@@ -34,8 +34,7 @@ HIP_TEST_CASE(Unit_Printf_specifier_Sanity_Positive) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
 #if HT_NVIDIA
   std::string reference(R"here(xyzzy
@@ -140,8 +139,7 @@ HIP_TEST_CASE(Unit_Printf_Negative_Parameters_RTC) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   hiprtcProgram program{};
 

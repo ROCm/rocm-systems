@@ -271,12 +271,7 @@ void DefaultPT2_StreamSync() {
 
 
 void DefaultPT2_StrmWaitEvent() {
-  int device;
-  HIP_CHECK(hipGetDevice(&device));
-  if (!DeviceAttributesSupport(device, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   hipEvent_t evt;
   hipStream_t Strm1;

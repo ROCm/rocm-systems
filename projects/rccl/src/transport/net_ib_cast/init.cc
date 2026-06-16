@@ -10,6 +10,8 @@
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
+extern int64_t ncclParamIbCastResiliencyPortFailover();
+extern int64_t ncclParamIbCastResiliencyPortRecovery();
 extern int64_t ncclParamIbCastGdrFlushDisable();
 // AMD AINIC
 RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
@@ -24,12 +26,9 @@ extern int64_t ncclParamIbCastUseInline();
 static int IbCastGetNumaNodeFromPath(const char* pciPath);
 static ncclResult_t IbCastGetPciRootFromPath(const char* pciPath, char* root, size_t rootLen);
 
-// RCCL's pciPathToInt64 (defined in graph/topo.cc) takes 4 args; NCCL 2.30 callers use 2.
-// Declare the 4-arg version and provide a 2-arg shim.
-ncclResult_t pciPathToInt64(char* path, int offset, int minOffset, int64_t* id);
-static ncclResult_t pciPathToInt64(char* path, int64_t* id) {
-  return pciPathToInt64(path, (int)strlen(path), 0, id);
-}
+// Forward declaration for the 2-arg pciPathToInt64 defined in src/misc/utils.cc.
+// Matches the resolution pattern used by net_ib/init.cc (via common.h).
+ncclResult_t pciPathToInt64(char* path, int64_t* id);
 
 NCCL_PARAM(IbCastPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 2);
 NCCL_PARAM(IbCastAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
@@ -193,9 +192,15 @@ fail:
 }
 
 ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
-  if (ncclParamIbCastMergeNics() == 0 && props->ndevs > 1) {
-    WARN("NET/IB : Skipping makeVDevice, Please set NCCL_IB_MERGE_NICS=1");
-    return ncclInvalidUsage;
+  // On AINIC, NIC fusion (cast) is disabled by default: each NIC runs independently.
+  // User must explicitly set NCCL_IB_MERGE_NICS=1 to override.
+  if (props->ndevs > 1) {
+    if (ncclParamIbCastMergeNics() == 0 ||
+        (rcclUseAinic() && ncclParamIbCastMergeNics() != 1)) {
+      WARN("NET/IB : Skipping makeVDevice%s, Please set NCCL_IB_MERGE_NICS=1",
+           rcclUseAinic() ? " (disabled by default on AINIC)" : "");
+      return ncclInvalidUsage;
+    }
   }
 
   if (props->ndevs == 0) {
@@ -506,15 +511,13 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
 
       // CTS Offload and CTS Inline are mutually dependent — both must be
       // enabled for either to function. Disable both if either is missing.
-      if (IbCastOffloadEnabled && rcclParamIbCastQpSchedEnable()) {
+      if (IbCastOffloadEnabled && rcclUseIbCastQpSched()) {
         INFO(NCCL_INIT|NCCL_NET, "NET/IB : CAST enabled - disabling CTS Inline Data and CTS Offload (not yet supported with CAST)");
         IbCastOffloadEnabled = false;
       }
       // for AINIC IbUseInline is enabled by default always
       IbCastUseInline = true;
-      // for AINIC GDR flush is disabled by default
-      IbCastGdrFlushDisable = 1;
-  
+
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
            "IB Use Inline: enabled; GDR Flush: disabled", IbCastUseInline ? "Enabled": "Disabled",
            IbCastOffloadEnabled ? "Enabled": "Disabled");
@@ -523,6 +526,18 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
 exit:
   if (ret == ncclSuccess)
     ret = IbCastQpSchedInitParms(&castGlobalQpSchedParms);
+  if (ret == ncclSuccess && castGlobalQpSchedParms.enable &&
+      (ncclParamIbCastResiliencyPortFailover() || ncclParamIbCastResiliencyPortRecovery())) {
+    INFO(NCCL_INIT|NCCL_NET, "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling QP scheduler "
+         "(load balancer integration with resiliency is pending)");
+    castGlobalQpSchedParms.enable = false;
+  }
+  if (ret == ncclSuccess && IbCastOffloadEnabled &&
+      (ncclParamIbCastResiliencyPortFailover() || ncclParamIbCastResiliencyPortRecovery())) {
+    INFO(NCCL_INIT|NCCL_NET, "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling CTS offload "
+         "(not compatible with resiliency)");
+    IbCastOffloadEnabled = false;
+  }
   return ret;
 fail:
   if(devices && (ncclSuccess != wrap_ibv_free_device_list(devices))){WARN("NET/IB : Unable to free device list");}

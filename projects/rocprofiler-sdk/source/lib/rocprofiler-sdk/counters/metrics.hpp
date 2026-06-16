@@ -129,6 +129,9 @@ checkValidMetric(const std::string& agent, const Metric& metric);
  */
 rocprofiler_status_t
 setCustomCounterDefinition(const CustomCounterDefinition& def);
+
+bool
+has_spm_support(const Metric& metric, rocprofiler_agent_id_t agent_id);
 }  // namespace counters
 }  // namespace rocprofiler
 

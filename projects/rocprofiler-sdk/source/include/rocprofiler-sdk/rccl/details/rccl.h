@@ -89,6 +89,22 @@ typedef enum
 #define NCCL_SHRINK_ABORT                                                                          \
     0x01 /* First, terminate ongoing parent operations, and then shrink the parent communicator */
 
+/* ncclCommRevoke flags */
+#define NCCL_REVOKE_DEFAULT                                                                        \
+    0x00 /* default revoke behavior: quiesce in-flight work, reject new ops */
+
+/* Communicator suspend flags */
+#define NCCL_SUSPEND_MEM 0x01 /* Suspend memory (release dynamic allocations) */
+
+/* Communicator memory statistic selector (for ncclCommMemStats) */
+typedef enum
+{
+    ncclStatGpuMemSuspend   = 0, /* Allocated GPU memory that can be suspended (bytes) */
+    ncclStatGpuMemSuspended = 1, /* GPU memory suspended? (0=active, 1=suspended)      */
+    ncclStatGpuMemPersist   = 2, /* Allocated GPU memory that cannot be suspended      */
+    ncclStatGpuMemTotal     = 3  /* Total allocated GPU memory tracked by NCCL (bytes) */
+} ncclCommMemStat_t;
+
 /*! @defgroup   rccl_config_type Communicator Configuration
     @details    Structure that allows for customizing Communicator behavior via
    ncclCommInitRankConfig
@@ -107,7 +123,7 @@ typedef struct ncclConfig_v22800
     int         cgaClusterSize;      /*!< Cooperative group array cluster size */
     int         minCTAs;             /*!< Minimum number of cooperative thread arrays (blocks) */
     int         maxCTAs;             /*!< Maximum number of cooperative thread arrays (blocks) */
-    const char* netName;             /*!< Force NCCL to use a specfic network */
+    const char* netName;             /*!< Force NCCL to use a specific network */
     int         splitShare;          /*!< Allow communicators to share resources */
     int         trafficClass;        /*!< Traffic class*/
     const char* commName;            /*!< Name of the communicator*/
@@ -247,7 +263,7 @@ pncclCommInitRankConfig(ncclComm_t*   comm,
 /*! @brief      Creates a new communicator (multi thread/process version).
     @details    Rank must be between 0 and nranks-1 and unique within a communicator clique.
                 Each rank is associated to a CUDA device, which has to be set before calling
-                ncclCommInitRank.  ncclCommInitRank implicitly syncronizes with other ranks,
+                ncclCommInitRank.  ncclCommInitRank implicitly synchronizes with other ranks,
                 so it must be called by different threads/processes or use
    ncclGroupStart/ncclGroupEnd.
     @return     Result code. See @ref rccl_result_code for more details.
@@ -354,7 +370,7 @@ pncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclCon
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  comm                  Original communicator object for this rank
-    @param[in]  excludeRanksList      List of ranks to be exluded
+    @param[in]  excludeRanksList      List of ranks to be excluded
     @param[in]  excludeRanksCount     Number of ranks to be excluded
     @param[out] newcomm               Pointer to new communicator
     @param[in]  config                Config file for new communicator. May be NULL to inherit from
@@ -375,6 +391,26 @@ pncclCommShrink(ncclComm_t    comm,
                 ncclComm_t*   newcomm,
                 ncclConfig_t* config,
                 int           shrinkFlags);
+
+ncclResult_t
+ncclCommRevoke(ncclComm_t comm, int revokeFlags);
+ncclResult_t
+pncclCommRevoke(ncclComm_t comm, int revokeFlags);
+
+ncclResult_t
+ncclCommSuspend(ncclComm_t comm, int flags);
+ncclResult_t
+pncclCommSuspend(ncclComm_t comm, int flags);
+
+ncclResult_t
+ncclCommResume(ncclComm_t comm);
+ncclResult_t
+pncclCommResume(ncclComm_t comm);
+
+ncclResult_t
+ncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
+ncclResult_t
+pncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 
 /*! @brief      Creates a new communicator (multi thread/process version), similar to
    ncclCommInitRankConfig.

@@ -6,6 +6,7 @@
 #include "binary/dwarf_entry.hpp"
 #include "binary/symbol.hpp"
 #include "common/defines.h"
+#include "common/units.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
@@ -26,7 +27,6 @@
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/tpls/cereal/cereal/archives/json.hpp>
 #include <timemory/tpls/cereal/types.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 
 #include "logger/debug.hpp"

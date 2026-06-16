@@ -14,7 +14,6 @@
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/rusage/backends.hpp>
-#include <timemory/environment.hpp>
 #include <timemory/process/process.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
@@ -38,8 +37,7 @@ namespace rocprofsys
 {
 namespace
 {
-auto root_process_id =
-    get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id(), false);
+auto root_process_id = get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id());
 
 auto&
 get_sampling_on_child_threads_history(std::int64_t _idx = utility::get_thread_index())

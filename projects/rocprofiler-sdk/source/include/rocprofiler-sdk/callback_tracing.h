@@ -360,7 +360,7 @@ typedef struct rocprofiler_callback_tracing_hip_stream_data_t
  * correlation id in the exit callback.
  *
  * @param [in] record Callback record data
- * @param [in,out] user_data This paramter can be used to retain information in between the enter
+ * @param [in,out] user_data This parameter can be used to retain information in between the enter
  * and exit phases.
  * @param [in] callback_data User data provided when configuring the callback tracing service
  */
@@ -459,7 +459,7 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
  *
  * @param [in] kind Callback tracing domain
  * @param [out] name If non-null and the name is a constant string that does not require dynamic
- * allocation, this paramter will be set to the address of the string literal, otherwise it will
+ * allocation, this parameter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
  * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)
@@ -478,7 +478,7 @@ rocprofiler_query_callback_tracing_kind_name(rocprofiler_callback_tracing_kind_t
  * @param [in] kind Callback tracing domain
  * @param [in] operation Enumeration id value which maps to a specific API function or event type
  * @param [out] name If non-null and the name is a constant string that does not require dynamic
- * allocation, this paramter will be set to the address of the string literal, otherwise it will
+ * allocation, this parameter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
  * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)

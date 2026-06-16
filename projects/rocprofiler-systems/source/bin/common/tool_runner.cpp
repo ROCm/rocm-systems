@@ -330,8 +330,7 @@ tool_runner::get_initial_environment()
     if(!libexec_path.empty()) data.env.set(env::SCRIPT_PATH, libexec_path);
 
     update_verbose_from_env();
-    const bool verbose = (data.out.verbose > 0);
-    if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt(verbose);
+    if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt();
        !llvm_dir.empty())
     {
         data.env.set("LD_LIBRARY_PATH", llvm_dir, update_mode::APPEND);
@@ -394,7 +393,7 @@ tool_runner::prepare_environment()
         rocprofsys::argparse::add_ld_library_path(data);
     }
 
-    rocprofsys::argparse::add_torch_library_path(data, data.out.verbose > 0);
+    rocprofsys::argparse::add_torch_library_path(data);
     rocprofsys::common::consolidate_env_entries(data.env.current);
 }
 

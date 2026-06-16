@@ -92,7 +92,7 @@ namespace device {
     extern "C" __constant__ rocshmem_team_t
     __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD = nullptr;
     extern "C" __constant__ rocshmem_team_t
-    __attribute__((visibility("default"))) ROCSHMEM_TEAM_SHARED = nullptr;
+    __attribute__((visibility("default"), used)) ROCSHMEM_TEAM_SHARED = nullptr;
 }
 
 #if defined(ENABLE_IPC_BITCODE)
@@ -166,7 +166,7 @@ static int copy_device_symbol_to_module(Symbol &builtin_symbol,
   size_t symbol_size {0};
   err = hipModuleGetGlobal(&target, &symbol_size, module, module_symbol_name);
   if (err != hipSuccess) {
-    LOG_ERROR("Failed to get %s symbol from module: %s", 
+    LOG_ERROR("Failed to get %s symbol from module: %s",
               label, hipGetErrorString(err));
     return ROCSHMEM_ERROR;
   }
@@ -207,6 +207,18 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
                                    sizeof(rocshmem_team_t), module, stream,
                                    "ROCSHMEM_TEAM_SHARED") != ROCSHMEM_SUCCESS) {
     return ROCSHMEM_ERROR;
+  }
+  {
+    void *probe{nullptr}; size_t probe_size{0};
+    if (hipModuleGetGlobal(&probe, &probe_size, module,
+                           "_ZN8rocshmem8constmemE") == hipSuccess) {
+      copy_device_symbol_to_module(constmem, "_ZN8rocshmem8constmemE",
+                                   sizeof(constmem_t), module, stream,
+                                   "constmem");
+    } else {
+      LOG_WARN("constmem not in module — module does not use rocshmem "
+               "device APIs that read constmem directly");
+    }
   }
   return ROCSHMEM_SUCCESS;
 }
@@ -778,12 +790,20 @@ __global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel(){
   rocshmem_barrier_all();
 }
 
+__global__ ATTR_NO_INLINE void rocshmem_barrier_kernel(rocshmem_team_t team){
+  rocshmem_ctx_barrier(ROCSHMEM_CTX_DEFAULT, team);
+}
+
 __global__ ATTR_NO_INLINE void rocshmem_quiet_kernel(){
   rocshmem_quiet();
 }
 
 __global__ ATTR_NO_INLINE void rocshmem_sync_all_kernel(){
   rocshmem_sync_all();
+}
+
+__global__ ATTR_NO_INLINE void rocshmem_team_sync_kernel(rocshmem_team_t team){
+  rocshmem_ctx_sync(ROCSHMEM_CTX_DEFAULT, team);
 }
 
 __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
@@ -812,6 +832,56 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
     rocshmem_wg_ctx_destroy(&ctx);
   }
 }
+
+template <typename T, ROCSHMEM_OP Op>
+__global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t team,
+                                            T *dest,
+                                            const T *source,
+                                            int nreduce)
+{
+  __shared__ rocshmem_ctx_t ctx;
+  __shared__ int ctx_result;
+
+  ctx_result = rocshmem_wg_team_create_ctx(team, 0, &ctx);
+
+  // If context creation failed, fall back to default context
+  if (ctx_result != 0)
+  {
+    ctx = ROCSHMEM_CTX_DEFAULT;
+    __syncthreads();
+  }
+
+  // Call device reduce function with created context and provided team
+  rocshmem_reduce_wg<T, Op>(ctx, team, dest,
+                            source, nreduce);
+
+  if (ctx != ROCSHMEM_CTX_INVALID || ctx != ROCSHMEM_CTX_DEFAULT)
+    rocshmem_wg_ctx_destroy(&ctx);
+}
+
+#define REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, Op, Op_API) \
+    template \
+    __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel<T, Op_API>(rocshmem_team_t team, \
+                                                                T *dest, \
+                                                                const T *source, \
+                                                                int nreduce); \
+
+#define REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME) \
+    REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM) \
+    REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN) \
+    REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX) \
+    REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
+
+#define REDUCTION_ON_STREAM_KERNEL_DEF_GEN_BITWISE(T, TNAME)  \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)  \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, and, ROCSHMEM_AND) \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
+
+#define INT_REDUCTION_ON_STREAM_KERNEL_GEN(T, TNAME) \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME)     \
+  REDUCTION_ON_STREAM_KERNEL_DEF_GEN_BITWISE(T, TNAME)
+
+#define FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(T, TNAME) REDUCTION_ON_STREAM_KERNEL_DEF_GEN_ARITH(T, TNAME)
 
 __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
@@ -2100,6 +2170,14 @@ WAIT_DEF_GEN(unsigned int, uint)
 WAIT_DEF_GEN(unsigned long, ulong)
 WAIT_DEF_GEN(unsigned long long, ulonglong)
 WAIT_DEF_GEN(uint64_t, uint64)
+
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(int, int)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(long, long)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(long long, longlong)
+INT_REDUCTION_ON_STREAM_KERNEL_GEN(short, short)
+
+FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(float, float)
+FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(double, double)
 // clang-format on
 
 }  // namespace rocshmem

@@ -10,10 +10,7 @@
 #include <utils.hh>
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Basic) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
 
@@ -31,10 +28,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Partial_Range) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, 2 * kPageSize);
 
@@ -53,10 +47,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Partial_Range) {
 }
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Basic) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
 
@@ -74,10 +65,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_CPU) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
 
@@ -92,10 +80,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_CPU) {
 }
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Partial_Range) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, 2 * kPageSize);
 
@@ -114,10 +99,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Partial_Ra
 }
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Basic) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
 
@@ -135,10 +117,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Basic) 
 }
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_CPU) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
 
@@ -152,10 +131,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_CPU) {
 }
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Partial_Range) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, 2 * kPageSize);
 
@@ -174,10 +150,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Partial
 }
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
 
@@ -205,10 +178,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, 2 * kPageSize);
 
@@ -237,15 +207,11 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range) {
 }
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
@@ -272,10 +238,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice) {
 }
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Negative_Parameters) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   int32_t data;
   LinearAllocGuard<void> managed(LinearAllocs::hipMallocManaged, kPageSize);

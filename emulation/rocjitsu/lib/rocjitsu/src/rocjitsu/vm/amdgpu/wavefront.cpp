@@ -3,10 +3,16 @@
 
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
-// Wavefront instances are created by IsaExecComputeUnit<Mode, Isa> in its constructor.
-// No factory or standalone creation - wavefronts are permanently bound to
-// their parent CU and slot index at construction time.
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 
 namespace rocjitsu {
-namespace amdgpu {} // namespace amdgpu
+namespace amdgpu {
+
+void Wavefront::halt() {
+  cu_.plugin_group().onAmdgpuWavefrontHalted(*this);
+  state_ = WfState::HALTED;
+  cu_.release_wf(dispatch_id_, wg_id_);
+}
+
+} // namespace amdgpu
 } // namespace rocjitsu

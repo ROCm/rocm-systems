@@ -68,7 +68,7 @@ enum class BarrierType : uint8_t {
 //! Virtual GPU
 class VirtualGPU : public device::VirtualDevice {
  public:
-  class Queue : public amd::HeapObject {
+  class Queue {
    public:
     static constexpr uint MaxCommands = 256;
     static constexpr uint StartCmdBufIdx = 1;
@@ -78,6 +78,15 @@ class VirtualGPU : public device::VirtualDevice {
 
     Queue(const Queue&) = delete;
     Queue& operator=(const Queue&) = delete;
+
+    // This type is allocated exclusively via amd::AllocWithTrailing<Queue>(extSize, ...) so
+    // that a single block holds the wrapper plus PAL's IQueue / ICmdBuffer / IFence objects
+    // placed in the trailing region.
+    void* operator new(size_t) = delete;
+    void operator delete(void*) = delete;
+    // Placement new overloads required by MSVC when operator new(size_t) is deleted
+    void* operator new(size_t, void* p) noexcept { return p; }
+    void* operator new(size_t, std::align_val_t, void* p) noexcept { return p; }
 
     static Queue* Create(VirtualGPU& gpu,                       //!< ROCCLR virtual GPU object
                          Pal::QueueType queueType,              //!< PAL queue type
@@ -208,7 +217,7 @@ class VirtualGPU : public device::VirtualDevice {
     uint max_command_buffers_;
   };
 
-  struct CommandBatch : public amd::HeapObject {
+  struct CommandBatch {
     amd::Command* head_;           //!< Command batch head
     GpuEvent events_[AllEngines];  //!< Last known GPU events
     TimeStamp* lastTS_;            //!< TS associated with command batch

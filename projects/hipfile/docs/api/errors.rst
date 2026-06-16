@@ -3,6 +3,7 @@ Errors and Error Handling
 
 Functions that return a hipFileOpError_t struct
 -----------------------------------------------
+
 Errors are handled identically to cuFile. Most API calls return
 a ``hipFileError_t`` struct, which includes ``hipFileOpError_t``
 field for returning hipFile error codes, and a ``hipError_t``
@@ -41,6 +42,7 @@ each of these macros.
 
 Functions that return an integer value
 --------------------------------------
+
 Several read and write functions (e.g., ``hipFileRead()``) return a ``ssize_t`` value.
 Like the POSIX ``read(3)`` call, these API calls return negative values for errors.
 Unlike the POSIX call, however, which only returns -1 on errors, the hipFile IO
@@ -58,5 +60,6 @@ via the ``hipFileError_t`` struct.
 
 Other functions
 ---------------
+
 * ``hipFileGetOpErrorString()`` returns a string that corresponds to a ``hipFileOpError_t`` value. It cannot fail.
 * ``hipFileUseCount()`` returns the reference count of the library. It returns -1 on errors.

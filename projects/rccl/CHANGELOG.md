@@ -16,13 +16,19 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Changed
 * Compatibility with NCCL 2.28.3.
-* The MSCCL feature is now disabled by default. The `--disable-msccl-kernel` build flag is replaced with `--enable-msccl-kernel` in the `rccl/install.sh` script.
-* MSCCL and NPKIT are deprecated and will be removed in a future release of RCCL.
 * Changed GPU Direct RDMA mode selection logic to prefer peermem over DMAbuf by default. `NCCL_DMABUF_ENABLE` now defaults to 1 (previously 0). When both peermem and DMAbuf are available, RCCL will use peermem. If peermem is unavailable, RCCL will automatically fall back to DMAbuf (if available and enabled). Setting `RCCL_FORCE_ENABLE_DMABUF=1` forces DMAbuf usage exclusively, skipping peermem even if available, and disables GPU Direct RDMA if DMAbuf is unavailable.
 * CTS offload is now controlled per-connection rather than globally, allowing P2P connections to fall back to standard RDMA writes while non-P2P traffic continues to use CTS.
+* The bootstrap AllGather now uses the bidirectional ring (N/2 steps) by default on the socket OOB path. `NCCL_BOOTSTRAP_BIDIR_ALLGATHER` now defaults to `1`; set it to `0` to fall back to the unidirectional ring. The net OOB path (`NCCL_OOB_NET_ENABLE`) and its bidirectional variant (`NCCL_BOOTSTRAP_BIDIR_NET`) remain off by default.
+
+### Removed
+* Removed MSCCL and MSCCL++ custom collective integration; legacy ``mscclLoadAlgo``, ``mscclRunAlgo``, and ``mscclUnloadAlgo`` APIs remain as no-ops for link compatibility.
+* Removed NPKit profiling support (build option ``ENABLE_NPKIT``, headers, device and proxy instrumentation, install script flag ``--npkit-enable``, and related documentation and tooling). Use the profiler plugin API for profiling instead.
+* Removed kernel COLLTRACE support, including the `COLLTRACE` build option, device-side collective trace buffers, debug kernel variants, and related install/CI wiring. The host latency profiler is unchanged.
+* Removed legacy `ENABLE_PROFILING` device profiling support and the `PROFILE` build option. Use the profiler plugin API instead.
 
 ### Resolved Issues
-* Fixed MSCCLPP_ENABLE_CLIP CMake build flag, which was not being properly honored.
+* Fixed static build (`BUILD_SHARED_LIBS=OFF`) failing with `install(EXPORT "rccl-targets" ...)` error when `fmt` is fetched via `FetchContent`. The `fmt-header-only` target is now scoped to the build interface and excluded from RCCL's exported usage requirements.
+* Fixed proxy channel staging buffers ignoring the new GDR mode selection on HIP < 7.12 builds. The legacy `#else` branch in `sendProxyConnect` / `recvProxyConnect` now honors `resources->useDmaBuf`, so peermem-equipped hosts on older HIP no longer fall through to `hsa_amd_portable_export_dmabuf` when peermem was selected in `*ProxySetup`. Workaround for affected RCCL builds: `NCCL_DMABUF_ENABLE=0`.
 
 ## Unreleased - RCCL 2.27.7 for ROCm 7.2.0
 

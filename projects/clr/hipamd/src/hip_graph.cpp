@@ -196,7 +196,7 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   }
   if (pMemsetParams->height == 1) {
     size_t offset = 0;
-    amd::Memory* memObj = getMemoryObject(pMemsetParams->dst, offset);
+    amd::Memory* memObj = getMemoryObjectForCurrentDevice(pMemsetParams->dst, offset);
     if (memObj == nullptr) {
       return hipErrorInvalidValue;
     }
@@ -209,7 +209,7 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     auto sizeBytes =
         pMemsetParams->width * pMemsetParams->height * depth * pMemsetParams->elementSize;
     size_t offset = 0;
-    amd::Memory* memObj = getMemoryObject(pMemsetParams->dst, offset, sizeBytes);
+    amd::Memory* memObj = getMemoryObjectForCurrentDevice(pMemsetParams->dst, offset, sizeBytes);
     if (memObj == nullptr) {
       return hipErrorInvalidValue;
     }
@@ -1034,6 +1034,10 @@ hipError_t capturehipMallocAsync(hipStream_t stream, hipMemPool_t mem_pool, size
   *dev_ptr = (HIP_MEM_POOL_USE_VM) ? mem_alloc_node->ReserveAddress() : mem_alloc_node->Execute(s);
   s->SetLastCapturedNode(mem_alloc_node);
 
+  // Track the allocation like the explicit path, so a captured escaped allocation
+  // is not misclassified as reusable and freed on hipGraphExecDestroy.
+  hip::Graph::TrackMemAllocPtr(s->GetCaptureGraph(), *dev_ptr);
+
   return hipSuccess;
 }
 
@@ -1042,6 +1046,11 @@ hipError_t capturehipFreeAsync(hipStream_t stream, void* dev_ptr) {
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
           "[hipGraph] Current capture node FreeAsync on stream : %p", stream);
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  // Mirror hipGraphAddMemFreeNode: reject a free of memory that is not a live
+  // unmatched graph allocation. Capture stays Active, so EndCapture still succeeds.
+  if (!hip::Graph::UntrackMemAllocPtr(dev_ptr)) {
+    return hipErrorInvalidValue;
+  }
   auto mem_free_node = new hip::GraphMemFreeNode(dev_ptr);
   auto status =
       ihipGraphAddNode(mem_free_node, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
@@ -1222,7 +1231,8 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
     *pGraph = nullptr;
     // When capture is invalidated, graph should be deleted, otherwise it leaks
     s->ReleaseCaptureGraph();
-
+    // Reset capture state to None so the stream is usable after a failed capture
+    (void)s->EndCapture();
     return hipErrorStreamCaptureInvalidated;
   }
 
@@ -1616,9 +1626,13 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t pGraphExec) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::GraphExec* ge = reinterpret_cast<hip::GraphExec*>(pGraphExec);
+  {
+    // Erase from the set before releasing, so that concurrent
+    // hipDeviceGraphMemTrim cannot retain a dangling pointer.
+    std::scoped_lock lock(GraphExec::graphExecSetLock_);
+    GraphExec::graphExecSet_.erase(ge);
+  }
   ge->release();
-  std::scoped_lock lock(GraphExec::graphExecSetLock_);
-  GraphExec::graphExecSet_.erase(ge);
   HIP_RETURN(hipSuccess);
 }
 
@@ -2782,9 +2796,13 @@ hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
   // The address must be provided during the node creation time
   pNodeParams->dptr =
       (HIP_MEM_POOL_USE_VM) ? mem_alloc_node->ReserveAddress() : mem_alloc_node->Execute();
+  if (pNodeParams->dptr == nullptr) {
+    amd::ScopedLock lock(hip::Graph::graphSetLock_);
+    hgraph->RemoveNode(node);
+    HIP_RETURN(hipErrorOutOfMemory);
+  }
   *pGraphNode = reinterpret_cast<hipGraphNode_t>(node);
-  amd::ScopedLock lock(hip::Graph::graphSetLock_);
-  hgraph->memAllocNodePtrs_.insert(pNodeParams->dptr);
+  hip::Graph::TrackMemAllocPtr(hgraph, pNodeParams->dptr);
   HIP_RETURN(status);
 }
 
@@ -2806,7 +2824,7 @@ hipError_t ihipGraphAddMemFreeNode(hip::GraphNode** graphNode, hip::Graph* graph
                                    void* dptr) {
   // Is memory passed to be free'd valid
   size_t offset = 0;
-  auto memory = getMemoryObject(dptr, offset);
+  auto memory = getMemoryObjectForCurrentDevice(dptr, offset);
   if (memory == nullptr) {
     if (HIP_MEM_POOL_USE_VM) {
       // When VM is on the address must be valid and may point to a VA object
@@ -2833,24 +2851,10 @@ hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
       dev_ptr == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  // memAllocNodePtrs_ stores only local to graph alloc dptrs whose free node is not added.
-  // and so we need to traverse all graphs of graphSet_ and below cases are handled.
-  // 1) Free node cannot be added twice to the same graph
-  // 2) Free node if it part of another graph cannot be added to this graph
+  // Reject if dev_ptr is not a live unmatched graph allocation (also rejects a
+  // duplicate free; matches an alloc registered under another graph).
   hip::GraphNode* pNode;
-  bool bGraphFound = false;
-  {
-    amd::ScopedLock lock(hip::Graph::graphSetLock_);
-    for (auto itGraph : hip::Graph::graphSet_) {
-      std::unordered_set<void*>::iterator itDevPtr = itGraph->memAllocNodePtrs_.find(dev_ptr);
-      if (itDevPtr != itGraph->memAllocNodePtrs_.end()) {
-        bGraphFound = true;
-        itGraph->memAllocNodePtrs_.erase(itDevPtr);
-        break;
-      }
-    }
-  }
-  if (bGraphFound == false) {
+  if (!hip::Graph::UntrackMemAllocPtr(dev_ptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   auto status = ihipGraphAddMemFreeNode(&pNode, reinterpret_cast<hip::Graph*>(graph),
@@ -2936,7 +2940,53 @@ hipError_t hipDeviceGraphMemTrim(int device) {
   if ((static_cast<size_t>(device) >= g_devices.size()) || device < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
-  g_devices[device]->GetGraphMemoryPool()->TrimTo(0);
+  auto* pool = g_devices[device]->GetGraphMemoryPool();
+
+  // Acquire exclusive lock — blocks new GraphExec::Run() retain calls.
+  std::unique_lock<std::shared_mutex> trim_lock(hip::GraphExec::graphExecTrimLock_);
+
+  std::vector<hip::GraphExec*> retained_graph_execs;
+  // Phase 1: Snapshot eligible graph execs under graphExecSetLock_ and retain them.
+  {
+    std::scoped_lock lock(hip::GraphExec::graphExecSetLock_);
+    for (auto* ge : hip::GraphExec::graphExecSet_) {
+      if (ge->Device() != g_devices[device]) {
+        continue;
+      }
+      ge->retain();
+      retained_graph_execs.push_back(ge);
+    }
+  }
+
+  // Phase 2: Wait for all in-flight graph work to complete.
+  // With trim_lock held exclusively, no new Run() can retain, so refcounts
+  // can only decrease. Spin until each graph exec's refcount reaches 2
+  // (1 owner + 1 trim-retain = no in-flight work).
+  for (auto* ge : retained_graph_execs) {
+    while (ge->referenceCount() > 2) {
+      amd::Os::yield();
+    }
+  }
+
+  // Phase 3: All graphs are idle — release cached VA mappings.
+  for (auto* ge : retained_graph_execs) {
+    for (auto* node : ge->GetNodes()) {
+      if (node->GetType() != hipGraphNodeTypeMemAlloc) {
+        continue;
+      }
+      auto* alloc_node = static_cast<hip::GraphMemAllocNode*>(node);
+      alloc_node->ReleaseCachedMapping(pool);
+    }
+  }
+
+  // Phase 4: Release trim-retain references.
+  for (auto* ge : retained_graph_execs) {
+    ge->release();
+  }
+
+  // Phase 5: Free pool memory.
+  pool->TrimTo(0);
+
   HIP_RETURN(hipSuccess);
 }
 
@@ -3239,7 +3289,7 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
       }
       // Is memory passed to be free'd valid
       offset = 0;
-      memory = getMemoryObject(nodeParams->free.dptr, offset);
+      memory = getMemoryObjectForCurrentDevice(nodeParams->free.dptr, offset);
       if (memory == nullptr) {
         if (HIP_MEM_POOL_USE_VM) {
           // When VM is on the address must be valid and may point to a VA object
@@ -3384,7 +3434,7 @@ hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGr
   }
   // Is memory passed to be free'd valid
   size_t offset = 0;
-  auto memory = getMemoryObject(dptr, offset);
+  auto memory = getMemoryObjectForCurrentDevice(dptr, offset);
   if (memory == nullptr) {
     if (HIP_MEM_POOL_USE_VM) {
       // When VM is on the address must be valid and may point to a VA object

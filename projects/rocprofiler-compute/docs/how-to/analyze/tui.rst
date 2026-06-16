@@ -16,19 +16,20 @@ actions, and improved readability with formatted output.
 
 .. note::
 
-   TUI is currently in an early access state. While functional, you may encounter minor issues or limitations.
+   TUI is currently an experimental feature. You must include the ``--experimental`` flag to enable it.
+   While functional, you may encounter minor issues or limitations.
    For the limitations identified, see :ref:`Current limitations <tui-limitation>`
    Running production workloads is not recommended.
 
 Launch the TUI analyzer
 ----------------------------------
 
-1. Use the ``--tui`` flag with the analysis command to launch the ROCm Compute Profiler TUI analyzer.
+1. Use the ``--experimental --tui`` flags with the analysis command to launch the ROCm Compute Profiler TUI analyzer.
 For example:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --tui
+   $ rocprof-compute analyze --experimental --tui
 
 2. To start the individual kernel analysis, use the drop-down menu at the top left of the screen to select
 a single workload from ``rocprof-compute profile`` generated output directories.

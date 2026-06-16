@@ -23,8 +23,17 @@ Examples:
   # Run all tests from config
   %(prog)s -c test_config.json
 
-  # Run specific test
-  %(prog)s -c test_config.json --test-name NET_AllTests_2Nodes_ETH
+  # Run a specific individual test by exact name
+  %(prog)s -c test_config.json --test-name CE_AllGather_2Ranks
+
+  # Run multiple individual tests (colon-separated)
+  %(prog)s -c test_config.json --test-name CE_AllGather_2Ranks:CE_AlltoAll_2Ranks
+
+  # Run all suites whose name contains 'CE Tests'
+  %(prog)s -c test_config.json --suite-name "CE Tests"
+
+  # Run two specific suites by substring (colon-separated)
+  %(prog)s -c test_config.json --suite-name "CE Tests - 2-Rank:CE Tests - 4-Rank"
 
   # Run with verbose output
   %(prog)s -c test_config.json -v
@@ -64,7 +73,12 @@ Examples:
         self.parser.add_argument(
             '--test-name',
             type=str,
-            help="Run only specific test by name"
+            help="Run only tests matching any glob pattern; ':' = OR, '*' = wildcard, '-' prefix = exclude, case-sensitive (e.g. 'P2P_*' = all P2P tests; '*:-SHM*' = all except SHM)"
+        )
+        self.parser.add_argument(
+            '--suite-name',
+            type=str,
+            help="gtest-style glob filter on suite names: ':' = OR, '*' = wildcard, '-' prefix = exclude, case-sensitive (e.g. 'CE*' runs all CE suites; '*:-NET*' runs all except NET)"
         )
         self.parser.add_argument(
             '--no-build',
@@ -140,7 +154,8 @@ Examples:
             print(f"Config file:       {args.config}")
             print(f"Verbose mode:      {args.verbose}")
             print(f"Output dir:        {args.output if args.output else 'auto-generated'}")
-            print(f"Test name filter:  {args.test_name if args.test_name else 'all tests'}")
+            print(f"Test name filter:  {args.test_name if args.test_name else 'all (glob)'}")
+            print(f"Suite name filter: {args.suite_name if args.suite_name else 'all suites'}")
             print(f"No build:          {args.no_build}")
             print(f"Skip tests:        {args.skip_tests}")
             print(f"Coverage report:   {args.coverage_report}")

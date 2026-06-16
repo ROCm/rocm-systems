@@ -100,7 +100,7 @@ int main() {
     roctxMark("before hipLaunchKernel");
     int rangeId = roctxRangeStart("hipLaunchKernel range");
     roctxRangePush("hipLaunchKernel");
-    // Lauching kernel from host
+    // Launching kernel from host
     hipLaunchKernelGGL(
         matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
         dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix, gpuMatrix, WIDTH);

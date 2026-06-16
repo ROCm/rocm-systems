@@ -449,21 +449,32 @@ RCCL_MPI_LOG_ALL_RANKS=1 mpirun -np 4 ./rccl-UnitTestsMPI
 
 ### Log Files
 
-When enabled, log files are created for all ranks in the **current working directory**:
+When enabled, log files are named `rccl_test_rank_<N>_pid<PID>.log` and placed in a directory
+chosen by the following priority:
+
+1. **`RCCL_TEST_LOG_DIR`** env var — explicit override, useful in CI pipelines
+2. **Directory of the test binary** (`/proc/self/exe`) — logs land alongside the binary,
+   automatically tied to the exact build; different builds never share logs
+3. **`/tmp`** — last-resort fallback if both above are unavailable
 
 ```
-rccl_test_rank_0.log  (contains rank 0 output - also displayed on console)
-rccl_test_rank_1.log  (contains all rank 1 output)
-rccl_test_rank_2.log  (contains all rank 2 output)
-rccl_test_rank_3.log  (contains all rank 3 output)
+<binary_dir>/rccl_test_rank_0_pid<PID>.log  (rank 0 — also displayed on console)
+<binary_dir>/rccl_test_rank_1_pid<PID>.log  (rank 1)
+<binary_dir>/rccl_test_rank_2_pid<PID>.log  (rank 2)
+<binary_dir>/rccl_test_rank_3_pid<PID>.log  (rank 3)
+```
+
+**Overriding the log directory:**
+```bash
+export RCCL_TEST_LOG_DIR=/path/to/ci/artifacts
+mpirun -np 4 -x RCCL_MPI_LOG_ALL_RANKS=1 ./rccl-UnitTestsMPI
 ```
 
 **Important Notes:**
 - **Rank 0**: Output goes to BOTH console (for interactive monitoring) AND log file (for later analysis)
 - **Rank 1-N**: Output goes only to log files
-- **Location**: Log files are created in the directory where you execute the test command
-- For multi-node runs, each node creates logs in its local working directory
-- Ensure you have write permissions in the execution directory
+- **PID suffix**: Ensures each `mpirun` invocation gets unique files; stale files from a previous run are never silently overwritten
+- For multi-node runs, each node writes logs to its local resolution of the log directory
 
 **Banner Display:**
 The per-rank logging banner is displayed using `TEST_INFO` macros, which means:
@@ -522,9 +533,9 @@ NCCL_DEBUG=INFO mpirun -np 2 ./rccl-UnitTestsMPI --gtest_filter="P2PTest.DataTra
 
 # You'll see a banner message at startup (with NCCL_DEBUG=INFO):
 # [0] TEST INFO Per-Rank Logging ENABLED (RCCL_MPI_LOG_ALL_RANKS=1)
-# [0] TEST INFO Rank 0     : Output to BOTH console AND rccl_test_rank_0.log
-# [0] TEST INFO Ranks 1-N  : Output redirected to rccl_test_rank_<N>.log
-# [0] TEST INFO Location   : Log files created in current working directory
+# [0] TEST INFO Rank 0     : Output to BOTH console AND <binary_dir>/rccl_test_rank_0_pid<PID>.log
+# [0] TEST INFO Ranks 1-N  : Output redirected to per-rank log files
+# [0] TEST INFO Log dir    : <binary_dir>  (override: RCCL_TEST_LOG_DIR)
 
 # Without NCCL_DEBUG (minimal output):
 export RCCL_MPI_LOG_ALL_RANKS=1
@@ -1544,6 +1555,12 @@ Two types of guards are provided:
 
 1. **`AutoGuard<T, auto DeleterFunc>`** - Modern C++17 guard using function pointers (for simple cleanup)
 2. **`ResourceGuard<T, Deleter>`** - Functor-based guard (for complex stateful cleanup)
+
+The built-in wrapper functions (`ncclCommDestroyWrapper`, `hipStreamDestroyWrapper`) include the
+MPI rank in any failure warning. The rank is resolved via `getMpiRankStr()`, which probes
+`OMPI_COMM_WORLD_RANK`, `PMI_RANK` (MPICH), `PMIX_RANK`, and `SLURM_PROCID` in that order,
+so rank-tagged warnings appear correctly under OpenMPI, MPICH, and SLURM without requiring
+`<mpi.h>` in the guard header.
 
 ### AutoGuard - Simple Cleanup
 

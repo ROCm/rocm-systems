@@ -40,8 +40,9 @@ protected:
 
 TEST_F(logger_test, include_process_id_in_filename_with_extension)
 {
-    auto pid      = std::to_string(getpid());
-    auto result   = rocprofsys::include_process_id_in_filename("logfile.log");
+    auto pid = std::to_string(getpid());
+    auto result =
+        rocprofsys::logger_detail::include_process_id_in_filename("logfile.log");
     auto expected = "logfile_" + pid + ".log";
 
     EXPECT_EQ(result, expected);
@@ -50,7 +51,7 @@ TEST_F(logger_test, include_process_id_in_filename_with_extension)
 TEST_F(logger_test, include_process_id_in_filename_without_extension)
 {
     auto pid      = std::to_string(getpid());
-    auto result   = rocprofsys::include_process_id_in_filename("logfile");
+    auto result   = rocprofsys::logger_detail::include_process_id_in_filename("logfile");
     auto expected = "logfile_" + pid;
 
     EXPECT_EQ(result, expected);
@@ -58,8 +59,9 @@ TEST_F(logger_test, include_process_id_in_filename_without_extension)
 
 TEST_F(logger_test, include_process_id_in_filename_with_path)
 {
-    auto pid      = std::to_string(getpid());
-    auto result   = rocprofsys::include_process_id_in_filename("/var/log/myapp.log");
+    auto pid = std::to_string(getpid());
+    auto result =
+        rocprofsys::logger_detail::include_process_id_in_filename("/var/log/myapp.log");
     auto expected = "/var/log/myapp_" + pid + ".log";
 
     EXPECT_EQ(result, expected);
@@ -67,8 +69,9 @@ TEST_F(logger_test, include_process_id_in_filename_with_path)
 
 TEST_F(logger_test, include_process_id_in_filename_with_path_no_extension)
 {
-    auto pid      = std::to_string(getpid());
-    auto result   = rocprofsys::include_process_id_in_filename("/var/log/myapp");
+    auto pid = std::to_string(getpid());
+    auto result =
+        rocprofsys::logger_detail::include_process_id_in_filename("/var/log/myapp");
     auto expected = "/var/log/myapp_" + pid;
 
     EXPECT_EQ(result, expected);
@@ -76,14 +79,15 @@ TEST_F(logger_test, include_process_id_in_filename_with_path_no_extension)
 
 TEST_F(logger_test, include_process_id_in_filename_empty)
 {
-    auto result = rocprofsys::include_process_id_in_filename("");
+    auto result = rocprofsys::logger_detail::include_process_id_in_filename("");
     EXPECT_TRUE(result.empty());
 }
 
 TEST_F(logger_test, include_process_id_in_filename_multiple_dots)
 {
-    auto pid      = std::to_string(getpid());
-    auto result   = rocprofsys::include_process_id_in_filename("file.name.with.dots.txt");
+    auto pid    = std::to_string(getpid());
+    auto result = rocprofsys::logger_detail::include_process_id_in_filename(
+        "file.name.with.dots.txt");
     auto expected = "file.name.with.dots_" + pid + ".txt";
 
     EXPECT_EQ(result, expected);
@@ -91,9 +95,9 @@ TEST_F(logger_test, include_process_id_in_filename_multiple_dots)
 
 TEST_F(logger_test, include_process_id_in_filename_dot_in_directory)
 {
-    auto pid = std::to_string(getpid());
-    auto result =
-        rocprofsys::include_process_id_in_filename("/path.with.dots/logfile.log");
+    auto pid    = std::to_string(getpid());
+    auto result = rocprofsys::logger_detail::include_process_id_in_filename(
+        "/path.with.dots/logfile.log");
     auto expected = "/path.with.dots/logfile_" + pid + ".log";
 
     EXPECT_EQ(result, expected);
@@ -102,7 +106,7 @@ TEST_F(logger_test, include_process_id_in_filename_dot_in_directory)
 TEST_F(logger_test, include_process_id_in_filename_hidden_file)
 {
     auto pid      = std::to_string(getpid());
-    auto result   = rocprofsys::include_process_id_in_filename(".hidden");
+    auto result   = rocprofsys::logger_detail::include_process_id_in_filename(".hidden");
     auto expected = ".hidden_" + pid;
 
     EXPECT_EQ(result, expected);
@@ -110,8 +114,9 @@ TEST_F(logger_test, include_process_id_in_filename_hidden_file)
 
 TEST_F(logger_test, include_process_id_in_filename_hidden_file_with_extension)
 {
-    auto pid      = std::to_string(getpid());
-    auto result   = rocprofsys::include_process_id_in_filename(".hidden.log");
+    auto pid = std::to_string(getpid());
+    auto result =
+        rocprofsys::logger_detail::include_process_id_in_filename(".hidden.log");
     auto expected = ".hidden_" + pid + ".log";
 
     EXPECT_EQ(result, expected);
@@ -205,7 +210,8 @@ TEST_F(logger_test, fork_child_gets_different_pid_in_filename)
     {
         pid_t current_pid = getpid();
 
-        auto child_filename    = rocprofsys::include_process_id_in_filename("test.log");
+        auto child_filename =
+            rocprofsys::logger_detail::include_process_id_in_filename("test.log");
         auto expected_filename = "test_" + std::to_string(current_pid) + ".log";
 
         bool pid_differs      = (current_pid != parent_pid);

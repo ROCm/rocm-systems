@@ -32,17 +32,14 @@ def emitln(f, lines):
     f.write('  '*indents + ln + '\n')
 
 def indent(s):
-  return '\n'.join('  '+l for l in s.splitlines())
+  endl = '\n' if s.endswith('\n') else ''
+  return '\n'.join('  '+l for l in s.splitlines()) + endl
 
 class Rec(object):
   def __init__(me, **kw):
     me.__dict__.update(kw)
   def __eq__(x, y):
-    if len(x) != len(y): return False
-    for k in x:
-      if k not in y: return False
-      if x[k] != y[k]: return False
-    return True
+    return x.__dict__ == y.__dict__
   def __hash__(me):
     h = 0
     for k in me.__dict__:
@@ -55,12 +52,13 @@ class Rec(object):
 reductions = ["AllReduce","ReduceScatter"]
 all_reds = ["sum"]
 all_tys = ["f32","f16","bf16","f8e4m3","f8e5m2"]
+gin_algos = ["RailA2A_LsaLD", "RailA2A_LsaLDMC", "RailRing_LsaSTMC"]
 
 nvls_algos_by_coll = {
   "AllReduce": ["AGxLLMC_R","RSxLDMC_AGxSTMC"],
-  "ReduceScatter": ["LDMC"]
+  "ReduceScatter": ["LDMC","RailA2A_LsaLDMC"]
 }
-ldmc_algos = ["RSxLDMC_AGxSTMC", "LDMC"]
+ldmc_algos = ["RSxLDMC_AGxSTMC", "LDMC", "RailA2A_LsaLDMC"]
 
 coll_to_lower = {
   "AllGather": "all_gather",
@@ -217,40 +215,52 @@ with open(os.path.join(gensrc, "sym_kernels_host.cc"), "w") as f:
   emitln(f, '#include "device.h"')
   emitln(f, '')
 
-  for k in enumerate_kernels():
+  kernel_list = list(enumerate_kernels())
+  for k in kernel_list:
     emitln(f, prototype(k))
   emitln(f, '')
 
-  emitln(f, 'extern int const ncclSymkKernelCount = %d;' % len(list(enumerate_kernels())))
-  emitln(f, 'extern void* const ncclSymkKernelList[] = {')
-  for k in enumerate_kernels():
+  emitln(f, 'extern int const ncclSymkKernelCount = %d;' % len(kernel_list))
+  emitln(f, 'void* ncclSymkKernelList[] = {')
+  for k in kernel_list:
     emitln(f, '(void*){cname},'.format(cname=kernel_cname(k)))
   emitln(f, 'nullptr};')
   emitln(f, '')
 
-  emitln(f, 'void* ncclSymkGetKernelPtr(ncclSymkKernelId id, int red, ncclDataType_t ty) {')
+  emitln(f, 'int ncclSymkKernelRequirements[] = {')
+  for index,k in enumerate(kernel_list):
+    cudart, _, _ = required_cuda(k)
+    sym = kernel_cname(k)
+    emitln(f, '  %7d, /*%4d %s*/' % (cudart or 0, index, sym));
+  emitln(f, '};')
+  emitln(f, '')
+
+  emitln(f, 'int ncclSymkKernelMaxDynamicSmem[%d];' % len(kernel_list))
+  emitln(f, '')
+
+  emitln(f, 'int ncclSymkGetKernelIndex(ncclSymkKernelId id, int red, ncclDataType_t ty) {')
   indents += 1
   emitln(f, 'switch (id) {')
-  emitln(f, 'default: return nullptr;')
-  for (coll, algo), coll_algo_ks in partition(enumerate_kernels(), lambda k: (k.coll, k.algo)).items():
+  emitln(f, 'default: return -1;')
+  for (coll, algo), coll_algo_ks in partition(kernel_list, lambda k: (k.coll, k.algo)).items():
     emitln(f, 'case ncclSymkKernelId_'+coll+'_'+algo+':')
     indents += 1
     if len(coll_algo_ks) == 1:
-      emitln(f, 'return (void*)&'+kernel_cname(coll_algo_ks[0])+';')
+      emitln(f, 'return %d;' % kernel_list.index(coll_algo_ks[0]))
     else:
       emitln(f, 'switch ((ncclDevRedOp_t)red) {')
-      emitln(f, 'default: return nullptr;')
+      emitln(f, 'default: return -1;')
       for red, coll_algo_red_ks in partition(coll_algo_ks, lambda k: k.red).items():
         emitln(f, 'case '+red_to_ncclDevRedOp[red]+':')
         indents += 1
         emitln(f, 'switch (ty) {')
-        emitln(f, 'default: return nullptr;')
+        emitln(f, 'default: return -1;')
         for k in coll_algo_red_ks:
-          emitln(f, 'case '+ty_to_ncclDataType[k.ty]+': return (void*)'+kernel_cname(k)+';')
+          emitln(f, 'case %s: return %d;' % (ty_to_ncclDataType[k.ty], kernel_list.index(k)))
         emitln(f, '}')
         indents -= 1
       emitln(f, '}')
-    indents -=1
+    indents -= 1
   emitln(f, '}')
   indents -= 1
   emitln(f, '}')

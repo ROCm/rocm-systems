@@ -49,18 +49,23 @@ find_library(
 function(_rocjpeg_read_version_header _VERSION_VAR)
     if(rocJPEG_INCLUDE_DIR AND EXISTS "${rocJPEG_INCLUDE_DIR}/rocjpeg/rocjpeg_version.h")
         file(READ "${rocJPEG_INCLUDE_DIR}/rocjpeg/rocjpeg_version.h" _rocjpeg_version)
-        macro(_rocjpeg_get_version_num _VAR _NAME)
-            string(REGEX MATCH "define([ \t]+)${_NAME}([ \t]+)([0-9]+)" _tmp
-                         "${_rocjpeg_version}")
+        macro(_rocjpeg_get_version_num _VAR _COMPONENT)
             set(${_VAR} 0)
-            if(_tmp MATCHES "([0-9]+)")
-                string(REGEX REPLACE "(.*${_NAME}[ ]+)([0-9]+)" "\\2" ${_VAR} "${_tmp}")
-            endif()
+            # rocJPEG headers define the version as ROCJPEG_VERSION_<COMPONENT>. Also
+            # tolerate the alternate ROCJPEG_<COMPONENT>_VERSION ordering.
+            foreach(_NAME "ROCJPEG_VERSION_${_COMPONENT}" "ROCJPEG_${_COMPONENT}_VERSION")
+                string(REGEX MATCH "define[ \t]+${_NAME}[ \t]+([0-9]+)" _tmp
+                             "${_rocjpeg_version}")
+                if(_tmp)
+                    set(${_VAR} "${CMAKE_MATCH_1}")
+                    break()
+                endif()
+            endforeach()
         endmacro()
 
-        _rocjpeg_get_version_num(_major "ROCJPEG_MAJOR_VERSION")
-        _rocjpeg_get_version_num(_minor "ROCJPEG_MINOR_VERSION")
-        _rocjpeg_get_version_num(_patch "ROCJPEG_MICRO_VERSION")
+        _rocjpeg_get_version_num(_major "MAJOR")
+        _rocjpeg_get_version_num(_minor "MINOR")
+        _rocjpeg_get_version_num(_patch "PATCH")
         set(${_VERSION_VAR}
             ${_major}.${_minor}.${_patch}
             PARENT_SCOPE)

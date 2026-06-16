@@ -11,6 +11,7 @@
 
 #include <timemory/hash/types.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -54,6 +55,7 @@ private:
         tim::hash_value_t       hash;
         rocprofiler_timestamp_t begin_ts;
         bool                    write_enabled;
+        std::uint64_t           range_id{ 0 };
     };
 
     using marker_range_stack_t = std::vector<marker_range_entry>;

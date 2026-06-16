@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 /// Definitions of NVTX payload types and schemas used for the NVTX
 /// instrumentation in init.cc and collectives.cc.
@@ -52,7 +53,7 @@ NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsCommInitRank, static c
   )
 )
 // The typedef and payload schema for ncclCommInitRank is also used for,
-// ncclCommInitRankConfig, ncclCommInitRankScalable, ncclCommDestroy, and ncclCommAbort.
+// ncclCommInitRankConfig, ncclCommInitRankScalable, ncclCommDestroy, ncclCommAbort, and ncclCommRevoke.
 typedef NcclNvtxParamsCommInitRank NcclNvtxParamsCommInitRankConfig;
 typedef NcclNvtxParamsCommInitRank NcclNvtxParamsCommInitRankScalable;
 typedef NcclNvtxParamsCommInitRank NcclNvtxParamsCommAbort;
@@ -80,11 +81,23 @@ NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsCommShrink, static con
   )
 )
 
+NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsCommGrow, static constexpr,
+  NCCL_NVTX_PAYLOAD_ENTRIES(
+    (uint64_t, newcomm, TYPE_UINT64, nccl_nvtxCommStr),
+    (uint64_t, parentcomm, TYPE_UINT64, "Parent NCCL communicator ID"),
+    (int, nranks, TYPE_INT, nccl_nvtxNranksStr),
+    (int, myrank, TYPE_INT, nccl_nvtxRankStr),
+    (int, cudaDev, TYPE_INT, nccl_nvtxCudaDevStr)
+  )
+)
+
 NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsCommFinalize, static constexpr,
   NCCL_NVTX_PAYLOAD_ENTRIES(
     (uint64_t, comm, TYPE_UINT64, nccl_nvtxCommStr)
   )
 )
+
+typedef NcclNvtxParamsCommFinalize NcclNvtxParamsCommRevoke;
 
 NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsAllGather, static constexpr,
   NCCL_NVTX_PAYLOAD_ENTRIES(
@@ -182,6 +195,31 @@ NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsMSCCL, static constexp
     (size_t, bytes, TYPE_SIZE, nccl_nvtxMsgSizeStr),
     (ncclRedOp_t, op, NCCL_REDOP, nccl_nvtxReductionOpStrpStr),
     (ncclDataType_t, datatype, TYPE_DATATYPE, nccl_nvtxDataTypeStr)
+  )
+)
+
+NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsPut, static constexpr,
+  NCCL_NVTX_PAYLOAD_ENTRIES(
+    (uint64_t, comm, TYPE_UINT64, nccl_nvtxCommStr),
+    (size_t, bytes, TYPE_SIZE, nccl_nvtxMsgSizeStr),
+    (int, peer, TYPE_INT, "Peer rank"),
+    (int, ctx, TYPE_INT, "Context ID")
+  )
+)
+
+NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsSignal, static constexpr,
+  NCCL_NVTX_PAYLOAD_ENTRIES(
+    (uint64_t, comm, TYPE_UINT64, nccl_nvtxCommStr),
+    (int, peer, TYPE_INT, "Peer rank"),
+    (int, ctx, TYPE_INT, "Context ID")
+  )
+)
+
+NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsWaitSignal, static constexpr,
+  NCCL_NVTX_PAYLOAD_ENTRIES(
+    (uint64_t, comm, TYPE_UINT64, nccl_nvtxCommStr),
+    (int, npeers, TYPE_INT, "Number of peers"),
+    (int, ctx, TYPE_INT, "Context ID")
   )
 )
 

@@ -139,7 +139,6 @@ jobs:
             GPU_TARBALL=${{ steps.therock.outputs.tarball }}
             NJOBS=2
             ELFUTILS_DOWNLOAD_VERSION=0.188
-            BOOST_DOWNLOAD_VERSION=1.79.0
           tags: |
             ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}:${{ matrix.system.version }}-systems-ci-${{ matrix.gpu }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -161,7 +160,6 @@ jobs:
             GPU_TARBALL=${{ steps.therock.outputs.tarball }}
             NJOBS=2
             ELFUTILS_DOWNLOAD_VERSION=0.188
-            BOOST_DOWNLOAD_VERSION=1.79.0
           tags: |
             ghcr.io/rocm/rocprofiler-${{ matrix.system.distro }}:${{ matrix.system.version }}-systems-ci-${{ matrix.gpu }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -44,6 +44,17 @@ struct BlockLiveness {
   RegisterSet kill;
 };
 
+/// @brief Optional controls for liveness construction.
+struct LivenessAnalysisOptions {
+  /// @brief Lowest VGPR index that find_free_run() may return.
+  ///
+  /// @details This is a debug-oriented allocation floor, not a dataflow fact.
+  /// The computed live-before sets remain the normal kernel liveness result,
+  /// while scratch allocation can be forced above a descriptor-declared VGPR
+  /// range to test whether semantic lowerings clobber guest registers.
+  uint16_t min_free_vgpr = 0;
+};
+
 /// @brief Reverse-post-order traversal of one kernel's implicit CFG.
 ///
 /// @details The CFG is embedded in the BasicBlock objects returned by
@@ -62,7 +73,7 @@ public:
   /// entry being translated, not every block decoded from the containing code
   /// object.
   /// @param blocks Blocks in one kernel CFG scope.
-  LivenessAnalysis(KernelBlockScope blocks);
+  LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options = {});
 
   /// @brief Block liveness by block object.
   [[nodiscard]] const BlockLiveness &block_liveness(const BasicBlock &block) const;
@@ -96,6 +107,7 @@ public:
 private:
   void analyze(KernelBlockScope blocks);
 
+  uint16_t min_free_vgpr_ = 0;
   std::vector<BlockLiveness> liveness_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
   std::unordered_map<const Instruction *, RegisterSet> live_before_;

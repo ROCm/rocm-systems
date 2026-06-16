@@ -31,10 +31,23 @@
 #include "memory/window_info.hpp"
 #include "util.hpp"
 #include "log.hpp"
+#include "team.hpp"
 
 #include <cassert>
 
 namespace rocshmem {
+
+namespace {
+std::vector<int> team_world_ranks(const Team* team_obj) {
+  std::vector<int> world_ranks;
+  world_ranks.reserve(team_obj->num_pes);
+  const TeamInfo* info = team_obj->tinfo_wrt_world;
+  for (int i = 0; i < team_obj->num_pes; i++) {
+    world_ranks.push_back(info->pe_start + i * info->stride);
+  }
+  return world_ranks;
+}
+}  // namespace
 
 __host__ HostContextWindowInfo::HostContextWindowInfo(MPI_Comm comm_world,
                                                       SymmetricHeap* heap) {
@@ -304,6 +317,25 @@ __host__ void HostInterface::sync_all(WindowInfo* window_info) {
   return;
 }
 
+__host__ void HostInterface::sync(rocshmem_team_t team, WindowInfo* window_info) {
+  if (team == ROCSHMEM_TEAM_INVALID) {
+    return;
+  }
+
+  Team* team_obj{get_internal_team(team)};
+  WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
+  if (window_info_mpi && team_obj->mpi_comm != MPI_COMM_NULL) {
+    mpilib_ftable_.Win_sync(window_info_mpi->get_win());
+    hdp_policy_->hdp_flush();
+    mpilib_ftable_.Barrier(team_obj->mpi_comm);
+  } else {
+    hdp_policy_->hdp_flush();
+    host_bootstrap_->groupBarrier(team_world_ranks(team_obj));
+  }
+
+  return;
+}
+
 __host__ void HostInterface::barrier_all(WindowInfo* window_info) {
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (window_info_mpi) {
@@ -325,9 +357,40 @@ __host__ void HostInterface::barrier_all(WindowInfo* window_info) {
   return;
 }
 
+__host__ void HostInterface::barrier(rocshmem_team_t team,
+                                     WindowInfo* window_info) {
+  if (team == ROCSHMEM_TEAM_INVALID) {
+    return;
+  }
+
+  Team* team_obj{get_internal_team(team)};
+  WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
+  if (window_info_mpi && team_obj->mpi_comm != MPI_COMM_NULL) {
+    complete_all(window_info_mpi->get_win());
+    hdp_policy_->hdp_flush();
+    mpilib_ftable_.Barrier(team_obj->mpi_comm);
+  } else {
+    hdp_policy_->hdp_flush();
+    host_bootstrap_->groupBarrier(team_world_ranks(team_obj));
+  }
+
+  return;
+}
+
 __host__ void HostInterface::barrier_all_on_stream(hipStream_t stream) {
   // Launch kernel to do barrier with given stream
   rocshmem_barrier_all_kernel<<<1, 1, 0, stream>>>();
+}
+
+__host__ void HostInterface::barrier_on_stream(rocshmem_team_t team,
+                                               hipStream_t stream) {
+  // Non-members hold ROCSHMEM_TEAM_INVALID; matching the blocking
+  // rocshmem_barrier(team), this is a no-op: nothing is enqueued.
+  if (team == ROCSHMEM_TEAM_INVALID) {
+    return;
+  }
+  // Launch kernel to do the team-scoped barrier on the given stream.
+  rocshmem_barrier_kernel<<<1, 1, 0, stream>>>(team);
 }
 
 __host__ void HostInterface::quiet_on_stream(hipStream_t stream) {
@@ -338,6 +401,17 @@ __host__ void HostInterface::quiet_on_stream(hipStream_t stream) {
 __host__ void HostInterface::sync_all_on_stream(hipStream_t stream) {
   // Launch kernel to do sync_all with given stream
   rocshmem_sync_all_kernel<<<1, 1, 0, stream>>>();
+}
+
+__host__ void HostInterface::sync_on_stream(rocshmem_team_t team,
+                                            hipStream_t stream) {
+  // Non-members hold ROCSHMEM_TEAM_INVALID; matching the blocking
+  // rocshmem_team_sync(team), this is a no-op: nothing is enqueued.
+  if (team == ROCSHMEM_TEAM_INVALID) {
+    return;
+  }
+  // Launch kernel to do the team-scoped sync on the given stream.
+  rocshmem_team_sync_kernel<<<1, 1, 0, stream>>>(team);
 }
 
 __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,

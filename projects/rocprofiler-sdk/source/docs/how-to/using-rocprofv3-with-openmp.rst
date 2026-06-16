@@ -5,21 +5,24 @@
 
 .. _using-rocprofv3-with-openmp:
 
+============================
 Using rocprofv3 with OpenMP
-+++++++++++++++++++++++++++++
+============================
 
 For computations offloaded to AMD GPUs using OpenMP (for example, via OpenMP target offload), ``rocprofv3`` can be used to capture and profile GPU activities initiated by these offloaded regions. Note that ``rocprofv3`` doesn't provide native support for profiling CPU-side OpenMP code or parallel regions.
 
 Example: Vector addition using OpenMP offload on AMD GPUs
-----------------------------------------------------------
+==========================================================
 
 The following example demonstrates how to perform vector addition using OpenMP target offload, enabling workload execution on AMD GPUs.
 
 **Key steps:**
 
-- Initialize input arrays on the host.
-- Offload the vector addition computation to the GPU using OpenMP directives.
-- Retrieve and verify the results on the host.
+1. Initialize the input arrays on the host.
+
+2. Offload the vector addition computation to the GPU using OpenMP directives.
+
+3. Retrieve and verify the results on the host.
 
 .. code-block:: c
 
@@ -61,16 +64,16 @@ The following example demonstrates how to perform vector addition using OpenMP t
     }
 
 Building the OpenMP offload application
-----------------------------------------
+========================================
 
-To compile the application for AMD GPU offload, use the following command:
+To compile the application for AMD GPU offload, use:
 
 .. code-block:: bash
 
     amdclang++ -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -L/opt/rocm/lib --offload-arch=gfx9xx -o vector_add <application>
 
 Profiling the application with rocprofv3
------------------------------------------
+=========================================
 
 To profile the GPU activity during execution, run the application with ``rocprofv3``:
 

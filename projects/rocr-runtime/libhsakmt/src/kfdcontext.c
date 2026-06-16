@@ -28,18 +28,27 @@
 #include <stddef.h>
 #include <assert.h>
 
-void hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx)
+int hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx)
 {
     assert(fd >= 0);
     assert(ctx);
 
     ctx->fd = fd;
-    ctx->topology_context = NULL;
-    ctx->queue_context = NULL;
-    ctx->fmm_context = NULL;
-    ctx->event_context = NULL;
-    ctx->debug_context = NULL;
-    ctx->perf_context = NULL;
+
+    if (hsakmt_kfdcontext_init_fmm_context(ctx))
+        return -1;
+    if (hsakmt_kfdcontext_init_topology_context(ctx))
+        return -1;
+    if (hsakmt_kfdcontext_init_queue_context(ctx))
+        return -1;
+    if (hsakmt_kfdcontext_init_event_context(ctx))
+        return -1;
+    if (hsakmt_kfdcontext_init_debug_context(ctx))
+        return -1;
+    if (hsakmt_kfdcontext_init_perf_context(ctx))
+        return -1;
+
+    return 0;
 }
 
 void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx)

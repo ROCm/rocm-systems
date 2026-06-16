@@ -159,7 +159,8 @@ else()
                      "src/dxg/wddm/gpu_memory.cpp"
                      "src/dxg/wddm/va_mgr.cpp"
                      "src/dxg/wddm/queue.cpp"
-                     "src/dxg/wddm/cmd_util.cpp" )
+                     "src/dxg/wddm/cmd_util.cpp"
+                     "src/dxg/extsem.cpp" )
   else()
     ## Source files
     set ( HSAKMT_SRC "src/debug.c"
@@ -181,7 +182,8 @@ else()
                      "src/svm.c"
                      "src/pc_sampling.c"
                      "src/ais.c"
-                     "src/kfdcontext.c")
+                     "src/kfdcontext.c"
+                     "src/extsem.c")
   endif()
 
   ## Declare the library target name

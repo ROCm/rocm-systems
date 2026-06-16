@@ -5,6 +5,8 @@
 #define ROCJITSU_KMD_LINUX_SIMULATED_DRIVER_H_
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/driver.h"
 #include "rocjitsu/vm/soc.h"
@@ -16,208 +18,221 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 
 namespace rocjitsu {
 
+// KFD mmap offset encoding (mirrors kfd_priv.h).
+inline constexpr uint64_t KFD_MMAP_TYPE_SHIFT = 62;
+inline constexpr uint64_t KFD_MMAP_TYPE_MASK = 0x3ULL << KFD_MMAP_TYPE_SHIFT;
+inline constexpr uint64_t KFD_MMAP_TYPE_DOORBELL = 0x3ULL << KFD_MMAP_TYPE_SHIFT;
+inline constexpr uint64_t KFD_MMAP_TYPE_EVENTS = 0x2ULL << KFD_MMAP_TYPE_SHIFT;
+inline constexpr uint64_t KFD_MMAP_GPU_ID_SHIFT = 46;
+
+inline constexpr uint64_t kfd_mmap_gpu_id(uint32_t gpu_id) {
+  return (static_cast<uint64_t>(gpu_id) << KFD_MMAP_GPU_ID_SHIFT) &
+         ((1ULL << KFD_MMAP_TYPE_SHIFT) - (1ULL << KFD_MMAP_GPU_ID_SHIFT));
+}
+
+/// @brief 128-bit IPC share handle key, matching the kernel's random handle.
+struct IpcHandleKey {
+  uint32_t words[4];
+  bool operator==(const IpcHandleKey &) const = default;
+};
+
+struct IpcHandleKeyHash {
+  size_t operator()(const IpcHandleKey &key) const {
+    size_t hash_value = std::hash<uint32_t>{}(key.words[0]);
+    for (int idx = 1; idx < 4; idx++)
+      hash_value ^= std::hash<uint32_t>{}(key.words[idx]) + 0x9e3779b9 + (hash_value << 6) +
+                    (hash_value >> 2);
+    return hash_value;
+  }
+};
+
+/// @brief Exported IPC object stored in the driver's global IPC store.
+struct IpcObject {
+  uint32_t share_handle[4];
+  int backing_memfd = -1;
+  uint64_t allocation_size = 0;
+  uint32_t allocation_flags = 0;
+  uint32_t source_gpu_id = 0;
+  uint32_t source_process_id = 0;
+  uint64_t source_alloc_handle = 0;
+};
+
 /// @brief Simulated kernel-mode driver that routes KFD ioctls to the simulator.
 ///
-/// @details Also manages the global singleton instance used by the LD_PRELOAD
-/// interposer. The interposer calls the static methods (get_or_create, lookup,
-/// redirect_sysfs_path) which delegate to the singleton.
+/// @details Per-process state (allocations, queues, events, doorbells) is held
+/// in KfdProcess instances. The driver maintains a process table and resolves
+/// the target process from a process_id parameter — matching the real kernel's
+/// kfd_chardev_ioctl which resolves kfd_process from filp->private_data.
+///
+/// The local-mode virtual interface (open/close/ioctl/mmap/munmap) operates on
+/// the process created by open(). The daemon uses the process_id-aware
+/// overloads so each client thread identifies itself by connection, not by
+/// shared mutable state.
 class SimulatedDriver : public Driver {
 public:
-  // -- Static singleton interface (used by the interposer) --
+  [[nodiscard]] bool daemon_mode() const { return daemon_mode_; }
 
-  /// @brief Get or lazily create the global driver singleton.
-  /// @returns Pointer to the driver, or nullptr on failure.
-  static SimulatedDriver *get_or_create();
-
-  /// @brief Look up the driver by its KFD file descriptor.
-  /// @param fd The file descriptor returned by open().
-  /// @returns Pointer to the driver, or nullptr if fd doesn't match.
-  static SimulatedDriver *lookup(int fd);
-
-  /// @brief Get the KFD fd for the singleton (-1 if not open).
-  static int kfd_fd();
-
-  /// @brief Redirect a sysfs path through the generated topology.
-  /// @param path The original sysfs path.
-  /// @returns Redirected path, or empty string if no redirect needed.
-  static std::string redirect_sysfs_path(const char *path);
-
-  /// @brief Re-entry guard for driver construction (thread-local).
-  static bool in_construction();
-
-  // -- Instance interface --
-
-  /// @brief Create a default driver from RJ_CONFIG/RJ_SCHEMA env vars.
-  static std::unique_ptr<SimulatedDriver> create_default();
-
-  /// @brief Construct with a simulation engine and SoC.
-  SimulatedDriver(simdojo::SimulationEngine &engine, SoC &soc);
+  SimulatedDriver(SoC &soc, bool daemon_mode = false);
+  SimulatedDriver(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode = false);
   ~SimulatedDriver() override;
 
+  /// @brief Local-mode interface (interposer). Operates on the local process.
+  /// @{
   int open() override;
   int close() override;
   int ioctl(unsigned long request, void *arg) override;
   void *mmap(void *addr, size_t length, int prot, int flags, off_t offset) override;
   int munmap(void *addr, size_t length) override;
+  /// @}
 
-  /// @brief Generate sysfs topology files for the interposer to redirect.
-  /// @details Must be called before ROCR's hsa_init().
+  /// @brief Daemon-mode process lifecycle. Thread-safe for concurrent clients.
+  /// @{
+
+  /// @brief Atomically create a new process and return its ID.
+  /// @details Unlike open(), which sets local_process_id_ (not thread-safe for
+  /// concurrent daemon clients), this method returns the ID directly so the
+  /// caller can associate it with a specific client connection.
+  uint32_t open_process();
+
+  int ioctl(uint32_t process_id, unsigned long request, void *arg);
+  void *mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags, off_t offset);
+  int munmap(uint32_t process_id, void *addr, size_t length);
+  int close(uint32_t process_id);
+  [[nodiscard]] int get_mmap_memfd(uint32_t process_id, off_t offset) const;
+  /// @}
+
+  /// @brief Local-mode get_mmap_memfd (uses local process).
+  [[nodiscard]] int get_mmap_memfd(off_t offset) const;
+
   void setup_topology(const Sysfs::GpuInfo &gpu);
-
-  /// @brief Returns true if the address range overlaps the mapped doorbell aperture.
+  void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
+  void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc);
   bool is_doorbell_range(const void *addr, size_t length) const;
-
-  /// Get the topology generator (for inspection/testing).
+  uint32_t gpu_id() const { return gpus_.empty() ? 0 : gpus_[0].gpu_id; }
+  uint32_t num_gpus() const { return static_cast<uint32_t>(gpus_.size()); }
   const Sysfs &topology() const { return topology_; }
-
-  /// Get the generated sysfs topology directory path.
   std::string topology_path() const { return topology_.path(); }
+  [[nodiscard]] int fd() const { return fd_; }
+  [[nodiscard]] uint32_t local_process_id() const { return local_process_id_; }
+  [[nodiscard]] bool owns_fd(int fd) const;
+  std::string redirect_sysfs_path(const char *path) const;
+  [[nodiscard]] int claim_fd(int real_fd);
+  [[nodiscard]] bool owns_reserved_fd(int fd) const;
+
+  /// @brief Per-GPU device state (mirrors kfd_dev in the kernel).
+  struct GpuDevice {
+    SoC *soc = nullptr;
+    uint32_t gpu_id = 0;
+    bool cps_initialized = false;
+    kfd_process_device_apertures apertures{};
+  };
 
 private:
+  /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
+  std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
+
+  /// @brief Look up a GpuDevice by gpu_id. Returns nullptr if not found.
+  GpuDevice *find_gpu(uint32_t gpu_id);
+  const GpuDevice *find_gpu(uint32_t gpu_id) const;
+
+  /// @brief Get the ordinal (0-based index) for a gpu_id. Returns 0 if not found.
+  uint32_t gpu_ordinal(uint32_t gpu_id) const {
+    for (uint32_t i = 0; i < gpus_.size(); ++i)
+      if (gpus_[i].gpu_id == gpu_id)
+        return i;
+    return 0;
+  }
+
+  void map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
+                  amdgpu::Mtype mtype = amdgpu::Mtype::RW);
+  void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
+
+  int dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg);
+  void *dispatch_mmap(KfdProcess &proc, void *addr, size_t length, int prot, int flags,
+                      off_t offset);
+  int dispatch_munmap(KfdProcess &proc, void *addr, size_t length);
+  int dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const;
+
   int get_version_ioctl(void *arg);
   int get_clock_counters_ioctl(void *arg);
   int get_apertures_ioctl(void *arg);
   int acquire_vm_ioctl(void *arg);
-  int alloc_memory_ioctl(void *arg);
-  int free_memory_ioctl(void *arg);
-  int map_memory_ioctl(void *arg);
-  int unmap_memory_ioctl(void *arg);
-  int create_queue_ioctl(void *arg);
-  int update_queue_ioctl(void *arg);
-  int destroy_queue_ioctl(void *arg);
-  int create_event_ioctl(void *arg);
-  int set_memory_policy_ioctl(void *arg);
-  int destroy_event_ioctl(void *arg);
-  int set_event_ioctl(void *arg);
-  int reset_event_ioctl(void *arg);
-  int wait_events_ioctl(void *arg);
-  int import_dmabuf_ioctl(void *arg);
-  int export_dmabuf_ioctl(void *arg);
-  int get_dmabuf_info_ioctl(void *arg);
-  int svm_ioctl(void *arg);
-  int runtime_enable_ioctl(void *arg);
+  int alloc_memory_ioctl(KfdProcess &proc, void *arg);
+  int free_memory_ioctl(KfdProcess &proc, void *arg);
+  int map_memory_ioctl(KfdProcess &proc, void *arg);
+  int unmap_memory_ioctl(KfdProcess &proc, void *arg);
+  int create_queue_ioctl(KfdProcess &proc, void *arg);
+  int update_queue_ioctl(KfdProcess &proc, void *arg);
+  int destroy_queue_ioctl(KfdProcess &proc, void *arg);
+  int create_event_ioctl(KfdProcess &proc, void *arg);
+  int set_memory_policy_ioctl(KfdProcess &proc, void *arg);
+  int destroy_event_ioctl(KfdProcess &proc, void *arg);
+  int set_event_ioctl(KfdProcess &proc, void *arg);
+  int reset_event_ioctl(KfdProcess &proc, void *arg);
+  int wait_events_ioctl(KfdProcess &proc, void *arg);
+  int import_dmabuf_ioctl(KfdProcess &proc, void *arg);
+  int export_dmabuf_ioctl(KfdProcess &proc, void *arg);
+  int get_dmabuf_info_ioctl(KfdProcess &proc, void *arg);
+  int ipc_export_handle_ioctl(KfdProcess &proc, void *arg);
+  int ipc_import_handle_ioctl(KfdProcess &proc, void *arg);
+  int svm_ioctl(KfdProcess &proc, void *arg);
+  int runtime_enable_ioctl(KfdProcess &proc, void *arg);
   int set_xnack_mode_ioctl(void *arg);
+  bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);
 
-  simdojo::SimulationEngine &engine_;
-  SoC &soc_;
-  int fd_ = -1; ///< Stable synthetic KFD fd (memfd); allocated once on first open(), reused across
-                ///< close/reopen.
+  std::vector<GpuDevice> gpus_;
+  bool daemon_mode_ = false;
+  int fd_ = -1;
 
-  uint32_t gpu_id_ = 0; ///< KFD gpu_id reported to userspace (set by setup_topology).
-  /// CommandProcessor for this KFD device. Set once in open() from the SoC
-  /// topology. All queue operations (create, flush, destroy) go through this
-  /// pointer so no other code needs to know about the underlying XCD index.
-  amdgpu::CommandProcessor *cp_ = nullptr;
+  /// @brief Process table mapping process_id to KfdProcess.
+  /// @details Protected by process_mutex_ for concurrent daemon access.
+  mutable std::mutex process_mutex_;
+  std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>> processes_;
+  uint32_t next_process_id_ = 1;
 
-  struct GpuAllocation {
-    uint64_t gpu_va = 0;
-    uint64_t size = 0;
-    void *host_ptr = nullptr;
-    uint32_t flags = 0;
-    uint64_t handle = 0;
-    bool user_va = false; ///< True if va_addr was provided by the caller (ROCR FMM path).
-    bool imported = false;
-    int dmabuf_fd = -1;
-  };
+  /// @brief Interrupt dispatch: process_id → EventState*.
+  /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_
+  /// to avoid ABBA deadlocks with hw_queue_mutex_ in the CP doorbell thread.
+  mutable std::mutex interrupt_mutex_;
+  std::unordered_map<uint32_t, EventState *> event_dispatch_;
 
-  std::mutex alloc_mutex_;
-  std::unordered_map<uint64_t, GpuAllocation> allocations_;
-  uint64_t next_handle_ = 1;
-  uint64_t next_gpu_va_ = 0x100000000ULL;
+  /// @brief Process ID for local-mode (interposer). Set once in open().
+  uint32_t local_process_id_ = 0;
 
-  /// @brief AMDGPU flat memory apertures (architecture-independent, 48-bit SVM).
-  /// @details Mirrors kfd_flat_memory.c kfd_init_apertures_v9. The gpu_id field
-  ///          is zero here; callers set it at copy time from gpu_id_.
   static constexpr kfd_process_device_apertures default_apertures_{
-      .lds_base = 0x1000000000000ULL, // 1 << 48
+      .lds_base = 0x1000000000000ULL,
       .lds_limit = 0x10000FFFFFFFFULL,
-      .scratch_base = 0x2000000000000ULL, // 2 << 48
+      .scratch_base = 0x2000000000000ULL,
       .scratch_limit = 0x20000FFFFFFFFULL,
-      .gpuvm_base = 0x1000000000ULL,    // 4 GB — above executable/stack/heap
-      .gpuvm_limit = 0x3FFFFFFFFFFFULL, // 64 TB — safely below the Linux mmap
-                                        // base (~124 TB on x86-64 with ASLR)
+      .gpuvm_base = 0x1000000000ULL,
+      .gpuvm_limit = 0x3FFFFFFFFFFFULL,
       .gpu_id = 0,
       .pad = 0,
   };
 
-  uint32_t next_queue_id_ = 1;
-  uint64_t next_doorbell_offset_ = 0;
-  std::vector<uint32_t>
-      active_queue_ids_; ///< Tracks queue IDs registered with the CP (for cleanup on close).
-  void *doorbell_page_ =
-      nullptr; ///< Mapped aperture page; base address given to the CP via set_doorbell_base().
-  size_t doorbell_page_size_ = 0; ///< Size of the mapped doorbell aperture.
-  uint64_t doorbell_gpu_va_ = 0;  ///< GPU VA associated with the doorbell aperture.
+  /// @brief IPC handle store for cross-process memory sharing.
+  /// @details Lock ordering: process_mutex_ < alloc_mutex_ < ipc_mutex_.
+  mutable std::mutex ipc_mutex_;
+  std::unordered_map<IpcHandleKey, IpcObject, IpcHandleKeyHash> ipc_store_;
 
-  int event_memfd_ = -1;       ///< memfd backing the KFD signal event page.
-  void *event_page_ = nullptr; ///< Mapped signal page (libhsakmt polls slots here).
-  size_t event_page_size_ = 0; ///< Size of the mapped event page in bytes.
-
-  struct GpuEvent {
-    uint32_t event_id = 0;
-    uint32_t event_type = 0;
-    bool signaled = false;
-    bool auto_reset = false;
-  };
-
-  std::mutex event_mutex_;
-  std::condition_variable event_cv_;
-  std::unordered_map<uint32_t, GpuEvent> events_;
-  uint32_t next_event_id_ = 1;
-  std::atomic<bool> closing_{false}; ///< Set on close(); read inside and outside event_mutex_.
-
-  struct MemoryPolicy {
-    uint64_t alternate_base = 0;
-    uint64_t alternate_size = 0;
-    uint32_t default_policy = 0;
-    uint32_t alternate_policy = 0;
-  };
-
-  struct ImportedDmabuf {
-    uint64_t handle = 0;
-    int fd = -1;
-    uint64_t size = 0;
-    uint64_t va = 0;
-    uint32_t gpu_id = 0;
-  };
-
-  struct SvmRange {
-    uint64_t size = 0;
-    std::unordered_map<uint32_t, uint32_t> attributes;
-  };
-
-  struct RuntimeState {
-    bool enabled = false;
-    bool pending = false;
-    uint32_t mode_mask = 0;
-    uint32_t capabilities_mask = 0;
-    uint64_t r_debug = 0;
-  };
-
-  std::unordered_map<uint32_t, MemoryPolicy> memory_policies_;
-  std::unordered_map<uint64_t, ImportedDmabuf> imported_dmabufs_;
-  std::unordered_map<int, uint64_t> fd_to_import_handle_;
-  std::unordered_map<uint64_t, SvmRange> svm_ranges_;
-  std::mutex runtime_mutex_;
-  RuntimeState runtime_state_;
-
-  uint64_t scratch_backing_va_ = 0; ///< Flat-scratch base from ROCR (SET_SCRATCH_BACKING_VA).
-  uint64_t trap_tba_addr_ = 0;      ///< Trap Base Address from ROCR (SET_TRAP_HANDLER).
-  uint64_t trap_tma_addr_ = 0;      ///< Trap Meta Address from ROCR (SET_TRAP_HANDLER).
+  mutable std::mutex owned_fds_mutex_;
+  std::unordered_set<int> owned_fds_;
 
   Sysfs topology_;
+
+  static constexpr int kReservedFdCount = 256;
+  int reserved_fd_base_ = 0;
+  int next_reserved_fd_ = 0;
+
+  void init_reserved_fd_range();
 };
 
 } // namespace rocjitsu

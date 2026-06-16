@@ -13,7 +13,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -75,9 +74,9 @@ private:
     uint64_t num_code_objs;
   };
 
-  void load_device_elf(const std::string &path);
-  void load_fat_binary(std::ifstream &elf_file);
-  void load_hip_fatbin(const Section &fatbin_section, std::ifstream &elf_file);
+  void load_device_elf();
+  void load_fat_binary();
+  void load_hip_fatbin(const Section &fatbin_section);
   void register_code_object(std::unique_ptr<AmdGpuCodeObject> co);
 
   std::vector<std::unique_ptr<AmdGpuCodeObject>> owned_code_objs_;

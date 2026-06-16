@@ -17,7 +17,6 @@ ARG GCC_TOOLSET_VERSION=10
 
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
-ARG BOOST_DOWNLOAD_VERSION="1.79.0"
 ARG NJOBS="8"
 
 RUN echo "* soft memlock unlimited" >> /etc/security/limits.conf && \
@@ -26,7 +25,7 @@ RUN echo "* soft memlock unlimited" >> /etc/security/limits.conf && \
 RUN OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"' | cut -d'.' -f1) && \
     yum install -y epel-release && crb enable && \
     yum install -y --allowerasing \
-        autoconf automake chrpath cmake curl dpkg-devel elfutils-devel flex git glibc-devel \
+        autoconf automake ccache chrpath cmake curl dpkg-devel elfutils-devel flex git glibc-devel \
         gmock-devel gtest-devel iproute json-devel libdwarf-devel libdrm-devel libtool make \
         ninja-build numactl-devel openmpi-devel papi-devel pkgconf pkgconf-m4 \
         pkgconf-pkg-config python3-devel python3-pip redhat-rpm-config rpm-build rpm-sign \

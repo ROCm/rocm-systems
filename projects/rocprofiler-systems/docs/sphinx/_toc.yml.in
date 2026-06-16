@@ -11,7 +11,9 @@ subtrees:
   - caption: Install
     entries:
     - file: install/install.rst
-      title: ROCm Systems Profiler installation guide
+      title: Install ROCm Systems Profiler
+    - file: install/build.rst
+      title: Build from source
 
   - caption: How to
     entries:
@@ -39,6 +41,10 @@ subtrees:
           title: Network performance profiling
         - file: how-to/communication-runtime-profiling.rst
           title: Communication runtime profiling
+        - file: how-to/unified-memory-profiling.rst
+          title: Unified memory profiling
+        - file: how-to/openmp-profiling.rst
+          title: OpenMP performance profiling
         - file: how-to/vcn-jpeg-sampling.rst
           title: VCN and JPEG sampling and tracing
         - file: how-to/xgmi-pcie-sampling.rst

@@ -56,7 +56,7 @@ endif()
 
 # rocjpeg Version
 # NOTE: package version and rocjpeg_version.h is generated with this version
-set(VERSION "1.5.0")
+set(VERSION "1.6.0")
 
 # Set Project Version and Language
 project(rocjpeg VERSION ${VERSION} LANGUAGES CXX)
@@ -112,7 +112,7 @@ if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
     endif()
     include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
 
-    set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+    set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250")
     if(HAS_ROCM_CHECK_TARGET_IDS)
         rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
     else() # if we don't have rocm_check_target_ids, just assume the targets are available
@@ -147,6 +147,7 @@ set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(Libva QUIET)
 find_package(Libdrm_amdgpu QUIET)
+find_package(Threads QUIET)
 
 # Check Libva version compatibility: requires libva >= 1.22
 if(Libva_FOUND)
@@ -164,7 +165,7 @@ if(ROCJPEG_ENABLE_ROCPROFILER_REGISTER)
     PATHS ${ROCM_PATH})
 endif()
 
-if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND)
+if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
   # LibVA
@@ -179,6 +180,9 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND)
   if(rocprofiler-register_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
   endif()
+
+  # Threads library (required for std::thread support)
+  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
 
   # local include files
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -344,5 +348,8 @@ else()
   endif()
   if(NOT Libdrm_amdgpu_FOUND)
     message(FATAL_ERROR "-- ERROR!: libdrm_amdgpu Not Found!")
+  endif()
+  if(NOT Threads_FOUND)
+    message(FATAL_ERROR "-- ERROR!: Threads Not Found!")
   endif()
 endif()

@@ -9,6 +9,15 @@ graph:
   Unit_hipGraphAddEmptyNode_BarrierFunc:
     <<: *level_2
     tags: [node]
+  Unit_hipGraph_ConcurrentCreate_GraphIDRace:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraph_ConcurrentConstruct_NextIDRace:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraph_ConcurrentConstruct_LaunchDropSmoke:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraphAddDependencies_Positive_Functional:
     <<: *level_2
     tags: [dependency]
@@ -83,7 +92,7 @@ graph:
   Unit_hipGraphAddMemcpyNode_Negative_Parameters:
     <<: *level_2
     # NOTE: The following test is disabled due to defect - EXSWHTEC-245
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [node, image]
   Unit_hipGraphClone_Negative:
     <<: *level_2
@@ -104,7 +113,7 @@ graph:
     <<: *level_2
     tags: [lifecycle, multigpu]
     # Enable the below test when multi-device graph launches are fully supported
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
   Unit_hipGraphInstantiateWithFlags_StreamCapture:
     <<: *level_2
     tags: [lifecycle, multigpu]
@@ -112,7 +121,7 @@ graph:
     <<: *level_2
     tags: [lifecycle, multigpu]
     # SWDEV-445928: These tests fail in PSDB stress test on 09/02/2024
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
   Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check:
     <<: *level_2
     # SWDEV-402082 - PAL Backend fails to reserve address on GPU except first one
@@ -121,22 +130,22 @@ graph:
   Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop:
     <<: *level_2
     # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel:
     <<: *level_2
     # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel:
     <<: *level_2
     # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch:
     <<: *level_2
     # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithParams_Negative:
     <<: *level_2
@@ -233,7 +242,9 @@ graph:
   Unit_hipGraphAddMemcpyNodeToSymbol_Negative_Parameters:
     <<: *level_2
     tags: [node]
-  Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic: *level_2
+  Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters:
     <<: *level_2
     tags: [exec]
@@ -243,7 +254,9 @@ graph:
     disabled: [amd_windows, amd_wsl]
     tags: [exec]
   Unit_hipGraphMemsetNodeSetParams_FlatAlloc_2D_Positive: *level_2
-  Unit_hipGraphMemsetNodeSetParams_PitchedAlloc_OverExtent_Negative: *level_2
+  Unit_hipGraphMemsetNodeSetParams_PitchedAlloc_OverExtent_Negative:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGraphExecUpdate_FlatAlloc_2DMemset_Idempotent: *level_2
   Unit_hipGraphExecUpdate_2DMemset_ShapeChange_Negative: *level_2
   Unit_hipGraphExecUpdate_2DMemset_ValueAndDst_Positive: *level_2
@@ -466,7 +479,7 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphInstantiate_Basic:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipGraphInstantiate_InvalidCyclicGraph:
     <<: *level_2
     tags: [lifecycle]
@@ -504,7 +517,7 @@ graph:
     <<: *level_2
     tags: [exec, multigpu]
     # SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipGraphExecUpdate_Functional_KernelFunction_Changed:
     <<: *level_2
     tags: [exec]
@@ -531,6 +544,7 @@ graph:
     tags: [node]
   Unit_hipGraphMemsetNodeGetParams_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphMemsetNodeSetParams_Positive_Basic:
     <<: *level_2
@@ -786,7 +800,7 @@ graph:
   Unit_hipGraphMemFreeNodeGetParams_InvalidArgs:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [query]
   Unit_hipGraphUserObj_Int_float_Objects:
     <<: *level_2
@@ -800,7 +814,7 @@ graph:
   Unit_hipGraphUserObj_ClonedGraph:
     <<: *level_2
     # Test Unit_hipGraphUserObj_ClonedGraph disabled due to SWDEV-483112
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [userobj]
   Unit_hipGraphUserObj_ManualGraph:
     <<: *level_2
@@ -841,7 +855,7 @@ graph:
   Unit_hipStreamBeginCaptureToGraph_CaptureDepGraph:
     <<: *level_2
     # SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_ComplexGraph:
     <<: *level_2
@@ -879,7 +893,7 @@ graph:
   Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads:
     <<: *level_2
     # SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [capture]
   Unit_hipGetProcAddress_GraphAPIs_StreamCapture:
     <<: *level_2
@@ -889,9 +903,11 @@ graph:
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams:
     <<: *level_2
@@ -913,6 +929,7 @@ graph:
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphExecNodeSetParams_Negative_Parameters:
     <<: *level_2
@@ -963,6 +980,9 @@ graph:
   Unit_hipStreamEndCapture_Positive_Thread:
     <<: *level_2
     tags: [capture]
+  Unit_hipStreamEndCapture_Negative_InvalidatedStateReset:
+    <<: *level_2
+    tags: [capture]
   Unit_hipStreamEndCapture_Negative:
     <<: *level_2
     tags: [capture]
@@ -1000,20 +1020,25 @@ graph:
     tags: [exec]
   Unit_hipGraphAddMemsetNode_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGraphAddMemsetNode_Negative_Parameters:
     <<: *level_2
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMallocPitch_2D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMallocPitch_1D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc3D_2D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc3D_1D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc_1D:
     <<: *level_2
@@ -1038,6 +1063,7 @@ graph:
     tags: [node]
   Unit_hipGraphMemcpyNodeGetParams_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphMemcpyNodeGetParams_Negative:
     <<: *level_2
@@ -1050,6 +1076,7 @@ graph:
     tags: [node, image]
   Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphKernelNodeGetParams_Negative:
     <<: *level_2
@@ -1076,7 +1103,7 @@ graph:
     tags: [exec]
   Unit_hipGraphLaunch_Positive:
     <<: *level_2
-    tags: [exec]
+    tags: [exec, smoke]
   Unit_hipGraphLaunch_Negative_Parameters:
     <<: *level_2
     tags: [exec]
@@ -1164,10 +1191,10 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphCreate_Positive_Basic:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipGraphDestroy_Positive_Basic:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipGraphDestroy_Negative_Parameters:
     <<: *level_2
     tags: [lifecycle]
@@ -1202,6 +1229,12 @@ graph:
     tags: [capture]
   Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture:
     <<: *level_2
+    tags: [capture]
+  Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode:
+    <<: *level_2
+    # Hangs on Windows (PAL), hitting CI timeout; passes on Linux.
+    # https://github.com/ROCm/rocm-systems/issues/7148
+    disabled: [amd_windows, amd_wsl]
     tags: [capture]
   Unit_hipUserObjectCreate_Functional_1:
     <<: *level_2
@@ -1344,7 +1377,7 @@ graph:
     tags: [exec]
     # (amd_linux) SWDEV-553920 disabled until multi device graph issues are resolved
     # (amd_windows) SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
-    disabled: [amd_linux, amd_windows]
+    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_hipGraphUpload_Functional_With_Priority_Stream:
     <<: *level_2
     tags: [exec]
@@ -1364,6 +1397,8 @@ graph:
     tags: [node]
   Unit_hipStreamEndCapture_later_and_add_a_node_inbetween:
     <<: *level_2
+    # AIRUNTIME-2335: temporarily disabled (intermittent failure in CI)
+    disabled: [amd_windows, amd_wsl, amd_linux]
     tags: [node]
   Unit_hipStreamEndCapture_first_and_add_a_node_later:
     <<: *level_2
@@ -1453,14 +1488,14 @@ graph:
     <<: *level_2
     tags: [query]
     # SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2:
     <<: *level_2
     tags: [query]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative:
     <<: *level_2
@@ -1477,7 +1512,7 @@ graph:
   Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream:
     <<: *level_2
@@ -1510,7 +1545,7 @@ graph:
     <<: *level_2
     # (amd_linux) SWDEV-457316 Below test is skipped due ref count logic (Discussed with German)
     # (amd_windows) SWDEV-457316 Below test is skipped due ref count logic (Discussed with German)
-    disabled: [amd_linux, amd_windows]
+    disabled: [amd_linux, amd_windows, amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph:
     <<: *level_2
@@ -1521,25 +1556,28 @@ graph:
   Unit_hipGraphAddMemFreeNode_Negative_NotSupported:
     <<: *level_2
     # SWDEV-457316 Below tests are disabled temporarily to avoid combined PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemFreeNode_Functional:
     <<: *level_2
     tags: [node]
   Unit_hipDrvGraphMemcpyNodeGetParams_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipDrvGraphMemcpyNodeGetParams_Positive:
     <<: *level_2
     tags: [query]
   Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array:
     <<: *level_2
     tags: [node, image]
   Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipDeviceSetGraphMemAttribute_Positive_Default:
     <<: *level_2
@@ -1573,11 +1611,15 @@ graph:
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_Negative:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [exec]
-  Unit_hipGraphAddNodeTypeMemset_Positive_Basic: *level_2
+  Unit_hipGraphAddNodeTypeMemset_Positive_Basic:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGraphAddNodeTypeKernel_Positive_Basic:
     <<: *level_2
     tags: [node]
@@ -1604,38 +1646,39 @@ graph:
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipDrvGraphAddMemsetNode_Negative_Parameters:
     <<: *level_2
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMallocManaged:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipDrvGraphAddMemcpyNode_Negative:
     <<: *level_2
@@ -1654,6 +1697,7 @@ graph:
     tags: [node, image]
   Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipEventQuery_GlobalCapture_DefaultMode_NormalEvent: *level_2
   Unit_hipEventQuery_GlobalCapture_DefaultMode_CapturedEvent: *level_2
@@ -1669,3 +1713,37 @@ graph:
   Unit_hipEventSynchronize_ThreadLocalCapture_DefaultMode_CapturedEvent: *level_2
   Unit_hipEventQuery_SameThread_GlobalCapture: *level_2
   Unit_hipEventQuery_SameThread_RelaxedCapture: *level_2
+  Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_MemoryTrim:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy:
+    <<: *level_2
+    tags: [node]

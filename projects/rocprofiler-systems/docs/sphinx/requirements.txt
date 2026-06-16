@@ -77,7 +77,7 @@ gitpython==3.1.50
     # via rocm-docs-core
 greenlet==3.1.1
     # via sqlalchemy
-idna==3.10
+idna==3.15
     # via requests
 imagesize==1.4.1
     # via sphinx
@@ -227,7 +227,7 @@ requests==2.33.0
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference]==1.33.1
+rocm-docs-core[api-reference]==1.35.0
     # via -r requirements.in
 rpds-py==0.22.3
     # via
@@ -283,7 +283,7 @@ tabulate==0.9.0
     # via jupyter-cache
 tomli==2.0.2
     # via sphinx
-tornado==6.5.5
+tornado==6.5.6
     # via
     #   ipykernel
     #   jupyter-client

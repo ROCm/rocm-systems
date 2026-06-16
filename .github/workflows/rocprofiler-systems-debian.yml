@@ -65,6 +65,7 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
     - uses: actions/checkout@v6
@@ -72,6 +73,23 @@ jobs:
         sparse-checkout: |
           projects/rocprofiler-systems/
           .gitmodules
+
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-debian-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
+        restore-keys: |
+          ccache-debian-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-
+          ccache-debian-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-
+
+    - name: Configure ccache
+      run: |
+        mkdir -p "${CCACHE_DIR}"
+        ccache --max-size=1G
+        ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+        ccache -z
+        ccache -p | head -20
 
     - name: Install Python Test Dependencies
       timeout-minutes: 10
@@ -98,6 +116,8 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       env:
         GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
       run: |
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD}
@@ -117,7 +137,6 @@ jobs:
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
-          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
@@ -131,6 +150,14 @@ jobs:
           -DUSE_CLANG_OMP=OFF \
           -- \
           -LE "network|gpu"
+
+    - name: ccache stats
+      if: always()
+      run: |
+        echo "=== ccache stats ==="
+        ccache -s -v || true
+        echo "=== ccache dir size ==="
+        du -sh "${CCACHE_DIR}" || true
 
     - name: Check for Leftover Buffered Files
       timeout-minutes: 5

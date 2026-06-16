@@ -75,6 +75,12 @@ public:
   /// @brief Query value of requested @p attribute and record it in @p value.
   bool GetInfo(const hsa_wavefront_info_t &attribute, void *value) const;
 
+  /// @returns True if this wavefront is wave64, false if wave32.
+  bool IsWavefrontSize64() const {
+    assert((num_threads_ == 32 || num_threads_ == 64) && "Invalid wavefront size");
+    return num_threads_ == 64;
+  }
+
 private:
   uint32_t num_threads_;
   /// @brief Default constructor.

@@ -268,7 +268,7 @@ class RocprofsysConfig:
             "ROCPROFSYS_TIME_OUTPUT": "OFF",
             "ROCPROFSYS_FILE_OUTPUT": "ON",
             "ROCPROFSYS_USE_PID": "OFF",
-            "ROCPROFSYS_LOG_LEVEL": "trace",
+            "ROCPROFSYS_LOG_LEVEL": "info",
             "ROCPROFSYS_SAMPLING_FREQ": "300",
             "ROCPROFSYS_SAMPLING_DELAY": "0.05",
             "ROCPROFSYS_SAMPLING_GPUS": "all",
@@ -288,6 +288,7 @@ class RocprofsysConfig:
             "ROCPROFSYS_USE_SAMPLING": "ON",
             "ROCPROFSYS_TIME_OUTPUT": "OFF",
             "ROCPROFSYS_USE_PID": "OFF",
+            "ROCPROFSYS_LOG_LEVEL": "info",
             "LD_LIBRARY_PATH": self.get_library_path(),
             "ROCPROFSYS_CONFIG_FILE": "",
         }

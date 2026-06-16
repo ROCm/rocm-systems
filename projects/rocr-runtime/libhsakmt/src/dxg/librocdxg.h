@@ -217,6 +217,12 @@ extern hsakmtRuntime *dxg_runtime;
 	hsakmt_print(HSAKMT_DEBUG_LEVEL_INFO, fmt, ##__VA_ARGS__)
 #define pr_debug(fmt, ...) \
 	hsakmt_print(HSAKMT_DEBUG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define pr_rocr_info(fmt, ...) \
+	do { \
+		if (HSAKMT_DEBUG_LEVEL_INFO <= dxg_runtime->hsakmt_debug_level) { \
+			hsakmt_print_common(stdout, fmt, ##__VA_ARGS__); \
+		} \
+	} while (false)
 #define pr_err_once(fmt, ...)                   \
 {                                               \
         static bool __print_once;               \

@@ -46,8 +46,6 @@ def test_data_structure(input_data):
 
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
-    num_agents = len([agent for agent in sdk_data["agents"] if agent["type"] == 2])
-
     node_exists("metadata", sdk_data)
     node_exists("pid", sdk_data["metadata"])
     node_exists("main_tid", sdk_data["metadata"])
@@ -65,9 +63,10 @@ def test_data_structure(input_data):
     node_exists("host_functions", sdk_data["callback_records"])
     node_exists("hsa_api_traces", sdk_data["callback_records"])
     node_exists("hip_api_traces", sdk_data["callback_records"], 0)
-    node_exists(
-        "scratch_memory_traces", sdk_data["callback_records"], min_len=(2 * num_agents)
-    )
+    # Each scratch allocation produces a phase-enter and phase-exit callback record.
+    # The workload only exercises the GPUs visible to it (which may be a subset of
+    # all detected agents), so require at least one complete allocation (2 records).
+    node_exists("scratch_memory_traces", sdk_data["callback_records"], min_len=2)
 
     node_exists("names", sdk_data["buffer_records"])
     node_exists("kernel_dispatch", sdk_data["buffer_records"])
@@ -75,9 +74,7 @@ def test_data_structure(input_data):
     node_exists("hsa_api_traces", sdk_data["buffer_records"])
     node_exists("hip_api_traces", sdk_data["buffer_records"], 0)
     node_exists("retired_correlation_ids", sdk_data["buffer_records"])
-    node_exists(
-        "scratch_memory_traces", sdk_data["buffer_records"], min_len=(1 * num_agents)
-    )
+    node_exists("scratch_memory_traces", sdk_data["buffer_records"], min_len=1)
 
 
 def test_timestamps(input_data):
@@ -240,7 +237,10 @@ def test_scratch_memory_tracking(input_data):
         scratch_reported_agent_ids.add(node["agent_id"]["handle"])
 
     assert 2**64 - 1 not in scratch_reported_agent_ids
-    assert scratch_reported_agent_ids == detected_agents_ids
+    assert scratch_reported_agent_ids, "no scratch memory was reported on any agent"
+    assert scratch_reported_agent_ids.issubset(
+        detected_agents_ids
+    ), f"scratch reported on unknown agents: {scratch_reported_agent_ids - detected_agents_ids}"
 
     # { thread-id -> [ events ],  ... }
     cb_threads = defaultdict(list)

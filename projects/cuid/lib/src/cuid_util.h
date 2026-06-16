@@ -73,18 +73,23 @@ amdcuid_status_t generate_derived_cuid(const amdcuid_primary_id *primary_id,
 amdcuid_status_t generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                        uint8_t revision_id, uint16_t device_id,
                                        uint16_t vendor_id, uint8_t device_type,
-                                       amdcuid_primary_id *primary_id);
+                                       amdcuid_primary_id *primary_id,
+                                       bool temp = false);
 void remove_UUIDv8_bits(amdcuid_id_t *id, uint8_t out_raw_bits[16]);
+void add_UUIDv8_bits(const uint8_t raw_bits[16], amdcuid_id_t *id);
 std::string get_cuid_as_string(const amdcuid_id_t *id);
 amdcuid_status_t uuid_string_to_uint8(const std::string &uuid_str,
                                       uint8_t *uuid);
 std::string device_type_to_string(amdcuid_device_type_t type);
 
+bool is_valid_bdf(const std::string &bdf);
+amdcuid_status_t make_fallback_fingerprint(const std::string &id,
+                                           uint64_t &fingerprint);
+
 // GPU VF (SR-IOV Virtual Function) utilities
 int extract_render_minor(const std::string &path);
 uint16_t get_gpu_vf_id(const std::string &device_path);
 
-// Use inline functions to avoid static initialization order fiasco
 inline const std::string &cuid_file() {
   static const std::string path = "/tmp/cuid";
   return path;

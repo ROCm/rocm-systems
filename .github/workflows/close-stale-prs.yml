@@ -1,0 +1,63 @@
+name: Close Stale PRs
+
+on:
+  schedule:
+    # Run daily at 00:00 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allow manual triggering
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/stale@v10
+        with:
+          # Only process PRs, not issues
+          only-pr-labels: ''
+
+          # Days before marking as stale
+          days-before-stale: 25
+
+          # Days before closing after being marked stale
+          days-before-close: 5
+
+          # Label to apply when PR becomes stale
+          stale-pr-label: 'stale'
+
+          # Message to post when PR becomes stale
+          stale-pr-message: |
+            This pull request has been inactive for 25 days and will be marked as stale.
+
+            If you would like to keep this PR open, please:
+            - Add new commits
+            - Add a comment explaining why it should remain open
+
+            This PR will be automatically closed in 5 days if no further activity occurs.
+
+          # Message to post when closing the PR
+          close-pr-message: |
+            This pull request has been automatically closed due to inactivity (30 days with no updates).
+
+            If you'd like to continue working on this, feel free to reopen the PR or create a new one.
+
+          # Don't process issues, only PRs
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+
+          # Exempt PRs with these labels from being marked stale
+          exempt-pr-labels: 'keep-open,in-progress,blocked'
+
+          # Remove stale label when PR has activity
+          remove-stale-when-updated: true
+
+          # Ascending order processes oldest PRs first
+          ascending: true
+
+          # Maximum number of operations per run (to avoid API rate limits)
+          operations-per-run: 1000

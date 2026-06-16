@@ -111,6 +111,13 @@ __host__ int GDAHostContext::reduce(rocshmem_team_t team, T *dest,
   return host_interface->reduce<T, Op>(team, dest, source, nreduce);
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__host__ int GDAHostContext::reduce_on_stream(rocshmem_team_t team, T* dest,
+                                              const T *source, int nreduce,
+                                              hipStream_t stream) {
+  return host_interface->reduce_on_stream<T, Op>(team, dest, source, nreduce, stream);
+}
+
 template <typename T>
 __host__ void GDAHostContext::wait_until(T *ivars, int cmp, T val) {
   host_interface->wait_until<T>(ivars, cmp, val, context_window_info);

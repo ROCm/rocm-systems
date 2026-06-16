@@ -54,11 +54,16 @@ unsigned int SDMAQueue::Rptr() {
 }
 
 unsigned int SDMAQueue::RptrWhenConsumed() {
-    /* Rptr is same size and byte units as Wptr. Here we only care
-     * about the low 32-bits. When all packets are consumed, read and
-     * write pointers should have the same value.
+    /* SDMA queue pointer are byte pointers. BaseQueue tracks pending
+     * pointers in dwords, so convert the submitted pending pointer to the
+     * byte value expected in the HW read pointer.
+     *
+     * On AI+ the HW pointer is 64-bit. BaseQueue::Wait4PacketConsumption
+     * waits on the low 32 bits through Queue_read_ptr, matching the existing
+     * read-pointer handling for the small kfdtest rings.
      */
-    return *m_Resources.Queue_write_ptr;
+    return static_cast<unsigned int>(
+        (m_FamilyId < FAMILY_AI ? m_pendingWptr : m_pendingWptr64) * sizeof (unsigned int));
 }
 
 void SDMAQueue::SubmitPacket() {
@@ -82,9 +87,9 @@ void SDMAQueue::SubmitPacket() {
 
 void SDMAQueue::Wait4PacketConsumption(HsaEvent *event, unsigned int timeOut) {
     if (event) {
-        PlacePacket(SDMAFencePacket(m_FamilyId, (void*)event->EventData.HWData2, event->EventId));
+        ASSERT_NO_FATAL_FAILURE(PlacePacket(SDMAFencePacket(m_FamilyId, (void*)event->EventData.HWData2, event->EventId)));
 
-        PlaceAndSubmitPacket(SDMATrapPacket(event->EventId));
+        ASSERT_NO_FATAL_FAILURE(PlaceAndSubmitPacket(SDMATrapPacket(event->EventId)));
 
         EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent, m_KFDContext, event, timeOut));
     } else {

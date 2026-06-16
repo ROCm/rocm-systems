@@ -2,36 +2,49 @@
   :description: Install rocminfo
   :keywords: install, rocminfo, AMD, ROCm
 
+**************************
+Build rocminfo from source
+**************************
 
-Building rocminfo
-*****************
+To build rocminfo as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build rocminfo standalone using the following
+instructions.
+
+Build rocminfo using CMake
+==========================
 
 Use the standard CMake build procedure to build rocminfo. The ROCm root directory (the parent directory containing ROCM headers and libraries) must be provided as a CMake argument using the standard ``CMAKE_PREFIX_PATH`` variable.
 
-After cloning the `rocminfo Git repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocminfo>`_, run ``git-fetch --tags`` to retrieve the repository tags, which are used for versioning.
+After cloning the `rocminfo Git repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocminfo>`_, run ``git fetch --tags`` to retrieve the repository tags, which are used for versioning.
 
 For example:
 
-.. code-block::
+.. code-block:: bash
 
-    $ git fetch --tags origin
+   $ git fetch --tags origin
 
-    Building from the CMakeLists.txt directory might look like this:
+Building from the CMakeLists.txt directory might look like this:
 
-    mkdir -p build
+.. code-block:: bash
 
-    cd build
+   mkdir -p build
 
-    cmake -DCMAKE_PREFIX_PATH=/opt/rocm ..
+   cd build
 
-    make
+   cmake -DCMAKE_PREFIX_PATH=/opt/rocm ..
 
-    cd ..
+   make
+
+   cd ..
 
 Upon a successful build, the rocminfo binary and the Python script ``rocm_agent_enumerator`` will present in the ``build`` directory.
 
 rocminfo execution
--------------------
+==================
 
 rocminfo reports information about HSA system attributes and agents.
 

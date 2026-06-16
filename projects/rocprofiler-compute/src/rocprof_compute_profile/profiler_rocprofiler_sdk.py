@@ -9,7 +9,7 @@ from typing import Optional, Union
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.logger import console_error, console_log, demarcate
+from utils.logger import console_debug, console_error, console_log, demarcate
 from utils.utils_common import resolve_rocm_library_path
 
 
@@ -51,7 +51,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "LD_PRELOAD": ld_preload_value,
             "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": args.format_rocprof_output,
-            "ROCPROF_OUTPUT_PATH": f"{args.path}/out/pmc_1",
+            "ROCPROF_OUTPUT_PATH": f"{args.output_directory}/out/pmc_1",
         })
 
         if getattr(args, "torch_trace", False):
@@ -76,12 +76,30 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             })
             options.pop("LD_PRELOAD", None)
 
+            # Try new live attach library first, fall back to old library
             rocprofiler_attach_library_path = resolve_rocm_library_path(
                 str(
                     Path(args.rocprofiler_sdk_tool_path).parent.parent
                     / "librocprofiler-sdk-rocattach.so"
                 )
             )
+            if not Path(rocprofiler_attach_library_path).exists():
+                console_debug(
+                    f"Latest live attach library not found at "
+                    f"{rocprofiler_attach_library_path}, "
+                    "searching for legacy live attach library"
+                )
+                rocprofiler_attach_library_path = resolve_rocm_library_path(
+                    str(
+                        Path(args.rocprofiler_sdk_tool_path).parent
+                        / "librocprofv3-attach.so"
+                    )
+                )
+            if not Path(rocprofiler_attach_library_path).exists():
+                console_error(
+                    "No live attach library found at "
+                    f"{rocprofiler_attach_library_path}."
+                )
             options.update({
                 "ROCPROF_ATTACH_LIBRARY": rocprofiler_attach_library_path,
                 "ROCPROF_ATTACH_PID": args.attach_pid,

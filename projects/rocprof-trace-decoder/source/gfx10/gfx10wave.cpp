@@ -223,8 +223,18 @@ mapped_inst_t map_to_common_type(int einst, int dprate, int derate)
     return mapped_inst_t{WaveInstCategory::NONE, 0};
 }
 
-wave_t::wave_t(int target_wgp, int tg_simd, int slot, pcinfo_t addr, Token& token, bool exbarw) :
-WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw)
+wave_t::wave_t(
+    int target_wgp,
+    int tg_simd,
+    int slot,
+    pcinfo_t addr,
+    Token& token,
+    bool exbarw,
+    uint8_t me,
+    uint8_t pipe,
+    uint8_t wg
+) :
+WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw, me, pipe, wg)
 {
     this->last_state_cycle = token.time;
     this->cur_state = WaveslotState::WS_IDLE;
@@ -263,7 +273,7 @@ void wave_t::update_state(WaveslotState new_state, int64_t time)
     this->cur_state = new_state;
 }
 
-void wave_t::new_pc(int64_t time, int64_t pc, CodeobjTableTranslator& table)
+void wave_t::new_pc(int64_t time, int64_t pc, const CachedTable& table)
 {
     update_barrier_gfx11(time);
     if (pc_infos.empty() || trap_status != WaveTrapStatus::TRAP_RESTORED) return;
@@ -278,7 +288,7 @@ void wave_t::new_pc(int64_t time, int64_t pc, CodeobjTableTranslator& table)
 
     auto& back = pc_infos.at(info_idx).second;
 
-    back = table.ToPcV2(pc << 2);
+    back = ToPcV2(table, pc << 2);
     if (back.code_object_id == 0) unattrib_pcs.push_back(pc_infos.size() - 1);
 }
 

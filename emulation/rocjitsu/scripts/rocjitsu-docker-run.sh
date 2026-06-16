@@ -67,7 +67,6 @@ shift
 ENV_ARGS=(
     -e "LD_PRELOAD=${INSTALL_DIR}/lib/librocjitsu_kmd.so"
     -e "RJ_CONFIG=${INSTALL_DIR}/share/rocjitsu/configs/amdgpu_cdna4_kmd.json"
-    -e "RJ_SCHEMA=${INSTALL_DIR}/share/rocjitsu/schemas/simulation_config.fbs"
     -e "HSA_ENABLE_SDMA=1"
     -e "ROCPROFILER_REGISTER_ENABLED=0"
 )

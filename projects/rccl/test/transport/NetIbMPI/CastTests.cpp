@@ -61,29 +61,11 @@ TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
         ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
-
-        ASSERT_TRUE(state.schedInit);
-        EXPECT_EQ(state.nqps, actualNqps);
-        EXPECT_EQ(state.initTotTokens, 100);
-        // Each QP must have 100/nqps tokens (±1 for remainder distribution).
-        const int base = 100 / actualNqps;
-        for (int i = 0; i < state.nqps; i++)
-            EXPECT_GE(state.initQpTokens[i], base)
-                << "QP " << i << " initToken below equal-weight floor";
-        int sum = 0;
-        for (int i = 0; i < state.nqps; i++) sum += state.initQpTokens[i];
-        EXPECT_EQ(sum, state.initTotTokens);
+        ExpectEqualWeightInitTokens(state, actualNqps);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -104,6 +86,7 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
@@ -170,15 +153,34 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
         EXPECT_EQ(state.activeTotTokens, 0) << "unequal weights: after one full round active tokens must be 0";
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    // Forward rank-1 gtest failures to rank 0 so the test's exit code reflects them.
+    // (rank 1 has its default gtest listeners detached by main_mpi.cpp.)
+    {
+        int total_failed = 0; std::string msg;
+        if (rank == 1) {
+            auto* r = ::testing::UnitTest::GetInstance()->current_test_info()->result();
+            for (int i = 0; i < r->total_part_count(); i++) {
+                const auto& p = r->GetTestPartResult(i);
+                if (p.failed()) { total_failed++; msg += std::string("  - ") + (p.summary() ? p.summary() : "") + "\n"; }
+            }
+            int len = (int)msg.size();
+            MPI_Send(&total_failed, 1, MPI_INT, 0, 9620, MPI_COMM_WORLD);
+            MPI_Send(&len,          1, MPI_INT, 0, 9621, MPI_COMM_WORLD);
+            if (len > 0) MPI_Send(msg.data(), len, MPI_CHAR, 0, 9622, MPI_COMM_WORLD);
+        } else if (rank == 0) {
+            int len = 0;
+            MPI_Recv(&total_failed, 1, MPI_INT, 1, 9620, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&len,          1, MPI_INT, 1, 9621, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if (len > 0) {
+                msg.assign(len, '\0');
+                MPI_Recv(msg.data(), len, MPI_CHAR, 1, 9622, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                ADD_FAILURE() << "rank 1 reported " << total_failed << " failure(s):\n" << msg;
+            }
+        }
     }
+
     MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -228,28 +230,12 @@ TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
         ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
-
-        ASSERT_TRUE(state.schedInit);
-        EXPECT_EQ(state.initTotTokens, 100);
-        // Equal tokens: each QP gets 100/nqps (±1 for remainder).
-        const int base = 100 / actualNqps;
-        for (int i = 0; i < state.nqps; i++)
-            EXPECT_GE(state.initQpTokens[i], base)
-                << "QP " << i << " initToken below equal-weight floor";
-        int activeSum = 0;
-        for (int i = 0; i < state.nqps; i++) activeSum += state.activeQpTokens[i];
-        EXPECT_EQ(activeSum, state.activeTotTokens);
+        ExpectEqualWeightInitTokens(state, actualNqps);
+        ExpectActiveTokenSumInvariant(state);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -298,14 +284,7 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -355,14 +334,7 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -422,14 +394,7 @@ TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -498,14 +463,7 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -605,14 +563,7 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -712,14 +663,7 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -738,6 +682,7 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
@@ -822,15 +767,33 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
         EXPECT_EQ(consumed, kPhase) << "phase 3: expected " << kPhase << " WRR selections";
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    // Forward rank-1 gtest failures to rank 0 (default listeners detached on non-zero ranks).
+    {
+        int total_failed = 0; std::string msg;
+        if (rank == 1) {
+            auto* r = ::testing::UnitTest::GetInstance()->current_test_info()->result();
+            for (int i = 0; i < r->total_part_count(); i++) {
+                const auto& p = r->GetTestPartResult(i);
+                if (p.failed()) { total_failed++; msg += std::string("  - ") + (p.summary() ? p.summary() : "") + "\n"; }
+            }
+            int len = (int)msg.size();
+            MPI_Send(&total_failed, 1, MPI_INT, 0, 9630, MPI_COMM_WORLD);
+            MPI_Send(&len,          1, MPI_INT, 0, 9631, MPI_COMM_WORLD);
+            if (len > 0) MPI_Send(msg.data(), len, MPI_CHAR, 0, 9632, MPI_COMM_WORLD);
+        } else if (rank == 0) {
+            int len = 0;
+            MPI_Recv(&total_failed, 1, MPI_INT, 1, 9630, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&len,          1, MPI_INT, 1, 9631, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if (len > 0) {
+                msg.assign(len, '\0');
+                MPI_Recv(msg.data(), len, MPI_CHAR, 1, 9632, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                ADD_FAILURE() << "rank 1 reported " << total_failed << " failure(s):\n" << msg;
+            }
+        }
     }
+
     MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -850,6 +813,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
@@ -938,14 +902,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -965,6 +922,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
@@ -1044,14 +1002,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -1163,14 +1114,7 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -1241,14 +1185,7 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -1314,14 +1251,7 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================

@@ -30,6 +30,9 @@ cmake_minimum_required(VERSION 3.16.3 FATAL_ERROR)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 project(rocshmem_functional_tests VERSION 1.0.0 LANGUAGES CXX)
 
+# ASAN option (if not already defined by parent project)
+option(ASAN "Enable AddressSanitizer" ${ASAN})
+
 ###############################################################################
 # SOURCES
 ###############################################################################
@@ -52,7 +55,6 @@ target_sources(
     ping_pong_tester.cpp
     ping_all_tester.cpp
     primitive_tester.cpp
-    primitive_mr_tester.cpp
     default_ctx_primitive_tester.cpp
     team_ctx_primitive_tester.cpp
     team_ctx_infra_tester.cpp
@@ -70,6 +72,10 @@ target_sources(
     flood_amo_tester.cpp
     device_bitcode_tester.cpp
     library_info_tester.cpp
+    fence_ordering_tester.cpp
+    tile_rma_tester.cpp
+    host_team_sync_barrier_tester.cpp
+    host_rma_tester.cpp
 )
 
 ###############################################################################
@@ -102,7 +108,7 @@ target_compile_definitions(
 
 configure_file(../../scripts/functional_tests/driver.sh rocshmem_functional_driver.sh COPYONLY)
 rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_functional_driver.sh COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
-rocm_install(TARGETS rocshmem_functional_tests COMPONENT tests)
+install(TARGETS rocshmem_functional_tests COMPONENT tests RUNTIME DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 
 target_link_libraries(
   ${PROJECT_NAME}
@@ -114,6 +120,93 @@ target_link_libraries(
 )
 
 ###############################################################################
+# ASAN SETTINGS
+###############################################################################
+target_compile_options(
+  ${PROJECT_NAME}
+  PRIVATE
+    $<$<BOOL:${ASAN}>:-fsanitize=address -g>
+)
+
+target_link_options(
+  ${PROJECT_NAME}
+  PRIVATE
+    $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
+)
+
+###############################################################################
 # DEVICE BITCODE TESTER (put/get via HSACO + rocshmem_hipmodule_init)
 ###############################################################################
 include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeDeviceBitcodeTester.cmake)
+
+###############################################################################
+# CTEST INTEGRATION (replaces driver.sh with native CTest tests)
+###############################################################################
+# Enable testing
+enable_testing()
+
+# Install the wrapper script and retry helper
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_wrapper.sh
+               ${CMAKE_CURRENT_BINARY_DIR}/test_wrapper.sh COPYONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ctest_with_retry.sh
+               ${CMAKE_CURRENT_BINARY_DIR}/ctest_with_retry.sh COPYONLY)
+rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/test_wrapper.sh
+             ${CMAKE_CURRENT_BINARY_DIR}/ctest_with_retry.sh
+             COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
+
+# Include CTest-based functional tests
+# Set BUILD_CTESTS=ON to register all tests (can be slow for large test suites)
+# By default, only the shell script is installed for compatibility
+if(BUILD_CTESTS)
+    message(STATUS "Registering CTest-based functional tests")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/CTestFunctionalTests.cmake OPTIONAL)
+
+    # Check if CTest generation functions are available
+    if(COMMAND init_install_ctest_generation AND COMMAND register_all_functional_tests)
+        # Initialize install-time test generation
+        set(INSTALL_CTEST_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/CTestFunctionalInstall.cmake")
+        init_install_ctest_generation("${INSTALL_CTEST_OUTPUT}")
+
+        # Configure template header
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/CTestFunctionalInstall.cmake.in
+            ${INSTALL_CTEST_OUTPUT}
+            @ONLY)
+
+        # Register all tests (this will populate both build-time and install-time)
+        register_all_functional_tests()
+
+        # Apply YAML-based tier labels (build-time only)
+        set(_test_categories_yaml "${CMAKE_SOURCE_DIR}/tests/test_categories.yaml")
+        include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
+        if(COMMAND apply_ctest_category_labels AND EXISTS "${_test_categories_yaml}")
+            # Apply tier labels to build-time tests
+            apply_ctest_category_labels("${_test_categories_yaml}")
+        endif()
+
+        # Apply tier labels to install-time CTest file
+        include(${CMAKE_SOURCE_DIR}/tests/ApplyInstallTierLabels.cmake OPTIONAL)
+        if(COMMAND apply_install_tier_labels AND EXISTS "${_test_categories_yaml}")
+            apply_install_tier_labels("${INSTALL_CTEST_OUTPUT}" "${_test_categories_yaml}")
+        endif()
+
+        # Install the generated install-time CTest file
+        rocm_install(FILES "${INSTALL_CTEST_OUTPUT}"
+                     COMPONENT tests
+                     DESTINATION ${CMAKE_INSTALL_BINDIR}/rocshmem/tests/functional
+                     RENAME CTestTestfile.cmake)
+
+        # Print summary
+        get_directory_property(all_tests TESTS)
+        list(LENGTH all_tests num_tests)
+        message(STATUS "Registered ${num_tests} functional tests")
+        message(STATUS "Run with: ctest -L functional")
+        message(STATUS "Install-time CTest file: ${INSTALL_CTEST_OUTPUT}")
+    else()
+        message(WARNING "CTest generation files not found in sparse checkout - skipping CTest registration")
+        set(BUILD_CTESTS OFF CACHE BOOL "CTests disabled due to missing files" FORCE)
+    endif()
+endif()
+
+# For backward compatibility and development, also install the shell script
+# Usage: rocshmem_functional_driver.sh <executable> <test_suite> <log_dir> [hostfile]

@@ -5,8 +5,11 @@ repos:
     rev: v6.0.0
     hooks:
       - id: check-yaml
+        files: ^projects/rocprofiler-compute/
       - id: end-of-file-fixer
+        files: ^projects/rocprofiler-compute/
       - id: trailing-whitespace
+        files: ^projects/rocprofiler-compute/
 
   # Python import sorting and formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -16,16 +19,54 @@ repos:
     hooks:
       - id: ruff-check
         args: [--fix]
+        files: ^projects/rocprofiler-compute/
       - id: ruff-format
+        files: ^projects/rocprofiler-compute/
+
+  # CMake formatting
+  - repo: https://github.com/BlankSpruce/gersemi
+    rev: 0.22.1
+    hooks:
+      - id: gersemi
+        files: ^projects/rocprofiler-compute/.*(CMakeLists\.txt|\.cmake)$
+
+  # C/C++ formatting (matches rocprofiler-compute-formatting.yml workflow)
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.0
+    hooks:
+      - id: clang-format
+        files: ^projects/rocprofiler-compute/src/.*\.(h|hpp|hh|c|cc|cpp)(\.in)?$
+        exclude: ^projects/rocprofiler-compute/src/(lib/external|vendored)/
+
+  # Reject committed Python bytecode
+  - repo: local
+    hooks:
+      - id: no-python-bytecode
+        name: Reject staged Python bytecode
+        entry: >-
+          bash -c 'printf "Error - Python bytecode staged for commit:\n";
+          printf "  %s\n" "$@"; exit 1' --
+        language: system
+        files: ^projects/rocprofiler-compute/.*(__pycache__/.*|\.pyc)$
 
   # Local hook: copyright header check
   - repo: local
     hooks:
       - id: copyright-header-check
         name: Copyright header check
-        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/copyright_header_check.py'
+        entry: python projects/rocprofiler-compute/tools/copyright_header_check.py
+        language: python
+        files: ^projects/rocprofiler-compute/.*\.(py|hip|cpp)$
+        stages: [pre-commit]
+
+  # Local hook: sets metric ID validation
+  - repo: local
+    hooks:
+      - id: sets-metric-id-check
+        name: Sets metric ID validation
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_sets_metric_ids.py'
         language: system
-        files: \.(py|hip|cpp)$
+        files: (sets/gfx.*_sets\.yaml|analysis_configs/gfx.*/\d{4}_.*\.yaml|mi_gpu_spec\.yaml)$
         pass_filenames: false
         stages: [pre-commit]
 
@@ -34,7 +75,9 @@ repos:
     hooks:
       - id: hash-check
         name: Hash consistency check
-        entry: bash -lc 'cd projects/rocprofiler-compute && python3 src/utils/hash_checker.py'
-        language: system
+        entry: python projects/rocprofiler-compute/src/utils/hash_checker.py
+        language: python
+        additional_dependencies: [pyyaml==6.0.3]
+        files: ^projects/rocprofiler-compute/
         pass_filenames: false
         stages: [pre-commit]

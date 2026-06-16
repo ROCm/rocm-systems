@@ -35,10 +35,9 @@ static inline bool gpuCompositorLikelyActive() {
 
 #define SKIP_IF_GPU_COMPOSITOR_ACTIVE()                                                         \
   if (gpuCompositorLikelyActive()) {                                                            \
-    HipTest::HIP_SKIP_TEST(                                                                     \
+    HIP_SKIP_TEST(                                                                              \
         "likely running under a GPU compositor; long printf kernels may trigger a GPU reset. "  \
         "Run from a VT (chvt 3) or over SSH, or set HIP_PRINTF_STRESS_FORCE_RUN=1 to bypass."); \
-    return;                                                                                     \
   }
 
 #ifdef __linux__

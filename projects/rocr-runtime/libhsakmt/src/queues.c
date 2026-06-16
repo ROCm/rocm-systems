@@ -36,7 +36,7 @@
 #include <errno.h>
 #include <assert.h>
 
-static uint32_t get_hwreg_size_per_cu(uint32_t gfxv);
+static uint32_t get_hwreg_size_per_cu(const HsaNodeProperties *node, uint32_t gfxv);
 
 /* 1024 doorbells, 4 or 8 bytes each doorbell depending on ASIC generation */
 #define DOORBELL_SIZE(gfxv)	(((gfxv) >= 0x90000) ? 8 : 4)
@@ -46,7 +46,7 @@ static uint32_t get_hwreg_size_per_cu(uint32_t gfxv);
 	(hsakmt_get_vgpr_size_per_cu(gfxv) +	\
 	 hsakmt_get_sgpr_size_per_cu(gfxv) +	\
 	 (node.LDSSizeInKB << 10) +		\
-	 get_hwreg_size_per_cu(gfxv))
+	 get_hwreg_size_per_cu(&node, gfxv))
 
 #define CNTL_STACK_BYTES_PER_WAVE(gfxv)	\
 	((gfxv) >= GFX_VERSION_NAVI10 ? 12 : 8)
@@ -89,37 +89,40 @@ struct hsa_kfd_queue_context
 	struct process_doorbells *doorbells;
 };
 
-struct hsa_kfd_queue_context *hsakmt_kfdcontext_get_queue_context(HsaKFDContext *ctx)
+int hsakmt_kfdcontext_init_queue_context(HsaKFDContext *ctx)
 {
-	assert(ctx);
-	if (!ctx) {
-		pr_err("Expected a non-null ptr for HsaKFDContext");
-		return NULL;
-	}
+	CHECK_CTX(ctx, -1);
 
 	if (ctx->queue_context)
-		return ctx->queue_context;
+		return 0;
 
 	ctx->queue_context = calloc(1, sizeof(struct hsa_kfd_queue_context));
 	if (!ctx->queue_context) {
 		pr_err("Alloc memory failed for struct hsa_kfd_queue_context size %zu\n",
 				 sizeof(struct hsa_kfd_queue_context));
-		return NULL;
+		return -1;
 	}
-
-	return ctx->queue_context;
+	return 0;
 }
 
-static uint32_t get_hwreg_size_per_cu(uint32_t gfxv)
+static uint32_t get_hwreg_size_per_cu(const HsaNodeProperties *node, uint32_t gfxv)
 {
-	uint32_t hwreg_size = 0;
+	HSAuint32 hwreg_size_bytes;
+	HSAuint32 simd_per_cu = node->NumSIMDPerCU;
+	HSAuint32 num_waves_per_simd = node->MaxWavesPerSIMD;
+	HSAuint32 bytes_per_wave = 128;
 
-	if (gfxv < GFX_VERSION_GFX1250)
-		hwreg_size = 0x1000; /* 128 bytes per wave, 32 waves per CU */
+	if (gfxv < GFX_VERSION_GFX1250) {
+		return 0x1000;
+	}
 
-	assert(hwreg_size);
+	if (gfxv == GFX_VERSION_GFX1250) {
+		bytes_per_wave = 512;  // per HW design; GFX_SHARED__HWREG_SPACE_USED
+	}
 
-	return hwreg_size;
+	hwreg_size_bytes = num_waves_per_simd * simd_per_cu * bytes_per_wave;
+
+	return hwreg_size_bytes;
 }
 
 uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
@@ -138,6 +141,8 @@ uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
 		vgpr_size = 0x40000;
 	else if (gfxv <= GFX_VERSION_GFX1201)
 		vgpr_size = 0x60000;
+	else if (gfxv <= GFX_VERSION_GFX1250)
+		vgpr_size = 0x80000;
 
 	assert(vgpr_size);
 
@@ -150,6 +155,8 @@ uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv)
 
 	if (gfxv < GFX_VERSION_GFX1250)
 		sgpr_size = 0x4000;
+	else if (gfxv == GFX_VERSION_GFX1250)
+		sgpr_size = 0x8000;
 
 	assert(sgpr_size);
 
@@ -163,8 +170,8 @@ static uint32_t get_num_waves(HsaNodeProperties *node, uint32_t gfxv,
 
 	if (gfxv < GFX_VERSION_NAVI10)
 		wave_num = MIN(cu_num * 40, node->NumShaderBanks / node->NumArrays * 512);
-	else if (gfxv < GFX_VERSION_GFX1250)
-		wave_num = cu_num * 32;
+	else
+		wave_num = cu_num * node->NumSIMDPerCU * node->MaxWavesPerSIMD;
 
 	assert(wave_num);
 
@@ -175,7 +182,7 @@ HSAKMT_STATUS hsakmt_init_process_doorbells(HsaKFDContext *ctx, unsigned int Num
 {
 	unsigned int i;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
+	struct hsa_kfd_queue_context *queue_ctx = ctx->queue_context;
 
 	/* queue_ctx->doorbells[] is accessed using Topology NodeId. This means doorbells[0],
 	 * which corresponds to CPU only Node, might not be used
@@ -218,7 +225,7 @@ static void get_doorbell_map_info(HsaKFDContext *ctx,
 void hsakmt_destroy_process_doorbells(HsaKFDContext *ctx)
 {
 	unsigned int i;
-	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
+	struct hsa_kfd_queue_context *queue_ctx = ctx->queue_context;
 	struct process_doorbells *doorbells = queue_ctx->doorbells;
 
 	if (!doorbells)
@@ -246,7 +253,7 @@ void hsakmt_destroy_process_doorbells(HsaKFDContext *ctx)
 void hsakmt_clear_process_doorbells(HsaKFDContext *ctx)
 {
 	unsigned int i;
-	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
+	struct hsa_kfd_queue_context *queue_ctx = ctx->queue_context;
 
 	if (!queue_ctx->doorbells)
 		return;
@@ -269,7 +276,7 @@ static HSAKMT_STATUS map_doorbell_apu(HsaKFDContext *ctx,
 				      HSAuint64 doorbell_mmap_offset)
 {
 	void *ptr;
-	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
+	struct hsa_kfd_queue_context *queue_ctx = ctx->queue_context;
 
 	ptr = mmap(0, queue_ctx->doorbells[NodeId].size, PROT_READ|PROT_WRITE,
 		   MAP_SHARED, ctx->fd, doorbell_mmap_offset);
@@ -287,7 +294,7 @@ static HSAKMT_STATUS map_doorbell_dgpu(HsaKFDContext *ctx,
 				       HSAuint64 doorbell_mmap_offset)
 {
 	void *ptr;
-	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
+	struct hsa_kfd_queue_context *queue_ctx = ctx->queue_context;
 
 	ptr = hsakmt_fmm_allocate_doorbell(ctx,
 				gpu_id, queue_ctx->doorbells[NodeId].size,
@@ -312,7 +319,7 @@ static HSAKMT_STATUS map_doorbell(HsaKFDContext *ctx,
 				  HSAuint64 doorbell_mmap_offset)
 {
 	HSAKMT_STATUS status = HSAKMT_STATUS_SUCCESS;
-	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
+	struct hsa_kfd_queue_context *queue_ctx = ctx->queue_context;
 	struct process_doorbells *doorbells = queue_ctx->doorbells;
 
 	pthread_mutex_lock(&doorbells[NodeId].mutex);
@@ -706,12 +713,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2Ctx(
 
 	CHECK_KFD_OPEN();
 
-	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
+	struct hsa_kfd_queue_context *queue_ctx = ctx->queue_context;
 	if (MetaDataQueueSizeInBytes) {
 		CHECK_KFD_MINOR_VERSION(19);
 		if (!IS_PAGE_ALIGNED(MetaDataQueueSizeInBytes))
 			return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
+
 
 	if (Priority < HSA_QUEUE_PRIORITY_MINIMUM ||
 		Priority > HSA_QUEUE_PRIORITY_MAXIMUM)

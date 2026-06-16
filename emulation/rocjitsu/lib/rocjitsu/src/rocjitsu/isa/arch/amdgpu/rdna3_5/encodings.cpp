@@ -73,6 +73,8 @@ Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (!default_encoding() || hasImpliedLiteral())
     size_ += sizeof(MachineInst);
+  if (hasImpliedLiteral())
+    literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
 }
 
 bool Sopk::default_encoding() { return true; }
@@ -87,6 +89,8 @@ Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (!default_encoding() || hasImpliedLiteral())
     size_ += sizeof(MachineInst);
+  if (hasImpliedLiteral())
+    literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
 }
 
 bool Sop2::default_encoding() { return inst_.ssrc0 != 255 && inst_.ssrc1 != 255; }
@@ -156,6 +160,8 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (!default_encoding() || hasImpliedLiteral())
     size_ += sizeof(MachineInst);
+  if (hasImpliedLiteral())
+    literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
 }
 
 bool Vop2::default_encoding() {
@@ -174,6 +180,9 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
+      has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
+    size_ += sizeof(MachineInst);
 }
 
 bool Vop3::has_lit_0() { return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255; }
@@ -211,6 +220,9 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
+      has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
+    size_ += sizeof(MachineInst);
 }
 
 bool Vop3p::has_lit_0() { return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255; }
@@ -375,6 +387,40 @@ Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+  if (has_lit_0() || has_lit_1() || has_lit_0_has_lit_1() || has_lit_2() || has_lit_0_has_lit_2() ||
+      has_lit_1_has_lit_2() || has_lit_0_has_lit_1_has_lit_2())
+    size_ += sizeof(MachineInst);
+}
+
+bool Vop3SdstEnc::has_lit_0() {
+  return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255;
+}
+
+bool Vop3SdstEnc::has_lit_1() {
+  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
+         inst_.src1 == 255 && inst_.src2 != 255;
+}
+
+bool Vop3SdstEnc::has_lit_0_has_lit_1() {
+  return inst_.src0 == 255 && inst_.src1 == 255 && inst_.src2 != 255;
+}
+
+bool Vop3SdstEnc::has_lit_2() {
+  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
+         inst_.src1 != 255 && inst_.src2 == 255;
+}
+
+bool Vop3SdstEnc::has_lit_0_has_lit_2() {
+  return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 == 255;
+}
+
+bool Vop3SdstEnc::has_lit_1_has_lit_2() {
+  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
+         inst_.src1 == 255 && inst_.src2 == 255;
+}
+
+bool Vop3SdstEnc::has_lit_0_has_lit_1_has_lit_2() {
+  return inst_.src0 == 255 && inst_.src1 == 255 && inst_.src2 == 255;
 }
 
 } // namespace rdna3_5

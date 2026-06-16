@@ -165,9 +165,12 @@ def generate_summary_query(
 
     full_view_name = f"{view_name}{view_suffix}"
 
+    # Use a different name for the CTE to avoid circular reference when view_query references the view
+    source_table_name = f"{view_name}_source" if view_query else view_name
+
     view_select = (
         f"""
-            {view_name} AS (
+            {source_table_name} AS (
                 {view_query}
             ),
     """
@@ -182,7 +185,7 @@ def generate_summary_query(
                 SELECT
                     {group_by_columns.replace(name_column, f"{name_column} AS name")},
                     AVG(duration) AS avg_duration
-                FROM {view_name}
+                FROM {source_table_name}
                 GROUP BY {group_by_columns}
             ),
             aggregated_data AS (
@@ -194,7 +197,7 @@ def generate_summary_query(
                     MIN(T.duration) AS min_duration,
                     MAX(T.duration) AS max_duration,
                     SQRT(SUM(CAST((T.duration - A.avg_duration) AS REAL) * CAST((T.duration - A.avg_duration) AS REAL)) / (COUNT(*) - 1)) AS std_dev_duration
-                FROM {view_name} T
+                FROM {source_table_name} T
                 JOIN avg_data A ON {join_condition}
                 GROUP BY {aggregation_group_by}
             ),
@@ -323,6 +326,7 @@ def create_summary_queries(
     connection: RocpdImportData,
     by_rank=False,
     only_view_categories=None,
+    kernel_name_type=None,
 ):
     """Create summary queries for eligible temporary views in the database.
 
@@ -333,6 +337,11 @@ def create_summary_queries(
     NAME_COLUMN_MAP = {
         "memory_allocations": "type",
         "scratch_memory": "operation",
+    }
+
+    KERNEL_NAME_TYPE_MAP = {
+        "truncated": "truncated_kernel_name",
+        "mangled": "kernel_name",
     }
 
     avoid_view_pattern = ("rocpd", "region", "counter", "pmc")
@@ -356,19 +365,34 @@ def create_summary_queries(
         if not required_columns.issubset(columns):
             continue
 
+        # Determine the name column and view query to use
+        name_column = NAME_COLUMN_MAP.get(view_name, "name")
+        view_query = ""
+
+        if view_name == "kernels" and kernel_name_type is not None:
+            # Use display_name as fallback if kernel_name_type is not in the map
+            display_name_column = KERNEL_NAME_TYPE_MAP.get(
+                kernel_name_type, "display_name"
+            )
+            view_query = f"""
+                SELECT K.*, COALESCE(KS.{display_name_column}, K.name) AS display_name
+                FROM kernels K
+                LEFT JOIN kernel_symbols KS
+                    ON K.kernel_id = KS.id
+                    AND K.guid = KS.guid
+            """
+            name_column = "display_name"
+
         # Create regular summary query
         summary_query_name, summary_query = generate_summary_query(
-            view_name, "", name_column=NAME_COLUMN_MAP.get(view_name, "name")
+            view_name, view_query, name_column=name_column
         )
         queries[summary_query_name] = summary_query
 
         # Create per-rank summary query
         if by_rank:
             per_rank_query_name, summary_by_rank_query = generate_summary_query(
-                view_name,
-                "",
-                name_column=NAME_COLUMN_MAP.get(view_name, "name"),
-                by_rank=True,
+                view_name, view_query, name_column=name_column, by_rank=True
             )
             queries[per_rank_query_name] = summary_by_rank_query
 
@@ -485,6 +509,15 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     output_path = kwargs.get("output_path", "./rocpd-output-data")
     region_categories = kwargs.get("region_categories", None)
     output_format = kwargs.get("format", "console")
+    mangled_kernels = kwargs.get("mangled_kernels", False)
+    truncate_kernels = kwargs.get("truncate_kernels", False)
+
+    if mangled_kernels:
+        kernel_name_type = "mangled"
+    elif truncate_kernels:
+        kernel_name_type = "truncated"
+    else:
+        kernel_name_type = None
 
     if not check_function_availability(connection, "sqrt"):
         connection.create_function(
@@ -510,11 +543,16 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
         and str(region_categories[0]).strip().upper() == "NONE"
     )
     if region_categories is None or is_none_categories:
-        summary_queries.update(create_summary_queries(connection, by_rank))
+        summary_queries.update(
+            create_summary_queries(connection, by_rank, kernel_name_type=kernel_name_type)
+        )
     else:
         summary_queries.update(
             create_summary_queries(
-                connection, by_rank, only_view_categories=region_categories
+                connection,
+                by_rank,
+                only_view_categories=region_categories,
+                kernel_name_type=kernel_name_type,
             )
         )
     summary_queries.update(
@@ -574,9 +612,28 @@ def add_args(parser):
         default=None,
         help="Specify region categories to include in the summary (example: HIP, HSA, RCCL, ROCDECODE, ROCJPEG, MARKER). If not specified, categories will be automatically retrieved from the database.",
     )
+    summary_options.add_argument(
+        "--mangled-kernels",
+        action="store_true",
+        default=False,
+        help="Display mangled kernel names (do not demangle)",
+    )
+    summary_options.add_argument(
+        "--truncate-kernels",
+        action="store_true",
+        default=False,
+        help="Display truncated kernel names (function name only, without template parameters)",
+    )
 
     def process_args(input, args):
-        valid_args = ["format", "domain_summary", "summary_by_rank", "region_categories"]
+        valid_args = [
+            "format",
+            "domain_summary",
+            "summary_by_rank",
+            "region_categories",
+            "mangled_kernels",
+            "truncate_kernels",
+        ]
 
         ret = {}
         for itr in valid_args:

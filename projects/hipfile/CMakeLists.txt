@@ -46,9 +46,10 @@ set(HIPFILE_NVIDIA_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/nvidia_detail")
 set(HIPFILE_SRC_COMMON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/common")
 set(HIPFILE_TEST_COMMON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/common")
 set(HIPFILE_AMD_TEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/amd_detail")
+set(HIPFILE_THIRD_PARTY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third-party")
 
-set(AIS_CXX_STANDARD "17" CACHE STRING "C++ standard to build with")
-set_property(CACHE AIS_CXX_STANDARD PROPERTY STRINGS "17" "20")
+set(AIS_CXX_STANDARD "20" CACHE STRING "C++ standard to build with")
+set_property(CACHE AIS_CXX_STANDARD PROPERTY STRINGS "20" "23" "26")
 
 # Set the list of build types for ccmake/CMake GUI
 #
@@ -121,8 +122,21 @@ endif()
 if(DEFINED ENV{ROCM_PATH})
     set(ROCM_INITIAL_PATH "$ENV{ROCM_PATH}")
 elseif(DEFINED ROCM_VERSION)
-    # Infer default based on ROCM_VERSION
-    set(ROCM_INITIAL_PATH "/opt/rocm-${ROCM_VERSION}")
+    # ROCm 7.11+ installs to /opt/rocm/core-MAJOR.MINOR (new repo.amd.com layout);
+    # earlier releases install to /opt/rocm-MAJOR.MINOR.PATCH.
+    string(REGEX MATCH "^([0-9]+)\\.([0-9]+)" _rocm_mm "${ROCM_VERSION}")
+    if(NOT _rocm_mm)
+        message(FATAL_ERROR
+            "ROCM_VERSION='${ROCM_VERSION}' does not match the expected "
+            "MAJOR.MINOR[.PATCH] form (e.g., 7.13.0).")
+    endif()
+    set(_rocm_major "${CMAKE_MATCH_1}")
+    set(_rocm_minor "${CMAKE_MATCH_2}")
+    if(_rocm_major GREATER 7 OR (_rocm_major EQUAL 7 AND _rocm_minor GREATER_EQUAL 11))
+        set(ROCM_INITIAL_PATH "/opt/rocm/core-${_rocm_major}.${_rocm_minor}")
+    else()
+        set(ROCM_INITIAL_PATH "/opt/rocm-${ROCM_VERSION}")
+    endif()
 else()
     # Default install location symlink
     set(ROCM_INITIAL_PATH "/opt/rocm")
@@ -220,7 +234,6 @@ option(AIS_INSTALL_EXAMPLES "Install example programs" ON)
 #------------------
 option(AIS_INSTALL_TOOLS "Install tool programs" ON)
 
-
 #------
 # docs
 #------
@@ -290,6 +303,9 @@ endif()
 if(AIS_INSTALL_EXAMPLES)
     add_subdirectory(examples/aiscp)
     add_subdirectory(examples/api)
+    add_subdirectory(examples/common)
+    add_subdirectory(examples/basics)
+    add_subdirectory(examples/async)
 endif()
 
 # Add tools directory

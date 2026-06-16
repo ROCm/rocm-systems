@@ -1730,8 +1730,7 @@ HIP_TEST_CASE(Unit_hipGraphClone_multi_GPU_test) {
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
   if (devcount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   for (int dev = 0; dev < devcount; dev++) {

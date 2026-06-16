@@ -52,6 +52,7 @@
 
 #include <rocprofiler-sdk-rocpd/rocpd.h>
 #include <rocprofiler-sdk-rocpd/sql.h>
+#include <rocprofiler-sdk-rocpd/types.h>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -64,7 +65,9 @@
 #include <atomic>
 #include <future>
 #include <mutex>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace py = ::pybind11;
 
@@ -212,7 +215,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .value("rocpd_views", ROCPD_SQL_SCHEMA_ROCPD_VIEWS)
         .value("data_views", ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS)
         .value("summary_views", ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS)
-        .value("marker_views", ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS);
+        .value("rocpd_metadata", ROCPD_SQL_SCHEMA_ROCPD_METADATA);
 
     py::enum_<rocpd_sql_options_t>(pyrocpd, "sql_option", "Load schema options")
         .value("none", ROCPD_SQL_OPTIONS_NONE)
@@ -324,6 +327,37 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readwrite("uuid", &rocpd::jinja_variables::uuid)
         .def_readwrite("guid", &rocpd::jinja_variables::guid);
 
+    py::class_<rocpd_version_triplet_t>(pyrocpd, "schema_version", "Schema version triplet")
+        .def(py::init<>([]() {
+            return rocpd_version_triplet_t{0, 0, 0};
+        }))
+        .def(py::init<>([](uint32_t major, uint32_t minor, uint32_t patch) {
+            return rocpd_version_triplet_t{major, minor, patch};
+        }))
+        .def(py::init<>([](const std::string& verstr) {
+            auto parts = std::vector<std::string>{};
+            parts.reserve(3);
+            for(const auto& part : rocprofiler::sdk::parse::tokenize(verstr, "."))
+                parts.emplace_back(part);
+
+            auto version = rocpd_version_triplet_t{0, 0, 0};
+            if(!parts.empty()) version.major = static_cast<uint32_t>(std::stoul(parts.at(0)));
+            if(parts.size() > 1) version.minor = static_cast<uint32_t>(std::stoul(parts.at(1)));
+            if(parts.size() > 2) version.patch = static_cast<uint32_t>(std::stoul(parts.at(2)));
+
+            return version;
+        }))
+        .def_readwrite("major", &rocpd_version_triplet_t::major)
+        .def_readwrite("minor", &rocpd_version_triplet_t::minor)
+        .def_readwrite("patch", &rocpd_version_triplet_t::patch)
+        .def("__str__",
+             [](const rocpd_version_triplet_t& v) {
+                 return fmt::format("{}.{}.{}", v.major, v.minor, v.patch);
+             })
+        .def("__repr__", [](const rocpd_version_triplet_t& v) {
+            return fmt::format("schema_version({}, {}, {})", v.major, v.minor, v.patch);
+        });
+
     py::class_<rocpd::RocpdImportData>(pyrocpd, "RocpdImportData", "RocPD database(s) instances")
         .def(py::init<>())
         .def(py::init<rocpd::RocpdImportData>())
@@ -335,16 +369,18 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 [](rocpd_sql_engine_t            engine,
                    rocpd_sql_schema_kind_t       kind,
                    rocpd_sql_options_t           options,
+                   rocpd_version_triplet_t       schema_version,
                    const rocpd::jinja_variables& variables) {
                     auto _callback = [](rocpd_sql_engine_t                        _engine,
                                         rocpd_sql_schema_kind_t                   _kind,
                                         rocpd_sql_options_t                       _options,
+                                        rocpd_version_triplet_t                   _schema_version,
                                         const rocpd_sql_schema_jinja_variables_t* _variables,
                                         const char*                               _schema_path,
                                         const char*                               _schema_content,
                                         void* _user_data) -> void {
                         rocprofiler::common::consume_args(
-                            _engine, _kind, _options, _variables, _schema_path);
+                            _engine, _kind, _options, _schema_version, _variables, _schema_path);
                         auto* _data = static_cast<std::string*>(_user_data);
                         if(_data && _schema_content) *_data = std::string{_schema_content};
                     };
@@ -370,6 +406,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                     ROCPD_CHECK(rocpd_sql_load_schema(engine,
                                                       kind,
                                                       options,
+                                                      schema_version,
                                                       &_rocpd_variables,
                                                       _callback,
                                                       _hints.data(),
@@ -377,6 +414,42 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                       &_contents));
                     return _contents;
                 });
+
+    pyrocpd.def(
+        "query_supported_schema_versions",
+        [](rocpd_sql_engine_t engine, const py::sequence& hints_opt) -> py::list {
+            std::vector<std::string> storage;
+            std::vector<const char*> hints;
+            if(!hints_opt.is_none())
+            {
+                const auto n = hints_opt.size();
+                for(size_t i = 0; i < n; ++i)
+                {
+                    storage.push_back(py::cast<std::string>(hints_opt[i]));
+                    hints.push_back(storage.back().c_str());
+                }
+            }
+
+            py::list out{};
+            auto     _callback = [](rocpd_sql_engine_t /*engine*/,
+                                const rocpd_version_triplet_t* versions,
+                                uint64_t                       num_versions,
+                                void*                          user_data) -> rocpd_status_t {
+                auto* _out = static_cast<py::list*>(user_data);
+                for(uint64_t i = 0; i < num_versions; ++i)
+                {
+                    _out->append(py::cast(versions[i]));
+                }
+                return ROCPD_STATUS_SUCCESS;
+            };
+            ROCPD_CHECK(rocpd_query_supported_schema_versions(
+                engine, hints.empty() ? nullptr : hints.data(), hints.size(), _callback, &out));
+            return out;
+        },
+        py::arg("engine")            = ROCPD_SQL_ENGINE_SQLITE3,
+        py::arg("schema_path_hints") = py::list{},
+        "Return supported rocpd SQL schema versions (from versions.yml) as a list of "
+        "schema_version objects. Call str() on each entry to get a \"major.minor.patch\" string.");
 
     // NOLINTBEGIN(performance-unnecessary-value-param)
 

@@ -66,6 +66,7 @@ typedef enum {
   HIP_COPY_KIND_BUFFER_TO_IMAGE_EXT = 10, /**< Device buffer → device image (format conversion) */
   HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT = 11, /**< Device image → device buffer (format conversion) */
   HIP_COPY_KIND_FILL_EXT            = 12, /**< Device buffer fill (pattern written by compute engine) */
+  HIP_COPY_KIND_BATCH_EXT           = 13, /**< Batched buffer copy (may mix D2D, P2P, H2D, D2H) */
 } HipCopyKindExt;
 
 /**
@@ -80,7 +81,8 @@ static inline int hipCopyKindIsSDMAExt(HipCopyKindExt kind) {
          kind == HIP_COPY_KIND_H2D_IMAGE_EXT ||
          kind == HIP_COPY_KIND_D2H_EXT       ||
          kind == HIP_COPY_KIND_D2H_RECT_EXT  ||
-         kind == HIP_COPY_KIND_D2H_IMAGE_EXT;
+         kind == HIP_COPY_KIND_D2H_IMAGE_EXT ||
+         kind == HIP_COPY_KIND_BATCH_EXT;
 }
 
 /**

@@ -5,9 +5,7 @@ This directory contains the authoritative configuration-management system for RO
 It is designed to guarantee:
 
 - **Structural correctness** across GPU architectures
-- **Deterministic deltas** relative to a single latest architecture
-- **Byte-level immutability** enforced via hashes
-- **Safe promotion** of a new latest architecture with rollback
+- **Byte-level immutability** of panel YAMLs enforced via hashes
 - **CI enforcement** of all invariants
 
 All workflows are orchestrated by a single sequential driver script:
@@ -23,15 +21,15 @@ rocprofiler-compute/
 ├── src/rocprof_compute_soc/
 │   └── analysis_configs/
 │       ├── gfx908/
-│       │   ├── 0000_top_stats.yaml
-│       │   └── config_delta/
-│       │       └── <latest_arch>_diff.yaml
+│       │   └── 0000_top_stats.yaml
 │       ├── gfx90a/
 │       ├── gfx940/
-│       ├── gfx950/                      # latest_arch
-│       └── gfx9_config_template.yaml    # single source of truth
+│       ├── gfx950/
+│       ├── gfx115x/                     # RDNA 3.5 shared analysis configs
+│       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
+│       └── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
 │
-├── src/util/
+├── src/utils/
 │   ├── hash_checker.py
 │   ├── .config_hashes.json
 │
@@ -39,21 +37,11 @@ rocprofiler-compute/
     ├── master_config_workflow_script.py
     ├── parse_config_template.py
     ├── verify_against_config_template.py
-    ├── generate_config_deltas.py
-    ├── apply_config_deltas.py
     ├── hash_manager.py
-    ├── TESTING.md
     └── README.md
 ```
 
 ## Core Concepts
-### Latest Architecture
-
-- Exactly one architecture is considered *latest*
-- Defined in:
-```bash
-src/rocprof_compute_soc/analysis_configs/gfx9_config_template.yaml
-```
 
 ### Panel YAMLs
 
@@ -64,33 +52,18 @@ analysis_configs/<arch>/*.yaml
 - Must conform strictly to the template schema
 - Are edited in-place using ruamel.yaml round-trip mode
 
-### Delta YAMLs
-
-- Represent differences from latest → older architecture
-- Live under:
-```bash
-analysis_configs/<older_arch>/config_delta/
-```
-- Exactly one delta file per arch
-- Always named:
-```bash
-<latest_arch>_diff.yaml
-```
-
 ### Hash Database
 
 - Stored at:
 ```bash
 src/utils/.config_hashes.json
 ```
-- Records:
-  - md5 hashes of panel YAMLs per arch
-  - md5 hash of the delta YAML (or null for latest)
+- Records md5 hashes of panel YAMLs per arch
 - Machine-generated only
 - Enforced in CI and pytest
 
 ## Architecture Diagram (End-to-End Flow)
-```pqsql
+```text
                    ┌──────────────────────────┐
                    │  analysis_configs/       │
                    │  gfx9_config_template    │
@@ -102,44 +75,17 @@ src/utils/.config_hashes.json
                  │ (structural validation)       │
                  └───────────┬───────────────────┘
                              │
-         ┌───────────────────┴───────────────────┐
-         │                                       │
-         ▼                                       ▼
-┌────────────────────┐               ┌──────────────────────┐
-│ edit-existing mode │               │ promotion mode       │
-│ (local dev only)   │               │ (authoritative path) │
-└─────────┬──────────┘               └──────────┬───────────┘
-          │                                     │
-          ▼                                     ▼
-┌────────────────────┐               ┌─────────────────────────────┐
-│ generate / apply   │               │ parse_config_template.py    │
-│ deltas manually    │               │ (update latest_arch)        │
-└────────────────────┘               └──────────┬──────────────────┘
-                                                 │
-                                                 ▼
-                               ┌──────────────────────────────────┐
-                               │ generate_config_deltas.py        │
-                               │ latest → all older arches        │
-                               │ (<latest>_diff.yaml only)        │
-                               └──────────┬───────────────────────┘
-                                          │
-                                          ▼
-                               ┌──────────────────────────────────┐
-                               │ verify_against_config_template   │
-                               │ (post-promotion validation)      │
-                               └──────────┬───────────────────────┘
-                                          │
-                                          ▼
-                               ┌──────────────────────────────────┐
-                               │ hash_manager.py --compute-all    │
-                               │ (new steady state)               │
-                               └──────────┬───────────────────────┘
-                                          │
-                                          ▼
-                               ┌──────────────────────────────────┐
-                               │ hash_checker.py                  │
-                               │ (semantic consistency)           │
-                               └──────────────────────────────────┘
+                             ▼
+                 ┌───────────────────────────────┐
+                 │ hash_manager.py --compute-all │
+                 │ (refresh .config_hashes.json) │
+                 └───────────┬───────────────────┘
+                             │
+                             ▼
+                 ┌───────────────────────────────┐
+                 │ hash_checker.py               │
+                 │ (panel-file hash consistency) │
+                 └───────────────────────────────┘
 ```
 
 ## Contributor Quick Start
@@ -161,7 +107,7 @@ python tools/config_management/master_config_workflow_script.py --validate-only
 
 This must pass.
 
-### 2. Editing an existing architecture (most common)
+### 2. Editing an existing architecture
 
 Edit panel YAMLs **directly** under:
 ```bash
@@ -178,43 +124,12 @@ Rules:
 After editing:
 ```bash
 python tools/config_management/master_config_workflow_script.py --validate-only
+python tools/config_management/hash_manager.py --compute-all src/rocprof_compute_soc/analysis_configs
 ```
 
-### 3. Generating or applying deltas (advanced / optional)
+The first command verifies structural conformance. The second refreshes the hash DB so `hash_checker.py` agrees.
 
-For local experimentation only:
-```bash
-python tools/config_management/master_config_workflow_script.py --edit-existing
-```
-
-This mode:
-
-- never updates the template
-- never updates hashes
-- always re-validates after application
-
-### 4. Promoting a new latest architecture (rare, gated)
-
-Promotion changes **global invariants** and must use the master script:
-```bash
-python tools/config_management/master_config_workflow_script.py --promote <latest_arch>
-```
-
-The script will:
-
-1. Update `latest_arch` in the template
-2. Regenerate deltas for all older arches
-3. Remove stale delta files
-4. Re-validate everything
-5. Rebuild the hash database
-6. Verify semantic consistency
-
-If anything fails:
-
-- all changes are rolled back
-- no partial state remains
-
-### 5. Hash checks (fast local / CI)
+### 3. Hash checks (fast local / CI)
 ```bash
 python tools/config_management/master_config_workflow_script.py --hash-only
 ```
@@ -224,9 +139,10 @@ or:
 python tools/config_management/master_config_workflow_script.py --ci
 ```
 
-This runs semantic hash validation only.
+This runs panel-file hash validation only.
 
 ## Automated Testing
+
 ### Pytest Hash Integrity Test
 
 Located at:
@@ -237,40 +153,18 @@ tests/test_autogen_config.py
 This test:
 
 - parses `.config_hashes.json`
-- verifies **byte-for-byte** integrity of:
-  - panel YAMLs
-  - delta YAMLs
+- verifies **byte-for-byte** integrity of panel YAMLs
 - fails on:
   - missing files
   - changed content
   - stale hash DB
-Semantic correctness is enforced separately by `hash_checker.py`.
 
 ## Contributor Rules (Strict)
 
 - Do **not** edit `.config_hashes.json` manually
-- Do **not** create multiple delta files per arch
-- Do **not** rename delta files arbitrarily
 - Do **not** regenerate full YAMLs unnecessarily
 - Use in-place edits (ruamel round-trip)
-- Use the master script for promotions
 - Expect CI to reject inconsistent states
-
-## Summary
-
-This system guarantees:
-
-- A **single source of truth** for latest architecture
-- Deterministic, reviewable deltas
-- Stable diffs for Git review
-- Hash-backed immutability
-- Safe, transactional promotions
-- CI-enforced correctness
-
-All correctness flows through:
-```bash
-master_config_workflow_script.py
-```
 
 ## Metric Descriptions
 
@@ -283,10 +177,10 @@ Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx
 **Files:**
 ```bash
 tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,942,950}_metrics_description.yaml   # plain + rst + unit
+  ├── gfx{908,90a,942,950,1151}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
-  └── gfx{908,90a,942,950}_metrics.yaml               # rst + unit (generated)
+  └── <arch>_metrics.yaml                                  # per-arch rst + unit (generated)
 ```
 
 **After editing panel `metrics_description` sections:**
@@ -295,4 +189,10 @@ python tools/config_management/metric_description_manager.py --sync-all src/rocp
 python tools/config_management/metric_description_manager.py --generate-docs
 ```
 
-**RST enhancement:** Edit per-arch YAMLs directly. Framework preserves manual edits (detects when `rst != plain`).
+To regenerate the docs YAML for a single architecture without rewriting the others:
+
+```bash
+python tools/config_management/metric_description_manager.py --generate-docs --docs-arch <arch>
+```
+
+**Manual RST edits:** Edit per-arch YAMLs directly. The framework preserves an edit when its `rst` differs from `plain`.

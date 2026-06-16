@@ -276,7 +276,9 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, ui
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey, laddr, lkey, static_cast<uint32_t>(length), send_inline};
+                   raddr, rkey, laddr,
+                   send_inline ? 0 : get_lkey(laddr),
+                   static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
@@ -308,7 +310,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey, laddr, lkey, static_cast<uint32_t>(length), send_inline};
+                   raddr, rkey, laddr, get_lkey(laddr), static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;

@@ -243,6 +243,11 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
   add_dependencies(${_dev_target} hipify_all)
+  if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
+    # rocSHMEM headers land in ext/rocshmem/include only after ExternalProject
+    # completes; ensure they are installed before device kernels start compiling.
+    add_dependencies(${_dev_target} rocshmem_static)
+  endif()
 
   # =========================================================================
   # Link step: driver --link mode produces device.elf
@@ -287,6 +292,23 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   file(GENERATE OUTPUT "${_link_rsp}"
     CONTENT "$<JOIN:$<TARGET_OBJECTS:${_dev_target}>,\n>\n")
 
+  # When rocSHMEM is enabled, pass the per-arch device bitcode to the driver.
+  # rocSHMEM device API symbols have hidden visibility and must be statically
+  # present in the device ELF — they cannot be imported from a shared library.
+  set(_rocshmem_bitcode_arg "")
+  set(_rocshmem_link_depends "")
+  if(ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR)
+    set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
+    set(_rocshmem_bitcode_arg "--rocshmem-bitcode=${_rocshmem_bc}")
+    # Do NOT add _rocshmem_bc to DEPENDS: rocSHMEM only supports a subset of
+    # GPU_TARGETS (e.g. gfx90a, gfx942, gfx950) and the bitcode files don't
+    # exist at cmake configure time (ExternalProject).  The Python driver checks
+    # existence at build time and skips silently for unsupported arches.
+    if(TARGET rocshmem_static)
+      list(APPEND _rocshmem_link_depends rocshmem_static)
+    endif()
+  endif()
+
   add_custom_command(
     OUTPUT  ${ARCH_DEVICE_ELF}
     COMMAND ${CMAKE_RCCLDEV_COMPILER}
@@ -295,13 +317,14 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       --clang=${DL_CLANG}
       ${DL_HIP_COMPILER_FLAGS}
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
+      ${_rocshmem_bitcode_arg}
       ${_link_def_flags}
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
-    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp
+    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}
     COMMENT "DL [${DL_GPU_TARGET}] link: device.elf"
     VERBATIM
     COMMAND_EXPAND_LISTS
@@ -454,10 +477,70 @@ add_custom_command(
 # collectives.cc: contains a __global__ kernel launch (hierarchicalAGShuffle)
 # so it needs full HIP compilation, not --offload-host-only.
 # ===========================================================================
+# Dependency tracking note (CMake >= 3.20 vs < 3.20):
+# add_custom_command only rebuilds when files listed in DEPENDS change.  It
+# does NOT automatically track transitive headers (e.g. ce_coll.h), so a
+# struct layout change in a header would not invalidate collectives.o.
+# CMake 3.20 DEPFILE support fixes this by reading the compiler-generated .d
+# file; on older CMake the workaround is: touch hipify/src/collectives.cc.
+# ===========================================================================
 set(COLLECTIVES_FAT_OBJ "${DEVICE_BUILD_DIR}/collectives.o")
 
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
+  set(COLLECTIVES_DEPFILE "${DEVICE_BUILD_DIR}/collectives.d")
+  add_custom_command(
+    OUTPUT  ${COLLECTIVES_FAT_OBJ}
+    COMMAND ${DL_CLANG}
+      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+      ${DL_HIP_COMPILER_FLAGS}
+      -DRCCL_DEVICE_LINKER
+      ${_link_def_flags}
+      ${_host_inc_flags}
+      ${DL_OPT_FLAGS}
+      -std=c++17
+      -fPIC
+      -w
+      -MD -MF ${COLLECTIVES_DEPFILE}
+      -c -o ${COLLECTIVES_FAT_OBJ}
+      ${HIPIFY_DIR}/src/collectives.cc
+    DEPENDS ${HIPIFY_DIR}/src/collectives.cc
+    DEPFILE ${COLLECTIVES_DEPFILE}
+    COMMENT "DL compile: collectives.cc (has __global__ kernel, header-tracking via DEPFILE)"
+    VERBATIM
+  )
+else()
+  add_custom_command(
+    OUTPUT  ${COLLECTIVES_FAT_OBJ}
+    COMMAND ${DL_CLANG}
+      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+      ${DL_HIP_COMPILER_FLAGS}
+      -DRCCL_DEVICE_LINKER
+      ${_link_def_flags}
+      ${_host_inc_flags}
+      ${DL_OPT_FLAGS}
+      -std=c++17
+      -fPIC
+      -w
+      -c -o ${COLLECTIVES_FAT_OBJ}
+      ${HIPIFY_DIR}/src/collectives.cc
+    DEPENDS ${HIPIFY_DIR}/src/collectives.cc
+    COMMENT "DL compile: collectives.cc (has __global__ kernel)"
+    VERBATIM
+  )
+endif()
+
+# ===========================================================================
+# dda_all_reduce_ipc.cu.cpp: contains device kernels and kernel launches.
+# Like collectives.cc, it cannot be built with --offload-host-only on the
+# main rccl target or __hip_fatbin_* stays undefined in librccl.so.
+# ===========================================================================
+set(DDA_ALL_REDUCE_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_ipc.o")
+set(DDA_REDUCE_SCATTER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_ipc.o")
+set(DDA_ALL_GATHER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_ipc.o")
+set(DDA_ALLTOALL_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_alltoall_ipc.o")
+
 add_custom_command(
-  OUTPUT  ${COLLECTIVES_FAT_OBJ}
+  OUTPUT  ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
   COMMAND ${DL_CLANG}
     -x hip ${DL_OFFLOAD_ARCH_FLAGS}
     ${DL_HIP_COMPILER_FLAGS}
@@ -468,10 +551,67 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
-    -c -o ${COLLECTIVES_FAT_OBJ}
-    ${HIPIFY_DIR}/src/collectives.cc
-  DEPENDS ${HIPIFY_DIR}/src/collectives.cc
-  COMMENT "DL compile: collectives.cc (has __global__ kernel)"
+    -c -o ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
+  COMMENT "DL compile: dda_all_reduce_ipc.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_reduce_scatter_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_reduce_scatter_ipc.cu.cpp
+  COMMENT "DL compile: dda_reduce_scatter_ipc.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_ALL_GATHER_IPC_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALL_GATHER_IPC_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_all_gather_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_all_gather_ipc.cu.cpp
+  COMMENT "DL compile: dda_all_gather_ipc.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT  ${DDA_ALLTOALL_IPC_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALLTOALL_IPC_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_alltoall_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_alltoall_ipc.cu.cpp
+  COMMENT "DL compile: dda_alltoall_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
 
@@ -526,7 +666,7 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${SYM_FAT_OBJS}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${SYM_FAT_OBJS}
 )
 add_dependencies(device_linker_build hipify_all)
 
@@ -534,6 +674,10 @@ set(DEVICE_LINKER_OBJECTS
   ${COMMON_FAT_OBJ}
   ${ONERANK_FAT_OBJ}
   ${COLLECTIVES_FAT_OBJ}
+  ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
+  ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
+  ${DDA_ALL_GATHER_IPC_FAT_OBJ}
+  ${DDA_ALLTOALL_IPC_FAT_OBJ}
   ${SYM_FAT_OBJS}
 )
 

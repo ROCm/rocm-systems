@@ -37,8 +37,7 @@ behaviour
   hipDeviceAttribute_t attr = hipDeviceAttributeVirtualMemoryManagementSupported;                \
   HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
   if (value == 0) {                                                                              \
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);                                  \
-    return;                                                                                      \
+    HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);                                         \
   }                                                                                              \
 }
 
@@ -54,6 +53,8 @@ static __global__ void var_update(int* data) {
     data[i] = VAL_DATA;
   }
 }
+
+__managed__ int m_deferred_managed_var = 0;
 
 /* Allocate memory using different Allocation APIs and check whether
    correct memory type and device oridinal are returned */
@@ -99,6 +100,30 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_MemoryTypes) {
     HIP_CHECK(hipFreeArray(arr));
   }
 #endif
+  SECTION("Unregistered Stack Pointer") {
+    int stack_var = 0;
+    HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_MEMORY_TYPE,
+                                     reinterpret_cast<hipDeviceptr_t>(&stack_var)));
+    REQUIRE(datatype == hipMemoryTypeUnregistered);
+  }
+  SECTION("Unregistered Heap Pointer") {
+    int* heap_ptr = static_cast<int*>(malloc(sizeof(int)));
+    REQUIRE(heap_ptr != nullptr);
+    HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_MEMORY_TYPE,
+                                     reinterpret_cast<hipDeviceptr_t>(heap_ptr)));
+    REQUIRE(datatype == hipMemoryTypeUnregistered);
+    free(heap_ptr);
+  }
+}
+
+// A deferred managed variable must be classified as hipMemoryTypeManaged
+// by hipPointerGetAttribute (HIP_POINTER_ATTRIBUTE_MEMORY_TYPE)
+HIP_TEST_CASE(Unit_hipPointerGetAttribute_DeferredManagedVar) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+  unsigned int datatype = 0;
+  HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_MEMORY_TYPE,
+                                   reinterpret_cast<hipDeviceptr_t>(&m_deferred_managed_var)));
+  REQUIRE(datatype == hipMemoryTypeManaged);
 }
 
 /*
@@ -161,12 +186,11 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
                                        reinterpret_cast<hipDeviceptr_t>(A_d)));
       REQUIRE(data == 0);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     HIP_CHECK(hipFree(A_d));
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   HIP_CHECK(hipFree(A_d));
 }

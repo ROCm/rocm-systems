@@ -3,8 +3,9 @@
 
 #include "aql_queue.h"
 
+#include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/mfma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -25,8 +26,6 @@ RJ_DIAGNOSTIC_POP
 #include <vector>
 
 namespace {
-
-const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
 
 // SOPP encoding: bits[31:23] = 0x17F (SOPP prefix), bits[22:16] = op.
 constexpr uint32_t SOPP_S_NOP = 0xBF800000;
@@ -70,7 +69,7 @@ struct VmFixture {
                        R"({"key":"lds_size_kb","value":"64"})"
                        R"(]}]}]}]},"links":[)" +
                        links + R"(]}})";
-    auto loaded = config::load_config_from_string(json, SCHEMA_PATH);
+    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     soc_ptr = loaded.soc();
     gpu_mem = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
@@ -104,6 +103,31 @@ struct VmFixture {
     return addr;
   }
 };
+
+struct AmdExtKernelDispatchPacketForTest {
+  uint16_t header = 0;
+  uint8_t amd_format = 0;
+  uint8_t setup = 0;
+  uint16_t workgroup_size_x = 0;
+  uint16_t workgroup_size_y = 0;
+  uint16_t workgroup_size_z = 0;
+  uint16_t reserved0 = 0;
+  uint32_t cluster_count_x = 0;
+  uint16_t cluster_count_y = 0;
+  uint16_t cluster_count_z = 0;
+  uint8_t cluster_size_x = 0;
+  uint8_t cluster_size_y = 0;
+  uint8_t cluster_size_z = 0;
+  uint8_t perf_hint = 0;
+  uint32_t private_segment_size = 0;
+  uint32_t group_segment_size = 0;
+  uint64_t kernel_object = 0;
+  void *kernarg_address = nullptr;
+  hsa_signal_t dep_signal{};
+  hsa_signal_t completion_signal{};
+};
+
+static_assert(sizeof(AmdExtKernelDispatchPacketForTest) == 64);
 
 void step_until_halted(simdojo::SimulationEngine &engine,
                        std::initializer_list<amdgpu::ComputeUnitCore *> cus,
@@ -210,7 +234,7 @@ TEST(VmLifecycleTest, CreateAndDestroy) {
       ]
     }
   })";
-  auto loaded = config::load_config_from_string(json, SCHEMA_PATH);
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
 
   auto *xcd = soc->xcd(0);
@@ -222,13 +246,13 @@ TEST(VmLifecycleTest, CreateAndDestroy) {
 TEST(VmLifecycleTest, MissingArchFails) {
   const char *json = R"({"vm":{"gpu":{"num_shader_engines":1}}})";
   rj_vm_t *handle = nullptr;
-  EXPECT_NE(rj_vm_create_from_string(json, SCHEMA_PATH.c_str(), &handle), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_NE(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
 }
 
 TEST(VmLifecycleTest, InvalidArchFails) {
   const char *json = R"({"vm":{"arch":"bogus"}})";
   rj_vm_t *handle = nullptr;
-  EXPECT_NE(rj_vm_create_from_string(json, SCHEMA_PATH.c_str(), &handle), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_NE(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
 }
 
 class IsaTest : public ::testing::TestWithParam<std::string> {
@@ -322,6 +346,37 @@ TEST_P(IsaTest, DispatchAndCapacity) {
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
 }
 
+TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {
+  VmFixture f(arch(), 1, 8);
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  AmdExtKernelDispatchPacketForTest ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = 3; // HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH.
+  ext.setup = 1;
+  ext.workgroup_size_x = 64;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 2;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 1;
+  ext.cluster_size_z = 1;
+  ext.kernel_object = ko;
+
+  hsa_kernel_dispatch_packet_t raw{};
+  std::memcpy(&raw, &ext, sizeof(ext));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(raw);
+  f.engine->run();
+
+  EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+  EXPECT_GE(f.cu()->num_wfs(), 1u);
+}
+
 TEST_P(IsaTest, DispatchCreatesWavefronts) {
   VmFixture f(arch(), 2);
 
@@ -380,7 +435,7 @@ TEST_P(IsaTest, RunToCompletion) {
                      R"(]}})";
 
   rj_vm_t *handle = nullptr;
-  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), SCHEMA_PATH.c_str(), &handle),
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &handle),
             ROCJITSU_STATUS_SUCCESS);
 
   uint64_t ticks = 0;
@@ -458,8 +513,9 @@ constexpr uint32_t v_cmp_eq_f32(uint32_t s0, uint32_t vs1) { return vopc(66, s0,
 // DS: 64-bit instruction.
 // dword0: offset0[7:0], offset1[15:8], gds[16], op[24:17], acc[25], encoding[31:26]=0x36
 // dword1: addr[7:0], data0[15:8], data1[23:16], vdst[31:24]
-constexpr uint32_t ds_lo(uint32_t op, uint8_t offset0 = 0, uint8_t offset1 = 0) {
-  return (0x36u << 26) | (op << 17) | (static_cast<uint32_t>(offset1) << 8) | offset0;
+constexpr uint32_t ds_lo(uint32_t op, uint8_t offset0 = 0, uint8_t offset1 = 0, uint8_t acc = 0) {
+  return (0x36u << 26) | (static_cast<uint32_t>(acc) << 25) | (op << 17) |
+         (static_cast<uint32_t>(offset1) << 8) | offset0;
 }
 constexpr uint32_t ds_hi(uint32_t vdst, uint32_t data0, uint32_t addr, uint32_t data1 = 0) {
   return (vdst << 24) | (data1 << 16) | (data0 << 8) | addr;
@@ -544,14 +600,15 @@ TEST_P(IsaTest, RoundRobinScheduling) {
   uint64_t ko_a = f.write_kernel(0x0, prog_a.data(), prog_a.size() * sizeof(uint32_t));
   uint64_t ko_b = f.write_kernel(0x2000, prog_b.data(), prog_b.size() * sizeof(uint32_t));
   test::AqlQueue queue(f.mem(), f.cp());
+
+  // Verify each dispatch executes and the CP tracks them.
   queue.dispatch(ko_a, 64);
+  step_until_halted(*f.engine, {f.cu()});
+  EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+
   queue.dispatch(ko_b, 64);
   step_until_halted(*f.engine, {f.cu()});
-
-  auto *cu = f.cu();
-  ASSERT_GE(cu->num_wfs(), 2u);
-  EXPECT_TRUE(cu->wf(0)->is_halted());
-  EXPECT_TRUE(cu->wf(1)->is_halted());
+  EXPECT_EQ(f.cp()->dispatched_count(), 2u);
 }
 
 TEST_P(IsaTest, EngineRunsToCompletion) {
@@ -1127,6 +1184,59 @@ TEST(AtomicStressTest, GlobalAtomicAdd_MultiWorkgroup) {
 
   uint32_t final_val = f.mem()->read32(TARGET_ADDR);
   EXPECT_EQ(final_val, 1256u) << "1000 + 256 global atomic adds = 1256";
+}
+
+// Verify that ds_read_b64_tr_b16 with acc=1 writes to AccVGPR (vb+256+vdst),
+// not to VGPR (vb+vdst).
+TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
+  VmFixture f("cdna4", 1, 10);
+
+  constexpr uint32_t VDST = 4;
+  constexpr uint32_t ADDR_REG = 0;
+  constexpr uint32_t DS_OP = 227; // ds_read_b64_tr_b16
+
+  // Kernel:
+  //   v_mov_b32 v0, 0          ; addr = LDS offset 0
+  //   v_mov_b32 v4, 0x42       ; sentinel in VGPR v4
+  //   v_mov_b32 v5, 0x42       ; sentinel in VGPR v5
+  //   ds_read_b64_tr_b16 a[4:5], v0  ; acc=1: write to AccVGPR
+  //   s_waitcnt lgkmcnt(0)
+  //   s_endpgm
+  using namespace enc;
+  const uint32_t code[] = {
+      v_mov_b32(ADDR_REG, INLINE_CONST(0)),
+      v_mov_b32(VDST, INLINE_CONST(42)),
+      v_mov_b32(VDST + 1, INLINE_CONST(42)),
+      ds_lo(DS_OP, /*offset0=*/0, /*offset1=*/0, /*acc=*/1),
+      ds_hi(VDST, /*data0=*/0, ADDR_REG),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  auto *cu = f.cu();
+
+  // Write a known non-zero pattern to LDS.
+  for (uint32_t i = 0; i < 256; ++i)
+    cu->lds().write32(i * 4, 0xDEADBEEF);
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64);
+  f.engine->run();
+
+  auto *wf = cu->wf(0);
+  ASSERT_NE(wf, nullptr);
+  uint32_t vb = wf->vgpr_alloc().base;
+
+  // VGPR v4 should still hold the sentinel (42), not overwritten by ds_read.
+  uint32_t vgpr_val = cu->read_vgpr(vb + VDST, 0);
+  EXPECT_EQ(vgpr_val, 42u) << "VGPR v" << VDST << " should NOT have been written when acc=1";
+
+  // AccVGPR a4 should have been written with LDS data (not 42, not 0).
+  uint32_t acc_val = cu->read_vgpr(vb + 256 + VDST, 0);
+  EXPECT_NE(acc_val, 0u) << "AccVGPR a" << VDST << " should have been written by ds_read";
+  EXPECT_NE(acc_val, 42u) << "AccVGPR a" << VDST
+                          << " should contain LDS data, not the VGPR sentinel";
 }
 
 } // namespace

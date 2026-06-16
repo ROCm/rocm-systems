@@ -426,7 +426,7 @@ find_symbolizer()
 /**
  * Differential test: every instruction inside each kernel symbol must yield the
  * same source-line / inline-chain attribution from CodeobjDecoderComponent as
- * from llvm-symbolizer.  Both parse the same .debug_line in the same ELF —
+ * from llvm-symbolizer.  Both parse the same .debug_line in the same ELF --
  * disagreement is a bug, and llvm-symbolizer has had years more scrutiny.
  *
  * Guards against the bugs the recent line-attribution fix targets: ranges

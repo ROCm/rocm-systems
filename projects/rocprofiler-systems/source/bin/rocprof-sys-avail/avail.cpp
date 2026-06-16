@@ -150,6 +150,9 @@ main(int argc, char** argv)
     _category_options.emplace("hw_counters::CPU");
     _category_options.emplace("hw_counters::GPU");
 
+    // Remove unused TIMEMORY third-party libraries
+    _category_options.erase("component::tpls::openmp");
+
     format_options fmt_opts{};
 
     array_t<bool, TOTAL> options    = { false, false, false, false, false, false, false };
@@ -259,6 +262,71 @@ main(int argc, char** argv)
         .action([_category_options](parser_t&) {
             std::cout << "Categories:\n";
             for(const auto& itr : _category_options)
+                std::cout << "    " << itr << "\n";
+        });
+    parser
+        .add_argument({ "--list-domains" },
+                      "List the available ROCm domains that have operations")
+        .count(0)
+        .action([](parser_t&) {
+            auto _settings = tim::settings::shared_instance();
+
+            std::set<std::string> _domains;
+            for(const auto& itr : *_settings)
+            {
+                if(auto _domain =
+                       rocm_domain_from_setting_name(itr.second->get_env_name()))
+                    _domains.insert(std::move(*_domain));
+            }
+
+            std::cout << "Available ROCm domains with operations:\n";
+            for(const auto& _domain : _domains)
+                std::cout << "    " << _domain << "\n";
+
+            std::cout << "\nUse '--list-operations <domain_name>' to see operations "
+                         "for a specific domain.\n";
+        });
+    parser
+        .add_argument({ "--list-operations" },
+                      "List available operations for a specific ROCm domain")
+        .max_count(1)
+        .dtype("string")
+        .action([](parser_t& p) {
+            if(p.get_count("list-operations") == 0)
+            {
+                std::cerr << "Error: '--list-operations' requires a domain name.\n"
+                          << "Use 'rocprof-sys-avail --list-domains' "
+                             "to see available domains.\n";
+                return;
+            }
+
+            auto _domain = p.get<std::string>("list-operations");
+            std::transform(_domain.begin(), _domain.end(), _domain.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+
+            auto _settings     = tim::settings::shared_instance();
+            auto _setting_name = rocm_setting_name_for_domain(_domain);
+            auto _sitr         = _settings->find(_setting_name);
+
+            if(_sitr == _settings->end())
+            {
+                std::cerr << "Error: Domain '" << _domain << "' not found.\n"
+                          << "Use 'rocprof-sys-avail --list-domains' "
+                             "to see available domains.\n";
+                return;
+            }
+
+            auto _choices = _sitr->second->get_choices();
+            filter_operations(_setting_name, _choices);
+
+            if(_choices.empty())
+            {
+                std::cerr << "Domain '" << _domain << "' has no operations.\n";
+                return;
+            }
+
+            std::cout << "Operations for " << _domain << ":\n";
+            for(const auto& itr : _choices)
                 std::cout << "    " << itr << "\n";
         });
     parser.add_argument({ "--list-keys" }, "List the output keys")
@@ -601,7 +669,8 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    if(parser.exists("list-categories") || parser.exists("list-keys"))
+    if(parser.exists("list-categories") || parser.exists("list-keys") ||
+       parser.exists("list-operations") || parser.exists("list-domains"))
         return EXIT_SUCCESS;
 
     std::string _pos_regex{};

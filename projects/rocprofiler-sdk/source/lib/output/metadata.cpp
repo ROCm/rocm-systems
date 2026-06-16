@@ -37,6 +37,7 @@
 #include "lib/output/kernel_symbol_info.hpp"
 #include "lib/output/node_info.hpp"
 
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
@@ -59,6 +60,20 @@ namespace tool
 namespace
 {
 namespace fs = ::rocprofiler::common::filesystem;
+
+rocprofiler_status_t
+query_spm_configuration(const rocprofiler_spm_available_configuration_t** configs,
+                        long unsigned int                                 num_config,
+                        void*                                             user_data)
+{
+    auto* avail_configs =
+        static_cast<std::vector<rocprofiler_spm_available_configuration_t>*>(user_data);
+    for(size_t i = 0; i < num_config; i++)
+    {
+        avail_configs->emplace_back(*configs[i]);
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
 
 rocprofiler_status_t
 query_pc_sampling_configuration(const rocprofiler_pc_sampling_configuration_t* configs,
@@ -207,6 +222,10 @@ metadata::metadata(inprocess)
                 rocprofiler_query_pc_sampling_agent_configurations(
                     itr.id, query_pc_sampling_configuration, &pc_configs);
                 agent_pc_sample_config_info.emplace(itr.id, pc_configs);
+                auto spm_configs = std::vector<rocprofiler_spm_available_configuration_t>{};
+                rocprofiler_spm_query_agent_configurations(
+                    itr.id, query_spm_configuration, &spm_configs);
+                agent_spm_config_info.emplace(itr.id, spm_configs);
             }
         }
 
@@ -506,6 +525,19 @@ metadata::get_gpu_agents() const
         if(itr.type == ROCPROFILER_AGENT_TYPE_GPU) _data.emplace_back(&itr);
     }
     return _data;
+}
+
+spm_config_vec_t
+metadata::get_spm_config_info(rocprofiler_agent_id_t _val) const
+{
+    auto _ret = spm_config_vec_t{};
+    if(agent_spm_config_info.find(_val) == agent_spm_config_info.end()) return _ret;
+    auto spm_config = agent_spm_config_info.at(_val);
+    for(const auto& itr : spm_config)
+    {
+        _ret.emplace_back(itr);
+    }
+    return _ret;
 }
 
 pc_sample_config_vec_t

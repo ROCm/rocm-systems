@@ -131,7 +131,7 @@ HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice) 
       hipGraphMemAllocNodeGetParams_Functional(i);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 }
 

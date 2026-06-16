@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_DEVICE_RUNTIME_H_
 #define NCCL_DEVICE_RUNTIME_H_
@@ -24,8 +25,13 @@ struct ncclDevrWindow {
   size_t bigOffset; // Offset in big VA space.
   int winFlags;
   void* localRegHandle;
-  struct ncclWindow_vidmem* vidmem;
+  struct ncclWindow_vidmem* vidmem; // key for intrusive map
+  struct ncclDevrWindow* next; // next for intrusive map
+  struct ncclComm* comm; // comm for intrusive map window <> comm look up
+  void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS]; // IB MR handles per GIN connection (proxy-only path)
+  ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]; // device-side GIN window handles (proxy-only path)
 };
+
 struct ncclDevrWindowSorted;
 struct ncclDevrTeam;
 
@@ -41,6 +47,7 @@ struct ncclDevrCommCreateTask {
   struct ncclDevrCommCreateTask *next;
   struct ncclDevCommRequirements* reqs;
   struct ncclDevComm* outDevComm;
+  ncclResult_t (*outDevCommCopyCB)(struct ncclDevComm const* tmpDevComm, void* out);
 };
 
 struct ncclDevrState {
@@ -50,8 +57,11 @@ struct ncclDevrState {
   int lsaSelf;
   int lsaSize;
   int* lsaRankList;
+  int nLsaTeams;
 
   size_t granularity; // cuMemGetAllocationGranularity
+  bool ginEnabled;
+  bool rmaProxyEnabled;
   struct ncclDevrMemory* memHead;
   struct ncclDevrWindowSorted* winSorted;
   int winSortedCapacity, winSortedCount;
@@ -66,6 +76,9 @@ struct ncclDevrState {
   struct ncclIntruQueue<struct ncclDevrCommCreateTask, &ncclDevrCommCreateTask::next> commCreateTaskQueue;
 };
 
+// Check if GIN resources have been requested as part of `reqs`.
+bool ncclGinResourcesRequested(struct ncclDevCommRequirements const* reqs);
+
 // We assume ncclComm has a `ncclDevrState symState` member.
 ncclResult_t ncclDevrInitOnce(struct ncclComm* comm);
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm);
@@ -78,7 +91,8 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
 );
 
 ncclResult_t ncclDevrCommCreateInternal(
-  struct ncclComm* comm, struct ncclDevCommRequirements const* reqs, struct ncclDevComm* outDevComm
+  struct ncclComm* comm, struct ncclDevCommRequirements const* reqs, struct ncclDevComm* outDevComm,
+  bool isInternal = false, ncclResult_t (*outDevCommCopyCB)(struct ncclDevComm const* tmpDevComm, void* out) = nullptr
 );
 void freeDevCommRequirements(
   struct ncclDevCommRequirements* reqs
@@ -86,6 +100,9 @@ void freeDevCommRequirements(
 
 // Get the corresponding pointer in another lsa rank's symmetric memory window
 ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank, void** outPtr);
+
+// Get the RMA device window handle for a specific context
+ncclGinWindow_t ncclDevrGetRmaDevWin(struct ncclDevrWindow* winHost, int ctx);
 
 // Get the multicast address for a given team
 ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, struct ncclTeam lsaTeam, void** outPtr);

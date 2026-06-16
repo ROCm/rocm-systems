@@ -100,50 +100,33 @@ def _validate_regex(
     if use_abort_fail_regex:
         fail_patterns.extend(ROCPROFSYS_ABORT_FAIL_REGEX)
 
-    # Build combined regex with named groups
-    all_patterns: list[str] = []
-    fail_indices: set[str] = set()
-    pass_indices: set[str] = set()
-
-    if fail_patterns:
-        for i, pattern in enumerate(fail_patterns):
-            all_patterns.append(f"(?P<f{i}>{pattern})")
-            fail_indices.add(f"f{i}")
-
-    if pass_regex:
-        for i, pattern in enumerate(pass_regex):
-            all_patterns.append(f"(?P<p{i}>{pattern})")
-            pass_indices.add(f"p{i}")
-
-    if not all_patterns:
+    if not fail_patterns and not pass_regex:
         return ValidationResult(is_valid=True, message="No patterns to validate")
 
     # Use re.DOTALL so '.' matches newlines (like CMake regex behavior)
-    combined_regex = re.compile("|".join(all_patterns), re.DOTALL)
-    found_pass: set[str] = set()
+    flags = re.DOTALL
 
-    for match in combined_regex.finditer(text):
-        matched_group = match.lastgroup
-
-        if matched_group in fail_indices:
-            original_idx = int(matched_group[1:])
+    # Fail patterns: one combined alternation, short-circuit on first hit
+    if fail_patterns:
+        fail_re = re.compile(
+            "|".join(f"(?P<f{i}>{p})" for i, p in enumerate(fail_patterns)), flags
+        )
+        m = fail_re.search(text)
+        if m is not None:
+            idx = int(m.lastgroup[1:])
             return ValidationResult(
                 is_valid=False,
-                message=f"Fail pattern matched: {fail_patterns[original_idx]}",
+                message=f"Fail pattern matched: {fail_patterns[idx]}",
             )
 
-        if matched_group in pass_indices:
-            found_pass.add(matched_group)
-
-    # Check if all pass patterns were found
+    # Pass patterns: individual re.search per pattern
     if pass_regex:
-        missing = pass_indices - found_pass
-        if missing:
-            missing_idx = int(next(iter(missing))[1:])
-            return ValidationResult(
-                is_valid=False,
-                message=f"Pass pattern not found: {pass_regex[missing_idx]}",
-            )
+        for pattern in pass_regex:
+            if re.search(pattern, text, flags) is None:
+                return ValidationResult(
+                    is_valid=False,
+                    message=f"Pass pattern not found: {pattern}",
+                )
 
     return ValidationResult(is_valid=True, message="All patterns validated successfully")
 
@@ -269,9 +252,15 @@ def validate_perfetto_trace(
     key_counts: Optional[list[int]] = None,
     trace_processor_path: Optional[Path] = None,
     print_output: bool = False,
+    check_counter_pairing: bool = False,
     timeout: int = 120,
 ) -> ValidationResult:
     """Validate a Perfetto trace file using validate-perfetto-proto.py.
+
+    Slice validation mode is inferred by validate-perfetto-proto.py: pass ``depths``
+    (-d) for positional row-by-row checks; omit ``depths`` for aggregate-by-name
+    (sum counts across depths). Omit ``counts`` (-c) in aggregate mode for
+    presence-only checks.
 
     Args:
         trace_path: Path to perfetto-trace.proto file
@@ -279,13 +268,14 @@ def validate_perfetto_trace(
         categories: List of categories to filter by (-m flag)
         labels: Expected labels (-l flag)
         counts: Expected counts (-c flag)
-        depths: Expected depths (-d flag)
+        depths: Expected depths (-d flag); omit for aggregate-by-name validation
         label_substrings: Expected label substrings (-s flag)
         counter_names: Counter names to validate (--counter-names flag)
         key_names: Debug key names to check (--key-names flag)
         key_counts: Expected counts for debug keys (--key-counts flag)
         trace_processor_path: Path to trace_processor_shell (-t flag)
         print_output: Whether to print trace data (-p flag)
+        check_counter_pairing: Verify counter tracks have paired start/end entries
         timeout: Validation timeout in seconds
 
     Returns:
@@ -318,6 +308,9 @@ def validate_perfetto_trace(
     if counter_names:
         args.extend(["--counter-names"] + counter_names)
 
+    if check_counter_pairing:
+        args.append("--check-counter-pairing")
+
     if key_names:
         args.extend(["--key-names"] + key_names)
 
@@ -343,6 +336,7 @@ def validate_rocpd_database(
     tests_dir: Path,
     rules_files: Optional[list[Path]] = None,
     timeout: int = 60,
+    gpu_category_to_skip: Optional[list[str]] = None,
 ) -> ValidationResult:
     """Validate a ROCpd database file using validate-rocpd.py.
 
@@ -351,6 +345,8 @@ def validate_rocpd_database(
         tests_dir: Path to directory containing validation scripts
         rules_files: List of JSON rules files to use for validation
         timeout: Validation timeout in seconds
+        gpu_category_to_skip: GPU categories to skip tagged validation queries for
+            (instinct, radeon, apu). Omit or pass empty to run all queries
 
     Returns:
         ValidationResult with validation status
@@ -364,6 +360,9 @@ def validate_rocpd_database(
         existing_rules = [str(r) for r in rules_files if r.exists()]
         if existing_rules:
             args.extend(["-r"] + existing_rules)
+
+    if gpu_category_to_skip:
+        args.extend(["--gpu-category-to-skip"] + gpu_category_to_skip)
 
     return _run_validation_script("validate-rocpd.py", args, tests_dir, timeout)
 
@@ -454,3 +453,37 @@ def validate_causal_json(
         args.extend(additional_args)
 
     return _run_validation_script("validate-causal-json.py", args, tests_dir, timeout)
+
+
+def validate_unified_memory_outputs(
+    output_dir: Path,
+    tests_dir: Path,
+    timeout: int = 60,
+) -> ValidationResult:
+    """Validate unified-memory text and JSON outputs in a test output tree."""
+    txt_matches = sorted(output_dir.rglob("unified_memory*.txt"))
+    json_matches = sorted(output_dir.rglob("unified_memory*.json"))
+
+    if not txt_matches:
+        return ValidationResult(False, f"No unified_memory*.txt found under {output_dir}")
+    if not json_matches:
+        return ValidationResult(
+            False, f"No unified_memory*.json found under {output_dir}"
+        )
+
+    txt_file = txt_matches[0]
+    json_file = json_matches[0]
+
+    if txt_file.parent != json_file.parent:
+        return ValidationResult(
+            False,
+            "Unified-memory outputs landed in different directories: "
+            f"{txt_file.parent} vs {json_file.parent}",
+        )
+
+    return _run_validation_script(
+        "validate-unified-memory.py",
+        ["--output-dir", str(txt_file.parent)],
+        tests_dir,
+        timeout,
+    )

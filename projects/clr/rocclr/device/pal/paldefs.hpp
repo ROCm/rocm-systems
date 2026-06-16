@@ -13,6 +13,46 @@
 #include "palFormatInfo.h"
 #include "util/palSysMemory.h"
 
+#include <cstdlib>
+#include <new>
+#include <utility>
+
+namespace amd {
+
+//! Allocate `sizeof(T) + extSize` bytes via std::malloc and placement-construct T at the
+//! start. The trailing `extSize` bytes are intended for caller-provided placement of
+//! supplementary data (e.g. a PAL object whose size is reported by IDevice::Get*Size()).
+//! Returns nullptr if allocation fails. If T's constructor throws, the storage is freed and
+//! the exception is rethrown — preserving the cleanup guarantee that HeapObject's matching
+//! placement-style operator delete used to provide.
+template <class T, class... Args>
+T* AllocWithTrailing(size_t extSize, Args&&... args) {
+  void* mem = std::malloc(sizeof(T) + extSize);
+  if (mem == nullptr) {
+    return nullptr;
+  }
+  try {
+    return new (mem) T(std::forward<Args>(args)...);
+  } catch (...) {
+    std::free(mem);
+    throw;
+  }
+}
+
+//! Counterpart to AllocWithTrailing: invokes T's destructor and frees the storage. Null-safe.
+//! Must be paired with AllocWithTrailing — calling it on memory obtained from any other
+//! allocator (including global ::operator new) is undefined behavior.
+template <class T>
+void DestroyWithTrailing(T* obj) {
+  if (obj == nullptr) {
+    return;
+  }
+  obj->~T();
+  std::free(obj);
+}
+
+}  // namespace amd
+
 //
 /// Memory Object Type
 //

@@ -201,7 +201,7 @@ target_link_libraries(rocprofiler-sdk-ptl INTERFACE PTL::ptl-static)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(LibElf)
+find_package(LibElf QUIET)
 if(LibElf_FOUND)
     target_link_libraries(rocprofiler-sdk-elf INTERFACE elf::elf)
 else()

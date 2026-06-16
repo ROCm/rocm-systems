@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <vector>
 #include <string>
 #include <fcntl.h>

@@ -4,26 +4,27 @@
 
 .. _index:
 
-===============================
-ROCR Debug Agent documentation
-===============================
+****************
+ROCr Debug Agent
+****************
 
-The ROCR Debug Agent (ROCdebug-agent) is a library that can be loaded by the ROCm software runtime :doc:`(ROCR) <rocr-runtime:index>` to provide the following functionality:
+The ROCr Debug Agent  is a library that can be loaded by the :doc:`ROCr Runtime <rocr-runtime:index>` to provide the following functionality:
 
 - Print the state of all AMD GPU wavefronts that cause a queue error (such as a memory violation, executing a ``s_trap 2``, or executing an illegal instruction).
 
 - Print the state of all AMD GPU wavefronts by sending a SIGQUIT signal to the process using ``kill -s SIGQUIT <pid>`` command or by pressing ``Ctrl-\``, while the program is executing.
 
-This functionality is provided for all AMD GPUs supported by the ROCm Debugger API Library :doc:`(ROCdbgapi) <rocdbgapi:index>`.
+This functionality is provided for all AMD GPUs supported by the :doc:`ROCm Debugger API (ROCdbgpai) <rocdbgapi:index>`.
 
-The code is open source and hosted at https://github.com/ROCm/rocr_debug_agent
+The code is open source and hosted at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocr-debug-agent>`__.
 
 .. grid:: 2
   :gutter: 3
 
   .. grid-item-card:: Install
 
-    * :ref:`Installation <debug-agent-installation>`
+    * :doc:`Install ROCr Debug Agent <install/installation>`
+    * `Build from source <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocr-debug-agent/README.md#build-the-rocdebug-agent-library>`_.
 
   .. grid-item-card:: How to
 

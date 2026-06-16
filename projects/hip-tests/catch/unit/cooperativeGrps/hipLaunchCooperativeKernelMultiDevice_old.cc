@@ -134,8 +134,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Basic) {
     // Calculate the device occupancy to know how many blocks can be run concurrently
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], 0));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
   }
 

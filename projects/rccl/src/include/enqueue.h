@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_ENQUEUE_H_
 #define NCCL_ENQUEUE_H_
@@ -17,8 +18,6 @@
 #define NCCL_SIMPLE_ALIGNMENT (WARP_SIZE * 8LL * 16LL)
 #define NCCL_BYTES_ALIGNMENT 16
 
-void* rcclGetKernelIndex(int unroll, bool useCollTrace, struct ncclTaskColl* task = NULL);
-
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize);
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info);
 ncclResult_t ncclLaunchPrepare(struct ncclComm* comm);
@@ -29,6 +28,9 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm);
 ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo);
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm);
 
+// Defined via NCCL_PARAM in enqueue.cc.
+int64_t ncclParamLaunchOrderImplicit();
+
 static inline size_t ncclFuncSendCount(ncclFunc_t func, int nRanks, size_t count) {
   return func == ncclFuncReduceScatter ? nRanks*count : count;
 }
@@ -38,5 +40,24 @@ static inline size_t ncclFuncRecvCount(ncclFunc_t func, int nRanks, size_t count
 rccl_static inline size_t ncclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count) {
   return func == ncclFuncAllGather || func == ncclFuncReduceScatter ? nRanks*count : count;
 }
+
+ncclResult_t ncclGetCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* task, int* collNetSupport);
+ncclResult_t ncclGetAlgoInfo(
+  struct ncclComm* comm, struct ncclTaskColl* task,
+  int collNetSupport, int nvlsSupport, int numPipeOps, ncclSimInfo_t* simInfo = NULL
+);
+bool ncclTestBudget(struct ncclKernelPlanBudget* budget, int nWorkBatches, ssize_t nWorkBytes);
+
+void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId, enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset, int p2pEpoch =-1, int p2pRound = -1, bool newBatch = false);
+
+// RCCL-only shim: sets plan->kernelFn / kernelSpecialized using the file-local
+// ncclKerns table in enqueue.cc, for upstream-style schedulers (e.g.
+// scheduler/allgatherv_sched.cc) that would otherwise reference the absent
+// ncclDevKernelForFunc[] / ncclDevKernelForFuncIsSpecialized[] arrays.
+void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan);
+
+ncclResult_t ncclAddProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op);
+
+ncclResult_t ncclAddProfilerProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op);
 
 #endif // End include guard

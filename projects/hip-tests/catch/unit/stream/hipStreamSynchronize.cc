@@ -36,7 +36,7 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_FinishWork) {
     HIP_CHECK(hipStreamCreate(&stream));
   }
 
-  LaunchDelayKernel(std::chrono::milliseconds(500), stream);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 50 : 500), stream);
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipStreamQuery(stream));
 
@@ -60,7 +60,7 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
   }
 
   for (int i = 0; i < totalStreams; ++i) {
-    LaunchDelayKernel(std::chrono::milliseconds(1000), streams[i]);
+    LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 1000), streams[i]);
   }
 
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
@@ -88,7 +88,7 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
  */
 HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-22.");
+  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-22.");
 #else
 
   hipStream_t stream1;
@@ -98,7 +98,7 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
   HIP_CHECK(hipStreamCreate(&stream2));
 
   LaunchDelayKernel(std::chrono::milliseconds(500), stream1);
-  LaunchDelayKernel(std::chrono::milliseconds(2000), stream2);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 2000), stream2);
 
   SECTION("Do not use NullStream") {}
   SECTION("Submit Kernel to NullStream") {

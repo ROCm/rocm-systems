@@ -304,8 +304,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_multidevice) {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   if (num_devices < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   usrDataS* usrDataptr = reinterpret_cast<usrDataS*>(malloc(sizeof(usrDataS)));
   REQUIRE(usrDataptr != nullptr);
@@ -476,7 +475,8 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Graph) {
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
   auto start1 = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < GRAPH_LAUNCH_ITERATIONS; i++) {
+  const int graphIters = isQuickLevel() ? 10 : GRAPH_LAUNCH_ITERATIONS;
+  for (int i = 0; i < graphIters; i++) {
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   }
   HIP_CHECK(hipStreamSynchronize(streamForGraph));

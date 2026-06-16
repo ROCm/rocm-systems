@@ -28,13 +28,14 @@ void LibraryContainer::Register(const std::string &name, int device, hipKernel_t
 }
 
 hipError_t LibraryContainer::GetKernelName(const char** name, hipKernel_t kernel) {
+  std::scoped_lock<std::mutex> lock(lib_mutex_);
   if (kernels_.empty()) {
     return hipErrorInvalidValue;
   }
 
   for (const auto &it : kernels_) {
     if (it.second == kernel) {
-      *name = it.first.first.c_str(); 
+      *name = it.first.first.c_str();
       return hipSuccess;
     }
   }
@@ -42,22 +43,15 @@ hipError_t LibraryContainer::GetKernelName(const char** name, hipKernel_t kernel
 }
 
 hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKernels) {
-  auto maxCount = (maxKernels > functions_.size()) ? functions_.size() : maxKernels;
-  auto device_id = hip::ihipGetDevice();
-  auto m = fatbin_->Module(device_id);
-  auto count = 0;
-  for (const auto&f : functions_) {
+  auto names = dynco_->getFunctionNames();
+  auto maxCount = (maxKernels > names.size()) ? names.size() : maxKernels;
+  unsigned int count = 0;
+  for (const auto& name : names) {
     if (count >= maxCount) break;
     hipKernel_t kern;
-    // build library only for un-registered kernels
-    if (auto ki = kernels_.find(std::make_pair(f.first, device_id)); ki!= kernels_.end()) {
-      kern = ki->second;
-    } else {
-      auto ret = f.second.get()->GetDynFunc(reinterpret_cast<hipFunction_t*>(&kern), m);
-      if (ret != hipSuccess) {
-        return ret;
-      }
-      Register(f.first, device_id, kern);
+    auto ret = Kernel(&kern, name);
+    if (ret != hipSuccess) {
+      return ret;
     }
     k[count++] = kern;
   }
@@ -65,70 +59,81 @@ hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKe
 }
 
 hipError_t LibraryContainer::Kernel(hipKernel_t* k, const std::string &name) {
-  auto device_id = hip::ihipGetDevice();
-  if (auto ki = kernels_.find(std::make_pair(name, device_id)); ki != kernels_.end()) {
-    *k = ki->second;
-    return hipSuccess;
+  // Use the device the underlying DynCO was loaded for, not ihipGetDevice():
+  // the caller may have switched devices since BuildIt(), but our module is
+  // single-device. Keying off the active device would mis-attribute cache
+  // entries across devices.
+  const int device_id = dynco_ ? dynco_->getDeviceId() : hip::ihipGetDevice();
+  {
+    // Cache hit fast path under lib_mutex_ — Register() writes kernels_
+    // under the same mutex, so unlocked reads would race.
+    std::scoped_lock<std::mutex> lock(lib_mutex_);
+    if (auto ki = kernels_.find(std::make_pair(name, device_id)); ki != kernels_.end()) {
+      *k = ki->second;
+      return hipSuccess;
+    }
   }
-  auto m = fatbin_->Module(device_id);
-  auto f = functions_.find(name);
-  if (f == functions_.end()) {
-    return hipErrorNotFound;
-  }
-  auto ret = f->second.get()->GetDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
-  if (ret != hipSuccess) {
-    return ret;
-  }
-  // Register it, basically make it available for query though the hip context.
+  hipFunction_t hfunc = nullptr;
+  IHIP_RETURN_ONFAIL(dynco_->getDynFunc(&hfunc, name));
+  *k = reinterpret_cast<hipKernel_t>(hfunc);
+  // Register() re-takes lib_mutex_; its check-and-insert handles the benign
+  // TOCTOU window where a second concurrent caller misses the cache and we
+  // both arrive here with the same hfunc.
   Register(name, device_id, *k);
   return hipSuccess;
 }
 
-LibraryContainer::LibraryContainer(const char* code_object) {
-  fatbin_ = std::make_shared<hip::FatBinaryInfo>(nullptr, code_object);
+size_t LibraryContainer::KernelCount() {
+  unsigned int count = 0;
+  if (dynco_) {
+    (void)dynco_->getFuncCount(&count);
+  }
+  return count;
 }
 
-LibraryContainer::LibraryContainer(const std::string &file_name) {
-  fatbin_ = std::make_shared<hip::FatBinaryInfo>(file_name.c_str(), nullptr);
+hipError_t LibraryContainer::GetGlobal(const std::string& name, void** dptr, size_t* bytes) {
+  return dynco_->GetGlobal(name, dptr, bytes);
 }
+
+hipError_t LibraryContainer::GetManaged(const std::string& name, void** dptr, size_t* bytes) {
+  return dynco_->GetManaged(name, dptr, bytes);
+}
+
+LibraryContainer::LibraryContainer(const char* code_object) : image_(code_object) {}
+
+LibraryContainer::LibraryContainer(const std::string &file_name) : filename_(file_name) {}
 
 LibraryContainer::~LibraryContainer() {
+  // No lock here on purpose: destruction is the user's responsibility to
+  // serialize against any in-flight Kernel/Enumerate/GetGlobal calls (same
+  // contract CUDA documents for cuLibraryUnload). Locking would falsely
+  // suggest safety while the mutex itself is about to be destroyed.
   for (const auto& k : kernels_) {
     (void)hip::PlatformState::Instance().UnregisterLibraryFunction(k.second);
   }
   kernels_.clear();
+  // dynco_ unique_ptr destruction frees vars, functions, and the underlying fatbin.
 }
 
 // BuildIt builds and loads the Library, default behavior is lazy load.
 // This function needs to be called before any query on library.
 hipError_t LibraryContainer::BuildIt() {
-  std::scoped_lock<std::mutex> lock(lib_mutex_);
-  if (built_) {
+  if (built_.load(std::memory_order_acquire)) {
     return hipSuccess;
   }
-
-  if (!fatbin_) {
+  std::scoped_lock<std::mutex> lock(lib_mutex_);
+  if (built_.load(std::memory_order_relaxed)) {
+    return hipSuccess;
+  }
+  if (filename_.empty() && image_ == nullptr) {
     return hipErrorInvalidValue;
   }
 
-  int device_id = ihipGetDevice();
-  std::vector<hip::Device*> devices = {g_devices[device_id]};
-  IHIP_RETURN_ONFAIL(fatbin_->ExtractFatBinaryUsingCOMGR(devices));
-  IHIP_RETURN_ONFAIL(fatbin_->BuildProgram(device_id));
+  dynco_ = std::make_unique<hip::DynCO>();
+  const char* fname = filename_.empty() ? nullptr : filename_.c_str();
+  IHIP_RETURN_ONFAIL(dynco_->loadCodeObject(fname, image_));
 
-  auto program =
-    fatbin_->GetProgram(device_id)->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
-  auto mod =
-    fatbin_->Module(device_id);
-
-  // Process Functions and create kernel handles
-  std::vector<std::string> function_names;
-  program->getGlobalFuncFromCodeObj(&function_names);
-  for (const auto& name : function_names) {
-    functions_.emplace(std::make_pair(name, std::make_shared<hip::Function>(name)));
-  }
-
-  built_ = true;
+  built_.store(true, std::memory_order_release);
   return hipSuccess;
 }
 
@@ -202,6 +207,40 @@ hipError_t hipLibraryGetKernel(hipKernel_t* kernel, hipLibrary_t library, const 
   }
   ret = l->Kernel(kernel, kname);
   HIP_RETURN(ret);
+}
+
+hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
+                               const char* name) {
+  HIP_INIT_API(hipLibraryGetGlobal, dptr, bytes, library, name);
+  if ((dptr == nullptr && bytes == nullptr) || name == nullptr || strlen(name) == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (library == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  auto* l = reinterpret_cast<hip::LibraryContainer*>(library);
+  auto ret = l->BuildIt();
+  if (ret != hipSuccess) {
+    HIP_RETURN(ret);
+  }
+  HIP_RETURN(l->GetGlobal(std::string{name}, dptr, bytes));
+}
+
+hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library,
+                                const char* name) {
+  HIP_INIT_API(hipLibraryGetManaged, dptr, bytes, library, name);
+  if ((dptr == nullptr && bytes == nullptr) || name == nullptr || strlen(name) == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (library == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  auto* l = reinterpret_cast<hip::LibraryContainer*>(library);
+  auto ret = l->BuildIt();
+  if (ret != hipSuccess) {
+    HIP_RETURN(ret);
+  }
+  HIP_RETURN(l->GetManaged(std::string{name}, dptr, bytes));
 }
 
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,

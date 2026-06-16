@@ -17,6 +17,13 @@
 #include "platform/prof_protocol.h"
 
 
+// Internal HIP function — probe-safe variant of hipGetFuncBySymbol that never
+// sets the sticky last_error_.  Used by the profiler to resolve kernel symbols
+// without polluting the user-visible error state.
+namespace hip {
+hipError_t ihipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr);
+}
+
 // ============================================================
 // Internal profiler API
 // ============================================================

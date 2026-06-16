@@ -4,14 +4,16 @@
 import re
 import subprocess
 import tempfile
+from subprocess import CompletedProcess
 from unittest.mock import patch
 
+import common
 import pytest
 
-try:
-    from src.utils.specs import generate_machine_specs
-except Exception:
-    from utils.specs import generate_machine_specs
+import utils.specs as specs
+from utils.file_io import is_single_panel_config
+from utils.specs import generate_machine_specs
+from utils.utils_common import canonical_config_arch
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {
@@ -28,13 +30,6 @@ GFX942_CHIP_IDS_TO_NUM_XCDS = {
     "29865": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
     "29885": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
 }
-
-# helper to strip ANSI color codes if your app uses them
-ANSI_ESCAPE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
-
-
-def strip_ansi(s: str) -> str:
-    return ANSI_ESCAPE.sub("", s)
 
 
 def parse_table_dict(output: str) -> dict:
@@ -95,25 +90,10 @@ def get_num_xcds():
     return num_xcds
 
 
-def get_gpu_arch():
-    rocminfo = str(
-        # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(
-            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("utf-8")
-    )
-    rocminfo = rocminfo.split("\n")
-
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
-    devices = list(filter(soc_regex.match, rocminfo))
-    gpu_arch = devices[0].split()[1]
-    return gpu_arch
-
-
 @pytest.mark.num_xcds_spec_class
 def test_num_xcds_spec_class(monkeypatch):
     # 1. Check if gfx942 soc
-    gpu_arch = get_gpu_arch()
+    gpu_arch = common.gpu_soc()[0]
     if gpu_arch is None or gpu_arch.lower() != "gfx942":
         pytest.skip("Skipping num xcds test for non-gfx942 socs.")
 
@@ -132,7 +112,7 @@ def test_num_xcds_spec_class(monkeypatch):
 @pytest.mark.num_xcds_cli_output
 def test_num_xcds_cli_output():
     # 1. Check if gfx942 soc
-    gpu_arch = get_gpu_arch()
+    gpu_arch = common.gpu_soc()[0]
     if gpu_arch is None or gpu_arch.lower() != "gfx942":
         pytest.skip("Skipping num xcds test for non-gfx942 socs.")
 
@@ -158,7 +138,7 @@ def test_num_xcds_cli_output():
     )
 
     # 3. strip ANSI, parse table
-    clean = strip_ansi(proc.stdout)
+    clean = common.strip_ansi(proc.stdout)
     return_dict = parse_table_dict(clean)
 
     # 4. check results are expected
@@ -207,6 +187,27 @@ def test_load_yaml_generic_exception():
     with patch("builtins.open", side_effect=PermissionError("Access denied")):
         with pytest.raises(PermissionError, match="Access denied"):
             MIGPUSpecs._load_yaml("some_file.yaml")
+
+
+@pytest.mark.misc
+@pytest.mark.parametrize(
+    "mock_kwargs",
+    [
+        {"side_effect": FileNotFoundError("missing")},
+        {
+            "return_value": CompletedProcess(
+                args=["rocminfo"], returncode=1, stdout="", stderr="boom"
+            )
+        },
+    ],
+    ids=["missing_binary", "nonzero_exit"],
+)
+def test_run_fails_fast(mock_kwargs):
+    with (
+        patch.object(specs.subprocess, "run", **mock_kwargs),
+        pytest.raises(SystemExit),
+    ):
+        specs.run(["rocminfo"])
 
 
 @pytest.mark.misc
@@ -273,6 +274,28 @@ def test_get_gpu_model_none_result():
     with patch.object(MIGPUSpecs, "_chip_id_dict", {999: None}):
         result = MIGPUSpecs.get_gpu_model("gfx942", "999")
         assert result is None
+
+
+@pytest.mark.misc
+def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
+    assert canonical_config_arch(None) is None
+    assert canonical_config_arch("gfx1150") == "gfx115x"
+    assert canonical_config_arch("gfx1151") == "gfx115x"
+    assert canonical_config_arch("gfx1152") == "gfx115x"
+    assert canonical_config_arch("gfx942") == "gfx942"
+
+
+@pytest.mark.misc
+def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
+    (tmp_path / "gfx115x").mkdir()
+
+    supported_archs = {
+        "gfx1150": "rdna35_point_1",
+        "gfx1151": "rdna35_halo",
+        "gfx1152": "rdna35_point_2",
+    }
+
+    assert is_single_panel_config(str(tmp_path), supported_archs) is False
 
 
 @pytest.mark.misc

@@ -84,8 +84,7 @@ HIP_TEST_CASE(Unit_hipGetLastError_Positive_Threaded) {
 HIP_TEST_CASE(Unit_hipGetLastError_with_hipMemcpyPeerAsync) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   int can_access_peer = 0;

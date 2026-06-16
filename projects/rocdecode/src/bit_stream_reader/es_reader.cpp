@@ -66,7 +66,7 @@ uint32_t RocVideoESParser::GetDataSizeInRB() {
 }
 
 int RocVideoESParser::FetchBitStream() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     int free_space;
     int read_size;
     int total_read_size = 0;
@@ -154,7 +154,7 @@ void RocVideoESParser::SetReadPointer(int value) {
 }
 
 bool RocVideoESParser::FindStartCode() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     uint8_t three_bytes[3];
     int i;
 
@@ -278,7 +278,7 @@ void RocVideoESParser::CheckAvcNalForSlice(int start_code_offset, int *slice_fla
 }
 
 int RocVideoESParser::GetPicDataAvcHevc(uint8_t **p_pic_data, int *pic_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_pic_data) + ", " + RocDecFmtPtr(pic_size));
     int slice_nal_flag;
     int first_slice_flag = 0;
     int num_slices = 0;
@@ -341,7 +341,7 @@ int RocVideoESParser::GetPicDataAvcHevc(uint8_t **p_pic_data, int *pic_size) {
 }
 
 bool RocVideoESParser::ReadObuHeaderAndSize(int *obu_type) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(obu_type));
     uint8_t header_byte;
     int obu_extension_flag;
 
@@ -408,7 +408,7 @@ bool RocVideoESParser::CopyObuFromRing() {
 }
 
 int RocVideoESParser::GetPicDataAv1(uint8_t **p_pic_data, int *pic_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_pic_data) + ", " + RocDecFmtPtr(pic_size));
     int obu_type;
     pic_data_size_ = 0;
 
@@ -433,7 +433,7 @@ int RocVideoESParser::GetPicDataAv1(uint8_t **p_pic_data, int *pic_size) {
 }
 
 int RocVideoESParser::GetPicDataIvf(uint8_t **p_pic_data, int *pic_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_pic_data) + ", " + RocDecFmtPtr(pic_size));
     uint8_t frame_header[12];
     pic_data_size_ = 0;
     if (ReadBytes(curr_byte_offset_, 12, frame_header)) {
@@ -456,7 +456,7 @@ int RocVideoESParser::GetPicDataIvf(uint8_t **p_pic_data, int *pic_size) {
 }
 
 int RocVideoESParser::GetPicData(uint8_t **p_pic_data, int *pic_size, int64_t *pts) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_pic_data) + ", " + RocDecFmtPtr(pic_size) + ", " + RocDecFmtPtr(pts));
     *pts = 0;
     int ret;
     switch (stream_type_) {
@@ -494,7 +494,7 @@ int RocVideoESParser::GetPicData(uint8_t **p_pic_data, int *pic_size, int64_t *p
 }
 
 rocDecVideoCodec RocVideoESParser::GetCodecId() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     rocDecVideoCodec codec;
     switch (stream_type_) {
         case kStreamTypeAvcElementary:
@@ -519,7 +519,7 @@ rocDecVideoCodec RocVideoESParser::GetCodecId() {
 }
 
 int RocVideoESParser::ProbeStreamType() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     int stream_type = kStreamTypeUnsupported;
     int stream_type_score = 0;
     uint8_t *stream_buf;
@@ -591,7 +591,7 @@ int RocVideoESParser::ProbeStreamType() {
 }
 
 int RocVideoESParser::CheckAvcEStream(uint8_t *p_stream, int stream_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(stream_size));
     int score = 0;
     int curr_offset = 0;
     int num_start_codes = 0;
@@ -692,7 +692,7 @@ int RocVideoESParser::CheckAvcEStream(uint8_t *p_stream, int stream_size) {
 }
 
 int RocVideoESParser::CheckHevcEStream(uint8_t *p_stream, int stream_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(stream_size));
     int score = 0;
     int curr_offset = 0;
     int num_start_codes = 0;
@@ -838,7 +838,7 @@ int RocVideoESParser::CheckHevcEStream(uint8_t *p_stream, int stream_size) {
 }
 
 int RocVideoESParser::EbspToRbsp(uint8_t *streamBuffer, int begin_bytepos, int end_bytepos) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(streamBuffer) + ", " + ROCDEC_TOSTR(begin_bytepos) + ", " + ROCDEC_TOSTR(end_bytepos));
     int count = 0;
     if (end_bytepos < begin_bytepos) {
         FunctionExitLog(g_rocdec_logger);
@@ -896,7 +896,7 @@ uint32_t RocVideoESParser::ReadUVLC(const uint8_t *p_stream, size_t &bit_offset)
 }
 
 int RocVideoESParser::CheckAv1EStream(uint8_t *p_stream, int stream_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(stream_size));
     int score = 0;
     uint8_t *obu_stream = p_stream;
     uint32_t curr_offset = 0;
@@ -1136,7 +1136,7 @@ int RocVideoESParser::CheckAv1EStream(uint8_t *p_stream, int stream_size) {
 }
 
 int RocVideoESParser::CheckIvfAv1Stream(uint8_t *p_stream, int stream_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(stream_size));
     static const char *IVF_SIGNATURE = "DKIF";
     static const char *AV1_FourCC = "AV01";
     static const int IvfFileHeaderSize = 32;
@@ -1173,7 +1173,7 @@ int RocVideoESParser::CheckIvfAv1Stream(uint8_t *p_stream, int stream_size) {
 }
 
 int RocVideoESParser::CheckVp9EStream(uint8_t *p_stream, int stream_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(stream_size));
     int score = 0;
     size_t offset = 0; // bit offset
     Vp9UncompressedHeader uncomp_header;
@@ -1220,7 +1220,7 @@ int RocVideoESParser::CheckVp9EStream(uint8_t *p_stream, int stream_size) {
 }
 
 int RocVideoESParser::CheckIvfVp9Stream(uint8_t *p_stream, int stream_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(stream_size));
     static const char *IVF_SIGNATURE = "DKIF";
     static const char *VP9_FourCC = "VP90";
     static const int IvfFileHeaderSize = 32;

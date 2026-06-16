@@ -66,6 +66,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
     return 32;
   default:
     return 2;
@@ -83,6 +84,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
     return 8;
   case ROCJITSU_CODE_ARCH_RDNA1:
   case ROCJITSU_CODE_ARCH_RDNA2:
@@ -98,6 +100,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
     return 10;
   case ROCJITSU_CODE_ARCH_RDNA1:
   case ROCJITSU_CODE_ARCH_RDNA2:

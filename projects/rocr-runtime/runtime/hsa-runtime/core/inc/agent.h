@@ -218,7 +218,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   //
   // @details Takes hsa_amd_memory_copy_op_t directly from the public API.
   // The implementation resolves agents, signals, and preferred SDMA engines
-  // internally using rec_sdma_eng_id_peers_info_. Operations sharing the
+  // internally using DmaPreferredEngine(). Operations sharing the
   // same copy_agent are grouped by the caller. Future optimizations can
   // group items by engine to reduce redundant packets.
   //
@@ -250,6 +250,21 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   virtual hsa_status_t DmaFill(void* ptr, uint32_t value, size_t count) {
     return HSA_STATUS_ERROR;
   }
+
+  /// @brief Invoke the user provided callback for each region accessible by
+  /// this agent.
+  ///
+  /// @param[in] include_peer If true, the callback will be also invoked on
+  /// each peer memory region accessible by this agent. If false, only invoke
+  /// the callback on memory region owned by this agent.
+  /// @param[in] callback User provided callback function.
+  /// @param[in] data User provided pointer as input for @p callback.
+  ///
+  /// @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
+  /// region returns ::HSA_STATUS_SUCCESS.
+  virtual hsa_status_t VisitRegion(bool include_peer,
+                                   hsa_status_t (*callback)(hsa_region_t region, void* data),
+                                   void* data) const = 0;
 
   // @brief Invoke the user provided callback for each region accessible by
   // this agent.

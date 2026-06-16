@@ -29,7 +29,7 @@ RocJpegDecoder::~RocJpegDecoder() {
     if (hip_stream_) {
         hipError_t hip_status = hipStreamDestroy(hip_stream_);
         if (hip_status != hipSuccess) {
-            ERR("ERROR: Failed to destroy the HIP stream!");
+            ErrorLog(g_rocjpeg_logger, "Failed to destroy the HIP stream!");
         }
     }
 }
@@ -47,18 +47,22 @@ RocJpegDecoder::~RocJpegDecoder() {
  *         - ROCJPEG_STATUS_INVALID_PARAMETER if the requested device_id is not found.
  */
 RocJpegStatus RocJpegDecoder::InitHIP(int device_id) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, ROCJPEG_TOSTR(device_id));
     CHECK_HIP(hipGetDeviceCount(&num_devices_));
     if (num_devices_ < 1) {
-        ERR("ERROR: Failed to find any GPU!");
+        CriticalLog(g_rocjpeg_logger, "Failed to find any GPU!");
+        FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_NOT_INITIALIZED;
     }
     if (device_id >= num_devices_) {
-        ERR("ERROR: the requested device_id is not found!");
+        CriticalLog(g_rocjpeg_logger, "The requested device_id is not found!");
+        FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
     CHECK_HIP(hipSetDevice(device_id));
     CHECK_HIP(hipGetDeviceProperties(&hip_dev_prop_, device_id));
     CHECK_HIP(hipStreamCreate(&hip_stream_));
+    FunctionExitLog(g_rocjpeg_logger);
     return ROCJPEG_STATUS_SUCCESS;
 }
 
@@ -74,24 +78,30 @@ RocJpegStatus RocJpegDecoder::InitHIP(int device_id) {
  *         - An error code if the initialization fails.
  */
 RocJpegStatus RocJpegDecoder::InitializeDecoder() {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, "");
     RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_SUCCESS;
     rocjpeg_status = InitHIP(device_id_);
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        ERR("ERROR: Failed to initialize the HIP!");
+        CriticalLog(g_rocjpeg_logger, "Failed to initialize the HIP!");
+        FunctionExitLog(g_rocjpeg_logger);
         return rocjpeg_status;
     }
     if (backend_ == ROCJPEG_BACKEND_HARDWARE) {
         std::string gpu_uuid(hip_dev_prop_.uuid.bytes, sizeof(hip_dev_prop_.uuid.bytes));
         rocjpeg_status = jpeg_vaapi_decoder_.InitializeDecoder(hip_dev_prop_.name, device_id_, gpu_uuid);
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-            ERR("ERROR: Failed to initialize the VA-API JPEG decoder!");
+            CriticalLog(g_rocjpeg_logger, "Failed to initialize the VA-API JPEG decoder!");
+            FunctionExitLog(g_rocjpeg_logger);
             return rocjpeg_status;
         }
     } else if (backend_ == ROCJPEG_BACKEND_HYBRID) {
+        FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_NOT_IMPLEMENTED;
     } else {
+        FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
+    FunctionExitLog(g_rocjpeg_logger);
     return rocjpeg_status;
 }
 
@@ -107,8 +117,11 @@ RocJpegStatus RocJpegDecoder::InitializeDecoder() {
  * @return The status of the JPEG decoding operation.
  */
 RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_stream_handle) + ", " + RocJpegFmtPtr(decode_params) + ", " + RocJpegFmtPtr(destination));
     std::lock_guard<std::mutex> lock(mutex_);
     if (jpeg_stream_handle == nullptr || decode_params == nullptr || destination == nullptr) {
+        CriticalLog(g_rocjpeg_logger, "Null pointer");
+        FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
     auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_stream_handle);
@@ -185,6 +198,7 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
 
     CHECK_ROCJPEG(jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_id));
     CHECK_HIP(hipStreamSynchronize(hip_stream_));
+    FunctionExitLog(g_rocjpeg_logger);
     return ROCJPEG_STATUS_SUCCESS;
 }
 
@@ -198,8 +212,11 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
  * @return A RocJpegStatus value indicating the success or failure of the decoding operation.
  */
 RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_streams) + ", " + ROCJPEG_TOSTR(batch_size) + ", " + RocJpegFmtPtr(decode_params) + ", " + RocJpegFmtPtr(destinations));
     std::lock_guard<std::mutex> lock(mutex_);
     if (jpeg_streams == nullptr || decode_params == nullptr || destinations == nullptr) {
+        CriticalLog(g_rocjpeg_logger, "Null pointer");
+        FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
 
@@ -294,6 +311,7 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
         }
     }
 
+    FunctionExitLog(g_rocjpeg_logger);
     return ROCJPEG_STATUS_SUCCESS;
 }
 /**
@@ -311,8 +329,11 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
  *         or ROCJPEG_STATUS_INVALID_PARAMETER if any of the input parameters are invalid.
  */
 RocJpegStatus RocJpegDecoder::GetImageInfo(RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components, RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights){
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_stream_handle) + ", " + RocJpegFmtPtr(num_components) + ", " + RocJpegFmtPtr(subsampling) + ", " + RocJpegFmtPtr(widths) + ", " + RocJpegFmtPtr(heights));
     std::lock_guard<std::mutex> lock(mutex_);
     if (jpeg_stream_handle == nullptr || num_components == nullptr || subsampling == nullptr || widths == nullptr || heights == nullptr) {
+        CriticalLog(g_rocjpeg_logger, "Null pointer");
+        FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
     auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_stream_handle);
@@ -360,6 +381,7 @@ RocJpegStatus RocJpegDecoder::GetImageInfo(RocJpegStreamHandle jpeg_stream_handl
             break;
     }
 
+    FunctionExitLog(g_rocjpeg_logger);
     return ROCJPEG_STATUS_SUCCESS;
 }
 
@@ -417,7 +439,7 @@ RocJpegStatus RocJpegDecoder::CopyChannel(HipInteropDeviceMem& hip_interop_dev_m
                         channel_widths[0] = is_roi_width_valid ? roi_width : channel_width;
                         break;
                     default:
-                        ERR("Unknown output format!");
+                        ErrorLog(g_rocjpeg_logger, "Unknown output format!");
                         return ROCJPEG_STATUS_INVALID_PARAMETER;
                     }
                 break;
@@ -441,7 +463,7 @@ RocJpegStatus RocJpegDecoder::CopyChannel(HipInteropDeviceMem& hip_interop_dev_m
                         channel_widths[0] = is_roi_width_valid ? roi_width : channel_width;
                         break;
                     default:
-                        ERR("Unknown output format!");
+                        ErrorLog(g_rocjpeg_logger, "Unknown output format!");
                         return ROCJPEG_STATUS_INVALID_PARAMETER;
                     }
                 break;
@@ -455,7 +477,7 @@ RocJpegStatus RocJpegDecoder::CopyChannel(HipInteropDeviceMem& hip_interop_dev_m
                 channel_widths[2] = channel_widths[1] = channel_widths[0] = is_roi_width_valid ? roi_width : channel_width;
                 break;
             default:
-                ERR("Unknown output format!");
+                ErrorLog(g_rocjpeg_logger, "Unknown output format!");
                 return ROCJPEG_STATUS_INVALID_PARAMETER;
         }
 
@@ -559,7 +581,7 @@ RocJpegStatus RocJpegDecoder::ColorConvertToRGB(HipInteropDeviceMem& hip_interop
                                                 hip_interop_dev_mem.hip_mapped_device_mem + roi_offset, hip_interop_dev_mem.pitch[0]);
            break;
         default:
-            ERR("ERROR! surface format is not supported!");
+            ErrorLog(g_rocjpeg_logger, "Surface format is not supported!");
             return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
     }
     return ROCJPEG_STATUS_SUCCESS;
@@ -622,7 +644,7 @@ RocJpegStatus RocJpegDecoder::ColorConvertToRGBPlanar(HipInteropDeviceMem& hip_i
             }
            break;
         default:
-            ERR("ERROR! surface format is not supported!");
+            ErrorLog(g_rocjpeg_logger, "Surface format is not supported!");
             return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
     }
     return ROCJPEG_STATUS_SUCCESS;

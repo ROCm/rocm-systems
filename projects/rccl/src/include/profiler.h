@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef PROFILER_H_
 #define PROFILER_H_
@@ -45,7 +46,7 @@ typedef struct ncclProfilerApiState {
   void *collApiEventHandle;
 } ncclProfilerApiState_t;
 
-extern __thread ncclProfilerApiState_t ncclProfilerApiState;
+extern thread_local ncclProfilerApiState_t ncclProfilerApiState;
 
 extern int ncclProfilerEventMask;
 
@@ -107,5 +108,21 @@ bool ncclProfilerPluginLoaded(void);
 
 // Profiler callback for network plugin
 ncclResult_t ncclProfilerCallback(void** eHandle, int type, void* pHandle, int64_t pluginId, void* extData);
+
+// ============================================================================
+// CE Profiler Declarations
+// ============================================================================
+
+// Forward declarations for CE types
+struct ncclCeCollArgs;
+struct ncclCeBatchOpsParams;
+
+// CE profiler event start/stop functions (simple wrappers that call plugin callbacks)
+ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
+ncclResult_t ncclProfilerStopCeCollEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
+ncclResult_t ncclProfilerStartCeSyncEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream, void** ceSyncHandle);
+ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm* comm, void* ceSyncHandle, cudaStream_t stream);
+ncclResult_t ncclProfilerStartCeBatchEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, struct ncclCeBatchOpsParams* params, cudaStream_t stream, void** ceBatchHandle);
+ncclResult_t ncclProfilerStopCeBatchEvent(struct ncclComm* comm, void* ceBatchHandle, cudaStream_t stream);
 
 #endif

@@ -1,0 +1,6 @@
+jobs:
+- pmc:
+  - TA_BUFFER_COALESCED_WRITE_CYCLES_sum
+  - TA_BUFFER_READ_WAVEFRONTS_sum
+  - TD_TC_STALL_sum
+  - TD_TD_BUSY_sum

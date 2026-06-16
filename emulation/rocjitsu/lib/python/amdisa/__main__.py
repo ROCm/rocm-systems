@@ -4,6 +4,7 @@
 """CLI entry point: ``python -m amdisa``."""
 
 import argparse
+from pathlib import Path
 import sys
 import xml.etree.ElementTree as elem_tree
 
@@ -13,6 +14,7 @@ from amdisa import (
     CdnaProfile,
     CodegenConfig,
     CodeGenerator,
+    Gfx1250Profile,
     Parser,
     Rdna1Profile,
     Rdna2Profile,
@@ -22,10 +24,19 @@ from amdisa import (
 )
 from amdisa import xml_schema as xs
 from amdisa.cross_isa import CrossIsaAnalyzer
-from amdisa.encoding_translator_codegen import generate_encoding_fields, generate_encoding_translators
+from amdisa.encoding_translator_codegen import (
+    generate_encoding_fields,
+    generate_encoding_translators,
+)
 from amdisa.legalization import LegalizationGenerator
 from amdisa.legalization_codegen import emit_all as emit_legalization
 from amdisa.semantics import derive_all_semantics
+
+_ENCODING_TRANSLATOR_PAIRS = [
+    ('cdna4', 'cdna3'),
+    ('cdna4', 'rdna4'),
+    ('cdna4', 'rdna3'),
+]
 
 _PROFILES = {
     'cdna': CdnaProfile,
@@ -38,15 +49,21 @@ _PROFILES = {
     'rdna3': Rdna3Profile,
     'rdna3.5': Rdna3_5Profile,
     'rdna4': Rdna4Profile,
+    'gfx1250': Gfx1250Profile,
 }
 
 
 def _detect_profile(isa_xml: str) -> str:
-    """Detect the ISA profile from the XML architecture name.
+    """Detect the ISA profile from the XML filename and architecture name.
 
     Parses only the architecture name element to determine the profile
     without loading the full spec.
     """
+    # TODO: Remove this filename override once the gfx1250 XML carries a
+    # finalized architecture name that can be detected through the normal path.
+    if 'gfx1250' in Path(isa_xml).stem:
+        return 'gfx1250'
+
     root = elem_tree.parse(isa_xml).getroot()
     isa_node = xs.get_node(root, xs.ISA)
     arch_node = xs.get_node(isa_node, xs.ARCH)
@@ -77,7 +94,10 @@ def _run_multi(args) -> None:
     specs = []
     for entry in args.multi:
         if ':' not in entry:
-            print(f'error: --multi entry must be name:xml_path, got: {entry}', file=sys.stderr)
+            print(
+                f'error: --multi entry must be name:xml_path, got: {entry}',
+                file=sys.stderr,
+            )
             sys.exit(1)
         name, xml_path = entry.split(':', 1)
         profile_key = name.replace('.', '_')
@@ -91,168 +111,113 @@ def _run_multi(args) -> None:
     analyzer = CrossIsaAnalyzer()
     plan = analyzer.analyze(specs)
 
-    print(f'Cross-ISA analysis: {plan.total_universal} universal, '
-          f'{plan.total_family_shared} family-shared, '
-          f'{plan.total_exclusive} exclusive', file=sys.stderr)
+    print(
+        f'Cross-ISA analysis: {plan.total_universal} universal, '
+        f'{plan.total_family_shared} family-shared, '
+        f'{plan.total_exclusive} exclusive',
+        file=sys.stderr,
+    )
 
-    config = CodegenConfig(use_shared=args.use_shared)
+    config = CodegenConfig()
 
     # Generate per-ISA files, accumulating shared execute bodies.
-    all_shared_bodies: dict[tuple[str, str], tuple] = {}
-    for name, spec, sem in specs:
-        code_gen = CodeGenerator(spec, args.output, sem, config=config,
-                                 shared_plan=plan)
-        if args.gen_all:
+    if args.gen_isas:
+        all_shared_bodies: dict[tuple[str, str], tuple] = {}
+        for name, spec, sem in specs:
+            code_gen = CodeGenerator(
+                spec, args.isa_output, sem, config=config, shared_plan=plan
+            )
             code_gen.gen_all()
-        # Merge shared execute bodies (first ISA wins for each key).
-        for key, data in code_gen._shared_execute_bodies.items():
-            if key not in all_shared_bodies:
-                all_shared_bodies[key] = data
+            for key, data in code_gen._shared_execute_bodies.items():
+                if key not in all_shared_bodies:
+                    all_shared_bodies[key] = data
 
-    # Write accumulated shared execute templates once (only when requested).
-    if args.gen_shared_execute and all_shared_bodies:
-        first_spec = specs[0][1]
-        first_sem = specs[0][2]
-        writer = CodeGenerator(first_spec, args.output, first_sem,
-                               config=config, shared_plan=plan)
-        writer._shared_execute_bodies = all_shared_bodies
-        writer._write_shared_execute_templates()
+        if all_shared_bodies:
+            first_spec = specs[0][1]
+            first_sem = specs[0][2]
+            writer = CodeGenerator(
+                first_spec, args.isa_output, first_sem, config=config, shared_plan=plan
+            )
+            writer._shared_execute_bodies = all_shared_bodies
+            writer._write_shared_execute_templates()
 
-    # Single unified shared execute header — no per-encoding stubs needed.
+    # DBT legalization tables and encoding translators.
+    if args.gen_dbt:
+        dbt_output = args.dbt_output
+        if not dbt_output:
+            print(
+                'error: --dbt-output is required when generating DBT tables with --multi',
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
-    # Legalization table generation (--gen-legalization).
-    if args.gen_legalization:
         leg_gen = LegalizationGenerator(specs)
-        pairs = args.legalization_pairs
-        if pairs:
-            pair_list = []
-            for p in pairs:
-                s, d = p.split('->')
-                pair_list.append((s.strip(), d.strip()))
-        else:
-            pair_list = None
-        results = leg_gen.generate_all(pair_list)
-        leg_output = args.legalization_output or args.output or '.'
-        generated = emit_legalization(leg_output, results)
+        results = leg_gen.generate_all()
+        generated = emit_legalization(dbt_output, results)
         for src, dst, entries in results:
             counts = leg_gen.summary(entries)
-            print(f'  {src} -> {dst}: {len(entries)} entries '
-                  f'({counts["identity"]} identity, {counts["substitute"]} substitute, '
-                  f'{counts["lower"]} lower, {counts["expand"]} expand, '
-                  f'{counts["illegal"]} illegal)', file=sys.stderr)
-        print(f'Generated {len(generated)} files in {leg_output}', file=sys.stderr)
+            identity = counts['identity']
+            substitute = counts['substitute']
+            lower = counts['lower']
+            expand = counts['expand']
+            illegal = counts['illegal']
+            print(
+                f'  {src} -> {dst}: {len(entries)} entries '
+                f'({identity} identity, {substitute} substitute, '
+                f'{lower} lower, {expand} expand, '
+                f'{illegal} illegal)',
+                file=sys.stderr,
+            )
+        print(f'Generated {len(generated)} files in {dbt_output}', file=sys.stderr)
 
-    # Encoding field structs + translator generation (--gen-encoding-translators).
-    if args.gen_encoding_translators:
-        enc_output = args.encoding_translator_output or args.output or '.'
-        generate_encoding_fields(specs, enc_output)
-        if args.encoding_pair:
-            src_n, dst_n = args.encoding_pair.split('->')
-            src_n, dst_n = src_n.strip(), dst_n.strip()
-            spec_map = {name: (spec, sem) for name, spec, sem in specs}
-            if src_n not in spec_map or dst_n not in spec_map:
-                print(f'error: --encoding-pair references unknown ISA: {src_n} or {dst_n}',
-                      file=sys.stderr)
-                sys.exit(1)
-            src_spec, _ = spec_map[src_n]
-            dst_spec, _ = spec_map[dst_n]
-            generate_encoding_translators(src_spec, dst_spec, src_n, dst_n, enc_output)
+        generate_encoding_fields(specs, dbt_output)
+        spec_map = {name: (spec, sem) for name, spec, sem in specs}
+        for src_n, dst_n in _ENCODING_TRANSLATOR_PAIRS:
+            if src_n in spec_map and dst_n in spec_map:
+                src_spec, _ = spec_map[src_n]
+                dst_spec, _ = spec_map[dst_n]
+                generate_encoding_translators(
+                    src_spec, dst_spec, src_n, dst_n, dbt_output
+                )
 
 
 def main() -> None:
     """Parse an AMD GPU ISA XML spec and generate C++ sources."""
     arg_parser = argparse.ArgumentParser(
-        description="Parse a machine-readable AMD GPU ISA specification and generate C++ sources"
+        description='Parse a machine-readable AMD GPU ISA specification and generate C++ sources'
     )
     arg_parser.add_argument(
-        "isafile", nargs='?', default=None,
-        help="XML file with machine-readable AMD GPU ISA specification"
-    )
-    arg_parser.add_argument(
-        "--multi", nargs='+', metavar='NAME:XML',
-        help="Multi-ISA mode: parse all XMLs and generate shared execute() templates. "
-             "Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml)."
-    )
-    arg_parser.add_argument(
-        "--profile",
-        choices=sorted(_PROFILES),
+        'isafile',
+        nargs='?',
         default=None,
-        help="ISA profile to use (auto-detected from XML if omitted)",
+        help='XML file with machine-readable AMD GPU ISA specification',
     )
     arg_parser.add_argument(
-        "--gen-all", action="store_true", help="Generate C++ for all files"
-    )
-    arg_parser.add_argument(
-        "--gen-decoder", action="store_true", help="Generate C++ decoder files"
-    )
-    arg_parser.add_argument(
-        "--gen-isa", action="store_true", help="Generate C++ ISA type files"
-    )
-    arg_parser.add_argument(
-        "--gen-opr-types", action="store_true", help="Generate C++ operand types"
-    )
-    arg_parser.add_argument(
-        "--gen-encodings", action="store_true", help="Generate C++ encoding types"
-    )
-    arg_parser.add_argument(
-        "--gen-insts", action="store_true", help="Generate C++ instruction types"
-    )
-    arg_parser.add_argument(
-        "--gen-operand",
-        action="store_true",
-        help="Generate C++ ISA-specific operand class",
-    )
-    arg_parser.add_argument(
-        "--gen-machine-inst-encodings",
-        action="store_true",
-        help="Generate C++ machine inst encoding types",
-    )
-    arg_parser.add_argument(
-        "-o", "--output", help="Output path for generated C++ files"
-    )
-    arg_parser.add_argument(
-        "--use-shared",
-        action="store_true",
-        help="Emit using-aliases for structs that match the shared baseline "
-             "headers (machine_insts_scalar.h, machine_insts_cdna.h)",
-    )
-    arg_parser.add_argument(
-        "--gen-shared-execute",
-        action="store_true",
-        help="Generate shared/execute_*.h template headers (requires --multi).",
-    )
-    arg_parser.add_argument(
-        "--gen-legalization",
-        action="store_true",
-        help="Generate C++ legalization tables for DBT (requires --multi).",
-    )
-    arg_parser.add_argument(
-        "--legalization-output",
-        metavar="DIR",
-        help="Output directory for legalization tables (defaults to -o value).",
-    )
-    arg_parser.add_argument(
-        "--legalization-pairs",
+        '--multi',
         nargs='+',
-        metavar='SRC->DST',
-        help="Restrict legalization to specific pairs (e.g., cdna3->cdna4). "
-             "Default: all supported pairs from the loaded ISAs.",
+        metavar='NAME:XML',
+        help='Multi-ISA mode: parse all XMLs and generate shared execute() templates. '
+        'Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml).',
     )
     arg_parser.add_argument(
-        "--gen-encoding-translators",
-        action="store_true",
-        help="Generate C++ encoding translator functions for DBT (requires --multi with exactly 2 ISAs).",
+        '--gen-isas',
+        action='store_true',
+        default=True,
+        help='Generate ISA C++ files (decoders, encodings, execute bodies). Default.',
     )
     arg_parser.add_argument(
-        "--encoding-translator-output",
-        metavar="DIR",
-        help="Output directory for encoding translators (defaults to -o value).",
+        '--gen-dbt',
+        action='store_true',
+        default=True,
+        help='Generate DBT legalization tables and encoding translators. Default.',
     )
     arg_parser.add_argument(
-        "--encoding-pair",
-        metavar="SRC->DST",
-        help="Source->target ISA pair for encoding translators (e.g., cdna4->rdna4). "
-             "Field structs are always generated from all ISAs in --multi.",
+        '--isa-output', help='Output path for generated ISA C++ files'
+    )
+    arg_parser.add_argument(
+        '--dbt-output',
+        metavar='DIR',
+        help='Output directory for DBT tables (defaults to --isa-output).',
     )
     args = arg_parser.parse_args()
 
@@ -261,43 +226,18 @@ def main() -> None:
         _run_multi(args)
         return
 
-    gen_flags = [
-        args.gen_all, args.gen_decoder, args.gen_isa, args.gen_opr_types,
-        args.gen_encodings, args.gen_insts, args.gen_operand,
-        args.gen_machine_inst_encodings,
-    ]
-    if not any(gen_flags):
-        print('warning: no --gen-* flag specified; nothing to generate', file=sys.stderr)
-        sys.exit(0)
-
     if not args.isafile:
         print('error: isafile required in single-ISA mode', file=sys.stderr)
         sys.exit(1)
 
-    profile_key = args.profile or _detect_profile(args.isafile)
+    profile_key = _detect_profile(args.isafile)
     profile = _PROFILES[profile_key]()
     isa = Parser(args.isafile, profile).parse()
     semantics = derive_all_semantics(isa)
-    config = CodegenConfig(use_shared=args.use_shared)
-    code_gen = CodeGenerator(isa, args.output, semantics, config=config)
-
-    if args.gen_all:
+    config = CodegenConfig()
+    if args.gen_isas:
+        code_gen = CodeGenerator(isa, args.isa_output, semantics, config=config)
         code_gen.gen_all()
-    else:
-        if args.gen_decoder:
-            code_gen.gen_decoder()
-        if args.gen_isa:
-            code_gen.gen_isa_types()
-        if args.gen_opr_types:
-            code_gen.gen_operand_types()
-        if args.gen_encodings:
-            code_gen.gen_encodings()
-        if args.gen_insts:
-            code_gen.gen_insts()
-        if args.gen_operand:
-            code_gen.gen_operand()
-        if args.gen_machine_inst_encodings:
-            code_gen.gen_machine_inst_encodings()
 
 
 if __name__ == '__main__':
