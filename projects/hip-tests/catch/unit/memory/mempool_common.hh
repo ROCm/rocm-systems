@@ -401,9 +401,8 @@ class streamMemAllocTest {
     }
     return true;
   }
-  // Thread-safe variant of validateResult(): performs the same comparison but
-  // returns a bool instead of calling any Catch2 assertion macro. Callers should wrap 
-  // the result in REQUIRE_THREAD on the main thread.
+  // Thread-safe variant of validateResult(): returns a bool instead of using a
+  // Catch2 macro, so it is safe to call from worker threads.
   bool validateResultThreadSafe() {
     for (int i = 0; i < size; i++) {
       auto res = A_h[i] + B_h[i];
