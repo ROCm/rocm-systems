@@ -565,7 +565,6 @@ namespace hip {
     }
 
     // --- Execution context management ---
-    
     ExecutionCtx* getPrimaryExecCtx() const { return primaryExecCtx_; }
     void setPrimaryExecCtx(ExecutionCtx* ctx) { primaryExecCtx_ = ctx; }
     std::recursive_mutex& getLock() { return lock_; }

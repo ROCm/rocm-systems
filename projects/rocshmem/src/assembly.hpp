@@ -204,7 +204,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 1: [[unlikely]] {
 #if defined(__gfx90a__)
       int16_t val16{static_cast<int16_t>(*src)};
-      asm volatile("flat_store_byte %0, %1, glc"
+      asm volatile("flat_store_byte %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val16)
                    : "memory");
@@ -218,7 +218,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #endif
 #if defined(__gfx1100__)
       int32_t val32{static_cast<int32_t>(*src)};
-      asm volatile("flat_store_byte %0, %1, glc"
+      asm volatile("flat_store_byte %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
@@ -235,7 +235,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 2: [[unlikely]] {
       [[maybe_unused]] int16_t val16{*(reinterpret_cast<int16_t*>(src))};
 #if defined(__gfx90a__)
-      asm volatile("flat_store_short %0, %1, glc"
+      asm volatile("flat_store_short %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val16)
                    : "memory");
@@ -248,7 +248,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #endif
 #if defined(__gfx1100__)
       int32_t val32{static_cast<int32_t>(val16)};
-      asm volatile("flat_store_short %0, %1, glc"
+      asm volatile("flat_store_short %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
@@ -265,7 +265,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 4: [[unlikely]] {
       [[maybe_unused]] int32_t val32{*(reinterpret_cast<int32_t*>(src))};
 #if defined(__gfx90a__) || defined(__gfx1100__)
-      asm volatile("flat_store_dword %0, %1, glc"
+      asm volatile("flat_store_dword %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
@@ -287,7 +287,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 8: [[unlikely]] {
       [[maybe_unused]] int64_t val64{*(reinterpret_cast<int64_t*>(src))};
 #if defined(__gfx90a__) || defined(__gfx1100__)
-      asm volatile("flat_store_dwordx2 %0, %1, glc"
+      asm volatile("flat_store_dwordx2 %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val64)
                    : "memory");
@@ -309,7 +309,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 16: [[likely]] {
       [[maybe_unused]] __int128_t val128{*(reinterpret_cast<__int128_t*>(src))};
 #if defined(__gfx90a__) || defined(__gfx1100__)
-      asm volatile("flat_store_dwordx4 %0, %1, glc"
+      asm volatile("flat_store_dwordx4 %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val128)
                    : "memory");
