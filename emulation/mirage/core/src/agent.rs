@@ -215,6 +215,14 @@ pub struct AmdgpuConfig {
     pub memory: Option<GpuMemoryConfig>,
     #[serde(default)]
     pub device: KfdDeviceInfo,
+
+    /// Number of simulated GPU instances. Mirrors `num_gpus` in the
+    /// rocjitsu flatbuffer schema (defaults to 1). The system-level
+    /// per-node GPU count comes from
+    /// [`crate::topology::TopologyDef::gpus_per_node`]; this field lets
+    /// the synthesised rocjitsu config request that many devices.
+    #[serde(default = "one")]
+    pub num_gpus: u32,
 }
 
 /// Virtual machine hardware model. Mirrors `VirtualMachineConfig`

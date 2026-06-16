@@ -34,6 +34,7 @@ pub fn mi300x() -> AgentDef {
                 num_xcds: 0,
                 num_iods: 0,
                 memory: None,
+                num_gpus: 1,
                 device: KfdDeviceInfo {
                     gpu_id: 50148,
                     gfx_target_version: 90402,
@@ -83,6 +84,7 @@ pub fn mi350x() -> AgentDef {
                 num_xcds: 0,
                 num_iods: 0,
                 memory: None,
+                num_gpus: 1,
                 device: KfdDeviceInfo {
                     gpu_id: 38144,
                     gfx_target_version: 90500,
@@ -131,6 +133,7 @@ pub fn mi450x() -> AgentDef {
                 num_xcds: 0,
                 num_iods: 0,
                 memory: None,
+                num_gpus: 1,
                 device: KfdDeviceInfo {
                     gpu_id: 1250,
                     gfx_target_version: 120500,

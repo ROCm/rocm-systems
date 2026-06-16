@@ -40,6 +40,41 @@ fn sim_config_round_trip() {
     }
 }
 
+/// The profile's per-node GPU count must flow into the synthesised
+/// rocjitsu config as `vm.gpu.num_gpus`, so `--gpus-per-node N` exposes
+/// N devices to the workload. Does not require the KMD library: the
+/// `session: None` path writes a content-addressed config file.
+#[test]
+fn gpus_per_node_drives_num_gpus() {
+    let _g = mirage_core::paths::test_env_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    mirage_core::paths::set_test_root(tmp.path());
+
+    let agent_report = mirage_builtin::ensure_agents(false).unwrap();
+    let agent_name = agent_report
+        .iter()
+        .map(|(n, _)| n.clone())
+        .next()
+        .expect("at least one builtin agent");
+
+    let def = EmulatorDef {
+        emulator: "rocjitsu".to_string(),
+        plugins: Default::default(),
+        exec_mode: ExecMode::Functional,
+        options: Default::default(),
+        topology: MaybeRef::Owned(mirage_core::topology::TopologyDef {
+            num_nodes: 1,
+            gpus_per_node: 3,
+            agent: MaybeRef::Ref(agent_name),
+        }),
+    };
+
+    let cfg = kmd_config(&def, None).expect("sim config should materialise");
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&cfg).unwrap()).unwrap();
+    assert_eq!(json["vm"]["gpu"]["num_gpus"], 3);
+}
+
 /// When rocjitsu is installed, the injected workload environment carries
 /// the overridable RCCL/HSA defaults the upstream RCCL collective tests
 /// rely on. Skipped when the KMD library is not discoverable.

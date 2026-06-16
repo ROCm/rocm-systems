@@ -408,11 +408,18 @@ pub fn kmd_config(def: &EmulatorDef, session: Option<&SessionId>) -> Result<Path
         ExecMode::Functional => "functional",
         ExecMode::Clocked => "clocked",
     };
+    // Honour the profile's per-node GPU count: rocjitsu's config loader
+    // reads `vm.gpu.num_gpus` and synthesises that many KFD devices
+    // (deriving per-GPU identities from the single `device` template).
+    // Each node's host process emulates the GPUs local to that node, so
+    // the per-node `gpus_per_node` is what the config requests.
+    let mut vm = agent.vm;
+    vm.gpu.num_gpus = topology.gpus_per_node.max(1);
     let sim = serde_json::json!({
         "max_ticks": 100000u64,
         "num_threads": 1u32,
         "exec_mode": exec_mode,
-        "vm": agent.vm,
+        "vm": vm,
         "topology": agent.topology,
     });
     let bytes = serde_json::to_vec_pretty(&sim).map_err(|e| {
