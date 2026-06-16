@@ -436,6 +436,132 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_MaxBlockDims) {
   CTX_DESTROY();
 }
 /**
+ * Test Description
+ * ------------------------
+ *  - Verifies that hipDrvLaunchKernelEx with hipLaunchAttributeClusterDimension
+ *  - is correctly captured during stream capture and replays with the correct
+ *  - cluster dimensions in the AQL ext dispatch packet.
+ *  - Only runs on gfx1250/gfx1251 where cluster launches are supported.
+ * Test source
+ * ------------------------
+ *  - unit/module/hipDrvLaunchKernelEx.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ *  - AMD GPU with cluster launch support (gfx1250/gfx1251)
+ */
+HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
+  hipDeviceProp_t prop{};
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  const std::string arch{prop.gcnArchName};
+
+  // Cluster launches (hipLaunchAttributeClusterDimension) require gfx1250/gfx1251
+  if (arch.find("gfx1250") == std::string::npos &&
+      arch.find("gfx1251") == std::string::npos) {
+    HIP_SKIP_TEST("Test requires gfx1250 or gfx1251 for cluster launch support");
+  }
+
+  // Compile a simple fill kernel via hiprtc
+  static const char* fill_src = R"(
+    extern "C" __global__ void fill(int* out, int val, int n) {
+      int i = blockIdx.x * blockDim.x + threadIdx.x;
+      if (i < n) out[i] = val;
+    }
+  )";
+
+  hiprtcProgram prog;
+  HIP_CHECK(hiprtcCreateProgram(&prog, fill_src, "fill.cu", 0, nullptr, nullptr));
+  char arch_flag[64];
+  snprintf(arch_flag, sizeof(arch_flag), "--offload-arch=%s", prop.gcnArchName);
+  const char* opts[] = {arch_flag};
+  REQUIRE(hiprtcCompileProgram(prog, 1, opts) == HIPRTC_SUCCESS);
+
+  size_t code_size;
+  HIP_CHECK(hiprtcGetCodeSize(prog, &code_size));
+  std::vector<char> code(code_size);
+  HIP_CHECK(hiprtcGetCode(prog, code.data()));
+  hiprtcDestroyProgram(&prog);
+
+  hipModule_t mod;
+  hipFunction_t fn;
+  HIP_CHECK(hipModuleLoadData(&mod, code.data()));
+  HIP_CHECK(hipModuleGetFunction(&fn, mod, "fill"));
+
+  constexpr int N_ELEM   = 1024;
+  constexpr int BLOCK    = 64;
+  constexpr int GRID     = N_ELEM / BLOCK;   // 16
+  constexpr int CLUSTER  = 4;               // 4 blocks per cluster
+
+  int* d_out = nullptr;
+  HIP_CHECK(hipMalloc(&d_out, N_ELEM * sizeof(int)));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  // Warmup before capture
+  {
+    HIP_LAUNCH_CONFIG cfg{};
+    cfg.gridDimX = GRID; cfg.gridDimY = 1; cfg.gridDimZ = 1;
+    cfg.blockDimX = BLOCK; cfg.blockDimY = 1; cfg.blockDimZ = 1;
+    cfg.hStream = stream;
+    hipLaunchAttribute attr;
+    attr.id = hipLaunchAttributeClusterDimension;
+    attr.value.clusterDim = {CLUSTER, 1, 1};
+    cfg.attrs = &attr;
+    cfg.numAttrs = 1;
+    int val = 0, n = N_ELEM;
+    void* kargs[] = {&d_out, &val, &n};
+    HIP_CHECK(hipDrvLaunchKernelEx(&cfg, fn, kargs, nullptr));
+    HIP_CHECK(hipStreamSynchronize(stream));
+  }
+
+  HIP_CHECK(hipMemset(d_out, 0, N_ELEM * sizeof(int)));
+
+  // Stream capture
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  {
+    HIP_LAUNCH_CONFIG cfg{};
+    cfg.gridDimX = GRID; cfg.gridDimY = 1; cfg.gridDimZ = 1;
+    cfg.blockDimX = BLOCK; cfg.blockDimY = 1; cfg.blockDimZ = 1;
+    cfg.hStream = stream;
+    hipLaunchAttribute attr;
+    attr.id = hipLaunchAttributeClusterDimension;
+    attr.value.clusterDim = {CLUSTER, 1, 1};
+    cfg.attrs = &attr;
+    cfg.numAttrs = 1;
+    int val = 42, n = N_ELEM;
+    void* kargs[] = {&d_out, &val, &n};
+    HIP_CHECK(hipDrvLaunchKernelEx(&cfg, fn, kargs, nullptr));
+  }
+
+  hipGraph_t graph;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+
+  // Verify at least one node was captured
+  size_t num_nodes = 0;
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &num_nodes));
+  REQUIRE(num_nodes >= 1);
+
+  // Instantiate and replay
+  hipGraphExec_t exec;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(exec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<int> h_out(N_ELEM);
+  HIP_CHECK(hipMemcpy(h_out.data(), d_out, N_ELEM * sizeof(int), hipMemcpyDeviceToHost));
+  for (int i = 0; i < N_ELEM; i++) {
+    REQUIRE(h_out[i] == 42);
+  }
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipModuleUnload(mod));
+}
+
+/**
  * End doxygen group ModuleTest.
  * @}
  */

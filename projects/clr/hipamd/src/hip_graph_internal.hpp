@@ -1300,6 +1300,7 @@ class GraphKernelNode : public GraphNode {
   int globalWorkSizeX_remainder_;
   int globalWorkSizeY_remainder_;
   int globalWorkSizeZ_remainder_;
+  dim3 clusterDim_;                    //!< Cluster dimensions for cluster launch
   hipFunction_t resolvedFunc_ = nullptr;  //!< Cached resolved function to avoid redundant lookups
 
  protected:
@@ -1311,6 +1312,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeX_remainder_ = rhs.globalWorkSizeX_remainder_;
     globalWorkSizeY_remainder_ = rhs.globalWorkSizeY_remainder_;
     globalWorkSizeZ_remainder_ = rhs.globalWorkSizeZ_remainder_;
+    clusterDim_ = rhs.clusterDim_;
     hipError_t status = copyParams(&rhs.kernelParams_);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to allocate memory to copy params");
@@ -1520,7 +1522,8 @@ class GraphKernelNode : public GraphNode {
                   int coopKernel = 0,
                   int globalWorkSizeX_remainder = 0,
                   int globalWorkSizeY_remainder = 0,
-                  int globalWorkSizeZ_remainder = 0)
+                  int globalWorkSizeZ_remainder = 0,
+                  dim3 clusterDim = {1, 1, 1})
       : GraphNode(hipGraphNodeTypeKernel, "bold", "octagon", "KERNEL") {
     kernelEvents_ = {0};
     if (pEvents != nullptr) {
@@ -1536,6 +1539,7 @@ class GraphKernelNode : public GraphNode {
     globalWorkSizeX_remainder_ = globalWorkSizeX_remainder;
     globalWorkSizeY_remainder_ = globalWorkSizeY_remainder;
     globalWorkSizeZ_remainder_ = globalWorkSizeZ_remainder;
+    clusterDim_ = clusterDim;
   }
 
   ~GraphKernelNode() { freeParams(); }
@@ -1607,7 +1611,8 @@ class GraphKernelNode : public GraphNode {
                                        kernelParams_.gridDim.z, kernelParams_.blockDim.x,
                                        kernelParams_.blockDim.y, kernelParams_.blockDim.z,
                                        kernelParams_.sharedMemBytes, *device, globalWorkSizeX_remainder_,
-                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_, 1, 1, 1);
+                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
+                                       clusterDim_.x, clusterDim_.y, clusterDim_.z);
 
     if (!launch_params.IsValidConfig()) {
       return hipErrorInvalidConfiguration;
@@ -1758,7 +1763,8 @@ class GraphKernelNode : public GraphNode {
                                        pNodeParams->gridDim.z, pNodeParams->blockDim.x,
                                        pNodeParams->blockDim.y, pNodeParams->blockDim.z,
                                        pNodeParams->sharedMemBytes, *device, globalWorkSizeX_remainder_,
-                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_, 1, 1, 1);
+                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
+                                       clusterDim_.x, clusterDim_.y, clusterDim_.z);
 
     if (!launch_params.IsValidConfig()) {
       HIP_RETURN(hipErrorInvalidConfiguration);
