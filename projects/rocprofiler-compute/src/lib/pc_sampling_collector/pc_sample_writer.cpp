@@ -76,7 +76,7 @@ nlohmann::json dim3_to_json(const pc_sample_dim3_t& d)
 
 nlohmann::json snapshot_to_json(const pc_sample_snapshot_t& s)
 {
-    auto out = nlohmann::json::object();
+    auto out            = nlohmann::json::object();
     out["stall_reason"] = not_issued_reason_name(s.stall_reason);
     // Emit the plain uint32 fields from the single-sourced field list.
 #define PC_SAMPLE_SNAPSHOT_EMIT(field) out[#field] = s.field;

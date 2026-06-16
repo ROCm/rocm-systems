@@ -62,27 +62,27 @@ struct pc_sample_dim3_t
 // special handling on both the decode and serialize sides). Single-sourced here
 // so the struct definition, the SDK->struct copy in decode, and the JSON emit are
 // all driven from one list; adding/renaming a field is a one-line edit.
-#define PC_SAMPLE_SNAPSHOT_PLAIN_FIELDS(X)                                                          \
-    X(dual_issue_valu)                                                                              \
-    X(arb_state_issue_valu)                                                                         \
-    X(arb_state_issue_matrix)                                                                       \
-    X(arb_state_issue_lds)                                                                          \
-    X(arb_state_issue_lds_direct)                                                                   \
-    X(arb_state_issue_scalar)                                                                       \
-    X(arb_state_issue_vmem_tex)                                                                     \
-    X(arb_state_issue_flat)                                                                         \
-    X(arb_state_issue_exp)                                                                          \
-    X(arb_state_issue_misc)                                                                         \
-    X(arb_state_issue_brmsg)                                                                        \
-    X(arb_state_stall_valu)                                                                         \
-    X(arb_state_stall_matrix)                                                                       \
-    X(arb_state_stall_lds)                                                                          \
-    X(arb_state_stall_lds_direct)                                                                   \
-    X(arb_state_stall_scalar)                                                                       \
-    X(arb_state_stall_vmem_tex)                                                                     \
-    X(arb_state_stall_flat)                                                                         \
-    X(arb_state_stall_exp)                                                                          \
-    X(arb_state_stall_misc)                                                                         \
+#define PC_SAMPLE_SNAPSHOT_PLAIN_FIELDS(X) \
+    X(dual_issue_valu)                     \
+    X(arb_state_issue_valu)                \
+    X(arb_state_issue_matrix)              \
+    X(arb_state_issue_lds)                 \
+    X(arb_state_issue_lds_direct)          \
+    X(arb_state_issue_scalar)              \
+    X(arb_state_issue_vmem_tex)            \
+    X(arb_state_issue_flat)                \
+    X(arb_state_issue_exp)                 \
+    X(arb_state_issue_misc)                \
+    X(arb_state_issue_brmsg)               \
+    X(arb_state_stall_valu)                \
+    X(arb_state_stall_matrix)              \
+    X(arb_state_stall_lds)                 \
+    X(arb_state_stall_lds_direct)          \
+    X(arb_state_stall_scalar)              \
+    X(arb_state_stall_vmem_tex)            \
+    X(arb_state_stall_flat)                \
+    X(arb_state_stall_exp)                 \
+    X(arb_state_stall_misc)                \
     X(arb_state_stall_brmsg)
 
 struct pc_sample_snapshot_t

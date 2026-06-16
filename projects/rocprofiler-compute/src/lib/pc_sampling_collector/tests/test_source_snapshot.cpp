@@ -142,7 +142,7 @@ TEST_F(test_source_snapshot_t, SnapshotSourceFiles_SymlinkedSourceInsideAllowedR
     const auto outside      = m_tmp_root / "secret.txt";
     write_file(outside, "secret\n");
 
-    const auto link = allowed_root / "link.cpp";
+    const auto      link = allowed_root / "link.cpp";
     std::error_code ec;
     std::filesystem::create_symlink(outside, link, ec);
     ASSERT_FALSE(ec) << ec.message();

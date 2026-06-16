@@ -71,7 +71,9 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
         span.size               = m_translator->get_load_size(id);
         writer.start_symbol(span);
 
-        for_each_instruction_in(id, [&writer](const instruction_t& inst) { writer.write_instruction(inst); });
+        for_each_instruction_in(id,
+                                [&writer](const instruction_t& inst)
+                                { writer.write_instruction(inst); });
 
         writer.end_symbol();
         writer.end_code_obj();

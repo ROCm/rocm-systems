@@ -342,7 +342,7 @@ TEST_F(TestSdkCallbacks, PcSamplingBufferCallback_NullEntryAndForeignRecords_Are
                                                      collector};
 
     rocprofiler_pc_sampling_record_host_trap_v0_t rec{};
-    rec.size = sizeof(rec);
+    rec.size     = sizeof(rec);
     auto foreign = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_TRACING,
                                   ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE,
                                   &rec);
@@ -362,10 +362,10 @@ TEST_F(TestSdkCallbacks, PcSamplingBufferCallback_MixedBatch_AppendsOnlyValidRec
                                                      collector};
 
     rocprofiler_pc_sampling_record_host_trap_v0_t valid{};
-    valid.size = sizeof(valid);
-    auto good  = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
-                               ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE,
-                               &valid);
+    valid.size   = sizeof(valid);
+    auto good    = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
+                                  ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE,
+                                  &valid);
     auto garbage = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING, 0xFFFFFFFFu, &valid);
 
     rocprofiler_record_header_t* headers[] = {&good, nullptr, &garbage, &good};
@@ -383,10 +383,10 @@ TEST_F(TestSdkCallbacks, KernelDispatchBufferCallback_MixedBatch_AppendsOnlyVali
                                                      collector};
 
     rocprofiler_buffer_tracing_kernel_dispatch_record_t kd{};
-    kd.size = sizeof(kd);
-    auto good = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_TRACING,
-                              ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                              &kd);
+    kd.size      = sizeof(kd);
+    auto good    = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                                  ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                  &kd);
     auto foreign = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
                                   ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                   &kd);
