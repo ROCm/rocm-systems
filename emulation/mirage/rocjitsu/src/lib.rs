@@ -345,7 +345,15 @@ fn kmd_search_dirs() -> Vec<PathBuf> {
     if let Ok(exe) = std::env::current_exe()
         && let Some(exe_dir) = exe.parent()
     {
-        dirs.push(exe_dir.join("../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/linux"));
+        dirs.extend((0..=3).map(|levels| {
+            exe_dir
+                .iter()
+                .chain(std::iter::repeat("..".as_ref()).take(levels))
+                .chain(std::iter::once(
+                    "rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/linux".as_ref(),
+                ))
+                .collect::<PathBuf>()
+        }));
     }
     // ROCm install root.
     if let Some(root) = std::env::var_os("ROCM_HOME").filter(|v| !v.is_empty()) {
