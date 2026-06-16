@@ -6,6 +6,7 @@ if [[ $# -lt 2 ]]; then
   echo "Usage: $0 <nnodes> <ppn> <msg_size> [<build-flag> [<gpu-arch>]]"
   echo "Rebuild gin-anvil after changing rocSHMEM tests (e.g. tester_arguments -v parsing):"
   echo "  $0 ... true   # or docker build --build-arg ROCSHMEM_CACHE_BUST=N ..."
+  echo "External GIN DSO: place docker-gin-plugin/libnccl-gin.so then rebuild; export GIN_HOST_USE_EXTERNAL_PLUGIN=1 for TYPE=2."
   exit 1
 fi
 
@@ -46,12 +47,17 @@ MPIRUN_BASE_HFILE="-n ${NP} --hostfile /workspace/${HFILE} --allow-run-as-root -
 # Avoid a duplicate -D 0 run mixing NCCL_GIN_ENABLE=1 with -D 0 and NCCL_DEBUG=WARN (see ddai-a2a-1gb-perf-try2.log).
 RCCL_ENV_COMMON="-x HSA_FORCE_FINE_GRAIN_PCIE=1 -x NCCL_DEBUG=VERSION"
 
-# NCCL_GIN_TYPE=2 (host IB proxy via built-in ncclGinIb): RCCL otherwise prepends libnccl-gin.so to the
-# plugin list; if that DSO is absent, init noise / ordering can block a clean fallback to ncclGinIb.
-# NCCL_GIN_PLUGIN=none clears external slots so Ib is used (still requires IB verbs in the container:
-# DOCKER_GPU includes --device /dev/infiniband). GIN_ANVIL is NCCL_GIN_TYPE=5 (built-in); no IB needed.
-# Skip host-proxy stanzas with RUN_GIN_HOST_PROXY=0 (e.g. CI without HCAs).
-GIN_HOST_PROXY_EXTRA="-x NCCL_GIN_PLUGIN=none -x NCCL_IB_DISABLE=0"
+# NCCL_GIN_TYPE=2 (host IB proxy): RCCL defaults to loading libnccl-gin.so (external slot name; not
+# librccl-gin.so). If that DSO is absent, NCCL_GIN_PLUGIN=none avoids reserving that slot so built-in
+# ncclGinIb can be used (IB still required: DOCKER_GPU includes --device /dev/infiniband).
+# If you bake docker-gin-plugin/libnccl-gin.so into the image (Dockerfile-rccl-gin-anvil), set
+# GIN_HOST_USE_EXTERNAL_PLUGIN=1 so we do not pass NCCL_GIN_PLUGIN=none.
+# GIN_ANVIL is NCCL_GIN_TYPE=5 (built-in); no IB needed. Skip host-proxy stanzas with RUN_GIN_HOST_PROXY=0.
+if [ "${GIN_HOST_USE_EXTERNAL_PLUGIN:-0}" = 1 ]; then
+  GIN_HOST_PROXY_EXTRA="-x NCCL_IB_DISABLE=0"
+else
+  GIN_HOST_PROXY_EXTRA="-x NCCL_GIN_PLUGIN=none -x NCCL_IB_DISABLE=0"
+fi
 
 # rccl-tests alltoall_perf: -R is local_register (0=off, 1=local, 2=symmetric ncclCommWindowRegister).
 # common.cu requires -R 2 whenever -D>0 (device/GIN kernels use ncclWindow_t from symmetric collective windows).

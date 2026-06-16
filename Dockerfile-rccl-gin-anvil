@@ -13,8 +13,9 @@ FROM ubuntu:24.04
 #docker build -f Dockerfile-rccl-gin-anvil -t rccl-gingda713 --build-arg GPU_TARGETS=gfx950 --build-arg ROCSHMEM_CACHE_BUST=5 --build-arg USE_LOCAL_SRC=1  .
 
 # Example command lines:
-# GIN host proxy (NCCL_GIN_TYPE=2, built-in ncclGinIb): pass IB into the container; without a vendor
-# libnccl-gin.so use -x NCCL_GIN_PLUGIN=none so RCCL does not reserve the default missing DSO slot.
+# GIN host proxy (NCCL_GIN_TYPE=2, built-in ncclGinIb): pass IB into the container. If you do not bake
+# an external libnccl-gin.so (see docker-gin-plugin/README.md), use -x NCCL_GIN_PLUGIN=none so RCCL does
+# not reserve the default missing DSO slot.
 # GIN proxy (inter-node capable): NCCL_GIN_TYPE=2
 #docker run -it --rm --shm-size 64G   --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host   --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged  rccl-gingda mpirun -n 8 -mca pml ob1 -mca btl ^openib -x RCCL_ROCSHMEM_ENABLE=0 -x RCCL_ROCSHMEM_THRESHOLD=$((128*1024*1024)) -x NCCL_DEBUG=VERSION -x NCCL_GIN_ENABLE=1 -x NCCL_GIN_TYPE=2 -x NCCL_GIN_PLUGIN=none -x NCCL_IB_DISABLE=0 -x NCCL_DEBUG_SUBSYS=INIT,NET -x NCCL_CUMEM_ENABLE=1 -x RCCL_ENABLE_INTRANET=1  -x NCCL_DMABUF_ENABLE=1 -x NCCL_MSCCL_ENABLE=0 -x HSA_NO_SCRATCH_RECLAIM=1 rccl-tests/alltoall_perf -b 128 -e 128M -f 2 -g 1 -R 2 -D 3 -A 1
 # GIN Anvil SDMA (intra-node MI300 xGMI only): NCCL_GIN_TYPE=5 — single-node job required
@@ -248,4 +249,12 @@ ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 ENV NCCL_DEBUG=VERSION
 ENV ROCSHMEM_DEBUG_LEVEL=info:noversion
 ENV ROCSHMEM_TEST_UUID=1
+
+# Optional vendor / local GIN plugin: drop libnccl-gin.so into docker-gin-plugin/ before `docker build`.
+# RCCL dlopens this name by default; it is not produced by the in-tree RCCL install (built-ins live in librccl.so).
+COPY docker-gin-plugin/ /tmp/docker-gin-plugin/
+RUN if [ -f /tmp/docker-gin-plugin/libnccl-gin.so ]; then \
+      install -D -m 755 /tmp/docker-gin-plugin/libnccl-gin.so "${RCCL_INSTALL_PREFIX}/lib/libnccl-gin.so"; \
+    fi \
+ && rm -rf /tmp/docker-gin-plugin
 
