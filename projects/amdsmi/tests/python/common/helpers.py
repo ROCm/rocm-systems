@@ -150,6 +150,20 @@ def _print_test_ids(suite):
     return
 
 
+def print_test_ids(suite):
+    """Print every test ID in an already-loaded *suite* to stderr.
+
+    Public entry point for the discover()-based runners (cli_unit_test.py,
+    integration_test.py, unit_tests.py), which build their suite from a
+    directory rather than from a single module.  Mirrors the "Available tests:"
+    header produced by print_tests() so ``-l`` output is consistent across all
+    runners.
+    """
+    print("Available tests:", file=sys.stderr)
+    _print_test_ids(suite)
+    return
+
+
 def print_tests(module_name):
     """Print all test IDs in the given module to stderr and return.
 

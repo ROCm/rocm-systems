@@ -56,11 +56,9 @@ elif any(a in ("-v", "-vv", "--verbose") for a in sys.argv):
     verbose = common.VERBOSITY_VERBOSE
 
 if "-h" in sys.argv or "--help" in sys.argv:
-    print(__doc__)
+    common.print_unittest_help()
+    common.print_amdsmi_path_help()
     sys.exit(0)
-
-if verbose < common.VERBOSITY_VERBOSE:
-    common.print_legend()
 
 loader = unittest.TestLoader()
 
@@ -84,7 +82,14 @@ if "--list" in sys.argv or "-l" in sys.argv:
     common.print_test_ids(suite)
     sys.exit(0)
 
-runner = unittest.TextTestRunner(
+if verbose < common.VERBOSITY_VERBOSE:
+    common.print_legend()
+
+if verbose > common.VERBOSITY_QUIET:
+    print("AMD SMI CLI Tests\n")
+    print("Running tests...\n")
+
+runner = common.GTestSummaryRunner(
     stream=sys.stderr,
     verbosity=common.make_runner_verbosity(verbose),
     buffer="-b" in sys.argv or "--buffer" in sys.argv,
