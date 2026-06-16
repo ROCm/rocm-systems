@@ -2471,8 +2471,12 @@ hsa_status_t Runtime::Load() {
   InitIPCDmaBufSupport();
 
   // Load svm profiler (Linux-only: relies on KFD SMI events via poll/eventfd)
-#ifdef __linux__
+#if defined(__linux__)
   svm_profile_.reset(new AMD::SvmProfileControl);
+#else
+  if (!flag_.svm_profile().empty()) {
+    debug_warning("HSA_SVM_PROFILE is only supported on Linux; ignoring.");
+  }
 #endif
 
   return HSA_STATUS_SUCCESS;
