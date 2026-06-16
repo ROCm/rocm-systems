@@ -490,8 +490,8 @@ pub enum StateCmd {
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    /// Profile to use.
-    #[arg(long)]
+    /// Profile to use. Defaults to the `mi450x` builtin.
+    #[arg(long, default_value = "mi450x")]
     profile: String,
     /// Reuse an existing session by id.
     #[arg(long, conflicts_with_all = ["keep_session"])]
