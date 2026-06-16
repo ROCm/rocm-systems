@@ -35,10 +35,6 @@ IF (BUILD_UNIT_TESTS)
     add_subdirectory(unit_tests)
 ENDIF()
 
-# gin_qp_factory_test moved to RCCL (gin_qp_factory is now in the RCCL GIN plugin)
-#IF (BUILD_FUNCTIONAL_TESTS)
-#    add_subdirectory(gin_tests)
-#ENDIF()
 
 # Print top-level test summary if CTest is enabled
 if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))

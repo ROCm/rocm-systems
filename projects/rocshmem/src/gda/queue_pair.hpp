@@ -50,8 +50,6 @@
 
 #include <map>
 
-struct rocshmem_gin_qp_set;
-
 namespace rocshmem {
 
 class GDABackend;
@@ -151,7 +149,6 @@ class ActiveWFInfo {
 class QueuePair {
  public:
   friend GDABackend;
-  friend struct ::rocshmem_gin_qp_set;
 
   /**
    * @brief Constructor.
@@ -419,6 +416,8 @@ class QueuePair {
   __device__ void ionic_ring_doorbell_single(uint32_t pos);
 #endif
 
+  // TODO: make private once gin_qp_factory uses a proper init API
+ public:
   /* GDAProvider::BNXT START */
   uint64_t *bnxt_dbr;
   struct bnxt_device_cq bnxt_cq;
