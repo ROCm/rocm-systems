@@ -232,7 +232,7 @@ pub fn describe() -> EmulatorDescription {
         version: env!("CARGO_PKG_VERSION").to_string(),
         description:
             "rocjitsu dynamic binary translation: run a GPU's code objects on a different \
-             physical GPU by translating them at load time (e.g. gfx950 code on gfx1201)"
+             physical GPU by translating them at load time (e.g. gfx1250 on gfx950)"
                 .to_string(),
         options_schema: options_schema(),
     }
