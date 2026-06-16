@@ -125,11 +125,6 @@
           "type": "string",
           "description": "RCCL install/build prefix to link rccl-tests against. Default: the RCCL build_dir."
         },
-        "parallel_jobs": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Number of parallel compile jobs."
-        },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Environment variables set only during the rccl-tests build step"

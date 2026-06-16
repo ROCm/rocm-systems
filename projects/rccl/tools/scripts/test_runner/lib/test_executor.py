@@ -779,10 +779,17 @@ class TestExecutor:
         build_env_vars = cfg.get("env_variables", {})
 
         # Build the command: explicit build_command wins, otherwise install.sh + flags.
+        # build_command may be a shell string or an argv array (per schema). An argv
+        # array must run without a shell; a string runs through the shell. In both
+        # forms expand env vars / ~ for consistency with the other resolved paths.
         build_command = cfg.get("build_command")
         if build_command:
-            cmd = build_command
-            use_shell = True
+            if isinstance(build_command, (list, tuple)):
+                cmd = [_expand(arg) for arg in build_command]
+                use_shell = False
+            else:
+                cmd = _expand(build_command)
+                use_shell = True
         else:
             install_script = os.path.join(source_dir, cfg.get("install_script", "install.sh"))
             if not os.path.isfile(install_script):
@@ -2024,7 +2031,7 @@ class TestExecutor:
         ignore_regex = (
             ".*tuner_v.*|.*profiler_v.*|.*net_v.*|.*_deps.*|ext.*|"
             ".*coll_net.*|.*nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*|"
-            ".*gensrc/*|.*rccl-tests.*"
+            ".*gensrc.*|.*rccl-tests.*"
         )
 
         if self.args.verbose:

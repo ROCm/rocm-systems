@@ -30,7 +30,6 @@
       "gfx942"
     ],
     "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/debug}",
-    "parallel_jobs": 64,
     "env_variables": {}
   },
   "test_configurations": {
