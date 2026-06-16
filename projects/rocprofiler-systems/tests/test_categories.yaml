@@ -11,20 +11,21 @@
 # LABELS` block, so `ctest -L <tier>` works directly against the installed
 # share/rocprofiler-systems/tests directory.
 #
-# Pattern semantics:
-#   - `test_patterns` / `exclude` patterns are matched against the CTest
-#     test name using Python `re.search` (substring regex match), mirroring
-#     CTest's own `--tests-regex` semantics in the legacy TheRock script
+# Two independent exclude mechanisms; a test is dropped from a tier if EITHER
+# matches:
+#   - `test_patterns` / `exclude`: matched against the test NAME via re.search
+#     (substring regex), mirroring CTest `--tests-regex` and the legacy
 #     test_rocprofiler_systems.py.
-#   - `excluded_labels` lists pytest-marker-derived CTest labels (e.g. `mpi`,
-#     `annotate`) that opt a test out of the tier even when its name matches.
+#   - `excluded_labels`: matched against the test's pytest-MARKER labels (e.g.
+#     `mpi`, `annotate`), independent of the name.
 #
 # Source of truth for the always-excluded sets is the legacy
 # TheRock/build_tools/.../test_executable_scripts/test_rocprofiler_systems.py
 # (EXCLUDED_TESTS, EXCLUDED_LABELS, QUICK_TESTS_REGEX).  Keep this YAML and
 # that script in sync until the legacy script is retired.
 
-# Tier-agnostic always-excluded test name patterns (AIPROFSYST-441).
+# Always-excluded test NAME patterns (matched against the test name via
+# re.search). For tests that are currently broken (AIPROFSYST-441).
 _common_excludes: &common_excludes
   - "transferbench-sys-run"
   - "fork.*"
@@ -42,7 +43,9 @@ _common_excludes: &common_excludes
   - "shmem-pingpong.*"
   - "video-decode.*"
 
-# Marker labels that are always excluded for now, pending AIPROFSYST-441.
+# Always-excluded pytest-MARKER labels (e.g. mpi, lulesh) for tests that run
+# but are slow/heavy. A different axis from _common_excludes (name patterns);
+# heavy markers are excluded for now, pending AIPROFSYST-441.
 _heavy_labels: &heavy_labels
   - "annotate"
   - "mpi"
@@ -100,11 +103,12 @@ test_categories:
 
   full:
     description: "Complete suite - everything that can run"
-    # Heavy markers remain excluded for now (pending AIPROFSYST-441).
+    # No marker exclusions: heavy tests run fine, just slowly, so they belong
+    # in "everything that can run". Only the always-broken name patterns
+    # (_common_excludes, AIPROFSYST-441) are dropped since they cannot run.
     test_patterns:
       - ".*"
     exclude: *common_excludes
-    excluded_labels: *heavy_labels
     labels:
       - "full"
       - "all"

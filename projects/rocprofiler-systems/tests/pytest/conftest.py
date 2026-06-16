@@ -911,6 +911,10 @@ def _load_test_categories() -> Optional[dict]:
         )
         return None
     if not yaml_path.exists():
+        print(
+            f"[test_categories] {yaml_path} not found - skipping tier label injection.",
+            file=sys.stderr,
+        )
         return None
     try:
         data = yaml.safe_load(yaml_path.read_text()) or {}
