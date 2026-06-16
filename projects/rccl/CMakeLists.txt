@@ -1,11 +1,8 @@
 # Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
 # Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
 
-# [NCCL CMakeLists.txt L1] Minimum CMake version. NCCL requires 3.25; RCCL targets 3.16 for broader
-# ROCm/distro compatibility.
-# CMake version minimum requirements
-#==================================================================================================
-cmake_minimum_required(VERSION 3.16)
+# [NCCL CMakeLists.txt L1]
+cmake_minimum_required(VERSION 3.16) # RCCL-DELTA: NCCL requires 3.25; RCCL targets 3.16 for broader ROCm/distro compatibility.
 
 # Locate the shared rocm-systems tree so standalone RCCL builds can pick up
 # shared/ctest/TestCategories.cmake (the test-categories block in test/CMakeLists.txt
@@ -14,12 +11,18 @@ if(NOT DEFINED ROCM_SYSTEMS_ROOT)
   set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 endif()
 
-# [NCCL CMakeLists.txt L3-11] Parse the version from makefiles/version.mk. NCCL uses single-line
-# string(REGEX REPLACE ...) extractions and computes NCCL_VERSION_CODE via math(); RCCL uses
-# if(MATCHES ...) parsing and builds NCCL_VERSION with the same X*10000+Y*100+Z intent (handling the
-# one/two-digit patch case explicitly). Both also read PKG_REVISION.
-# Determine version from makefiles/version.mk (NCCL-style version variables)
-#==================================================================================================
+# [NCCL CMakeLists.txt L3-11]
+# Version information
+# Read makefiles/version.mk file
+#[[ >>> RCCL-DELTA
+file(READ ${CMAKE_SOURCE_DIR}/makefiles/version.mk VERSION_CONTENT)
+string(REGEX REPLACE ".*NCCL_MAJOR[ ]*:=[ ]*([0-9]+).*" "\\1" NCCL_MAJOR "${VERSION_CONTENT}")
+string(REGEX REPLACE ".*NCCL_MINOR[ ]*:=[ ]*([0-9]+).*" "\\1" NCCL_MINOR "${VERSION_CONTENT}")
+string(REGEX REPLACE ".*NCCL_PATCH[ ]*:=[ ]*([0-9]+).*" "\\1" NCCL_PATCH "${VERSION_CONTENT}")
+string(REGEX REPLACE ".*NCCL_SUFFIX[ ]*:=[ ]*([a-zA-Z0-9]*).*" "\\1" NCCL_SUFFIX "${VERSION_CONTENT}")
+string(REGEX REPLACE ".*PKG_REVISION[ ]*:=[ ]*([0-9]+).*" "\\1" PKG_REVISION "${VERSION_CONTENT}")
+math(EXPR NCCL_VERSION_CODE "(${NCCL_MAJOR} * 10000) + (${NCCL_MINOR} * 100) + ${NCCL_PATCH}")
+]]
 file(READ makefiles/version.mk version_mk_text)
 if("${version_mk_text}" MATCHES "NCCL_MAJOR *:= *([0-9]*)")
   set(NCCL_MAJOR ${CMAKE_MATCH_1})
@@ -51,10 +54,9 @@ if("${NCCL_PATCH}" MATCHES "[0-9][0-9]")
 else()
   set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}0${NCCL_PATCH}")
 endif()
+# <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L13-20] Expose the version information to C++ sources as compile definitions
-# (NCCL_USE_CMAKE + NCCL_MAJOR/MINOR/PATCH/VERSION_CODE). Mirrors NCCL (RCCL passes NCCL_VERSION as
-# the VERSION_CODE value computed above).
+# [NCCL CMakeLists.txt L13-20]
 add_compile_definitions(
   NCCL_USE_CMAKE
   NCCL_MAJOR=${NCCL_MAJOR}
@@ -65,23 +67,68 @@ add_compile_definitions(
 
 # [NCCL CMakeLists.txt -- no direct equivalent] RCCL-only: select the ROCm/HIP toolchain file.
 # NCCL builds with the CUDA toolkit and has no toolchain-file step.
+#
+# As of rocm-systems PR#4938 the toolchain file fully owns ROCm/compiler resolution: at project()
+# time it resolves ROCM_PATH (-DROCM_PATH > $ROCM_PATH > PATH autodetect > /opt/rocm, with a
+# fail-fast existence check), writes it to the CMake cache, and derives CMAKE_CXX_COMPILER /
+# CMAKE_C_COMPILER from it. The old root-level "establish ROCM_PATH" block was therefore removed:
+# pre-defining ROCM_PATH here (before project()) would short-circuit the toolchain's PATH-based
+# autodetection. After project() returns, ROCM_PATH is available from the cache for the
+# find_package()/install logic below.
 # CMake Toolchain file to define compilers and path to ROCm
-#==================================================================================================
+# >>> RCCL-DELTA
 if (NOT CMAKE_TOOLCHAIN_FILE)
   set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/toolchain-linux.cmake")
   message(STATUS "CMAKE_TOOLCHAIN_FILE: ${CMAKE_TOOLCHAIN_FILE}")
 endif()
 
-# [NCCL CMakeLists.txt L22] Export NCCL_USE_CMAKE to the environment. NCCL sets this immediately
-# before project(); moved up here (above project) to match NCCL ordering.
+# [NCCL CMakeLists.txt -- no direct equivalent] RCCL-only: ROCM_PATH normalization.
+# Assumes rocm-systems PR#4938: toolchain-linux.cmake resolves ROCM_PATH (-DROCM_PATH > $ROCM_PATH >
+# PATH autodetect > /opt/rocm, with a fail-fast existence check) and caches it during project(), so
+# the previous standalone detection block here was removed. Two safety nets remain:
+#   1. Fallback for non-default toolchain files that don't set ROCM_PATH themselves.
+#   2. Export ROCM_PATH into the environment for child processes (hipconfig, compiler version probes,
+#      etc.) -- the toolchain only sets the CMake cache variable, not the environment.
+if(NOT DEFINED ROCM_PATH)
+  set(ROCM_PATH "/opt/rocm")
+  message(WARNING "ROCM_PATH not set by the toolchain; falling back to ${ROCM_PATH}")
+else()
+  message(STATUS "ROCM_PATH: ${ROCM_PATH}")
+endif()
+set(ENV{ROCM_PATH} ${ROCM_PATH})
+
+# [NCCL CMakeLists.txt UNMAPPED] Compiler/standard/optimization flags. This
+# folds together several NCCL blocks: the C++ standard (NCCL L98-108; NCCL picks 14 or 17 by CUDA
+# version, RCCL always uses C++17), the compiler-specific warning/codegen flags (NCCL L141-156,
+# which are CUDA/MSVC-specific and have no RCCL analog -- RCCL's warning/-fgpu-rdc flags live on the
+# rccl target in src/CMakeLists.txt), and the per-config Debug/Release flags (NCCL L232-242). RCCL
+# also sets CMAKE_INSTALL_PREFIX to ROCM_PATH and prepends ROCm dirs to CMAKE_PREFIX_PATH (RCCL-only).
+# Set CMAKE flags
+#==================================================================================================
+if(ROCM_PATH)
+  list(APPEND CMAKE_PREFIX_PATH  # Add ROCM_PATH to CMake search paths (for finding HIP / HSA
+              ${ROCM_PATH}
+              ${ROCM_PATH}/hip
+              ${ROCM_PATH}/llvm)
+endif()
+# <<< RCCL-DELTA
+
+# [NCCL CMakeLists.txt L22]
 set(ENV{NCCL_USE_CMAKE} "1")
 
-# [NCCL CMakeLists.txt L24-25] Declare the project. NCCL: project(NCCL VERSION ... LANGUAGES CUDA
-# CXX C). RCCL builds HIP through the CXX compiler (amdclang++/hipcc), so it declares only CXX and
-# has no CUDA language (and sets VERSION later via rocm_setup_version).
-# RCCL project
-#==================================================================================================
+# [NCCL CMakeLists.txt L24-25]
+#[[ >>> RCCL-DELTA
+project(NCCL VERSION ${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}
+        LANGUAGES CUDA CXX C)
+]]
 project(rccl CXX)
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "")
+endif()
+# <<< RCCL-DELTA
+
+# [NCCL CMakeLists.txt L27]
+include(GNUInstallDirs)
 
 # [NCCL CMakeLists.txt L29-32] UNMAPPED -- NCCL-only default build type. RCCL does not force a
 # default CMAKE_BUILD_TYPE here. Verbatim NCCL block kept for merge reference:
@@ -92,12 +139,32 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 ]] # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L34-56] Build options. NCCL declares its package/build/feature option()s in
-# one block. RCCL has its own option set plus the NcclCompat shim (maps NCCL-style option names onto
-# RCCL options) and several RCCL-specific options. NCCL declares options BEFORE OS detection; RCCL's
-# OS-detection block was moved below this options block to match that ordering.
-# Build options
-#==================================================================================================
+# [NCCL CMakeLists.txt L34-56]
+# Package building options
+#[[ >>> RCCL-DELTA
+option(BUILD_DEBIAN_PACKAGE "Build Debian package" OFF)
+option(BUILD_REDHAT_PACKAGE "Build Redhat package" OFF)
+option(BUILD_TXZ_PACKAGE "Build TXZ package" OFF)
+option(BUILD_CONDA_PACKAGE "Build Conda package" OFF)
+option(BUILD_SRCTXZ_PACKAGE "Build source tarball package" OFF)
+option(BUILD_DOC_PACKAGE "Build documentation package" OFF)
+option(BUILD_PACKAGES "Build all packages" OFF)
+option(VERBOSE "Enable verbose output" OFF)
+option(KEEP "Keep intermediate files" OFF)
+option(DEBUG "Enable debug build" OFF)
+option(ASAN "Enable Address Sanitizer" OFF)
+option(UBSAN "Enable Undefined Behavior Sanitizer" OFF)
+option(TRACE "Enable tracing" OFF)
+option(WERROR "Treat warnings as errors" OFF)
+option(PROFAPI "Enable profiling API" ON)
+option(NVTX "Enable NVTX" ON)
+option(RDMA_CORE "Enable RDMA core" OFF)
+option(NET_PROFILER "Enable network profiler" OFF)
+option(MLX5DV "Enable MLX5DV" OFF)
+option(MAX_EXT_NET_PLUGINS "Maximum external network plugins" 0)
+option(EMIT_LLVM_IR "Generate LLVM IR for device APIs" OFF)
+option(BUILD_NCCL4PY "Enable nccl4py Python bindings targets" OFF)
+]]
 include(cmake/NcclCompat.cmake)
 rccl_define_nccl_compat_options()
 
@@ -146,25 +213,228 @@ endif()
 set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
 option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
+# <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L58-67] Detect OS and set NCCL_OS_WINDOWS / NCCL_OS_LINUX (+ matching
-# -DNCCL_OS_* definitions). RCCL omits NCCL's FATAL_ERROR else-branch for other operating systems.
-# Requires project() above (reads CMAKE_SYSTEM_NAME); moved here (after the options block) to match
-# NCCL's options-then-OS-detection ordering.
+# [NCCL CMakeLists.txt L58-67]
+# Detect OS
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(NCCL_OS_WINDOWS ON)
     add_definitions(-DNCCL_OS_WINDOWS)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(NCCL_OS_LINUX ON)
     add_definitions(-DNCCL_OS_LINUX)
+else()
+    message(FATAL_ERROR "Unsupported OS: ${CMAKE_SYSTEM_NAME}")
 endif()
 
-# [NCCL CMakeLists.txt L110-139] CUDA architecture defaults are NCCL's GPU-arch selection. RCCL's
-# analog is the GPU_TARGETS pipeline (DEFAULT_GPUS here, resolved/validated further below). NCCL
-# places this after find_package + C++ standard; RCCL resolves GPU targets earlier because several
-# downstream steps (rocm_check_target_ids, WARP_SPEED gating) depend on the final list.
-# Default GPU architectures to build
+# [NCCL CMakeLists.txt L69-78] Detect the compiler. NCCL classifies MSVC vs GCC/Clang and sets
+# NCCL_COMPILER_*; RCCL instead identifies the specific ROCm front-end (amdclang++ / clang++ /
+# hipcc) to drive version probing below, and errors out for anything else. NCCL detects the
+# compiler right after OS detection; RCCL does it here because it keys off CMAKE_CXX_COMPILER, which
+# is set by toolchain-linux.cmake (which also resolves ROCM_PATH per PR#4938) when project() runs above.
+# Detect compiler
+#[[ >>> RCCL-DELTA
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    set(NCCL_COMPILER_MSVC ON)
+    add_definitions(-DNCCL_COMPILER_MSVC)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set(NCCL_COMPILER_GCC ON)
+    add_definitions(-DNCCL_COMPILER_GCC)
+else()
+    message(FATAL_ERROR "Unsupported compiler: ${CMAKE_CXX_COMPILER_ID}")
+endif()
+]]
+if("${CMAKE_CXX_COMPILER}" MATCHES ".*amdclang\\+\\+")
+  message(STATUS "Compiling with amdclang++")
+  set(COMPILER_EXE_NAME amdclang++)
+  set(COMPILER_GREP_STRING "AMD clang version")
+  set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $4}'")
+elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*clang\\+\\+")
+  message(STATUS "Compiling with clang++")
+  set(COMPILER_EXE_NAME clang++)
+  set(COMPILER_GREP_STRING "AMD clang version")
+  set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $4}'")
+elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*hipcc$")
+  message(STATUS "Compiling with hipcc")
+  set(COMPILER_EXE_NAME hipcc)
+  set(COMPILER_GREP_STRING "HIP version")
+  set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $3}' | awk -F\"-\" '{ printf $1}'")
+else()
+  message(FATAL_ERROR "RCCL can be built only with hipcc or amdclang++")
+endif()
+# <<< RCCL-DELTA
+
+# [NCCL CMakeLists.txt L80-82]
+#[[ >>> RCCL-DELTA
+find_package(CUDAToolkit REQUIRED)
+find_package(Threads REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+]]
+find_package(hip REQUIRED)
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+## Check for HIP
+message(STATUS "HIP compiler:     ${HIP_COMPILER}")
+message(STATUS "HIP runtime:      ${HIP_RUNTIME}")
+if(NOT "${HIP_COMPILER}" MATCHES "clang")
+  message(FATAL_ERROR "RCCL requires clang-based compiler (amdclang++ or hipcc)")
+endif()
+# <<< RCCL-DELTA
+
+# [NCCL CMakeLists.txt L84-85]
+## HIP version detection
+#[[ >>> RCCL-DELTA
+string(REGEX MATCH "([0-9]+\\.[0-9]+)" CUDA_VERSION "${CUDAToolkit_VERSION}")
+]]
+find_program(hipconfig_executable hipconfig)
+message(STATUS "hipconfig executable: ${hipconfig_executable}")
+execute_process(
+  COMMAND         bash "-c" "${hipconfig_executable} -v | awk -F\"-\" '{ printf $1 }'"
+  OUTPUT_VARIABLE hip_version_string)
+message(STATUS "${COMPILER_EXE_NAME} HIP version:    ${hip_version_string}")
+
+## Check for compiler version
+find_program(compiler_executable ${COMPILER_EXE_NAME})
+message(STATUS "${COMPILER_EXE_NAME} executable: ${compiler_executable}")
+execute_process(
+  COMMAND         bash "-c" "${compiler_executable} --version | grep \"${COMPILER_GREP_STRING}\" | ${COMPILER_AWK_CMD}"
+  OUTPUT_VARIABLE compiler_version_string)
+message(STATUS "${COMPILER_EXE_NAME} version:    ${compiler_version_string}")
+
+## Check for ROCm version
+set(EXPLICIT_ROCM_VERSION "" CACHE STRING "Explicit ROCM version to compile to (auto detect if empty)")
+if(NOT DEFINED ROCMCORE_PATH)
+  set(ROCMCORE_PATH "${ROCM_PATH}" CACHE PATH "Path to ROCm core")
+endif()
+
+if(EXPLICIT_ROCM_VERSION)
+  set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
+elseif(ROCMCORE_PATH)
+  # Use .info/version directly, or under the 'core' symlink for multi-arch installs.
+  set(rocm_info_version_file "${ROCMCORE_PATH}/.info/version")
+  if(NOT EXISTS "${rocm_info_version_file}")
+    set(rocm_info_version_file "${ROCMCORE_PATH}/core/.info/version")
+  endif()
+  if(NOT EXISTS "${rocm_info_version_file}")
+    message(FATAL_ERROR "Could not determine ROCm version: expected '${ROCMCORE_PATH}/.info/version' or '${ROCMCORE_PATH}/core/.info/version' (set EXPLICIT_ROCM_VERSION or set ROCMCORE_PATH to a valid installation)")
+  endif()
+  message(STATUS "Reading ROCM version from ${rocm_info_version_file}")
+  file(READ "${rocm_info_version_file}" rocm_version_string)
+else()
+  message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
+endif()
+# <<< RCCL-DELTA
+
+# [NCCL CMakeLists.txt L87-90]
+# Extract major, minor, and patch version numbers
+#[[ >>> RCCL-DELTA
+string(REGEX MATCH "([0-9]+)" CUDA_MAJOR "${CUDA_VERSION}")
+string(REGEX MATCH "([0-9]+)$" CUDA_MINOR "${CUDA_VERSION}")
+string(REGEX REPLACE ".*\\.([0-9]+)$" "\\1" CUDA_MINOR "${CUDA_VERSION}")
+]]
+string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
+if (rocm_version_matches)
+    set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
+    set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2})
+    set(ROCM_PATCH_VERSION ${CMAKE_MATCH_3})
+
+    message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}")
+
+    # Convert the version components to int for comparison
+    math(EXPR ROCM_VERSION "(10000 * ${ROCM_MAJOR_VERSION}) + (100 * ${ROCM_MINOR_VERSION}) + ${ROCM_PATCH_VERSION}")
+    add_definitions("-DROCM_VERSION=${ROCM_VERSION}")
+else()
+    message(WARNING "Failed to extract ROCm version.")
+endif()
+# <<< RCCL-DELTA
+
+# [NCCL CMakeLists.txt L92-96]
+# Add CUDA version definitions after find_package
+#[[ >>> RCCL-DELTA
+add_compile_definitions(
+    CUDA_MAJOR=${CUDA_MAJOR}
+    CUDA_MINOR=${CUDA_MINOR}
+)
+]] # <<< RCCL-DELTA
+
+# [NCCL CMakeLists.txt L98-108]
+# RCCL requires C++17
+#[[ >>> RCCL-DELTA
+if(${CUDA_MAJOR} GREATER_EQUAL 13)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CUDA_STANDARD 17)
+else()
+    set(CMAKE_CXX_STANDARD 14)
+    set(CMAKE_CUDA_STANDARD 14)
+endif()
+
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+]]
+set(CMAKE_CXX_STANDARD   17)   # We use C++17 features, this will add compile option: -std=c++17
+set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++20 instead, which has some issues.
+# <<< RCCL-DELTA
+
+# [NCCL CMakeLists.txt -- mostly no direct equivalent] RCCL-only: load the CMake check-modules and
+# RCCL's dependency module (rocm-cmake, GTest, rocm_local_targets, rocm_check_target_ids). NCCL does
+# not need these. Loaded here -- after the build options / NcclCompat (so rccl_apply_nccl_compat_-
+# translations() can run) and before the unified GPU-architecture block below -- because the GPU
+# target resolution depends on rocm_local_targets / rocm_check_target_ids from Dependencies.cmake.
+# (GNUInstallDirs, the one overlap with NCCL L27, is included earlier near project().)
+# Load CMake modules
 #==================================================================================================
+include(CheckIncludeFiles)
+include(CheckIncludeFileCXX)
+include(CheckSymbolExists)
+include(CheckCXXCompilerFlag)
+include(CheckCXXSourceCompiles)
+include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
+include(cmake/CheckSymbolExistsNoWarn.cmake)
+# Include rocSHMEM build module only if enabled
+if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
+  include(cmake/ROCSHMEM.cmake)
+endif()
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
+rccl_apply_nccl_compat_translations()
+
+# [NCCL CMakeLists.txt L110-139]
+#[[ >>> RCCL-DELTA
+# CUDA architecture flags
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR CMAKE_CUDA_ARCHITECTURES STREQUAL "")
+    message(STATUS "CMAKE_CUDA_ARCHITECTURES not defined or empty, setting default values based on CUDA version")
+
+    if(${CUDA_MAJOR} LESS 9)
+        set(CMAKE_CUDA_ARCHITECTURES "35;50;60;61")
+    elseif(${CUDA_MAJOR} EQUAL 9)
+        set(CMAKE_CUDA_ARCHITECTURES "35;50;60;61;70")
+    elseif(${CUDA_MAJOR} EQUAL 10)
+        set(CMAKE_CUDA_ARCHITECTURES "35;50;60;61;70")
+    elseif(${CUDA_MAJOR} EQUAL 11)
+        if(${CUDA_MINOR} LESS 8)
+            set(CMAKE_CUDA_ARCHITECTURES "35;50;60;61;70;80")
+        else()
+            set(CMAKE_CUDA_ARCHITECTURES "35;50;60;61;70;80;90")
+        endif()
+    elseif(${CUDA_MAJOR} EQUAL 12)
+        if(${CUDA_MINOR} LESS 8)
+            set(CMAKE_CUDA_ARCHITECTURES "50;60;61;70;80;90")
+        else()
+            set(CMAKE_CUDA_ARCHITECTURES "50;60;61;70;80;90;100;120")
+        endif()
+    elseif(${CUDA_MAJOR} EQUAL 13)
+        set(CMAKE_CUDA_ARCHITECTURES "50;60;61;70;80;90;100;110;120")
+    else()
+        # For future CUDA versions, include all architectures up to the latest known
+        set(CMAKE_CUDA_ARCHITECTURES "50;60;61;70;80;90;100;110;120")
+    endif()
+endif()
+message(STATUS "Using CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
+]]
 set(DEFAULT_GPUS
       gfx906
       gfx908
@@ -180,34 +450,6 @@ set(DEFAULT_GPUS
       gfx1201
       gfx1250)
 
-# [NCCL CMakeLists.txt -- mostly no direct equivalent] RCCL-only: load the CMake check-modules and
-# RCCL's dependency module (rocm-cmake, GTest, rocm_local_targets). NCCL does not need these; the
-# one overlap is include(GNUInstallDirs), which NCCL includes early at NCCL L27 (right after
-# project()). RCCL includes it here as part of this module-loading block.
-# Load CMake modules
-#==================================================================================================
-include(CheckIncludeFiles)
-include(CheckIncludeFileCXX)
-include(CheckSymbolExists)
-include(CheckCXXCompilerFlag)
-include(CheckCXXSourceCompiles)
-include(GNUInstallDirs) # [NCCL CMakeLists.txt L27] include(GNUInstallDirs)
-include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
-include(cmake/CheckSymbolExistsNoWarn.cmake)
-# Include rocSHMEM build module only if enabled
-if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
-  include(cmake/ROCSHMEM.cmake)
-endif()
-
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-
-option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
-rccl_apply_nccl_compat_translations()
-
-# [NCCL CMakeLists.txt L110-139] continuation of the GPU-architecture analog: NCCL just picks a
-# default CMAKE_CUDA_ARCHITECTURES list by CUDA version. RCCL's resolution is RCCL-only and much
-# richer -- optional local-GPU detection, ASAN xnack+ suffixing, rocm_check_target_ids validation,
-# and a fail-fast on an empty target list -- producing the final GPU_TARGETS.
 # Build only for local GPU architecture
 if (BUILD_LOCAL_GPU_TARGET_ONLY)
   message(STATUS "Building only for local GPU target")
@@ -219,8 +461,7 @@ if (BUILD_LOCAL_GPU_TARGET_ONLY)
 endif()
 
 # Determine which GPU architectures to build for
-set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
-
+set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined." FORCE)
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
@@ -285,144 +526,13 @@ message(STATUS "Compiling for ${GPU_TARGETS}")
 
 ## NOTE: Reload rocm-cmake in order to update GPU_TARGETS
 include(cmake/Dependencies.cmake) # Reloading to use desired GPU_TARGETS instead of defaults
+# <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt -- no direct equivalent] RCCL-only: establish ROCM_PATH so the ROCm
-# find_package() calls below can locate HIP/HSA/SMI. NCCL builds against the CUDA toolkit and has no
-# equivalent path-discovery step.
-# Try to establish ROCM_PATH (for find_package)
-#==================================================================================================
-if(NOT DEFINED ROCM_PATH)
-  # Guess default location
-  set(ROCM_PATH "/opt/rocm")
-  message(WARNING "Unable to find ROCM_PATH: Falling back to ${ROCM_PATH}")
-else()
-  message(STATUS "ROCM_PATH found: ${ROCM_PATH}")
-endif()
-set(ENV{ROCM_PATH} ${ROCM_PATH})
-
-# [NCCL CMakeLists.txt L69-78] Detect the compiler. NCCL classifies MSVC vs GCC/Clang and sets
-# NCCL_COMPILER_*; RCCL instead identifies the specific ROCm front-end (amdclang++ / clang++ /
-# hipcc) to drive version probing below, and errors out for anything else. NCCL detects the
-# compiler right after OS detection; RCCL does it here because it keys off CMAKE_CXX_COMPILER set up
-# via the toolchain/ROCM_PATH handling above.
-if("${CMAKE_CXX_COMPILER}" MATCHES ".*amdclang\\+\\+")
-  message(STATUS "Compiling with amdclang++")
-  set(COMPILER_EXE_NAME amdclang++)
-  set(COMPILER_GREP_STRING "AMD clang version")
-  set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $4}'")
-elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*clang\\+\\+")
-  message(STATUS "Compiling with clang++")
-  set(COMPILER_EXE_NAME clang++)
-  set(COMPILER_GREP_STRING "AMD clang version")
-  set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $4}'")
-elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*hipcc$")
-  message(STATUS "Compiling with hipcc")
-  set(COMPILER_EXE_NAME hipcc)
-  set(COMPILER_GREP_STRING "HIP version")
-  set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $3}' | awk -F\"-\" '{ printf $1}'")
-else()
-  message(FATAL_ERROR "RCCL can be built only with hipcc or amdclang++")
-endif()
-
-# [NCCL CMakeLists.txt L98-108, L141-156, L232-242] Compiler/standard/optimization flags. This
-# folds together several NCCL blocks: the C++ standard (NCCL L98-108; NCCL picks 14 or 17 by CUDA
-# version, RCCL always uses C++17), the compiler-specific warning/codegen flags (NCCL L141-156,
-# which are CUDA/MSVC-specific and have no RCCL analog -- RCCL's warning/-fgpu-rdc flags live on the
-# rccl target in src/CMakeLists.txt), and the per-config Debug/Release flags (NCCL L232-242). RCCL
-# also sets CMAKE_INSTALL_PREFIX to ROCM_PATH and prepends ROCm dirs to CMAKE_PREFIX_PATH (RCCL-only).
-# Set CMAKE flags
-#==================================================================================================
-set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "")
-set(CMAKE_CXX_STANDARD   17)   # We use C++17 features, this will add compile option: -std=c++17
-set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++20 instead, which has some issues.
-if(ROCM_PATH)
-  list(APPEND CMAKE_PREFIX_PATH  # Add ROCM_PATH to CMake search paths (for finding HIP / HSA
-              ${ROCM_PATH}
-              ${ROCM_PATH}/hip
-              ${ROCM_PATH}/llvm)
-endif()
-
+# [NCCL CMakeLists.txt L141-156, L232-242]
 set(CMAKE_CXX_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
 set(CMAKE_C_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
 set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
-
-# [NCCL CMakeLists.txt L80-96 + L84-139] Dependency discovery and capability probing. NCCL's root
-# does a small amount of this: find_package(CUDAToolkit/Threads/Python3) (NCCL L80-82) and CUDA
-# version detection (NCCL L84-96). RCCL's equivalent is much larger and almost entirely RCCL-only:
-# find_package(Threads) maps to NCCL L81, but everything else here (HIP/HSA/amd-smi discovery,
-# compiler & HIP & ROCm version probing, and the many hip*/bfd/kernarg/parallel-jobs/WARP_SPEED/
-# ROCTX capability checks) has no NCCL counterpart -- it exists because RCCL must adapt to the
-# installed ROCm stack at configure time. Kept as one cohesive RCCL block in this position (before
-# add_subdirectory(src), mirroring where NCCL resolves its dependencies).
-# Check for required dependencies
-#==================================================================================================
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-## Check for Threads
-set(THREADS_PREFER_PTHREAD_FLAG ON) # [NCCL CMakeLists.txt L81] find_package(Threads REQUIRED)
-find_package(Threads REQUIRED)
-
-## Check for HIP
-find_package(hip REQUIRED)
-message(STATUS "HIP compiler:     ${HIP_COMPILER}")
-message(STATUS "HIP runtime:      ${HIP_RUNTIME}")
-if(NOT "${HIP_COMPILER}" MATCHES "clang")
-  message(FATAL_ERROR "RCCL requires clang-based compiler (amdclang++ or hipcc)")
-endif()
-
-## Check for compiler version
-find_program(compiler_executable ${COMPILER_EXE_NAME})
-message(STATUS "${COMPILER_EXE_NAME} executable: ${compiler_executable}")
-execute_process(
-  COMMAND         bash "-c" "${compiler_executable} --version | grep \"${COMPILER_GREP_STRING}\" | ${COMPILER_AWK_CMD}"
-  OUTPUT_VARIABLE compiler_version_string)
-message(STATUS "${COMPILER_EXE_NAME} version:    ${compiler_version_string}")
-
-## Check for HIP version
-find_program(hipconfig_executable hipconfig)
-message(STATUS "hipconfig executable: ${hipconfig_executable}")
-execute_process(
-  COMMAND         bash "-c" "${hipconfig_executable} -v | awk -F\"-\" '{ printf $1 }'"
-  OUTPUT_VARIABLE hip_version_string)
-message(STATUS "${COMPILER_EXE_NAME} HIP version:    ${hip_version_string}")
-
-## Check for ROCm version
-set(EXPLICIT_ROCM_VERSION "" CACHE STRING "Explicit ROCM version to compile to (auto detect if empty)")
-if(NOT DEFINED ROCMCORE_PATH)
-  set(ROCMCORE_PATH "${ROCM_PATH}" CACHE PATH "Path to ROCm core")
-endif()
-
-if(EXPLICIT_ROCM_VERSION)
-  set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
-elseif(ROCMCORE_PATH)
-  # Use .info/version directly, or under the 'core' symlink for multi-arch installs.
-  set(rocm_info_version_file "${ROCMCORE_PATH}/.info/version")
-  if(NOT EXISTS "${rocm_info_version_file}")
-    set(rocm_info_version_file "${ROCMCORE_PATH}/core/.info/version")
-  endif()
-  if(NOT EXISTS "${rocm_info_version_file}")
-    message(FATAL_ERROR "Could not determine ROCm version: expected '${ROCMCORE_PATH}/.info/version' or '${ROCMCORE_PATH}/core/.info/version' (set EXPLICIT_ROCM_VERSION or set ROCMCORE_PATH to a valid installation)")
-  endif()
-  message(STATUS "Reading ROCM version from ${rocm_info_version_file}")
-  file(READ "${rocm_info_version_file}" rocm_version_string)
-else()
-  message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
-endif()
-string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
-if (rocm_version_matches)
-    set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
-    set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2})
-    set(ROCM_PATCH_VERSION ${CMAKE_MATCH_3})
-
-    message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}")
-
-    # Convert the version components to int for comparison
-    math(EXPR ROCM_VERSION "(10000 * ${ROCM_MAJOR_VERSION}) + (100 * ${ROCM_MINOR_VERSION}) + ${ROCM_PATCH_VERSION}")
-    add_definitions("-DROCM_VERSION=${ROCM_VERSION}")
-else()
-    message(WARNING "Failed to extract ROCm version.")
-endif()
 
 ### Required for checking HIP device symbols when building with amdclang++
 set(CMAKE_REQUIRED_LIBRARIES hip::device)
