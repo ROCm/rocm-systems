@@ -83,7 +83,6 @@ void initThreadBuffer(int rank, int isRootThread) {
   if (!b) return;
   b->rank = rank;
   b->isRootThread = isRootThread;
-  b->idx = 0;
 }
 
 void recordEvent(uint16_t phase, uint16_t md, uint64_t startNs, uint32_t bytes) {
@@ -132,6 +131,25 @@ static const char* phaseName(uint16_t p) {
     case PHASE_RING_ALLGATHER:    return "ring_allgather";
     case PHASE_RING_STEP:         return "ring_step";
     case PHASE_PROXY_INIT:        return "proxy_init";
+    case PHASE_DEPLOY_COMM_INIT_TOTAL:      return "deploy.comm_init.total";
+    case PHASE_DEPLOY_HIP_CTX:              return "deploy.hip_ctx";
+    case PHASE_DEPLOY_KERNEL_LOAD:          return "deploy.kernel_load";
+    case PHASE_DEPLOY_COMM_SPLIT_ALLGATHER: return "deploy.comm_split_allgather";
+    case PHASE_DEPLOY_BOOTSTRAP:            return "deploy.bootstrap";
+    case PHASE_DEPLOY_ALLGATHER_PEER:       return "deploy.allgather.peer";
+    case PHASE_DEPLOY_TOPO_DETECT:          return "deploy.topo.detect";
+    case PHASE_DEPLOY_TOPO_PATHS:           return "deploy.topo.paths";
+    case PHASE_DEPLOY_GRAPH_SEARCH:         return "deploy.graph_search";
+    case PHASE_DEPLOY_ALLGATHER3:           return "deploy.allgather3";
+    case PHASE_DEPLOY_TOPO_POSTSET:         return "deploy.topo.postset";
+    case PHASE_DEPLOY_BUFFERS:              return "deploy.buffers";
+    case PHASE_DEPLOY_PROXY_CREATE:         return "deploy.proxy_create";
+    case PHASE_DEPLOY_TRANSPORT_CONNECT:    return "deploy.transport_connect";
+    case PHASE_DEPLOY_PROXY_CONNECT:        return "deploy.proxy_connect";
+    case PHASE_DEPLOY_TUNER_LOAD:           return "deploy.tuner_load";
+    case PHASE_DEPLOY_DEV_COMM_SETUP:       return "deploy.dev_comm_setup";
+    case PHASE_DEPLOY_INTRANODE_BARRIER:    return "deploy.intranode_barrier";
+    case PHASE_DEPLOY_KERNEL_LAUNCH:        return "deploy.kernel_launch";
     case PHASE_ROOT_TOTAL:        return "root.total";
     case PHASE_ROOT_WAIT_FIRST:   return "root.wait_first";
     case PHASE_ROOT_ACCEPT:       return "root.accept";

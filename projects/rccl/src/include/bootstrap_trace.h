@@ -38,6 +38,27 @@ enum Phase : uint16_t {
   PHASE_RING_ALLGATHER      = 12, // ringAllInfo total
   PHASE_RING_STEP           = 13, // md = step index, bytes = bytes/dir
   PHASE_PROXY_INIT          = 14,
+
+  // Deployment-wide ncclCommInitRank events (instrumented outside bootstrap.cc).
+  PHASE_DEPLOY_COMM_INIT_TOTAL      = 300,
+  PHASE_DEPLOY_HIP_CTX              = 301,
+  PHASE_DEPLOY_KERNEL_LOAD          = 302,
+  PHASE_DEPLOY_COMM_SPLIT_ALLGATHER = 303,
+  PHASE_DEPLOY_BOOTSTRAP            = 304,
+  PHASE_DEPLOY_ALLGATHER_PEER       = 305,
+  PHASE_DEPLOY_TOPO_DETECT          = 306,
+  PHASE_DEPLOY_TOPO_PATHS           = 307,
+  PHASE_DEPLOY_GRAPH_SEARCH         = 308, // md = graph id
+  PHASE_DEPLOY_ALLGATHER3           = 309,
+  PHASE_DEPLOY_TOPO_POSTSET         = 310,
+  PHASE_DEPLOY_BUFFERS              = 311,
+  PHASE_DEPLOY_PROXY_CREATE         = 312,
+  PHASE_DEPLOY_TRANSPORT_CONNECT    = 313,
+  PHASE_DEPLOY_PROXY_CONNECT        = 314,
+  PHASE_DEPLOY_TUNER_LOAD           = 315,
+  PHASE_DEPLOY_DEV_COMM_SETUP       = 316,
+  PHASE_DEPLOY_INTRANODE_BARRIER    = 317,
+  PHASE_DEPLOY_KERNEL_LAUNCH        = 318,
   // Root-thread events
   PHASE_ROOT_TOTAL          = 100,
   PHASE_ROOT_WAIT_FIRST     = 101,
@@ -49,7 +70,7 @@ enum Phase : uint16_t {
   PHASE_TCP_CONNECT         = 200, // md = peer rank
   PHASE_TCP_ACCEPT          = 201, // md = peer rank
   PHASE_TCP_READY           = 202, // md = peer rank, dur = time from start to ready
-  PHASE_COUNT
+  PHASE_COUNT               = 319
 };
 
 struct Event {

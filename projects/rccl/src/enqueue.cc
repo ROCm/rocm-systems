@@ -15,6 +15,7 @@
 #include <hip/hip_ext.h>
 #include "gdrwrap.h"
 #include "bootstrap.h"
+#include "bootstrap_trace.h"
 #include <cstring>
 #include "channel.h"
 #include "rocmwrap.h"
@@ -1890,6 +1891,7 @@ NCCL_PARAM(MemSyncDomain, "MEM_SYNC_DOMAIN", cudaLaunchMemSyncDomainRemote);
 
 ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   ncclResult_t ret = ncclSuccess;
+  BTRACE_BEGIN(__btrace_kernel_launch);
   struct ncclKernelPlanner* planner = &comm->planner;
   int nChannels = 0;
   for (int i = 0; i < MAXCHANNELS/64; i++)
@@ -1929,7 +1931,8 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
     comm->lastStream = launchStream;
     comm->lastStreamValid = true;
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
-    return ncclSuccess;
+    ret = ncclSuccess;
+    goto do_return;
   }
 
 #if !defined(__HIP_PLATFORM_AMD__) || !defined(__HIPCC__)
@@ -2020,6 +2023,8 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   comm->lastStreamValid = true;
 
 do_return:
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_KERNEL_LAUNCH, (uint16_t)nChannels, __btrace_kernel_launch, (uint32_t)smem);
+  ncclBootstrapTrace::dumpThreadBuffer();
   NCCLCHECK(ncclProfilerStopKernelLaunchEvent(plan));
   return ret;
 }

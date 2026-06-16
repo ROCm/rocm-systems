@@ -30,6 +30,7 @@ followed by `count` Event records:
 import argparse
 import json
 import os
+import re
 import struct
 import sys
 from collections import defaultdict
@@ -53,6 +54,25 @@ PHASE_NAMES = {
     12:  "ring_allgather",
     13:  "ring_step",
     14:  "proxy_init",
+    300: "deploy.comm_init.total",
+    301: "deploy.hip_ctx",
+    302: "deploy.kernel_load",
+    303: "deploy.comm_split_allgather",
+    304: "deploy.bootstrap",
+    305: "deploy.allgather.peer",
+    306: "deploy.topo.detect",
+    307: "deploy.topo.paths",
+    308: "deploy.graph_search",
+    309: "deploy.allgather3",
+    310: "deploy.topo.postset",
+    311: "deploy.buffers",
+    312: "deploy.proxy_create",
+    313: "deploy.transport_connect",
+    314: "deploy.proxy_connect",
+    315: "deploy.tuner_load",
+    316: "deploy.dev_comm_setup",
+    317: "deploy.intranode_barrier",
+    318: "deploy.kernel_launch",
     100: "root.total",
     101: "root.wait_first",
     102: "root.accept",
@@ -71,12 +91,28 @@ EVT_FMT = "<QIHHII"           # t_ns, rank, phase, md, dur_us, bytes
 EVT_SIZE = struct.calcsize(EVT_FMT)
 assert EVT_SIZE == 24
 
+TEXT_PHASE_IDS = {name: phase for phase, name in PHASE_NAMES.items()}
+TEXT_PHASE_IDS.update({
+    "deploy.exec": 1000,
+    "mpi.init": 1001,
+    "mpi.init_thread": 1002,
+    "pmix.init": 1003,
+    "deploy.main": 1004,
+})
+TEXT_PHASE_NAMES = {phase: name for name, phase in TEXT_PHASE_IDS.items()}
+DEPLOY_RE = re.compile(
+    r"DEPLOY_TRACE\s+rank=(?P<rank>-?\d+)\s+pid=(?P<pid>\d+)\s+"
+    r"phase=(?P<phase>[A-Za-z0-9_.-]+)\s+t_ns=(?P<t_ns>\d+)\s+"
+    r"dur_us=(?P<dur_us>\d+)\s+md=(?P<md>\d+)\s+bytes=(?P<bytes>\d+)"
+    r"(?:\s+detail=(?P<detail>\S+))?"
+)
+
 
 class Event:
     __slots__ = ("t_ns", "rank", "phase", "md", "dur_us", "bytes",
-                 "is_root", "src_file")
+                 "is_root", "src_file", "detail")
 
-    def __init__(self, t_ns, rank, phase, md, dur_us, bytes_, is_root, src_file):
+    def __init__(self, t_ns, rank, phase, md, dur_us, bytes_, is_root, src_file, detail=""):
         self.t_ns = t_ns
         self.rank = rank
         self.phase = phase
@@ -85,9 +121,10 @@ class Event:
         self.bytes = bytes_
         self.is_root = is_root
         self.src_file = src_file
+        self.detail = detail
 
     def name(self):
-        return PHASE_NAMES.get(self.phase, f"phase_{self.phase}")
+        return PHASE_NAMES.get(self.phase, TEXT_PHASE_NAMES.get(self.phase, f"phase_{self.phase}"))
 
 
 def load_dump(path: Path):
@@ -116,6 +153,28 @@ def load_dump(path: Path):
                     bool(is_root), path.name)
 
 
+def load_text_log(path: Path):
+    """Yield DEPLOY_TRACE events from a text log."""
+    for line in path.read_text(errors="ignore").splitlines():
+        m = DEPLOY_RE.search(line)
+        if not m:
+            continue
+        phase_name = m.group("phase")
+        phase = TEXT_PHASE_IDS.setdefault(phase_name, 2000 + len(TEXT_PHASE_IDS))
+        TEXT_PHASE_NAMES[phase] = phase_name
+        yield Event(
+            int(m.group("t_ns")),
+            int(m.group("rank")),
+            phase,
+            int(m.group("md")),
+            int(m.group("dur_us")),
+            int(m.group("bytes")),
+            False,
+            path.name,
+            m.group("detail") or "",
+        )
+
+
 def collect(dirs):
     events = []
     for d in dirs:
@@ -125,6 +184,8 @@ def collect(dirs):
             continue
         for f in sorted(p.glob("*.bin")):
             events.extend(load_dump(f))
+        for f in sorted(p.glob("*.log")) + sorted(p.glob("*.out")) + sorted(p.glob("*.err")):
+            events.extend(load_text_log(f))
     return events
 
 
@@ -150,6 +211,8 @@ def write_chrome_trace(events, path):
             tid = 1
             args_extra = {}
         args = {"md": e.md, "bytes": e.bytes, **args_extra}
+        if e.detail:
+            args["detail"] = e.detail
         ev = {
             "name": e.name(),
             "cat": "bootstrap",
@@ -190,10 +253,10 @@ def write_chrome_trace(events, path):
 
 def write_csv(events, path):
     with open(path, "w") as f:
-        f.write("t_ns,rank,is_root,phase_id,phase_name,md,dur_us,bytes,src\n")
+        f.write("t_ns,rank,is_root,phase_id,phase_name,md,dur_us,bytes,src,detail\n")
         for e in events:
             f.write(f"{e.t_ns},{e.rank},{int(e.is_root)},"
-                    f"{e.phase},{e.name()},{e.md},{e.dur_us},{e.bytes},{e.src_file}\n")
+                    f"{e.phase},{e.name()},{e.md},{e.dur_us},{e.bytes},{e.src_file},{e.detail}\n")
     print(f"[ok] CSV: {path} ({len(events)} rows)")
 
 

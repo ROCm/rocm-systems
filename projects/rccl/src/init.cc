@@ -12,6 +12,7 @@
 #include "nvmlwrap.h"
 #include "gdrwrap.h"
 #include "bootstrap.h"
+#include "bootstrap_trace.h"
 #include "transport.h"
 #include "group.h"
 #include "net.h"
@@ -1460,7 +1461,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // AllGather1 - begin
   NCCLCHECKGOTO(ncclCalloc(&comm->peerInfo, nranks+1), ret, fail); // Extra rank to represent CollNet root
   NCCLCHECKGOTO(fillInfo(comm, comm->peerInfo+rank, comm->commHash), ret, fail);
+  BTRACE_BEGIN(__btrace_peer_ag);
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, comm->peerInfo, sizeof(struct ncclPeerInfo)), ret, fail);
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_ALLGATHER_PEER, 0, __btrace_peer_ag, (uint32_t)sizeof(struct ncclPeerInfo));
   __atomic_store_n(&comm->peerInfoValid, true, __ATOMIC_RELEASE);
 
   comm->cuMemSupport = 1;
@@ -1555,11 +1558,13 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // Dump XML if requested by user
   const char* dumpXmlFile;
   dumpXmlFile = ncclGetEnv("NCCL_TOPO_DUMP_FILE");
+  BTRACE_BEGIN(__btrace_topo_detect);
   if (dumpXmlFile) {
     NCCLCHECKGOTO(ncclTopoGetSystem(comm, NULL, dumpXmlFile), ret, fail);
   }
   // Topo detection / System graph creation
   NCCLCHECKGOTO(ncclTopoGetSystem(comm, &comm->topo), ret, fail);
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_TOPO_DETECT, 0, __btrace_topo_detect, 0);
   comm->topo->tuning = rcclGetTuningIndexForArch(comm->archName);
   INFO(NCCL_INIT, "Tuning index set to: %d",  comm->topo->tuning);
   // save nRanks to ncclTopoSystem as indicator of multi-node
@@ -1574,6 +1579,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // Topology hint if tree has been defined by model or User
   comm->topo->treeDefined = false;
   // Compute paths between GPUs and NICs
+  BTRACE_BEGIN(__btrace_topo_paths);
   NCCLCHECKGOTO(ncclTopoComputePaths(comm->topo, comm), ret, fail);
 
   // Remove inaccessible GPUs and unused NICs
@@ -1586,6 +1592,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclTopoComputeCommCPU(comm), ret, fail);
   // Print final topology
   NCCLCHECKGOTO(ncclTopoPrint(comm->topo), ret, fail);
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_TOPO_PATHS, 0, __btrace_topo_paths, 0);
   timers[TIMER_INIT_TOPO] = clockNano() - timers[TIMER_INIT_TOPO];
 
   // Set Affinity to a CPU local the our GPU, so that all memory we allocate
@@ -1634,7 +1641,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   ringGraph->pattern = NCCL_TOPO_PATTERN_RING;
   ringGraph->minChannels = 1;
   ringGraph->maxChannels = MAXCHANNELS/2;
+  BTRACE_BEGIN(__btrace_graph_ring);
   NCCLCHECKGOTO(ncclTopoCompute(comm->topo, ringGraph), ret, fail);
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_GRAPH_SEARCH, (uint16_t)NCCL_ALGO_RING, __btrace_graph_ring, 0);
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, ringGraph), ret, fail);
 
   if( IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151" ) ) {
@@ -1659,7 +1668,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   treeGraph->pattern = NCCL_TOPO_PATTERN_BALANCED_TREE;
   treeGraph->minChannels = ringGraph->nChannels;
   treeGraph->maxChannels = ringGraph->nChannels;
+  BTRACE_BEGIN(__btrace_graph_tree);
   NCCLCHECKGOTO(ncclTopoCompute(comm->topo, treeGraph), ret, fail);
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_GRAPH_SEARCH, (uint16_t)NCCL_ALGO_TREE, __btrace_graph_tree, 0);
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, treeGraph), ret, fail);
 
   memset(collNetChainGraph, 0, sizeof(struct ncclTopoGraph));
@@ -1676,9 +1687,13 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   collNetDirectGraph->minChannels = 1;
   collNetDirectGraph->maxChannels = MAXCHANNELS;
   if (comm->config.collnetEnable) {
+    BTRACE_BEGIN(__btrace_graph_collnet_chain);
     NCCLCHECKGOTO(ncclTopoCompute(comm->topo, collNetChainGraph), ret, fail);
+    BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_GRAPH_SEARCH, (uint16_t)NCCL_ALGO_COLLNET_CHAIN, __btrace_graph_collnet_chain, 0);
     NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, collNetChainGraph), ret, fail);
+    BTRACE_BEGIN(__btrace_graph_collnet_direct);
     NCCLCHECKGOTO(ncclTopoCompute(comm->topo, collNetDirectGraph), ret, fail);
+    BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_GRAPH_SEARCH, (uint16_t)NCCL_ALGO_COLLNET_DIRECT, __btrace_graph_collnet_direct, 0);
     NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, collNetDirectGraph), ret, fail);
   }
 
@@ -1688,7 +1703,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   nvlsGraph->minChannels = 1;
   nvlsGraph->maxChannels = MAXCHANNELS;
   if (comm->nvlsSupport) {
+    BTRACE_BEGIN(__btrace_graph_nvls);
     NCCLCHECKGOTO(ncclTopoCompute(comm->topo, nvlsGraph), ret, fail);
+    BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_GRAPH_SEARCH, (uint16_t)NCCL_ALGO_NVLS, __btrace_graph_nvls, 0);
     NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, nvlsGraph), ret, fail);
   }
   timers[TIMER_INIT_GRAPHS] = clockNano() - timers[TIMER_INIT_GRAPHS];
@@ -1734,6 +1751,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // Because timers[[TIMER_INIT_ALLGATHER] already contains the timing of the first allgather,
   // we temporarily store the start time of the subsequent one in an as-of-yet unused CONNECT timer.
   timers[TIMER_INIT_CONNECT] = clockNano();
+  BTRACE_BEGIN(__btrace_allgather3);
   // AllGather3 - begin
   NCCLCHECKGOTO(ncclCalloc(&allGather3Data, nranks), ret, fail);
   int idx;
@@ -1837,6 +1855,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclTopoPreset(comm, graphs, &allGather3Data[rank].topoRanks), ret, fail);
 
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allGather3Data, sizeof(*allGather3Data)), ret, fail);
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_ALLGATHER3, 0, __btrace_allgather3, (uint32_t)sizeof(*allGather3Data));
 
   if (uniformRanksPerHost(comm, nranks)) {
     NCCLCHECKGOTO(rcclCheckRomeTopoModelIdxConsensus(
@@ -1971,8 +1990,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   NCCLCHECKGOTO(ncclCalloc(&rings, nranks*MAXCHANNELS), ret, fail);
 
+  BTRACE_BEGIN(__btrace_postset);
   NCCLCHECKGOTO(ncclTopoPostset(comm, nodesFirstRank, nodesTreePatterns, allTopoRanks, rings, graphs, parent, nc), ret, fail);
   if (comm->topo->treeDefined) NCCLCHECK(ncclTreeBasePostset(comm, treeGraph));
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_TOPO_POSTSET, 0, __btrace_postset, 0);
 
   // AllGather3 - end
   timers[TIMER_INIT_ALLGATHER] += clockNano() - timers[TIMER_INIT_CONNECT];
@@ -1991,12 +2012,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   line[4095] = '\0';
   INFO(NCCL_INIT, "Trees%s comm %p nRanks %02d busId %lx", line, comm, comm->nRanks, comm->busId);
 
+  BTRACE_BEGIN(__btrace_buffers);
   NCCLCHECKGOTO(computeBuffSizes(comm), ret, fail);
 
   // Compute nChannels per peer for p2p
   NCCLCHECKGOTO(ncclTopoComputeP2pChannels(comm), ret, fail);
   // RCCL: Determine and set P2P channel shift size for comm
   NCCLCHECK(rcclCommSetP2pShiftSize(comm));
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_BUFFERS, 0, __btrace_buffers, 0);
   /* until now, all info of comm should be known. We can initialize shared resources and
    * map localRanks to top parent local ranks. NOTE: this shareRes init must be put before
    * all proxy operations. */
@@ -2023,7 +2046,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     comm->proxyState = parent->sharedRes->proxyState;
     ncclAtomicRefCountIncrement(&parent->sharedRes->proxyState->refCount);
   } else {
+    BTRACE_BEGIN(__btrace_proxy_create);
     NCCLCHECKGOTO(ncclProxyCreate(comm), ret, fail);
+    BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_PROXY_CREATE, 0, __btrace_proxy_create, 0);
   }
   NCCLCHECKGOTO(ncclCalloc(&comm->gproxyConn, comm->nRanks), ret, fail);
 
@@ -2034,6 +2059,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECK(ncclP2pSchedule(comm));
 
   comm->runtimeConn = comm->cuMemSupport && ncclParamRuntimeConnect();
+  BTRACE_BEGIN(__btrace_transport_connect);
   if (comm->runtimeConn) {
     for (int c=0; c<comm->nChannels; c++) {
       NCCLCHECKGOTO(setupChannel(comm, c, rank, nranks, rings+c*nranks), ret, fail);
@@ -2123,16 +2149,19 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, 1), ret, fail);
     }
   }
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_TRANSPORT_CONNECT, (uint16_t)(comm->runtimeConn ? 1 : 0), __btrace_transport_connect, 0);
 
   TRACE(NCCL_INIT, "rank %d nranks %d - CONNECTED %d RINGS AND TREES", rank, nranks, comm->nChannels);
 
   // Compute time models for algorithm and protocol combinations
+  BTRACE_BEGIN(__btrace_tuner);
   NCCLCHECKGOTO(ncclTopoInitTunerConstants(comm), ret, fail);
   NCCLCHECKGOTO(ncclTunerPluginLoad(comm), ret, fail);
   if (comm->tuner) {
     NCCLCHECK(comm->tuner->init(&comm->tunerContext, comm->commHash, comm->nRanks, comm->nNodes, ncclDebugLog, &comm->nvlDomainInfo, &comm->tunerConstants));
   }
   NCCLCHECKGOTO(ncclTopoTuneModel(comm, comm->minCompCap, comm->maxCompCap, graphs), ret, fail);
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_TUNER_LOAD, 0, __btrace_tuner, 0);
 
   INFO(NCCL_INIT, "comm:%p, nRanks:%d, nNodes:%d, coll channels:%d collnet channels:%d, nvls channels:%d, p2p channels:%d, p2p channels per peer:%d, shiftSize:%d", comm, comm->nRanks, comm->nNodes, comm->nChannels, comm->nChannels, comm->nvlsChannels, comm->p2pnChannels, comm->p2pnChannelsPerPeer, comm->p2pChannelShiftSize);
 
@@ -2160,12 +2189,16 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   // Call devCommSetup before the last barrier, making sure we don't have a thread running in front and starting to
   // launch NCCL kernels before all cuda mem allocation is complete. That could cause a deadlock.
+  BTRACE_BEGIN(__btrace_dev_comm_setup);
   NCCLCHECKGOTO(devCommSetup(comm), ret, fail);
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_DEV_COMM_SETUP, 0, __btrace_dev_comm_setup, 0);
 
   timers[TIMER_INIT_CONNECT] = clockNano() -  timers[TIMER_INIT_CONNECT];
 
   /* Local intra-node barrier */
+  BTRACE_BEGIN(__btrace_intranode_barrier);
   NCCLCHECKGOTO(bootstrapIntraNodeBarrier(comm->bootstrap, comm->localRankToRank, comm->localRank, comm->localRanks, comm->localRankToRank[0]), ret, fail);
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_INTRANODE_BARRIER, 0, __btrace_intranode_barrier, 0);
 
   // We should have allocated all buffers, collective fifos, ... we can
   // restore the affinity.
@@ -2253,7 +2286,9 @@ static ncclResult_t commGetSplitInfo(struct ncclComm* comm, struct ncclComm* par
   // Compute nRanks, my rank and the ranks (of the original comm) before and after me
   info[parent->rank].color = color;
   info[parent->rank].key = key;
+  BTRACE_BEGIN(__btrace_comm_split_ag);
   NCCLCHECKGOTO(bootstrapAllGather(parent->bootstrap, info, sizeof(commSplitInfo)), ret, fail);
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_COMM_SPLIT_ALLGATHER, 0, __btrace_comm_split_ag, (uint32_t)sizeof(commSplitInfo));
 
   // Negative color does not create a new comm. Return now.
   if (color == NCCL_SPLIT_NOCOLOR) goto exit;
@@ -2322,6 +2357,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   #endif
 
   timers[TIMER_INIT_TOTAL] = clockNano();
+  ncclBootstrapTrace::initThreadBuffer(job->myrank, /*isRootThread=*/0);
+  BTRACE_BEGIN(__btrace_comm_init_total);
+  BTRACE_BEGIN(__btrace_hip_ctx);
   CUDACHECKGOTO(cudaSetDevice(cudaDev), res, fail);
   CUDACHECKGOTO(cudaDeviceGetAttribute(&maxSharedMem, cudaDevAttrMaxSharedMemoryPerBlockOptin, cudaDev), res, fail);
   CUDACHECKGOTO(cudaDeviceGetAttribute(&archMajor, cudaDevAttrComputeCapabilityMajor, cudaDev), res, fail);
@@ -2336,8 +2374,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     WARN("strdup failed for architecture name");
     goto fail;
   }
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_HIP_CTX, (uint16_t)cudaDev, __btrace_hip_ctx, 0);
 
   timers[TIMER_INIT_KERNELS] = clockNano();
+  BTRACE_BEGIN(__btrace_kernel_load);
   NCCLCHECK(ncclInitKernelsForDevice(cudaArch, maxSharedMem, &maxLocalSizeBytes));
   // Set the maximum kernel stack size of all kernels to avoid
   // a CUDA memory reconfig on load (c.f. NVSHMEM issue)
@@ -2358,6 +2398,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     TRACE(NCCL_INIT, "Setting cudaLimitStackSize to %zu", maxLocalSizeBytes);
     CUDACHECKIGNORE(cudaDeviceSetLimit(cudaLimitStackSize, maxLocalSizeBytes));
   }
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_KERNEL_LOAD, (uint16_t)cudaArch, __btrace_kernel_load,
+             (uint32_t)(maxLocalSizeBytes > 0xffffffffu ? 0xffffffffu : maxLocalSizeBytes));
   timers[TIMER_INIT_KERNELS] = clockNano() - timers[TIMER_INIT_KERNELS];
 
   if (job->parent) {
@@ -2386,7 +2428,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx parent %p splitCount %d color %d key %d- Init START", job->funcName,
          comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, job->parent, job->splitCount, job->color, job->key);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano();
+    BTRACE_BEGIN(__btrace_deploy_bootstrap);
     NCCLCHECKGOTO(bootstrapSplit(comm->commHash, comm, job->parent, job->color, job->key, parentRanks), res, fail);
+    BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_BOOTSTRAP, 1, __btrace_deploy_bootstrap, 0);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano() - timers[TIMER_INIT_BOOTSTRAP];
     // debug info, no commId was used
     commIdHash = 0;
@@ -2399,7 +2443,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx commId 0x%llx - Init START", job->funcName,
          comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, commIdHash);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano();
+    BTRACE_BEGIN(__btrace_deploy_bootstrap);
     NCCLCHECKGOTO(bootstrapInit(job->nId, (struct ncclBootstrapHandle*)job->commId, comm), res, fail);
+    BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_BOOTSTRAP, 0, __btrace_deploy_bootstrap, 0);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano() - timers[TIMER_INIT_BOOTSTRAP];
   }
   comm->cudaArch = cudaArch;
@@ -2538,6 +2584,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
        timers[TIMER_INIT_BOOTSTRAP] / 1e9, timers[TIMER_INIT_ALLGATHER] / 1e9, timers[TIMER_INIT_TOPO] / 1e9,
        timers[TIMER_INIT_GRAPHS] / 1e9, timers[TIMER_INIT_CONNECT] / 1e9, timers[TIMER_INIT_TOTAL] / 1e9 - sum_timers);
 exit:
+  BTRACE_END(ncclBootstrapTrace::PHASE_DEPLOY_COMM_INIT_TOTAL, (uint16_t)res, __btrace_comm_init_total, 0);
+  ncclBootstrapTrace::dumpThreadBuffer();
   if (job->newcomm) {
     /* assign it to user pointer. */
     __atomic_store_n(job->newcomm, comm, __ATOMIC_RELEASE);
