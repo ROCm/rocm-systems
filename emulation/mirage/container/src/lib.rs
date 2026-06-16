@@ -564,15 +564,17 @@ impl Engine {
 
     /// Run the provider with `args`, succeeding only on a zero exit.
     fn checked(&self, args: &[String]) -> Result<()> {
-        let output = Command::new(&self.provider)
-            .args(args)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|source| ContainerError::Spawn {
-                provider: self.provider.clone(),
-                args: args.to_vec(),
-                source,
-            })?;
+        let output = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(args)
+                .stdin(Stdio::null())
+                .output()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.to_vec(),
+            source,
+        })?;
         if output.status.success() {
             Ok(())
         } else {
@@ -587,32 +589,36 @@ impl Engine {
 
     /// Run the provider with `args` and return whether it exited zero.
     fn status(&self, args: &[String]) -> Result<bool> {
-        let status = Command::new(&self.provider)
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|source| ContainerError::Spawn {
-                provider: self.provider.clone(),
-                args: args.to_vec(),
-                source,
-            })?;
+        let status = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.to_vec(),
+            source,
+        })?;
         Ok(status.success())
     }
 
     /// Run the provider with `args`, returning captured stdout on a zero
     /// exit.
     fn output(&self, args: &[String]) -> Result<Vec<u8>> {
-        let output = Command::new(&self.provider)
-            .args(args)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|source| ContainerError::Spawn {
-                provider: self.provider.clone(),
-                args: args.to_vec(),
-                source,
-            })?;
+        let output = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(args)
+                .stdin(Stdio::null())
+                .output()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.to_vec(),
+            source,
+        })?;
         if output.status.success() {
             Ok(output.stdout)
         } else {
@@ -622,6 +628,35 @@ impl Engine {
                 code: output.status.code().unwrap_or(-1),
                 stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
             })
+        }
+    }
+}
+
+/// Spawn a command, transparently retrying on `ETXTBSY`.
+///
+/// In a multithreaded process a concurrent `fork` momentarily
+/// duplicates every open file descriptor — including a writable handle
+/// to a just-written executable — into the forked child. Until that
+/// child `exec`s (closing the descriptor via `O_CLOEXEC`), attempting to
+/// execute the file fails with `ETXTBSY` ("Text file busy"). The
+/// condition is transient, so retry a bounded number of times with a
+/// short backoff before surfacing the error. Real container providers
+/// (podman/docker) are stable binaries that never hit this, but the
+/// guard makes provider spawning robust regardless of how the binary
+/// came to exist.
+fn spawn_retrying_etxtbsy<T>(
+    mut run: impl FnMut() -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    let mut attempts = 0;
+    loop {
+        match run() {
+            Err(e)
+                if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 50 =>
+            {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            other => return other,
         }
     }
 }

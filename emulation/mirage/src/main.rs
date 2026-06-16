@@ -5,8 +5,9 @@
 //! Top-level layout:
 //!
 //! * `mirage <ctl-command>` — every control-plane subcommand
-//!   (`profile`, `session`, `exec`, `run`, `attach`, `logs`, `paths`,
-//!   `schema`). These are flattened in from [`mirage_ctl::CtlCmd`].
+//!   (`profile`, `topology`, `agent`, `emulators`, `session`, `exec`,
+//!   `state`, `run`, `attach`, `logs`, `paths`). These are flattened in
+//!   from [`mirage_ctl::CtlCmd`].
 //! * `mirage host --session <id>` — runs the per-session host.
 //! * `mirage webui` — runs the web UI server (formerly `mirage
 //!   daemon`, still accepted as an alias).
@@ -77,8 +78,9 @@ enum TopCmd {
     /// built from (with their licenses).
     About,
 
-    /// All control-plane subcommands (profile, session, exec, run,
-    /// attach, logs, paths, schema) are flattened in here.
+    /// All control-plane subcommands (profile, topology, agent,
+    /// emulators, session, exec, state, run, attach, logs, paths) are
+    /// flattened in here.
     #[command(flatten)]
     Ctl(CtlCmd),
 }

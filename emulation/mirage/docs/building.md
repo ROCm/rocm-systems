@@ -4,11 +4,11 @@ This guide covers building the `mirage` CLI/daemon, its embedded web
 dashboard, and (optionally) the `rocjitsu` GPU emulator that mirage
 drives.
 
-mirage is a single Cargo workspace
-([`emulation/mirage/`](../)) made of six crates: `core`, `ctl`,
-`daemon`, `dashboard`, `host`, and `rocjitsu` (the `mirage_rocjitsu`
-asset-embedding crate). One `cargo build` produces the unified
-`mirage` binary.
+mirage is a single Cargo workspace ([`emulation/mirage/`](../)). One
+`cargo build` produces the unified `mirage` binary from a set of crates —
+`core`, `ctl`, `host`, `container`, `builtin`, the emulator backends (`noop`,
+`rocjitsu`, `hotswap`), and the optional `daemon` + `dashboard` web UI. See
+[`architecture.md`](architecture.md) for the full crate map.
 
 ## TL;DR
 

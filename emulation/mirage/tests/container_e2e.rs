@@ -4,7 +4,7 @@
 //!
 //! These assert the full containerised lifecycle:
 //!
-//! * `mirage profile create --image ... --provider <mock>` records the
+//! * `mirage profile create --image ... --container-provider <mock>` records the
 //!   containerisation on the profile;
 //! * starting a containerised session brings up the per-node container
 //!   and network (the host pulls the image, creates the network, and
@@ -83,7 +83,7 @@ impl Env {
                 name,
                 "--image",
                 "img:latest",
-                "--provider",
+                "--container-provider",
                 &self.provider.to_string_lossy(),
             ])
             .assert()

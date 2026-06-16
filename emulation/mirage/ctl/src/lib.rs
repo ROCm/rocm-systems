@@ -123,7 +123,7 @@ fn emulators_cmd(long: bool, json: bool) {
     }
 
     println!(
-        "{:<10} {:<10} {:<10} DESCRIPTION",
+        "{:<13} {:<10} {:<10} DESCRIPTION",
         "NAME", "INSTALLED", "SUPPORTED"
     );
     for spec in &specs {
@@ -133,7 +133,7 @@ fn emulators_cmd(long: bool, json: bool) {
             spec.name.clone()
         };
         println!(
-            "{:<10} {:<10} {:<10} {}",
+            "{:<13} {:<10} {:<10} {}",
             name,
             if spec.installed { "yes" } else { "no" },
             if spec.support.supported { "yes" } else { "no" },
@@ -273,7 +273,7 @@ pub enum ProfileCmd {
         #[arg(long)]
         description: Option<String>,
         /// Containerise the profile: run every node inside a container
-        /// built from this image. Enables `--mount`/`--provider`.
+        /// built from this image. Enables `--mount`/`--container-provider`.
         #[arg(long)]
         image: Option<String>,
         /// Bind mount applied to every node container, as
@@ -284,7 +284,7 @@ pub enum ProfileCmd {
         /// Container provider to use (`podman`, `docker`, or a path).
         /// Autodetected (podman, then docker) when omitted. Requires
         /// `--image`.
-        #[arg(long)]
+        #[arg(long = "container-provider")]
         provider: Option<String>,
         /// Never prompt; use defaults for any unspecified field even on
         /// a terminal.
@@ -409,7 +409,7 @@ pub struct StartArgs {
     pub mounts: Vec<String>,
     /// Container provider (`podman`, `docker`, or a path). Autodetected
     /// when omitted.
-    #[arg(long)]
+    #[arg(long = "container-provider")]
     pub provider: Option<String>,
     /// Override the emulator execution mode (`functional` or `clocked`).
     #[arg(long)]
@@ -535,8 +535,9 @@ pub struct RunArgs {
     #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
     mounts: Vec<String>,
     /// Container provider (`podman`, `docker`, or a path). Autodetected
-    /// when omitted.
-    #[arg(long)]
+    /// when omitted. The `MIRAGE_CONTAINER_PROVIDER` environment variable
+    /// has the same effect.
+    #[arg(long = "container-provider")]
     container_provider: Option<String>,
     /// Override the emulator execution mode (`functional` or `clocked`).
     #[arg(long)]
@@ -892,8 +893,8 @@ async fn session_cmd<C: MirageCtl>(
 /// Build a [`ContainerizedDef`] from CLI container flags.
 ///
 /// Returns `None` when no container flags were given. `--mount` and
-/// `--provider` require `--image` (there is no base image to attach
-/// them to otherwise).
+/// `--container-provider` require `--image` (there is no base image to
+/// attach them to otherwise).
 fn build_containerize(
     image: Option<String>,
     mounts: &[String],
@@ -909,7 +910,7 @@ fn build_containerize(
         })),
         None => {
             if !mounts.is_empty() || provider.is_some() {
-                anyhow::bail!("--mount/--provider require --image");
+                anyhow::bail!("--mount/--container-provider require --image");
             }
             Ok(None)
         }
@@ -1216,7 +1217,7 @@ fn apply_profile_overrides(
             }
             None => {
                 let image = image.ok_or_else(|| {
-                    anyhow::anyhow!("--mount/--provider require a containerised profile or --image")
+                    anyhow::anyhow!("--mount/--container-provider require a containerised profile or --image")
                 })?;
                 profile.containerize = Some(ContainerizedDef {
                     provider,
