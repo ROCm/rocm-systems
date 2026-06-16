@@ -44,7 +44,6 @@ class ProfileModeImportGuard:
         "pc_sampling",
         "utils",
         "interface",
-        "orchestrator",
         "vendored",
         "roofline",
         "config",

@@ -875,13 +875,6 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
-# src/orchestrator
-install(
-    DIRECTORY src/orchestrator
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
-)
 # Install the roctx_recordfn sources so the runtime loader can rebuild
 # the extension against the user's PyTorch environment on first use.
 install(

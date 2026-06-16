@@ -11,9 +11,8 @@ from interface.factory import (
     create_profile_data_writer,
 )
 from interface.pmc_frame import to_canonical_pmc_frame
-from interface.profile_data import ProfileDataReaderOptions, ProfilePassContext
+from interface.profile_data import ProfileDataReaderOptions
 from interface.rocpd_data import RocpdAnalysisData, RocpdProfileDataWriter
-from orchestrator.rocprofv3 import Rocprofv3ProfileOrchestrator
 
 
 def test_factory_selects_csv_and_rocpd_implementations():
@@ -111,30 +110,6 @@ def test_rocpd_long_counter_rows_convert_to_canonical_frame():
     assert canonical_frame["GPU_ID"].tolist() == [0]
     assert canonical_frame["SQ_WAVES"].tolist() == [11]
     assert canonical_frame["GRBM_COUNT"].tolist() == [22]
-
-
-def test_rocprofv3_profile_orchestrator_delegates_to_writer(monkeypatch, tmp_path):
-    calls = []
-
-    class FakeWriter:
-        def finalize_pass(self, context):
-            calls.append(context)
-
-    monkeypatch.setattr(
-        "orchestrator.rocprofv3.create_profile_data_writer",
-        lambda data_format: FakeWriter(),
-    )
-    context = ProfilePassContext(
-        workload_dir=tmp_path,
-        fbase="pmc_perf",
-        profiler_command="rocprofv3",
-        using_native_tool=False,
-        torch_trace_enabled=False,
-    )
-
-    Rocprofv3ProfileOrchestrator().finalize_profile_pass("csv", context)
-
-    assert calls == [context]
 
 
 def write_counter_result(csv_path: Path, counter_name: str, value: str) -> None:

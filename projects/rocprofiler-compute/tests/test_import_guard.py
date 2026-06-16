@@ -26,12 +26,10 @@ def test_import_guard_allows_stdlib_and_project():
         # 2. Project modules (must succeed - sys.path includes src/)
         import config
         import interface
-        import orchestrator
         import utils
 
         assert utils is not None
         assert interface is not None
-        assert orchestrator is not None
         assert config is not None
 
 
