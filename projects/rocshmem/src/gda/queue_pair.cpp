@@ -56,13 +56,8 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   mr_fetching_atomic = ibv.reg_mr(pd, fetching_atomic, 8 * FETCHING_ATOMIC_CNT, access, &allocator);
   CHECK_NNULL(mr_fetching_atomic, "ibv_reg_mr");
 
-  if (gda_provider == GDAProvider::MLX5) {
-    nonfetching_atomic_lkey = htobe32(mr_nonfetching_atomic->lkey);
-    fetching_atomic_lkey = htobe32(mr_fetching_atomic->lkey);
-  } else {
-    nonfetching_atomic_lkey = mr_nonfetching_atomic->lkey;
-    fetching_atomic_lkey = mr_fetching_atomic->lkey;
-  }
+  nonfetching_atomic_lkey = mr_nonfetching_atomic->lkey;
+  fetching_atomic_lkey = mr_fetching_atomic->lkey;
 
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
@@ -426,11 +421,7 @@ int QueuePair::buffer_register(uintptr_t addr, size_t length) {
       user_buf_info[i].addr   = addr;
       user_buf_info[i].length = length;
 
-      if (gda_provider_ == GDAProvider::MLX5) {
-        user_buf_info[i].lkey = htobe32(mr->lkey);
-      } else {
-        user_buf_info[i].lkey = mr->lkey;
-      }
+      user_buf_info[i].lkey = mr->lkey;
 
       break;
     }
