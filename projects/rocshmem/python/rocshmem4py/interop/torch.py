@@ -152,7 +152,10 @@ def _stream_handle(stream: Optional['torch.cuda.Stream'] = None) -> int:
 
     Defaults to ``torch.cuda.current_stream()`` when *stream* is None.
     """
-    import torch
+    try:
+        import torch
+    except ImportError:
+        raise ImportError("PyTorch is required for rocshmem4py.interop.torch.")
     if stream is None:
         stream = torch.cuda.current_stream()
     return stream.cuda_stream
