@@ -6,6 +6,7 @@
 #include "common.hpp"
 #include "common/defines.h"
 #include "common/environment.hpp"
+#include "core/perfetto/output_layout.hpp"
 #include "state.hpp"
 #include "timemory.hpp"
 #include <cstdint>
@@ -249,6 +250,9 @@ get_perfetto_combined_traces();
 
 std::string
 get_perfetto_fill_policy();
+
+core::perfetto_output_layout
+get_perfetto_output_layout();
 
 std::set<std::string>
 get_enabled_categories();
