@@ -3,14 +3,15 @@
 
 #pragma once
 
-#include "core/sdma_feature.hpp"
+#include "backends/amd_smi/sdma_feature.hpp"
 
+#include <concepts>
 #include <cstdint>
 #include <memory>
 
 #include <amd_smi/amdsmi.h>
 
-namespace rocprofsys::pmc::drivers::amd_smi
+namespace rocprofsys::backends::amd_smi
 {
 
 /**
@@ -18,9 +19,9 @@ namespace rocprofsys::pmc::drivers::amd_smi
  *
  * This struct provides static methods that directly forward to the AMD SMI library.
  * It serves as an abstraction layer that can be mocked in tests through the
- * driver_factory.
+ * backend_factory.
  */
-struct driver
+struct backend
 {
     /**
      * @brief Initialize the AMD SMI library.
@@ -177,23 +178,23 @@ struct driver
 };
 
 /**
- * @brief Factory for creating driver instances.
+ * @brief Factory for creating backend instances.
  *
- * Provides a factory method for creating driver instances. This enables
- * dependency injection and allows for substituting mock drivers in tests.
+ * Provides a factory method for creating backend instances. This enables
+ * dependency injection and allows for substituting mock backends in tests.
  */
-struct driver_factory
+struct backend_factory
 {
-    using driver_t = driver;
+    using backend_t = backend;
 
     /**
-     * @brief Create a new driver instance.
-     * @return Shared pointer to the driver instance.
+     * @brief Create a new backend instance.
+     * @return Shared pointer to the backend instance.
      */
-    static std::shared_ptr<driver_t> create_driver()
+    static std::shared_ptr<backend_t> create_backend()
     {
-        return std::make_shared<driver_t>();
+        return std::make_shared<backend_t>();
     }
 };
 
-}  // namespace rocprofsys::pmc::drivers::amd_smi
+}  // namespace rocprofsys::backends::amd_smi

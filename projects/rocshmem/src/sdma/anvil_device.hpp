@@ -34,6 +34,7 @@
 
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/hsakmttypes.h"
+#include "log.hpp"
 #include "sdma_pkt_struct.h"
 #include "sdma_pkt_struct_mi4.h"
 
@@ -261,25 +262,49 @@ struct SdmaQueueDeviceHandle {
         // All stores inside the loop to avoid SIMD reconvergence deadlock:
         // the committedWptr update must complete before this lane becomes
         // inactive, so that other lanes in the same wavefront can proceed.
+#if defined(__gfx1250__)
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        LOGD_ERROR_ABORT("SDMA is not supported on this architecture");
+#endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
         __hip_atomic_store(wptr, pendingWptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
 
+#if defined(__gfx1250__)
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        LOGD_ERROR_ABORT("SDMA is not supported on this architecture");
+#endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
         __hip_atomic_store(doorbell, pendingWptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
 
+#if defined(__gfx1250__)
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        LOGD_ERROR_ABORT("SDMA is not supported on this architecture");
+#endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
         __hip_atomic_store(committedWptr, pendingWptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
 
+#if defined(__gfx1250__)
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        LOGD_ERROR_ABORT("SDMA is not supported on this architecture");
+#endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
@@ -324,10 +349,21 @@ struct SdmaQueueDeviceHandle {
   __device__ __forceinline__ bool nontemporal_compare_exchange(uint64_t* vaddr, uint64_t expected,
                                                                uint64_t value) {
     uint64_t vdst;
-    unsigned __int128 vdata = ((unsigned __int128)expected << 64) | value;
+    [[maybe_unused]] unsigned __int128 vdata = ((unsigned __int128)expected << 64) | value;
+#if defined(__gfx1250__)
+    __asm__ __volatile__("flat_atomic_cmpswap_b64 %0, %1, %2 scope:SCOPE_SYS nt;\n s_wait_loadcnt 0x0\n s_wait_storecnt 0x0\n\t"
+                         : "=v"(vdst)
+                         : "v"(vaddr), "v"(vdata)
+                         : "memory");
+#elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
     __asm__ __volatile__("flat_atomic_cmpswap_x2 %0, %1, %2 sc0 nt;\n s_waitcnt vmcnt(0); \n\t"
                          : "=v"(vdst)
                          : "v"(vaddr), "v"(vdata));
+#else
+    (void)vaddr;
+    LOGD_ERROR_ABORT("SDMA is not supported on this architecture");
+    vdst = 0;
+#endif
     return (vdst == expected);
   }
 
@@ -390,7 +426,13 @@ struct SdmaQueueSingleProducerDeviceHandle : SdmaQueueDeviceHandle {
   __device__ __forceinline__ void submitPacket([[maybe_unused]] uint64_t base,
                                                uint64_t pendingWptr) {
     *wptr = pendingWptr;
+#if defined(__gfx1250__)
+    asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
     __builtin_amdgcn_s_waitcnt(0);
+#else
+    LOGD_ERROR_ABORT("SDMA is not supported on this architecture");
+#endif
     __builtin_amdgcn_wave_barrier();
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
     *doorbell = pendingWptr;

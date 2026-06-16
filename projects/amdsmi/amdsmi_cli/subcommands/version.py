@@ -131,7 +131,7 @@ class VersionCommands:
                 )
             if args.nic_version:
                 human_readable_output = (
-                    human_readable_output + f" | AINIC version: {nic_version_str}"
+                    human_readable_output + f" | ionic version: {nic_version_str}"
                 )
             # Custom human readable handling for version
             if self.logger.destination == "stdout":

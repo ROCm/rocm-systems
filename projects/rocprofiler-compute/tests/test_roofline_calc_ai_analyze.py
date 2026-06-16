@@ -6,7 +6,12 @@ import numpy as np
 import pandas as pd
 
 from utils import schema
-from utils.roofline_calc import calc_ai_analyze, sanitize_ai_value
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.roofline_calc import (
+    calc_ai_analyze,
+    sanitize_ai_value,
+    sanitize_mem_level,
+)
 
 
 def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
@@ -18,6 +23,9 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     DataFrame that ``eval_metric`` would normally populate.
 
     Returns the plot-points dict produced by ``calc_ai_analyze``.
+
+    Note: this mock simulates MI350 AI metric values based on the architecture's cache
+    levels available on the hardware. Cache levels will vary for other architectures.
     """
     kernel_name = "test_kernel"
     kernel_id = 0
@@ -172,3 +180,60 @@ def test_sanitize_ai_value_replaces_invalid_values_with_zero():
     assert sanitize_ai_value("") == 0
     assert sanitize_ai_value(None) == 0
     assert sanitize_ai_value(1.5) == 1.5
+
+
+##############################################################################
+# sanitize_mem_level Tests
+##############################################################################
+
+
+def test_sanitize_mem_level_all_falls_back_to_hierarchy():
+    """'ALL' results in full memory levels for the model, minus MALL."""
+    result = sanitize_mem_level("ALL", "mi210")
+    # mi210 has no MALL, so result equals memory_levels directly
+    assert result == mi_gpu_specs.get_memory_levels("mi210")
+
+
+def test_sanitize_mem_level_all_list_falls_back_to_hierarchy():
+    """['ALL'] behaves the same as 'ALL'."""
+    result = sanitize_mem_level(["ALL"], "mi210")
+    assert result == mi_gpu_specs.get_memory_levels("mi210")
+
+
+def test_sanitize_mem_level_supported_string():
+    """A supported single string level is returned as a single-item list."""
+    result = sanitize_mem_level("HBM", "mi210")
+    assert result == ["HBM"]
+
+
+def test_sanitize_mem_level_supported_list():
+    """A list of supported levels is returned unchanged."""
+    result = sanitize_mem_level(["HBM", "L2"], "mi210")
+    assert result == ["HBM", "L2"]
+
+
+def test_sanitize_mem_level_unsupported_falls_back_to_hierarchy():
+    """Fully unsupported input falls back to full memory levels, minus MALL."""
+    result = sanitize_mem_level("HBM", "rdna35_halo")
+    # rdna35_halo memory_levels includes MALL, which is stripped by sanitize_mem_level
+    expected = [m for m in mi_gpu_specs.get_memory_levels("rdna35_halo") if m != "MALL"]
+    assert result == expected
+
+
+def test_sanitize_mem_level_mixed_filters_unsupported():
+    """Unsupported levels in a mixed list are filtered out."""
+    # rdna35_halo supports L0, L1, L2, MALL, LDS — not HBM; MALL is also stripped
+    result = sanitize_mem_level(["HBM", "L2"], "rdna35_halo")
+    assert result == ["L2"]
+
+
+def test_sanitize_mem_level_mall_is_stripped():
+    """MALL is always removed from results even when explicitly requested."""
+    result = sanitize_mem_level("MALL", "rdna35_halo")
+    assert "MALL" not in result
+
+
+def test_sanitize_mem_level_vl1d_normalised():
+    """'vL1D' is normalised to 'L1' before filtering."""
+    result = sanitize_mem_level("vL1D", "mi210")
+    assert result == ["L1"]

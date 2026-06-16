@@ -566,6 +566,30 @@ class Graph {
   std::unordered_set<void*> memAllocNodePtrs_;
   static std::unordered_set<Graph*> graphSet_;
   static amd::Monitor graphSetLock_;
+
+  //! Records a graph allocation that has no matching free node yet. Shared by the
+  //! explicit and stream-capture paths so their bookkeeping cannot diverge.
+  static void TrackMemAllocPtr(Graph* graph, void* dptr) {
+    if (graph == nullptr || dptr == nullptr) return;
+    amd::ScopedLock lock(graphSetLock_);
+    graph->memAllocNodePtrs_.insert(dptr);
+  }
+
+  //! Finds and erases a tracked dptr across all graphs (an alloc may be freed in a
+  //! different graph). Returns false if it is not a live unmatched allocation; both
+  //! free paths reject that as hipErrorInvalidValue.
+  static bool UntrackMemAllocPtr(void* dptr) {
+    if (dptr == nullptr) return false;
+    amd::ScopedLock lock(graphSetLock_);
+    for (auto* g : graphSet_) {
+      auto it = g->memAllocNodePtrs_.find(dptr);
+      if (it != g->memAllocNodePtrs_.end()) {
+        g->memAllocNodePtrs_.erase(it);
+        return true;
+      }
+    }
+    return false;
+  }
   Graph(hip::Device* device, const Graph* original = nullptr)
       : pOriginalGraph_(original),
         id_(nextID.fetch_add(1, std::memory_order_relaxed)),

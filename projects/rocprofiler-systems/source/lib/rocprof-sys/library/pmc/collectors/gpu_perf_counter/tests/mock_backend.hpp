@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "library/pmc/device_providers/rocprofiler_sdk/drivers/driver.hpp"
+#include "backends/rocprofiler_sdk/backend.hpp"
 #include <cstdint>
 
 #include <gmock/gmock.h>
@@ -13,10 +13,10 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys::pmc::drivers::rocprofiler_sdk::testing
+namespace rocprofsys::backends::rocprofiler_sdk::testing
 {
 
-class mock_driver
+class mock_backend
 {
 public:
     using counter_config_id_t          = rocprofiler_counter_config_id_t;
@@ -56,8 +56,8 @@ public:
                 (rocprofiler_counter_record_t record,
                  rocprofiler_counter_id_t*    counter_id));
 
-    MOCK_METHOD((std::vector<collectors::gpu_perf_counter::counter_metadata>),
-                query_counter_details, (rocprofiler_counter_id_t counter_id));
+    MOCK_METHOD((std::vector<counter_metadata>), query_counter_details,
+                (rocprofiler_counter_id_t counter_id));
 
     MOCK_METHOD(rocprofiler_status_t, iterate_agent_supported_counters,
                 (rocprofiler_agent_id_t              agent_id,
@@ -73,21 +73,21 @@ public:
                  rocprofiler_device_counting_service_cb_t callback, void* user_data));
 };
 
-struct mock_driver_factory
+struct mock_backend_factory
 {
-    using driver_t = mock_driver;
+    using backend_t = mock_backend;
 
-    static inline std::shared_ptr<driver_t> s_mock{};
+    static inline std::shared_ptr<backend_t> s_mock{};
 
-    static void set_mock(std::shared_ptr<driver_t> mock) { s_mock = std::move(mock); }
+    static void set_mock(std::shared_ptr<backend_t> mock) { s_mock = std::move(mock); }
 
-    static std::shared_ptr<driver_t> create_driver()
+    static std::shared_ptr<backend_t> create_backend()
     {
         if(s_mock) return s_mock;
-        return std::make_shared<driver_t>();
+        return std::make_shared<backend_t>();
     }
 
     static void reset() { s_mock.reset(); }
 };
 
-}  // namespace rocprofsys::pmc::drivers::rocprofiler_sdk::testing
+}  // namespace rocprofsys::backends::rocprofiler_sdk::testing

@@ -245,8 +245,12 @@ Roofline Plot Points:
     rst: Arithmetic Intensity relative to the L2 cache. This metric shows compute density relative to L2 cache traffic. Higher values indicate better data reuse upstream of L2, while lower values suggest heavy traffic into L2.
     unit: FLOPs/Byte
   AI L1:
-    plain: Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L1 bandwidth.
-    rst: Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L1 bandwidth.
+    plain: Arithmetic Intensity relative to the L1 cache. This metric shows compute density relative to L1 cache traffic. Higher values indicate better data reuse upstream of L1, while lower values suggest heavy traffic into L1.
+    rst: Arithmetic Intensity relative to the L1 cache. This metric shows compute density relative to L1 cache traffic. Higher values indicate better data reuse upstream of L1, while lower values suggest heavy traffic into L1.
+    unit: FLOPs/Byte
+  AI L0:
+    plain: Arithmetic Intensity relative to the L0 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L0 bandwidth.
+    rst: Arithmetic Intensity relative to the L0 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L0 bandwidth.
     unit: FLOPs/Byte
   AI LDS:
     plain: Arithmetic Intensity relative to the Local Data Share (LDS). Higher values indicate more compute per byte of LDS traffic, suggesting effective reuse of shared data within a workgroup. Lower values suggest memory-bound behavior limited by LDS bandwidth or bank-conflict pressure.

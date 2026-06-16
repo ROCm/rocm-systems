@@ -75,6 +75,7 @@ target_sources(
     fence_ordering_tester.cpp
     tile_rma_tester.cpp
     host_team_sync_barrier_tester.cpp
+    host_rma_tester.cpp
 )
 
 ###############################################################################
