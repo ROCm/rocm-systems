@@ -96,11 +96,16 @@ public:
   /// @brief Daemon-mode process lifecycle. Thread-safe for concurrent clients.
   /// @{
 
-  /// @brief Atomically create a new process and return its ID.
+  /// @brief Atomically open a process and return its ID.
   /// @details Unlike open(), which sets local_process_id_ (not thread-safe for
   /// concurrent daemon clients), this method returns the ID directly so the
-  /// caller can associate it with a specific client connection.
-  uint32_t open_process();
+  /// caller can associate it with a specific client connection. When
+  /// client_pid is non-zero, repeated opens from that OS process share the
+  /// same simulated KFD process and increment its open reference count.
+  uint32_t open_process(pid_t client_pid = 0);
+
+  /// @brief Attach a daemon client's OS pid to a simulated KFD process.
+  void set_client_pid(uint32_t process_id, pid_t client_pid);
 
   int ioctl(uint32_t process_id, unsigned long request, void *arg);
   void *mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags, off_t offset);

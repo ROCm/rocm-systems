@@ -24,6 +24,9 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <libdrm/amdgpu.h>
+#include <libdrm/amdgpu_drm.h>
+
 #include "util/dynamic_loader.h"
 #include "util/log.h"
 
@@ -33,6 +36,7 @@ RJ_DIAGNOSTIC_POP
 #include <csignal>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <dlfcn.h>
@@ -78,6 +82,18 @@ static int connect_to_daemon() {
 }
 
 namespace {
+
+struct RjFakeBo {
+  static constexpr uint32_t kMagic = 0x524a424f; // RJBO
+
+  uint32_t magic = kMagic;
+  int dmabuf_fd = -1;
+  uint64_t size = 0;
+  off_t mmap_offset = 0;
+  uint32_t kms_handle = 0;
+  void *cpu_ptr = nullptr;
+  amdgpu_bo_metadata metadata = {};
+};
 
 void rj_sigsegv_handler(int, siginfo_t *, void *) {
   signal(SIGSEGV, SIG_DFL);
@@ -352,6 +368,63 @@ public:
     handle_to_drm_fd_[handle] = fd;
   }
 
+  int untrack_drm_handle(void *handle) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = handle_to_drm_fd_.find(handle);
+    if (it == handle_to_drm_fd_.end())
+      return -1;
+    int fd = it->second;
+    handle_to_drm_fd_.erase(it);
+    return fd;
+  }
+
+  void track_dmabuf_mmap_offset(int fd, off_t mmap_offset) {
+    if (fd < 0)
+      return;
+    std::lock_guard lock(fd_mutex_);
+    dmabuf_mmap_offsets_[fd] = mmap_offset;
+  }
+
+  off_t dmabuf_mmap_offset(int fd) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = dmabuf_mmap_offsets_.find(fd);
+    return (it != dmabuf_mmap_offsets_.end()) ? it->second : 0;
+  }
+
+  void untrack_dmabuf(int fd) {
+    std::lock_guard lock(fd_mutex_);
+    dmabuf_mmap_offsets_.erase(fd);
+  }
+
+  uint32_t track_fake_bo(RjFakeBo *bo) {
+    std::lock_guard lock(fd_mutex_);
+    uint32_t kms_handle = next_fake_kms_handle_++;
+    fake_bo_by_kms_[kms_handle] = bo;
+    if (bo->mmap_offset)
+      fake_bo_by_mmap_offset_[bo->mmap_offset] = bo;
+    return kms_handle;
+  }
+
+  void untrack_fake_bo(RjFakeBo *bo) {
+    std::lock_guard lock(fd_mutex_);
+    if (bo->kms_handle)
+      fake_bo_by_kms_.erase(bo->kms_handle);
+    if (bo->mmap_offset)
+      fake_bo_by_mmap_offset_.erase(bo->mmap_offset);
+  }
+
+  RjFakeBo *fake_bo_from_kms(uint32_t kms_handle) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = fake_bo_by_kms_.find(kms_handle);
+    return (it != fake_bo_by_kms_.end()) ? it->second : nullptr;
+  }
+
+  RjFakeBo *fake_bo_from_mmap_offset(off_t mmap_offset) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = fake_bo_by_mmap_offset_.find(mmap_offset);
+    return (it != fake_bo_by_mmap_offset_.end()) ? it->second : nullptr;
+  }
+
   SimulatedDriver *get_or_create() {
     std::lock_guard lock(init_mutex_);
     if (!rj_vm_) {
@@ -445,7 +518,11 @@ private:
   std::unordered_map<int, std::string> sysfs_fds_;
   std::unordered_map<int, uint32_t> drm_fds_;
   std::unordered_map<void *, int> handle_to_drm_fd_;
+  std::unordered_map<int, off_t> dmabuf_mmap_offsets_;
+  std::unordered_map<uint32_t, RjFakeBo *> fake_bo_by_kms_;
+  std::unordered_map<off_t, RjFakeBo *> fake_bo_by_mmap_offset_;
   std::unordered_set<int> kfd_dup_fds_;
+  uint32_t next_fake_kms_handle_ = 1;
 
   alignas(16) static uint8_t storage_[];
 };
@@ -472,6 +549,14 @@ __attribute__((constructor(101))) static void resolve_real_dlsym() {
 }
 
 __attribute__((constructor)) static void init_interposer() { InterposerContext::init(); }
+
+void track_successful_kfd_ioctl(unsigned long request, void *arg, int rc) {
+  if (rc != 0 || request != AMDKFD_IOC_EXPORT_DMABUF || !arg)
+    return;
+  auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
+  InterposerContext::ctx.track_dmabuf_mmap_offset(static_cast<int>(export_args->dmabuf_fd),
+                                                  static_cast<off_t>(export_args->handle << 12));
+}
 
 } // namespace
 
@@ -665,6 +750,7 @@ int openat64(int dirfd, const char *path, int flags, ...) {
 
 int close(int fd) {
   assert(InterposerContext::real.ready());
+  InterposerContext::ctx.untrack_dmabuf(fd);
   if (InterposerContext::ctx.remote_lookup(fd))
     return InterposerContext::ctx.close_remote_fd_only();
   InterposerContext::ctx.untrack_sysfs(fd);
@@ -700,6 +786,7 @@ int ioctl(int fd, unsigned long request, ...) {
 
   constexpr unsigned kDrmIoctlType = 'd';
   constexpr unsigned kDrmIoctlNrVersion = 0x00;
+  constexpr unsigned kDrmIoctlNrPrimeFdToHandle = 0x2e;
   constexpr unsigned kDrmIoctlNrAmdgpuInfo = 0x45;
   constexpr unsigned kAmdgpuInfoDevInfo = 0x16;
 
@@ -730,6 +817,22 @@ int ioctl(int fd, unsigned long request, ...) {
       if (ver->desc && ver->desc_len > 0)
         ver->desc[0] = '\0';
       ver->desc_len = 1;
+      return 0;
+    }
+    if (type == kDrmIoctlType && nr == kDrmIoctlNrPrimeFdToHandle && arg) {
+      struct drm_prime_handle {
+        uint32_t handle;
+        uint32_t flags;
+        int32_t fd;
+      };
+      auto *prime = static_cast<drm_prime_handle *>(arg);
+      if (prime->fd < 0) {
+        errno = EINVAL;
+        return -1;
+      }
+      // The simulated render node does not maintain GEM objects. ROCR only
+      // needs a nonzero handle to complete its dmabuf bookkeeping.
+      prime->handle = static_cast<uint32_t>(prime->fd) + 1u;
       return 0;
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrAmdgpuInfo && arg) {
@@ -819,22 +922,34 @@ int ioctl(int fd, unsigned long request, ...) {
     return -1;
   }
 
-  if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
-    return remote->ioctl(request, arg);
+  if (auto *remote = InterposerContext::ctx.remote_lookup(fd)) {
+    int rc = remote->ioctl(request, arg);
+    track_successful_kfd_ioctl(request, arg, rc);
+    return rc;
+  }
   if (InterposerContext::ctx.is_kfd_dup(fd)) {
-    if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
-      return remote->ioctl(request, arg);
+    if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
+      int rc = remote->ioctl(request, arg);
+      track_successful_kfd_ioctl(request, arg, rc);
+      return rc;
+    }
   }
   if (_IOC_TYPE(request) == AMDKFD_IOCTL_BASE) {
-    if (auto *remote = InterposerContext::ctx.remote())
-      return remote->ioctl(request, arg);
+    if (auto *remote = InterposerContext::ctx.remote()) {
+      int rc = remote->ioctl(request, arg);
+      track_successful_kfd_ioctl(request, arg, rc);
+      return rc;
+    }
   }
 
   auto *drv = InterposerContext::ctx.lookup(fd);
   if (!drv && InterposerContext::ctx.is_kfd_dup(fd))
     drv = InterposerContext::ctx.driver();
-  if (drv)
-    return drv->ioctl(request, arg);
+  if (drv) {
+    int rc = drv->ioctl(request, arg);
+    track_successful_kfd_ioctl(request, arg, rc);
+    return rc;
+  }
 
   return InterposerContext::real.ioctl(fd, request, arg);
 }
@@ -983,6 +1098,12 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
     return drv->mmap(addr, length, prot, flags, offset);
 
   if (InterposerContext::ctx.is_drm(fd)) {
+    uint64_t type = static_cast<uint64_t>(offset) & rocjitsu::KFD_MMAP_TYPE_MASK;
+    if (type == 0) {
+      if (auto *bo = InterposerContext::ctx.fake_bo_from_mmap_offset(offset)) {
+        return InterposerContext::real.mmap(addr, length, prot, flags, bo->dmabuf_fd, 0);
+      }
+    }
     if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
       return remote->mmap(addr, length, prot, flags, offset);
     if (auto *drv = InterposerContext::ctx.driver())
@@ -1046,27 +1167,174 @@ int munmap(void *addr, size_t length) {
 
 // -- libdrm interposition --
 
-int amdgpu_device_initialize(int /*fd*/, uint32_t *major_version, uint32_t *minor_version,
-                             void **device_handle) {
+int amdgpu_device_initialize(int fd, uint32_t *major_version, uint32_t *minor_version,
+                             amdgpu_device_handle *device_handle) {
   if (InterposerContext::ctx.driver_fd() < 0 && InterposerContext::ctx.remote_kfd_fd() < 0)
     return -1;
   *major_version = 3;
   *minor_version = 57;
-  static int dummy_handle = 1;
-  *device_handle = &dummy_handle;
+  int handle_fd = InterposerContext::real.fcntl(fd, F_DUPFD_CLOEXEC, 512);
+  if (handle_fd < 0)
+    return -1;
+  if (InterposerContext::ctx.is_drm(fd))
+    InterposerContext::ctx.track_drm(handle_fd, InterposerContext::ctx.drm_render_minor(fd));
+  auto *handle = new int(handle_fd);
+  *device_handle = reinterpret_cast<amdgpu_device_handle>(handle);
+  InterposerContext::ctx.track_drm_handle(handle, handle_fd);
   return 0;
 }
 
 int amdgpu_device_initialize2(int fd, bool /*deduplicate_device*/, uint32_t *major_version,
-                              uint32_t *minor_version, void **device_handle) {
+                              uint32_t *minor_version, amdgpu_device_handle *device_handle) {
   return amdgpu_device_initialize(fd, major_version, minor_version, device_handle);
 }
 
-int amdgpu_device_deinitialize(void * /*device_handle*/) { return 0; }
+int amdgpu_device_deinitialize(amdgpu_device_handle device_handle) {
+  int fd = InterposerContext::ctx.untrack_drm_handle(device_handle);
+  if (fd >= 0) {
+    InterposerContext::ctx.untrack_drm(fd);
+    InterposerContext::real.close(fd);
+  }
+  delete reinterpret_cast<int *>(device_handle);
+  return 0;
+}
 
-int amdgpu_device_get_fd(void * /*device_handle*/) {
-  int fd = InterposerContext::ctx.remote_kfd_fd();
+int amdgpu_device_get_fd(amdgpu_device_handle device_handle) {
+  int fd = InterposerContext::ctx.drm_fd_for_handle(device_handle);
+  if (fd >= 0)
+    return fd;
+  fd = InterposerContext::ctx.remote_kfd_fd();
   return fd >= 0 ? fd : InterposerContext::ctx.driver_fd();
+}
+
+int amdgpu_bo_import(amdgpu_device_handle /*dev*/, enum amdgpu_bo_handle_type type,
+                     uint32_t shared_handle, struct amdgpu_bo_import_result *output) {
+  if (!output || type != amdgpu_bo_handle_type_dma_buf_fd)
+    return -EINVAL;
+
+  int source_fd = static_cast<int>(shared_handle);
+  int dup_fd = InterposerContext::real.fcntl(source_fd, F_DUPFD_CLOEXEC, 512);
+  if (dup_fd < 0)
+    return -errno;
+
+  auto *bo = new RjFakeBo();
+  bo->dmabuf_fd = dup_fd;
+  bo->mmap_offset = InterposerContext::ctx.dmabuf_mmap_offset(source_fd);
+  struct stat st {};
+  if (fstat(source_fd, &st) == 0 && st.st_size > 0)
+    bo->size = static_cast<uint64_t>(st.st_size);
+  bo->kms_handle = InterposerContext::ctx.track_fake_bo(bo);
+
+  output->buf_handle = reinterpret_cast<amdgpu_bo_handle>(bo);
+  output->alloc_size = bo->size;
+  return 0;
+}
+
+int amdgpu_bo_export(amdgpu_bo_handle buf_handle, enum amdgpu_bo_handle_type type,
+                     uint32_t *shared_handle) {
+  auto *bo = reinterpret_cast<RjFakeBo *>(buf_handle);
+  if (!bo || bo->magic != RjFakeBo::kMagic || !shared_handle)
+    return -EINVAL;
+
+  if (type == amdgpu_bo_handle_type_dma_buf_fd) {
+    int dup_fd = InterposerContext::real.fcntl(bo->dmabuf_fd, F_DUPFD_CLOEXEC, 0);
+    if (dup_fd < 0)
+      return -errno;
+    InterposerContext::ctx.track_dmabuf_mmap_offset(dup_fd, bo->mmap_offset);
+    *shared_handle = static_cast<uint32_t>(dup_fd);
+    return 0;
+  }
+
+  if (type == amdgpu_bo_handle_type_kms || type == amdgpu_bo_handle_type_kms_noimport) {
+    *shared_handle = bo->kms_handle;
+    return 0;
+  }
+
+  return -EINVAL;
+}
+
+int amdgpu_bo_query_info(amdgpu_bo_handle buf_handle, struct amdgpu_bo_info *info) {
+  auto *bo = reinterpret_cast<RjFakeBo *>(buf_handle);
+  if (!bo || bo->magic != RjFakeBo::kMagic || !info)
+    return -EINVAL;
+  std::memset(info, 0, sizeof(*info));
+  info->alloc_size = bo->size;
+  info->metadata = bo->metadata;
+  return 0;
+}
+
+int amdgpu_bo_set_metadata(amdgpu_bo_handle buf_handle, struct amdgpu_bo_metadata *info) {
+  auto *bo = reinterpret_cast<RjFakeBo *>(buf_handle);
+  if (!bo || bo->magic != RjFakeBo::kMagic || !info)
+    return -EINVAL;
+  bo->metadata = *info;
+  return 0;
+}
+
+int amdgpu_bo_va_op(amdgpu_bo_handle buf_handle, uint64_t /*offset*/, uint64_t /*size*/,
+                    uint64_t /*addr*/, uint64_t /*flags*/, uint32_t /*ops*/) {
+  auto *bo = reinterpret_cast<RjFakeBo *>(buf_handle);
+  if (!bo || bo->magic != RjFakeBo::kMagic)
+    return -EINVAL;
+  return 0;
+}
+
+int amdgpu_bo_cpu_map(amdgpu_bo_handle buf_handle, void **cpu) {
+  auto *bo = reinterpret_cast<RjFakeBo *>(buf_handle);
+  if (!bo || bo->magic != RjFakeBo::kMagic || !cpu || bo->size == 0)
+    return -EINVAL;
+  if (!bo->cpu_ptr) {
+    bo->cpu_ptr = InterposerContext::real.mmap(nullptr, bo->size, PROT_READ | PROT_WRITE,
+                                               MAP_SHARED, bo->dmabuf_fd, 0);
+    if (bo->cpu_ptr == MAP_FAILED) {
+      bo->cpu_ptr = nullptr;
+      return -errno;
+    }
+  }
+  *cpu = bo->cpu_ptr;
+  return 0;
+}
+
+int amdgpu_bo_cpu_unmap(amdgpu_bo_handle buf_handle) {
+  auto *bo = reinterpret_cast<RjFakeBo *>(buf_handle);
+  if (!bo || bo->magic != RjFakeBo::kMagic)
+    return -EINVAL;
+  if (bo->cpu_ptr) {
+    InterposerContext::real.munmap(bo->cpu_ptr, bo->size);
+    bo->cpu_ptr = nullptr;
+  }
+  return 0;
+}
+
+int amdgpu_bo_free(amdgpu_bo_handle buf_handle) {
+  auto *bo = reinterpret_cast<RjFakeBo *>(buf_handle);
+  if (!bo || bo->magic != RjFakeBo::kMagic)
+    return -EINVAL;
+  if (bo->cpu_ptr)
+    InterposerContext::real.munmap(bo->cpu_ptr, bo->size);
+  if (bo->dmabuf_fd >= 0)
+    InterposerContext::real.close(bo->dmabuf_fd);
+  InterposerContext::ctx.untrack_fake_bo(bo);
+  bo->magic = 0;
+  delete bo;
+  return 0;
+}
+
+int drmCommandWriteRead(int fd, unsigned long drmCommandIndex, void *data, unsigned long size) {
+  if (InterposerContext::ctx.is_drm(fd) && drmCommandIndex == DRM_AMDGPU_GEM_MMAP &&
+      data && size >= sizeof(drm_amdgpu_gem_mmap)) {
+    auto *args = static_cast<drm_amdgpu_gem_mmap *>(data);
+    if (auto *bo = InterposerContext::ctx.fake_bo_from_kms(args->in.handle)) {
+      args->out.addr_ptr = static_cast<uint64_t>(bo->mmap_offset);
+      return 0;
+    }
+  }
+
+  auto fn = util::lookup_symbol<int (*)(int, unsigned long, void *, unsigned long)>(
+      RTLD_NEXT, "drmCommandWriteRead");
+  if (fn)
+    return fn(fd, drmCommandIndex, data, size);
+  return -EINVAL;
 }
 
 // -- fopen / freopen interposition (sysfs redirect) --

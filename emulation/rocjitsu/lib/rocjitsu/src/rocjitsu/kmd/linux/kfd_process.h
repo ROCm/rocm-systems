@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <mutex>
 #include <shared_mutex>
+#include <sys/types.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -52,6 +53,19 @@ public:
 
   /// @brief Get the process ID (PASID analog).
   uint32_t process_id() const { return process_id_; }
+
+  /// @brief OS process id for a daemon client, or 0 in local mode.
+  pid_t client_pid() const { return client_pid_; }
+  void set_client_pid(pid_t pid) { client_pid_ = pid; }
+  uint32_t open_ref_count() const { return open_ref_count_; }
+  void retain_open() { ++open_ref_count_; }
+  bool release_open() {
+    if (open_ref_count_ > 1) {
+      --open_ref_count_;
+      return false;
+    }
+    return true;
+  }
 
   /// @brief GPU memory allocation descriptor.
   struct GpuAllocation {
@@ -140,6 +154,8 @@ public:
   // -- Per-process state --
 
   uint32_t process_id_;
+  pid_t client_pid_ = 0;
+  uint32_t open_ref_count_ = 1;
 
   mutable std::mutex alloc_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;

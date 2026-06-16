@@ -240,6 +240,9 @@ rj_status_t execute_impl(SimulatedDriver *driver, uint32_t process_id, rj_vm_cmd
     auto *import_args = static_cast<kfd_ioctl_ipc_import_handle_args *>(cmd->buf);
     cmd->shared_handle =
         driver->get_mmap_memfd(process_id, static_cast<off_t>(import_args->mmap_offset));
+  } else if (cmd->cmd == AMDKFD_IOC_EXPORT_DMABUF && cmd->result == 0) {
+    auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(cmd->buf);
+    cmd->shared_handle = export_args->dmabuf_fd;
   }
 
   return ROCJITSU_STATUS_SUCCESS;
@@ -271,6 +274,31 @@ rj_status_t rj_vm_device_open(rj_vm_t *vm, uint32_t *process_id) {
     return ROCJITSU_STATUS_ERROR;
   if (process_id)
     *process_id = pid;
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rj_vm_device_open_for_client_pid(rj_vm_t *vm, int32_t client_pid,
+                                             uint32_t *process_id) {
+  if (!vm || !vm->vm || !vm->vm->driver() || client_pid <= 0)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  auto *drv = dynamic_cast<SimulatedDriver *>(vm->vm->driver());
+  if (!drv)
+    return ROCJITSU_STATUS_ERROR;
+  uint32_t pid = drv->open_process(static_cast<pid_t>(client_pid));
+  if (pid == 0)
+    return ROCJITSU_STATUS_ERROR;
+  if (process_id)
+    *process_id = pid;
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rj_vm_device_set_client_pid(rj_vm_t *vm, uint32_t process_id, int32_t client_pid) {
+  if (!vm || !vm->vm || !vm->vm->driver() || process_id == 0 || client_pid <= 0)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  auto *drv = dynamic_cast<SimulatedDriver *>(vm->vm->driver());
+  if (!drv)
+    return ROCJITSU_STATUS_ERROR;
+  drv->set_client_pid(process_id, static_cast<pid_t>(client_pid));
   return ROCJITSU_STATUS_SUCCESS;
 }
 

@@ -173,6 +173,20 @@ RJ_API_EXPORT rj_status_t rj_vm_execute_as(rj_vm_t *vm, uint32_t process_id, rj_
 /// @param[out] process_id The new process ID (may be NULL for legacy callers).
 RJ_API_EXPORT rj_status_t rj_vm_device_open(rj_vm_t *vm, uint32_t *process_id);
 
+/// @brief Open the VM's simulated device for a daemon client OS process.
+/// @param[in] vm VM handle.
+/// @param[in] client_pid OS process id for the daemon client.
+/// @param[out] process_id The opened process ID.
+RJ_API_EXPORT rj_status_t rj_vm_device_open_for_client_pid(rj_vm_t *vm, int32_t client_pid,
+                                                           uint32_t *process_id);
+
+/// @brief Attach a daemon client's OS pid to a simulated KFD process.
+/// @param[in] vm VM handle.
+/// @param[in] process_id The process ID to update.
+/// @param[in] client_pid OS process id for the daemon client.
+RJ_API_EXPORT rj_status_t rj_vm_device_set_client_pid(rj_vm_t *vm, uint32_t process_id,
+                                                      int32_t client_pid);
+
 /// @brief Close a specific KFD process by ID.
 /// @param[in] vm VM handle.
 /// @param[in] process_id The process ID to close (0 closes the local process).

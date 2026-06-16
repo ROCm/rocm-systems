@@ -344,7 +344,7 @@ int SimulatedDriver::open() {
   return fd_;
 }
 
-uint32_t SimulatedDriver::open_process() {
+uint32_t SimulatedDriver::open_process(pid_t client_pid) {
   if (fd_ < 0) {
     fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0));
     if (fd_ < 0)
@@ -354,12 +354,25 @@ uint32_t SimulatedDriver::open_process() {
   uint32_t pid;
   {
     std::lock_guard<std::mutex> lk(process_mutex_);
+    if (client_pid > 0) {
+      for (auto &[existing_pid, existing_proc] : processes_) {
+        if (existing_proc->client_pid() == client_pid) {
+          existing_proc->retain_open();
+          return existing_pid;
+        }
+      }
+    }
+
     pid = next_process_id_++;
     auto proc = std::make_shared<KfdProcess>(pid, static_cast<uint32_t>(gpus_.size()));
+    proc->set_client_pid(client_pid);
     proc->event_state_.reset();
     for (auto &g : gpus_) {
-      if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+      if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
         mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
+        if (client_pid > 0)
+          mem->set_process_client_pid(pid, client_pid);
+      }
     }
     processes_[pid] = proc;
 
@@ -415,6 +428,18 @@ uint32_t SimulatedDriver::open_process() {
   return pid;
 }
 
+void SimulatedDriver::set_client_pid(uint32_t process_id, pid_t client_pid) {
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  auto it = processes_.find(process_id);
+  if (it == processes_.end())
+    return;
+  it->second->set_client_pid(client_pid);
+  for (auto &g : gpus_) {
+    if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+      mem->set_process_client_pid(process_id, client_pid);
+  }
+}
+
 int SimulatedDriver::close() { return close(local_process_id_); }
 
 int SimulatedDriver::close(uint32_t process_id) {
@@ -426,6 +451,9 @@ int SimulatedDriver::close(uint32_t process_id) {
     auto it = processes_.find(process_id);
     if (it == processes_.end())
       return 0;
+    if (daemon_mode_ && it->second->client_pid() > 0 && !it->second->release_open()) {
+      return 0;
+    }
     extracted = std::move(it->second);
     processes_.erase(it);
   }
