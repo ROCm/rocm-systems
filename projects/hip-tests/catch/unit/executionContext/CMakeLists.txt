@@ -4,6 +4,9 @@ set(TEST_SRC
   hipExecutionCtxStreamDetached.cc
   hipExecutionCtxRecordEvent.cc
   hipExecutionCtxResourceSplit.cc
+  hipExecutionCtxSmAlignment.cc
+  hipDeviceGetExecutionCtx.cc
+  hipStreamGetDevResource.cc
 )
 
 hip_add_exe_to_target(
