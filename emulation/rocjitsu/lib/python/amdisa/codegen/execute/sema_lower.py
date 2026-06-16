@@ -121,6 +121,7 @@ class LoweringContext:
     true16_dst_reg: str | None = None
     true16_src_raw: str | None = None
     vector_sgpr_once: bool = False
+    clear_false_lane_mask_writes: bool = True
 
 
 _INFIX_OPS: dict[SemaNodeKind, str] = {
@@ -321,6 +322,7 @@ def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
             true16_dst_reg=ctx.true16_dst_reg,
             true16_src_raw=ctx.true16_src_raw,
             vector_sgpr_once=ctx.vector_sgpr_once,
+            clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
         )
         lines.extend(_lower_stmt(node.children[1], inner_ctx))
         lines.append(f'{_indent(ctx)}}}')
@@ -393,12 +395,18 @@ def _lower_assign(node: SemaNode, ctx: LoweringContext) -> list[str]:
             idx = _lower_expr(lhs_node.children[1], ctx)
             rhs = _lower_expr(rhs_node, ctx)
             ind = _indent(ctx)
-            return [
+            lines = [
                 f'{ind}if ({rhs})',
                 f'{ind}  {ctx.vcc_var} |= (1ULL << {idx});',
-                f'{ind}else',
-                f'{ind}  {ctx.vcc_var} &= ~(1ULL << {idx});',
             ]
+            if ctx.clear_false_lane_mask_writes:
+                lines.extend(
+                    [
+                        f'{ind}else',
+                        f'{ind}  {ctx.vcc_var} &= ~(1ULL << {idx});',
+                    ]
+                )
+            return lines
         if arr.kind == SemaNodeKind.ID and arr.id_name in ('MEM', 'LDS'):
             idx = _lower_expr(lhs_node.children[1], ctx)
             rhs = _lower_expr(rhs_node, ctx)
@@ -446,6 +454,7 @@ def _lower_if(node: SemaNode, ctx: LoweringContext) -> list[str]:
         true16_dst_reg=ctx.true16_dst_reg,
         true16_src_raw=ctx.true16_src_raw,
         vector_sgpr_once=ctx.vector_sgpr_once,
+        clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
     )
 
     if len(children) == 2:
@@ -496,6 +505,7 @@ def _lower_for(node: SemaNode, ctx: LoweringContext) -> list[str]:
         true16_dst_reg=ctx.true16_dst_reg,
         true16_src_raw=ctx.true16_src_raw,
         vector_sgpr_once=ctx.vector_sgpr_once,
+        clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
     )
 
     init_str = (

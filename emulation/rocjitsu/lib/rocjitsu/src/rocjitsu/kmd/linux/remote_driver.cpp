@@ -258,6 +258,9 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 
   size_t arg_size = ioctl_arg_size(request);
   if (is_svm_ioctl(request)) {
+    // SVM has a flexible attrs[] tail, so ROCR encodes the actual byte size in
+    // the ioctl request. The attributes are inline payload, not embedded client
+    // pointers, so RPC only needs the larger buffer size validated here.
     if (arg_size < sizeof(kfd_ioctl_svm_args))
       return -EINVAL;
     auto *svm_args = static_cast<const kfd_ioctl_svm_args *>(arg);

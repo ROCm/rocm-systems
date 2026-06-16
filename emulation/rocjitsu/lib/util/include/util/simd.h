@@ -394,6 +394,7 @@ native<Float> round_fixup_simd(native<Float> a, Round round) {
 #if defined(__clang__) || defined(__GNUC__)
   constexpr bool kQuietNan = true;
 #else
+  static_assert(QuietNan, "round_fixup_simd needs a compiler-specific signaling-NaN policy");
   constexpr bool kQuietNan = QuietNan;
 #endif
   F nan_result;

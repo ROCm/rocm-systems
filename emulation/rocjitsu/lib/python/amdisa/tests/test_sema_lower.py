@@ -267,6 +267,46 @@ class TestLowerVectorAdd:
         assert result.count('src0.read_lane(wf, lane)') == 1
         assert result.count('src1.read_lane(wf, lane)') == 1
 
+    def test_zero_initialized_vcc_mask_omits_false_lane_clear(self):
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ARRAYDEREF,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='VCC'),
+                        SemaNode(SemaNodeKind.ID, id_name='laneId'),
+                    ),
+                ),
+                SemaNode(
+                    SemaNodeKind.EQ,
+                    ty=SemaType.U1,
+                    children=(
+                        _cast(_src(0), SemaType.U32),
+                        _cast(_src(1), SemaType.U32),
+                    ),
+                ),
+            ),
+        )
+        block = SemaBlock('V_CMP_EQ_U32', ExecModel.VECTOR, body)
+        omap = OperandMap(
+            src_bindings={
+                0: OperandBinding('src0', RegClass.VGPR, 32),
+                1: OperandBinding('src1', RegClass.VGPR, 32),
+            },
+        )
+        ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR,
+            operand_map=omap,
+            clear_false_lane_mask_writes=False,
+        )
+
+        result = lower_sema_block(block, ctx)
+
+        assert 'uint64_t vcc = 0;' in result
+        assert 'vcc |= (1ULL << lane);' in result
+        assert 'vcc &= ~(1ULL << lane);' not in result
+
     def test_true16_destination_select_merges_half(self):
         b16 = SemaType('B', 16)
         body = SemaNode(

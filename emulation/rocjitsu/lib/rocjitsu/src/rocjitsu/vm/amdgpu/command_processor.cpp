@@ -1325,18 +1325,30 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
   auto write_read_ptr = [&] {
     uint64_t rptr_val = rpos * sizeof(uint32_t);
     auto *read_ptr = static_cast<uint64_t *>(resolve(queue.read_ptr_va));
-    if (read_ptr &&
-        (queue.read_ptr_va & GpuMemory::PAGE_MASK) + sizeof(rptr_val) <= GpuMemory::PAGE_SIZE &&
-        reinterpret_cast<uintptr_t>(read_ptr) % alignof(uint64_t) == 0) {
-      std::atomic_ref<uint64_t>(*read_ptr).store(rptr_val, std::memory_order_release);
-      return;
+    if (read_ptr) {
+      // Queue read pointers should be naturally aligned and contained in one
+      // page. Keep runtime guards before atomic_ref anyway so malformed tests
+      // or future queue types do not turn the fallback path into UB.
+      bool contained_in_page =
+          (queue.read_ptr_va & GpuMemory::PAGE_MASK) + sizeof(rptr_val) <= GpuMemory::PAGE_SIZE;
+      bool aligned = reinterpret_cast<uintptr_t>(read_ptr) % alignof(uint64_t) == 0;
+      assert(contained_in_page && "SDMA read pointer must not cross a page boundary");
+      assert(aligned && "SDMA read pointer must be naturally aligned");
+      if (contained_in_page && aligned) {
+        std::atomic_ref<uint64_t>(*read_ptr).store(rptr_val, std::memory_order_release);
+        return;
+      }
     }
+    // Fallback for queues whose read pointer cannot be resolved to a directly
+    // writable host pointer in this process.
     write_gpu_block(queue.read_ptr_va, &rptr_val, sizeof(rptr_val), queue.process_id);
   };
   // Publish the unchanged read pointer before retrying a wait/poll packet or an
   // SDMA packet whose translated VA is not ready yet. The queue owner still sees
   // the packet as pending, and the doorbell reschedule gives later mappings or
-  // signal writes a chance to make the same packet executable.
+  // signal writes a chance to make the same packet executable. Callers must
+  // return from process_sdma_ring() immediately after this helper so a later
+  // read-pointer update cannot accidentally advance past the deferred packet.
   auto reschedule_current_packet = [&] {
     write_read_ptr();
     engine()->schedule_event_now(&doorbell_event_);

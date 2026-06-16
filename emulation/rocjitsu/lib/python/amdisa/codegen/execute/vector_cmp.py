@@ -144,7 +144,6 @@ def gen_vector_cmp_class(
         L.append('    if (match) result |= (1ULL << lane);')
     else:
         L.append('    if (match) vcc |= (1ULL << lane);')
-        L.append('    else vcc &= ~(1ULL << lane);')
     L.append('  }')
     if is_cmpx:
         if cmpx_writes_vcc:
@@ -293,16 +292,12 @@ def gen_vector_cmp(
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
-    if op == 'f':
-        L.append('    vcc &= ~(1ULL << lane);')
-    elif op == 't':
+    if op == 't':
         L.append('    vcc |= (1ULL << lane);')
-    else:
+    elif op != 'f':
         cond = _cmp_condition(src, op, dtype, is_vop3, L, has_abs)
         L.append(f'    if ({cond})')
         L.append('      vcc |= (1ULL << lane);')
-        L.append('    else')
-        L.append('      vcc &= ~(1ULL << lane);')
     L.append('  }')
     if dst:
         # VOP3: write to explicit destination (sdst/vdst SGPR pair).

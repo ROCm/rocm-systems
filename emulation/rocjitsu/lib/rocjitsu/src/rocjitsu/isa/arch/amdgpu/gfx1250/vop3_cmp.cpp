@@ -83,8 +83,6 @@ void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
            return sv;
          }()))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -156,8 +154,6 @@ void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
            return sv;
          }()))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -229,8 +225,6 @@ void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
            return sv;
          }()))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -302,8 +296,6 @@ void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
            return sv;
          }()))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -378,8 +370,6 @@ void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           return (a < b) || (a > b);
         }()))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -451,8 +441,6 @@ void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
            return sv;
          }()))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -523,8 +511,6 @@ void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
            return sv;
          }())))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -595,8 +581,6 @@ void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
            return sv;
          }())))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -668,8 +652,6 @@ void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
              return sv;
            }())))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -744,8 +726,6 @@ void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           return (a < b) || (a > b);
         }())))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -817,8 +797,6 @@ void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
              return sv;
            }())))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -890,8 +868,6 @@ void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
              return sv;
            }())))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -963,8 +939,6 @@ void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
            return sv;
          }()))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -1036,8 +1010,6 @@ void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
              return sv;
            }())))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2237,8 +2209,6 @@ void VCmpLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<int16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                          : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2294,8 +2264,6 @@ void VCmpEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<int16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                          : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2351,8 +2319,6 @@ void VCmpLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<int16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                          : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2408,8 +2374,6 @@ void VCmpGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<int16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                          : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2465,8 +2429,6 @@ void VCmpNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<int16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                          : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2522,8 +2484,6 @@ void VCmpGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<int16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                          : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2579,8 +2539,6 @@ void VCmpLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<uint16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                           : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2636,8 +2594,6 @@ void VCmpEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<uint16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                           : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2693,8 +2649,6 @@ void VCmpLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<uint16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                           : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2750,8 +2704,6 @@ void VCmpGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<uint16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                           : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2807,8 +2759,6 @@ void VCmpNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<uint16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                           : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -2864,8 +2814,6 @@ void VCmpGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
          static_cast<uint16_t>(((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
                                                           : src1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));
@@ -3937,8 +3885,6 @@ void VCmpClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       match = true;
     if (match)
       vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
   }
   if (wf.wf_size() <= 32)
     vdst.write_scalar(wf, static_cast<uint32_t>(vcc));

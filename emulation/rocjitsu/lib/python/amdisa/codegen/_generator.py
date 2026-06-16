@@ -1947,6 +1947,10 @@ class CodeGenerator:
                     dst_reg_classes,
                 )
                 lctx = LoweringContext(exec_model=sema_block.pragma, operand_map=omap)
+                if cls == 'vector_cmp':
+                    # V_CMP writes a fresh wave mask initialized to zero, so false
+                    # lanes can remain clear without emitting redundant bit clears.
+                    lctx.clear_false_lane_mask_writes = False
                 if (
                     sema_block.pragma.name == 'VECTOR'
                     and dst_ops

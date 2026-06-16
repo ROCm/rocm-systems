@@ -2623,7 +2623,9 @@ template <FmaMixDst DstMode, typename Inst>
 #if defined(__clang__) && defined(__FMA__)
   if constexpr (DstMode == FmaMixDst::F32) {
     // Clang contracts native SIMD a*b+c on FMA hosts for this shape while the
-    // generated scalar bodies remain bit-exact with separate multiply/add.
+    // generated scalar bodies remain bit-exact with separate multiply/add. The
+    // f16 destination modes stay enabled: they narrow to f16 and are covered by
+    // the fma_mix SIMD-vs-scalar tests rather than by this raw-f32 bit path.
     return false;
   }
 #endif

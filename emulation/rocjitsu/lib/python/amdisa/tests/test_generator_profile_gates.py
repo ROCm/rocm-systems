@@ -64,6 +64,13 @@ def test_vector_cmp_writes_explicit_sdst_mask():
     assert 'wf.set_vcc(vcc)' not in body
 
 
+def test_vector_cmp_omits_redundant_mask_clears():
+    body = gen_vector_cmp(['sdst'], ['src0', 'src1'], 'eq', 'u32', is_vop3=True)
+
+    assert 'uint64_t vcc = 0;' in body
+    assert 'vcc &= ~(1ULL << lane)' not in body
+
+
 def test_vector_cmp_class_writes_explicit_sdst_mask():
     body = gen_vector_cmp_class(
         ['sdst'], ['src0', 'src1'], 'f32', is_cmpx=False, is_vop3=True
@@ -73,6 +80,15 @@ def test_vector_cmp_class_writes_explicit_sdst_mask():
     assert 'sdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in body
     assert 'sdst.write_scalar64(wf, vcc)' in body
     assert 'wf.set_vcc(vcc)' not in body
+
+
+def test_vector_cmp_class_omits_redundant_mask_clears():
+    body = gen_vector_cmp_class(
+        ['sdst'], ['src0', 'src1'], 'f32', is_cmpx=False, is_vop3=True
+    )
+
+    assert 'uint64_t vcc = 0;' in body
+    assert 'vcc &= ~(1ULL << lane)' not in body
 
 
 def test_div_scale_uses_signed_tiny_exponent_threshold():
