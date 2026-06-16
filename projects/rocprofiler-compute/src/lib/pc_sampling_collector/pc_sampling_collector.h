@@ -66,6 +66,9 @@ private:
     instruction_t resolve_instruction(uint64_t code_object_id, uint64_t code_object_offset);
 
     template<typename Fn>
+    void for_each_instruction_in(uint64_t id, Fn&& fn);
+
+    template<typename Fn>
     void for_each_instruction(Fn&& fn);
 
     std::shared_ptr<code_object_translator_t> m_translator;
@@ -79,27 +82,35 @@ private:
 };
 
 template<typename Fn>
+void pc_sampling_collector_impl_t::for_each_instruction_in(uint64_t id, Fn&& fn)
+{
+    // Walk the whole loaded range so callers see every instruction, including
+    // code outside named symbols. PC samples can land on any instruction.
+    const uint64_t base      = m_translator->get_load_base(id);
+    const uint64_t range_end = base + m_translator->get_load_size(id);
+
+    uint64_t pc = base;
+    while (pc < range_end)
+    {
+        const auto inst = m_translator->get_instruction(id, pc);
+        if (inst.size == 0)
+        {
+            // Undecodable padding/data: advance a word so the walk progresses
+            // instead of aborting the whole code object.
+            pc += sizeof(uint32_t);
+            continue;
+        }
+        fn(inst);
+        pc += inst.size;
+    }
+}
+
+template<typename Fn>
 void pc_sampling_collector_impl_t::for_each_instruction(Fn&& fn)
 {
     for (const auto& id : m_translator->get_code_object_ids())
     {
-        // Walk the whole loaded range so callers (e.g. source snapshotting) see
-        // every instruction, including code outside named symbols.
-        const uint64_t base      = m_translator->get_load_base(id);
-        const uint64_t range_end = base + m_translator->get_load_size(id);
-
-        uint64_t pc = base;
-        while (pc < range_end)
-        {
-            const auto inst = m_translator->get_instruction(id, pc);
-            if (inst.size == 0)
-            {
-                pc += sizeof(uint32_t);
-                continue;
-            }
-            fn(id, inst);
-            pc += inst.size;
-        }
+        for_each_instruction_in(id, [&fn, id](const instruction_t& inst) { fn(id, inst); });
     }
 }
 }  // namespace rocprofiler_compute_tool

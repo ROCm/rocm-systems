@@ -7,6 +7,7 @@
 #include "gtest/gtest.h"
 #include "pc_sample_decode.h"
 
+#include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/pc_sampling.h>
 
@@ -90,6 +91,38 @@ protected:
         rec.workgroup_id.z = 0;
 
         rec.wave_in_group = 1;
+
+        return rec;
+    }
+
+    // Fully-populated kernel-dispatch record. Every field is given a distinct,
+    // non-zero value so a field swap in the decoder is observable.
+    static rocprofiler_buffer_tracing_kernel_dispatch_record_t make_kernel_dispatch_record()
+    {
+        rocprofiler_buffer_tracing_kernel_dispatch_record_t rec{};
+        rec.size            = sizeof(rec);
+        rec.kind            = ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH;
+        rec.operation       = ROCPROFILER_KERNEL_DISPATCH_COMPLETE;
+        rec.thread_id       = 4242;
+        rec.start_timestamp = 1000;
+        rec.end_timestamp   = 2000;
+
+        rec.correlation_id.internal       = 55;
+        rec.correlation_id.external.value = 66;
+
+        rec.dispatch_info.size                 = sizeof(rec.dispatch_info);
+        rec.dispatch_info.agent_id.handle      = 7;
+        rec.dispatch_info.queue_id.handle      = 8;
+        rec.dispatch_info.kernel_id            = 9;
+        rec.dispatch_info.dispatch_id          = 10;
+        rec.dispatch_info.private_segment_size = 11;
+        rec.dispatch_info.group_segment_size   = 12;
+        rec.dispatch_info.workgroup_size.x     = 64;
+        rec.dispatch_info.workgroup_size.y     = 2;
+        rec.dispatch_info.workgroup_size.z     = 1;
+        rec.dispatch_info.grid_size.x          = 1024;
+        rec.dispatch_info.grid_size.y          = 16;
+        rec.dispatch_info.grid_size.z          = 4;
 
         return rec;
     }

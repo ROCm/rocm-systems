@@ -259,6 +259,66 @@ TEST_F(TestSdkCallbacks, FeatureDelegatesSampleIngestionAndFinalizeToCollector)
     fs::remove_all(out_root, ec);
 }
 
+TEST_F(TestSdkCallbacks, KernelSymbolRegisterWithPcSamplingEnabled_DemanglesAndTruncatesName)
+{
+    auto collector           = std::make_shared<MockPcSamplingCollector>();
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
+                                                     "unused",
+                                                     "unused.json",
+                                                     "unused.json",
+                                                     collector};
+
+    rocprofiler_callback_tracing_record_t                                  record  = {};
+    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
+    record.phase     = ROCPROFILER_CALLBACK_PHASE_LOAD;
+    record.kind      = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
+    record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+    record.payload   = &payload;
+
+    payload.code_object_id = 7;
+    payload.kernel_id      = 42;
+    payload.kernel_name    = "_Z9my_kernelv";  // demangles to "my_kernel()"
+
+    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
+
+    ASSERT_EQ(collector->added_kernel_symbols.size(), 1u);
+    EXPECT_EQ(collector->added_kernel_symbols[0].first, 7u);
+    EXPECT_EQ(collector->added_kernel_symbols[0].second, "my_kernel");
+    ASSERT_EQ(collector->added_kernel_ids.size(), 1u);
+    EXPECT_EQ(collector->added_kernel_ids[0], 42u);
+}
+
+TEST_F(TestSdkCallbacks, KernelSymbolRegisterWithPcSamplingEnabled_FallsBackToRawNameWhenTruncateEmpty)
+{
+    auto collector           = std::make_shared<MockPcSamplingCollector>();
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
+                                                     "unused",
+                                                     "unused.json",
+                                                     "unused.json",
+                                                     collector};
+
+    rocprofiler_callback_tracing_record_t                                  record  = {};
+    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
+    record.phase     = ROCPROFILER_CALLBACK_PHASE_LOAD;
+    record.kind      = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
+    record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+    record.payload   = &payload;
+
+    // "()" is not a valid mangled name and truncates to empty, so the callback
+    // must fall back to storing the raw kernel_name verbatim.
+    payload.code_object_id = 3;
+    payload.kernel_id      = 99;
+    payload.kernel_name    = "()";
+
+    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
+
+    ASSERT_EQ(collector->added_kernel_symbols.size(), 1u);
+    EXPECT_EQ(collector->added_kernel_symbols[0].first, 3u);
+    EXPECT_EQ(collector->added_kernel_symbols[0].second, "()");
+    ASSERT_EQ(collector->added_kernel_ids.size(), 1u);
+    EXPECT_EQ(collector->added_kernel_ids[0], 99u);
+}
+
 TEST_F(TestSdkCallbacks, PcSamplingBufferCallback_NullHeaders_DoesNothing)
 {
     auto collector           = std::make_shared<MockPcSamplingCollector>();

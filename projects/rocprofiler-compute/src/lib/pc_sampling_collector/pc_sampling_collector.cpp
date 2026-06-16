@@ -62,30 +62,16 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
         // so every loaded instruction must be present. Group them under one span
         // symbol -- the consumer flattens symbols and reads only the instruction
         // list, keyed by the loaded-basis code_obj_offset.
-        const uint64_t base      = m_translator->get_load_base(id);
-        const uint64_t range_end = base + m_translator->get_load_size(id);
+        const uint64_t base = m_translator->get_load_base(id);
 
         symbol_t span{};
         span.name               = "<code object>";
         span.virtual_address    = base;
         span.code_object_offset = 0;
-        span.size               = range_end - base;
+        span.size               = m_translator->get_load_size(id);
         writer.start_symbol(span);
 
-        uint64_t pc = base;
-        while (pc < range_end)
-        {
-            const auto inst = m_translator->get_instruction(id, pc);
-            if (inst.size == 0)
-            {
-                // Undecodable padding/data: advance a word so the walk progresses
-                // instead of aborting the whole code object.
-                pc += sizeof(uint32_t);
-                continue;
-            }
-            writer.write_instruction(inst);
-            pc += inst.size;
-        }
+        for_each_instruction_in(id, [&writer](const instruction_t& inst) { writer.write_instruction(inst); });
 
         writer.end_symbol();
         writer.end_code_obj();

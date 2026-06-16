@@ -92,6 +92,62 @@ TEST_F(test_pc_sample_decode_t, ProvidedHostTrapHeader_MapsCommonFieldsAndLeaves
     EXPECT_EQ(decoded->snapshot.stall_reason, 0u);
 }
 
+TEST_F(test_pc_sample_decode_t, ProvidedKernelDispatchHeader_MapsEveryFieldOneToOne)
+{
+    auto rec    = make_kernel_dispatch_record();
+    auto header = make_header(ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                              ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                              &rec);
+
+    const auto decoded = rct::decode_kernel_dispatch_record(header);
+    ASSERT_TRUE(decoded.has_value());
+
+    EXPECT_EQ(decoded->size, sizeof(rec));
+    EXPECT_EQ(decoded->kind, static_cast<uint32_t>(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH));
+    EXPECT_EQ(decoded->operation, static_cast<uint32_t>(ROCPROFILER_KERNEL_DISPATCH_COMPLETE));
+    EXPECT_EQ(decoded->thread_id, 4242u);
+    EXPECT_EQ(decoded->corr_internal, 55u);
+    EXPECT_EQ(decoded->corr_external, 66u);
+    EXPECT_EQ(decoded->start_timestamp, 1000u);
+    EXPECT_EQ(decoded->end_timestamp, 2000u);
+
+    EXPECT_EQ(decoded->dispatch_info_size, sizeof(rec.dispatch_info));
+    EXPECT_EQ(decoded->agent_id_handle, 7u);
+    EXPECT_EQ(decoded->queue_id_handle, 8u);
+    EXPECT_EQ(decoded->kernel_id, 9u);
+    EXPECT_EQ(decoded->dispatch_id, 10u);
+    EXPECT_EQ(decoded->private_segment_size, 11u);
+    EXPECT_EQ(decoded->group_segment_size, 12u);
+
+    EXPECT_EQ(decoded->workgroup_size.x, 64u);
+    EXPECT_EQ(decoded->workgroup_size.y, 2u);
+    EXPECT_EQ(decoded->workgroup_size.z, 1u);
+
+    EXPECT_EQ(decoded->grid_size.x, 1024u);
+    EXPECT_EQ(decoded->grid_size.y, 16u);
+    EXPECT_EQ(decoded->grid_size.z, 4u);
+}
+
+TEST_F(test_pc_sample_decode_t, ProvidedNonTracingCategoryToKernelDispatch_ReturnsNullopt)
+{
+    auto rec    = make_kernel_dispatch_record();
+    auto header = make_header(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
+                              ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                              &rec);
+
+    EXPECT_FALSE(rct::decode_kernel_dispatch_record(header).has_value());
+}
+
+TEST_F(test_pc_sample_decode_t, ProvidedWrongTracingKindToKernelDispatch_ReturnsNullopt)
+{
+    auto rec    = make_kernel_dispatch_record();
+    auto header = make_header(ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                              ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                              &rec);
+
+    EXPECT_FALSE(rct::decode_kernel_dispatch_record(header).has_value());
+}
+
 TEST_F(test_pc_sample_decode_t, ProvidedNonPcSamplingCategory_ReturnsNullopt)
 {
     auto rec    = make_stochastic_record();
