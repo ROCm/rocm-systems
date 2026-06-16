@@ -115,11 +115,14 @@ void TestFrequenciesReadWrite::Run(void) {
         if (ret == AMDSMI_STATUS_UNEXPECTED_DATA) {
           std::cerr << "WARN: Clock file [" << FreqEnumToStr(amdsmi_clk) << "] exists on device ["
                     << dv_ind << "] but empty!" << std::endl;
-          std::cerr << "      Likely a driver issue! Skipping write test for this clock."
-                    << std::endl;
-          // f is not populated; skip write test and avoid non-SUCCESS ret leaking to outer
-          // CHK_ERR_ASRT after freq_write().
-          return false;
+          std::cerr << "      Likely a driver issue!" << std::endl;
+          // TODO(amdsmi_team): Decide whether to keep develop's behavior (fall through here) or
+          // re-enable the refactor's early-skip below. The refactor skipped the write test for
+          // this clock because f is not populated, which avoids a non-SUCCESS ret leaking into
+          // the outer CHK_ERR_ASRT after freq_write(). Restored to develop's behavior for now.
+          // std::cerr << "      Likely a driver issue! Skipping write test for this clock."
+          //           << std::endl;
+          // return false;
         }
 
         // CHK_ERR_ASRT(ret)
