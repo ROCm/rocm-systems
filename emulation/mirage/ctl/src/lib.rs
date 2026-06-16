@@ -506,14 +506,20 @@ pub enum StateCmd {
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    /// Profile to use. Defaults to the `mi450x` builtin.
-    #[arg(long, default_value = "mi450x")]
+    /// Profile to use. Defaults to the `mi350x` builtin.
+    #[arg(long, default_value = "mi350x")]
     profile: String,
     /// Override the profile's emulator backend (e.g. `rocjitsu`,
     /// `rocjitsu-dbt`, `hotswap`, `noop`). See `mirage emulators` for
     /// the available backends.
     #[arg(long)]
     emulator: Option<String>,
+    /// Override the profile topology's node count for this run.
+    #[arg(long)]
+    num_nodes: Option<u32>,
+    /// Override the profile topology's per-node GPU count for this run.
+    #[arg(long)]
+    gpus_per_node: Option<u32>,
     /// Reuse an existing session by id.
     #[arg(long, conflicts_with_all = ["keep_session"])]
     session: Option<SessionId>,
@@ -1188,6 +1194,8 @@ fn apply_profile_overrides(
     exec_mode: Option<ExecModeArg>,
     options: &[String],
     config: Option<String>,
+    num_nodes: Option<u32>,
+    gpus_per_node: Option<u32>,
     profile_name: &str,
 ) -> anyhow::Result<MaybeRef<ProfileDef>> {
     if image.is_none()
@@ -1197,6 +1205,8 @@ fn apply_profile_overrides(
         && exec_mode.is_none()
         && options.is_empty()
         && config.is_none()
+        && num_nodes.is_none()
+        && gpus_per_node.is_none()
     {
         // No overrides: keep the cheap by-name reference.
         return Ok(MaybeRef::Ref(profile_name.to_string()));
@@ -1264,6 +1274,23 @@ fn apply_profile_overrides(
         );
     }
 
+    // Topology overrides: per-run node and per-node GPU counts. Resolve
+    // the emulator's topology (following a by-name reference) so the
+    // counts can be mutated, then inline the modified topology.
+    if num_nodes.is_some() || gpus_per_node.is_some() {
+        let mut topo = match &profile.emulator.topology {
+            MaybeRef::Owned(t) => t.clone(),
+            MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
+        };
+        if let Some(n) = num_nodes {
+            topo.num_nodes = n;
+        }
+        if let Some(g) = gpus_per_node {
+            topo.gpus_per_node = g;
+        }
+        profile.emulator.topology = MaybeRef::Owned(topo);
+    }
+
     Ok(MaybeRef::Owned(profile.clone()))
 }
 
@@ -1322,6 +1349,8 @@ async fn session_start<C: MirageCtl>(
         args.exec_mode,
         &args.options,
         args.config,
+        None,
+        None,
         &profile_name,
     )?;
     let def = ctl.session_create(CreateSessionRequest {
@@ -1822,6 +1851,8 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                 a.exec_mode,
                 &a.options,
                 a.config.clone(),
+                a.num_nodes,
+                a.gpus_per_node,
                 &a.profile,
             )?;
             tracing::info!(profile = %a.profile, "creating transient session");
@@ -2079,8 +2110,10 @@ mod tests {
     #[test]
     fn no_overrides_keeps_by_name_ref() {
         let mut p = sample_profile();
-        let r = apply_profile_overrides(&mut p, None, &[], None, None, None, &[], None, "mi450x")
-            .unwrap();
+        let r = apply_profile_overrides(
+            &mut p, None, &[], None, None, None, &[], None, None, None, "mi450x",
+        )
+        .unwrap();
         assert_eq!(r, MaybeRef::Ref("mi450x".to_string()));
     }
 
@@ -2095,6 +2128,8 @@ mod tests {
             None,
             Some(ExecModeArg::Clocked),
             &["gpu_model=cdna4".to_string(), "queues=8".to_string()],
+            None,
+            None,
             None,
             "mi450x",
         )
@@ -2111,6 +2146,35 @@ mod tests {
                     Some(&SimpleValue::Number(8))
                 );
             }
+            MaybeRef::Ref(_) => panic!("expected an inlined (owned) profile"),
+        }
+    }
+
+    #[test]
+    fn topology_counts_override_inline_owned_profile() {
+        let mut p = sample_profile();
+        let r = apply_profile_overrides(
+            &mut p,
+            None,
+            &[],
+            None,
+            None,
+            None,
+            &[],
+            None,
+            Some(2),
+            Some(4),
+            "mi450x",
+        )
+        .unwrap();
+        match r {
+            MaybeRef::Owned(owned) => match owned.emulator.topology {
+                MaybeRef::Owned(topo) => {
+                    assert_eq!(topo.num_nodes, 2);
+                    assert_eq!(topo.gpus_per_node, 4);
+                }
+                MaybeRef::Ref(_) => panic!("expected an inlined (owned) topology"),
+            },
             MaybeRef::Ref(_) => panic!("expected an inlined (owned) profile"),
         }
     }
