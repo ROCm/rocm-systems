@@ -279,11 +279,10 @@ if(NOT STANDALONEBINARY)
             ${COV_OPTION} tests/test_import_guard.py ${WORKING_DIR_OPTION}
     )
     add_test(
-        NAME test_interface_artifacts
+        NAME test_profile_data
         COMMAND
-            ${PYTHON_TEST_COMMAND} -m pytest
-            --junitxml=tests/test_interface_artifacts.xml ${COV_OPTION}
-            tests/test_interface_artifacts.py ${WORKING_DIR_OPTION}
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_data.xml
+            ${COV_OPTION} tests/test_profile_data.py ${WORKING_DIR_OPTION}
     )
 endif()
 
