@@ -77,6 +77,7 @@ class SvmMapMemoryCommand;
 class SvmUnmapMemoryCommand;
 class SvmPrefetchAsyncCommand;
 class SvmPrefetchBatchAsyncCommand;
+class SvmDiscardBatchAsyncCommand;
 class StreamOperationCommand;
 class BatchMemoryOperationCommand;
 class VirtualMapCommand;
@@ -680,6 +681,7 @@ struct Info : public amd::EmbeddedObject {
 
   uint32_t numberOfXccs_;  //! The number of XCC(s) on the device
 
+  bool fabric_handle_; //!< fabric handle support flag
   bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
 
   bool dmabufSupported_;  //!< DMABuf support flag
@@ -1331,6 +1333,9 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) = 0;
   virtual void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) { ShouldNotReachHere(); }
   virtual void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) {
+    ShouldNotReachHere();
+  }
+  virtual void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd) {
     ShouldNotReachHere();
   }
   virtual void submitStreamOperation(amd::StreamOperationCommand& cmd) { ShouldNotReachHere(); }
@@ -2052,7 +2057,7 @@ class Device : public RuntimeObject {
    * @param shareableHandle exported handle, points to fdesc.
    */
   virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
-                                        void* shareableHandle) {
+                                        void* shareableHandle, amd::Memory::HandleType handle_type) {
     ShouldNotCallThis();
     return false;
   }
@@ -2063,7 +2068,7 @@ class Device : public RuntimeObject {
    * @param osHandle os handle/fdesc/void*
    * @param amd_mem_obj amd_mem_obj with hsa_handle/memory_obj.
    */
-  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle) {
+  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle, amd::Memory::HandleType handle_type) {
     ShouldNotCallThis();
     return nullptr;
   }

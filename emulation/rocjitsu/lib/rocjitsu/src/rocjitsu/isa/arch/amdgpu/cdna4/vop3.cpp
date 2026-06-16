@@ -2104,22 +2104,7 @@ VDot2cF32F16Vop3::VDot2cF32F16Vop3(const MachineInst *inst)
 }
 
 void VDot2cF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));
-    float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));
-    facc += a0 * b0 + a1 * b1;
-    acc = static_cast<int32_t>(std::bit_cast<uint32_t>(facc));
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot2c_f32_f16_vop3(*this, wf);
 }
 
 VDot2cI32I16Vop3::VDot2cI32I16Vop3(const MachineInst *inst)
@@ -2137,20 +2122,7 @@ VDot2cI32I16Vop3::VDot2cI32I16Vop3(const MachineInst *inst)
 }
 
 void VDot2cI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    int16_t a0 = static_cast<int16_t>(a & 0xFFFF);
-    int16_t a1 = static_cast<int16_t>((a >> 16) & 0xFFFF);
-    int16_t b0 = static_cast<int16_t>(b & 0xFFFF);
-    int16_t b1 = static_cast<int16_t>((b >> 16) & 0xFFFF);
-    acc += static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1;
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot2c_i32_i16_vop3(*this, wf);
 }
 
 VDot4cI32I8Vop3::VDot4cI32I8Vop3(const MachineInst *inst)
@@ -2168,20 +2140,7 @@ VDot4cI32I8Vop3::VDot4cI32I8Vop3(const MachineInst *inst)
 }
 
 void VDot4cI32I8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    for (int i = 0; i < 4; ++i) {
-      int8_t ea = static_cast<int8_t>((a >> (i * 8)) & 0xFF);
-      int8_t eb = static_cast<int8_t>((b >> (i * 8)) & 0xFF);
-      acc += static_cast<int32_t>(ea) * static_cast<int32_t>(eb);
-    }
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot4c_i32_i8_vop3(*this, wf);
 }
 
 VDot8cI32I4Vop3::VDot8cI32I4Vop3(const MachineInst *inst)
@@ -2199,24 +2158,7 @@ VDot8cI32I4Vop3::VDot8cI32I4Vop3(const MachineInst *inst)
 }
 
 void VDot8cI32I4Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    for (int i = 0; i < 8; ++i) {
-      int32_t ea = static_cast<int32_t>((a >> (i * 4)) & 0xF);
-      if (ea & 8)
-        ea |= ~0xF;
-      int32_t eb = static_cast<int32_t>((b >> (i * 4)) & 0xF);
-      if (eb & 8)
-        eb |= ~0xF;
-      acc += ea * eb;
-    }
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot8c_i32_i4_vop3(*this, wf);
 }
 
 VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
@@ -9046,55 +8988,7 @@ VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
 }
 
 void VMinimum3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
-                      float v = [&]() {
-                        float v = [&]() {
-                          auto a = [&]() {
-                            float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
-                            if (inst_.abs & (1u << 0))
-                              sv = std::fabs(sv);
-                            if (inst_.neg & (1u << 0))
-                              sv = -sv;
-                            return sv;
-                          }();
-                          auto b = [&]() {
-                            float sv = std::bit_cast<float>(src1.read_lane(wf, lane));
-                            if (inst_.abs & (1u << 1))
-                              sv = std::fabs(sv);
-                            if (inst_.neg & (1u << 1))
-                              sv = -sv;
-                            return sv;
-                          }();
-                          auto c = [&]() {
-                            float sv = std::bit_cast<float>(src2.read_lane(wf, lane));
-                            if (inst_.abs & (1u << 2))
-                              sv = std::fabs(sv);
-                            if (inst_.neg & (1u << 2))
-                              sv = -sv;
-                            return sv;
-                          }();
-                          if (std::isnan(a) || std::isnan(b) || std::isnan(c))
-                            return std::numeric_limits<decltype(a)>::quiet_NaN();
-                          auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b);
-                          return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c);
-                        }();
-                        if (inst_.omod == 1)
-                          v *= 2.0f;
-                        else if (inst_.omod == 2)
-                          v *= 4.0f;
-                        else if (inst_.omod == 3)
-                          v *= 0.5f;
-                        return v;
-                      }();
-                      if (inst_.clamp)
-                        v = std::clamp(v, 0.0f, 1.0f);
-                      return v;
-                    }()));
-  }
+  amdgpu::execute_v_minimum3_f32_vop3(*this, wf);
 }
 
 VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
@@ -9113,55 +9007,7 @@ VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
 }
 
 void VMaximum3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
-                      float v = [&]() {
-                        float v = [&]() {
-                          auto a = [&]() {
-                            float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
-                            if (inst_.abs & (1u << 0))
-                              sv = std::fabs(sv);
-                            if (inst_.neg & (1u << 0))
-                              sv = -sv;
-                            return sv;
-                          }();
-                          auto b = [&]() {
-                            float sv = std::bit_cast<float>(src1.read_lane(wf, lane));
-                            if (inst_.abs & (1u << 1))
-                              sv = std::fabs(sv);
-                            if (inst_.neg & (1u << 1))
-                              sv = -sv;
-                            return sv;
-                          }();
-                          auto c = [&]() {
-                            float sv = std::bit_cast<float>(src2.read_lane(wf, lane));
-                            if (inst_.abs & (1u << 2))
-                              sv = std::fabs(sv);
-                            if (inst_.neg & (1u << 2))
-                              sv = -sv;
-                            return sv;
-                          }();
-                          if (std::isnan(a) || std::isnan(b) || std::isnan(c))
-                            return std::numeric_limits<decltype(a)>::quiet_NaN();
-                          auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);
-                          return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c);
-                        }();
-                        if (inst_.omod == 1)
-                          v *= 2.0f;
-                        else if (inst_.omod == 2)
-                          v *= 4.0f;
-                        else if (inst_.omod == 3)
-                          v *= 0.5f;
-                        return v;
-                      }();
-                      if (inst_.clamp)
-                        v = std::clamp(v, 0.0f, 1.0f);
-                      return v;
-                    }()));
-  }
+  amdgpu::execute_v_maximum3_f32_vop3(*this, wf);
 }
 
 VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)

@@ -2727,6 +2727,41 @@ void VirtualGPU::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& 
 }
 
 // ================================================================================================
+void VirtualGPU::SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& command) {
+  std::scoped_lock lock(execution());
+  profilingBegin(command);
+
+  auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
+  hsa_signal_t active = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
+
+  // Collect all pointers and sizes for batch operation
+  std::vector<void*> dev_ptrs_vec;
+  std::vector<size_t> sizes_vec;
+  for (size_t idx = 0; idx < command.Count(); idx++) {
+    dev_ptrs_vec.push_back(const_cast<void*>(command.DevicePointers()[idx]));
+    sizes_vec.push_back(command.Sizes()[idx]);
+  }
+
+  hsa_status_t status = Hsa::svm_discard_batch_async(dev_ptrs_vec.data(), sizes_vec.data(),
+                                                      command.Count(), wait_events.size(),
+                                                      wait_events.data(), active);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+          "HSA discard batch async count=%zu, wait_event=0x%zx, completion_signal=0x%zx",
+          command.Count(), wait_events.empty() ? 0 : wait_events[0].handle, active.handle);
+
+  if (status != HSA_STATUS_SUCCESS) {
+    Barriers().ResetCurrentSignal();
+    LogError("HSA discard batch async failed");
+    command.setStatus(CL_INVALID_OPERATION);
+    profilingEnd();
+    return;
+  }
+
+  addSystemScope();
+  profilingEnd();
+}
+
+// ================================================================================================
 bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memory& dstMem,
                             bool entire, const amd::Coord3D& srcOrigin,
                             const amd::Coord3D& dstOrigin, const amd::Coord3D& size,

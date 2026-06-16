@@ -93,7 +93,7 @@ def validate_instruction_comment(df):
 def validate_instruction_correlation_id_relation(df):
     # Samples with no decoded instructions originates from either
     # blit kernels or self modifying code. The correlation id for this
-    # type of samples should alway be zero.
+    # type of samples should always be zero.
     # Thus, Correlation_Id is 0 `iff`` instruction is not decoded.
 
     # The previous statement has two implications.

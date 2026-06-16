@@ -148,6 +148,13 @@ main(int argc, char *argv[])
         goto deregister_buf;
     }
 
+    /* hipMemset is async w.r.t. the host; block until it completes (testing). */
+    hip_err = hipDeviceSynchronize();
+    if (hipSuccess != hip_err) {
+        fprintf(stderr, "Could not synchronize after memset (%d)\n", hip_err);
+        goto deregister_buf;
+    }
+
     nbytes = hipFileRead(in_handle, devbuf, alloc_size, /*file_offset=*/0, /*buf_offset=*/0);
     if (nbytes < 0) {
         fprintf(stderr, "Could not read from %s (%zd) (%s)\n", in_path, nbytes,
