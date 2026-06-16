@@ -36,7 +36,7 @@ tracing-subscriber = { workspace = true }
 # The web UI is OFF by default. Enable just the HTTP API server with
 # `--features daemon`, or the full dashboard (API + bundled SPA, needs
 # the Node.js toolchain) with `--features webui`.
-default = ["noop", "rocjitsu", "hotswap"]
+default = ["rocjitsu"]
 noop = ["dep:mirage_noop"]
 rocjitsu = ["dep:mirage_rocjitsu"]
 hotswap = ["dep:mirage_hotswap"]
@@ -65,7 +65,19 @@ libc = { workspace = true }
 nix = { workspace = true }
 
 [workspace]
-members = ["builtin","core", "container", "ctl", "daemon", "dashboard", "host", "hotswap", "noop", "rocjitsu", "rocjitsu_sys"]
+members = [
+    "builtin",
+    "core",
+    "container",
+    "ctl",
+    "daemon",
+    "dashboard",
+    "host",
+    "hotswap",
+    "noop",
+    "rocjitsu",
+    "rocjitsu_sys",
+]
 
 [workspace.dependencies]
 chrono = { version = "0.4", features = ["serde"] }
@@ -78,7 +90,13 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 tokio-util = "0.7"
 futures = "0.3"
-nix = { version = "0.29", features = ["fs", "signal", "process", "term", "user"] }
+nix = { version = "0.29", features = [
+    "fs",
+    "signal",
+    "process",
+    "term",
+    "user",
+] }
 libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
