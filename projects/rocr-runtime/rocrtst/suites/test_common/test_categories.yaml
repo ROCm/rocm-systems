@@ -225,6 +225,11 @@ test_categories:
       - "rocrtstFunc.TrapHandler_NoTrap"
       - "rocrtstFunc.TrapHandler_Abort"
       - "rocrtstFunc.TrapHandler_Generic"
+      - "rocrtstFunc.SDMA_Doorbell_Race"
+      - "rocrtstFunc.SDMA_Engine_Exhaustion"
+      - "rocrtstFunc.Concurrent_Copy_Signal_Completion_Race"
+      - "rocrtstFunc.Concurrent_Copy_Size_Stress"
+      - "rocrtstFunc.Concurrent_Copy_And_Kernel_Dispatch"
       - "rocrtstNeg.Memory_Negative_Tests"
       - "rocrtstNeg.Queue_Validation_InvalidDimension"
       - "rocrtstNeg.Queue_Validation_InvalidGroupMemory"
@@ -241,6 +246,8 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
+      - "rocrtstPerf.Memory_Async_Copy_Concurrent"
+      - "rocrtstPerf.Memory_Async_Copy_Multi_GPU_P2P"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:

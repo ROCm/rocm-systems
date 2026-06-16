@@ -80,6 +80,7 @@
 #include "suites/functional/concurrent_init.h"
 #include "suites/functional/concurrent_init_shutdown.h"
 #include "suites/functional/concurrent_shutdown.h"
+#include "suites/functional/concurrent_async_copy.h"
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
 #include "suites/functional/signal_allocation_validation.h"
@@ -233,6 +234,41 @@ TEST(rocrtstFunc, Concurrent_Shutdown) {
   if (!RunCustomTestProlog(&cs)) return;
   cs.TestConcurrentShutdown();
   RunCustomTestEpilog(&cs);
+}
+
+TEST(rocrtstFunc, SDMA_Doorbell_Race) {
+  ConcurrentAsyncCopy sdr;
+  if (!RunCustomTestProlog(&sdr)) return;
+  sdr.TestSdmaDoorbellRace();
+  RunCustomTestEpilog(&sdr);
+}
+
+TEST(rocrtstFunc, SDMA_Engine_Exhaustion) {
+  ConcurrentAsyncCopy see;
+  if (!RunCustomTestProlog(&see)) return;
+  see.TestSdmaEngineExhaustion();
+  RunCustomTestEpilog(&see);
+}
+
+TEST(rocrtstFunc, Concurrent_Copy_Signal_Completion_Race) {
+  ConcurrentAsyncCopy scr;
+  if (!RunCustomTestProlog(&scr)) return;
+  scr.TestSignalCompletionRace();
+  RunCustomTestEpilog(&scr);
+}
+
+TEST(rocrtstFunc, Concurrent_Copy_Size_Stress) {
+  ConcurrentAsyncCopy vcss;
+  if (!RunCustomTestProlog(&vcss)) return;
+  vcss.TestVaryingCopySizeStress();
+  RunCustomTestEpilog(&vcss);
+}
+
+TEST(rocrtstFunc, Concurrent_Copy_And_Kernel_Dispatch) {
+  ConcurrentAsyncCopy cckd;
+  if (!RunCustomTestProlog(&cckd)) return;
+  cckd.TestConcurrentCopyAndKernelDispatch();
+  RunCustomTestEpilog(&cckd);
 }
 
 TEST(rocrtstFunc, Reference_Count) {
@@ -1007,6 +1043,21 @@ TEST(rocrtstPerf, Memory_Async_Copy) {
 TEST(rocrtstPerf, Memory_Async_Copy_On_Engine) {
     MemoryAsyncCopyOnEngine mac;
     RunGenericTest(&mac);
+}
+
+// concurrent async copy tests using MemoryAsyncCopy infrastructure
+TEST(rocrtstPerf, Memory_Async_Copy_Concurrent) {
+  MemoryAsyncCopy mac;
+  if (!RunCustomTestProlog(&mac)) return;
+  mac.TestConcurrentAsyncCopy();
+  RunCustomTestEpilog(&mac);
+}
+
+TEST(rocrtstPerf, Memory_Async_Copy_Multi_GPU_P2P) {
+  MemoryAsyncCopy mac;
+  if (!RunCustomTestProlog(&mac)) return;
+  mac.TestMultiGpuP2P();
+  RunCustomTestEpilog(&mac);
 }
 
 TEST(rocrtstPerf, ENQUEUE_LATENCY) {
