@@ -21,15 +21,18 @@ static __device__ void scatterDeep(
 
   Pack* inpPacks = (Pack*)input.localPtr() + intptr_t(w)*UnrollPacks*WARP_SIZE + lane;
   ncclSymPtr<Pack> outPacks = (ncclSymPtr<Pack>)output + intptr_t(w)*UnrollPacks*WARP_SIZE + lane;
-  Pack tmp[UnrollPacks];
+  //Pack tmp[nRanks][UnrollPacks];
 
   nIters -= w;
-  if (0 < nIters) {
-    #pragma unroll
-    for (int u=0; u < UnrollPacks; u++) {
-      tmp[u] = inpPacks[u*WARP_SIZE];
-    }
-  }
+  //if (0 < nIters) {
+  //  #pragma unroll
+  //  for (int r=0; r < nRanks; r++) {
+  //    #pragma unroll
+  //    for (int u=0; u < UnrollPacks; u++) {
+  //      tmp[r][u] = inpPacks[r*nElts/BytePerPack + u*WARP_SIZE];
+  //    }
+  //  }
+  //}
 
   if (waitNeeded) bar.wait(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
@@ -49,8 +52,9 @@ static __device__ void scatterDeep(
             if (partial && dr == nRanks) break;
             #pragma unroll UnrollPacks
             for (int u=0; u < UnrollPacks; u++) {
-
-              outPacks.lsaPtr(r)[u*WARP_SIZE] = tmp[u];
+              const size_t rank_offset = r*nElts/BytePerPack;
+              outPacks.lsaPtr(r)[u*WARP_SIZE] = inpPacks[rank_offset + u*WARP_SIZE];
+              //outPacks.lsaPtr(r)[u*WARP_SIZE] = tmp[r][u];
             }
             if (++r == nRanks) r = 0;
           }
@@ -61,11 +65,11 @@ static __device__ void scatterDeep(
       nIters -= wn;
       if (nIters <= 0) break;
 
-      // Load data for next iteration.
-      #pragma unroll
-      for (int u=0; u < UnrollPacks; u++) {
-        tmp[u] = inpPacks[u*WARP_SIZE];
-      }
+      //Load data for next iteration.
+      //#pragma unroll
+      //for (int u=0; u < UnrollPacks; u++) {
+      //  tmp[r][u] = inpPacks[r*nElts/BytePerPack + u*WARP_SIZE];
+      //}
     }
   }
 }
@@ -82,7 +86,8 @@ static __device__ void scatterEnds(
   #pragma unroll 1
   for (size_t i = t; i < nPreElts+nSufElts; i += tn) {
     size_t elt = i < nPreElts ? i : nElts-nPreElts-nSufElts+i;
-    BytePack<sizeof(T)> tmp = inpPacks[elt];
+    //BytePack<sizeof(T)> tmp = inpPacks[elt];
+    BytePack<sizeof(T)> tmp = inpPacks[rank*nElts/sizeof(T) + elt];
     int dr = inPlace ? 1 : 0;
     int r = rank + dr;
     if (r == nRanks) r = 0;
@@ -90,14 +95,18 @@ static __device__ void scatterEnds(
     for (; dr + UnrollPeers <= nRanks; dr += UnrollPeers) {
       #pragma unroll UnrollPeers
       for (int u=0; u < UnrollPeers; u++) {
-        outPacks.lsaPtr(r)[elt] = tmp;
+        //outPacks.lsaPtr(r)[elt] = tmp;
+        const size_t rank_offset = r*nElts/sizeof(T);
+        outPacks.lsaPtr(r)[elt] = inpPacks[rank_offset + elt];
         if (++r == nRanks) r = 0;
       }
     }
     #pragma unroll UnrollPeers
     for (int u=0; u < UnrollPeers; u++) {
       if (dr+u == nRanks) break;
-      outPacks.lsaPtr(r)[elt] = tmp;
+      //outPacks.lsaPtr(r)[elt] = tmp;
+      const size_t rank_offset = r*nElts/sizeof(T);
+      outPacks.lsaPtr(r)[elt] = inpPacks[rank_offset + elt];
       if (++r == nRanks) r = 0;
     }
   }
