@@ -101,6 +101,7 @@ class KernelRooflineData(Base):
         Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
     total_flops = Column(Float)
+    l0_cache_data = Column(Float)
     l1_cache_data = Column(Float)
     l2_cache_data = Column(Float)
     hbm_cache_data = Column(Float)
@@ -211,6 +212,7 @@ class WorkloadRooflineData(Base):
         Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
     )
     total_flops = Column(Float)
+    l0_cache_data = Column(Float)
     l1_cache_data = Column(Float)
     l2_cache_data = Column(Float)
     hbm_cache_data = Column(Float)

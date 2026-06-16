@@ -796,7 +796,7 @@ Examples:
         "-m",
         "--mem-level",
         required=False,
-        choices=["HBM", "L2", "vL1D", "LDS"],
+        choices=["HBM", "L2", "vL1D", "L0", "LDS"],
         metavar="",
         nargs="+",
         type=str,
@@ -806,6 +806,7 @@ Examples:
             "\t\t   HBM\n"
             "\t\t   L2\n"
             "\t\t   vL1D\n"
+            "\t\t   L0\n"
             "\t\t   LDS"
         ),
     )

@@ -389,6 +389,111 @@ def test_get_num_xcds_dict_empty():
 
 
 @pytest.mark.misc
+def test_set_cache_sizes_cdna_uses_l1():
+    """CDNA models (e.g. mi300x_a1) should key vL1D as 'L1'."""
+    cache_info = {
+        "cache": [
+            {
+                "cache_level": 1,
+                "cache_properties": ["DATA_CACHE"],
+                "cache_size": 16,
+                "num_cache_instance": 304,
+            }
+        ]
+    }
+    result = specs.set_cache_sizes(
+        "mi300x_a1", 304, cache_info, num_dies=4, num_se=8, num_sa_se=2
+    )
+    assert "L1" in result
+    assert "L0" not in result
+    assert result["L1"] == 16 * 1024
+
+
+@pytest.mark.misc
+def test_set_cache_sizes_rdna_uses_l0_and_l1():
+    """RDNA models (e.g. rdna35_halo) populate both L0 (per-CU GL0) and L1 (per-SA GL1).
+    Both are reported as level-1 DATA_CACHE by amd-smi; L0 has higher instance count.
+    """
+    cache_info = {
+        "cache": [
+            {
+                "cache_level": 1,
+                "cache_properties": ["DATA_CACHE"],
+                "cache_size": 32,
+                "num_cache_instance": 40,  # GL0: one per CU (40 CUs total)
+            },
+            {
+                "cache_level": 1,
+                "cache_properties": ["DATA_CACHE"],
+                "cache_size": 128,
+                "num_cache_instance": 8,  # GL1: one per SA (num_se * num_sa_se = 4*2)
+            },
+        ]
+    }
+    result = specs.set_cache_sizes(
+        "rdna35_halo", 40, cache_info, num_dies=1, num_se=4, num_sa_se=2
+    )
+    assert result["L0"] == 32 * 1024
+    assert result["L1"] == 128 * 1024
+
+
+@pytest.mark.misc
+def test_set_cache_sizes_l2_and_mall():
+    """L2 and MALL (L3) cache entries are correctly parsed and scaled by num_dies."""
+    cache_info = {
+        "cache": [
+            {
+                "cache_level": 2,
+                "cache_size": 512,
+                "cache_properties": [],
+                "num_cache_instance": 1,
+            },
+            {
+                "cache_level": 3,
+                "cache_size": 256,
+                "cache_properties": [],
+                "num_cache_instance": 1,
+            },
+        ]
+    }
+    result = specs.set_cache_sizes(
+        "mi300x_a1", 304, cache_info, num_dies=4, num_se=8, num_sa_se=2
+    )
+    assert result["L2"] == 512 * 1024
+    assert result["MALL"] == 256 * 1024 // 4
+
+
+@pytest.mark.misc
+def test_set_cache_sizes_selects_vl1d_by_max_instance_count():
+    """Harvested GPU: num_cu reported by rocminfo may be less than the max
+    num_cache_instance in amd-smi. set_cache_sizes must select vL1D by the
+    highest num_cache_instance, not by exact match to num_cu.
+    """
+    cache_info = {
+        "cache": [
+            {
+                "cache_level": 1,
+                "cache_properties": ["DATA_CACHE"],
+                "cache_size": 16,
+                "num_cache_instance": 228,  # max instances (some CUs harvested)
+            },
+            {
+                "cache_level": 1,
+                "cache_properties": ["DATA_CACHE"],
+                "cache_size": 16,
+                "num_cache_instance": 190,  # lower instance count entry
+            },
+        ]
+    }
+    # num_cu=224 simulates harvested GPU (fewer than 228 active CUs)
+    result = specs.set_cache_sizes(
+        "mi300x_a1", 224, cache_info, num_dies=4, num_se=8, num_sa_se=2
+    )
+    assert "L1" in result
+    assert result["L1"] == 16 * 1024
+
+
+@pytest.mark.misc
 def test_normal_functionality_still_works():
     """Ensure that normal paths still work after adding error handling tests"""
     from src.utils.mi_gpu_spec import MIGPUSpecs

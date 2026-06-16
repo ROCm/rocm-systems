@@ -6622,31 +6622,22 @@ def test_reconfigure_stdio_utf8_end_to_end_makes_non_ascii_print_safe():
     assert raw.getvalue() == "│ box │\n".encode("utf-8")
 
 
-def test_set_cache_sizes_selects_vl1d_by_instance_count():
-    """vL1D is the level-1 data cache with the most instances; that count need
-    not equal the active CU count, which it does not on harvested parts."""
-    from utils.specs import set_cache_sizes
+##############################################################################
+# get_matrix_ops_type Tests
+##############################################################################
 
-    def l1(props, size, instances):
-        return {
-            "cache_properties": props,
-            "cache_size": size,
-            "cache_level": 1,
-            "max_num_cu_shared": 1,
-            "num_cache_instance": instances,
-        }
 
-    # Harvested: vL1D instances (112) exceed active CUs (104). It must still
-    # win over a smaller data cache and an instruction cache.
-    harvested = {
-        "cache": [
-            l1(["DATA_CACHE"], 16, 112),
-            l1(["DATA_CACHE"], 8, 16),
-            l1(["INST_CACHE"], 32, 112),
-        ]
-    }
-    assert set_cache_sizes(104, harvested, num_dies=1)["L1"] == 16 * 1024
+def test_get_matrix_ops_type():
+    """
+    CDNA2/3/4 GPU series should return MFMA.
+    Non-CDNA GPU series should return WMMA, including unknown series or empty str.
+    """
+    from utils.utils_analysis import get_matrix_ops_type
 
-    # Non-harvested: vL1D instances equal active CUs.
-    non_harvested = {"cache": [l1(["DATA_CACHE"], 32, 304), l1(["DATA_CACHE"], 16, 16)]}
-    assert set_cache_sizes(304, non_harvested, num_dies=1)["L1"] == 32 * 1024
+    assert get_matrix_ops_type("MI200") == "MFMA"
+    assert get_matrix_ops_type("MI300") == "MFMA"
+    assert get_matrix_ops_type("MI350") == "MFMA"
+
+    assert get_matrix_ops_type("navi3") == "WMMA"
+    assert get_matrix_ops_type("unknown_series") == "WMMA"
+    assert get_matrix_ops_type("") == "WMMA"

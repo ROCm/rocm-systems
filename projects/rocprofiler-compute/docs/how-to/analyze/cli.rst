@@ -39,7 +39,7 @@ There are three high-level GPU analysis views:
 
 * System Speed-of-Light: Key GPU performance metrics to show overall GPU performance and utilization.
 * Memory chart: Shows memory transactions and throughput on each cache hierarchical level.
-* Empirical hierarchical roofline: Roofline model that compares achieved throughput with attainable peak hardware limits, more specifically peak compute throughput and memory bandwidth (on L1/LDS/L2/HBM). When combined with kernel filtering, provides detailed per-kernel arithmetic intensity analysis and performance breakdowns.
+* Empirical hierarchical roofline: Roofline model that compares achieved throughput with attainable peak hardware limits, more specifically peak compute throughput and memory bandwidth. When combined with kernel filtering, provides detailed per-kernel arithmetic intensity analysis and performance breakdowns.
 
 **System Speed-of-Light:**
 
@@ -496,6 +496,13 @@ Roofline HTML plots are generated during analyze mode. Profile mode creates
 ``roofline.csv`` containing microbenchmark data, and analyze mode uses this
 data to produce interactive HTML roofline charts.
 
+.. note::
+   Matrix multiplication performance data will vary depending on which architecture is profiled:
+   * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
+   * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
+
+   Additionally, the cache level data available for analysis is dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
+
 Two-step workflow:
 
 .. code-block:: shell-session
@@ -509,14 +516,31 @@ Two-step workflow:
 Roofline visualization options (available only in analyze mode):
 
 * ``--sort``: Overlay top kernels or top dispatches (default: kernels)
-* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, LDS (default: ALL)
+* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
+   * Multiple data types can be provided with this option in order to isolate and visualize said types in a single plot.
+   * Note: layering more than one data type could create a cluttered plot
 
-Example with multiple options:
+Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 .. code-block:: shell-session
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM L2 --roofline-data-type FP32 FP16
+
+Interactive Roofline HTML:
+
+* HTML plots have the ability to select/deselect specific rooflines and cache-level-specific kernels. In the right-hand legend of the plot, click on individual items in the legend once to display or remove the item from the plot. Double-click on an item to make it the only displayed item in the plot; double-click on any item in the legend to reset the plot to display all items.
+* Hovering your mouse on the plot displays a menu in the top right-hand corner of the page which has tools for the following:
+   * Saving the plot as a .png
+   * Zoom, pan, reset scale
+* Zooming in a specific area of the plot can also be done with click-and-drag box selection with your mouse to isolate the area you would like to see closer. Resetting the view can be done through the hover menu in the top right-hand corner of the page (described in the above bullet point)
+
+Below is an example of HTML plot interactivity, with L2 kernel points, L2-FP32 empirical bandwidth, and Peak VALU-FP32 empirical roofline toggled on:
+
+.. image:: ../../data/analyze/cli/roofline_html_interact.png
+   :align: center
+   :alt: HTML interactive plot
+   :width: 800
 
 .. _analysis-baseline-comparison:
 

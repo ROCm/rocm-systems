@@ -15,7 +15,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added support for GPU metrics on gfx1150 and gfx1152 hardware.
 
-* Added roofline benchmarking support for gfx1150 and gfx1152 hardware.
+* Added GPU benchmarking support for gfx1150 and gfx1152 hardware.
+
+* Added Roofline profiling and analysis support for gfx1151 architecture
+  * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations
 
 ### Changed
 
@@ -81,6 +84,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * On gfx1151, `TCP_REQ_sum` is zero in single-pass counter collection, so the related `GL0` metrics always reports zero. This will be fixed in a future release.
 
 * On gfx1151, `$max_mclk` is not automatically populated in sysinfo, so the related bandwidth metrics may be incorrect. Use `amd-smi` to obtain the maximum memory clock and provide it via `--specs-correction`.
+
+* CLI mode block 4 Roofline plot's legend will not appear if there are too many kernels to list, in relation to the user's terminal size. Same per-kernel roofline rate metrics and AI plot point details can be read in block 4's preceding tables.
 
 ## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
 

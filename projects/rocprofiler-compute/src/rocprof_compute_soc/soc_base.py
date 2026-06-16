@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from roofline.run_benchmark import run_roofline_benchmark
+from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface
 from utils.logger import (
     console_debug,
@@ -202,6 +202,11 @@ class OmniSoC_Base:
             key = search(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.se_per_gpu = key
+                continue
+
+            key = search(r"^\s*Shader Arrs. per Eng.:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            if key is not None:
+                self._mspec.sa_per_se = key
                 continue
 
             key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
@@ -886,8 +891,7 @@ class OmniSoC_Base:
         # If --filter-blocks is provided, roofline block (block 4) should be mentioned
         if (
             self.get_args().no_roof
-            or self.__arch == "gfx908"
-            or self.__arch == "gfx1151"
+            or self.__arch not in BENCHMARKING_SUPPORTED
             or (
                 self.get_args().filter_blocks
                 and "4" not in self.get_args().filter_blocks
