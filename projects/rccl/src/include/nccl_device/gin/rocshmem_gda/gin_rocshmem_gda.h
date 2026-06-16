@@ -30,7 +30,6 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     if (coop.thread_rank() == 0) {
       ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
       rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
-      rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
 
       if ((required == cuda::thread_scope_system) && (given > required)) {
         __threadfence_system();
@@ -45,16 +44,16 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
         uint32_t srcLkey = loadConst(&srcMh->lkey);
 
-        qp->put_nbi((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, !hasSignal);
+        qp->put_nbi_single((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, !hasSignal);
       }
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
         uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/false);
+        qp->atomic_add_single((void*)sigAddr, sigRkey, (int64_t)signalOpArg, /*fence=*/false);
       } else if (hasCounter) {
-        qp->quiet(wf_info);
+        qp->quiet_single();
       }
 
       if (hasCounter) {
@@ -82,7 +81,6 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     if (coop.thread_rank() == 0) {
       ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
       rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
-      rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
 
       ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
       uintptr_t dstAddr = loadConst(loadConst(&dstMh->remote_vas) + peer) + dstOff;
@@ -92,15 +90,15 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         __threadfence_system();
       }
 
-      // lkey=0: put_nbi copies srcVal inline into the WQE
+      // lkey=0: put_nbi_single copies srcVal inline into the WQE
       // (inline_threshold >= sizeof(T)), so no registered MR is needed.
-      qp->put_nbi((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), wf_info, !hasSignal);
+      qp->put_nbi_single((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), !hasSignal);
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
         uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/false);
+        qp->atomic_add_single((void*)sigAddr, sigRkey, (int64_t)signalOpArg, /*fence=*/false);
       }
     }
     coop.sync();
@@ -149,8 +147,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     rocshmem::QueuePair** qps = loadConst(&rsCtx->qps);
 #pragma unroll 1
     for (int peer = coop.thread_rank(); peer < ctx.nRanks; peer += coop.size()) {
-      rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
-      loadConst(qps + peer)->quiet(wf_info);
+      loadConst(qps + peer)->quiet_single();
     }
   }
 };
