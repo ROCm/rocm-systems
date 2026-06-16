@@ -430,6 +430,63 @@ def test_enrich_kernel_name_unmapped_is_none() -> None:
     assert df.iloc[0]["kernel_name"] is None
 
 
+def test_enrich_native_map_keyed_in_sample_basis_resolves_instruction() -> None:
+    """The native map joins on (code_object_id, code_object_offset).
+
+    The native collector must key code_obj_offset in the same loaded basis as a
+    PC sample's code_object_offset. This asserts that when the map and the sample
+    agree on that key, the instruction/source_line resolve from the native map
+    (not the SDK strings table) -- guarding against a re-introduced basis split.
+    """
+    # SDK strings deliberately disagree, to prove the native map is the source.
+    tool_data = make_tool_data(instructions=["WRONG_INSN"], comments=["wrong.cpp:1"])
+    aggregated = pd.DataFrame([{
+        "code_object_id": 2,
+        "code_object_offset": 0x8564,
+        "inst_index": 0,
+        "kernel_id": 100,
+    }])
+    native_map = {
+        (2, 0x8564): {"name": "s_waitcnt vmcnt(0)", "comment": "vcopy.cpp:42"}
+    }
+    df = enrich_with_metadata(
+        aggregated,
+        tool_data,
+        attach={"instruction", "source_line"},
+        native_code_object_map=native_map,
+    )
+    assert df.iloc[0]["instruction"] == "s_waitcnt vmcnt(0)"
+    assert df.iloc[0]["source_line"] == "vcopy.cpp:42"
+
+
+def test_enrich_native_map_basis_mismatch_yields_na() -> None:
+    """A native map keyed in the wrong basis fails to join and degrades to N/A.
+
+    This is the regression the C++ basis fix prevents: if code_obj_offset were
+    emitted as the ELF file offset instead of the loaded offset, the sample's
+    code_object_offset would not match any map key.
+    """
+    tool_data = make_tool_data(instructions=[""], comments=[""])
+    aggregated = pd.DataFrame([{
+        "code_object_id": 2,
+        "code_object_offset": 0x8564,
+        "inst_index": 0,
+        "kernel_id": 100,
+    }])
+    # Same instruction, but keyed at a file offset that the sample never carries.
+    native_map = {
+        (2, 0x1234): {"name": "s_waitcnt vmcnt(0)", "comment": "vcopy.cpp:42"}
+    }
+    df = enrich_with_metadata(
+        aggregated,
+        tool_data,
+        attach={"instruction", "source_line"},
+        native_code_object_map=native_map,
+    )
+    assert df.iloc[0]["instruction"] is None
+    assert df.iloc[0]["source_line"] == "N/A"
+
+
 # ═══════════════════════════════════════════════════════════════
 # load_aggregated_pc_sampling
 # ═══════════════════════════════════════════════════════════════
