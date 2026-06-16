@@ -40,6 +40,8 @@ struct amdsmi_backend
     using nic_port_info_t         = amdsmi_nic_port_info_t;
     using nic_rdma_devices_info_t = amdsmi_nic_rdma_devices_info_t;
     using nic_stat_t              = amdsmi_nic_stat_t;
+
+    static constexpr processor_type_t NIC_PROCESSOR_TYPE = AMDSMI_PROCESSOR_TYPE_AMD_NIC;
 #endif
 
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1

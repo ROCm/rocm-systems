@@ -406,8 +406,6 @@ TEST_F(DeviceBackendTest, get_memory_usage_error_message_contains_function_name)
 
 // ── NIC methods ──────────────────────────────────────────────────────────────
 
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-
 TEST_F(DeviceBackendTest, get_nic_asic_info_maps_product_and_vendor_names)
 {
     const testing::mock_nic_asic_info_t raw{ .product_name = "CX7",
@@ -439,7 +437,7 @@ TEST_F(DeviceBackendTest, get_nic_port_info_returns_empty_when_no_ports)
 
     DeviceSut  sut{ m_session, k_handle };
     const auto info = sut.get_nic_port_info();
-    EXPECT_TRUE(info.netdev.empty());
+    EXPECT_TRUE(info.device_name.empty());
 }
 
 TEST_F(DeviceBackendTest, get_nic_port_info_returns_netdev_for_first_port)
@@ -452,7 +450,7 @@ TEST_F(DeviceBackendTest, get_nic_port_info_returns_netdev_for_first_port)
 
     DeviceSut  sut{ m_session, k_handle };
     const auto info = sut.get_nic_port_info();
-    EXPECT_EQ(info.netdev, "mlx5_0");
+    EXPECT_EQ(info.device_name, "mlx5_0");
 }
 
 TEST_F(DeviceBackendTest, get_nic_port_info_throws_on_backend_error)
@@ -473,7 +471,7 @@ TEST_F(DeviceBackendTest, get_nic_rdma_info_returns_zero_when_no_rdma_devices)
 
     DeviceSut  sut{ m_session, k_handle };
     const auto info = sut.get_nic_rdma_info();
-    EXPECT_EQ(info.num_rdma_ports, 0U);
+    EXPECT_EQ(info.port_count, 0U);
 }
 
 TEST_F(DeviceBackendTest, get_nic_rdma_info_returns_port_count)
@@ -486,7 +484,7 @@ TEST_F(DeviceBackendTest, get_nic_rdma_info_returns_port_count)
 
     DeviceSut  sut{ m_session, k_handle };
     const auto info = sut.get_nic_rdma_info();
-    EXPECT_EQ(info.num_rdma_ports, 4U);
+    EXPECT_EQ(info.port_count, 4U);
 }
 
 TEST_F(DeviceBackendTest, get_nic_rdma_info_throws_on_backend_error)
@@ -557,8 +555,6 @@ TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_throws_on_data_error)
     EXPECT_THROW(static_cast<void>(sut.get_nic_rdma_port_statistics(0)),
                  std::runtime_error);
 }
-
-#endif  // ROCPROFSYS_BUILD_AINIC
 
 // ── SDMA (disabled path) ──────────────────────────────────────────────────────
 

@@ -66,10 +66,14 @@ concept amdsmi_backend_policy =
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     &&
     requires {
+        typename T::processor_type_t;
         typename T::nic_asic_info_t;
         typename T::nic_port_info_t;
         typename T::nic_rdma_devices_info_t;
         typename T::nic_stat_t;
+    } &&
+    requires(typename T::processor_type_t pt) {
+        { T::NIC_PROCESSOR_TYPE } -> std::convertible_to<typename T::processor_type_t>;
     } &&
     requires(T t, typename T::processor_handle ph, typename T::nic_asic_info_t* nap,
              typename T::nic_port_info_t* npp, typename T::nic_rdma_devices_info_t* ndp,
@@ -165,7 +169,7 @@ public:
         return enumerate_handles(
             [this](socket_handle socket, std::uint32_t* count, processor_handle* procs) {
                 return m_amdsmi.get_processor_handles_by_type(
-                    socket, AMDSMI_PROCESSOR_TYPE_AMD_NIC, procs, count);
+                    socket, AmdsmiBackend::NIC_PROCESSOR_TYPE, procs, count);
             },
             "amdsmi_get_processor_handles_by_type");
     }

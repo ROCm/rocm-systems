@@ -438,7 +438,9 @@ TEST_F(BackendTest, get_gpu_process_list_error_message_contains_function_name)
 // NIC handle enumeration + per-device NIC forwarding
 // ─────────────────────────────────────────────────────────────────────────────
 
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+// ─────────────────────────────────────────────────────────────────────────────
+// NIC handle enumeration + per-device NIC forwarding
+// ─────────────────────────────────────────────────────────────────────────────
 
 TEST_F(BackendTest, enumerate_nic_handles_returns_empty_when_no_sockets)
 {
@@ -658,7 +660,5 @@ TEST_F(BackendTest, get_nic_rdma_port_statistics_error_message_contains_function
         },
         std::runtime_error);
 }
-
-#endif  // ROCPROFSYS_BUILD_AINIC
 
 }  // namespace rocprofsys::backends::amd_smi

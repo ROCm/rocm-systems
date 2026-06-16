@@ -14,6 +14,4 @@ target_link_libraries(
 
 target_include_directories(amd-smi-backend-tests PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-if(ROCPROFSYS_BUILD_AINIC)
-    target_compile_definitions(amd-smi-backend-tests PUBLIC ROCPROFSYS_BUILD_AINIC=1)
-endif()
+target_compile_definitions(amd-smi-backend-tests PUBLIC ROCPROFSYS_BUILD_AINIC=1)
