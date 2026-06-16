@@ -17,9 +17,10 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use clap::{Args, Subcommand};
-use mirage_core::common::MaybeRef;
+use clap::{Args, Subcommand, ValueEnum};
+use mirage_core::common::{MaybeRef, SimpleValue};
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
+use mirage_core::emulator::ExecMode;
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
 use mirage_core::profile::{ContainerizedDef, FileMount, ProfileDef};
 use mirage_core::registry::EmulatorInfo;
@@ -410,6 +411,13 @@ pub struct StartArgs {
     /// when omitted.
     #[arg(long)]
     pub provider: Option<String>,
+    /// Override the emulator execution mode (`functional` or `clocked`).
+    #[arg(long)]
+    pub exec_mode: Option<ExecModeArg>,
+    /// Override an emulator option directly (`KEY=VALUE`). May be
+    /// repeated.
+    #[arg(long = "option", short = 'o', value_name = "KEY=VALUE")]
+    pub options: Vec<String>,
     /// Run the emulator in out-of-process daemon mode instead of the
     /// default in-process (local) emulation.
     #[arg(long)]
@@ -521,6 +529,13 @@ pub struct RunArgs {
     /// when omitted.
     #[arg(long)]
     provider: Option<String>,
+    /// Override the emulator execution mode (`functional` or `clocked`).
+    #[arg(long)]
+    exec_mode: Option<ExecModeArg>,
+    /// Override an emulator option directly (`KEY=VALUE`). May be
+    /// repeated.
+    #[arg(long = "option", short = 'o', value_name = "KEY=VALUE")]
+    options: Vec<String>,
     /// Run the emulator in out-of-process daemon mode instead of the
     /// default in-process (local) emulation.
     #[arg(long)]
@@ -1102,41 +1117,110 @@ fn parse_mounts(mounts: &[String]) -> anyhow::Result<Vec<FileMount>> {
 /// itself (the common, cheap path). When flags are present, they enable
 /// or extend the profile's containerisation and the (now modified)
 /// profile is returned inline via [`MaybeRef::Owned`].
-fn apply_container_overrides(
+/// Emulator execution mode, exposed on the CLI as `--exec-mode`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum ExecModeArg {
+    /// Functional emulation (default): correct results, no timing model.
+    Functional,
+    /// Clocked emulation: model device timing.
+    Clocked,
+}
+
+impl From<ExecModeArg> for ExecMode {
+    fn from(m: ExecModeArg) -> Self {
+        match m {
+            ExecModeArg::Functional => ExecMode::Functional,
+            ExecModeArg::Clocked => ExecMode::Clocked,
+        }
+    }
+}
+
+/// Parse a `KEY=VALUE` emulator option into a typed [`SimpleValue`].
+///
+/// Values that look like booleans or integers are stored as such so the
+/// override matches what a hand-written profile would carry; everything
+/// else is kept as a string.
+fn parse_option(spec: &str) -> anyhow::Result<(String, SimpleValue)> {
+    let (key, value) = spec
+        .split_once('=')
+        .ok_or_else(|| anyhow::anyhow!("invalid option {spec:?} (expected KEY=VALUE)"))?;
+    if key.is_empty() {
+        anyhow::bail!("invalid option {spec:?} (empty key)");
+    }
+    let parsed = match value {
+        "true" => SimpleValue::Boolean(true),
+        "false" => SimpleValue::Boolean(false),
+        _ => match value.parse::<i64>() {
+            Ok(n) => SimpleValue::Number(n),
+            Err(_) => SimpleValue::String(value.to_string()),
+        },
+    };
+    Ok((key.to_string(), parsed))
+}
+
+/// Apply direct CLI overrides (containerisation + emulator settings) to
+/// a profile fetched by name.
+///
+/// When no override is supplied the cheap by-name [`MaybeRef::Ref`] is
+/// returned so the session keeps tracking the on-disk profile. As soon
+/// as any field is overridden the whole (mutated) profile is inlined as
+/// [`MaybeRef::Owned`].
+fn apply_profile_overrides(
     profile: &mut ProfileDef,
     image: Option<String>,
     mounts: &[String],
     provider: Option<String>,
+    exec_mode: Option<ExecModeArg>,
+    options: &[String],
     profile_name: &str,
 ) -> anyhow::Result<MaybeRef<ProfileDef>> {
-    if image.is_none() && mounts.is_empty() && provider.is_none() {
+    if image.is_none()
+        && mounts.is_empty()
+        && provider.is_none()
+        && exec_mode.is_none()
+        && options.is_empty()
+    {
         // No overrides: keep the cheap by-name reference.
         return Ok(MaybeRef::Ref(profile_name.to_string()));
     }
-    let parsed = parse_mounts(mounts)?;
-    match &mut profile.containerize {
-        Some(c) => {
-            if let Some(img) = image {
-                c.image = img;
+
+    // Container overrides.
+    if image.is_some() || !mounts.is_empty() || provider.is_some() {
+        let parsed = parse_mounts(mounts)?;
+        match &mut profile.containerize {
+            Some(c) => {
+                if let Some(img) = image {
+                    c.image = img;
+                }
+                if let Some(p) = provider {
+                    c.provider = Some(p);
+                }
+                c.mounts.extend(parsed);
             }
-            if let Some(p) = provider {
-                c.provider = Some(p);
+            None => {
+                let image = image.ok_or_else(|| {
+                    anyhow::anyhow!("--mount/--provider require a containerised profile or --image")
+                })?;
+                profile.containerize = Some(ContainerizedDef {
+                    provider,
+                    image,
+                    mounts: parsed,
+                    devices: Vec::new(),
+                    groups: Vec::new(),
+                });
             }
-            c.mounts.extend(parsed);
-        }
-        None => {
-            let image = image.ok_or_else(|| {
-                anyhow::anyhow!("--mount/--provider require a containerised profile or --image")
-            })?;
-            profile.containerize = Some(ContainerizedDef {
-                provider,
-                image,
-                mounts: parsed,
-                devices: Vec::new(),
-                groups: Vec::new(),
-            });
         }
     }
+
+    // Emulator overrides.
+    if let Some(mode) = exec_mode {
+        profile.emulator.exec_mode = mode.into();
+    }
+    for opt in options {
+        let (key, value) = parse_option(opt)?;
+        profile.emulator.options.insert(key, value);
+    }
+
     Ok(MaybeRef::Owned(profile.clone()))
 }
 
@@ -1186,11 +1270,13 @@ async fn session_start<C: MirageCtl>(
     // Validate profile exists and resolve it so container overrides can
     // be applied.
     let mut profile = ctl.profile_get(&profile_name)?;
-    let profile_ref = apply_container_overrides(
+    let profile_ref = apply_profile_overrides(
         &mut profile,
         args.image,
         &args.mounts,
         args.provider,
+        args.exec_mode,
+        &args.options,
         &profile_name,
     )?;
     let def = ctl.session_create(CreateSessionRequest {
@@ -1588,11 +1674,13 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
         None => {
             // create transient session
             let mut profile = ctl.profile_get(&a.profile)?;
-            let profile_ref = apply_container_overrides(
+            let profile_ref = apply_profile_overrides(
                 &mut profile,
                 a.image.clone(),
                 &a.mounts,
                 a.provider.clone(),
+                a.exec_mode,
+                &a.options,
                 &a.profile,
             )?;
             tracing::info!(profile = %a.profile, "creating transient session");
@@ -1796,5 +1884,90 @@ fn print_paths(json: bool) {
         );
         println!("profiles: {}", mirage_core::paths::profile_root().display());
         println!("sessions: {}", mirage_core::paths::session_root().display());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mirage_core::common::SimpleMap;
+    use mirage_core::emulator::{EmulatorDef, EmulatorKind};
+    use mirage_core::topology::TopologyDef;
+
+    fn sample_profile() -> ProfileDef {
+        ProfileDef {
+            name: "mi450x".to_string(),
+            description: None,
+            emulator: EmulatorDef {
+                emulator: EmulatorKind::from("rocjitsu"),
+                plugins: Default::default(),
+                exec_mode: ExecMode::Functional,
+                options: SimpleMap::default(),
+                topology: MaybeRef::Owned(TopologyDef {
+                    num_nodes: 1,
+                    gpus_per_node: 1,
+                    agent: MaybeRef::Ref("MI450X".to_string()),
+                }),
+            },
+            containerize: None,
+        }
+    }
+
+    #[test]
+    fn parse_option_infers_types() {
+        assert_eq!(
+            parse_option("gpu_model=cdna3").unwrap(),
+            ("gpu_model".to_string(), SimpleValue::String("cdna3".into()))
+        );
+        assert_eq!(
+            parse_option("queues=4").unwrap(),
+            ("queues".to_string(), SimpleValue::Number(4))
+        );
+        assert_eq!(
+            parse_option("trace=true").unwrap(),
+            ("trace".to_string(), SimpleValue::Boolean(true))
+        );
+    }
+
+    #[test]
+    fn parse_option_rejects_malformed() {
+        assert!(parse_option("nope").is_err());
+        assert!(parse_option("=value").is_err());
+    }
+
+    #[test]
+    fn no_overrides_keeps_by_name_ref() {
+        let mut p = sample_profile();
+        let r = apply_profile_overrides(&mut p, None, &[], None, None, &[], "mi450x").unwrap();
+        assert_eq!(r, MaybeRef::Ref("mi450x".to_string()));
+    }
+
+    #[test]
+    fn exec_mode_and_options_inline_owned_profile() {
+        let mut p = sample_profile();
+        let r = apply_profile_overrides(
+            &mut p,
+            None,
+            &[],
+            None,
+            Some(ExecModeArg::Clocked),
+            &["gpu_model=cdna4".to_string(), "queues=8".to_string()],
+            "mi450x",
+        )
+        .unwrap();
+        match r {
+            MaybeRef::Owned(owned) => {
+                assert_eq!(owned.emulator.exec_mode, ExecMode::Clocked);
+                assert_eq!(
+                    owned.emulator.options.get("gpu_model"),
+                    Some(&SimpleValue::String("cdna4".into()))
+                );
+                assert_eq!(
+                    owned.emulator.options.get("queues"),
+                    Some(&SimpleValue::Number(8))
+                );
+            }
+            MaybeRef::Ref(_) => panic!("expected an inlined (owned) profile"),
+        }
     }
 }
