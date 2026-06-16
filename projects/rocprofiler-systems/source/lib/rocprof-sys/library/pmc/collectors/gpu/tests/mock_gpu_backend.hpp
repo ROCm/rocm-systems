@@ -4,6 +4,7 @@
 #pragma once
 
 #include "backends/amd_smi/backend.hpp"
+#include "backends/amd_smi/gpu_types.hpp"
 
 #include <gmock/gmock.h>
 
@@ -11,6 +12,9 @@
 
 namespace rocprofsys::backends::amd_smi::testing
 {
+
+using gpu::asic_info;
+using gpu::metrics;
 
 struct mock_gpu_backend
 {

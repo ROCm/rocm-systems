@@ -23,7 +23,7 @@ using gpu::METRIC_VALUE_NOT_SUPPORTED_16;
 using gpu::METRIC_VALUE_NOT_SUPPORTED_64;
 
 // ── Mock raw types ──────────────────────────────────────────────────────────
-// Field names mirror amdsmi_* struct fields exactly so device_backend's
+// Field names mirror amdsmi_* struct fields exactly so backend_proxy's
 // convert_* methods compile.  snake_case is intentional; suppress naming lint.
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -43,21 +43,14 @@ struct mock_version_t
 
 struct mock_gpu_metrics_t
 {
-    // Power — convert_power
     std::uint32_t current_socket_power = 0;
     std::uint32_t average_socket_power = 0;
-
-    // Temperature — convert_temperature
-    std::uint16_t temperature_hotspot = 0;
-    std::uint16_t temperature_edge    = 0;
-
-    // Activity — convert_activity
+    std::uint16_t temperature_hotspot  = 0;
+    std::uint16_t temperature_edge     = 0;
     std::uint16_t average_gfx_activity = 0;
     std::uint16_t average_umc_activity = 0;
     std::uint16_t average_mm_activity  = 0;
 
-    // XCP stats — C arrays required so std::begin/std::end produce pointer pairs
-    // matching the real amdsmi_gpu_metrics_t layout used by convert_xcp.
     struct xcp_stat_t
     {
         std::uint16_t
@@ -71,7 +64,6 @@ struct mock_gpu_metrics_t
     std::uint16_t
         jpeg_activity[MAX_NUM_JPEG] = {};  // NOLINT(cppcoreguidelines-avoid-c-arrays)
 
-    // XGMI — default sentinel = unsupported
     std::uint16_t xgmi_link_width =
         static_cast<std::uint16_t>(METRIC_VALUE_NOT_SUPPORTED_16);
     std::uint16_t xgmi_link_speed =
@@ -81,7 +73,6 @@ struct mock_gpu_metrics_t
     std::uint64_t xgmi_write_data_acc
         [MAX_NUM_XGMI_LINKS] = {};  // NOLINT(cppcoreguidelines-avoid-c-arrays)
 
-    // PCIe — default sentinel = unsupported
     std::uint16_t pcie_link_width =
         static_cast<std::uint16_t>(METRIC_VALUE_NOT_SUPPORTED_16);
     std::uint16_t pcie_link_speed =
@@ -89,7 +80,6 @@ struct mock_gpu_metrics_t
     std::uint64_t pcie_bandwidth_acc  = METRIC_VALUE_NOT_SUPPORTED_64;
     std::uint64_t pcie_bandwidth_inst = METRIC_VALUE_NOT_SUPPORTED_64;
 
-    // Clocks — default sentinel = unsupported
     std::uint16_t current_gfxclk =
         static_cast<std::uint16_t>(METRIC_VALUE_NOT_SUPPORTED_16);
     std::uint16_t current_uclk =
@@ -98,11 +88,21 @@ struct mock_gpu_metrics_t
 
 // NOLINTEND(readability-identifier-naming)
 
-// ── GMock class ─────────────────────────────────────────────────────────────
-// Methods match the raw backend API: each returns a status_t and writes output
-// via pointer parameters, mirroring the AMD SMI C API shape.
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+// NOLINTBEGIN(readability-identifier-naming)
+struct mock_proc_info_t
+{
+    std::uint64_t sdma_usage = 0;
+};
+// NOLINTEND(readability-identifier-naming)
+#endif
 
-using mock_status_t = std::uint32_t;  // same underlying type as amdsmi_status_t
+using mock_status_t = std::uint32_t;
+
+// ── GMock class ─────────────────────────────────────────────────────────────
+// Lifecycle/enumeration methods are mocked as regular instance methods
+// (the real backend exposes them as static, but GMock needs instances).
+// Per-device methods take an explicit handle (matches backend<> instance API).
 
 struct gmock_backend_api
 {
@@ -117,20 +117,25 @@ struct gmock_backend_api
     MOCK_METHOD(mock_status_t, get_processor_handles,
                 (std::uint64_t socket, std::uint32_t* count, std::uint64_t* handles));
 
-    // Per-device GPU queries (output via pointer — same shape as amdsmi_*)
+    // Per-device forwarding (explicit handle)
     MOCK_METHOD(mock_status_t, get_metrics_info,
                 (std::uint64_t handle, mock_gpu_metrics_t* out));
     MOCK_METHOD(mock_status_t, get_gpu_asic_info,
                 (std::uint64_t handle, mock_asic_info_t* out));
     MOCK_METHOD(mock_status_t, get_memory_usage,
                 (std::uint64_t handle, std::uint32_t type, std::uint64_t* out));
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    MOCK_METHOD(mock_status_t, get_gpu_process_list,
+                (std::uint64_t handle, std::uint32_t* count, mock_proc_info_t* list));
+#endif
 };
 
 inline std::unique_ptr<gmock_backend_api> g_mock_backend;
 
 // ── Policy struct ───────────────────────────────────────────────────────────
-// Static methods delegate to g_mock_backend. device_backend<mock_backend>
-// compiles without AMD SMI headers and exercises check_call() error paths.
+// Satisfies the AmdsmiBackend concept for backend<mock_backend>.
+// Static methods delegate to g_mock_backend for lifecycle/enumeration.
+// Instance methods (per-device forwarding) also delegate via g_mock_backend.
 
 struct mock_backend
 {
@@ -141,6 +146,9 @@ struct mock_backend
     using gpu_metrics_t    = mock_gpu_metrics_t;
     using asic_info_t      = mock_asic_info_t;
     using memory_type_t    = std::uint32_t;
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    using proc_info_t = mock_proc_info_t;
+#endif
 
     static constexpr status_t      STATUS_SUCCESS = 0;
     static constexpr memory_type_t MEM_TYPE_VRAM  = 0;
@@ -150,7 +158,7 @@ struct mock_backend
         return "mock error " + std::to_string(static_cast<int>(status));
     }
 
-    // Lifecycle
+    // Lifecycle (static)
     static status_t init() { return g_mock_backend->init(); }
     static status_t shutdown() { return g_mock_backend->shutdown(); }
     static status_t get_version(version_t* out)
@@ -158,7 +166,7 @@ struct mock_backend
         return g_mock_backend->get_version(out);
     }
 
-    // Enumeration
+    // Enumeration (static)
     static status_t get_socket_handles(std::uint32_t* count, socket_handle* handles)
     {
         return g_mock_backend->get_socket_handles(count, handles);
@@ -170,22 +178,30 @@ struct mock_backend
         return g_mock_backend->get_processor_handles(socket, count, handles);
     }
 
-    // Per-device GPU queries
-    static status_t get_metrics_info(processor_handle handle, gpu_metrics_t* out)
+    // Per-device forwarding (instance — explicit handle, matches backend<> API)
+    status_t get_metrics_info(processor_handle handle, gpu_metrics_t* out) const
     {
         return g_mock_backend->get_metrics_info(handle, out);
     }
 
-    static status_t get_gpu_asic_info(processor_handle handle, asic_info_t* out)
+    status_t get_gpu_asic_info(processor_handle handle, asic_info_t* out) const
     {
         return g_mock_backend->get_gpu_asic_info(handle, out);
     }
 
-    static status_t get_memory_usage(processor_handle handle, memory_type_t type,
-                                     std::uint64_t* out)
+    status_t get_memory_usage(processor_handle handle, memory_type_t type,
+                              std::uint64_t* out) const
     {
         return g_mock_backend->get_memory_usage(handle, type, out);
     }
+
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    status_t get_gpu_process_list(processor_handle handle, std::uint32_t* count,
+                                  proc_info_t* list) const
+    {
+        return g_mock_backend->get_gpu_process_list(handle, count, list);
+    }
+#endif
 };
 
 }  // namespace rocprofsys::backends::amd_smi::testing

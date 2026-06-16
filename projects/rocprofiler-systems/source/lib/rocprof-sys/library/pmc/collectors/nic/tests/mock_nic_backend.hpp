@@ -4,6 +4,7 @@
 #pragma once
 
 #include "backends/amd_smi/backend.hpp"
+#include "backends/amd_smi/nic_types.hpp"
 
 #include <gmock/gmock.h>
 

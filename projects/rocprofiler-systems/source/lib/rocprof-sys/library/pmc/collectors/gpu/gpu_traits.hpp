@@ -37,7 +37,7 @@ struct gpu_traits
     // Required type aliases for base::collector
     using metrics_t         = pmc::collectors::gpu::metrics;
     using enabled_metrics_t = pmc::collectors::gpu::enabled_metrics;
-    using backend_t         = typename DeviceType::backend_type;
+    using backend_t         = DeviceType::backend_type;
     using device_t          = DeviceType;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;

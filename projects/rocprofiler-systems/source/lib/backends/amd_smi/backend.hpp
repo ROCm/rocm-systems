@@ -3,368 +3,244 @@
 
 #pragma once
 
-#include "backends/amd_smi/gpu_types.hpp"
-#include "backends/amd_smi/nic_types.hpp"
 #include "backends/amd_smi/sdma_feature.hpp"
 
-#include <algorithm>
-#include <cstddef>
+#include <concepts>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace rocprofsys::backends::amd_smi
 {
 
-using gpu::asic_info;
-using gpu::MAX_NUM_JPEG_V1;
-using gpu::MAX_NUM_XCP;
-using gpu::MAX_NUM_XGMI_LINKS;
-using gpu::metrics;
-using gpu::populate_if_supported;
+/**
+ * @brief Concept that an AmdsmiBackend policy type must satisfy.
+ *
+ * Checked at the point @c backend<T> or @c backend_factory<T> is instantiated,
+ * so a mismatch produces a clear error at the template boundary rather than deep
+ * inside the template body.
+ */
+template <typename T>
+concept amdsmi_backend_policy = requires {
+    typename T::status_t;
+    typename T::version_t;
+    typename T::socket_handle;
+    typename T::processor_handle;
+    typename T::gpu_metrics_t;
+    typename T::asic_info_t;
+    typename T::memory_type_t;
+} && requires(typename T::status_t s) {
+    { T::STATUS_SUCCESS } -> std::convertible_to<typename T::status_t>;
+    { T::MEM_TYPE_VRAM } -> std::convertible_to<typename T::memory_type_t>;
+    { T::status_to_string(s) } -> std::convertible_to<std::string>;
+    { T::init() } -> std::convertible_to<typename T::status_t>;
+    { T::shutdown() } -> std::convertible_to<typename T::status_t>;
+};
 
 /**
- * @brief Smart AMD SMI backend — owns an AmdsmiBackend policy and one processor handle.
+ * @brief Session-level smart wrapper around an AMD SMI backend policy.
  *
- * @c backend<AmdsmiBackend> is the single layer that:
- *  - Calls raw AmdsmiBackend methods (1:1 AMD SMI forwarding)
- *  - Checks every return status via check_call() — throws std::runtime_error on failure
- *  - Converts raw AMD SMI structs to domain types (metrics, asic_info, …)
+ * Responsibilities:
+ *  - Re-export all type aliases from @p AmdsmiBackend so upper layers can
+ *    reference @c Backend::processor_handle etc. without naming amdsmi_backend.
+ *  - Manage global lifecycle (initialize / shutdown / version).
+ *  - Enumerate processor handles.
+ *  - Forward per-device raw calls (taking an explicit handle) so
+ *    @c backend_proxy<Backend> can call through the shared session.
  *
- * Static members handle global lifecycle (initialize / shutdown / enumeration)
- * so the provider layer does not need to know about AMD SMI types at all.
+ * Error checking and type conversion live in backend_proxy, not here.
  *
- * @tparam AmdsmiBackend  Policy providing raw AMD SMI call wrappers and type aliases.
- *                        Defaults to the real @c amdsmi_backend; swap for a mock in
- * tests.
+ * @tparam AmdsmiBackend  Raw AMD SMI C API policy (e.g. amdsmi_backend).
  */
-template <typename AmdsmiBackend>
+template <amdsmi_backend_policy AmdsmiBackend>
 class backend
 {
 public:
-    explicit backend(typename AmdsmiBackend::processor_handle handle) noexcept
-    : m_handle{ handle }
-    {}
+    // ── Type aliases — forwarded from AmdsmiBackend ───────────────────────────
+    using status_t         = typename AmdsmiBackend::status_t;
+    using version_t        = typename AmdsmiBackend::version_t;
+    using socket_handle    = typename AmdsmiBackend::socket_handle;
+    using processor_handle = typename AmdsmiBackend::processor_handle;
+    using gpu_metrics_t    = typename AmdsmiBackend::gpu_metrics_t;
+    using asic_info_t      = typename AmdsmiBackend::asic_info_t;
+    using memory_type_t    = typename AmdsmiBackend::memory_type_t;
+
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    using nic_asic_info_t         = typename AmdsmiBackend::nic_asic_info_t;
+    using nic_port_info_t         = typename AmdsmiBackend::nic_port_info_t;
+    using nic_rdma_devices_info_t = typename AmdsmiBackend::nic_rdma_devices_info_t;
+    using nic_stat_t              = typename AmdsmiBackend::nic_stat_t;
+#endif
+
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    using proc_info_t = typename AmdsmiBackend::proc_info_t;
+#endif
+
+    // ── Status constants — forwarded ──────────────────────────────────────────
+    static constexpr status_t      STATUS_SUCCESS = AmdsmiBackend::STATUS_SUCCESS;
+    static constexpr memory_type_t MEM_TYPE_VRAM  = AmdsmiBackend::MEM_TYPE_VRAM;
+
+    [[nodiscard]] static std::string status_to_string(status_t status)
+    {
+        return AmdsmiBackend::status_to_string(status);
+    }
+
+    // ── Constructor ───────────────────────────────────────────────────────────
+    backend() noexcept = default;
 
     // ── Static lifecycle ──────────────────────────────────────────────────────
 
-    /**
-     * @brief Initialize the AMD SMI library.
-     * @throws std::runtime_error on failure.
-     */
-    static void initialize() { check_call(AmdsmiBackend::init(), "amdsmi_init"); }
+    static void initialize() { check_status(AmdsmiBackend::init(), "amdsmi_init"); }
 
-    /**
-     * @brief Shutdown the AMD SMI library (best-effort, never throws).
-     */
     static void shutdown() noexcept { AmdsmiBackend::shutdown(); }
 
-    /**
-     * @brief Get AMD SMI library version.
-     * @throws std::runtime_error on failure.
-     */
-    [[nodiscard]] static typename AmdsmiBackend::version_t get_lib_version()
+    [[nodiscard]] static version_t get_lib_version()
     {
-        typename AmdsmiBackend::version_t ver{};
-        check_call(AmdsmiBackend::get_version(&ver), "amdsmi_get_lib_version");
+        version_t ver{};
+        check_status(AmdsmiBackend::get_version(&ver), "amdsmi_get_lib_version");
         return ver;
     }
 
     // ── Static enumeration ────────────────────────────────────────────────────
 
-    /**
-     * @brief Enumerate all GPU processor handles across all sockets.
-     *
-     * Sockets that report no GPU processors are skipped silently.
-     * @throws std::runtime_error if socket enumeration or any data fetch fails.
-     */
-    [[nodiscard]] static std::vector<typename AmdsmiBackend::processor_handle>
-    enumerate_gpu_handles()
+    [[nodiscard]] static std::vector<processor_handle> enumerate_gpu_handles()
     {
-        return enumerate_handles([](typename AmdsmiBackend::socket_handle     socket,
-                                    std::uint32_t*                            count,
-                                    typename AmdsmiBackend::processor_handle* procs) {
-            return AmdsmiBackend::get_processor_handles(socket, count, procs);
-        });
+        return enumerate_handles(
+            [](socket_handle socket, std::uint32_t* count, processor_handle* procs) {
+                return AmdsmiBackend::get_processor_handles(socket, count, procs);
+            },
+            "amdsmi_get_processor_handles");
     }
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    /**
-     * @brief Enumerate all NIC processor handles across all sockets.
-     *
-     * Sockets that report no NIC processors are skipped silently.
-     * @throws std::runtime_error if socket enumeration or any data fetch fails.
-     */
-    [[nodiscard]] static std::vector<typename AmdsmiBackend::processor_handle>
-    enumerate_nic_handles()
+    [[nodiscard]] static std::vector<processor_handle> enumerate_nic_handles()
     {
-        return enumerate_handles([](typename AmdsmiBackend::socket_handle     socket,
-                                    std::uint32_t*                            count,
-                                    typename AmdsmiBackend::processor_handle* procs) {
-            return AmdsmiBackend::get_processor_handles_by_type(
-                socket, AMDSMI_PROCESSOR_TYPE_AMD_NIC, procs, count);
-        });
+        return enumerate_handles(
+            [](socket_handle socket, std::uint32_t* count, processor_handle* procs) {
+                return AmdsmiBackend::get_processor_handles_by_type(
+                    socket, AMDSMI_PROCESSOR_TYPE_AMD_NIC, procs, count);
+            },
+            "amdsmi_get_processor_handles_by_type");
     }
 #endif
 
-    // ── Per-device GPU queries ────────────────────────────────────────────────
+    // ── Per-device forwarding (called by backend_proxy) ───────────────────────
+    // Each method takes an explicit handle and returns the raw status code.
+    // Error checking and type conversion are the caller's responsibility.
 
-    [[nodiscard]] asic_info get_gpu_asic_info() const
+    [[nodiscard]] status_t get_metrics_info(processor_handle h, gpu_metrics_t* out) const
     {
-        typename AmdsmiBackend::asic_info_t raw{};
-        check_call(m_amdsmi.get_gpu_asic_info(m_handle, &raw),
-                   "amdsmi_get_gpu_asic_info");
-        return { raw.market_name, raw.vendor_name };
+        return m_amdsmi.get_metrics_info(h, out);
     }
 
-    [[nodiscard]] metrics get_gpu_metrics() const
+    [[nodiscard]] status_t get_gpu_asic_info(processor_handle h, asic_info_t* out) const
     {
-        typename AmdsmiBackend::gpu_metrics_t raw{};
-        check_call(m_amdsmi.get_metrics_info(m_handle, &raw),
-                   "amdsmi_get_gpu_metrics_info");
-
-        metrics out{};
-        convert_power(raw, out);
-        convert_temperature(raw, out);
-        convert_activity(raw, out);
-        convert_xcp(raw, out);
-        convert_xgmi(raw, out);
-        convert_pcie(raw, out);
-        convert_clocks(raw, out);
-        return out;
+        return m_amdsmi.get_gpu_asic_info(h, out);
     }
 
-    [[nodiscard]] std::uint64_t get_memory_usage() const
+    [[nodiscard]] status_t get_memory_usage(processor_handle h, memory_type_t type,
+                                            std::uint64_t* out) const
     {
-        std::uint64_t usage = 0;
-        check_call(
-            m_amdsmi.get_memory_usage(m_handle, AmdsmiBackend::MEM_TYPE_VRAM, &usage),
-            "amdsmi_get_gpu_memory_usage");
-        return usage;
+        return m_amdsmi.get_memory_usage(h, type, out);
     }
 
-    [[nodiscard]] std::uint64_t get_raw_sdma_usage() const
-    {
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-        std::uint32_t count = 0;
-        if(m_amdsmi.get_gpu_process_list(m_handle, &count, nullptr) !=
-               AmdsmiBackend::STATUS_SUCCESS ||
-           count == 0)
-            return 0;
-
-        std::vector<typename AmdsmiBackend::proc_info_t> procs(count);
-        check_call(m_amdsmi.get_gpu_process_list(m_handle, &count, procs.data()),
-                   "amdsmi_get_gpu_process_list");
-
-        std::uint64_t cumulative = 0;
-        for(const auto& proc : procs)
-            cumulative += proc.sdma_usage;
-        return cumulative;
-#else
-        return 0;
-#endif
-    }
-
-    [[nodiscard]] bool is_sdma_supported() const noexcept
+    [[nodiscard]] status_t get_gpu_process_list(processor_handle h, std::uint32_t* count,
+                                                proc_info_t* list) const
     {
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-        std::uint32_t count = 0;
-        return m_amdsmi.get_gpu_process_list(m_handle, &count, nullptr) ==
-               AmdsmiBackend::STATUS_SUCCESS;
-#else
-        return false;
-#endif
+        return m_amdsmi.get_gpu_process_list(h, count, list);
     }
+#endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    // ── Per-device NIC queries ────────────────────────────────────────────────
-
-    [[nodiscard]] nic::asic_info get_nic_asic_info() const
+    [[nodiscard]] status_t get_nic_asic_info(processor_handle h,
+                                             nic_asic_info_t* out) const
     {
-        typename AmdsmiBackend::nic_asic_info_t raw{};
-        check_call(m_amdsmi.get_nic_asic_info(m_handle, &raw),
-                   "amdsmi_get_nic_asic_info");
-        return { raw.product_name, raw.vendor_name };
+        return m_amdsmi.get_nic_asic_info(h, out);
     }
 
-    [[nodiscard]] nic::port_info get_nic_port_info() const
+    [[nodiscard]] status_t get_nic_port_info(processor_handle h,
+                                             nic_port_info_t* out) const
     {
-        typename AmdsmiBackend::nic_port_info_t raw{};
-        check_call(m_amdsmi.get_nic_port_info(m_handle, &raw),
-                   "amdsmi_get_nic_port_info");
-        if(raw.num_ports == 0) return {};
-        return { raw.ports[0].netdev };
+        return m_amdsmi.get_nic_port_info(h, out);
     }
 
-    [[nodiscard]] nic::rdma_info get_nic_rdma_info() const
+    [[nodiscard]] status_t get_nic_rdma_dev_info(processor_handle         h,
+                                                 nic_rdma_devices_info_t* out) const
     {
-        // Heap-allocate: amdsmi_nic_rdma_devices_info_t is ~558 KiB.
-        auto raw = std::make_unique<typename AmdsmiBackend::nic_rdma_devices_info_t>();
-        check_call(m_amdsmi.get_nic_rdma_dev_info(m_handle, raw.get()),
-                   "amdsmi_get_nic_rdma_dev_info");
-        if(raw->num_rdma_dev == 0) return { 0 };
-        return { raw->rdma_dev_info[0].num_rdma_ports };
+        return m_amdsmi.get_nic_rdma_dev_info(h, out);
     }
 
-    [[nodiscard]] std::vector<nic::stat_entry> get_nic_rdma_port_statistics(
-        std::uint8_t rdma_port_idx) const
+    [[nodiscard]] status_t get_nic_rdma_port_statistics(processor_handle h,
+                                                        std::uint8_t     port_idx,
+                                                        std::uint32_t*   count,
+                                                        nic_stat_t*      stats) const
     {
-        std::uint32_t count = 0;
-        check_call(m_amdsmi.get_nic_rdma_port_statistics(m_handle, rdma_port_idx, &count,
-                                                         nullptr),
-                   "amdsmi_get_nic_rdma_port_statistics (count)");
-
-        if(count == 0) return {};
-
-        std::vector<typename AmdsmiBackend::nic_stat_t> raw_stats(count);
-        check_call(m_amdsmi.get_nic_rdma_port_statistics(m_handle, rdma_port_idx, &count,
-                                                         raw_stats.data()),
-                   "amdsmi_get_nic_rdma_port_statistics (data)");
-
-        std::vector<nic::stat_entry> result;
-        result.reserve(count);
-        for(const auto& stat : raw_stats)
-            result.emplace_back(nic::stat_entry{ stat.name, stat.value });
-        return result;
+        return m_amdsmi.get_nic_rdma_port_statistics(h, port_idx, count, stats);
     }
 #endif
 
 private:
-    using gpu_metrics_t = typename AmdsmiBackend::gpu_metrics_t;
+    AmdsmiBackend m_amdsmi{};
 
-    // ── Error checking ────────────────────────────────────────────────────────
-
-    static void check_call(typename AmdsmiBackend::status_t status, std::string_view func)
+    static void check_status(status_t status, const char* func)
     {
-        if(status == AmdsmiBackend::STATUS_SUCCESS) return;
+        if(status == AmdsmiBackend::STATUS_SUCCESS)
+        {
+            return;
+        }
         throw std::runtime_error(std::string(func) +
                                  " failed: " + AmdsmiBackend::status_to_string(status));
     }
 
-    // ── Enumeration helper ────────────────────────────────────────────────────
-
     template <typename QueryFn>
-    [[nodiscard]] static std::vector<typename AmdsmiBackend::processor_handle>
-    enumerate_handles(QueryFn query)
+    [[nodiscard]] static std::vector<processor_handle> enumerate_handles(
+        QueryFn query, const char* fn_name)
     {
-        std::vector<typename AmdsmiBackend::processor_handle> result;
+        std::vector<processor_handle> result;
 
         std::uint32_t socket_count = 0;
-        check_call(AmdsmiBackend::get_socket_handles(&socket_count, nullptr),
-                   "amdsmi_get_socket_handles (count)");
+        check_status(AmdsmiBackend::get_socket_handles(&socket_count, nullptr),
+                     "amdsmi_get_socket_handles (count)");
 
-        if(socket_count == 0) return result;
+        if(socket_count == 0)
+        {
+            return result;
+        }
 
-        std::vector<typename AmdsmiBackend::socket_handle> sockets(socket_count);
-        check_call(AmdsmiBackend::get_socket_handles(&socket_count, sockets.data()),
-                   "amdsmi_get_socket_handles (data)");
+        std::vector<socket_handle> sockets(socket_count);
+        check_status(AmdsmiBackend::get_socket_handles(&socket_count, sockets.data()),
+                     "amdsmi_get_socket_handles (data)");
 
         for(auto socket : sockets)
         {
             std::uint32_t count = 0;
             if(query(socket, &count, nullptr) != AmdsmiBackend::STATUS_SUCCESS ||
                count == 0)
+            {
                 continue;
+            }
 
-            std::vector<typename AmdsmiBackend::processor_handle> procs(count);
-            check_call(query(socket, &count, procs.data()),
-                       "amdsmi_get_processor_handles (data)");
+            std::vector<processor_handle> procs(count);
+            check_status(query(socket, &count, procs.data()),
+                         (std::string(fn_name) + " (data)").c_str());
 
             result.insert(result.end(), procs.begin(), procs.end());
         }
 
         return result;
     }
-
-    // ── Metric conversion ─────────────────────────────────────────────────────
-
-    static void convert_power(const gpu_metrics_t& raw, metrics& out)
-    {
-        out.current_socket_power = raw.current_socket_power;
-        out.average_socket_power = raw.average_socket_power;
-    }
-
-    static void convert_temperature(const gpu_metrics_t& raw, metrics& out)
-    {
-        out.hotspot_temperature = raw.temperature_hotspot;
-        out.edge_temperature    = raw.temperature_edge;
-    }
-
-    static void convert_activity(const gpu_metrics_t& raw, metrics& out)
-    {
-        out.gfx_activity = raw.average_gfx_activity;
-        out.umc_activity = raw.average_umc_activity;
-        out.mm_activity  = raw.average_mm_activity;
-    }
-
-    static void convert_xcp(const gpu_metrics_t& raw, metrics& out)
-    {
-        for(std::size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
-        {
-            std::copy(std::begin(raw.xcp_stats[xcp].vcn_busy),
-                      std::end(raw.xcp_stats[xcp].vcn_busy),
-                      out.xcp_stats[xcp].vcn_busy.begin());
-
-            constexpr std::size_t copy_count =
-                std::min(static_cast<std::size_t>(sizeof(raw.xcp_stats[0].jpeg_busy) /
-                                                  sizeof(std::uint16_t)),
-                         gpu::MAX_NUM_JPEG_V1);
-            std::copy_n(std::begin(raw.xcp_stats[xcp].jpeg_busy), copy_count,
-                        out.xcp_stats[xcp].jpeg_busy.begin());
-        }
-
-        std::copy(std::begin(raw.vcn_activity), std::end(raw.vcn_activity),
-                  out.vcn_activity.begin());
-        std::copy(std::begin(raw.jpeg_activity), std::end(raw.jpeg_activity),
-                  out.jpeg_activity.begin());
-    }
-
-    static void convert_xgmi(const gpu_metrics_t& raw, metrics& out)
-    {
-        populate_if_supported(out.xgmi.link.width, raw.xgmi_link_width);
-        populate_if_supported(out.xgmi.link.speed, raw.xgmi_link_speed);
-
-        for(std::size_t idx = 0; idx < MAX_NUM_XGMI_LINKS; ++idx)
-        {
-            populate_if_supported(out.xgmi.data_acc.read[idx],
-                                  raw.xgmi_read_data_acc[idx]);
-            populate_if_supported(out.xgmi.data_acc.write[idx],
-                                  raw.xgmi_write_data_acc[idx]);
-        }
-    }
-
-    static void convert_pcie(const gpu_metrics_t& raw, metrics& out)
-    {
-        populate_if_supported(out.pcie.link.width, raw.pcie_link_width);
-        populate_if_supported(out.pcie.link.speed, raw.pcie_link_speed);
-        populate_if_supported(out.pcie.bandwidth.acc, raw.pcie_bandwidth_acc);
-        populate_if_supported(out.pcie.bandwidth.inst, raw.pcie_bandwidth_inst);
-    }
-
-    static void convert_clocks(const gpu_metrics_t& raw, metrics& out)
-    {
-        constexpr auto clock_sentinel = static_cast<std::uint32_t>(0xFFFFU);
-        populate_if_supported(out.gfx_clock_mhz,
-                              static_cast<std::uint32_t>(raw.current_gfxclk),
-                              clock_sentinel);
-        populate_if_supported(out.mem_clock_mhz,
-                              static_cast<std::uint32_t>(raw.current_uclk),
-                              clock_sentinel);
-    }
-
-    // ── Members ───────────────────────────────────────────────────────────────
-
-    AmdsmiBackend                   m_amdsmi{};  ///< Policy (stateless — zero overhead)
-    AmdsmiBackend::processor_handle m_handle;
 };
 
-template <typename Backend>
+/**
+ * @brief Factory for creating backend<AmdsmiBackend> session instances.
+ */
+template <amdsmi_backend_policy AmdsmiBackend>
 struct backend_factory
 {
-    using backend_t = backend<Backend>;
+    using backend_t = backend<AmdsmiBackend>;
 
     static std::shared_ptr<backend_t> create_backend()
     {

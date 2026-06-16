@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "backends/amd_smi/backend.hpp"
+#include "backends/amd_smi/device_backend.hpp"
 #include "mock_backend.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 
 using ::testing::_;
@@ -24,317 +26,64 @@ using ::testing::StrictMock;
 namespace rocprofsys::backends::amd_smi
 {
 
-using MockApi = StrictMock<testing::gmock_backend_api>;
-using sut_t   = backend<testing::mock_backend>;
+using MockApi   = StrictMock<testing::gmock_backend_api>;
+using factory_t = backend_factory<testing::mock_backend>;
+using sut_t     = factory_t::backend_t;
+using DeviceSut = device_backend<sut_t>;
 
-constexpr testing::mock_backend::processor_handle k_handle = 0xDEAD'BEEF;
-constexpr testing::mock_status_t k_ok  = testing::mock_backend::STATUS_SUCCESS;
-constexpr testing::mock_status_t k_err = 1;
+constexpr testing::mock_status_t k_ok     = testing::mock_backend::STATUS_SUCCESS;
+constexpr testing::mock_status_t k_err    = 1;
+constexpr std::uint64_t          k_handle = 0xABCDABCDULL;
 
-// ── Fixture ───────────────────────────────────────────────────────────────────
-
-class BackendTest : public ::testing::Test
+class DeviceBackendTest : public ::testing::Test
 {
 protected:
-    void SetUp() override { testing::g_mock_backend = std::make_unique<MockApi>(); }
+    void SetUp() override
+    {
+        testing::g_mock_backend = std::make_unique<MockApi>();
+        m_session               = std::make_shared<sut_t>();
+    }
+
     void TearDown() override { testing::g_mock_backend.reset(); }
+
+    std::shared_ptr<sut_t> m_session;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Static lifecycle
-// ─────────────────────────────────────────────────────────────────────────────
+// ── get_gpu_asic_info ─────────────────────────────────────────────────────────
 
-TEST_F(BackendTest, initialize_calls_backend_init)
+TEST_F(DeviceBackendTest, get_gpu_asic_info_maps_market_name_to_product_name)
 {
-    EXPECT_CALL(*testing::g_mock_backend, init()).WillOnce(Return(k_ok));
-    sut_t::initialize();
-}
-
-TEST_F(BackendTest, initialize_throws_on_backend_error)
-{
-    EXPECT_CALL(*testing::g_mock_backend, init()).WillOnce(Return(k_err));
-    EXPECT_THROW(sut_t::initialize(), std::runtime_error);
-}
-
-TEST_F(BackendTest, initialize_error_message_contains_function_name)
-{
-    EXPECT_CALL(*testing::g_mock_backend, init()).WillOnce(Return(k_err));
-    EXPECT_THROW(
-        {
-            try
-            {
-                sut_t::initialize();
-            } catch(const std::runtime_error& ex)
-            {
-                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_init"));
-                throw;
-            }
-        },
-        std::runtime_error);
-}
-
-TEST_F(BackendTest, shutdown_calls_backend_shutdown)
-{
-    EXPECT_CALL(*testing::g_mock_backend, shutdown()).WillOnce(Return(k_ok));
-    sut_t::shutdown();
-}
-
-TEST_F(BackendTest, shutdown_is_noexcept)
-{
-    // shutdown() must not throw even when backend returns error
-    EXPECT_CALL(*testing::g_mock_backend, shutdown()).WillOnce(Return(k_err));
-    EXPECT_NO_THROW(sut_t::shutdown());
-}
-
-TEST_F(BackendTest, get_lib_version_forwards_version_fields)
-{
-    const testing::mock_version_t raw{
-        .major = 26, .minor = 3, .release = 0, .build = "26.3.0"
-    };
-    EXPECT_CALL(*testing::g_mock_backend, get_version(NotNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(raw), Return(k_ok)));
-
-    auto ver = sut_t::get_lib_version();
-    EXPECT_EQ(ver.major, 26U);
-    EXPECT_EQ(ver.minor, 3U);
-    EXPECT_EQ(ver.release, 0U);
-}
-
-TEST_F(BackendTest, get_lib_version_throws_on_backend_error)
-{
-    EXPECT_CALL(*testing::g_mock_backend, get_version(_)).WillOnce(Return(k_err));
-    EXPECT_THROW(static_cast<void>(sut_t::get_lib_version()), std::runtime_error);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GPU handle enumeration
-// ─────────────────────────────────────────────────────────────────────────────
-
-TEST_F(BackendTest, enumerate_gpu_handles_returns_empty_when_no_sockets)
-{
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(0U), Return(k_ok)));
-
-    auto handles = sut_t::enumerate_gpu_handles();
-    EXPECT_TRUE(handles.empty());
-}
-
-TEST_F(BackendTest, enumerate_gpu_handles_throws_on_socket_count_error)
-{
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
-        .WillOnce(Return(k_err));
-    EXPECT_THROW(static_cast<void>(sut_t::enumerate_gpu_handles()), std::runtime_error);
-}
-
-TEST_F(BackendTest, enumerate_gpu_handles_throws_on_socket_data_error)
-{
-    InSequence seq;
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
-        .WillOnce(Return(k_err));
-
-    EXPECT_THROW(static_cast<void>(sut_t::enumerate_gpu_handles()), std::runtime_error);
-}
-
-TEST_F(BackendTest, enumerate_gpu_handles_skips_socket_with_no_processors)
-{
-    constexpr std::uint64_t k_socket = 10;
-
-    InSequence seq;
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(1U),
-                        SetArrayArgument<1>(&k_socket, &k_socket + 1), Return(k_ok)));
-    // Count returns 0 → socket is skipped silently, no data fetch
-    EXPECT_CALL(*testing::g_mock_backend,
-                get_processor_handles(k_socket, NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(0U), Return(k_ok)));
-
-    auto handles = sut_t::enumerate_gpu_handles();
-    EXPECT_TRUE(handles.empty());
-}
-
-TEST_F(BackendTest, enumerate_gpu_handles_returns_all_handles_from_single_socket)
-{
-    constexpr std::uint64_t k_socket  = 42;
-    constexpr std::uint64_t k_procs[] = { 100, 101 };
-
-    InSequence seq;
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(1U),
-                        SetArrayArgument<1>(&k_socket, &k_socket + 1), Return(k_ok)));
-    EXPECT_CALL(*testing::g_mock_backend,
-                get_processor_handles(k_socket, NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(2U), Return(k_ok)));
-    EXPECT_CALL(*testing::g_mock_backend,
-                get_processor_handles(k_socket, NotNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(2U), SetArrayArgument<2>(k_procs, k_procs + 2),
-                        Return(k_ok)));
-
-    auto handles = sut_t::enumerate_gpu_handles();
-    ASSERT_EQ(handles.size(), 2U);
-    EXPECT_EQ(handles[0], k_procs[0]);
-    EXPECT_EQ(handles[1], k_procs[1]);
-}
-
-TEST_F(BackendTest, enumerate_gpu_handles_aggregates_handles_across_two_sockets)
-{
-    constexpr std::uint64_t k_sockets[] = { 10, 20 };
-    constexpr std::uint64_t k_proc_a    = 100;
-    constexpr std::uint64_t k_proc_b    = 200;
-
-    InSequence seq;
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(2U), Return(k_ok)));
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(2U),
-                        SetArrayArgument<1>(k_sockets, k_sockets + 2), Return(k_ok)));
-
-    // Socket 0: one GPU
-    EXPECT_CALL(*testing::g_mock_backend,
-                get_processor_handles(k_sockets[0], NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(1U), Return(k_ok)));
-    EXPECT_CALL(*testing::g_mock_backend,
-                get_processor_handles(k_sockets[0], NotNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(1U),
-                        SetArrayArgument<2>(&k_proc_a, &k_proc_a + 1), Return(k_ok)));
-
-    // Socket 1: one GPU
-    EXPECT_CALL(*testing::g_mock_backend,
-                get_processor_handles(k_sockets[1], NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(1U), Return(k_ok)));
-    EXPECT_CALL(*testing::g_mock_backend,
-                get_processor_handles(k_sockets[1], NotNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(1U),
-                        SetArrayArgument<2>(&k_proc_b, &k_proc_b + 1), Return(k_ok)));
-
-    auto handles = sut_t::enumerate_gpu_handles();
-    ASSERT_EQ(handles.size(), 2U);
-    EXPECT_EQ(handles[0], k_proc_a);
-    EXPECT_EQ(handles[1], k_proc_b);
-}
-
-TEST_F(BackendTest, enumerate_gpu_handles_throws_on_processor_data_error)
-{
-    constexpr std::uint64_t k_socket = 10;
-
-    InSequence seq;
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
-    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(1U),
-                        SetArrayArgument<1>(&k_socket, &k_socket + 1), Return(k_ok)));
-    EXPECT_CALL(*testing::g_mock_backend,
-                get_processor_handles(k_socket, NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(2U), Return(k_ok)));
-    EXPECT_CALL(*testing::g_mock_backend,
-                get_processor_handles(k_socket, NotNull(), NotNull()))
-        .WillOnce(Return(k_err));
-
-    EXPECT_THROW(static_cast<void>(sut_t::enumerate_gpu_handles()), std::runtime_error);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Per-device: get_memory_usage
-// ─────────────────────────────────────────────────────────────────────────────
-
-TEST_F(BackendTest, get_memory_usage_forwards_handle_and_returns_value)
-{
-    EXPECT_CALL(
-        *testing::g_mock_backend,
-        get_memory_usage(k_handle, testing::mock_backend::MEM_TYPE_VRAM, NotNull()))
-        .WillOnce(DoAll(SetArgPointee<2>(std::uint64_t{ 4096 }), Return(k_ok)));
-
-    const sut_t dev{ k_handle };
-    EXPECT_EQ(dev.get_memory_usage(), 4096U);
-}
-
-TEST_F(BackendTest, get_memory_usage_throws_on_backend_error)
-{
-    EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, _, _))
-        .WillOnce(Return(k_err));
-
-    const sut_t dev{ k_handle };
-    EXPECT_THROW(static_cast<void>(dev.get_memory_usage()), std::runtime_error);
-}
-
-TEST_F(BackendTest, get_memory_usage_error_message_contains_function_name)
-{
-    EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, _, _))
-        .WillOnce(Return(k_err));
-
-    const sut_t dev{ k_handle };
-    EXPECT_THROW(
-        {
-            try
-            {
-                static_cast<void>(dev.get_memory_usage());
-            } catch(const std::runtime_error& ex)
-            {
-                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_memory_usage"));
-                throw;
-            }
-        },
-        std::runtime_error);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Per-device: get_raw_sdma_usage / is_sdma_supported (SDMA guard off)
-// ─────────────────────────────────────────────────────────────────────────────
-
-TEST_F(BackendTest, get_raw_sdma_usage_returns_zero_when_sdma_unsupported)
-{
-    const sut_t dev{ k_handle };
-    EXPECT_EQ(dev.get_raw_sdma_usage(), 0U);
-}
-
-TEST_F(BackendTest, is_sdma_supported_returns_false_when_sdma_unsupported)
-{
-    const sut_t dev{ k_handle };
-    EXPECT_FALSE(dev.is_sdma_supported());
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Per-device: get_gpu_asic_info
-// ─────────────────────────────────────────────────────────────────────────────
-
-TEST_F(BackendTest, get_gpu_asic_info_forwards_handle_and_converts_fields)
-{
-    const testing::mock_asic_info_t raw{ .market_name = "RX 9900 XT",
+    const testing::mock_asic_info_t raw{ .market_name = "Radeon RX 7900 XTX",
                                          .vendor_name = "AMD" };
     EXPECT_CALL(*testing::g_mock_backend, get_gpu_asic_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    const sut_t dev{ k_handle };
-    auto        info = dev.get_gpu_asic_info();
-    EXPECT_EQ(info.product_name, "RX 9900 XT");
+    DeviceSut  sut{ m_session, k_handle };
+    const auto info = sut.get_gpu_asic_info();
+    EXPECT_EQ(info.product_name, "Radeon RX 7900 XTX");
     EXPECT_EQ(info.vendor_name, "AMD");
 }
 
-TEST_F(BackendTest, get_gpu_asic_info_throws_on_backend_error)
+TEST_F(DeviceBackendTest, get_gpu_asic_info_throws_on_backend_error)
 {
     EXPECT_CALL(*testing::g_mock_backend, get_gpu_asic_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    const sut_t dev{ k_handle };
-    EXPECT_THROW(static_cast<void>(dev.get_gpu_asic_info()), std::runtime_error);
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_gpu_asic_info()), std::runtime_error);
 }
 
-TEST_F(BackendTest, get_gpu_asic_info_error_message_contains_function_name)
+TEST_F(DeviceBackendTest, get_gpu_asic_info_error_message_contains_function_name)
 {
     EXPECT_CALL(*testing::g_mock_backend, get_gpu_asic_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    const sut_t dev{ k_handle };
+    DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(
         {
             try
             {
-                static_cast<void>(dev.get_gpu_asic_info());
+                static_cast<void>(sut.get_gpu_asic_info());
             } catch(const std::runtime_error& ex)
             {
                 EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_asic_info"));
@@ -344,119 +93,257 @@ TEST_F(BackendTest, get_gpu_asic_info_error_message_contains_function_name)
         std::runtime_error);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Per-device: get_gpu_metrics — conversion correctness
-// ─────────────────────────────────────────────────────────────────────────────
+// ── get_gpu_metrics — power ───────────────────────────────────────────────────
 
-TEST_F(BackendTest, get_gpu_metrics_converts_power_fields)
+TEST_F(DeviceBackendTest, get_gpu_metrics_maps_power_fields)
 {
     testing::mock_gpu_metrics_t raw{};
-    raw.current_socket_power = 175;
+    raw.current_socket_power = 150;
     raw.average_socket_power = 120;
 
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    const sut_t dev{ k_handle };
-    auto        met = dev.get_gpu_metrics();
-    EXPECT_EQ(met.current_socket_power, 175U);
-    EXPECT_EQ(met.average_socket_power, 120U);
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.current_socket_power, 150U);
+    EXPECT_EQ(m.average_socket_power, 120U);
 }
 
-TEST_F(BackendTest, get_gpu_metrics_converts_temperature_fields)
+// ── get_gpu_metrics — temperature ────────────────────────────────────────────
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_maps_temperature_fields)
 {
     testing::mock_gpu_metrics_t raw{};
-    raw.temperature_hotspot = 82;
-    raw.temperature_edge    = 60;
+    raw.temperature_hotspot = 85;
+    raw.temperature_edge    = 72;
 
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    const sut_t dev{ k_handle };
-    auto        met = dev.get_gpu_metrics();
-    EXPECT_EQ(met.hotspot_temperature, 82U);
-    EXPECT_EQ(met.edge_temperature, 60U);
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.hotspot_temperature, 85U);
+    EXPECT_EQ(m.edge_temperature, 72U);
 }
 
-TEST_F(BackendTest, get_gpu_metrics_converts_activity_fields)
+// ── get_gpu_metrics — activity ────────────────────────────────────────────────
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_maps_activity_fields)
 {
     testing::mock_gpu_metrics_t raw{};
-    raw.average_gfx_activity = 95;
-    raw.average_umc_activity = 60;
-    raw.average_mm_activity  = 30;
+    raw.average_gfx_activity = 80;
+    raw.average_umc_activity = 40;
+    raw.average_mm_activity  = 60;
 
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    const sut_t dev{ k_handle };
-    auto        met = dev.get_gpu_metrics();
-    EXPECT_EQ(met.gfx_activity, 95U);
-    EXPECT_EQ(met.umc_activity, 60U);
-    EXPECT_EQ(met.mm_activity, 30U);
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.gfx_activity, 80U);
+    EXPECT_EQ(m.umc_activity, 40U);
+    EXPECT_EQ(m.mm_activity, 60U);
 }
 
-TEST_F(BackendTest, get_gpu_metrics_populates_supported_clock_fields)
+// ── get_gpu_metrics — PCIe ────────────────────────────────────────────────────
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_pcie_fields_zeroed_when_sentinel)
 {
-    testing::mock_gpu_metrics_t raw{};
-    raw.current_gfxclk = 2400;
-    raw.current_uclk   = 1000;
+    // mock_gpu_metrics_t default-initialises all pcie fields to sentinel values
+    const testing::mock_gpu_metrics_t raw{};
 
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    const sut_t dev{ k_handle };
-    auto        met = dev.get_gpu_metrics();
-    EXPECT_EQ(met.gfx_clock_mhz, 2400U);
-    EXPECT_EQ(met.mem_clock_mhz, 1000U);
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.pcie.link.width, 0U);
+    EXPECT_EQ(m.pcie.link.speed, 0U);
+    EXPECT_EQ(m.pcie.bandwidth.acc, 0U);
+    EXPECT_EQ(m.pcie.bandwidth.inst, 0U);
 }
 
-TEST_F(BackendTest, get_gpu_metrics_zeroes_unsupported_clock_fields)
-{
-    // Default mock_gpu_metrics_t has sentinel 0xFFFF for clocks → zero in output
-    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(testing::mock_gpu_metrics_t{}), Return(k_ok)));
-
-    const sut_t dev{ k_handle };
-    auto        met = dev.get_gpu_metrics();
-    EXPECT_EQ(met.gfx_clock_mhz, 0U);
-    EXPECT_EQ(met.mem_clock_mhz, 0U);
-}
-
-TEST_F(BackendTest, get_gpu_metrics_populates_supported_pcie_bandwidth)
+TEST_F(DeviceBackendTest, get_gpu_metrics_pcie_fields_populated_when_supported)
 {
     testing::mock_gpu_metrics_t raw{};
-    raw.pcie_bandwidth_acc  = 12345;
-    raw.pcie_bandwidth_inst = 6789;
+    raw.pcie_link_width     = 16;
+    raw.pcie_link_speed     = 32;
+    raw.pcie_bandwidth_acc  = 10000;
+    raw.pcie_bandwidth_inst = 9000;
 
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
-    const sut_t dev{ k_handle };
-    auto        met = dev.get_gpu_metrics();
-    EXPECT_EQ(met.pcie.bandwidth.acc, 12345U);
-    EXPECT_EQ(met.pcie.bandwidth.inst, 6789U);
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.pcie.link.width, 16U);
+    EXPECT_EQ(m.pcie.link.speed, 32U);
+    EXPECT_EQ(m.pcie.bandwidth.acc, 10000U);
+    EXPECT_EQ(m.pcie.bandwidth.inst, 9000U);
 }
 
-TEST_F(BackendTest, get_gpu_metrics_throws_on_backend_error)
+// ── get_gpu_metrics — XGMI ───────────────────────────────────────────────────
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_xgmi_link_zeroed_when_sentinel)
+{
+    // xgmi_link_width and xgmi_link_speed default to 0xFFFF in mock_gpu_metrics_t
+    const testing::mock_gpu_metrics_t raw{};
+
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.xgmi.link.width, 0U);
+    EXPECT_EQ(m.xgmi.link.speed, 0U);
+}
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_xgmi_link_populated_when_supported)
+{
+    testing::mock_gpu_metrics_t raw{};
+    raw.xgmi_link_width = 2;
+    raw.xgmi_link_speed = 25;
+
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.xgmi.link.width, 2U);
+    EXPECT_EQ(m.xgmi.link.speed, 25U);
+}
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_xgmi_data_acc_populated_when_supported)
+{
+    testing::mock_gpu_metrics_t raw{};
+    raw.xgmi_read_data_acc[0]  = 1000;
+    raw.xgmi_write_data_acc[0] = 2000;
+
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.xgmi.data_acc.read[0], 1000U);
+    EXPECT_EQ(m.xgmi.data_acc.write[0], 2000U);
+}
+
+// ── get_gpu_metrics — clocks ─────────────────────────────────────────────────
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_clocks_zeroed_when_sentinel)
+{
+    // current_gfxclk and current_uclk default to 0xFFFF in mock_gpu_metrics_t
+    const testing::mock_gpu_metrics_t raw{};
+
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.gfx_clock_mhz, 0U);
+    EXPECT_EQ(m.mem_clock_mhz, 0U);
+}
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_clocks_populated_when_supported)
+{
+    testing::mock_gpu_metrics_t raw{};
+    raw.current_gfxclk = 2100;
+    raw.current_uclk   = 1200;
+
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.gfx_clock_mhz, 2100U);
+    EXPECT_EQ(m.mem_clock_mhz, 1200U);
+}
+
+// ── get_gpu_metrics — VCN / JPEG activity ────────────────────────────────────
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_vcn_activity_is_copied)
+{
+    testing::mock_gpu_metrics_t raw{};
+    raw.vcn_activity[0] = 55;
+    raw.vcn_activity[1] = 77;
+
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.vcn_activity[0], 55U);
+    EXPECT_EQ(m.vcn_activity[1], 77U);
+}
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_jpeg_activity_is_copied)
+{
+    testing::mock_gpu_metrics_t raw{};
+    raw.jpeg_activity[0]  = 11;
+    raw.jpeg_activity[31] = 22;
+
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.jpeg_activity[0], 11U);
+    EXPECT_EQ(m.jpeg_activity[31], 22U);
+}
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_xcp_vcn_busy_is_copied)
+{
+    testing::mock_gpu_metrics_t raw{};
+    raw.xcp_stats[0].vcn_busy[0] = 33;
+    raw.xcp_stats[0].vcn_busy[3] = 44;
+
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.xcp_stats[0].vcn_busy[0], 33U);
+    EXPECT_EQ(m.xcp_stats[0].vcn_busy[3], 44U);
+}
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_xcp_jpeg_busy_is_copied)
+{
+    testing::mock_gpu_metrics_t raw{};
+    raw.xcp_stats[0].jpeg_busy[0]  = 55;
+    raw.xcp_stats[0].jpeg_busy[39] = 66;
+
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto m = sut.get_gpu_metrics();
+    EXPECT_EQ(m.xcp_stats[0].jpeg_busy[0], 55U);
+    EXPECT_EQ(m.xcp_stats[0].jpeg_busy[39], 66U);
+}
+
+// ── get_gpu_metrics — error handling ─────────────────────────────────────────
+
+TEST_F(DeviceBackendTest, get_gpu_metrics_throws_on_backend_error)
 {
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    const sut_t dev{ k_handle };
-    EXPECT_THROW(static_cast<void>(dev.get_gpu_metrics()), std::runtime_error);
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_gpu_metrics()), std::runtime_error);
 }
 
-TEST_F(BackendTest, get_gpu_metrics_error_message_contains_function_name)
+TEST_F(DeviceBackendTest, get_gpu_metrics_error_message_contains_function_name)
 {
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, _))
         .WillOnce(Return(k_err));
 
-    const sut_t dev{ k_handle };
+    DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(
         {
             try
             {
-                static_cast<void>(dev.get_gpu_metrics());
+                static_cast<void>(sut.get_gpu_metrics());
             } catch(const std::runtime_error& ex)
             {
                 EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_metrics_info"));
@@ -465,5 +352,147 @@ TEST_F(BackendTest, get_gpu_metrics_error_message_contains_function_name)
         },
         std::runtime_error);
 }
+
+// ── get_memory_usage ──────────────────────────────────────────────────────────
+
+TEST_F(DeviceBackendTest, get_memory_usage_returns_reported_bytes)
+{
+    constexpr std::uint64_t k_bytes = 8ULL * 1024 * 1024 * 1024;
+    EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, _, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<2>(k_bytes), Return(k_ok)));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_EQ(sut.get_memory_usage(), k_bytes);
+}
+
+TEST_F(DeviceBackendTest, get_memory_usage_passes_vram_type)
+{
+    constexpr auto k_vram = testing::mock_backend::MEM_TYPE_VRAM;
+    EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, k_vram, _))
+        .WillOnce(DoAll(SetArgPointee<2>(0U), Return(k_ok)));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_EQ(sut.get_memory_usage(), 0U);
+}
+
+TEST_F(DeviceBackendTest, get_memory_usage_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, _, _))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_memory_usage()), std::runtime_error);
+}
+
+TEST_F(DeviceBackendTest, get_memory_usage_error_message_contains_function_name)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, _, _))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(
+        {
+            try
+            {
+                static_cast<void>(sut.get_memory_usage());
+            } catch(const std::runtime_error& ex)
+            {
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_memory_usage"));
+                throw;
+            }
+        },
+        std::runtime_error);
+}
+
+// ── SDMA (disabled path) ──────────────────────────────────────────────────────
+
+#if !defined(AMD_SMI_SDMA_SUPPORTED) || AMD_SMI_SDMA_SUPPORTED != 1
+TEST_F(DeviceBackendTest, is_sdma_supported_returns_false_when_not_compiled)
+{
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_FALSE(sut.is_sdma_supported());
+}
+
+TEST_F(DeviceBackendTest, get_raw_sdma_usage_returns_zero_when_not_compiled)
+{
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_EQ(sut.get_raw_sdma_usage(), 0U);
+}
+#endif
+
+// ── SDMA (enabled path) ───────────────────────────────────────────────────────
+
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+TEST_F(DeviceBackendTest, is_sdma_supported_returns_true_when_process_list_succeeds)
+{
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(0U), Return(k_ok)));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_TRUE(sut.is_sdma_supported());
+}
+
+TEST_F(DeviceBackendTest, is_sdma_supported_returns_false_when_process_list_fails)
+{
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), IsNull()))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_FALSE(sut.is_sdma_supported());
+}
+
+TEST_F(DeviceBackendTest, get_raw_sdma_usage_returns_zero_when_no_processes)
+{
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(0U), Return(k_ok)));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_EQ(sut.get_raw_sdma_usage(), 0U);
+}
+
+TEST_F(DeviceBackendTest, get_raw_sdma_usage_returns_zero_when_count_fails)
+{
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), IsNull()))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_EQ(sut.get_raw_sdma_usage(), 0U);
+}
+
+TEST_F(DeviceBackendTest, get_raw_sdma_usage_accumulates_sdma_usage)
+{
+    const testing::mock_proc_info_t procs[] = { { .sdma_usage = 100 },
+                                                { .sdma_usage = 200 } };
+    InSequence                      seq;
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(2U), Return(k_ok)));
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(2U), SetArrayArgument<2>(procs, procs + 2),
+                        Return(k_ok)));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_EQ(sut.get_raw_sdma_usage(), 300U);
+}
+
+TEST_F(DeviceBackendTest, get_raw_sdma_usage_throws_when_data_fetch_fails)
+{
+    InSequence seq;
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(1U), Return(k_ok)));
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), NotNull()))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_raw_sdma_usage()), std::runtime_error);
+}
+#endif
 
 }  // namespace rocprofsys::backends::amd_smi

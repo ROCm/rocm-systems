@@ -19,14 +19,18 @@ namespace rocprofsys::pmc::device_providers::amd_smi
  * Manages AMD SMI backend lifecycle (init/shutdown) and provides device
  * enumeration. Shared between GPU and NIC collectors.
  *
- * @tparam BackendFactory  Provides @c backend_t, a type that exposes static
- *                         lifecycle, versioning, and enumeration methods.
+ * Follows the same factory pattern as procfs and rocprofiler_sdk providers:
+ * BackendFactory::create_backend() instantiates the backend; the provider
+ * stores it as @c m_backend_api and dispatches lifecycle and enumeration
+ * calls through that instance.
+ *
+ * @tparam BackendFactory  Provides @c backend_t and @c create_backend().
  */
 template <typename BackendFactory>
 class provider
 {
-    version m_version{};
-    bool    m_initialized{ false };
+    std::shared_ptr<typename BackendFactory::backend_t> m_backend_api;
+    version                                             m_version{};
 
 public:
     using backend_t = BackendFactory::backend_t;
@@ -36,11 +40,11 @@ public:
      * @throws std::runtime_error on AMD SMI failure.
      */
     provider()
+    : m_backend_api(BackendFactory::create_backend())
     {
-        backend_t::initialize();
-        m_initialized = true;
+        m_backend_api->initialize();
 
-        auto ver                                 = backend_t::get_lib_version();
+        auto ver                                 = m_backend_api->get_lib_version();
         m_version.numeric_representation.major   = ver.major;
         m_version.numeric_representation.minor   = ver.minor;
         m_version.numeric_representation.release = ver.release;
@@ -49,25 +53,28 @@ public:
 
     ~provider() noexcept
     {
-        if(m_initialized) backend_t::shutdown();
+        if(m_backend_api) m_backend_api->shutdown();
     }
 
-    // Non-copyable, but movable
+    // Non-copyable, movable
     provider(const provider&)            = delete;
     provider& operator=(const provider&) = delete;
 
     provider(provider&& other) noexcept
-    : m_version(std::move(other.m_version))
-    , m_initialized(std::exchange(other.m_initialized, false))
-    {}
+    : m_backend_api(std::move(other.m_backend_api))
+    , m_version(std::move(other.m_version))
+    {
+        other.m_backend_api.reset();
+    }
 
     provider& operator=(provider&& other) noexcept
     {
         if(this != &other)
         {
-            if(m_initialized) backend_t::shutdown();
+            if(m_backend_api) m_backend_api->shutdown();
+            m_backend_api = std::move(other.m_backend_api);
             m_version     = std::move(other.m_version);
-            m_initialized = std::exchange(other.m_initialized, false);
+            other.m_backend_api.reset();
         }
         return *this;
     }
@@ -82,15 +89,19 @@ public:
      */
     void shutdown()
     {
-        if(m_initialized)
+        if(m_backend_api)
         {
-            backend_t::shutdown();
-            m_initialized = false;
+            m_backend_api->shutdown();
+            m_backend_api.reset();
         }
     }
 
     /**
      * @brief Get all GPU devices.
+     *
+     * Enumerates GPU handles via the shared session, then wraps each handle in
+     * a @c Device::backend_type (i.e. @c device_backend<backend_t>) constructed
+     * with the session and the handle.
      *
      * @tparam Device  Concrete device type; exposes @c backend_type used to
      *                 construct per-device backend instances from handles.
@@ -98,16 +109,17 @@ public:
     template <typename Device>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> get_gpu_devices()
     {
-        auto handles = backend_t::enumerate_gpu_handles();
+        auto handles = m_backend_api->enumerate_gpu_handles();
 
         std::vector<std::shared_ptr<Device>> result;
         result.reserve(handles.size());
 
-        size_t index = 0;
+        std::size_t index = 0;
         for(auto handle : handles)
         {
-            auto dev_backend = std::make_shared<typename Device::backend_type>(handle);
-            result.push_back(std::make_shared<Device>(std::move(dev_backend), index++));
+            auto proxy =
+                std::make_shared<typename Device::backend_type>(m_backend_api, handle);
+            result.push_back(std::make_shared<Device>(std::move(proxy), index++));
         }
 
         return result;
@@ -116,22 +128,21 @@ public:
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     /**
      * @brief Get all NIC devices.
-     *
-     * @tparam Device  Concrete NIC device type; exposes @c backend_type.
      */
     template <typename Device>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> get_nic_devices()
     {
-        auto handles = backend_t::enumerate_nic_handles();
+        auto handles = m_backend_api->enumerate_nic_handles();
 
         std::vector<std::shared_ptr<Device>> result;
         result.reserve(handles.size());
 
-        size_t index = 0;
+        std::size_t index = 0;
         for(auto handle : handles)
         {
-            auto dev_backend = std::make_shared<typename Device::backend_type>(handle);
-            result.push_back(std::make_shared<Device>(std::move(dev_backend), index++));
+            auto proxy =
+                std::make_shared<typename Device::backend_type>(m_backend_api, handle);
+            result.push_back(std::make_shared<Device>(std::move(proxy), index++));
         }
 
         return result;

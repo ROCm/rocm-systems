@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(amd-smi-backend-tests OBJECT test_device_backend.cpp)
+add_library(amd-smi-backend-tests OBJECT test_backend.cpp test_device_backend.cpp)
 
 target_link_libraries(
     amd-smi-backend-tests

@@ -35,7 +35,9 @@ using ::rocprofsys::pmc::nic_device_filter;
  * - Device context storage for NIC-specific API signatures (device_name, product_name)
  * - Agent registration during device enumeration
  *
- * @tparam Backend The AMD SMI backend type (real or mock for testing)
+ * @tparam BackendProvider Device provider type.
+ * @tparam DeviceType      Concrete device type; exposes @c backend_type so traits
+ *                         stay decoupled from the AMD SMI backend headers.
  */
 template <typename BackendProvider, typename DeviceType>
 struct nic_traits
