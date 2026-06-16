@@ -15,7 +15,7 @@ from typing import Any, Optional, Union, cast
 import config
 import utils.utils_profile_csv as csv_ops
 from utils import rocpd_data
-from utils.inject_roctx import KNOWN_BACKENDS
+from utils.inject_roctx.constants import KNOWN_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -38,6 +38,12 @@ _PROFILER_INTERNAL_RE = re.compile(
 )
 
 ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
+
+# inject_roctx appends a trailing "|<backend>" suffix to marker names.
+_UNKNOWN_BACKEND = "unknown"
+_BACKEND_SUFFIX_RE = re.compile(
+    r"\|(" + "|".join(re.escape(b) for b in KNOWN_BACKENDS) + r")$"
+)
 
 
 def is_live_attach(
@@ -744,14 +750,6 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
         return []
 
     return results_files_csv
-
-
-# Wire format: "<op_path>:#<ctx>|<backend>" from inject_roctx.
-# Recognized backend names come from utils.inject_roctx.KNOWN_BACKENDS.
-_UNKNOWN_BACKEND = "unknown"
-_BACKEND_SUFFIX_RE = re.compile(
-    r"\|(" + "|".join(re.escape(b) for b in KNOWN_BACKENDS) + r")$"
-)
 
 
 def _parse_function_backend(function_value: Optional[str]) -> tuple[str, str]:

@@ -460,6 +460,33 @@ def test_parse_function_backend_aten_leaf_is_unknown():
     assert backend == "unknown"
 
 
+def test_parse_function_backend_edge_cases():
+    """Bogus suffix, empty string, and None all fall back to 'unknown'."""
+    assert _parse_function_backend("op|bogus") == ("op|bogus", "unknown")
+    assert _parse_function_backend("") == ("", "unknown")
+    assert _parse_function_backend(None) == ("", "unknown")
+
+
+def test_augment_marker_csv_untagged_row_warns(tmp_path, monkeypatch):
+    """Untagged rows are tagged 'unknown' and emit a warning."""
+    from utils import utils_profile
+
+    src = tmp_path / "src_marker_api_trace.csv"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv"
+    pd.DataFrame({"Function": ["aten::sum"]}).to_csv(src, index=False)
+
+    warnings: list[tuple] = []
+    monkeypatch.setattr(utils_profile, "console_warning", lambda *a: warnings.append(a))
+
+    _augment_marker_csv(str(src), str(dst))
+
+    out_df = pd.read_csv(dst)
+    assert out_df["Function"].tolist() == ["aten::sum"]
+    assert out_df["Backend"].tolist() == ["unknown"]
+    assert warnings, "untagged rows must emit a warning"
+    assert any("unknown" in str(a) for a in warnings[0])
+
+
 def test_augment_marker_csv_adds_backend_column(tmp_path):
     """End-to-end: tagged + untagged rows survive copy; Backend is populated."""
     src = tmp_path / "src_marker_api_trace.csv"
