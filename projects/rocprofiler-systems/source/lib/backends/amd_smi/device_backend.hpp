@@ -75,8 +75,8 @@ public:
         return usage;
     }
 
-    // amdsmi_get_temp_metric() return the same std::int64_t as SMI API.
-    // (whole °C after library / 1000  scaling). Failures are non-success statuses ->
+    // amdsmi_get_temp_metric() returns the same std::int64_t as SMI API.
+    // (whole °C after library / 1000 scaling). Failures are non-success statuses ->
     // std::runtime_error via check(). gpu::metrics stores the same width so values are
     // not narrowed or reinterpreted at this boundary (including sub-zero °C if the stack
     // ever reports it).

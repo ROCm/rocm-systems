@@ -162,7 +162,11 @@ public:
             }
         }
 
-        if(m_supported_metrics.bits.hotspot_temperature)
+        // At most one SMI temperature read per sample: prefer hotspot when it is both
+        // supported and enabled; otherwise read edge when enabled (so edge-only configs
+        // still work when the device exposes both sensors).
+        if(enabled_cfg.bits.hotspot_temperature &&
+           m_supported_metrics.bits.hotspot_temperature)
         {
             try
             {
@@ -173,7 +177,8 @@ public:
                           e.what());
             }
         }
-        if(m_supported_metrics.bits.edge_temperature)
+        else if(enabled_cfg.bits.edge_temperature &&
+                m_supported_metrics.bits.edge_temperature)
         {
             try
             {
@@ -221,8 +226,7 @@ private:
         }
 
         // The API amdsmi_get_temp_metric signals "not available" with a non-success
-        // status, which the backend turns into std::runtime_error. The value is not
-        // filled with MAX_UINT32 unlike other metrics.
+        // status, which the backend turns into std::runtime_error.
         try
         {
             (void) m_backend->get_hotspot_temperature();

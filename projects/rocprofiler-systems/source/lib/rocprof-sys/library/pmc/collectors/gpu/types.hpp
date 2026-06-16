@@ -110,6 +110,7 @@ has_gpu_temperature_output(const enabled_metrics& enabled)
     return enabled.bits.hotspot_temperature != 0 || enabled.bits.edge_temperature != 0;
 }
 
+// Single scalar track; hotspot wins when enabled; edge otherwise
 [[nodiscard]] inline double
 select_gpu_temperature(const enabled_metrics& enabled, const metrics& values)
 {
