@@ -122,7 +122,12 @@ void reset_env() {
   reset_gfx_revision_cache();
 }
 
-uint64_t g_next_handle = 1000;
+// Arbitrary non-zero seed for synthesized test agent handles. The value is not
+// significant; it only needs to be non-zero (so a synthesized handle is never
+// confused with a default-constructed hsa_agent_t whose handle is 0) and unique
+// per fresh_agent() call.
+constexpr uint64_t kFirstTestAgentHandle = 1;
+uint64_t g_next_handle = kFirstTestAgentHandle;
 hsa_agent_t fresh_agent() {
   hsa_agent_t a{};
   a.handle = g_next_handle++;
