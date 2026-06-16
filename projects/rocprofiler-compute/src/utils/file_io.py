@@ -11,10 +11,9 @@ import pandas as pd
 import yaml
 
 import config
-from utils import schema, utils_analysis
-from utils.kernel_name_shortener import kernel_name_shortener
+from interface.factory import create_profile_data_reader
+from interface.profile_data import ProfileDataReaderOptions
 from utils.logger import (
-    console_debug,
     console_error,
     console_log,
     console_warning,
@@ -303,31 +302,6 @@ def create_df_pmc(
     """
     Load all raw pmc counters and join into one df.
     """
-
-    def create_single_df_pmc(
-        raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
-    ) -> pd.DataFrame:
-        pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-        if not pmc_perf_path.is_file():
-            return pd.DataFrame()
-
-        df = pd.read_csv(pmc_perf_path)
-
-        if config_dict.get("format_rocprof_output") == "rocpd":
-            df = utils_analysis.process_rocpd_csv(df)
-
-        # Demangle original KernelNames
-        # Skip for Standalone Roofline with -1 to keep full kernel names
-        if kernel_verbose >= 0:
-            kernel_name_shortener(df, kernel_verbose)
-
-        if node_name is not None:
-            df.insert(0, "Node", node_name)
-
-        if verbose >= 2:
-            console_debug(f"pmc_raw_data final_single_df {df.info}")
-        return df
-
     root_path = Path(raw_data_root_dir)
 
     # 1. spatial multiplexing case
@@ -336,8 +310,12 @@ def create_df_pmc(
 
         for subdir in root_path.iterdir():
             if subdir.is_dir():
-                new_df = create_single_df_pmc(
-                    str(subdir), str(subdir.name), kernel_verbose, verbose
+                new_df = _read_single_df_pmc(
+                    subdir,
+                    config_dict,
+                    kernel_verbose,
+                    verbose,
+                    str(subdir.name),
                 )
                 if not new_df.empty:
                     dfs.append(new_df)
@@ -345,7 +323,12 @@ def create_df_pmc(
 
     # 2. regular single node case (nodes=None)
     if nodes is None:
-        return create_single_df_pmc(raw_data_root_dir, None, kernel_verbose, verbose)
+        return _read_single_df_pmc(
+            root_path,
+            config_dict,
+            kernel_verbose,
+            verbose,
+        )
 
     # 3. all nodes case (nodes=[])
     if not nodes:
@@ -353,8 +336,12 @@ def create_df_pmc(
 
         for subdir in root_path.iterdir():
             if subdir.is_dir():
-                new_df = create_single_df_pmc(
-                    str(subdir), str(subdir.name), kernel_verbose, verbose
+                new_df = _read_single_df_pmc(
+                    subdir,
+                    config_dict,
+                    kernel_verbose,
+                    verbose,
+                    str(subdir.name),
                 )
                 if not new_df.empty:
                     dfs.append(new_df)
@@ -366,7 +353,13 @@ def create_df_pmc(
     for node in nodes:
         node_path = root_path / node
         if node_path.exists():
-            new_df = create_single_df_pmc(str(node_path), node, kernel_verbose, verbose)
+            new_df = _read_single_df_pmc(
+                node_path,
+                config_dict,
+                kernel_verbose,
+                verbose,
+                node,
+            )
             if not new_df.empty:
                 dfs.append(new_df)
     return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
@@ -460,3 +453,23 @@ def get_valid_nodes(directory: str) -> list[str]:
         for entry in dir_path.iterdir()
         if entry.is_dir() and (entry / "sysinfo.csv").exists()
     ]
+
+
+def _read_single_df_pmc(
+    raw_data_dir: Path,
+    config_dict: dict[str, Any],
+    kernel_verbose: int,
+    verbose: int,
+    node_name: Optional[str] = None,
+) -> pd.DataFrame:
+    reader = create_profile_data_reader(
+        config_dict,
+        ProfileDataReaderOptions(
+            kernel_verbose=kernel_verbose,
+            verbose=verbose,
+        ),
+    )
+    df = reader.read_pmc_frame(raw_data_dir)
+    if not df.empty and node_name is not None:
+        df.insert(0, "Node", node_name)
+    return df

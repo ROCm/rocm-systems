@@ -25,10 +25,36 @@ def test_import_guard_allows_stdlib_and_project():
 
         # 2. Project modules (must succeed - sys.path includes src/)
         import config
+        import interface
+        import orchestrator
         import utils
 
         assert utils is not None
+        assert interface is not None
+        assert orchestrator is not None
         assert config is not None
+
+
+def test_import_guard_allows_profile_data_writer_factory():
+    """Verify profile data writer imports stay profile-mode safe."""
+    pandas_was_cached = "pandas" in sys.modules
+    if pandas_was_cached:
+        del sys.modules["pandas"]
+
+    try:
+        with ProfileModeImportGuard():
+            from interface.factory import create_profile_data_writer
+
+            csv_writer = create_profile_data_writer("csv")
+            rocpd_writer = create_profile_data_writer("rocpd")
+
+        assert csv_writer is not None
+        assert rocpd_writer is not None
+        assert "pandas" not in sys.modules
+    finally:
+        # Restore session-wide pandas cache for later guard tests.
+        if pandas_was_cached:
+            import pandas  # noqa: F401
 
 
 def test_import_guard_allows_rocm_modules():

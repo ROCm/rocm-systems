@@ -53,6 +53,7 @@ python3 -m pip install -r requirements-development.txt
 ## Testing
 
 Populate the <usename> variable in `docker/docker-compose.customrocmtest.yml`.
+
 Populate the <rocm_build_image> variable in `docker/Dockerfile.customrocmtest` based on latest ROCm CI build information.
 
 To quickly get the environment (bash shell) for building and testing, run the following commands:
