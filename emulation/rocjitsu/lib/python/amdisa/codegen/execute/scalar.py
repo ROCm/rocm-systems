@@ -607,6 +607,7 @@ def gen_scalar_bfe(dst: list[str], src: list[str], dtype: str | None) -> str:
         L.append(f'    {dst[0]}.write_scalar64(wf, 0);')
         L.append('    wf.write_scc(false);')
         L.append('  } else {')
+        L.append('    if (offset + width > 64) width = 64 - offset;')
         L.append('    uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1);')
         L.append('    uint64_t extracted = (base >> offset) & mask;')
         if dtype == 'i64':
@@ -624,6 +625,7 @@ def gen_scalar_bfe(dst: list[str], src: list[str], dtype: str | None) -> str:
         L.append(f'    {dst[0]}.write_scalar(wf, 0);')
         L.append('    wf.write_scc(false);')
         L.append('  } else {')
+        L.append('    if (offset + width > 32) width = 32 - offset;')
         L.append('    uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1);')
         L.append('    uint32_t extracted = (base >> offset) & mask;')
         if dtype == 'i32':

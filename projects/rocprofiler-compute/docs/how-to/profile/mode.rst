@@ -173,7 +173,7 @@ The following sample command profiles the ``vcopy`` workload.
       INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/116379_native_counter_collection.csv
       INFO    |-> [rocprofiler-sdk] vcopy testing on GCD 0
       INFO    |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
-   WARNING PC sampling data collection skipped as block 21 is not specified.
+   WARNING PC sampling data collection skipped as --pc-sampling is not specified.
       INFO [roofline] Checking for roofline.csv in /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X
    GPU Device 0 (gfx942) with 304 CUs: Profiling...
    100% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||]
@@ -1054,7 +1054,7 @@ Example with hierarchical naming:
 
 **Analyzing captured operators**: After profiling, use the analyze CLI (see
 :doc:`../analyze/cli`) to list and filter by operator name. Filtering
-(``--torch-operator``) accepts PurePosixPath glob patterns (e.g. ``*conv2d``,
+(``--torch-operator``) accepts shell-style glob patterns (e.g. ``*conv2d``,
 ``torch.nn.functional.conv2d``, ``*/*conv2d``). To select all operators, pass
 no arguments, ``all``, ``*``, or ``**`` — all four forms are equivalent.
 
@@ -1410,11 +1410,6 @@ workload multiple times to collect all performance counters. This mode fails
 for MPI applications because running the application multiple times results in
 multiple ``MPI_Init`` and ``MPI_Finalize`` calls, which is not permitted by the
 MPI specification.
-
-**PC Sampling:**
-
-PC sampling (block 21) may fail to collect data for multi-rank applications with
-MPI communication due to synchronization requirements.
 
 **Recommended single-pass modes:**
 

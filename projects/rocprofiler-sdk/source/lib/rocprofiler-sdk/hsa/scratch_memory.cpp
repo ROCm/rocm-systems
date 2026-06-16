@@ -606,7 +606,7 @@ update_table(const context_array_t& ctxs, hsa_amd_tool_table_t* _orig)
         _func = get_hsa_amd_tool_api_impl<TableIdx, OpIdx>(_func);
     }
 
-    // suppress unused paramter
+    // suppress unused parameter
     common::consume_args(ctxs, _orig);
 }
 

@@ -126,7 +126,7 @@ class PerfettoReader:
     def configure(self, **kwargs):
 
         # pre-compile the regex patterns for extracting the func, file, and line info
-        # users can use their own pattens via patterns=[...]. An empty set of patterns
+        # users can use their own patterns via patterns=[...]. An empty set of patterns
         # is valid for avoiding parsing func/file/line info
         _default_patterns = [
             # func [file:line]
