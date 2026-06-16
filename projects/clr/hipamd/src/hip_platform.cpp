@@ -189,7 +189,15 @@ void __hipRegisterFunction(void** modules, const void* hostFunction, char* devic
   // hip::Function is stored in map with hostFunction as key to prevent leaks.
   auto& platform = PlatformState::Instance();
   if (platform.StatCO().GetFuncName(hostFunction) == nullptr) {
-    hip::Function* func = new hip::Function(std::string(deviceName), fat_binary_modules);
+    // Static code object function: mark isStatic=true so the built amd::Kernel can
+    // skip the per-launch retain()/release() in NDRangeKernelCommand. StatCO kernels
+    // outlive every launch and all streams are drained at fat-binary teardown.
+    // TODO: device-internal/blit kernels (rocblit/palblit/devprogram amd::Kernels)
+    //       are also device-lifetime objects and could be marked static for the same
+    //       per-launch win; left as non-static (retained) for now to keep this change
+    //       scoped to the HIP StatCO path.
+    hip::Function* func =
+        new hip::Function(std::string(deviceName), fat_binary_modules, /*isStatic=*/true);
     hipError_t hip_error = platform.StatCO().RegisterFunction(hostFunction, func);
     guarantee(hip_error == hipSuccess, "Cannot register Static function, error: %d", hip_error);
   }

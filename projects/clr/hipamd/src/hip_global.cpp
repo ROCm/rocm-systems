@@ -43,8 +43,8 @@ namespace hip {
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
 // ================================================================================================
-Function::Function(const std::string& name, FatBinaryInfo** modules)
-    : name_(name), modules_(modules) {
+Function::Function(const std::string& name, FatBinaryInfo** modules, bool isStatic)
+    : name_(name), modules_(modules), isStatic_(isStatic) {
   dFunc_.resize(g_devices.size());
 }
 
@@ -62,7 +62,8 @@ amd::Kernel* Function::BuildKernel(hipModule_t hmod) const {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
   const amd::Symbol* symbol = program->findSymbol(name_.c_str());
   guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name_.c_str());
-  return new amd::Kernel(*program, *symbol, name_);
+  // isStatic_ lets NDRangeKernelCommand skip the per-launch retain()/release().
+  return new amd::Kernel(*program, *symbol, name_, isStatic_);
 }
 
 // ================================================================================================

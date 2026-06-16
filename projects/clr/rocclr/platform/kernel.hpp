@@ -288,6 +288,11 @@ class Kernel : public RuntimeObject {
   const Symbol& symbol_;          //!< The symbol for this kernel.
   std::string name_;              //!< The kernel's name.
   KernelParameters* parameters_;  //!< The parameters.
+  //! True if the kernel's lifetime is owned by a static code object (HIP StatCO).
+  //! Such kernels outlive every launch (and streams are drained at teardown), so
+  //! NDRangeKernelCommand can safely skip the per-launch retain()/release() that
+  //! would otherwise contend on the reference count. Immutable after construction.
+  bool isStatic_;
 
  protected:
   //! Destroy this kernel
@@ -297,7 +302,7 @@ class Kernel : public RuntimeObject {
   /*! \brief Construct a kernel object from the __kernel function
    *  \a kernelName in the given \a program.
    */
-  Kernel(Program& program, const Symbol& symbol, const std::string& name);
+  Kernel(Program& program, const Symbol& symbol, const std::string& name, bool isStatic = false);
 
   //! Construct a new kernel object from an existing one. Used by CloneKernel.
   explicit Kernel(const Kernel& rhs);
@@ -317,6 +322,9 @@ class Kernel : public RuntimeObject {
 
   //! Return the kernel's name.
   const std::string& name() const { return name_; }
+
+  //! True if owned by a static code object; launches may skip retain()/release().
+  bool isStatic() const { return isStatic_; }
 
   virtual ObjectType objectType() const { return ObjectTypeKernel; }
 

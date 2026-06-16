@@ -466,13 +466,22 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
     profilingInfo_.correlation_id_ = activity_prof::correlation_id;
     profilingInfo_.marker_ts_ = true;
   }
-  kernel_.retain();
+  // Static-code-object kernels outlive every launch (their owner is destroyed only
+  // after all streams are drained at teardown), so we skip the per-launch retain to
+  // avoid contending on the kernel's reference count. isStatic() is immutable, so
+  // releaseResources() re-checks it for a symmetric (no) release.
+  if (!kernel_.isStatic()) {
+    kernel_.retain();
+  }
 }
 
 void NDRangeKernelCommand::releaseResources() {
   kernel_.parameters().release(parameters_);
   DEBUG_ONLY(parameters_ = NULL);
-  kernel_.release();
+  // Symmetric with the constructor: only release if we retained (non-static kernels).
+  if (!kernel_.isStatic()) {
+    kernel_.release();
+  }
   Command::releaseResources();
 }
 
