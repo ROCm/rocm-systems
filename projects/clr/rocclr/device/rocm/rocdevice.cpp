@@ -2461,6 +2461,65 @@ bool Device::virtualFree(void* addr) {
   return true;
 }
 
+// ================================================================================================
+// Direct synchronous map/unmap path bypassing VirtualMapCommand. Used by the
+// non-async hipMemMap/hipMemUnmap entry points (wired up in subsequent
+// commits). No execution() lock and no barrier packet: the HIP layer is
+// responsible for draining access-device queues from the CPU side before
+// calling, and hsa_amd_vmem_{map,unmap} are synchronous w.r.t. the CPU.
+cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
+  if (phys == nullptr) {
+    LogError("virtualMap: phys is nullptr");
+    return CL_INVALID_VALUE;
+  }
+
+  amd::Memory* vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
+  if (vaddr_sub_obj == nullptr) {
+    LogError("virtualMap: MapMemObjBookkeeping failed");
+    return CL_INVALID_VALUE;
+  }
+
+  hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
+  opaque_hsa_handle.handle = phys->getUserData().hsa_handle;
+  hsa_status_t hsa_status = Hsa::vmem_map(vaddr_sub_obj->getSvmPtr(), size,
+                                          vaddr_sub_obj->getOffset(), opaque_hsa_handle, 0);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    LogPrintfError("virtualMap: hsa_amd_vmem_map failed with status: %d", hsa_status);
+    // Roll back the bookkeeping so the sub_obj/MemObjMap doesn't leak.
+    // FinalizeMapMemObjBookkeeping was never called, so MemObjMap doesn't
+    // contain va and the cross-links are not wired. Just tear down the
+    // sub-buffer view directly.
+    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+    vaddr_sub_obj->release();
+    return CL_OUT_OF_HOST_MEMORY;
+  }
+
+  constexpr bool kImportVmmForInterprocess = true;
+  FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
+  return CL_SUCCESS;
+}
+
+// ================================================================================================
+cl_int Device::virtualUnmap(void* va, size_t size) {
+  amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va);
+  if (vaddr_sub_obj == nullptr) {
+    LogPrintfError("virtualUnmap: no sub_obj for va: %p", va);
+    return CL_INVALID_VALUE;
+  }
+
+  hsa_status_t hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), size);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    LogPrintfError("virtualUnmap: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
+    return CL_INVALID_VALUE;
+  }
+
+  constexpr bool kDestroyVirtualBuffer = true;
+  constexpr bool kReleaseSubObj = true;
+  UnmapMemObjBookkeeping(vaddr_sub_obj, va, kDestroyVirtualBuffer, kReleaseSubObj);
+  return CL_SUCCESS;
+}
+
+// ================================================================================================
 bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                           VmmLocationType access_location) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
