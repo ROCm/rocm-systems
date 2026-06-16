@@ -18,21 +18,25 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""CLI common commands: help, version, list, default, invalid."""
+"""CLI leaf test: common commands (help, version, list, default, invalid).
+
+A concrete ``TestCliBase`` subclass, discovered and run via the
+cli_unit_test.py runner.
+"""
 
 import ctypes
 import json
 import stat
 import unittest
 
-import common.helpers as common
+import common.common as common
 import common.runcmd as runcmd
 from cli.base import TestCliBase
 
-# common.helpers owns path resolution, sys.path setup, and amdsmi loading — borrow the
+# common.common owns path resolution, sys.path setup, and amdsmi loading — borrow the
 # reference so AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution and the stale-package check
 # (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
-from common.helpers import amdsmi
+from common.common import amdsmi
 
 
 class TestCliCommon(TestCliBase):

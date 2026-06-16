@@ -18,6 +18,23 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""Core shared infrastructure for the AMD SMI Python test suite.
+
+Owns three responsibilities:
+  * amdsmi module discovery -- resolves the install via
+    AMDSMI_PATH -> ROCM_HOME -> ROCM_PATH -> /opt/rocm, inserts it on
+    sys.path, and guards against a shadowing site-packages copy
+    (see ROCM-1552 / PR #6359).
+  * the ``Common`` helper base -- enum tables, ``Test_API_*`` drivers,
+    ``check_ret`` and friends, held as ``self.common`` by the API tests
+    (intentionally NOT a unittest.TestCase).
+  * the unittest runner machinery -- ``run_test_dir``,
+    ``GTestSummaryRunner``, verbosity/-k/-l parsing and the help/legend
+    printers used by the three top-level runners.
+
+Imported by every functional/unit leaf test and by all three runners
+(integration_test.py, cli_unit_test.py, unit_tests.py).
+"""
 
 import contextlib
 import inspect

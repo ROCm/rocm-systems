@@ -25,14 +25,14 @@ import json
 import stat
 import unittest
 
-import common.helpers as common
+import common.common as common
 import common.runcmd as runcmd
 from cli.base import TestCliBase
 
-# common.helpers owns path resolution, sys.path setup, and amdsmi loading — borrow the
+# common.common owns path resolution, sys.path setup, and amdsmi loading — borrow the
 # reference so AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution and the stale-package check
 # (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
-from common.helpers import amdsmi
+from common.common import amdsmi
 
 
 class TestCliGpu(TestCliBase):

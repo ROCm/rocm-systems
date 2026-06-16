@@ -18,6 +18,13 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""Subprocess helper for driving the ``amd-smi`` CLI binary.
+
+Defines ``Util`` (RunCmdSync/RunCmdAsync/ConvertStr/Print/GetFuncName) --
+the thin subprocess plumbing the CLI tests use to invoke the installed
+``amd-smi`` executable and capture its output.  Used only by the CLI
+tests; it has no amdsmi or unittest dependencies.
+"""
 
 import argparse
 import datetime

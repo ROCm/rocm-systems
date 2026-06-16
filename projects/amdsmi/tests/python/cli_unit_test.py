@@ -46,6 +46,6 @@ import sys
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _here)
 
-import common.helpers as common
+import common.common as common
 
 common.run_test_dir("cli", "AMD SMI CLI Tests", _here)

@@ -18,11 +18,14 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""Shared base class for CLI unit tests.
+"""Shared base class for the CLI unit tests.
 
-Provides __init__, FindArgs, CreateCmds, and RunCmds — the instance-level
-helpers that all CLI test classes need.  Each concrete test class inherits
-from TestCliBase and provides its own setUpClass / test_* methods.
+``TestCliBase`` provides the instance-level scaffolding every CLI test
+needs -- ``__init__`` (command constants), ``FindArgs``, ``CreateCmds``
+and ``RunCmds``.  Extracted from develop's monolithic ``TestAmdSmiCli``
+so the per-feature CLI suites can share it: the three ``cli/test_cli_*.py``
+files each subclass ``TestCliBase`` and add their own setUpClass / test_*
+methods.
 """
 
 import json
