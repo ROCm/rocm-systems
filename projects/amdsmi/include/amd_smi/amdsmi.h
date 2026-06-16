@@ -6038,11 +6038,12 @@ amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processo
  * AMDSMI_STATUS_OUT_OF_RESOURCES.
  *
  * Even if the API returns AMDSMI_STATUS_MORE_DATA, the 2nd call may still get the entry_count == 0
- * as the driver cache may not contain the severity user is interested in. The API should return
- * AMDSMI_STATUS_SUCCESS in this case so that user can ignore that call.
+ * as the driver cache may not contain the severity user is interested in. The API returns
+ * AMDSMI_STATUS_SUCCESS with entry_count == 0 and buf_size == 0 in this case so that user can
+ * ignore that call.
  *
  * An empty CPER ring (no records) also returns AMDSMI_STATUS_SUCCESS with
- * entry_count == 0, not an error.
+ * entry_count == 0 and buf_size == 0.
  *
  * @ingroup tagRasInfo
  *
