@@ -46,13 +46,12 @@ foreach(line ${ldd_lines})
   endif()
 endforeach()
 
-# A missing dependency (=> not found) means ldd could not fully resolve the
-# graph, so the absence of "undefined symbol" lines would be unreliable. Warn
-# loudly but don't fail the build on what is really an environment issue.
+# Missing dependencies (=> not found) make resolution unreliable, so skip (don't pass/fail) the check.
 if(missing_deps)
   list(REMOVE_DUPLICATES missing_deps)
   string(REPLACE ";" "\n  " missing_deps_pretty "${missing_deps}")
-  message(WARNING "Undefined-symbol check incomplete - unresolved dependencies:\n  ${missing_deps_pretty}")
+  message(WARNING "Undefined-symbol check skipped - unresolved dependencies:\n  ${missing_deps_pretty}")
+  return()
 endif()
 
 # Accumulate all failures so every problem is reported in a single error.
@@ -85,11 +84,11 @@ endif()
 # Step 1: detect whether librccl pulled in a libatomic dependency.
 set(libatomic_path "")
 foreach(line ${ldd_lines})
-  if(line MATCHES "libatomic\\.so[^ ]* => ([^ \t]+)")
+  if(line MATCHES "libatomic\\.so[^ ]* => (/[^ \t]+)")
     set(libatomic_path "${CMAKE_MATCH_1}")
   endif()
 endforeach()
-if(libatomic_path)
+if(libatomic_path AND EXISTS "${libatomic_path}")
   # Step 2: nm is required to name the symbols; without it, warn and skip (do not fail).
   find_program(NM_EXECUTABLE nm)
   if(NOT NM_EXECUTABLE)
