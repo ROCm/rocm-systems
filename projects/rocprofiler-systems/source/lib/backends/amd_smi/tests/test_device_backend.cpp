@@ -556,25 +556,8 @@ TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_throws_on_data_error)
                  std::runtime_error);
 }
 
-// ── SDMA (disabled path) ──────────────────────────────────────────────────────
+// ── SDMA ─────────────────────────────────────────────────────────────────────
 
-#if !defined(AMD_SMI_SDMA_SUPPORTED) || AMD_SMI_SDMA_SUPPORTED != 1
-TEST_F(DeviceBackendTest, is_sdma_supported_returns_false_when_not_compiled)
-{
-    DeviceSut sut{ m_session, k_handle };
-    EXPECT_FALSE(sut.is_sdma_supported());
-}
-
-TEST_F(DeviceBackendTest, get_raw_sdma_usage_returns_zero_when_not_compiled)
-{
-    DeviceSut sut{ m_session, k_handle };
-    EXPECT_EQ(sut.get_raw_sdma_usage(), 0U);
-}
-#endif
-
-// ── SDMA (enabled path) ───────────────────────────────────────────────────────
-
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
 TEST_F(DeviceBackendTest, is_sdma_supported_returns_true_when_process_list_succeeds)
 {
     EXPECT_CALL(*testing::g_mock_backend,
@@ -645,6 +628,5 @@ TEST_F(DeviceBackendTest, get_raw_sdma_usage_throws_when_data_fetch_fails)
     DeviceSut sut{ m_session, k_handle };
     EXPECT_THROW(static_cast<void>(sut.get_raw_sdma_usage()), std::runtime_error);
 }
-#endif
 
 }  // namespace rocprofsys::backends::amd_smi

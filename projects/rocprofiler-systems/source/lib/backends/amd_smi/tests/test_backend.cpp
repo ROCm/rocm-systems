@@ -368,7 +368,9 @@ TEST_F(BackendTest, get_memory_usage_error_message_contains_function_name)
 // SDMA forwarding (enabled path)
 // ─────────────────────────────────────────────────────────────────────────────
 
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+// ─────────────────────────────────────────────────────────────────────────────
+// SDMA forwarding
+// ─────────────────────────────────────────────────────────────────────────────
 
 TEST_F(BackendTest, try_get_gpu_process_list_returns_true_on_success)
 {
@@ -431,8 +433,6 @@ TEST_F(BackendTest, get_gpu_process_list_error_message_contains_function_name)
         },
         std::runtime_error);
 }
-
-#endif  // AMD_SMI_SDMA_SUPPORTED
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NIC handle enumeration + per-device NIC forwarding

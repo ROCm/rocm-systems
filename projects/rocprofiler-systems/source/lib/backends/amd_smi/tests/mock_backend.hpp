@@ -88,14 +88,12 @@ struct mock_gpu_metrics_t
 
 // NOLINTEND(readability-identifier-naming)
 
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
 // NOLINTBEGIN(readability-identifier-naming)
 struct mock_proc_info_t
 {
     std::uint64_t sdma_usage = 0;
 };
 // NOLINTEND(readability-identifier-naming)
-#endif
 
 // ── Mock NIC raw types ──────────────────────────────────────────────────────
 // NOLINTBEGIN(readability-identifier-naming)
@@ -167,10 +165,8 @@ struct gmock_backend_api
                 (std::uint64_t handle, mock_asic_info_t* out));
     MOCK_METHOD(mock_status_t, get_memory_usage,
                 (std::uint64_t handle, std::uint32_t type, std::uint64_t* out));
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     MOCK_METHOD(mock_status_t, get_gpu_process_list,
                 (std::uint64_t handle, std::uint32_t* count, mock_proc_info_t* list));
-#endif
     MOCK_METHOD(mock_status_t, get_nic_asic_info,
                 (std::uint64_t handle, mock_nic_asic_info_t* out));
     MOCK_METHOD(mock_status_t, get_nic_port_info,
@@ -191,16 +187,14 @@ inline std::unique_ptr<gmock_backend_api> g_mock_backend;
 
 struct mock_backend
 {
-    using status_t         = mock_status_t;
-    using version_t        = mock_version_t;
-    using socket_handle    = std::uint64_t;
-    using processor_handle = std::uint64_t;
-    using gpu_metrics_t    = mock_gpu_metrics_t;
-    using asic_info_t      = mock_asic_info_t;
-    using memory_type_t    = std::uint32_t;
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-    using proc_info_t = mock_proc_info_t;
-#endif
+    using status_t                = mock_status_t;
+    using version_t               = mock_version_t;
+    using socket_handle           = std::uint64_t;
+    using processor_handle        = std::uint64_t;
+    using gpu_metrics_t           = mock_gpu_metrics_t;
+    using asic_info_t             = mock_asic_info_t;
+    using memory_type_t           = std::uint32_t;
+    using proc_info_t             = mock_proc_info_t;
     using processor_type_t        = std::uint32_t;
     using nic_asic_info_t         = mock_nic_asic_info_t;
     using nic_port_info_t         = mock_nic_port_info_t;
@@ -263,13 +257,11 @@ struct mock_backend
         return g_mock_backend->get_memory_usage(handle, type, out);
     }
 
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     status_t get_gpu_process_list(processor_handle handle, std::uint32_t* count,
                                   proc_info_t* list) const
     {
         return g_mock_backend->get_gpu_process_list(handle, count, list);
     }
-#endif
 
     status_t get_nic_asic_info(processor_handle handle, nic_asic_info_t* out) const
     {
