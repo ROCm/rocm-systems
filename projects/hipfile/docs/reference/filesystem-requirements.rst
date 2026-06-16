@@ -2,9 +2,9 @@
   :description: File system and file type requirements for the hipFile fastpath backend, including supported layouts and direct I/O alignment.
   :keywords: hipFile, file system, ext4, XFS, fastpath, direct I/O, DIO alignment, ROCm
 
-*************************************
-Filesystem and file type requirements
-*************************************
+**************************************
+File system and file type requirements
+**************************************
 
 The hipFile fastpath backend performs direct-to-GPU I/O through the HIP runtime. Before it accepts an I/O request, it validates that the target file meets specific file system and file type criteria. If validation fails, the request either falls back to the fallback backend or is rejected, depending on configuration. For backend selection and scoring, see :doc:`/reference/hipFile-io-backends`.
 

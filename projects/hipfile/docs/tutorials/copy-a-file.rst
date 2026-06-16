@@ -25,7 +25,7 @@ Prerequisites
 
 - A supported AMD GPU with the ROCm stack installed
 - hipFile built and installed (see the project ``INSTALL.md``)
-- A file system that supports ``O_DIRECT``, such as ext4 or XFS)
+- A file system that supports ``O_DIRECT``, such as ext4 or XFS
 - The HIP runtime development headers (``hip/hip_runtime_api.h``)
 
 Build the example
@@ -209,7 +209,7 @@ explain each piece.
    free_devbuf:
        hip_err = hipFree(devbuf);
        if (hipSuccess != hip_err) {
-           fprintf(stderr, "Could free device buffer (%d)\n", hip_err);
+           fprintf(stderr, "Could not free device buffer (%d)\n", hip_err);
            exit_status = EXIT_FAILURE;
        }
 

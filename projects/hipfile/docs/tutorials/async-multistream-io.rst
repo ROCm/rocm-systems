@@ -50,8 +50,9 @@ Prerequisites
 Complete source code
 ********************
 
-The full example is reproduced below. The sections that follow explain each
-logical step.
+The full example is in
+``examples/async/roundtrip-async-multi-stream-registered.cpp`` in the hipFile
+source tree. The sections that follow explain each logical step.
 
 Step-by-step walkthrough
 ************************

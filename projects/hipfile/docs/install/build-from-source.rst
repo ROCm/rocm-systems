@@ -39,7 +39,7 @@ Where:
 
 .. note::
 
-   Make sure the exact package name for hipFile with the latest ROCm release documentation, as the group name may vary between releases.
+   Verify the exact package name for hipFile against the latest ROCm release documentation, as the group name might vary between releases.
 
 .. tab-set::
 
@@ -90,115 +90,28 @@ Build commands
 
 Create a build directory, configure with CMake, build, and install:
 
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-For an NVIDIA platform build, set ``CMAKE_HIP_PLATFORM`` to ``nvidia`` and make sure
-``CUDAToolkit`` and ``cuFile`` are discoverable:
-
-.. code:: shell
-
-   cmake -B build \
-       -DCMAKE_HIP_PLATFORM=nvidia \
-       -DCMAKE_INSTALL_PREFIX=/usr/local
-   cmake --build build
-   sudo cmake --install build
-
-For an NVIDIA platform build, set ``CMAKE_HIP_PLATFORM`` to ``nvidia`` and make sure
-``CUDAToolkit`` and ``cuFile`` are discoverable:
-
-.. code:: shell
-
-   cmake -B build \
-       -DCMAKE_HIP_PLATFORM=nvidia \
-       -DCMAKE_INSTALL_PREFIX=/usr/local
-   cmake --build build
-   sudo cmake --install build
-
-For an NVIDIA platform build, set ``CMAKE_HIP_PLATFORM`` to ``nvidia`` and make sure
-``CUDAToolkit`` and ``cuFile`` are discoverable:
-
-.. code:: shell
-
-   cmake -B build \
-       -DCMAKE_HIP_PLATFORM=nvidia \
-       -DCMAKE_INSTALL_PREFIX=/usr/local
-   cmake --build build
-   sudo cmake --install build
-
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
 .. code:: shell
 
    cd rocm-systems/projects/hipfile
    cmake -B build \
        -DCMAKE_INSTALL_PREFIX=/opt/rocm \
        -DCMAKE_HIP_PLATFORM=amd
+   cmake --build build
+   sudo cmake --install build
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+For an NVIDIA platform build, set ``CMAKE_HIP_PLATFORM`` to ``nvidia`` and make sure
+``CUDAToolkit`` and ``cuFile`` are discoverable:
+
+.. code:: shell
+
+   cmake -B build \
+       -DCMAKE_HIP_PLATFORM=nvidia \
+       -DCMAKE_INSTALL_PREFIX=/usr/local
    cmake --build build
    sudo cmake --install build
 
