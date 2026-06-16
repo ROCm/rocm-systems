@@ -38,6 +38,23 @@ The binaries land under `build/examples/<directory>/`. The `api` and `aiscp`
 directories can also be built standalone against an installed hipFile — see
 those sections below.
 
+### Building a single example
+
+Each example program is its own CMake target, named exactly after the program
+(the `basics`/`async` directories create one target per program in a `foreach`
+loop; `api`/`aiscp` do the same via `ais_add_executable(NAME …)`). After
+configuring, build just one with `--target`:
+
+```bash
+cmake --build build --target bufregister-write
+cmake --build build --target roundtrip-async-multi-stream
+```
+
+Per-example payload and chunk sizes are compile-time `#define`s (e.g.
+`-DBRW_SIZE=…`, `-DIR_CHUNK_SIZE=…`, documented at the top of each `.cpp`); to
+build an example with different sizes, re-run the configure step with the
+corresponding `-D` flag.
+
 ---
 
 ## `api`
@@ -225,9 +242,16 @@ aiscp SOURCE DEST
 
 ### Building
 
-Create a build directory and use cmake to configure and build the program. You
-may need to add the path(s) to ROCm and/or hipFile if they are installed in
-non-standard locations:
+In-tree, `aiscp` is built by the parent hipFile project when
+`AIS_INSTALL_EXAMPLES=ON` (the default; see the top-level
+[Building](#building) section). Its default `CMakeLists.txt` uses the in-tree
+`ais_add_executable` macro, so it builds alongside the other examples and the
+binary lands under `build/examples/aiscp/`.
+
+To build it standalone against an installed hipFile, use the
+`find_package`-based `CMakeLists.install.cmake` (copy it to `CMakeLists.txt` in
+a scratch copy of the directory). You may need to add the path(s) to ROCm
+and/or hipFile if they are installed in non-standard locations:
 
 ```bash
 cmake -DCMAKE_PREFIX_PATH="/path/to/rocm;/path/to/hipfile" /path/to/aiscp/dir
