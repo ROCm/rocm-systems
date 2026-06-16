@@ -2732,8 +2732,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                                      callbacks.counter_record,
                                                                      nullptr),
             "Could not setup counting service");
-
-        start_context(counter_collection_ctx, "counter collection");
     }
 
     if(tool::get_config().spm_counter_collection)
@@ -2743,8 +2741,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             rocprofiler_spm_configure_callback_dispatch_service(
                 counter_collection_ctx, spm_dispatch_callback, nullptr, spm_data_callback, nullptr),
             "Could not setup SPM counting service");
-
-        start_context(counter_collection_ctx, "SPM counter collection");
     }
 
     auto rename_ctx            = rocprofiler_context_id_t{0};
@@ -2906,12 +2902,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         auto _fut  = _prom.get_future();
         std::thread{collection_period_cntrl, std::move(_prom), get_client_ctx()}.detach();
         _fut.wait_for(std::chrono::seconds{1});  // wait for a max of 1 second
+        // Activate the counting now, as it is not enabled by default earlier
+        set_contexts_active(pause_resume_contexts, true);
     }
     else
     {
         ROCP_INFO << "rocprofv3 will record data starting now";
 
-        start_context(get_client_ctx(), "primary rocprofv3");
+        set_contexts_active(pause_resume_contexts, true);
     }
 
     tool_metadata->set_process_id(getpid(), getppid());
