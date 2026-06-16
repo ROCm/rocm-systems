@@ -209,8 +209,11 @@ impl MirageCtl for FileCtl {
     }
 
     fn profile_put(&self, profile: &ProfileDef) -> Result<()> {
+        // Profile names are case-insensitive and always stored lowercase.
+        let mut profile = profile.clone();
+        profile.name = profile.name.to_lowercase();
         let p = crate::paths::profile_path(&profile.name);
-        crate::state::write_json(&p, profile)
+        crate::state::write_json(&p, &profile)
     }
 
     fn profile_delete(&self, name: &str) -> Result<()> {

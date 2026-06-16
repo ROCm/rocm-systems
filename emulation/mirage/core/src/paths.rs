@@ -168,8 +168,11 @@ pub fn profile_root() -> PathBuf {
 }
 
 /// Path to a specific profile file: `<profile_root>/<name>.json`.
+///
+/// Profile names are case-insensitive and always stored lowercase, so the
+/// name is lowercased before building the path.
 pub fn profile_path(name: &str) -> PathBuf {
-    profile_root().join(format!("{name}.json"))
+    profile_root().join(format!("{}.json", name.to_lowercase()))
 }
 
 /// Root directory for mirage topologies: `<mirage_config_dir>/topology`.
