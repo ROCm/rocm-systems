@@ -400,6 +400,25 @@ enum class AggregationType { Reduce,
                              /// @brief an exclusive scan with the default operator, i.e. cg::plus
                              ExclusiveScanDefault };
 
+inline bool isInclusive(AggregationType aggType)
+{
+  switch (aggType) {
+  case AggregationType::Reduce:
+    return true;
+  case AggregationType::InclusiveScan:
+    return true;
+  case AggregationType::ExclusiveScan:
+    return false;
+  case AggregationType::InclusiveScanDefault:
+    return true;
+  case AggregationType::ExclusiveScanDefault:
+    return false;
+  default:
+    assert(false && "Unknown aggregation type");
+    return "unknown";
+  }
+}
+
 inline const char* aggregationTypeToStr(AggregationType aggType)
 {
   switch (aggType) {

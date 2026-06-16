@@ -1368,7 +1368,7 @@ void testScanForTileSize()
   void* args[devicePtrs.size()];
   AggregationType aggType = AggType;
 
-  if (aggType == AggregationType::ExclusiveScan) {
+  if (!isInclusive(aggType)) {
     scanIdentity<T, Op>(id);
   }
 
@@ -1394,7 +1394,7 @@ void testScanForTileSize()
     for (int i = 0; i < TileSize; i++) {
       UNSCOPED_INFO("Index: " << pos + i << " tile size: " << TileSize);
 
-      if (aggType == AggregationType::InclusiveScan) {
+      if (isInclusive(aggType)) {
         accum += pos + i;
         INFO("Inclusive scan");
         REQUIRE(h_result.host_ptr()[pos + i] == accum);
