@@ -62,10 +62,14 @@ static_assert(sizeof(AmdExtKernelDispatchPacket) == 64);
 
 uint32_t nonzero_or_one(uint32_t v) { return v == 0 ? 1 : v; }
 
-uint32_t read_memory_u32(GpuMemory *memory, uint64_t addr) {
+uint32_t ceil_div_u32(uint32_t numerator, uint32_t denominator) {
+  return denominator == 0 ? 1 : (numerator + denominator - 1) / denominator;
+}
+
+uint32_t read_memory_u32(GpuMemory *memory, uint64_t addr, uint32_t vmid) {
   uint32_t value = 0;
   for (uint32_t i = 0; i < sizeof(value); ++i)
-    value |= static_cast<uint32_t>(memory->read8(addr + i)) << (i * 8);
+    value |= static_cast<uint32_t>(memory->read8(addr + i, vmid)) << (i * 8);
   return value;
 }
 
@@ -165,7 +169,8 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
 
       uint64_t preload_addr = pkt.kernarg_addr + static_cast<uint64_t>(preload_offset) * 4;
       for (uint32_t i = 0; i < preload_length; ++i)
-        cu->write_sgpr(sbase + idx + i, read_memory_u32(memory_, preload_addr + i * 4));
+        cu->write_sgpr(sbase + idx + i,
+                       read_memory_u32(memory_, preload_addr + i * 4, pkt.process_id));
       util::Logger::vm("CP: init_wf kernarg preload s[", idx, ":", idx + preload_length - 1,
                        "] length=", preload_length, " offset=", preload_offset, " sbase=", sbase);
       idx += preload_length;
@@ -704,9 +709,9 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t wfs_per_wg = (wg_size + wave_size - 1) / wave_size;
 
   uint32_t num_dims = pkt.setup & 0x3;
-  uint32_t grid_wgs_x = pkt.workgroup_size_x > 0 ? pkt.grid_size_x / pkt.workgroup_size_x : 1;
-  uint32_t grid_wgs_y = pkt.workgroup_size_y > 0 ? pkt.grid_size_y / pkt.workgroup_size_y : 1;
-  uint32_t grid_wgs_z = pkt.workgroup_size_z > 0 ? pkt.grid_size_z / pkt.workgroup_size_z : 1;
+  uint32_t grid_wgs_x = ceil_div_u32(pkt.grid_size_x, pkt.workgroup_size_x);
+  uint32_t grid_wgs_y = ceil_div_u32(pkt.grid_size_y, pkt.workgroup_size_y);
+  uint32_t grid_wgs_z = ceil_div_u32(pkt.grid_size_z, pkt.workgroup_size_z);
   uint32_t total_wgs = grid_wgs_x * grid_wgs_y * grid_wgs_z;
 
   DispatchEntry dp{};
@@ -917,6 +922,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
       util::Logger::warn("INVALID pkt at 0x", std::hex, pkt_addr, " host=0x",
                          reinterpret_cast<uintptr_t>(host_ptr), " raw=0x", raw_header);
       process_limit = read_idx;
+      engine()->schedule_event_now(&doorbell_event_);
       break;
     }
 
@@ -1346,9 +1352,12 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           uint64_t wait_ref = static_cast<uint64_t>(dw(4)) | (static_cast<uint64_t>(dw(5)) << 32);
           uint64_t wait_mask = static_cast<uint64_t>(dw(6)) | (static_cast<uint64_t>(dw(7)) << 32);
           if (wait_addr > 0x1000) {
-            uint64_t wait_value =
-                std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(wait_addr))
-                    .load(std::memory_order_acquire);
+            auto *wait_ptr = static_cast<uint64_t *>(resolve(wait_addr));
+            if (!wait_ptr) {
+              rpos = wpos;
+              continue;
+            }
+            uint64_t wait_value = std::atomic_ref<uint64_t>(*wait_ptr).load(std::memory_order_acquire);
             if (!sdma_compare_u64(wait_func, wait_value & wait_mask, wait_ref)) {
               if (queue.host_accessible) {
                 std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(queue.read_ptr_va))
@@ -1366,12 +1375,16 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         uint64_t dst = static_cast<uint64_t>(dw(COPY_BASE + 4)) |
                        (static_cast<uint64_t>(dw(COPY_BASE + 5)) << 32);
 
-        std::memcpy(reinterpret_cast<void *>(dst), reinterpret_cast<const void *>(src), count);
+        auto *src_ptr = resolve(src);
+        auto *dst_ptr = resolve(dst);
+        if (src_ptr && dst_ptr) {
+          std::memcpy(dst_ptr, src_ptr, count);
 
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(dst, count);
-        for (auto *cu : cus_)
-          cu->l1_vector().invalidate_all();
+          for (auto *l2 : l2_caches_)
+            l2->invalidate_range(dst, count);
+          for (auto *cu : cus_)
+            cu->l1_vector().invalidate_all();
+        }
 
         if (has_signal) {
           uint32_t signal_op = dw(SIGNAL_BASE) & 0x7F;
@@ -1381,8 +1394,10 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
                                  (static_cast<uint64_t>(dw(SIGNAL_BASE + 4)) << 32);
 
           if (signal_addr > 0x1000 && signal_op == 0x70) {
-            std::atomic_ref<int64_t>(*reinterpret_cast<int64_t *>(signal_addr))
-                .fetch_sub(static_cast<int64_t>(signal_data), std::memory_order_release);
+            auto *signal_ptr = static_cast<int64_t *>(resolve(signal_addr));
+            if (signal_ptr)
+              std::atomic_ref<int64_t>(*signal_ptr)
+                  .fetch_sub(static_cast<int64_t>(signal_data), std::memory_order_release);
           }
         }
 
