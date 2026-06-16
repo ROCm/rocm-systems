@@ -442,16 +442,45 @@ this was handled, those addresses were stored verbatim and replay launched the
 kernel with the original (untranslated) GPU VAs — a guaranteed memory fault.
 
 Capture detects them by value: for every non-pointer argument,
-`find_embedded_ptr_offsets` walks each 8-byte-aligned word and asks the runtime
+`find_embedded_ptr_offsets` scans the bytes and asks the runtime
 (`hipPointerGetAttributes`, via `g_real_table` so it is not itself captured)
-whether the word is a live device/unified allocation. Matching offsets are
-recorded as a new arg encoding `value_kind == 3`: the raw struct bytes followed
-by `u16 n_ptrs` and `n_ptrs × u16` byte offsets. Probing perturbs the thread's
-HIP last-error, so `hip::tls.last_command_error_/last_error_` are saved and
-restored around the scan. At replay, `replay_kernel_launch` copies the struct
-bytes and overwrites each recorded offset with `translate_ptr(rec)` before
-launch, so embedded pointers resolve to live allocations exactly like top-level
-pointer args. Old archives (no `value_kind == 3`) parse unchanged.
+whether a candidate word is a live device/unified allocation. Matching offsets
+are recorded as a new arg encoding `value_kind == 3`: the raw struct bytes
+followed by `u16 n_ptrs` and `n_ptrs × u16` byte offsets. Probing perturbs the
+thread's HIP last-error, so `hip::tls.last_command_error_/last_error_` are saved
+and restored around the scan. At replay, `replay_kernel_launch` copies the
+struct bytes and overwrites each recorded offset with `translate_ptr(rec)`
+before launch, so embedded pointers resolve to live allocations exactly like
+top-level pointer args. Old archives (no `value_kind == 3`) parse unchanged.
+
+This detector is a value-based heuristic with three deliberate properties:
+
+- **Memoized layout (perf + low perturbation).** The offset layout of a given
+  argument is structural — fixed by the kernel's by-value struct type — so
+  `memo_embedded_ptr_offsets` probes once per `(kernel, arg-index, size)` and
+  caches the result (thread-local, lock-free). Without this, capture would issue
+  one `hipPointerGetAttributes` (a locked allocation-tree walk) per candidate
+  window of every by-value arg of every launch — millions of probes on an LLM
+  workload — slowing capture and distorting the timing/ordering HRR records.
+  Caveat: if a kernel's pointer slot is null on its *first* recorded launch, the
+  cached layout misses it; in practice the first launch already carries live
+  pointers.
+- **Unaligned scan.** The scan steps byte-by-byte (skipping a full pointer width
+  on a hit, since pointers do not overlap) so a pointer at an unaligned offset
+  inside a packed struct (`#pragma pack` `{char; void*}`) is still found. Most
+  ABIs 8-byte-align pointer members, but packed structs would otherwise slip
+  through silently.
+- **False-positive guard at replay.** Because the detector flags any word whose
+  bit pattern lands in a live VA, a large scalar/double can be mis-flagged. To
+  avoid silently corrupting such a scalar, replay overwrites a `value_kind == 3`
+  offset **only when the recorded value resolves** to a known allocation; an
+  unresolved word is left as its original bytes (logged under `--verbose`). The
+  capture-time `cand < 0x10000` guard additionally skips small scalars.
+
+**Scope:** only `hipMemoryTypeDevice`/`Unified` words are flagged. A pinned/host
+(`hipMemoryTypeHost`) pointer embedded by value keeps its capture-time host VA at
+replay (invalid in the replay process); translating embedded host pointers is
+intentionally out of scope.
 
 `co_hash` is always written as 0 in kernel launch events — no cheap mapping from
 kernel to code object at dispatch time. Playback resolves kernels by name, scanning

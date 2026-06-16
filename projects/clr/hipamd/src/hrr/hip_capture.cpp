@@ -58,6 +58,8 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <map>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -164,30 +166,79 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 // std::array<char*,N> that ATen's vectorized_elementwise_kernel takes through
 // the <<<>>> path. The type metadata cannot say "bytes 0..7 are an address",
 // so the only robust way to find such pointers is to ask the runtime whether
-// each 8-byte aligned word is a live device allocation. Probing perturbs the
-// calling thread's HIP last-error state, so we save and restore it.
+// a candidate word is a live device allocation. Probing perturbs the calling
+// thread's HIP last-error state, so we save and restore it.
+//
+// Scanning is byte-by-byte (not 8-byte-strided) so a device pointer embedded at
+// an unaligned offset inside a packed by-value struct (e.g. a `#pragma pack`'d
+// {char; void*}) is still found; on a hit we skip a full pointer width since
+// pointers do not overlap, otherwise we advance one byte. This is a heuristic:
+// any 8-byte window whose bit pattern happens to land in a live device VA is
+// flagged, so a large scalar/double can be a false positive — replay guards
+// against that by only overwriting a flagged word when the recorded value
+// actually resolves to a known allocation (see hip_playback.cpp).
+//
+// Scope: only hipMemoryTypeDevice/Unified are flagged. A pinned/host
+// (hipMemoryTypeHost) pointer embedded by value would keep its capture-time
+// host VA at replay, which is invalid in the replay process; translating such
+// pointers is intentionally out of scope.
 static void find_embedded_ptr_offsets(const uint8_t* data, size_t size,
                                       std::vector<uint16_t>& offsets) {
   if (!data || !g_real_table.hipPointerGetAttributes_fn) return;
   const hipError_t saved_cmd = hip::tls.last_command_error_;
   const hipError_t saved_err = hip::tls.last_error_;
-  for (size_t j = 0; j + sizeof(void*) <= size; j += sizeof(void*)) {
+  size_t j = 0;
+  while (j + sizeof(void*) <= size) {
     uint64_t cand;
     std::memcpy(&cand, data + j, sizeof(cand));
-    if (cand < 0x10000ULL) continue;  // small scalars are never device VAs
+    if (cand < 0x10000ULL) { j += 1; continue; }  // small scalars are not VAs
     hipPointerAttribute_t attr{};
     if (g_real_table.hipPointerGetAttributes_fn(
             &attr, reinterpret_cast<const void*>(cand)) == hipSuccess &&
         (attr.type == hipMemoryTypeDevice || attr.type == hipMemoryTypeUnified)) {
       offsets.push_back(static_cast<uint16_t>(j));
+      j += sizeof(void*);
+    } else {
+      j += 1;
     }
   }
   hip::tls.last_command_error_ = saved_cmd;
   hip::tls.last_error_         = saved_err;
 }
 
+// Memoized wrapper around find_embedded_ptr_offsets. The embedded-pointer
+// *layout* of an argument is structural — fixed by the kernel's by-value struct
+// type — so we probe the runtime once per (kernel, arg-index, size) and reuse
+// the offset list on every subsequent launch. Without this, capture issues one
+// hipPointerGetAttributes (a locked allocation-tree walk) per candidate window
+// of every by-value arg of every launch — millions of probes on an LLM
+// workload — which both slows capture and perturbs the very timing/ordering
+// HRR records.
+//
+// The cache is thread_local to keep the hot launch path lock-free; the layout
+// is identical across threads so per-thread duplication is harmless. Caveat:
+// the probe is value-based, so if a kernel's pointer slot is null/zero on its
+// first recorded launch the cached layout misses it. In practice the first
+// launch already carries live pointers; the assumption is documented here.
+static const std::vector<uint16_t>& memo_embedded_ptr_offsets(
+    const void* func_key, uint32_t arg_idx, uint16_t sz, const uint8_t* bytes) {
+  static const std::vector<uint16_t> kEmpty;
+  // Nothing to probe (and nothing worth caching) without the arg bytes — a
+  // later launch of the same arg may have them available.
+  if (!bytes || !func_key) return kEmpty;
+  thread_local std::map<std::tuple<const void*, uint32_t, uint16_t>,
+                        std::vector<uint16_t>> cache;
+  const auto key = std::make_tuple(func_key, arg_idx, sz);
+  auto it = cache.find(key);
+  if (it != cache.end()) return it->second;
+  std::vector<uint16_t> offs;
+  find_embedded_ptr_offsets(bytes, sz, offs);
+  return cache.emplace(key, std::move(offs)).first->second;
+}
+
 static void serialize_kernel_launch(
     const char*                 kernel_name,
+    const void*                 func_key,
     uint32_t gx, uint32_t gy, uint32_t gz,
     uint32_t bx, uint32_t by, uint32_t bz,
     uint32_t shared_mem,
@@ -264,8 +315,8 @@ static void serialize_kernel_launch(
       }
       return;
     }
-    std::vector<uint16_t> offs;
-    find_embedded_ptr_offsets(bytes, sz, offs);
+    const std::vector<uint16_t>& offs =
+        memo_embedded_ptr_offsets(func_key, idx, sz, bytes);
     uint8_t kind = offs.empty() ? 0 : 3;
     push_u8(kind); push_u16(sz);
     if (bytes) push_bytes(bytes, sz);
@@ -353,6 +404,7 @@ static void record_launch(
 
   serialize_kernel_launch(
       kernel->name().c_str(),
+      kernel,  // stable per-kernel key for the embedded-ptr offset cache
       gx, gy, gz, bx, by, bz,
       static_cast<uint32_t>(shared_mem),
       stream, sig, kernel_params, kbuf, ksz);
@@ -764,6 +816,7 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
         size_t      ksz  = kargs.size();
         serialize_kernel_launch(
             kernel->name().c_str(),
+            kernel,  // stable per-kernel key for the embedded-ptr offset cache
             grid.x, grid.y, grid.z,
             block.x, block.y, block.z,
             static_cast<uint32_t>(shared), stream,

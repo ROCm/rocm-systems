@@ -387,11 +387,23 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
                 if (static_cast<size_t>(off) + 8 > arg_size) continue;
                 uint64_t rec_ptr; memcpy(&rec_ptr, storage.data() + off, 8);
                 void* live = ctx.translate_ptr(rec_ptr);
+                // The capture-side detector is a value-based heuristic: any
+                // 8-byte word that happened to fall inside a live device VA was
+                // flagged. If the recorded value does not resolve to a known
+                // allocation here, it may be a genuine scalar (a large count, a
+                // double, a packed value) that was mis-flagged — overwriting it
+                // with null would silently corrupt it. Only rewrite the word
+                // when it actually resolves; otherwise leave the original bytes.
+                if (!live) {
+                    if (ctx.verbose)
+                        fprintf(stderr, "[HRR]   arg[%u]: embedded ptr @+%u 0x%llx unresolved — left as-is (possible scalar)\n",
+                                i, off, (unsigned long long)rec_ptr);
+                    continue;
+                }
                 memcpy(storage.data() + off, &live, sizeof(void*));
                 if (ctx.verbose)
-                    fprintf(stderr, "[HRR]   arg[%u]: embedded ptr @+%u 0x%llx -> %p%s\n",
-                            i, off, (unsigned long long)rec_ptr, live,
-                            live ? "" : " (MISSING!)");
+                    fprintf(stderr, "[HRR]   arg[%u]: embedded ptr @+%u 0x%llx -> %p\n",
+                            i, off, (unsigned long long)rec_ptr, live);
             }
         } else {
             storage.assign(data, data + arg_size);
