@@ -77,13 +77,25 @@ static_assert(createCachePolicy(TemporalHint::NT_RT, MemScope::SYS) == 28);
 static_assert(createCachePolicy(TemporalHint::RT_NT, MemScope::SYS) == 29);
 static_assert(createCachePolicy(TemporalHint::NT_HT, MemScope::SYS) == 30);
 
-/* Async load/Store APIs */
-__device__ void asyncLoadToLDS(/* ... */){
+constexpr CachePolicy DEFAULT_CACHE_POLICY = createCachePolicy(TemporalHint::RT, MemScope::SYS);
 
+/* Async load/Store APIs */
+// The b128 async builtins are typed to take a pointer to a signed int4 vector (V4i), so use a
+// matching signed vector type rather than __hip_uint32x4 to avoid an element-signedness mismatch.
+using __hip_int32x4 = int32_t __attribute__((__vector_size__(16)));
+
+template<typename T, CachePolicy cp = DEFAULT_CACHE_POLICY>
+__device__ void asyncLoadToLDS(T* const* src, T* dst){
+  __builtin_amdgcn_global_load_async_to_lds_b128(
+      (__attribute__((address_space(1))) __hip_int32x4*)src,
+      (__attribute__((address_space(3))) __hip_int32x4*)dst, 0, cp);
 }
 
-__device__ void asyncStoreFromLDS(/* ... */){
-
+template<typename T, CachePolicy cp = DEFAULT_CACHE_POLICY>
+__device__ void asyncStoreFromLDS(T* const* src, T* dst){
+  __builtin_amdgcn_global_store_async_from_lds_b128(
+    (__attribute__((address_space(1))) __hip_int32x4*)dst,
+    (__attribute__((address_space(3))) __hip_int32x4*)src, 0, cp);
 }
 
 
@@ -98,7 +110,7 @@ __device__ static void setTransferSize(gfx1250_TDM_GROUP1& group1, int numElemen
 
 // Warp-level data copier.  Moves whole 1D tiles in between global memory and LDS using the TDM.  Both pointers ideally should be a multiple of 128-byte aligned 
 // for maximum performance.
-template<typename T, CachePolicy cp = createCachePolicy(TemporalHint::RT, MemScope::SYS)>
+template<typename T, CachePolicy cp = DEFAULT_CACHE_POLICY>
 struct TileMover{
   gfx1250_TDM_GROUP0 group0;
   gfx1250_TDM_GROUP1 group1;
