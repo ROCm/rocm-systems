@@ -33,6 +33,7 @@ extern "C" {
 #include "ras-decode/aca_decode.h"
 }
 #include "amd_smi/impl/amd_smi_cper.h"
+#include "amd_smi/impl/amd_smi_cper_testing.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
 namespace {
@@ -40,6 +41,13 @@ namespace {
 // ring capacity (a few MiB) in st_size; this cap guards against a nonsensical
 // size exhausting memory or throwing across the C API boundary.
 constexpr off_t kMaxCperBufferSize = 64 * 1024 * 1024;  // 64 MiB
+
+// read() indirection so unit tests can reproduce the debugfs short-read shape
+// (st_size advertises ring capacity, read() returns fewer/zero bytes) that a
+// regular file cannot. Defaults to POSIX read(); the production path is unchanged.
+// Not thread-safe: only the single-threaded tests mutate it (via
+// cper_set_read_fn_for_testing); production never writes it.
+ssize_t (*g_cper_read_fn)(int, void*, size_t) = ::read;
 
 static std::vector<const amdsmi_cper_hdr_t*> amdsmi_get_gpu_cper_headers(const char* buffer,
                                                                          size_t buffer_sz) {
@@ -134,7 +142,7 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
     LOG_ERROR(ss);
     return ctx;
   }
-  auto bytes_read = read(fd, ctx.buffer.get(), ctx.file_size);
+  auto bytes_read = g_cper_read_fn(fd, ctx.buffer.get(), ctx.file_size);
   if (bytes_read < 0) {
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to read file: " << filepath
        << ", errno:(" << errno << "): " << strerror(errno);
@@ -389,6 +397,11 @@ static void inject_product_serial_number(amdsmi_cper_hdr_t* cper, uint64_t produ
 }
 
 }  // namespace
+
+// See amd_smi/impl/amd_smi_cper_testing.h for the contract.
+void cper_set_read_fn_for_testing(ssize_t (*read_fn)(int, void*, size_t)) {
+  g_cper_read_fn = read_fn ? read_fn : ::read;
+}
 
 amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(const char* amdgpu_ring_cper_file,
                                                     uint32_t severity_mask, char* cper_data,
