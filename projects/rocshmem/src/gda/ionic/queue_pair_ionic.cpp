@@ -310,6 +310,7 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
   }
 
+  // TODO why is this needed?
   if (length && !laddr && opcode == IONIC_V2_OP_RDMA_WRITE) {
     length = 1;
   }
@@ -325,10 +326,11 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
   wqe->common.length = byteswap<uint32_t>(length);
 
   if (length) {
-    if (opcode == IONIC_V2_OP_RDMA_WRITE && length <= inline_threshold) {
+    if (opcode == IONIC_V2_OP_RDMA_WRITE && static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold)) {
       wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_INL);
       wqe->base.num_sge_key = 0;
       if (!laddr) {
+        // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
         memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), length);
@@ -391,7 +393,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
       wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(laddr ? lkey : 0);
+      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(lkey);
     }
   }
 

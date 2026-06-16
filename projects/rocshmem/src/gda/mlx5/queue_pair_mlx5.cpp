@@ -301,7 +301,6 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
                                                     uint32_t rkey, uint8_t opcode,
                                                     bool ring_db) {
   bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
-  uint32_t lkey_val = send_inline ? 0 : byteswap<uint32_t>(lkey);
 
   // get SQ lock
   acquire_lock(&mlx5_sq.lock);
@@ -314,7 +313,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, byteswap<uint32_t>(rkey), laddr, lkey_val,
+                   raddr, byteswap<uint32_t>(rkey), laddr, byteswap<uint32_t>(lkey),
                    static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ

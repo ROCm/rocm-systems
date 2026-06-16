@@ -236,7 +236,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
   uint32_t hdr_flags;
   uint32_t inline_msg;
 
-  inline_msg = length <= inline_threshold &&
+  inline_msg = static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold) &&
                opcode == gda_op_rdma_write;
 
   bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
@@ -313,12 +313,9 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
 __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t size,
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
     uint8_t opcode, bool ring_db) {
-  uint32_t lkey_val = (static_cast<uint32_t>(size) <= inline_threshold && opcode == gda_op_rdma_write)
-      ? 0 : lkey;
-
   lock(&bnxt_sq.lock);
 
-  bnxt_write_rma_wqe(size, raddr, rkey, laddr, lkey_val, opcode);
+  bnxt_write_rma_wqe(size, raddr, rkey, laddr, lkey, opcode);
 
   if (ring_db) {
     bnxt_ring_doorbell(bnxt_sq.tail);

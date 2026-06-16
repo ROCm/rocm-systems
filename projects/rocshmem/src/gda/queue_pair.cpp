@@ -315,7 +315,8 @@ __device__ void QueuePair::put_nbi_single(void *dest, const void *source,
     size_t length, bool ring_db) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  uint32_t src_lkey = get_lkey(src);
+  uint32_t src_lkey = (length <= inline_threshold)
+      ? 0 : get_lkey(src);
   post_wqe_rma_single(length, src, src_lkey, dst, rkey,
                        gda_op_rdma_write, ring_db);
 }
@@ -336,6 +337,7 @@ __device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t
   post_wqe_rma_single(length, dst, dst_lkey, src, rkey,
                        gda_op_rdma_read, ring_db);
 }
+
 
 __device__ void QueuePair::get_nbi(void *dest, const void *source,
     size_t length, ActiveWFInfo &wf_info) {
