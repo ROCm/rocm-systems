@@ -8,6 +8,7 @@
 #include "backends/amd_smi/sdma_feature.hpp"
 
 #include <algorithm>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -25,22 +26,71 @@ using gpu::metrics;
 using gpu::populate_if_supported;
 
 /**
+ * @brief Concept that a Backend session type passed to device_backend must satisfy.
+ *
+ * Enumerates every expression device_backend<T> evaluates on its session pointer,
+ * so a missing method is caught at the template boundary rather than deep inside
+ * the template body.
+ */
+template <typename T>
+concept backend_session_contract =
+    // ── Required type aliases ─────────────────────────────────────────────────
+    requires {
+        typename T::processor_handle;
+        typename T::asic_info_t;
+        typename T::gpu_metrics_t;
+        typename T::memory_type_t;
+    } &&
+    // ── Per-device GPU calls (always required) ────────────────────────────────
+    requires(T sess, typename T::processor_handle ph, typename T::asic_info_t* aip,
+             typename T::gpu_metrics_t* gmp, typename T::memory_type_t mt,
+             std::uint64_t* u64p) {
+        { T::MEM_TYPE_VRAM } -> std::convertible_to<typename T::memory_type_t>;
+        { sess.get_gpu_asic_info(ph, aip) };
+        { sess.get_metrics_info(ph, gmp) };
+        { sess.get_memory_usage(ph, mt, u64p) };
+    }
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    && requires { typename T::proc_info_t; } &&
+    requires(T sess, typename T::processor_handle ph, std::uint32_t* cp,
+             typename T::proc_info_t* pp) {
+        { sess.try_get_gpu_process_list(ph, cp, pp) } -> std::convertible_to<bool>;
+        { sess.get_gpu_process_list(ph, cp, pp) };
+    }
+#endif
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    &&
+    requires {
+        typename T::nic_asic_info_t;
+        typename T::nic_port_info_t;
+        typename T::nic_rdma_devices_info_t;
+        typename T::nic_stat_t;
+    } &&
+    requires(T sess, typename T::processor_handle ph, typename T::nic_asic_info_t* nap,
+             typename T::nic_port_info_t* npp, typename T::nic_rdma_devices_info_t* ndp,
+             std::uint8_t port_idx, std::uint32_t* cp, typename T::nic_stat_t* nsp) {
+        { sess.get_nic_asic_info(ph, nap) };
+        { sess.get_nic_port_info(ph, npp) };
+        { sess.get_nic_rdma_dev_info(ph, ndp) };
+        { sess.get_nic_rdma_port_statistics(ph, port_idx, cp, nsp) };
+    }
+#endif
+;
+
+/**
  * @brief Per-device proxy — bridges a shared backend session to one device handle.
  *
- * @c device_backend<Backend> is the object that satisfies @c gpu_backend_contract
- * and @c nic_backend_contract. It holds a reference to the shared session
- * (@c backend<AmdsmiBackend>) and one processor handle, then:
- *  - Forwards per-device calls through the session.
- *  - Checks every return status via @c check_call() — throws on failure.
- *  - Converts raw AMD SMI structs to domain types.
+ * Holds a @c shared_ptr<Backend> session and one processor handle. Forwards
+ * per-device calls through the session (which throws on failure) and converts
+ * raw AMD SMI structs to domain types.
  *
- * Lives in the PMC layer; the concrete @c Backend type (which wraps amdsmi_backend)
- * is named only at the integration point (sampler.cpp).
+ * Lives in the PMC layer; the concrete @c Backend type is named only at the
+ * integration point (sampler.cpp).
  *
- * @tparam Backend  A session type exposing type aliases and per-device forwarding
- *                  methods (e.g. @c backends::amd_smi::backend<amdsmi_backend>).
+ * @tparam Backend  Session type satisfying @c backend_session_contract
+ *                  (e.g. @c backends::amd_smi::backend<amdsmi_backend>).
  */
-template <typename Backend>
+template <backend_session_contract Backend>
 class device_backend
 {
 public:

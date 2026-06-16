@@ -23,21 +23,66 @@ namespace rocprofsys::backends::amd_smi
  * inside the template body.
  */
 template <typename T>
-concept amdsmi_backend_policy = requires {
-    typename T::status_t;
-    typename T::version_t;
-    typename T::socket_handle;
-    typename T::processor_handle;
-    typename T::gpu_metrics_t;
-    typename T::asic_info_t;
-    typename T::memory_type_t;
-} && requires(T t, typename T::status_t s) {
-    { T::STATUS_SUCCESS } -> std::convertible_to<typename T::status_t>;
-    { T::MEM_TYPE_VRAM } -> std::convertible_to<typename T::memory_type_t>;
-    { T::status_to_string(s) } -> std::convertible_to<std::string>;
-    { t.init() } -> std::convertible_to<typename T::status_t>;
-    { t.shutdown() } -> std::convertible_to<typename T::status_t>;
-};
+concept amdsmi_backend_policy =
+    // ── Required type aliases ─────────────────────────────────────────────────
+    requires {
+        typename T::status_t;
+        typename T::version_t;
+        typename T::socket_handle;
+        typename T::processor_handle;
+        typename T::gpu_metrics_t;
+        typename T::asic_info_t;
+        typename T::memory_type_t;
+    } &&
+    // ── Constants, status helpers, lifecycle, enumeration, per-device calls ───
+    requires(T t, typename T::status_t s, typename T::version_t* vp, std::uint32_t* cp,
+             typename T::socket_handle sh, typename T::socket_handle* shp,
+             typename T::processor_handle ph, typename T::processor_handle* php,
+             typename T::gpu_metrics_t* gmp, typename T::asic_info_t* aip,
+             typename T::memory_type_t mt, std::uint64_t* u64p) {
+        { T::STATUS_SUCCESS } -> std::convertible_to<typename T::status_t>;
+        { T::MEM_TYPE_VRAM } -> std::convertible_to<typename T::memory_type_t>;
+        { T::status_to_string(s) } -> std::convertible_to<std::string>;
+        { t.init() } -> std::convertible_to<typename T::status_t>;
+        { t.shutdown() } -> std::convertible_to<typename T::status_t>;
+        { t.get_version(vp) } -> std::convertible_to<typename T::status_t>;
+        { t.get_socket_handles(cp, shp) } -> std::convertible_to<typename T::status_t>;
+        {
+            t.get_processor_handles(sh, cp, php)
+        } -> std::convertible_to<typename T::status_t>;
+        { t.get_metrics_info(ph, gmp) } -> std::convertible_to<typename T::status_t>;
+        { t.get_gpu_asic_info(ph, aip) } -> std::convertible_to<typename T::status_t>;
+        { t.get_memory_usage(ph, mt, u64p) } -> std::convertible_to<typename T::status_t>;
+    }
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    && requires { typename T::proc_info_t; } &&
+    requires(T t, typename T::processor_handle ph, std::uint32_t* cp,
+             typename T::proc_info_t* pp) {
+        {
+            t.get_gpu_process_list(ph, cp, pp)
+        } -> std::convertible_to<typename T::status_t>;
+    }
+#endif
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    &&
+    requires {
+        typename T::nic_asic_info_t;
+        typename T::nic_port_info_t;
+        typename T::nic_rdma_devices_info_t;
+        typename T::nic_stat_t;
+    } &&
+    requires(T t, typename T::processor_handle ph, typename T::nic_asic_info_t* nap,
+             typename T::nic_port_info_t* npp, typename T::nic_rdma_devices_info_t* ndp,
+             std::uint8_t port_idx, std::uint32_t* cp, typename T::nic_stat_t* nsp) {
+        { t.get_nic_asic_info(ph, nap) } -> std::convertible_to<typename T::status_t>;
+        { t.get_nic_port_info(ph, npp) } -> std::convertible_to<typename T::status_t>;
+        { t.get_nic_rdma_dev_info(ph, ndp) } -> std::convertible_to<typename T::status_t>;
+        {
+            t.get_nic_rdma_port_statistics(ph, port_idx, cp, nsp)
+        } -> std::convertible_to<typename T::status_t>;
+    }
+#endif
+;
 
 /**
  * @brief Session-level smart wrapper around an AMD SMI backend policy.
