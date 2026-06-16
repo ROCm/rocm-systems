@@ -191,8 +191,11 @@ pub fn agent_root() -> PathBuf {
 }
 
 /// Path to a specific agent file: `<agent_root>/<name>.json`.
+///
+/// Agent names are case-insensitive and always stored lowercase, so the
+/// name is lowercased before building the path.
 pub fn agent_path(name: &str) -> PathBuf {
-    agent_root().join(format!("{name}.json"))
+    agent_root().join(format!("{}.json", name.to_lowercase()))
 }
 
 /// Root directory for all sessions: `<mirage_runtime_dir>/session`.

@@ -14,11 +14,14 @@ use mirage_core::agent::{
 };
 
 /// All builtin agents, keyed by the name written to disk.
+///
+/// Agent names are case-insensitive and always stored lowercase, so the
+/// registry keys are lowercase to match the on-disk filenames.
 pub fn agents() -> Vec<(&'static str, AgentDef)> {
     vec![
-        ("MI300X", mi300x()),
-        ("MI350X", mi350x()),
-        ("MI450X", mi450x()),
+        ("mi300x", mi300x()),
+        ("mi350x", mi350x()),
+        ("mi450x", mi450x()),
     ]
 }
 
@@ -306,9 +309,9 @@ mod tests {
     fn agents_have_expected_keys() {
         let a = agents();
         assert_eq!(a.len(), 3);
-        assert_eq!(a[0].0, "MI300X");
-        assert_eq!(a[1].0, "MI350X");
-        assert_eq!(a[2].0, "MI450X");
+        assert_eq!(a[0].0, "mi300x");
+        assert_eq!(a[1].0, "mi350x");
+        assert_eq!(a[2].0, "mi450x");
     }
 
     #[test]

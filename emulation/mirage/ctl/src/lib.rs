@@ -1020,7 +1020,10 @@ fn build_profile_create(
             if known.is_empty() {
                 "MI350X".to_string()
             } else {
-                let default_idx = known.iter().position(|n| n == "MI350X").unwrap_or(0);
+                let default_idx = known
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case("MI350X"))
+                    .unwrap_or(0);
                 let pick = Select::with_theme(&theme)
                     .with_prompt("Agent")
                     .items(&known)
