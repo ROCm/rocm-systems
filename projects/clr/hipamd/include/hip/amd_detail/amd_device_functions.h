@@ -894,7 +894,7 @@ static inline __device__ void* memset(void* ptr, int val, size_t size) {
 }
 #endif  // !__OPENMP_AMDGCN__
 
-#define GENERATE_SCAN_FUNC(OP, TYPE_ALIAS, TYPE) \
+#define HIP_IMPL_GENERATE_SCAN_FUNC(OP, TYPE_ALIAS, TYPE) \
   extern "C" __device__ __attribute__((const)) TYPE __ockl_wfscan_ ## OP ## _ ## TYPE_ALIAS(TYPE, bool);\
 \
     template <bool Inclusive>\

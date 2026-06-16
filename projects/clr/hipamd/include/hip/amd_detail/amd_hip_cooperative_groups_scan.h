@@ -15,50 +15,50 @@ namespace cooperative_groups {
 namespace impl {
   // these functions allow to make use of C++ function overloads, instead of having to code
   // a big if-constexpr according to operand type
-  GENERATE_SCAN_FUNC(add, i32, int);
-  GENERATE_SCAN_FUNC(add, u32, unsigned int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(add, i32, int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(add, u32, unsigned int);
 
-  GENERATE_SCAN_FUNC(min, i32, int);
-  GENERATE_SCAN_FUNC(min, u32, unsigned int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(min, i32, int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(min, u32, unsigned int);
 
-  GENERATE_SCAN_FUNC(max, i32, int);
-  GENERATE_SCAN_FUNC(max, u32, unsigned int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(max, i32, int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(max, u32, unsigned int);
 
-  GENERATE_SCAN_FUNC(and, i32, int);
-  GENERATE_SCAN_FUNC(and, u32, unsigned int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(and, i32, int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(and, u32, unsigned int);
 
-  GENERATE_SCAN_FUNC(or, i32, int);
-  GENERATE_SCAN_FUNC(or, u32, unsigned int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(or, i32, int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(or, u32, unsigned int);
 
-  GENERATE_SCAN_FUNC(xor, i32, int);
-  GENERATE_SCAN_FUNC(xor, u32, unsigned int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(xor, i32, int);
+  HIP_IMPL_GENERATE_SCAN_FUNC(xor, u32, unsigned int);
 
   // extra types. Unlike cg::reduce() which depends on reduce_*_sync() functions being defined with
   // HIP_ENABLE_EXTRA_WARP_SYNC_TYPES to be able to use the ockl intrinsics, for scan we always
   // define them here
-  GENERATE_SCAN_FUNC(add, i64, long long);
-  GENERATE_SCAN_FUNC(add, u64, unsigned long long);
-  GENERATE_SCAN_FUNC(add, f32, float);
-  GENERATE_SCAN_FUNC(add, f64, double);
+  HIP_IMPL_GENERATE_SCAN_FUNC(add, i64, long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(add, u64, unsigned long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(add, f32, float);
+  HIP_IMPL_GENERATE_SCAN_FUNC(add, f64, double);
 
-  GENERATE_SCAN_FUNC(min, i64, long long);
-  GENERATE_SCAN_FUNC(min, u64, unsigned long long);
-  GENERATE_SCAN_FUNC(min, f32, float);
-  GENERATE_SCAN_FUNC(min, f64, double);
+  HIP_IMPL_GENERATE_SCAN_FUNC(min, i64, long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(min, u64, unsigned long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(min, f32, float);
+  HIP_IMPL_GENERATE_SCAN_FUNC(min, f64, double);
 
-  GENERATE_SCAN_FUNC(max, i64, long long);
-  GENERATE_SCAN_FUNC(max, u64, unsigned long long);
-  GENERATE_SCAN_FUNC(max, f32, float);
-  GENERATE_SCAN_FUNC(max, f64, double);
+  HIP_IMPL_GENERATE_SCAN_FUNC(max, i64, long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(max, u64, unsigned long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(max, f32, float);
+  HIP_IMPL_GENERATE_SCAN_FUNC(max, f64, double);
 
-  GENERATE_SCAN_FUNC(and, i64, long long);
-  GENERATE_SCAN_FUNC(and, u64, unsigned long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(and, i64, long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(and, u64, unsigned long long);
 
-  GENERATE_SCAN_FUNC(or, i64, long long);
-  GENERATE_SCAN_FUNC(or, u64, unsigned long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(or, i64, long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(or, u64, unsigned long long);
 
-  GENERATE_SCAN_FUNC(xor, i64, long long);
-  GENERATE_SCAN_FUNC(xor, u64, unsigned long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(xor, i64, long long);
+  HIP_IMPL_GENERATE_SCAN_FUNC(xor, u64, unsigned long long);
 
   // not all types could be used with wfscan (e.g. user defined types), this predicate
   // indicates whether that is the case

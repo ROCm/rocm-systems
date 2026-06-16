@@ -1182,9 +1182,9 @@ template <typename MaskT> __device__ inline __half __reduce_max_sync(MaskT mask,
 #if !defined(__HIP_NO_HALF_OPERATORS__)
 namespace cooperative_groups {
 namespace impl {
-GENERATE_SCAN_FUNC(add, f16, __half);
-GENERATE_SCAN_FUNC(min, f16, __half);
-GENERATE_SCAN_FUNC(max, f16, __half);
+HIP_IMPL_GENERATE_SCAN_FUNC(add, f16, __half);
+HIP_IMPL_GENERATE_SCAN_FUNC(min, f16, __half);
+HIP_IMPL_GENERATE_SCAN_FUNC(max, f16, __half);
 }
 }
 #endif
