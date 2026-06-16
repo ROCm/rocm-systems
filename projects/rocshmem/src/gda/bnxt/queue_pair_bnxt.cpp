@@ -27,6 +27,13 @@
 
 namespace rocshmem {
 
+typedef uint32_t v4u32 __attribute__((ext_vector_type(4)));
+
+__device__ static inline void nt_store_16B(void* dst, const void* src) {
+  __builtin_nontemporal_store(*reinterpret_cast<const v4u32*>(src),
+                              reinterpret_cast<v4u32*>(dst));
+}
+
 __device__ static inline struct bnxt_re_msns* bnxt_re_pull_psn_buff(struct bnxt_device_sq *sq) {
   return (struct bnxt_re_msns*)(((char *) sq->msntbl) + ((sq->msn) << sq->psn_sz_log2));
 }
@@ -75,7 +82,7 @@ __device__ static inline void bnxt_re_fill_psns_for_msntbl(struct bnxt_device_sq
    sq->msn++;
    sq->msn %= sq->msn_tbl_sz;
 
-   memcpy(msns_ptr, &msns, sizeof(uint64_t));
+   __builtin_nontemporal_store(msns.start_idx_next_psn_start_psn, msns_ptr);
 }
 
 __device__ static inline void bnxt_re_incr_tail(struct bnxt_device_sq *sq, uint8_t cnt)
@@ -284,13 +291,13 @@ __device__ void QueuePair::bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
   }
 
   /* Write WQE to SQ */
-  memcpy(hdr_ptr,  &hdr,  sizeof(struct bnxt_re_bsqe));
-  memcpy(rdma_ptr, &rdma, sizeof(struct bnxt_re_rdma));
+  nt_store_16B(hdr_ptr, &hdr);
+  nt_store_16B(rdma_ptr, &rdma);
 
   if (inline_msg) {
     memcpy(sge_ptr,  reinterpret_cast<const void*>(laddr),  length);
   } else {
-    memcpy(sge_ptr,  &sge,  sizeof(struct bnxt_re_sge));
+    nt_store_16B(sge_ptr, &sge);
   }
 
   /* Populate MSN Table */
@@ -397,9 +404,9 @@ __device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr, uint32_t rkey
   sge.length = length;
 
   /* Write WQE to SQ */
-  memcpy(hdr_ptr, &hdr, sizeof(struct bnxt_re_bsqe));
-  memcpy(amo_ptr, &amo, sizeof(struct bnxt_re_atomic));
-  memcpy(sge_ptr, &sge, sizeof(struct bnxt_re_sge));
+  nt_store_16B(hdr_ptr, &hdr);
+  nt_store_16B(amo_ptr, &amo);
+  nt_store_16B(sge_ptr, &sge);
 
   /* Populate MSN Table */
   bnxt_re_fill_psns_for_msntbl(&bnxt_sq, length);
