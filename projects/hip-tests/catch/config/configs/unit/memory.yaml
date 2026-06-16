@@ -1941,6 +1941,30 @@ memory:
   Unit_hipMemPrefetchBatchAsync_MultiDevice:
     <<: *level_2
     tags: [query]
+  Unit_hipMemDiscardBatchAsync_NegativeTests:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemDiscardBatchAsync_SingleDiscard: *level_2
+  Unit_hipMemDiscardBatchAsync_MultipleDiscards: *level_2
+  Unit_hipMemDiscardBatchAsync_LargeCount: *level_2
+  Unit_hipMemDiscardBatchAsync_DiscardThenPrefetch: *level_2
+  Unit_hipMemDiscardBatchAsync_StreamOrdering: *level_2
+  Unit_hipMemDiscardBatchAsync_SubrangeDiscard: *level_2
+  Unit_hipMemDiscardBatchAsync_SamePointerTwice: *level_2
+  Unit_hipMemDiscardBatchAsync_MinimalSize: *level_2
+  Unit_hipMemDiscardBatchAsync_DrvApiParity: *level_2
+  Unit_hipMemDiscardBatchAsync_ContentAfterDiscard: *level_2
+  Unit_hipMemDiscardBatchAsync_PageableDeviceMemory: *level_2
+  Unit_hipMemDiscardBatchAsync_PageableSystemMemory: *level_2
+  Unit_hipMemDiscardBatchAsync_PageableMixedBatch: *level_2
+  Unit_hipMemDiscardAndPrefetchBatchAsync_NegativeTests:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer: *level_2
+  Unit_hipMemDiscardAndPrefetchBatchAsync_MultipleSameDevice: *level_2
+  Unit_hipMemDiscardAndPrefetchBatchAsync_ParitySeparateCalls: *level_2
+  Unit_hipMemDiscardAndPrefetchBatchAsync_Atomicity: *level_2
+  Unit_hipDrvMemDiscardAndPrefetchBatchAsync_SingleBuffer: *level_2
   Unit_hipMemGetInfo_FreeLessThanTotal:
     <<: *level_2
     tags: [query]

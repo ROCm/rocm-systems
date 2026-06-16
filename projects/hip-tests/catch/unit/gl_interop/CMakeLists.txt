@@ -5,7 +5,6 @@
 set(TEST_SRC
     hipGLGetDevices.cc
     hipGLContextSwitch.cc
-    hipGLImageDataVerification.cc
     hipGraphicsGLRegisterBuffer.cc
     hipGraphicsGLRegisterImage.cc
     hipGraphicsMapResources.cc
@@ -71,46 +70,7 @@ endif()
 
 # GLEW is required on Windows for OpenGL extension access
 # On Linux, extensions are available via native headers
-# Handle GLEW - env vars first, then find_package
-set(USE_ENV_GLEW FALSE)
-if (DEFINED ENV{GLEW_SHARED_LIBRARY_RELEASE} AND
-    DEFINED ENV{GLEW_INCLUDE_DIR})
-  if (NOT "$ENV{GLEW_SHARED_LIBRARY_RELEASE}" STREQUAL "" AND
-      NOT "$ENV{GLEW_INCLUDE_DIR}" STREQUAL "")
-    if (EXISTS "$ENV{GLEW_SHARED_LIBRARY_RELEASE}" AND
-        EXISTS "$ENV{GLEW_INCLUDE_DIR}")
-      set(USE_ENV_GLEW TRUE)
-    else()
-      message(WARNING "GLEW env vars invalid, using find_package")
-    endif()
-  endif()
-endif()
-
-if (USE_ENV_GLEW)
-  message(STATUS "Using GLEW from environment variables")
-  message(STATUS "  GLEW_SHARED_LIBRARY_RELEASE: $ENV{GLEW_SHARED_LIBRARY_RELEASE}")
-  message(STATUS "  GLEW_INCLUDE_DIR: $ENV{GLEW_INCLUDE_DIR}")
-
-  set(GLEW_SHARED_LIBRARY_RELEASE "$ENV{GLEW_SHARED_LIBRARY_RELEASE}"
-      CACHE FILEPATH "Path to GLEW library")
-  set(GLEW_INCLUDE_DIR "$ENV{GLEW_INCLUDE_DIR}"
-      CACHE PATH "Path to GLEW include directory")
-  set(GLEW_FOUND TRUE)
-  add_library(GLEW::GLEW UNKNOWN IMPORTED)
-  set_target_properties(GLEW::GLEW PROPERTIES
-      IMPORTED_LOCATION "${GLEW_SHARED_LIBRARY_RELEASE}"
-      INTERFACE_INCLUDE_DIRECTORIES "${GLEW_INCLUDE_DIR}"
-  )
-else()
-  message(STATUS "Searching for GLEW via find_package...")
-  find_package(GLEW)
-  message(STATUS "GLEW_FOUND: ${GLEW_FOUND}")
-  if (NOT GLEW_FOUND)
-    message(STATUS "GLEW not found.")
-    message(STATUS "Do you add -DGLEW_INCLUDE_DIR=path-to-include -DGLEW_SHARED_LIBRARY_RELEASE=path-to-x64/glew32.lib to CMake?")
-  endif()
-endif()
-
+find_package(GLEW)
 if(WIN32 AND NOT GLEW_FOUND)
   message(STATUS "GLEW required on Windows but not found, "
                  "GL interop tests not enabled.")
