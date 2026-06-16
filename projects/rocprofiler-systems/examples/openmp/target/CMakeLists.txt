@@ -70,8 +70,21 @@ set(_LLVM_LIB_HINTS
     "/opt/rocm/lib/llvm/lib"
 )
 
+# Determine LLVM host triple as libomptarget might be installed there.
+execute_process(
+    COMMAND "${OMP_TARGET_COMPILER}" --print-target-triple
+    OUTPUT_VARIABLE LLVM_HOST_TRIPLE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY
+)
+
 # Find libomptarget
-find_library(LIBOMPTARGET_SO NAMES omptarget HINTS ${_LLVM_LIB_HINTS})
+find_library(
+    LIBOMPTARGET_SO
+    NAMES omptarget
+    HINTS ${_LLVM_LIB_HINTS}
+    PATH_SUFFIXES ${LLVM_HOST_TRIPLE}
+)
 
 if(NOT LIBOMPTARGET_SO)
     message(FATAL_ERROR "Could not find libomptarget in any of:\n  ${_LLVM_LIB_HINTS}")
