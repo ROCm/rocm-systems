@@ -60,7 +60,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Resolved Issues
 
 - **Corrected invalid AMD SMI status-code names in exception messages and documentation**.  
-  - Some `AmdSmiLibraryException` messages and API documentation entries referenced status-code names that do not exist in the `amdsmi_status_t` enum; they now use the correct `AMDSMI_STATUS_*` names.
+  - Some `AmdSmiLibraryException` messages and API documentation entries were misspelled; they now use the correct `AMDSMI_STATUS_*` names.
 
 - **Fixed AMD GPU manufacturer name display in `amd-smi static --board`**.  
   - The CLI now displays the canonical vendor name `Advanced Micro Devices, Inc. [AMD/ATI]` when the board manufacturer name is reported as the raw AMD PCI vendor ID (`0x1002`) because the host `pci.ids` lookup is unavailable. The C and Python APIs continue to return the raw value unchanged.
