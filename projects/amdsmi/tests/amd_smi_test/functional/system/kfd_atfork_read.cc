@@ -28,8 +28,8 @@
 #include <cstdint>
 #include <iostream>
 
-#include "test_common.h"
 #include "rocm_smi/rocm_smi_kfd_data_manager.h"
+#include "test_common.h"
 
 namespace {
 // pthread_atfork callbacks take no arguments, so the counter is file-scoped.

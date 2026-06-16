@@ -35,10 +35,10 @@
 #include <string>
 #include <vector>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "test_common.h"
 
 // How long the holder process holds the mutex (seconds).
 // NOTE: This test takes at least kHoldSeconds (~5s) to run by design — the

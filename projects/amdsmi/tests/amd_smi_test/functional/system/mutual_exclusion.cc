@@ -35,10 +35,10 @@
 #include <string>
 #include <vector>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "test_common.h"
 
 // How long the mutex-holder process holds the device mutex (seconds).
 // The tester process uses trylock (RESRV_TEST1 mode) so all its API calls
