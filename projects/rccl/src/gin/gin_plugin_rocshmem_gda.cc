@@ -123,7 +123,7 @@ static ncclResult_t ginRocshmemGdaQueryLastError(void* ginCtx, bool* hasError) {
 
 __attribute__((visibility("default")))
 ncclGin_t ncclGinRocshmemGdaPlugin = {
-  .name            = "rocshmem_gda",
+  .name            = "rocshmem-gda",
   .init            = ginRocshmemGdaInit,
   .devices         = ginRocshmemGdaDevices,
   .getProperties   = ginRocshmemGdaGetProperties,

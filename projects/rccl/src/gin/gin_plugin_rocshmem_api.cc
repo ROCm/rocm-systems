@@ -136,7 +136,7 @@ static ncclResult_t ginRocshmemQueryLastError(void* ginCtx, bool* hasError) {
 
 __attribute__((visibility("default")))
 ncclGin_t ncclGinRocshmemApi = {
-  .name            = "rocshmem",
+  .name            = "rocshmem-api",
   .init            = ginRocshmemInit,
   .devices         = ginRocshmemDevices,
   .getProperties   = ginRocshmemGetProperties,
