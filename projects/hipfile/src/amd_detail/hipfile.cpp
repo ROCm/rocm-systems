@@ -182,6 +182,11 @@ try {
     int                      score{-1};
     std::shared_ptr<Backend> backend{};
 
+    if (file_offset < 0 || buffer_offset < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
     for (const auto &_backend : backends) {
         auto _score = _backend->score(file, buffer, size, file_offset, buffer_offset);
         if (score < _score) {

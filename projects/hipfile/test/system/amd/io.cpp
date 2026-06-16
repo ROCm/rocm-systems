@@ -13,11 +13,14 @@
 
 #include <array>
 #include <cstdlib>
+#include <fcntl.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
+#include <linux/stat.h>
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 extern SystemTestOptions test_env;
 
@@ -42,16 +45,26 @@ HIPFILE_WARN_NO_EXIT_DTOR_ON
 
 struct HipFileIo : public testing::TestWithParam<IoTestParam> {
 
-    Tmpfile         tmpfile;
-    size_t          tmpfile_size;
-    hipFileHandle_t tmpfile_handle;
-    void           *unregistered_device_buffer;
-    size_t          unregistered_device_buffer_size;
+    Tmpfile              tmpfile;
+    size_t               tmpfile_size;
+    uint32_t             tmpfile_dio_offset_align;
+    hipFileHandle_t      tmpfile_handle;
+    void                *unregistered_device_buffer;
+    size_t               unregistered_device_buffer_size;
+    std::vector<uint8_t> host_buffer;
 
     HipFileIo()
-        : tmpfile{test_env.ais_capable_dir}, tmpfile_size{1024 * 1024}, tmpfile_handle{nullptr},
-          unregistered_device_buffer{nullptr}, unregistered_device_buffer_size{1024 * 1024}
+        : tmpfile{test_env.ais_capable_dir}, tmpfile_size{1024 * 1024}, tmpfile_dio_offset_align{4096},
+          tmpfile_handle{nullptr}, unregistered_device_buffer{nullptr},
+          unregistered_device_buffer_size{1024 * 1024}, host_buffer(1024)
     {
+#if defined(STATX_DIOALIGN)
+        struct statx stx {};
+        if (0 == statx(tmpfile.fd, "", AT_EMPTY_PATH, STATX_DIOALIGN, &stx) &&
+            stx.stx_mask & STATX_DIOALIGN) {
+            tmpfile_dio_offset_align = stx.stx_dio_offset_align;
+        }
+#endif
     }
 
     void SetUp() override
@@ -108,6 +121,42 @@ TEST_P(HipFileIo, ReadToUnregisteredBufferAtOffsetReturnsErrorIfOverflow)
 
     ASSERT_EQ(-hipFileInvalidValue,
               hipFileRead(tmpfile_handle, unregistered_device_buffer, io_size, 0, io_buffer_offset));
+}
+
+TEST_P(HipFileIo, readAtNegativeFileOffsetReturnsEINVAL)
+{
+    errno = 0;
+    ASSERT_EQ(-1, pread(tmpfile.fd, host_buffer.data(), 512, -1));
+    ASSERT_EQ(EINVAL, errno);
+
+    errno = 0;
+    ASSERT_EQ(-1, hipFileRead(tmpfile_handle, unregistered_device_buffer, 512, -1, 0));
+    ASSERT_EQ(EINVAL, errno);
+}
+
+TEST_P(HipFileIo, writeAtNegativeFileOffsetReturnsEINVAL)
+{
+    errno = 0;
+    ASSERT_EQ(-1, pwrite(tmpfile.fd, host_buffer.data(), 512, -1));
+    ASSERT_EQ(EINVAL, errno);
+
+    errno = 0;
+    ASSERT_EQ(-1, hipFileWrite(tmpfile_handle, unregistered_device_buffer, 512, -1, 0));
+    ASSERT_EQ(EINVAL, errno);
+}
+
+TEST_P(HipFileIo, readAtNegativeBufferOffsetReturnsEINVAL)
+{
+    errno = 0;
+    ASSERT_EQ(-1, hipFileRead(tmpfile_handle, unregistered_device_buffer, 512, 0, -1));
+    ASSERT_EQ(EINVAL, errno);
+}
+
+TEST_P(HipFileIo, writeAtNegativeBufferOffsetReturnsEINVAL)
+{
+    errno = 0;
+    ASSERT_EQ(-1, hipFileWrite(tmpfile_handle, unregistered_device_buffer, 512, 0, -1));
+    ASSERT_EQ(EINVAL, errno);
 }
 
 INSTANTIATE_TEST_SUITE_P(, HipFileIo, testing::ValuesIn(io_test_params),
