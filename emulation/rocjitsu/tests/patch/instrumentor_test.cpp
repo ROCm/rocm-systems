@@ -1422,5 +1422,33 @@ TEST(InstrumentorSpill, NonEmptySpillSetFailsPolicy) {
   EXPECT_NE(err.find("s30"), std::string::npos);
 }
 
+// Test that a builder's resource plan can feeds the Instrumentor's spill
+// formula. The planner output flows straight into
+// spill_set = live & (probe | builder) clobbers.
+TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
+  // Create an empty probe_summary (has no clobbers)
+  const ProbeClobberSummary probe_summary;
+
+  TrampolinePlan plan;
+  std::string err;
+  // s5 live: the planner must avoid it; the rest are free.
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, make_sgpr_set({5}),
+                                                 probe_summary.ordinary_clobbers, &err));
+
+  const RegisterSet clobbers =
+      compute_instrumentation_clobbers(probe_summary, plan.builder_clobbers);
+
+  // A live value outside the envelope's registers does not spill.
+  const RegisterSet spill_clear = compute_spill_set(make_sgpr_set({5}), clobbers);
+  EXPECT_TRUE(spill_clear.none());
+  EXPECT_TRUE(check_spill_policy(spill_clear, SpillPolicy::NoSpillsSupported, &err));
+
+  // A live value that collides with the chosen target pair spills, and the
+  // no-spill policy rejects it naming that register.
+  const RegisterSet spill_hit = compute_spill_set(make_sgpr_set({plan.target_pair_base}), clobbers);
+  EXPECT_TRUE(has_sgpr(spill_hit, plan.target_pair_base));
+  EXPECT_FALSE(check_spill_policy(spill_hit, SpillPolicy::NoSpillsSupported, &err));
+}
+
 } // namespace
 } // namespace rocjitsu
