@@ -79,6 +79,50 @@ endif()
 
 set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architectures for device bitcode (semicolon-separated)")
 
+# Build a map of base-arch → full target string by querying rocminfo.
+# GPU_TARGETS/rocm_local_targets strip feature suffixes (e.g. :sramecc+:xnack-)
+# before they reach us, so we re-query rocminfo to recover them.  The result is
+# used by downstream cmake (CMakeDeviceBitcodeTester) to pass the correct -mattr
+# to llc, which embeds the feature suffix in the HSACO amdhsa.target metadata
+# string that HIP checks when loading the module.
+# Only query rocminfo when there are architectures to look up — avoids
+# an unnecessary subprocess (and potential driver noise) on GPU-less hosts.
+find_program(_ROCMINFO rocminfo PATHS ${ROCM_PATH}/bin NO_DEFAULT_PATH QUIET)
+if(_ROCMINFO AND _BITCODE_DEFAULT_ARCHS)
+  set(_rocminfo_tmpfile "${CMAKE_BINARY_DIR}/CMakeFiles/rocminfo_out.txt")
+  execute_process(
+    COMMAND ${_ROCMINFO}
+    OUTPUT_FILE "${_rocminfo_tmpfile}"
+    ERROR_QUIET
+  )
+  # Parse lines like: "Name:  amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-"
+  # Use REGEX filter to avoid loading the entire file into a CMake list (which would
+  # be split on semicolons in the output and lose entries).
+  file(STRINGS "${_rocminfo_tmpfile}" _rocminfo_isa_lines REGEX "amdgcn-amd-amdhsa--")
+  foreach(_line ${_rocminfo_isa_lines})
+    if(_line MATCHES "Name:.*amdgcn-amd-amdhsa--([a-zA-Z0-9_:+.-]+)")
+      set(_full_target "${CMAKE_MATCH_1}")
+      string(REGEX REPLACE ":.*" "" _base "${_full_target}")
+      # Only record if not already in the map (first GPU wins per arch)
+      if(NOT DEFINED _ROCMINFO_ARCH_${_base})
+        set(_ROCMINFO_ARCH_${_base} "${_full_target}")
+      endif()
+    endif()
+  endforeach()
+endif()
+
+# Build BITCODE_GPU_ARCHS_FULL: for each stripped arch, use rocminfo's full string
+# if available, otherwise fall back to the bare arch name.
+set(_BITCODE_FULL_LIST "")
+foreach(_arch ${_BITCODE_DEFAULT_ARCHS})
+  if(DEFINED _ROCMINFO_ARCH_${_arch})
+    list(APPEND _BITCODE_FULL_LIST "${_ROCMINFO_ARCH_${_arch}}")
+  else()
+    list(APPEND _BITCODE_FULL_LIST "${_arch}")
+  endif()
+endforeach()
+set(BITCODE_GPU_ARCHS_FULL "${_BITCODE_FULL_LIST}" CACHE STRING "Full GPU arch strings with features for device bitcode")
+
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and llc.
 set(BITCODE_COMPILE_FLAGS_BASE
