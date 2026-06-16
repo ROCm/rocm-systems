@@ -530,6 +530,24 @@ typedef hipError_t (*t_hipMemPrefetchBatchAsync)(void** dev_ptrs, size_t* sizes,
                                                 hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
                                                 size_t num_prefetch_locs, unsigned long long flags,
                                                 hipStream_t stream);
+typedef hipError_t (*t_hipMemDiscardBatchAsync)(void** dev_ptrs, size_t* sizes, size_t count,
+                                                unsigned long long flags, hipStream_t stream);
+typedef hipError_t (*t_hipDrvMemDiscardBatchAsync)(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                                   unsigned long long flags, hipStream_t stream);
+typedef hipError_t (*t_hipMemDiscardAndPrefetchBatchAsync)(void** dptrs, size_t* sizes,
+                                                           size_t count,
+                                                           hipMemLocation* prefetchLocs,
+                                                           size_t* prefetchLocIdxs,
+                                                           size_t numPrefetchLocs,
+                                                           unsigned long long flags,
+                                                           hipStream_t stream);
+typedef hipError_t (*t_hipDrvMemDiscardAndPrefetchBatchAsync)(hipDeviceptr_t* dptrs, size_t* sizes,
+                                                              size_t count,
+                                                              hipMemLocation* prefetchLocs,
+                                                              size_t* prefetchLocIdxs,
+                                                              size_t numPrefetchLocs,
+                                                              unsigned long long flags,
+                                                              hipStream_t stream);
 typedef hipError_t (*t_hipMemPtrGetInfo)(void* ptr, size_t* size);
 typedef hipError_t (*t_hipMemRangeGetAttribute)(void* data, size_t data_size,
                                                 hipMemRangeAttribute attribute, const void* dev_ptr,
@@ -1798,7 +1816,11 @@ struct HipDispatchTable {
   t_hipLibraryGetGlobal hipLibraryGetGlobal_fn;
   t_hipLibraryGetManaged hipLibraryGetManaged_fn;
 
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 30: enum-only (#6596), no member.
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+  t_hipMemDiscardBatchAsync hipMemDiscardBatchAsync_fn;
+  t_hipDrvMemDiscardBatchAsync hipDrvMemDiscardBatchAsync_fn;
+  t_hipMemDiscardAndPrefetchBatchAsync hipMemDiscardAndPrefetchBatchAsync_fn;
+  t_hipDrvMemDiscardAndPrefetchBatchAsync hipDrvMemDiscardAndPrefetchBatchAsync_fn;
 
   // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
