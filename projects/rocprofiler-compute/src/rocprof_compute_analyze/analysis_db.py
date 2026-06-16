@@ -14,6 +14,7 @@ import pandas as pd
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import load_pc_sampling_results, process_pc_sampling_kernel_trace
@@ -48,12 +49,14 @@ from utils.metrics.noise_clamper import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.pc_sampling_analysis import load_aggregated_pc_sampling
 from utils.roofline_calc import (
-    CACHE_HIERARCHY,
     MATRIX_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
-from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
+from utils.utils_analysis import (
+    PEAK_COL_PREFERENCE,
+    VALUE_COL_PREFERENCE,
+)
 from utils.utils_common import get_uuid, get_version
 from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
 
@@ -166,6 +169,7 @@ class db_analysis(OmniAnalyze_Base):
                 Database.get_session().add(
                     orm.KernelRooflineData(
                         total_flops=getattr(roofline_data, "total_flops", None),
+                        l0_cache_data=getattr(roofline_data, "l0_cache_data", None),
                         l1_cache_data=getattr(roofline_data, "l1_cache_data", None),
                         l2_cache_data=getattr(roofline_data, "l2_cache_data", None),
                         hbm_cache_data=getattr(roofline_data, "hbm_cache_data", None),
@@ -180,6 +184,7 @@ class db_analysis(OmniAnalyze_Base):
                 Database.get_session().add(
                     orm.WorkloadRooflineData(
                         total_flops=workload_roofline.get("total_flops"),
+                        l0_cache_data=workload_roofline.get("l0_cache_data"),
                         l1_cache_data=workload_roofline.get("l1_cache_data"),
                         l2_cache_data=workload_roofline.get("l2_cache_data"),
                         hbm_cache_data=workload_roofline.get("hbm_cache_data"),
@@ -343,6 +348,12 @@ class db_analysis(OmniAnalyze_Base):
         roofline_ceilings_per_workload: dict[str, dict[str, Any]] = {}
 
         for workload_path in self._runs.keys():
+            sys_row = self._runs[workload_path].sys_info.iloc[0]
+            gpu_arch = sys_row["gpu_arch"]
+
+            if gpu_arch not in ROOFLINE_SUPPORTED:
+                console_warning(f"Roofline not supported for {gpu_arch}.")
+                continue
             if not (Path(workload_path) / "roofline.csv").exists():
                 console_warning(f"Roofline ceilings not found for {workload_path}.")
                 continue
@@ -351,11 +362,12 @@ class db_analysis(OmniAnalyze_Base):
                 pd.read_csv(f"{workload_path}/roofline.csv").iloc[0].to_dict()
             )
             keys: list[str] = []
-            for mem_level in CACHE_HIERARCHY:
+
+            matrix_ops_type = utils_analysis.get_matrix_ops_type(sys_row["gpu_series"])
+
+            for mem_level in mi_gpu_specs.get_memory_levels(sys_row["gpu_model"]):
                 keys.append(f"{mem_level}Bw")
-            for dtype in SUPPORTED_DATATYPES[
-                self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
-            ]:
+            for dtype in SUPPORTED_DATATYPES[gpu_arch]:
                 if dtype in PEAK_OPS_DATATYPES:
                     if dtype.startswith("F") or dtype.startswith("B"):
                         keys.append(f"{dtype}Flops")
@@ -364,10 +376,10 @@ class db_analysis(OmniAnalyze_Base):
                 if dtype in MATRIX_DATATYPES:
                     if dtype.startswith("F") or dtype.startswith("B"):
                         # FP16 -> F16
-                        dtype = dtype.replace("FP", "F")
-                        keys.append(f"MFMA{dtype}Flops")
+                        matrix_dtype = dtype.replace("FP", "F")
+                        keys.append(f"{matrix_ops_type}{matrix_dtype}Flops")
                     elif dtype.startswith("I"):
-                        keys.append(f"MFMA{dtype}Ops")
+                        keys.append(f"{matrix_ops_type}{dtype}Ops")
             roofline_ceilings_per_workload[workload_path] = {
                 key: roofline_dict[key] for key in keys if key in roofline_dict
             }
@@ -912,6 +924,7 @@ class db_analysis(OmniAnalyze_Base):
                 "total_flops": roofline_data_expressions.get(
                     "Performance (GFLOPs)", ""
                 ),
+                "l0_cache_data": roofline_data_expressions.get("AI L0", ""),
                 "l1_cache_data": roofline_data_expressions.get("AI L1", ""),
                 "l2_cache_data": roofline_data_expressions.get("AI L2", ""),
                 "hbm_cache_data": roofline_data_expressions.get("AI HBM", ""),

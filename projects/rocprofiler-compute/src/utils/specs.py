@@ -250,7 +250,12 @@ def generate_machine_specs(
     specs.num_dies = mi_gpu_specs.get_num_dies(specs.gpu_arch, specs.gpu_model)
 
     specs.cache_sizes = set_cache_sizes(
-        gpu_info["num_compute_units"], gpu_info["gpu_cache_info"], specs.num_dies
+        specs.gpu_model,
+        gpu_info["num_compute_units"],
+        gpu_info["gpu_cache_info"],
+        specs.num_dies,
+        specs.se_per_gpu,
+        specs.sa_per_se,
     )
 
     return specs
@@ -411,14 +416,6 @@ class MachineSpecs:
             "doc": "The version of the machine specification file format.",
             "name": "MachineSpecs Version",
             "intable": False,
-            "show_in_table": True,
-        },
-    )
-    timestamp: Optional[str] = field(
-        default=None,
-        metadata={
-            "doc": "The time (in local system time) when data was collected",
-            "name": "Timestamp",
             "show_in_table": True,
         },
     )
@@ -629,6 +626,17 @@ class MachineSpecs:
                 "the total number of shader engines in a partition."
             ),
             "name": "SE per GPU",
+            "show_in_table": True,
+        },
+    )
+    sa_per_se: Optional[str] = field(
+        default=None,
+        metadata={
+            "doc": (
+                "The number of shader arrays per shader engine on the accelerators/GPUs"
+                " in the system."
+            ),
+            "name": "SA per SE",
             "show_in_table": True,
         },
     )
@@ -943,7 +951,14 @@ def totall2_banks(
     return None
 
 
-def set_cache_sizes(num_cu: int, cache_info: dict, num_dies: int) -> dict[str, int]:
+def set_cache_sizes(
+    gpu_model: str,
+    num_cu: int,
+    cache_info: dict,
+    num_dies: int,
+    num_se: str | int,
+    num_sa_se: str | int,
+) -> dict[str, int]:
     """
     Extrapolate the cache sizes for AMD-SMI cache info output
     """
@@ -953,6 +968,7 @@ def set_cache_sizes(num_cu: int, cache_info: dict, num_dies: int) -> dict[str, i
         console_error("Failed to retrieve GPU cache information from AMD-SMI.")
 
     cache_sizes = {}
+    memory_levels = mi_gpu_specs.get_memory_levels(gpu_model)
 
     # vL1D is the level-1 data cache with the most instances (one per CU).
     # Match by instance count, not num_cu, to stay correct on harvested parts.
@@ -964,14 +980,38 @@ def set_cache_sizes(num_cu: int, cache_info: dict, num_dies: int) -> dict[str, i
     ]
     if l1_data_caches:
         vl1d = max(l1_data_caches, key=lambda cache: cache["num_cache_instance"])
-        cache_sizes["L1"] = vl1d["cache_size"] * 1024
+        # Bug in `amd-smi static --cache`` for gpu models that support GL0 cache
+        # Issue: GL0 cache is labelled as level 1
+        # Use "L0" if the model starts at L0 cache level, otherwise default "L1"
+        l1_key = "L0" if "L0" in memory_levels else "L1"
+        cache_sizes[l1_key] = int(vl1d["cache_size"]) * 1024
+
+    # Bug in `amd-smi static --cache`` for gpu models that support GL0 and GL1 caches
+    # Issue: both GL0 and GL1 cache levels are labelled as level 1
+    # Look for the level 1 data cache whose number of cache instances is equal to the
+    # number of shader arrays- this is the GL1 cache shared across all CUs within
+    # a single Shader Array
+    if "L0" in memory_levels and "L1" in memory_levels:
+        if num_sa_se is None:
+            console_warning(
+                "Shader Arrays per Shader Engine spec is not available; "
+                "skipping GL1 cache size detection"
+            )
+        else:
+            sa_level_cache = [
+                c
+                for c in l1_data_caches
+                if c["num_cache_instance"] == int(num_se) * int(num_sa_se)
+            ]
+            if sa_level_cache:
+                cache_sizes["L1"] = int(sa_level_cache[0]["cache_size"]) * 1024
 
     # L2 and L3/MALL cache sizes
     for cache_values in cache_info["cache"]:
         if cache_values["cache_level"] == 2:
-            cache_sizes["L2"] = cache_values["cache_size"] * 1024
+            cache_sizes["L2"] = int(cache_values["cache_size"]) * 1024
         elif cache_values["cache_level"] == 3 and num_dies > 0:
-            cache_sizes["MALL"] = int(cache_values["cache_size"] * 1024 / num_dies)
+            cache_sizes["MALL"] = int(cache_values["cache_size"]) * 1024 // num_dies
 
     return cache_sizes
 
