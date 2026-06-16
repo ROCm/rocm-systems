@@ -418,6 +418,10 @@ pub struct StartArgs {
     /// repeated.
     #[arg(long = "option", short = 'o', value_name = "KEY=VALUE")]
     pub options: Vec<String>,
+    /// Use an explicit emulator config file instead of synthesising one
+    /// from the profile (the upstream `rocjitsu --config`).
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<String>,
     /// Run the emulator in out-of-process daemon mode instead of the
     /// default in-process (local) emulation.
     #[arg(long)]
@@ -536,6 +540,10 @@ pub struct RunArgs {
     /// repeated.
     #[arg(long = "option", short = 'o', value_name = "KEY=VALUE")]
     options: Vec<String>,
+    /// Use an explicit emulator config file instead of synthesising one
+    /// from the profile (the upstream `rocjitsu --config`).
+    #[arg(long, value_name = "PATH")]
+    config: Option<String>,
     /// Run the emulator in out-of-process daemon mode instead of the
     /// default in-process (local) emulation.
     #[arg(long)]
@@ -1172,6 +1180,7 @@ fn apply_profile_overrides(
     provider: Option<String>,
     exec_mode: Option<ExecModeArg>,
     options: &[String],
+    config: Option<String>,
     profile_name: &str,
 ) -> anyhow::Result<MaybeRef<ProfileDef>> {
     if image.is_none()
@@ -1179,6 +1188,7 @@ fn apply_profile_overrides(
         && provider.is_none()
         && exec_mode.is_none()
         && options.is_empty()
+        && config.is_none()
     {
         // No overrides: keep the cheap by-name reference.
         return Ok(MaybeRef::Ref(profile_name.to_string()));
@@ -1219,6 +1229,18 @@ fn apply_profile_overrides(
     for opt in options {
         let (key, value) = parse_option(opt)?;
         profile.emulator.options.insert(key, value);
+    }
+    // Drop-in `--config <path>`: an explicit emulator config file
+    // (the upstream `rocjitsu --config`). Stored as the `config`
+    // emulator option (absolute, so it resolves regardless of the
+    // workload's working directory) for the backend to use verbatim.
+    if let Some(cfg) = config {
+        let abs =
+            std::fs::canonicalize(&cfg).map_err(|e| anyhow::anyhow!("--config {cfg:?}: {e}"))?;
+        profile.emulator.options.insert(
+            "config".to_string(),
+            SimpleValue::String(abs.display().to_string()),
+        );
     }
 
     Ok(MaybeRef::Owned(profile.clone()))
@@ -1277,6 +1299,7 @@ async fn session_start<C: MirageCtl>(
         args.provider,
         args.exec_mode,
         &args.options,
+        args.config,
         &profile_name,
     )?;
     let def = ctl.session_create(CreateSessionRequest {
@@ -1775,6 +1798,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                 a.provider.clone(),
                 a.exec_mode,
                 &a.options,
+                a.config.clone(),
                 &a.profile,
             )?;
             tracing::info!(profile = %a.profile, "creating transient session");
@@ -2032,7 +2056,8 @@ mod tests {
     #[test]
     fn no_overrides_keeps_by_name_ref() {
         let mut p = sample_profile();
-        let r = apply_profile_overrides(&mut p, None, &[], None, None, &[], "mi450x").unwrap();
+        let r =
+            apply_profile_overrides(&mut p, None, &[], None, None, &[], None, "mi450x").unwrap();
         assert_eq!(r, MaybeRef::Ref("mi450x".to_string()));
     }
 
@@ -2046,6 +2071,7 @@ mod tests {
             None,
             Some(ExecModeArg::Clocked),
             &["gpu_model=cdna4".to_string(), "queues=8".to_string()],
+            None,
             "mi450x",
         )
         .unwrap();

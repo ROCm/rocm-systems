@@ -18,7 +18,7 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 use mirage_core::agent::AgentDef;
-use mirage_core::common::MaybeRef;
+use mirage_core::common::{MaybeRef, SimpleValue};
 use mirage_core::config::OptionDef;
 use mirage_core::emulator::{
     EmulatorBackend, EmulatorBackendDef, EmulatorDaemon, EmulatorDef, EmulatorDescription,
@@ -379,6 +379,23 @@ fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
 ///    configs share a file and stale files are never overwritten
 ///    in-place.
 pub fn kmd_config(def: &EmulatorDef, session: Option<&SessionId>) -> Result<PathBuf> {
+    // Drop-in `--config <path>`: when an explicit rocjitsu simulation
+    // config is supplied (mirage being used as a `rocjitsu` replacement)
+    // use that file verbatim instead of synthesising one from the
+    // profile's topology. This is the `--config` of the upstream
+    // `rocjitsu` CLI. (Container path remapping is not applied; the
+    // explicit-config path is intended for direct, non-containerised
+    // drop-in use.)
+    if let Some(SimpleValue::String(path)) = def.options.get("config") {
+        let cfg = PathBuf::from(path);
+        if !cfg.exists() {
+            return Err(MirageError::Other(format!(
+                "rocjitsu config not found: {path}"
+            )));
+        }
+        return Ok(cfg);
+    }
+
     let topology: TopologyDef = match &def.topology {
         MaybeRef::Owned(t) => t.clone(),
         MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
