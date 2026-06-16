@@ -364,6 +364,10 @@ struct CreateSessionBody {
     id: Option<SessionId>,
     #[serde(default)]
     workdir: Option<String>,
+    /// Run the emulator in out-of-process daemon mode instead of the
+    /// default in-process (local) emulation.
+    #[serde(default)]
+    daemon: bool,
     /// Override/enable containerisation: run every node inside a
     /// container built from this image.
     #[serde(default)]
@@ -459,6 +463,7 @@ async fn create_session(
                 .map(|p| p.display().to_string())
                 .unwrap_or("/".to_string())
         }),
+        daemon: body.daemon,
     })?;
     if body.spawn_host {
         mirage_ctl::spawn_host_for(&def.id)?;

@@ -57,6 +57,9 @@ pub struct CreateSessionRequest {
     pub profile: crate::common::MaybeRef<ProfileDef>,
     /// Working directory used as the default cwd for execs.
     pub workdir: String,
+    /// Run the emulator in out-of-process daemon mode for this session
+    /// instead of the default in-process emulation.
+    pub daemon: bool,
 }
 
 /// The control-plane API the CLI talks to.
@@ -351,6 +354,7 @@ impl MirageCtl for FileCtl {
             id: id.clone(),
             profile: req.profile,
             workdir: req.workdir,
+            daemon: req.daemon,
             created_at: Utc::now(),
         };
         crate::state::write_json(&layout.def(), &def)?;
@@ -752,6 +756,7 @@ mod tests {
                 id: Some(SessionId::new("s1").unwrap()),
                 profile: MaybeRef::Ref("p".to_string()),
                 workdir: "/tmp".to_string(),
+                daemon: false,
             })
             .unwrap();
         assert_eq!(def.id.as_str(), "s1");
@@ -771,6 +776,7 @@ mod tests {
             id: Some(SessionId::new("dup").unwrap()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
+            daemon: false,
         };
         ctl.session_create(req()).unwrap();
         assert!(matches!(
@@ -787,6 +793,7 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
+            daemon: false,
         })
         .unwrap();
         let def = ExecDef {
@@ -833,6 +840,7 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
+            daemon: false,
         })
         .unwrap();
         let r = make_exec_dir(&ctl, &s);
@@ -852,6 +860,7 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
+            daemon: false,
         })
         .unwrap();
         let r = make_exec_dir(&ctl, &s);
@@ -870,6 +879,7 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
+            daemon: false,
         })
         .unwrap();
         let r = ExecRef {
@@ -904,6 +914,7 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
+            daemon: false,
         })
         .unwrap();
         // Simulate the host having recorded the container state.
@@ -963,6 +974,7 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
+            daemon: false,
         })
         .unwrap();
         // No container state was ever written → provider must not be

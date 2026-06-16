@@ -410,6 +410,10 @@ pub struct StartArgs {
     /// when omitted.
     #[arg(long)]
     pub provider: Option<String>,
+    /// Run the emulator in out-of-process daemon mode instead of the
+    /// default in-process (local) emulation.
+    #[arg(long)]
+    pub daemon: bool,
     /// Never prompt; require every field on the command line even on a
     /// terminal.
     #[arg(long)]
@@ -517,6 +521,10 @@ pub struct RunArgs {
     /// when omitted.
     #[arg(long)]
     provider: Option<String>,
+    /// Run the emulator in out-of-process daemon mode instead of the
+    /// default in-process (local) emulation.
+    #[arg(long)]
+    daemon: bool,
     /// The command and its arguments.
     #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
     argv: Vec<String>,
@@ -1189,6 +1197,7 @@ async fn session_start<C: MirageCtl>(
         id,
         profile: profile_ref,
         workdir,
+        daemon: args.daemon,
     })?;
     if !args.no_host {
         spawn_host_for(&def.id)?;
@@ -1595,6 +1604,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                         .map(|p| p.display().to_string())
                         .unwrap_or("/".to_string())
                 }),
+                daemon: a.daemon,
             })?;
             tracing::info!(session = %def.id, "session created; spawning host");
             spawn_host_for(&def.id)?;

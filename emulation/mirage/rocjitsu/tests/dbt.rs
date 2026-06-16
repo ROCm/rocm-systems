@@ -52,6 +52,7 @@ fn write_session(emulator: EmulatorDef) -> SessionId {
         id: id.clone(),
         profile: MaybeRef::Owned(profile),
         workdir: ".".to_string(),
+        daemon: false,
         created_at: chrono::Utc::now(),
     };
     let layout = mirage_core::paths::SessionLayout::for_id(&id);

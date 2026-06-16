@@ -45,7 +45,9 @@ use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
 use mirage_core::paths::{ExecLayout, SessionLayout};
 use mirage_core::profile::{FileMount, ProfileDef};
-use mirage_core::session::{HEALTH_HEARTBEAT_INTERVAL, SessionDef, SessionHealth, SessionId};
+use mirage_core::session::{
+    HEALTH_HEARTBEAT_INTERVAL, SessionDef, SessionHealth, SessionId, session_uses_daemon,
+};
 use mirage_core::state::{read_json, read_json_opt, read_small_str, write_bytes, write_json};
 use nix::sys::stat::Mode;
 use nix::unistd::mkfifo;
@@ -167,7 +169,12 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     // or the orchestrator of a non-containerised session) hosts a daemon,
     // because that is where the workload — and thus the
     // `ROCJITSU_RUNTIME_DIR` the daemon binds its socket under — lives.
-    let mut emulator_daemon = if run_execs_here {
+    //
+    // Daemon mode is opt-in per session (`mirage run --daemon`); by
+    // default the emulator runs in-process (local mode), where the
+    // interposer reads the session's local config directly and no daemon
+    // socket is bound.
+    let mut emulator_daemon = if run_execs_here && session_uses_daemon(&config.session) {
         start_emulator_daemon(&config.session)
     } else {
         None

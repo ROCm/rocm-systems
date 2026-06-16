@@ -86,6 +86,7 @@ fn injection_emits_rccl_env_defaults() {
         id: id.clone(),
         profile: MaybeRef::Owned(profile),
         workdir: ".".to_string(),
+        daemon: false,
         created_at: chrono::Utc::now(),
     };
     let layout = mirage_core::paths::SessionLayout::for_id(&id);
