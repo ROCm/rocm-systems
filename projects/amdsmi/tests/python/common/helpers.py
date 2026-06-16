@@ -148,38 +148,43 @@ def _print_test_ids(suite):
             # Print the full dotted test id (e.g. "cli.test_cli_gpu.TestCliGpu.test_event")
             # so -l output matches the GTestSummaryRunner's per-test labels. Strip the
             # "__main__." prefix the same way so module-run and discover-run agree.
+            #
+            # The -l/--list output is the data the user asked for, so it goes to stdout
+            # (lets `... -l | grep xgmi` work without 2>&1).  Test-run chatter (legend,
+            # progress, summary, errors, help) stays on stderr.
             test_id = test.id()
             if test_id.startswith("__main__."):
                 test_id = test_id[len("__main__.") :]
-            print(f"\t{test_id}", file=sys.stderr)
+            print(f"\t{test_id}", file=sys.stdout)
     return
 
 
 def print_test_ids(suite):
-    """Print every test ID in an already-loaded *suite* to stderr.
+    """Print every test ID in an already-loaded *suite* to stdout.
 
     Public entry point for the discover()-based runners (cli_unit_test.py,
     integration_test.py, unit_tests.py), which build their suite from a
     directory rather than from a single module.  Mirrors the "Available tests:"
     header produced by print_tests() so ``-l`` output is consistent across all
-    runners.
+    runners.  Written to stdout so the listing can be piped/filtered directly.
     """
-    print("Available tests:", file=sys.stderr)
+    print("Available tests:", file=sys.stdout)
     _print_test_ids(suite)
     return
 
 
 def print_tests(module_name):
-    """Print all test IDs in the given module to stderr and return.
+    """Print all test IDs in the given module to stdout and return.
 
     Loads every test discovered by unittest.TestLoader from the named module
     (pass __name__ from the script's __main__ block) and prints each ID,
-    one per line, indented by a tab.  Output goes to stderr so it can be
-    captured independently of normal stdout test output.
+    one per line, indented by a tab.  Output goes to stdout so the listing can
+    be piped/filtered (e.g. `... -l | grep xgmi`) independently of the test-run
+    chatter, which stays on stderr.
     """
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[module_name])
-    print("Available tests:", file=sys.stderr)
+    print("Available tests:", file=sys.stdout)
     _print_test_ids(suite)
     return
 
