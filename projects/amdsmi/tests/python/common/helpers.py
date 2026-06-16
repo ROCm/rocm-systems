@@ -145,8 +145,13 @@ def _print_test_ids(suite):
         if isinstance(test, unittest.TestSuite):
             _print_test_ids(test)
         else:
-            test = str(test).split()[0]
-            print(f"\t{test}", file=sys.stderr)
+            # Print the full dotted test id (e.g. "cli.test_cli_gpu.TestCliGpu.test_event")
+            # so -l output matches the GTestSummaryRunner's per-test labels. Strip the
+            # "__main__." prefix the same way so module-run and discover-run agree.
+            test_id = test.id()
+            if test_id.startswith("__main__."):
+                test_id = test_id[len("__main__.") :]
+            print(f"\t{test_id}", file=sys.stderr)
     return
 
 
