@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2016-2026, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 /* Internal types and constants shared between p2p_resiliency_recovery.cc
  * and p2p_resiliency_recovery_ainic.cc. Not part of the public plugin API. */
