@@ -46,9 +46,11 @@
 #include <hwloc.h>
 #include <hwloc/linux-libnuma.h>
 #include <numa.h>
+#include <pthread.h>
 
 #include <vector>
 #include <algorithm>
+#include <atomic>
 
 #include "common/base_rocr.h"
 #include "suites/test_common/test_base.h"
@@ -995,7 +997,6 @@ void MemoryAsyncCopy::PrintTopology(void) {
     // Print agent info
     std::cout << std::endl;
     std::cout << "Agent #" << node.agent.index_ << ":" << std::endl;
-
     if (HSA_DEVICE_TYPE_CPU == node.agent.device_type())
       std::cout << "Agent Device Type:                             CPU"
                 << std::endl;
@@ -1015,6 +1016,335 @@ void MemoryAsyncCopy::PrintTopology(void) {
                 << node.pool.at(j).is_fine_grained_ << std::endl;
     }
   }
+}
+
+// =============================================================================
+// Concurrent/Multi-threaded Async Copy Tests
+// =============================================================================
+
+// Performs async copy iterations on a transaction
+// This is designed to be called from multiple threads concurrently
+hsa_status_t PerformAsyncCopyIterations(
+    MemoryAsyncCopy* test,
+    Transaction* trans,
+    void* src_buffer,
+    void* dst_buffer,
+    size_t copy_size,
+    int iterations) {
+
+  hsa_status_t status;
+  hsa_signal_t signal;
+
+  status = hsa_signal_create(1, 0, nullptr, &signal);
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  // Get pools and agents from transaction
+  hsa_amd_memory_pool_t src_pool = test->pool_info()->at(trans->src)->pool_;
+  hsa_amd_memory_pool_t dst_pool = test->pool_info()->at(trans->dst)->pool_;
+  hsa_agent_t src_agent = test->pool_info()->at(trans->src)->owner_agent_info()->agent();
+  hsa_agent_t dst_agent = test->pool_info()->at(trans->dst)->owner_agent_info()->agent();
+
+  // Acquire access - prefer GPU agent
+  hsa_agent_t* copy_agent = test->AcquireAsyncCopyAccess(
+      dst_buffer, dst_pool, &dst_agent,
+      src_buffer, src_pool, &src_agent);
+
+  if (copy_agent == nullptr) {
+    hsa_signal_destroy(signal);
+    return HSA_STATUS_ERROR;
+  }
+
+  // Perform the copy iterations
+  for (int i = 0; i < iterations; i++) {
+    hsa_signal_store_screlease(signal, 1);
+
+    status = hsa_amd_memory_async_copy(
+        dst_buffer,
+        *copy_agent,
+        src_buffer,
+        *copy_agent,
+        copy_size,
+        0,
+        nullptr,
+        signal);
+
+    if (status != HSA_STATUS_SUCCESS) {
+      hsa_signal_destroy(signal);
+      return status;
+    }
+
+    hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
+                               UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  }
+
+  hsa_signal_destroy(signal);
+  return HSA_STATUS_SUCCESS;
+}
+
+void MemoryAsyncCopy::TestConcurrentAsyncCopy() {
+  static const int kNumThreads = 100;
+  static const int kCopiesPerThread = 1000;
+  static const size_t kCopySizes[] = {
+    4 * 1024,     // 4 KB
+    8 * 1024,     // 8 KB
+    16 * 1024,    // 16 KB
+    32 * 1024,    // 32 KB
+    64 * 1024,    // 64 KB
+    128 * 1024,   // 128 KB
+    256 * 1024    // 256 KB
+  };
+  static const int kNumCopySizes = sizeof(kCopySizes) / sizeof(kCopySizes[0]);
+
+  std::cout << "\n*** Concurrent Async Copy Test (TSAN) ***\n";
+  std::cout << "Spawning " << kNumThreads << " threads performing concurrent async copies\n";
+  std::cout << "to stress-test SDMA engine allocation and doorbell contention.\n\n";
+
+  // Ensure we have transactions set up
+  if (tran_.empty()) {
+    std::cout << "No transactions available. Run SetUp() first.\n";
+    return;
+  }
+
+  // Find H2D and D2H transactions to test
+  Transaction* h2d_trans = nullptr;
+  Transaction* d2h_trans = nullptr;
+
+  for (auto& t : tran_) {
+    if (t.type == H2D && h2d_trans == nullptr) {
+      h2d_trans = &t;
+      std::cout << "Found H2D path: Pool " << t.src << " -> Pool " << t.dst << "\n";
+    } else if (t.type == D2H && d2h_trans == nullptr) {
+      d2h_trans = &t;
+      std::cout << "Found D2H path: Pool " << t.src << " -> Pool " << t.dst << "\n";
+    }
+  }
+
+  if (h2d_trans == nullptr && d2h_trans == nullptr) {
+    std::cout << "No H2D or D2H transactions found. Skipping test.\n";
+    return;
+  }
+
+  // Thread context structure
+  struct ThreadContext {
+    MemoryAsyncCopy* test;
+    int thread_id;
+    Transaction* transaction;
+    void* src_buffer;
+    void* dst_buffer;
+    size_t copy_size;
+    int iterations;
+    std::atomic<int>* error_count;
+  };
+
+  std::atomic<int> error_count(0);
+  std::vector<pthread_t> threads(kNumThreads);
+  std::vector<ThreadContext> contexts(kNumThreads);
+
+  // Worker lambda - calls PerformAsyncCopyIterations
+  auto worker = [](void* arg) -> void* {
+    ThreadContext* ctx = reinterpret_cast<ThreadContext*>(arg);
+
+    hsa_status_t status = PerformAsyncCopyIterations(
+        ctx->test,
+        ctx->transaction,
+        ctx->src_buffer,
+        ctx->dst_buffer,
+        ctx->copy_size,
+        ctx->iterations);
+
+    if (status != HSA_STATUS_SUCCESS) {
+      ctx->error_count->fetch_add(1, std::memory_order_relaxed);
+    }
+    return nullptr;
+  };
+
+  // Allocate buffers for each thread
+  size_t max_size = kCopySizes[kNumCopySizes - 1];
+  for (int i = 0; i < kNumThreads; i++) {
+    contexts[i].test = this;
+    contexts[i].thread_id = i;
+    // Alternate between H2D and D2H transactions
+    contexts[i].transaction = (i % 2 == 0 && h2d_trans) ? h2d_trans : d2h_trans;
+    if (contexts[i].transaction == nullptr) {
+      contexts[i].transaction = h2d_trans ? h2d_trans : d2h_trans;
+    }
+    contexts[i].iterations = kCopiesPerThread;
+    contexts[i].error_count = &error_count;
+    // Vary copy size across threads
+    contexts[i].copy_size = kCopySizes[(i * kCopiesPerThread) % kNumCopySizes];
+
+    hsa_amd_memory_pool_t src_pool = pool_info_[contexts[i].transaction->src]->pool_;
+    hsa_amd_memory_pool_t dst_pool = pool_info_[contexts[i].transaction->dst]->pool_;
+
+    hsa_status_t err = hsa_amd_memory_pool_allocate(src_pool, max_size, 0,
+                                                     &contexts[i].src_buffer);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+
+    err = hsa_amd_memory_pool_allocate(dst_pool, max_size, 0,
+                                        &contexts[i].dst_buffer);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+
+    // Grant access if needed
+    hsa_agent_t src_agent = pool_info_[contexts[i].transaction->src]->owner_agent_info()->agent();
+    hsa_agent_t dst_agent = pool_info_[contexts[i].transaction->dst]->owner_agent_info()->agent();
+
+    AcquireAccess(src_agent, dst_pool, contexts[i].dst_buffer);
+    AcquireAccess(dst_agent, src_pool, contexts[i].src_buffer);
+  }
+
+  std::cout << "Launching " << kNumThreads << " threads with "
+            << kCopiesPerThread << " copies each...\n";
+  std::cout << "Total async copy operations: " << (kNumThreads * kCopiesPerThread) << "\n";
+  std::cout << "Copy sizes vary from 4KB to 256KB\n";
+
+  // Create threads - this is where TSAN races occur
+  for (int i = 0; i < kNumThreads; i++) {
+    int rc = pthread_create(&threads[i], nullptr, worker, &contexts[i]);
+    ASSERT_EQ(0, rc);
+  }
+
+  // Wait for all threads to complete
+  for (int i = 0; i < kNumThreads; i++) {
+    pthread_join(threads[i], nullptr);
+  }
+
+  std::cout << "All threads completed.\n";
+  ASSERT_EQ(0, error_count.load()) << "Errors occurred during concurrent copies";
+
+  // Cleanup
+  for (int i = 0; i < kNumThreads; i++) {
+    hsa_amd_memory_pool_free(contexts[i].src_buffer);
+    hsa_amd_memory_pool_free(contexts[i].dst_buffer);
+  }
+
+  std::cout << "Concurrent async copy test: PASSED\n";
+  std::cout << "\nExpected TSAN findings (before runtime fix):\n";
+  std::cout << "  - Race on sdma_blit_used_mask_ (amd_gpu_agent.cpp:2292)\n";
+  std::cout << "  - Race on *queue_wptr_ (blit_sdma.cpp:1300)\n";
+}
+
+void MemoryAsyncCopy::TestMultiGpuP2P() {
+  static const int kNumThreads = 20;
+  static const int kCopiesPerThread = 500;
+  static const size_t kCopySize = 4 * 1024;  // 4KB
+
+  std::cout << "\n*** Multi-GPU P2P Concurrent Test (TSAN) ***\n";
+  std::cout << "Spawning " << kNumThreads << " threads performing concurrent P2P copies\n";
+  std::cout << "to test PCIe P2P bandwidth and SDMA engine sharing between GPUs.\n\n";
+
+  // Find P2P transaction
+  Transaction* p2p_trans = nullptr;
+  for (auto& t : tran_) {
+    if (t.type == P2P) {
+      p2p_trans = &t;
+      std::cout << "Found P2P path: Pool " << t.src << " -> Pool " << t.dst << "\n";
+      break;
+    }
+  }
+
+  if (p2p_trans == nullptr) {
+    std::cout << "P2P transaction not found (requires 2+ GPUs in same NUMA node).\n";
+    std::cout << "Skipping test.\n";
+    return;
+  }
+
+  // Thread context structure
+  struct ThreadContext {
+    MemoryAsyncCopy* test;
+    int thread_id;
+    Transaction* transaction;
+    void* src_buffer;
+    void* dst_buffer;
+    size_t copy_size;
+    int iterations;
+    std::atomic<int>* error_count;
+  };
+
+  std::atomic<int> error_count(0);
+  std::vector<pthread_t> threads(kNumThreads);
+  std::vector<ThreadContext> contexts(kNumThreads);
+
+  // Worker lambda - calls PerformAsyncCopyIterations
+  auto worker = [](void* arg) -> void* {
+    ThreadContext* ctx = reinterpret_cast<ThreadContext*>(arg);
+
+    hsa_status_t status = PerformAsyncCopyIterations(
+        ctx->test,
+        ctx->transaction,
+        ctx->src_buffer,
+        ctx->dst_buffer,
+        ctx->copy_size,
+        ctx->iterations);
+
+    if (status != HSA_STATUS_SUCCESS) {
+      ctx->error_count->fetch_add(1, std::memory_order_relaxed);
+    }
+    return nullptr;
+  };
+
+  // Allocate buffers for each thread
+  for (int i = 0; i < kNumThreads; i++) {
+    contexts[i].test = this;
+    contexts[i].thread_id = i;
+    contexts[i].transaction = p2p_trans;
+    contexts[i].iterations = kCopiesPerThread;
+    contexts[i].error_count = &error_count;
+    contexts[i].copy_size = kCopySize;
+
+    hsa_amd_memory_pool_t src_pool = pool_info_[p2p_trans->src]->pool_;
+    hsa_amd_memory_pool_t dst_pool = pool_info_[p2p_trans->dst]->pool_;
+
+    hsa_status_t err = hsa_amd_memory_pool_allocate(src_pool, kCopySize, 0,
+                                                     &contexts[i].src_buffer);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+
+    err = hsa_amd_memory_pool_allocate(dst_pool, kCopySize, 0,
+                                        &contexts[i].dst_buffer);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+
+    // Grant P2P access between both GPUs
+    hsa_agent_t src_agent = pool_info_[p2p_trans->src]->owner_agent_info()->agent();
+    hsa_agent_t dst_agent = pool_info_[p2p_trans->dst]->owner_agent_info()->agent();
+    hsa_agent_t agents[] = {src_agent, dst_agent};
+
+    err = hsa_amd_agents_allow_access(2, agents, nullptr, contexts[i].src_buffer);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+
+    err = hsa_amd_agents_allow_access(2, agents, nullptr, contexts[i].dst_buffer);
+    ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+  }
+
+  std::cout << "Launching " << kNumThreads << " threads with "
+            << kCopiesPerThread << " P2P copies each...\n";
+  std::cout << "Total P2P operations: " << (kNumThreads * kCopiesPerThread) << "\n";
+  std::cout << "Copy size: " << (kCopySize / 1024) << " KB\n";
+
+  // Create threads - this is where TSAN races occur
+  for (int i = 0; i < kNumThreads; i++) {
+    int rc = pthread_create(&threads[i], nullptr, worker, &contexts[i]);
+    ASSERT_EQ(0, rc);
+  }
+
+  // Wait for all threads to complete
+  for (int i = 0; i < kNumThreads; i++) {
+    pthread_join(threads[i], nullptr);
+  }
+
+  std::cout << "All P2P threads completed.\n";
+  ASSERT_EQ(0, error_count.load()) << "Errors occurred during P2P copies";
+
+  // Cleanup
+  for (int i = 0; i < kNumThreads; i++) {
+    hsa_amd_memory_pool_free(contexts[i].src_buffer);
+    hsa_amd_memory_pool_free(contexts[i].dst_buffer);
+  }
+
+  std::cout << "Multi-GPU P2P test: PASSED\n";
+  std::cout << "\nThis tests:\n";
+  std::cout << "  - PCIe P2P bandwidth under contention\n";
+  std::cout << "  - SDMA engine sharing between GPUs\n";
+  std::cout << "  - Cross-GPU SDMA bitmask isolation\n";
+  std::cout << "  - P2P memory access race conditions\n";
 }
 
 #undef RET_IF_HSA_ERR

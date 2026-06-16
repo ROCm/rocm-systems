@@ -153,6 +153,10 @@ class MemoryAsyncCopy : public TestBase {
   // @Brief: Display information about what this test does
   virtual void DisplayTestInfo(void);
 
+  // @Brief: Concurrent async copy stress tests
+  void TestConcurrentAsyncCopy(void);
+  void TestMultiGpuP2P(void);
+
   // There are 3 levels of testing, from quickest/very specific to
   // longest/most complete:
   // 1. to and from a specified source to a specified target
