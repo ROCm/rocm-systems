@@ -68,6 +68,9 @@ Panel Config:
           value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) + (GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64)) )
           unit: FLOPs/Byte
         AI L1:
+          value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(TCP_GL1_REQ_READ_sum * 64 + TCP_GL1_REQ_WRITE_sum * 64) )
+          unit: FLOPs/Byte
+        AI L0:
           value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(TCP_REQ_sum * 64) )
           unit: FLOPs/Byte
         AI LDS:
@@ -109,9 +112,13 @@ Panel Config:
       density relative to L2 cache traffic. Higher values indicate better data
       reuse upstream of L2, while lower values suggest heavy traffic into L2.
     AI L1: >-
-      Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate
+      Arithmetic Intensity relative to the L1 cache. This metric shows compute
+      density relative to L1 cache traffic. Higher values indicate better data
+      reuse upstream of L1, while lower values suggest heavy traffic into L1.
+    AI L0: >-
+      Arithmetic Intensity relative to the L0 cache (TCP). Higher values indicate
       more compute operations per byte of data loaded, suggesting compute-bound
-      behavior. Lower values suggest memory-bound behavior limited by L1 bandwidth.
+      behavior. Lower values suggest memory-bound behavior limited by L0 bandwidth.
     AI LDS: >-
       Arithmetic Intensity relative to the Local Data Share (LDS). Higher values
       indicate more compute per byte of LDS traffic, suggesting effective reuse

@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from roofline.roofline_main import Roofline
+from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze
@@ -16,6 +16,7 @@ from utils.utils_analysis import (
     build_call_trees,
     build_call_trees_with_kernel_ids,
     build_operator_summary,
+    get_matrix_ops_type,
     process_torch_trace_output,
     write_torch_trace_consolidated_csv,
 )
@@ -167,7 +168,7 @@ class cli_analysis(OmniAnalyze_Base):
 
             # Generate roofline plot for single-path, compatible architectures
             if (len(args.path)) == 1:
-                if gpu_arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
+                if gpu_arch in ROOFLINE_SUPPORTED:
                     is_roofline_valid, roofline_error_msg = validate_roofline_csv(
                         Path(workload_path)
                     )
@@ -180,13 +181,6 @@ class cli_analysis(OmniAnalyze_Base):
                         )
                     if is_roofline_valid:
                         soc_obj = soc[gpu_arch]
-                        # Normalize user-facing "vL1D" to CSV column name "L1"
-                        mem_level = (
-                            args.mem_level
-                            if isinstance(args.mem_level, list)
-                            else [args.mem_level]
-                        )
-                        mem_level = [("L1" if m == "vL1D" else m) for m in mem_level]
 
                         roof_obj = Roofline(
                             args=soc_obj.get_args(),
@@ -194,13 +188,16 @@ class cli_analysis(OmniAnalyze_Base):
                             run_parameters={
                                 "workload_dir": workload_path,
                                 "device_id": 0,
+                                "gpu_arch": gpu_arch,
                                 "sort_type": str(args.sort),
-                                "mem_level": mem_level,
-                                "is_standalone": True,
+                                "mem_level": args.mem_level,
                                 "roofline_data_type": args.roofline_data_type,
                                 "kernel_filter": bool(args.gpu_kernel),
                                 "iteration_multiplexing": self._profiling_config.get(
                                     "iteration_multiplexing"
+                                ),
+                                "matrix_ops_type": get_matrix_ops_type(
+                                    workload.sys_info.iloc[0]["gpu_series"]
                                 ),
                             },
                         )

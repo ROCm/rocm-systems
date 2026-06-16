@@ -20,14 +20,19 @@ from utils.logger import (
     demarcate,
 )
 from utils.roofline_calc import (
-    CACHE_HIERARCHY,
     CACHE_LEVELS,
     MATRIX_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
     construct_roof,
+    sanitize_mem_level,
 )
 from utils.specs import MachineSpecs
+from utils.utils_analysis import get_matrix_ops_type
+
+# ROOFLINE_SUPPORTED lists the supported gfx architectures, check against this list
+# before doing any roofline-related work
+ROOFLINE_SUPPORTED = ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950", "gfx1151"]
 
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 
@@ -35,6 +40,7 @@ SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 # entry per rendering backend so both the HTML (Plotly hex) and CLI (plotext
 # token) plots draw from a single source of truth.
 _TRACE_COLORS: dict[str, dict[str, str]] = {
+    "l0": {"html": "#F0E442", "cli": "brown+"},
     "l1": {"html": "#0072B2", "cli": "red+"},
     "l2": {"html": "#009E73", "cli": "green+"},
     "hbm": {"html": "#D55E00", "cli": "blue+"},
@@ -353,6 +359,10 @@ class Roofline:
         subplot_row = None
         total_figure_height = 600  # default height
 
+        sanitized_cache_hierarchy = sanitize_mem_level(
+            self.__run_parameters["mem_level"], self.__mspec.gpu_model
+        )
+
         if is_new_figure:
             if has_kernel_names:
                 raw_kernel_names = kernel_names_data.get("kernel_names", [])
@@ -365,13 +375,18 @@ class Roofline:
                 temp_ceiling_data = construct_roof(
                     roofline_parameters=self.__run_parameters,
                     dtype=dtype,
+                    mspec=self.__mspec,
                     ai_data=self.__ai_data,
                 )
 
                 plot_points_data = []
 
                 for cache_level in CACHE_LEVELS:
-                    if cache_level in self.__ai_data:
+                    level_name = cache_level.removeprefix("ai_").upper()
+                    if (
+                        cache_level in self.__ai_data
+                        and level_name in sanitized_cache_hierarchy
+                    ):
                         x_vals = self.__ai_data[cache_level][0]
                         y_vals = self.__ai_data[cache_level][1]
 
@@ -410,9 +425,19 @@ class Roofline:
 
                 BASE_ROW_HEIGHT = 15  # Base pixel height of each kernel name row
                 KERNEL_PADDING = 8  # Padding in between each kernel name row
+                kernel_indices_with_points = {
+                    point["kernel_idx"] for point in plot_points_data
+                }
+                active_kernel_indices = [
+                    i for i in range(num_kernels) if i in kernel_indices_with_points
+                ]
+                num_active_kernels = len(active_kernel_indices)
+                active_lines_per_kernel = [
+                    lines_per_kernel[i] for i in active_kernel_indices
+                ]
                 KERNEL_NAMES_HEIGHT = (
-                    sum(lines_per_kernel) * BASE_ROW_HEIGHT
-                    + (num_kernels - 1) * KERNEL_PADDING
+                    sum(active_lines_per_kernel) * BASE_ROW_HEIGHT
+                    + max(num_active_kernels - 1, 0) * KERNEL_PADDING
                     + BASE_ROW_HEIGHT
                 )
 
@@ -461,6 +486,7 @@ class Roofline:
         self.__ceiling_data = construct_roof(
             roofline_parameters=self.__run_parameters,
             dtype=dtype,
+            mspec=self.__mspec,
             ai_data=self.__ai_data,
         )
         console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")
@@ -483,16 +509,16 @@ class Roofline:
         if ops_flops == "FLOP" and not skipAI:
             kernel_names = self.__ai_data.get("kernelNames", [])
             symbols_list = [SYMBOLS[i % len(SYMBOLS)] for i in range(len(kernel_names))]
-            show_in_legend = not self.__run_parameters["is_standalone"]
 
             for cache_level in CACHE_LEVELS:
+                name = cache_level.removeprefix("ai_").upper()
                 if (
                     cache_level not in self.__ai_data
                     or not self.__ai_data[cache_level][0]
+                    or name not in sanitized_cache_hierarchy
                 ):
                     continue
 
-                name = cache_level.removeprefix("ai_").upper()
                 fig.add_trace(
                     go.Scatter(
                         x=self.__ai_data[cache_level][0],
@@ -504,7 +530,6 @@ class Roofline:
                             size=10,
                             symbol=symbols_list[: len(self.__ai_data[cache_level][0])],
                         ),
-                        showlegend=show_in_legend,
                     ),
                     **subplot_kwargs,
                 )
@@ -512,19 +537,8 @@ class Roofline:
         #######################
         # Bandwidth Ceilings
         #######################
-        mem_level_config = self.__run_parameters.get("mem_level", "ALL")
-        cache_hierarchy = (
-            CACHE_HIERARCHY
-            if mem_level_config == "ALL" or mem_level_config == ["ALL"]
-            else (
-                mem_level_config
-                if isinstance(mem_level_config, list)
-                else [mem_level_config]
-            )
-        )
-
         bandwidth_lines = []
-        for level in cache_hierarchy:
+        for level in sanitized_cache_hierarchy:
             key = level.lower()
             line_data = self.__ceiling_data.get(key)
             if (
@@ -577,7 +591,6 @@ class Roofline:
                 all_dts = sorted(list(set(existing_dts + [dtype])))
                 all_dts_str = ", ".join(all_dts)
                 legend_name = f"{level.upper()}-{all_dts_str}<br>{value} GB/s"
-
                 fig.update_traces(
                     patch={
                         "name": legend_name,
@@ -588,7 +601,6 @@ class Roofline:
             else:
                 # New bandwidth line with value in legend
                 legend_name = f"{level.upper()}-{dtype}<br>{value} GB/s"
-
                 fig.add_trace(
                     go.Scatter(
                         x=bw_line["x"],
@@ -626,8 +638,12 @@ class Roofline:
             )
 
         if matrix_data:
+            matrix_ops_type = get_matrix_ops_type(
+                getattr(self.__mspec, "gpu_series", "unknown_series")
+            )
             legend_name = (
-                f"Peak MFMA-{dtype}<br>{to_int(matrix_data[2])} G{ops_flops}/s"
+                f"Peak {matrix_ops_type}-{dtype}<br>"
+                f"{to_int(matrix_data[2])} G{ops_flops}/s"
             )
             fig.add_trace(
                 go.Scatter(
@@ -844,7 +860,7 @@ class Roofline:
             row_heights = []
             current_y = 0
             KERNEL_PADDING = 0
-            for i in range(num_kernels):
+            for i in active_kernel_indices:
                 # Height for this kernel is proportional to its number of lines
                 kernel_height = lines_per_kernel[i]
                 row_heights.append(kernel_height)
@@ -862,19 +878,19 @@ class Roofline:
             kernel_symbol_y = []
             kernel_symbol_markers = []
 
-            for i in range(num_kernels):
+            for row_idx, kernel_idx in enumerate(active_kernel_indices):
                 kernel_symbol_x.append(0.05)
-                kernel_symbol_y.append(y_positions[i])
-                kernel_symbol_markers.append(symbols_list[i])
+                kernel_symbol_y.append(y_positions[row_idx])
+                kernel_symbol_markers.append(symbols_list[kernel_idx])
 
                 # Background shading for every other row
-                if i % 2 == 0:
+                if row_idx % 2 == 0:
                     fig.add_shape(
                         type="rect",
                         x0=0,
                         x1=1,
-                        y0=y_positions[i] - row_heights[i] / 2,
-                        y1=y_positions[i] + row_heights[i] / 2,
+                        y0=y_positions[row_idx] - row_heights[row_idx] / 2,
+                        y1=y_positions[row_idx] + row_heights[row_idx] / 2,
                         fillcolor="rgba(220, 220, 220, 0.3)",
                         line_width=0,
                         layer="below",
@@ -887,8 +903,8 @@ class Roofline:
                     type="line",
                     x0=0,
                     x1=1,
-                    y0=y_positions[i] - row_heights[i] / 2,
-                    y1=y_positions[i] - row_heights[i] / 2,
+                    y0=y_positions[row_idx] - row_heights[row_idx] / 2,
+                    y1=y_positions[row_idx] - row_heights[row_idx] / 2,
                     line=dict(color="rgba(150, 150, 150, 0.5)", width=1),
                     row=3,
                     col=1,
@@ -897,8 +913,8 @@ class Roofline:
                 # Kernel name annotation with wrapped text (left aligned)
                 fig.add_annotation(
                     x=0.15,
-                    y=y_positions[i],
-                    text=wrapped_kernel_names[i],
+                    y=y_positions[row_idx],
+                    text=wrapped_kernel_names[kernel_idx],
                     showarrow=False,
                     xanchor="left",
                     yanchor="middle",
@@ -1054,6 +1070,7 @@ class Roofline:
         self.__ceiling_data = construct_roof(
             roofline_parameters=self.__run_parameters,
             dtype=dtype,
+            mspec=self.__mspec,
         )
 
         self.roof_setup()
@@ -1062,9 +1079,9 @@ class Roofline:
         if not isinstance(dtype, str):
             console_error("Unsupported datatype input - must be str")
 
-        # Defensive copy; vL1D→L1 normalization happens at the analysis entry point.
-        raw_mem = self.__run_parameters["mem_level"]
-        mem_level = list(raw_mem) if isinstance(raw_mem, list) else raw_mem
+        sanitized_cache_hierarchy = sanitize_mem_level(
+            self.__run_parameters["mem_level"], self.__mspec.gpu_model
+        )
 
         kernel_markers = {
             0: "star",
@@ -1080,12 +1097,7 @@ class Roofline:
 
         ops_flops = "OP" if dtype.startswith("I") else "FLOP"
 
-        # Plot bandwidth lines
-        cache_hierarchy = (
-            CACHE_HIERARCHY if mem_level == "ALL" or mem_level == ["ALL"] else mem_level
-        )
-
-        for cache_level in cache_hierarchy:
+        for cache_level in sanitized_cache_hierarchy:
             cache_key = cache_level.lower()
             if self.__ceiling_data[cache_key][0] is None:
                 continue
@@ -1114,13 +1126,18 @@ class Roofline:
             )
 
         # Plot VALU and Matrix Ops Peak
-        if dtype in PEAK_OPS_DATATYPES and self.__ceiling_data["valu"][0] is not None:
+        if (
+            dtype in PEAK_OPS_DATATYPES
+            and self.__ceiling_data["valu"]
+            and self.__ceiling_data["valu"][0] is not None
+        ):
+            valu_y = [
+                max(self.__ceiling_data["valu"][1][0] - 0.1, 1e-9),
+                max(self.__ceiling_data["valu"][1][1] - 0.1, 1e-9),
+            ]
             plt.plot(
                 self.__ceiling_data["valu"][0],
-                [
-                    self.__ceiling_data["valu"][1][0] - 0.1,
-                    self.__ceiling_data["valu"][1][1] - 0.1,
-                ],
+                valu_y,
                 label=f"Peak VALU-{dtype}",
                 marker="braille",
                 color=get_color("valu", backend="cli"),
@@ -1146,15 +1163,20 @@ class Roofline:
 
         if (
             dtype in MATRIX_DATATYPES
+            and self.__ceiling_data["matrix_ops"]
             and self.__ceiling_data["matrix_ops"][0] is not None
         ):
+            matrix_ops_type = get_matrix_ops_type(
+                getattr(self.__mspec, "gpu_series", "unknown_series")
+            )
+            matrix_y = [
+                max(self.__ceiling_data["matrix_ops"][1][0] - 0.1, 1e-9),
+                max(self.__ceiling_data["matrix_ops"][1][1] - 0.1, 1e-9),
+            ]
             plt.plot(
                 self.__ceiling_data["matrix_ops"][0],
-                [
-                    self.__ceiling_data["matrix_ops"][1][0] - 0.1,
-                    self.__ceiling_data["matrix_ops"][1][1] - 0.1,
-                ],
-                label=f"Peak MFMA-{dtype}",
+                matrix_y,
+                label=f"Peak {matrix_ops_type}-{dtype}",
                 marker="braille",
                 color=get_color("matrix_ops", backend="cli"),
             )
@@ -1178,7 +1200,7 @@ class Roofline:
             console_warning(f"No Matrix Ops measurement available for {dtype}")
 
         # Plot Application AI
-        for cache_level in cache_hierarchy:
+        for cache_level in sanitized_cache_hierarchy:
             key = f"ai_{cache_level.lower()}"
             if key not in self.__ai_data:
                 continue
@@ -1222,4 +1244,8 @@ class Roofline:
         return plt.build()
 
     def get_dtype(self) -> list[str]:
+        """
+        Return the data types requested by the user (else the default data type)
+        for the roofline plot.
+        """
         return self.__run_parameters["roofline_data_type"]

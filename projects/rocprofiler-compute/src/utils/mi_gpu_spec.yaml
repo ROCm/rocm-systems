@@ -24,6 +24,7 @@
 #               | -- physical_aid # Number of physical AIDs (CDNA)
 #               | -- logical_partitions_per_die # Logical AID partitions per physical AID (CDNA)
 #               | -- memory_die # Number of memory dies / MCDs (RDNA/navi3)
+#               | -- memory_levels # Cache and memory levels supported by the arch
 #
 # --------------------------------------------------------------------------------
 
@@ -63,12 +64,18 @@ mi_gpu_spec:
           GDS: 4
         models:
           - gpu_model: mi210
+            design:
+              memory_levels: ["LDS", "L1", "L2", "HBM"]
             chip_ids:
               physical: 29711
           - gpu_model: mi250
+            design:
+              memory_levels: ["LDS", "L1", "L2", "HBM"]
             chip_ids:
               physical: 29708
           - gpu_model: mi250x
+            design:
+              memory_levels: ["LDS", "L1", "L2", "HBM"]
             chip_ids:
               physical: 29704
 
@@ -103,6 +110,7 @@ mi_gpu_spec:
             design:
               physical_aid: 4
               logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: null
               virtual: null
@@ -141,6 +149,7 @@ mi_gpu_spec:
             design:
               physical_aid: 4
               logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: null
               virtual: null
@@ -175,6 +184,7 @@ mi_gpu_spec:
             design:
               physical_aid: 4
               logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29856
               virtual: 29876
@@ -200,6 +210,7 @@ mi_gpu_spec:
             design:
               physical_aid: 4
               logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29857
               virtual: 29877
@@ -225,6 +236,7 @@ mi_gpu_spec:
             design:
               physical_aid: 4
               logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29865
               virtual: 29885
@@ -246,6 +258,7 @@ mi_gpu_spec:
             design:
               physical_aid: 4
               logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29858
               virtual: 29878
@@ -267,6 +280,7 @@ mi_gpu_spec:
             design:
               physical_aid: 4
               logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29864
               virtual: 29884
@@ -292,6 +306,7 @@ mi_gpu_spec:
             design:
               physical_aid: 4
               logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29861
               virtual: 29881
@@ -334,6 +349,7 @@ mi_gpu_spec:
               # MI350 series has 2 physical AIDs that are subdivided into 2 independent logical partitions
               physical_aid: 2
               logical_partitions_per_die: 2
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 30112
               virtual: 30128
@@ -358,6 +374,7 @@ mi_gpu_spec:
             design:
               physical_aid: 2
               logical_partitions_per_die: 2
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 30115
               virtual: 30131
@@ -380,6 +397,7 @@ mi_gpu_spec:
             design:
               physical_aid: 2
               logical_partitions_per_die: 2
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 30114
               virtual: 30130
@@ -399,6 +417,7 @@ mi_gpu_spec:
               # Half config- 2 AIDs but AID1 is dummy
               physical_aid: 1
               logical_partitions_per_die: 2
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 30120
               virtual: 30136
@@ -426,6 +445,7 @@ mi_gpu_spec:
           - gpu_model: rdna35_point_1
             design:
               memory_die: 1
+              memory_levels: ["LDS", "L0", "L1", "L2"]
             chip_ids:
               physical: 5390
       - gpu_arch: gfx1151
@@ -445,6 +465,7 @@ mi_gpu_spec:
           - gpu_model: rdna35_halo
             design:
               memory_die: 1
+              memory_levels: ["LDS", "L0", "L1", "L2", "MALL"]
             chip_ids:
               physical: 5510
       - gpu_arch: gfx1152
@@ -464,6 +485,7 @@ mi_gpu_spec:
           - gpu_model: rdna35_point_2
             design:
               memory_die: 1
+              memory_levels: ["LDS", "L0", "L1", "L2"]
             chip_ids:
               physical: 4372
   #########################################################
