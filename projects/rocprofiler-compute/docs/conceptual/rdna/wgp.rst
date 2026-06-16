@@ -100,6 +100,14 @@ Wave instruction mix
       .. jinja:: rdna115x-wave-instruction-mix-gfx115x
          :file: _templates/metrics_table.j2
 
+.. note::
+
+   The **Instructions - Dual VALU (VOPD)** row counts ``SQ_INSTS_DUAL_VALU_WAVE32`` —
+   the number of VOPD-encoded wave32 instructions issued per normalization unit.
+   Each unit corresponds to one dual-issue VALU slot consumed, so a workload that
+   saturates VOPD will show this counter approaching the total VALU instruction count.
+   For peak-rate theory and FLOPs ceilings see :ref:`rdna-dual-issue-valu`.
+
 VMEM instruction mix
 --------------------
 
