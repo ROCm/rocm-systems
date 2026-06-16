@@ -25,7 +25,7 @@
  *   7. Hash verify
  *
  * Compat mode must be enabled via env var:
- *   HIPFILE_ALLOW_COMPAT_MODE=1 ./no-odirect-write OUTPUT
+ *   HIPFILE_ALLOW_COMPAT_MODE=true ./no-odirect-write OUTPUT
  */
 
 #include "examples_common.h"

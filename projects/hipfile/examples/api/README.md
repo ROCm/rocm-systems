@@ -31,6 +31,7 @@ Copy `CMakeLists.install.in` to `CMakeLists.txt` in a scratch copy of this
 directory — it uses `find_package(hipfile)` instead of the in-tree macro:
 
 ```bash
+mkdir -p /tmp/api-example
 cp CMakeLists.install.in /tmp/api-example/CMakeLists.txt
 cp get-version.cpp /tmp/api-example/
 cmake -DCMAKE_PREFIX_PATH="/opt/rocm;/path/to/hipfile" -S /tmp/api-example -B /tmp/api-example/build
