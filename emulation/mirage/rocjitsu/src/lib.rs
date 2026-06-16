@@ -34,6 +34,25 @@ use mirage_core::topology::TopologyDef;
 pub mod daemon;
 pub mod dbt;
 
+/// Overridable default environment for workloads run under rocjitsu.
+///
+/// These mirror the environment the upstream rocjitsu RCCL collective
+/// tests run with (`rocjitsu/tests/daemon_test.cpp`): RCCL must avoid
+/// the P2P and shared-memory transports the simulated topology does not
+/// model and stay on a single loopback socket, while ROCr must use SDMA
+/// copies and skip scratch reclaim. Applied as defaults in
+/// [`Rocjitsu::injection_def`]; the per-exec environment overrides any
+/// of them.
+const RCCL_ENV_DEFAULTS: &[(&str, &str)] = &[
+    ("HSA_ENABLE_SDMA", "1"),
+    ("HSA_NO_SCRATCH_RECLAIM", "1"),
+    ("NCCL_P2P_DISABLE", "1"),
+    ("NCCL_SHM_DISABLE", "1"),
+    ("NCCL_SOCKET_NTHREADS", "1"),
+    ("NCCL_NSOCKS_PERTHREAD", "1"),
+    ("NCCL_SOCKET_IFNAME", "lo"),
+];
+
 /// rocjitsu [`EmulatorBackend`] implementation. Bundles the
 /// rocjitsu-specific injection (the KMD `LD_PRELOAD` plus the
 /// `ROCJITSU_RUNTIME_DIR` env var and the `config_path` discovery file
@@ -136,6 +155,20 @@ impl EmulatorBackend for Rocjitsu {
             "ROCJITSU_RUNTIME_DIR".to_string(),
             runtime_dir.display().to_string(),
         );
+
+        // Default runtime tuning the emulated workload needs to behave
+        // under rocjitsu. These mirror the environment the upstream
+        // rocjitsu RCCL collective tests run with (see
+        // `rocjitsu/tests/daemon_test.cpp`): RCCL must avoid the P2P and
+        // shared-memory transports the simulated topology does not model
+        // and stick to a single loopback socket, and ROCr must use SDMA
+        // copies without scratch reclaim. They are *defaults*: the
+        // per-exec environment (`mirage run --env KEY=VALUE`) is layered
+        // on top in `mirage_host` and overrides any of these, so a user
+        // who needs different RCCL/HSA tuning can still set it.
+        for (key, value) in RCCL_ENV_DEFAULTS {
+            env.insert((*key).to_string(), (*value).to_string());
+        }
 
         // For a containerised session the workload runs inside a node
         // container that does *not* share the host filesystem, so the
