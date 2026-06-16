@@ -94,10 +94,10 @@
         | 1: Enable debug mode with additional validation and logging.
 
     * - | ``HSA_ENABLE_DXG_DETECTION``
-        | Disables usage of the DXG driver on WSL2.
+        | Controls detection of the DXG driver (/dev/dxg) on WSL2.
       - ``1``
-      - | 0: Disable dxg detection.
-        | 1: Enable dxg detection, allowing ROCr to detect runtime is in WSL2.
+      - | 0: Disable DXG detection.
+        | 1: Enable DXG detection, allowing ROCr to detect that it is running in WSL2.
 
 Hardware Debugging Environment Variables
 ----------------------------------------
