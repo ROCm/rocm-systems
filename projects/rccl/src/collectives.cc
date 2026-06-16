@@ -564,11 +564,12 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   comm->enableDirectReduceScatter = 0;
 
   // Skip DDA IPC and Direct RS if the symmetric path will handle this op, so they don't collide and deadlock.
+  // Symmetric reduce-scatter implements sum and avg (ncclDevSumPostDiv), refer ncclSymkImplemented
   bool symEligible = false;
-  // Symmetric reduce-scatter is sum-only (refer ncclSymkImplemented), so only gate on ncclSum.
-  if (comm->symmetricSupport && op == ncclSum) {
+  if (comm->symmetricSupport && (op == ncclSum || op == ncclAvg)) {
     NCCLCHECK(ncclSymkInitOnce(comm));
-    symEligible = ncclSymkAvailable(comm, ncclFuncReduceScatter, (int)ncclDevSum, datatype, recvcount);
+    int symkOp = (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum;
+    symEligible = ncclSymkAvailable(comm, ncclFuncReduceScatter, symkOp, datatype, recvcount);
   }
 
   if (!symEligible &&

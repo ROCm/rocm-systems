@@ -258,6 +258,13 @@ template<> struct ncclSymkGinAccumType<FuncSumPostDiv, __nv_fp8_e4m3> { using Ty
 template<> struct ncclSymkGinAccumType<FuncSumPostDiv, __nv_fp8_e5m2> { using Type = __half; };
 #endif
 
+#if defined(__HIP_PLATFORM_AMD__)
+// avg reduces in float on ROCm: raw bf16/fp8 have no FuncSumPostDiv, but FuncSumPostDiv<float> does.
+template<> struct ncclSymkGinAccumType<FuncSumPostDiv, hip_bfloat16> { using Type = float; };
+template<> struct ncclSymkGinAccumType<FuncSumPostDiv, rccl_float8>  { using Type = float; };
+template<> struct ncclSymkGinAccumType<FuncSumPostDiv, rccl_bfloat8> { using Type = float; };
+#endif
+
 static __device__ __forceinline__ void tmaLoadStoreMc(void* dest, void* smem, void* source, size_t size, __mbarrier_t* bar) {
   cp_async_bulk_global_to_shared(smem, source, bar, size);
   __mbarrier_token_t token = barrier_arrive1_tx_relaxed(bar, size);
