@@ -195,6 +195,10 @@ enum : int32_t {
 };
 #undef KERNEL_CODE_PROPERTY
 
+struct kernarg_preload_t {
+  uint16_t length :7;
+  uint16_t offset :9;
+};
 // Kernel descriptor. Must be kept backwards compatible.
 struct kernel_descriptor_t {
   uint32_t group_segment_fixed_size;
@@ -202,12 +206,22 @@ struct kernel_descriptor_t {
   uint32_t kernarg_size;
   uint8_t reserved0[4];
   int64_t kernel_code_entry_byte_offset;
+
+struct kernel_descriptor_t_v3 {
+  uint32_t group_segment_fixed_size;
+  uint32_t private_segment_fixed_size;
+  uint32_t kernarg_size;
+  uint8_t reserved0[4];
+  int64_t kernel_code_entry_byte_offset;
+  uint8_t reserved1[20];
+};
   uint8_t reserved1[20];
   uint32_t compute_pgm_rsrc3; // GFX10+ and GFX90A+
   uint32_t compute_pgm_rsrc1;
   uint32_t compute_pgm_rsrc2;
   uint16_t kernel_code_properties;
-  uint8_t reserved2[6];
+  kernarg_preload_t kernarg_preload;
+  uint8_t reserved2[4];
 };
 
 enum : uint32_t {
@@ -221,7 +235,8 @@ enum : uint32_t {
   COMPUTE_PGM_RSRC1_OFFSET = 48,
   COMPUTE_PGM_RSRC2_OFFSET = 52,
   KERNEL_CODE_PROPERTIES_OFFSET = 56,
-  RESERVED2_OFFSET = 58,
+  KERNARG_PRELOAD_OFFSET = 58,
+  RESERVED2_OFFSET = 60,
 };
 
 static_assert(
@@ -255,6 +270,9 @@ static_assert(offsetof(kernel_descriptor_t, compute_pgm_rsrc2) ==
 static_assert(offsetof(kernel_descriptor_t, kernel_code_properties) ==
                   KERNEL_CODE_PROPERTIES_OFFSET,
               "invalid offset for kernel_code_properties");
+static_assert(offsetof(kernel_descriptor_t, kernarg_preload) ==
+                  KERNARG_PRELOAD_OFFSET,
+              "invalid offset for kernarg_preload");
 static_assert(offsetof(kernel_descriptor_t, reserved2) == RESERVED2_OFFSET,
               "invalid offset for reserved2");
 

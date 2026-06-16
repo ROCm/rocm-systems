@@ -51,6 +51,8 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <cinttypes>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -62,6 +64,9 @@
 #include "amd_hsa_code_util.hpp"
 #include "amd_options.hpp"
 #include "core/util/utils.h"
+
+#include "core/inc/agent.h"
+#include "core/inc/amd_gpu_agent.h"
 
 #include "executable.hpp"
 
@@ -246,6 +251,9 @@ hsa_status_t AmdHsaCodeLoader::FreezeExecutable(Executable *executable, const ch
   if (status != HSA_STATUS_SUCCESS) {
     return status;
   }
+  if (!reinterpret_cast<ExecutableImpl*>(executable)->InsertPreambleShaders()) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   // Assuming runtime atomic implements C++ std::memory_order
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
@@ -389,6 +397,66 @@ void AmdHsaCodeLoader::DisableReadOnlyMode()
 //===----------------------------------------------------------------------===//
 // SymbolImpl.                                                                    //
 //===----------------------------------------------------------------------===//
+
+SymbolImpl::~SymbolImpl() {
+  RemovePreambleShader();
+}
+
+void SymbolImpl::RemovePreambleShader() {
+  if (preamble_shader == nullptr) {
+    return;
+  }
+  void* const key = preamble_shader;
+  void* const key_arg_preload = preamble_shader_arg_preload;
+  preamble_shader = nullptr;
+  preamble_shader_arg_preload = nullptr;
+
+  core::Agent* core_agent = core::Agent::Convert(agent);
+  if (core_agent != nullptr && core_agent->device_type() == core::Agent::kAmdGpuDevice) {
+    reinterpret_cast<AMD::GpuAgent*>(core_agent)->DestroyPreambleShader(key);
+    if (key_arg_preload != nullptr) {
+      reinterpret_cast<AMD::GpuAgent*>(core_agent)->DestroyPreambleShader(key_arg_preload);
+    }
+  }
+}
+
+bool SymbolImpl::InsertPreambleShader() {
+  core::Agent* core_agent = core::Agent::Convert(agent);
+  if (core_agent == nullptr || core_agent->device_type() != core::Agent::kAmdGpuDevice) {
+    return true;
+  }
+
+  if (preamble_shader != nullptr) {
+    return true;
+  }
+
+  uint8_t* kd_address = reinterpret_cast<uint8_t*>(address); //HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT
+  uint64_t entry_offset = *reinterpret_cast<uint64_t*>(kd_address + rocr::llvm::amdhsa::KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET);
+  void* kd_code_entry_address = kd_address + entry_offset;
+
+  void* preamble_shader_address = reinterpret_cast<AMD::GpuAgent*>(core_agent)->CreatePreambleShader(kd_code_entry_address);
+  if (preamble_shader_address == nullptr) {
+    return false;
+  }
+
+  preamble_shader = kd_code_entry_address;
+
+  *reinterpret_cast<uint64_t*>(kd_address + rocr::llvm::amdhsa::KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET) = (uint64_t)preamble_shader_address - address;
+
+  const auto* kd = reinterpret_cast<const rocr::llvm::amdhsa::kernel_descriptor_t*>(kd_address);
+  const uint16_t kernarg_preload_length = kd->kernarg_preload.length;  // dwords
+  if (kernarg_preload_length > 0) {
+    uint64_t entry_offset_arg_preload = *reinterpret_cast<uint64_t*>(kd_address + rocr::llvm::amdhsa::KERNARG_PRELOAD_OFFSET) + 0x100;
+    void* kd_code_entry_address_arg_preload = kd_address + entry_offset_arg_preload;
+    void* preamble_shader_address_arg_preload = reinterpret_cast<AMD::GpuAgent*>(core_agent)->CreatePreambleShader(kd_code_entry_address_arg_preload);
+    if (preamble_shader_address_arg_preload == nullptr) {
+      return false;
+    }
+    preamble_shader_arg_preload = kd_code_entry_address_arg_preload;
+    *reinterpret_cast<uint64_t*>(kd_address + rocr::llvm::amdhsa::KERNARG_PRELOAD_OFFSET + 0x100) = (uint64_t)preamble_shader_address_arg_preload - address;
+  }
+  return true;
+}
 
 bool SymbolImpl::GetInfo(hsa_symbol_info32_t symbol_info, void *value) {
   static_assert(
@@ -1950,6 +2018,20 @@ hsa_status_t ExecutableImpl::Freeze(const char *options) {
 
   state_ = HSA_EXECUTABLE_STATE_FROZEN;
   return HSA_STATUS_SUCCESS;
+}
+
+bool ExecutableImpl::InsertPreambleShaders() {
+  amd::hsa::common::ReaderLockGuard<amd::hsa::common::ReaderWriterLock> reader_lock(rw_lock_);
+  bool any = false;
+  for (const auto& kv : agent_symbols_) {
+    if (!kv.second->is_loaded) {
+      continue;
+    }
+    if (kv.second->IsKernel()) {
+      any |= kv.second->InsertPreambleShader();
+    }
+  }
+  return any;
 }
 
 void ExecutableImpl::Print(std::ostream& out)

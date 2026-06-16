@@ -151,7 +151,7 @@ typedef uint32_t symbol_attribute32_t;
 
 class SymbolImpl: public Symbol {
 public:
-  virtual ~SymbolImpl() {}
+  virtual ~SymbolImpl();
 
   bool IsKernel() const {
     return HSA_SYMBOL_KIND_KERNEL == kind;
@@ -173,6 +173,10 @@ public:
     return agent;
   }
 
+  // @brief Optionally install a preamble for this kernel (GpuAgent path).
+  // @return true if the preamble was installed successfully.
+  bool InsertPreambleShader();
+
 protected:
   SymbolImpl(const bool &_is_loaded,
              const hsa_symbol_kind_t &_kind,
@@ -188,6 +192,12 @@ protected:
     , linkage(_linkage)
     , is_definition(_is_definition)
     , address(_address) {}
+
+  void RemovePreambleShader();
+
+  /// Map key for GpuAgent::CreatePreambleShader (original kernel entry VA); nullptr if none.
+  void* preamble_shader = nullptr;
+  void* preamble_shader_arg_preload = nullptr;
 
   virtual bool GetInfo(hsa_symbol_info32_t symbol_info, void* value) override;
 
@@ -529,6 +539,10 @@ public:
     hsa_loaded_code_object_t *loaded_code_object) override;
 
   hsa_status_t Freeze(const char *options) override;
+
+  /// @brief Run GpuAgent preamble injection for every loaded kernel symbol.
+  /// @return true if at least one symbol had a preamble installed.
+  bool InsertPreambleShaders();
 
   hsa_status_t Validate(uint32_t *result) override {
     amd::hsa::common::ReaderLockGuard<amd::hsa::common::ReaderWriterLock> reader_lock(rw_lock_);

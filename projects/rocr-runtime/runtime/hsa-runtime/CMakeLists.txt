@@ -172,7 +172,8 @@ target_include_directories( ${CORE_RUNTIME_TARGET}
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/libamdhsacode
   ${CMAKE_CURRENT_BINARY_DIR}/core/runtime/trap_handler
-  ${CMAKE_CURRENT_BINARY_DIR}/core/runtime/blit_shaders)
+  ${CMAKE_CURRENT_BINARY_DIR}/core/runtime/blit_shaders
+  ${CMAKE_CURRENT_BINARY_DIR}/core/runtime/preamble_shaders)
 
 
 ## ------------------------- Linux Compiler and Linker options -------------------------
@@ -280,6 +281,9 @@ add_dependencies( ${CORE_RUNTIME_TARGET} amd_trap_handler_v2 )
 ## Depend on blit shader target.
 add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/blit_shaders )
 add_dependencies( ${CORE_RUNTIME_TARGET} amd_blit_shaders_v2)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/preamble_shaders)
+add_dependencies(${CORE_RUNTIME_TARGET} amd_preamble_shaders)
 
 option(PC_SAMPLING_SUPPORT "Enable PC Sampling Support" ON)
 

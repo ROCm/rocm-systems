@@ -62,6 +62,7 @@
 #include "core/util/lazy_ptr.h"
 #include "core/util/locks.h"
 #include "core/util/os.h"
+#include "core/util/simple_heap.h"
 #include "core/util/small_heap.h"
 #include "pcs/pcs_runtime.h"
 #include "core/inc/counted_queue_manager.h"
@@ -263,16 +264,23 @@ class GpuAgent : public GpuAgentInt {
   // @param [in] assemble_target ISA or AQL assembly target.
   // @param [out] code_buf Code object buffer.
   // @param [out] code_buf_size Size of code object buffer in bytes.
+  // @param [out] actual_code_buf_size Size of the code object in bytes.
   enum class AssembleTarget { ISA, AQL };
 
   void AssembleShader(const char* func_name, AssembleTarget assemble_target, void*& code_buf,
-                      size_t& code_buf_size) const;
+                      size_t& code_buf_size, size_t* actual_code_buf_size = nullptr) const;
 
   // @brief Frees code object created by AssembleShader.
   //
   // @param [in] code_buf Code object buffer.
   // @param [in] code_buf_size Size of code object buffer in bytes.
   void ReleaseShader(void* code_buf, size_t code_buf_size) const;
+
+  // @brief Create preamble code for @p jump_address and return its device VA.
+  void* CreatePreambleShader(void* jump_address);
+
+  // @brief Destroy preamble created for @p jump_address (same pointer as Create).
+  void DestroyPreambleShader(void* jump_address);
 
   // @brief Override from core::Agent.
   hsa_status_t VisitRegion(bool include_peer,
@@ -747,6 +755,44 @@ class GpuAgent : public GpuAgentInt {
 
   size_t trap_code_buf_size_;
 
+  // Preamble allocator section start
+  void* preamble_code_buf_ = nullptr;
+  size_t preamble_code_buf_actual_size_ = 0;
+  size_t preamble_code_buf_size_ = 0;
+  size_t preamble_code_buf_jump_address_hi_offset_ = 0;
+  size_t preamble_code_buf_jump_address_lo_offset_ = 0;
+
+  class PreambleCodeBufEntry {
+    public:
+    PreambleCodeBufEntry(GpuAgent& owner, void* jump_address);
+    ~PreambleCodeBufEntry();
+
+    void* entry_code() const { return code_buf; }
+
+    private:
+    size_t code_buf_size_;
+    void* code_buf;
+    GpuAgent& owner_;
+  };
+
+  std::unordered_map<void*, PreambleCodeBufEntry*> preamble_code_bufs_;  // key: kernel entry VA
+
+  // Sub-allocate small executable preamble copies from 2MiB VRAM slabs (same
+  // SimpleHeap + block pattern as AMD::MemoryRegion::fragment_allocator_).
+  class PreambleExecutableBlockAllocator {
+    GpuAgent& owner_;
+
+   public:
+    explicit PreambleExecutableBlockAllocator(GpuAgent& owner) : owner_(owner) {}
+    void* alloc(size_t request_size, size_t& allocated_size) const;
+    void free(void* ptr, size_t length) const;
+    size_t block_size() const { return size_t(16) * 1024 * 1024; }
+  };
+
+  mutable std::mutex preamble_shader_mutex;
+  mutable rocr::SimpleHeap<PreambleExecutableBlockAllocator> preamble_code_heap_;
+  // Preamble allocator section end
+
   // @brief Mappings from doorbell index to queue, for trap handler.
   // Correlates with output of s_sendmsg(MSG_GET_DOORBELL) for queue identification.
   amd_queue_v2_t** doorbell_queue_map_;
@@ -770,6 +816,10 @@ class GpuAgent : public GpuAgentInt {
   // @brief Reserve memory for scratch pool to be used by AQL queue of this
   // agent.
   void InitScratchPool();
+
+  // @brief Assemble preamble shader machine code for supported ISAs.
+  void InitPreambleShaders();
+  void ClearPreambleShaders();
 
   // @brief Query the driver to get the cache properties.
   void InitCacheList();

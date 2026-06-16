@@ -46,6 +46,7 @@
 #include <atomic>
 #include <cinttypes>
 #include <climits>
+#include <cstdint>
 #include <cstring>
 #include <map>
 #include <set>
@@ -73,9 +74,10 @@
 #include "core/inc/amd_trap_handler_v1.h"
 #include "core/inc/amd_blit_shaders.h"
 #include "core/inc/hsa_api_trace_int.h"
-// Generated header
+// Generated headers
 #include "amd_trap_handler_v2.h"
 #include "amd_blit_shaders_v2.h"
+#include "amd_preamble_shaders.h"
 
 #if defined(__linux__)
 // libdrm headers
@@ -128,7 +130,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       extended_aql_dispatch_supported_(false),
       workgroup_clusters_supported_(false),
       kern_cluster_max_dim_({ UINT32_MAX, UINT32_MAX, UINT32_MAX }),
-      cluster_max_dim_({ 1, 1, 1 }) {
+      cluster_max_dim_({ 1, 1, 1 }),
+      preamble_code_heap_(PreambleExecutableBlockAllocator(*this)) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
@@ -281,11 +284,13 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 GpuAgent::~GpuAgent() {
   for (auto& blit : blits_) blit.reset();
 
+  preamble_code_heap_.trim();
   regions_.clear();
 }
 
+/* code_buf_size is the size of the memory allocated for the code object. actual_code_buf_size is the size of the code object. */
 void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_target,
-                              void*& code_buf, size_t& code_buf_size) const {
+                              void*& code_buf, size_t& code_buf_size, size_t* actual_code_buf_size) const {
   // Select precompiled shader implementation from name/target.
   struct ASICShader {
     const void* code;
@@ -373,7 +378,22 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeFill11, sizeof(kCodeFill11), 19, 8},                       // gfx11
            {kCodeFill12, sizeof(kCodeFill12), 19, 8},                       // gfx12
            {kCodeFill1250, sizeof(kCodeFill1250), 19, 8},                   // gfx1250
-       }}};
+           }},
+      {"PreambleShader",
+        {
+          {NULL, 0, 0, 0},                                                  // gfx7
+          {NULL, 0, 0, 0},                                                  // gfx8
+          {NULL, 0, 0, 0},                                                  // gfx9
+          {NULL, 0, 0, 0},                                                  // gfx90a
+          {NULL, 0, 0, 0},                                                  // gfx942
+          {NULL, 0, 0, 0},                                                  // gfx1010
+          {NULL, 0, 0, 0},                                                  // gfx10
+          {NULL, 0, 0, 0},                                                  // gfx11
+          {kCodePreamble1201, sizeof(kCodePreamble1201), 0, 0},            // gfx1201 //Remove later
+          {kCodePreamble1250, sizeof(kCodePreamble1250), 0, 0},            // gfx1250
+       }
+      }
+  };
 
   auto compiled_shader_it = compiled_shaders.find(func_name);
   assert(compiled_shader_it != compiled_shaders.end() &&
@@ -423,6 +443,8 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
   size_t header_size =
       (assemble_target == AssembleTarget::AQL ? sizeof(amd_kernel_code_t) : 0);
   code_buf_size = AlignUp(header_size + asic_shader->size, 0x1000);
+
+  if (actual_code_buf_size) *actual_code_buf_size = asic_shader->size;
 
   code_buf = system_allocator()(code_buf_size, 0x1000,
     core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateExecutableBlitKernelObject);
@@ -1019,6 +1041,8 @@ void GpuAgent::ReleaseResources() {
   if (this->Enabled()) {
     this->Disable();
 
+    ClearPreambleShaders();
+
     // Remove all shared hardware queues from pool
     queue_pool_.Cleanup();
 
@@ -1054,6 +1078,7 @@ hsa_status_t GpuAgent::PostToolsInit() {
   // Defer memory allocation until agents have been discovered.
   InitAllocators();
   InitScratchPool();
+  InitPreambleShaders();
   BindTrapHandler();
   InitDma();
 
@@ -3195,6 +3220,105 @@ void GpuAgent::BindTrapHandler() {
   [[maybe_unused]] hsa_status_t trap_err =
       driver().SetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr, tma_size);
   assert(trap_err == HSA_STATUS_SUCCESS && "SetTrapHandler() failed");
+}
+
+
+void GpuAgent::InitPreambleShaders() {
+  //if (!(isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() == 5))
+  if (!(isa_->GetMajorVersion() == 12)) //Testing on gfx1201, but code will be for gfx1250
+    return;
+
+  // For gfx1250, we need a separate copy of the preamble shader for each code object entry point.
+  // This function compiles and generates the preamble shader for gfx1250. Then later we need to
+  // replace the jump address for each code object entry point.
+  AssembleShader("PreambleShader", AssembleTarget::ISA, preamble_code_buf_, preamble_code_buf_size_, &preamble_code_buf_actual_size_);
+
+  preamble_code_buf_jump_address_hi_offset_ = 12; // in bytes
+  preamble_code_buf_jump_address_lo_offset_ = 4; // in bytes
+}
+
+void GpuAgent::ClearPreambleShaders() {
+  if (preamble_code_buf_ == nullptr)
+    return;
+
+  std::lock_guard<std::mutex> lock(preamble_shader_mutex);
+
+  ReleaseShader(preamble_code_buf_, preamble_code_buf_size_); 
+  preamble_code_buf_ = nullptr;
+  preamble_code_buf_size_ = 0;
+}
+
+/* called with preamble_shader_mutex locked */
+GpuAgent::PreambleCodeBufEntry::PreambleCodeBufEntry(GpuAgent& owner, void* jump_address)
+  : owner_(owner) {
+
+  /* Store the jump address in-place in the original preamble code buffer. We are protected by preamble_shader_mutex  */
+  uint32_t jump_address_hi = uint32_t(uint64_t(jump_address) >> 32);
+  uint32_t jump_address_lo = uint32_t(jump_address) & 0xFFFFFFFF;
+
+  *(uint32_t*)((uintptr_t)owner_.preamble_code_buf_ + owner_.preamble_code_buf_jump_address_hi_offset_) = jump_address_hi;
+  *(uint32_t*)((uintptr_t)owner_.preamble_code_buf_ + owner_.preamble_code_buf_jump_address_lo_offset_) = jump_address_lo;
+
+  code_buf = owner_.preamble_code_heap_.alloc(owner_.preamble_code_buf_size_);
+  if (code_buf == nullptr) {
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                             "PreambleCodeBufEntry::PreambleCodeBufEntry failed.");
+  }
+  
+  owner_.DmaCopy(code_buf, owner_.preamble_code_buf_, owner_.preamble_code_buf_actual_size_);
+  owner_.InvalidateCodeCaches(code_buf, owner_.preamble_code_buf_actual_size_);
+}
+
+GpuAgent::PreambleCodeBufEntry::~PreambleCodeBufEntry() {
+  if (code_buf != nullptr) {
+    owner_.preamble_code_heap_.free(code_buf);
+  }
+}
+
+void* GpuAgent::PreambleExecutableBlockAllocator::alloc(size_t request_size,
+                                                        size_t& allocated_size) const {
+  const size_t bsize = AlignUp(request_size, block_size());
+  void* ret =
+      owner_.finegrain_allocator()(bsize, core::MemoryRegion::AllocateExecutable);
+  if (ret == nullptr) {
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                             "PreambleExecutableBlockAllocator::alloc failed.");
+  }
+  allocated_size = bsize;
+  return ret;
+}
+
+void GpuAgent::PreambleExecutableBlockAllocator::free(void* ptr, size_t length) const {
+  (void)length;
+  owner_.finegrain_deallocator()(ptr);
+}
+
+void* GpuAgent::CreatePreambleShader(void* jump_address) {
+  if (preamble_code_buf_ == nullptr)
+    return jump_address;
+
+  std::lock_guard<std::mutex> lock(preamble_shader_mutex);
+
+  if (preamble_code_bufs_.find(jump_address) != preamble_code_bufs_.end()) {
+    //preamble_code_bufs_[jump_address]->inc_ref();
+    printf("DYSDEBUG existing entry found for jump_address 0x%p\n", jump_address);
+    return preamble_code_bufs_[jump_address]->entry_code();
+  }
+
+  auto entry = std::make_unique<PreambleCodeBufEntry>(*this, jump_address);
+  preamble_code_bufs_.emplace(jump_address, entry.get());
+  (void)entry.release();
+  return preamble_code_bufs_[jump_address]->entry_code();
+}
+
+void GpuAgent::DestroyPreambleShader(void* jump_address) {
+  std::lock_guard<std::mutex> lock(preamble_shader_mutex);
+  auto it = preamble_code_bufs_.find(jump_address);
+  if (it != preamble_code_bufs_.end()) {
+    delete it->second;
+    preamble_code_bufs_.erase(it);
+  }
+  return;
 }
 
 void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
