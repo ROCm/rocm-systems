@@ -259,7 +259,7 @@ struct svm_api_range {
 	void *start;			/* page-aligned base address */
 	uint64_t size;			/* page-aligned size */
 	uint32_t refcount;		/* number of outstanding registrations */
-	struct svm_api_range *next;
+	rbtree_node_t node;		/* svm_api_range_tree, key addr only (size field 0) */
 };
 typedef struct svm_api_range svm_api_range_t;
 
@@ -281,10 +281,10 @@ struct hsa_kfd_fmm_context
 
 	svm_t svm;
 
-	/* List of host ranges registered via the SVM API (see svm_api_range).
-	 * Protected by svm_api_mutex.
+	/* RB tree of host ranges registered via the SVM API (see svm_api_range).
+	 * Protected by svm_api_mutex. Keys use aligned VA only (LKP_ADDR).
 	 */
-	svm_api_range_t *svm_api_ranges;
+	rbtree_t svm_api_range_tree;
 	pthread_mutex_t svm_api_mutex;
 
 	/* On APU, for memory allocated on the system memory that GPU doesn't
@@ -344,7 +344,7 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	ctx->fmm_context->svm.alignment_order = 0;
 
 	/* Initialize SVM-API range tracking */
-	ctx->fmm_context->svm_api_ranges = NULL;
+	rbtree_init(&ctx->fmm_context->svm_api_range_tree);
 	pthread_mutex_init(&ctx->fmm_context->svm_api_mutex, NULL);
 
 	/* Initialize cpuvm_aperture */
@@ -1145,13 +1145,12 @@ static HsaMemFlags fmm_translate_ioc_to_hsa_flags(uint32_t ioc_flags)
 static svm_api_range_t *svm_api_range_find(struct hsa_kfd_fmm_context *fmm_ctx,
 					   void *aligned_addr)
 {
-	svm_api_range_t *r;
+	rbtree_key_t key = rbtree_key((unsigned long)aligned_addr, 0);
+	rbtree_node_t *n = rbtree_lookup(&fmm_ctx->svm_api_range_tree, &key, LKP_ADDR);
 
-	for (r = fmm_ctx->svm_api_ranges; r; r = r->next) {
-		if (r->start == aligned_addr)
-			return r;
-	}
-	return NULL;
+	if (!n)
+		return NULL;
+	return rb_entry(n, svm_api_range_t, node);
 }
 
 /* Add a new SVM-API range, or bump the refcount of an existing one. */
@@ -1184,14 +1183,14 @@ static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
 	r->start = aligned_addr;
 	r->size = aligned_size;
 	r->refcount = 1;
-	r->next = fmm_ctx->svm_api_ranges;
-	fmm_ctx->svm_api_ranges = r;
+	r->node.key = rbtree_key((unsigned long)aligned_addr, 0);
+	hsakmt_rbtree_insert(&fmm_ctx->svm_api_range_tree, &r->node);
 	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 }
 
 /*
  * Drop a reference on the SVM-API range covering @addr. If this was the last
- * reference, remove it from the list and return its aligned base/size through
+ * reference, remove it from the RB tree and return its aligned base/size through
  * @out_addr/@out_size so the caller can issue the inverse SET_ATTR outside the
  * lock. Returns true if the range dropped to zero references.
  */
@@ -1200,24 +1199,19 @@ static bool svm_api_range_put(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
 {
 	HSAuint64 page_offset = (HSAuint64)addr & (PAGE_SIZE - 1);
 	void *aligned_addr = (void *)((HSAuint64)addr - page_offset);
-	svm_api_range_t *r, *prev = NULL;
+	svm_api_range_t *r;
 	bool released = false;
 
 	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
-	for (r = fmm_ctx->svm_api_ranges; r; prev = r, r = r->next) {
-		if (r->start != aligned_addr)
-			continue;
+	r = svm_api_range_find(fmm_ctx, aligned_addr);
+	if (r) {
 		if (--r->refcount == 0) {
-			if (prev)
-				prev->next = r->next;
-			else
-				fmm_ctx->svm_api_ranges = r->next;
+			hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, &r->node);
 			*out_addr = r->start;
 			*out_size = r->size;
 			free(r);
 			released = true;
 		}
-		break;
 	}
 	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 	return released;
@@ -3354,7 +3348,8 @@ gpu_mem_init_failed:
 void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 {
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
-	svm_api_range_t *r, *next;
+	svm_api_range_t *r;
+	rbtree_node_t *n;
 
 	release_mmio(ctx);
 
@@ -3363,11 +3358,13 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 	 * so we only release our bookkeeping here.
 	 */
 	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
-	for (r = fmm_ctx->svm_api_ranges; r; r = next) {
-		next = r->next;
+	while (fmm_ctx->svm_api_range_tree.root != &fmm_ctx->svm_api_range_tree.sentinel) {
+		n = rbtree_min(fmm_ctx->svm_api_range_tree.root,
+			       &fmm_ctx->svm_api_range_tree.sentinel);
+		r = rb_entry(n, svm_api_range_t, node);
+		hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, n);
 		free(r);
 	}
-	fmm_ctx->svm_api_ranges = NULL;
 	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 
 	if (fmm_ctx->all_gpu_id_array) {
