@@ -112,6 +112,10 @@ jobs:
           # components leave it empty. See: https://github.com/ROCm/TheRock/issues/3587
           GPU_ENABLE_PAL: ${{ fromJSON(inputs.component).gpu_enable_pal }}
         run: |
+          if [[ "${TEST_COMPONENT}" == "rocprofiler-systems" ]]; then
+            export ROCPROFILER_QUEUE_INTERPOSITION=0
+            echo "ROCPROFILER_QUEUE_INTERPOSITION=${ROCPROFILER_QUEUE_INTERPOSITION}"
+          fi
           ${{ fromJSON(inputs.component).test_script }}
 
       # GitHub's 'Complete job' step is unaware of launched executables
