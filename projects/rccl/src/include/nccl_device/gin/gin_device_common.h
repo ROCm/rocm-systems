@@ -31,17 +31,6 @@
 #endif
 #endif
 
-// rocshmem-api uses full rocshmem device API (putmem, quiet, fence) which
-// requires rocshmem_init() in the same device module. Only enable in TUs
-// that link librocshmem.a directly (e.g. rccl-tests), not in librccl.so.
-#ifndef NCCL_GIN_ROCSHMEM_API_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM)
-#define NCCL_GIN_ROCSHMEM_API_ENABLE 1
-#else
-#define NCCL_GIN_ROCSHMEM_API_ENABLE 0
-#endif
-#endif
-
 // rocshmem-gda uses QueuePair methods from librocshmem.a device bitcode.
 // Only enable in TUs that link librocshmem.a (ENABLE_ROCSHMEM), not in
 // librccl.so (ENABLE_ROCSHMEM_GIN), to avoid duplicate device state.

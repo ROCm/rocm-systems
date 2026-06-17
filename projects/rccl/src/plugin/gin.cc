@@ -126,8 +126,7 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
     }
 #ifdef ENABLE_ROCSHMEM_GIN
     else if (comm->ginContext &&
-             (pluginLib->ncclGin == &ncclGinRocshmemApiPlugin ||
-              pluginLib->ncclGin == &ncclGinRocshmemGdaPlugin)) {
+             pluginLib->ncclGin == &ncclGinRocshmemGdaPlugin) {
       ncclGinRocshmemSetInitContext(comm->ginContext, comm);
     }
 #endif
