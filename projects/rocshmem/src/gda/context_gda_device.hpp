@@ -277,6 +277,19 @@ class GDAContext : public Context {
       int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
   template <typename T>
+  __device__ void internal_broadcast_wave(T *dest, const T *source, int nelems,
+      int pe_root, int pe_start, int stride, int pe_size, long *p_sync);  // NOLINT(runtime/int)
+
+  template <typename T>
+  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems,
+      int pe_root, int PE_start, int logPE_stride, int PE_size,
+      ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
+
+  template <typename T>
+  __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems,
+      int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
+
+  template <typename T>
   __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
       const T *source, int nelems);
 

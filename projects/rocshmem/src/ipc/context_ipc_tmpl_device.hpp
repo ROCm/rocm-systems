@@ -554,11 +554,9 @@ __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  // internal_broadcast_wave<T>(dest, source, nelement, pe_root_world, 
-  //                             pe_start, stride, pe_size, p_sync);
-
-  internal_broadcastmem_wave(dest, source, nelement * sizeof(T), pe_root_world, 
+  internal_broadcast_wave<T>(dest, source, nelement, pe_root_world, 
                               pe_start, stride, pe_size, p_sync);
+
   return ROCSHMEM_SUCCESS;
 }
 
@@ -566,7 +564,7 @@ template <typename T>
 __device__ void IPCContext::internal_broadcast_wave(T *dst, const T *src, int nelems,
                                       int pe_root, int pe_start,
                                       int stride, int pe_size,
-                                      [[maybe_unused]] long *p_sync) {  // NOLINT(runtime/int)
+                                      long *p_sync) {  // NOLINT(runtime/int)
   if (num_pes < 4) {
     internal_put_broadcast_wave<T>(dst, src, nelems, pe_root, pe_start, stride, pe_size);
   } else {
