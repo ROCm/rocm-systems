@@ -9,6 +9,7 @@
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vimage.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop2.h"
@@ -17,6 +18,9 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/except.h"
@@ -1236,9 +1240,141 @@ TEST(Gfx1250ExecutionTest, TensorDmaAtomicBarrierArrivesAfterCopy) {
   gfx1250::TensorLoadToLdsVimage load_inst(load_words.data());
   load_inst.execute_impl(*wf);
 
+  EXPECT_TRUE(wf->wait_counters().empty());
+  EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0 * 4), 0x55000000u);
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 1 * 4), 0x55000001u);
-  EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr), 7ull << 29);
+  const uint64_t state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
+  EXPECT_EQ(state, 0xffffull << 16);
+  EXPECT_TRUE(amdgpu::lds_barrier_cell::phase_parity(state));
+}
+
+TEST(Gfx1250ExecutionTest, ReleaseWaitCounterWakesWaitcntWhenTargetIsSatisfied) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+
+  wf->wait_counters().increment(amdgpu::WaitCounterType::TENSORCNT);
+  wf->set_wait_target_tensorcnt(0);
+  ASSERT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
+
+  wf->release_wait_counter(amdgpu::WaitCounterType::TENSORCNT);
+
+  EXPECT_TRUE(wf->wait_counters().empty());
+  EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
+}
+
+TEST(Gfx1250ExecutionTest, ReleaseWaitCounterHaltsEndingWaveWhenLastCounterRetires) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+
+  wf->wait_counters().increment(amdgpu::WaitCounterType::TENSORCNT);
+  wf->end();
+  ASSERT_EQ(wf->state(), amdgpu::WfState::ENDING);
+
+  wf->release_wait_counter(amdgpu::WaitCounterType::TENSORCNT);
+
+  EXPECT_TRUE(wf->wait_counters().empty());
+  EXPECT_TRUE(wf->is_halted());
+}
+
+TEST(Gfx1250ExecutionTest, DsAtomicAsyncBarrierArriveFlipsRawBarrierPhase) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint32_t kBarrierLdsAddr = 64;
+  cu->write_vgpr(wf->vgpr_alloc().base + 0, 0, kBarrierLdsAddr);
+  cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, amdgpu::lds_barrier_cell::init_state(1));
+
+  const std::array<uint32_t, 2> words = {0xd9580000u, 0x00000000u};
+  auto *arrive_inst = new gfx1250::DsAtomicAsyncBarrierArriveB64Vds(words.data());
+  arrive_inst->execute_impl(*wf);
+  amdgpu::LocalMemPipeline local_pipeline(&cu->lds());
+  local_pipeline.issue(arrive_inst, *wf);
+
+  const uint64_t state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
+  EXPECT_EQ(state, 0xffffull << 16);
+  EXPECT_TRUE(amdgpu::lds_barrier_cell::phase_parity(state));
+  EXPECT_TRUE(wf->wait_counters().empty());
+}
+
+TEST(Gfx1250ExecutionTest, LocalMemPipelineUsesInjectedBarrierDecrementPayload) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint32_t kBarrierLdsAddr = 64;
+  cu->write_vgpr(wf->vgpr_alloc().base + 0, 0, kBarrierLdsAddr);
+  cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, amdgpu::lds_barrier_cell::init_state(2));
+
+  const std::array<uint32_t, 2> words = {0xd9580000u, 0x00000000u};
+  auto *arrive_inst = new gfx1250::DsAtomicAsyncBarrierArriveB64Vds(words.data());
+  arrive_inst->execute_impl(*wf);
+
+  auto *state = arrive_inst->data_as<amdgpu::VectorMemState>();
+  const uint64_t decrement = 2;
+  state->store_data.resize(static_cast<size_t>(wf->wf_size()) * sizeof(decrement));
+  std::memcpy(state->store_data.data(), &decrement, sizeof(decrement));
+
+  amdgpu::LocalMemPipeline local_pipeline(&cu->lds());
+  local_pipeline.issue(arrive_inst, *wf);
+
+  const uint64_t expected =
+      amdgpu::lds_barrier_cell::update_arrive(amdgpu::lds_barrier_cell::init_state(2), decrement);
+  EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr), expected);
+  EXPECT_EQ(expected, (1ull << 32) | (0xffffull << 16) | 1ull);
+  EXPECT_TRUE(wf->wait_counters().empty());
+}
+
+TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleAndBatchedArrivals) {
+  using namespace amdgpu::lds_barrier_cell;
+
+  uint64_t state = init_state(2);
+  EXPECT_EQ(state, (1ull << 32) | 1ull);
+
+  state = update_arrive(state);
+  EXPECT_EQ(state, 1ull << 32);
+  EXPECT_FALSE(phase_parity(state));
+
+  state = update_arrive(state);
+  EXPECT_EQ(state, (1ull << 32) | (0xffffull << 16) | 1ull);
+  EXPECT_TRUE(phase_parity(state));
+
+  const uint64_t drained = update_arrive(init_state(2));
+  ASSERT_EQ(pending_count(drained), 0ull);
+  EXPECT_EQ(update_arrive(drained, 0), drained);
+  EXPECT_EQ(update_arrive(init_state(3), 0), init_state(3));
+
+  uint64_t iterated = init_state(2);
+  for (int i = 0; i < 5; ++i)
+    iterated = update_arrive(iterated);
+  const uint64_t batched = update_arrive(init_state(2), 5);
+  EXPECT_EQ(batched, iterated);
+  EXPECT_EQ(batched, (1ull << 32) | (0xfffeull << 16));
+
+  for (uint32_t arrivals_per_phase : {0u, 1u}) {
+    state = init_state(arrivals_per_phase);
+    EXPECT_EQ(pending_count(state), 0ull);
+    state = update_arrive(state);
+    EXPECT_EQ(pending_count(state), 0ull);
+    EXPECT_EQ(phase(state), kPhaseMask);
+    EXPECT_TRUE(phase_parity(state));
+  }
+
+  const uint64_t reserved = 0xabcdull << 48;
+  const uint64_t reserved_state = update_arrive(reserved | init_state(2));
+  EXPECT_EQ(reserved_state & kReservedMask, reserved);
+  EXPECT_EQ(init_count(reserved_state), 1ull);
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaDenseDescriptorCopiesDenseRows) {
@@ -1386,7 +1522,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherSupportsI16Indices) {
   constexpr uint32_t kSentinel = 0xCDAECDAEu;
 
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
-  write_wave_sgpr(*cu, *wf, 0, 1u | (1u << 30));
+  write_wave_sgpr(*cu, *wf, 0, 1u | (1u << 31));
   write_wave_sgpr(*cu, *wf, 12, 2u << 16);    // i32 elements.
   write_wave_sgpr(*cu, *wf, 13, kCols << 16); // Tensor dim0.
   write_wave_sgpr(*cu, *wf, 14, kRows << 16); // Tensor dim1.
