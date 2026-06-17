@@ -19,6 +19,10 @@
 #include "nvtx.h"
 #include "compiler.h"
 #include "rma/rma.h"
+#include "argcheck.h"
+#include <chrono>
+#include <thread>
+#include "os.h"
 
 using namespace rccl;
 
@@ -82,7 +86,7 @@ void* ncclAsyncJobMain(void* arg) {
   if (job->result != ncclSuccess) {
     INFO(NCCL_INIT,"%s:%d -> %d [Async thread]", __FILE__, __LINE__, job->result);
   }
-  COMPILER_ATOMIC_STORE(&job->state, ncclGroupJobDone, std::memory_order_release);
+  COMPILER_ATOMIC_STORE(&job->state, static_cast<ncclGroupJobState_t>(ncclGroupJobDone), std::memory_order_release);
   return arg;
 }
 
@@ -297,7 +301,7 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
   while (!ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue)) {
     struct ncclDevrCommCreateTask* task = ncclIntruQueueDequeue(&comm->devrState.commCreateTaskQueue);
     NCCLCHECKGOTO(ncclDevrCommCreateInternal(
-      comm, (struct ncclDevCommRequirements const*)task->reqs, task->outDevComm, /*isInternal=*/false, task->outDevCommCopyCB),
+      comm, task->reqs, task->outDevComm, /*isInternal=*/false, task->devCompat),
       ret, fail);
     freeDevCommRequirements(task->reqs); // free additional task memory for reqs
     free(task);
@@ -327,6 +331,20 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
     struct ncclRmaCeInitTask* task = ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue);
     NCCLCHECKGOTO(ncclRmaCeInit(task->comm), ret, fail);
     free(task);
+  }
+
+  while (!ncclIntruQueueEmpty(&comm->suspendTaskQueue)) {
+    struct ncclMemManagerTask* task = ncclIntruQueueDequeue(&comm->suspendTaskQueue);
+    struct ncclComm* taskComm = task->comm;
+    free(task);
+    NCCLCHECKGOTO(ncclCommMemSuspend(taskComm), ret, fail);
+  }
+
+  while (!ncclIntruQueueEmpty(&comm->resumeTaskQueue)) {
+    struct ncclMemManagerTask* task = ncclIntruQueueDequeue(&comm->resumeTaskQueue);
+    struct ncclComm* taskComm = task->comm;
+    free(task);
+    NCCLCHECKGOTO(ncclCommMemResume(taskComm), ret, fail);
   }
 
 exit:
@@ -562,18 +580,18 @@ static ncclResult_t asyncJobLaunch(struct ncclIntruQueue<struct ncclAsyncJob, &n
         }
 
         if (!job->destroyFlag && (COMPILER_ATOMIC_LOAD(groupAbortFlag, std::memory_order_acquire) || errorJobAbortFlag == true)) {
-          COMPILER_ATOMIC_STORE(job->abortFlag, 1, std::memory_order_release);
-          COMPILER_ATOMIC_STORE(job->abortFlagDev, 1, std::memory_order_release);
+          COMPILER_ATOMIC_STORE(job->abortFlag, uint32_t(1), std::memory_order_release);
+          COMPILER_ATOMIC_STORE(job->abortFlagDev, uint32_t(1), std::memory_order_release);
           if (job->childAbortFlag) {
-            COMPILER_ATOMIC_STORE(job->childAbortFlag, 1, std::memory_order_release);
-            COMPILER_ATOMIC_STORE(job->childAbortFlagDev, 1, std::memory_order_release);
+            COMPILER_ATOMIC_STORE(job->childAbortFlag, uint32_t(1), std::memory_order_release);
+            COMPILER_ATOMIC_STORE(job->childAbortFlagDev, uint32_t(1), std::memory_order_release);
           }
         }
 
         job = job->next;
       } while (job != nullptr);
       // Let preconnect threads progress.
-      if (jobsDone == false) usleep(1);
+      if (jobsDone == false) std::this_thread::sleep_for(std::chrono::microseconds(1));
     } while (jobsDone == false);
 
     if (ret != ncclSuccess) goto fail;
@@ -821,7 +839,6 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
   size_t realSize = 0;
   bool hasCommHead = false;
   ncclGroupJob* groupJob = NULL;
-
   internalSimInfo.magic = 0;
 
   if (ncclGroupDepth == 0) {
