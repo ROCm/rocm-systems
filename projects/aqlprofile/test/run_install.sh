@@ -29,7 +29,7 @@ cd $BIN_DIR
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and other libraries
-export LD_LIBRARY_PATH=$BIN_DIR/../../../lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$BIN_DIR/../../lib:$LD_LIBRARY_PATH
 # test binary
 tbin=./ctrl
 
