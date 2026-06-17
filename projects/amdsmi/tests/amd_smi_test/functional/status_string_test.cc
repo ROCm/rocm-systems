@@ -200,18 +200,13 @@ TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
 
   const auto all_status_codes = enum_reflect::AllStatusCodes();
 
-  // Guard against a vacuous pass: reflection must have discovered the full set,
-  // including the codes whose missing cases prompted this test and the
-  // out-of-range sentinels. A failure here almost certainly means the compiler
-  // changed its __PRETTY_FUNCTION__ rendering and enum_reflect::EnumName() needs
-  // updating -- the amdsmi library itself is probably fine.
-  ASSERT_GE(all_status_codes.size(), 40u)
-      << "enum reflection found too few codes (" << all_status_codes.size()
-      << "); the __PRETTY_FUNCTION__ parser in enum_reflect likely broke due to a "
-      << "compiler change (or kScanLimit is too low). Compiler: " << enum_reflect::CompilerId()
-      << "; sample signature: \"" << enum_reflect::SampleSignature()
-      << "\". This is a test-harness problem, "
-      << "not an amdsmi library bug.";
+  // Guard against a vacuous pass without pinning a magic count (which would need
+  // bumping every time a status code is added). Reflection must have discovered
+  // the specific normal codes whose missing cases prompted this test, plus the
+  // two out-of-range sentinels. TIMEOUT (8) and MORE_DATA (39) are ordinary
+  // scanned codes: if the __PRETTY_FUNCTION__ parser broke (e.g. a compiler
+  // change) the scan finds no enumerators and they drop out, failing the check
+  // below -- a test-harness problem, not an amdsmi library bug.
   auto contains = [&](amdsmi_status_t code) {
     for (const auto& [value, name] : all_status_codes) {
       if (value == code) return true;
@@ -221,10 +216,12 @@ TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
   for (amdsmi_status_t code : {AMDSMI_STATUS_TIMEOUT, AMDSMI_STATUS_MORE_DATA,
                                AMDSMI_STATUS_MAP_ERROR, AMDSMI_STATUS_UNKNOWN_ERROR}) {
     ASSERT_TRUE(contains(code))
-        << "enum reflection did not discover a known status code (" << code
-        << "); the __PRETTY_FUNCTION__ parser in enum_reflect likely broke due "
-        << "to a compiler change. This is a test-harness problem, not an amdsmi "
-        << "library bug.";
+        << "enum reflection did not discover known status code " << code
+        << "; the __PRETTY_FUNCTION__ parser in enum_reflect likely broke due to "
+        << "a compiler change (or kScanLimit is too low). Compiler: " << enum_reflect::CompilerId()
+        << "; sample signature: \"" << enum_reflect::SampleSignature()
+        << "\". This is a test-harness "
+        << "problem, not an amdsmi library bug.";
   }
 
   for (const auto& [code, name] : all_status_codes) {
