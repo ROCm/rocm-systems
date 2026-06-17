@@ -200,7 +200,7 @@ log "server is healthy"
 # Test a generation through the OpenAI-compatible completions endpoint.
 # ---------------------------------------------------------------------------
 log "requesting a completion from $MODEL"
-REQ="$(printf '{"model":"%s","prompt":"Hello, my name is","max_tokens":16,"temperature":0}' "$MODEL")"
+REQ="$(printf '{"model":"%s","prompt":"The capital of France is","max_tokens":6,"temperature":0}' "$MODEL")"
 RESP="$(api_curl /v1/completions \
   -H 'Content-Type: application/json' \
   -d "$REQ")" || { cat "$RUN_LOG" >&2; fail "completion request failed"; }
