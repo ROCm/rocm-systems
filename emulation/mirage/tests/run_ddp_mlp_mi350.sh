@@ -11,14 +11,12 @@
 #   * mirage exports `MASTER_ADDR`/`MASTER_PORT` on every node, so
 #     `torchrun`'s rendezvous (and `torch.distributed`'s `env://`) work with no
 #     extra wiring. For a single node, `torchrun --standalone` is enough.
+#   * mirage runs the emulator as a separate daemon process by default, so the
+#     rank processes share GPU memory through it. Pass `mirage run --in-process`
+#     to give each process its own in-process emulator (no shared GPU memory).
 #   * The fixture `ddp_mlp.py` is launched once per rank by torchrun; each rank
-#     pins itself to GPU `LOCAL_RANK`, wraps an MLP in DDP, and trains.
-#
-# The model trains on the emulated GPU; gradients are all-reduced with the
-# `gloo` backend (host-staged collectives). That is the combination that works
-# across *multiple* emulated GPUs today -- multi-GPU RCCL/`nccl` collectives are
-# not yet serviced by the functional emulator (set BACKEND=nccl to try). A
-# single emulated GPU works with either backend.
+#     pins itself to GPU `LOCAL_RANK`, wraps an MLP in DDP, and trains. Gradients
+#     are all-reduced with NCCL (RCCL on ROCm).
 #
 # What this does:
 #   1. Create/reuse a venv populated from the gfx950-dcgpu (MI350) ROCm nightly.
@@ -32,8 +30,6 @@
 #   SKIP_INSTALL  set to 1 to reuse an already-populated venv
 #   PROFILE       mirage profile (default: mi350x)
 #   NPROC         GPUs / ranks per node, i.e. torchrun --nproc_per_node (default: 2)
-#   BACKEND       collective backend: gloo (default) or nccl (RCCL on ROCm)
-#   DEVICE        where tensors live: cuda (default), cpu, or auto
 #   STEPS         optimizer steps the MLP trains for (default: 50)
 #
 set -euo pipefail
@@ -44,8 +40,6 @@ FIXTURE="$MIRAGE_DIR/tests/fixtures/ml/ddp_mlp.py"
 
 PROFILE="${PROFILE:-mi350x}"
 NPROC="${NPROC:-2}"
-BACKEND="${BACKEND:-gloo}"
-DEVICE="${DEVICE:-cuda}"
 STEPS="${STEPS:-50}"
 VENV="${VENV:-$MIRAGE_DIR/.venv-mi350}"
 INDEX_URL="${INDEX_URL:-https://rocm.nightlies.amd.com/v2/gfx950-dcgpu/}"
@@ -87,13 +81,11 @@ fi
 #    from the workspace (cargo run) so its rocjitsu KMD discovery/preload work;
 #    the first `--` ends cargo's args, the second ends mirage's.
 cd "$MIRAGE_DIR"
-log "training MLP with DDP via torchrun --nproc_per_node=$NPROC on emulated $PROFILE (backend=$BACKEND device=$DEVICE)"
+log "training MLP with DDP via torchrun --nproc_per_node=$NPROC on emulated $PROFILE (nccl)"
 set +e
 OUTPUT="$(cargo run --quiet -- run \
   --profile "$PROFILE" \
   --gpus-per-node "$NPROC" \
-  --env "DDP_BACKEND=$BACKEND" \
-  --env "DDP_DEVICE=$DEVICE" \
   --env "DDP_STEPS=$STEPS" \
   -- "$TORCHRUN" --standalone --nproc_per_node="$NPROC" "$FIXTURE" 2>&1)"
 STATUS=$?

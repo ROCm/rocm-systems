@@ -1,34 +1,21 @@
 """Train a tiny MLP with PyTorch DistributedDataParallel (DDP).
 
-This is the workload half of the DDP-on-mirage demo. It is launched once
-per rank -- normally by ``torchrun`` -- and each rank:
+A standard, self-contained DDP training script. It is launched once per
+rank -- normally by ``torchrun`` -- and each rank:
 
   1. Reads its rank / world-size / local-rank from the standard
      ``torch.distributed`` environment variables (``RANK``,
      ``WORLD_SIZE``, ``LOCAL_RANK``, ``MASTER_ADDR``, ``MASTER_PORT``).
-     ``torchrun`` populates the first three; mirage exports
-     ``MASTER_ADDR``/``MASTER_PORT`` on every node so multi-node
-     rendezvous works without extra flags.
-  2. Pins itself to GPU ``LOCAL_RANK`` (one emulated GPU per rank).
+  2. Pins itself to GPU ``LOCAL_RANK`` and initializes the NCCL (RCCL on
+     ROCm) process group.
   3. Builds an identical MLP, wraps it in ``DistributedDataParallel`` so
      gradients are all-reduced across ranks every backward pass.
   4. Trains on a fixed synthetic regression task for a few steps.
-  5. Sanity-checks that training actually worked: the loss dropped and
-     every rank ended with byte-identical weights (DDP keeps replicas in
+  5. Sanity-checks that training worked: the loss dropped and every rank
+     ended with byte-identical weights (DDP keeps replicas in
      lock-step). Rank 0 then prints ``ddp_mlp_ok``.
 
-Exit codes:
-  * 0 + rank 0 prints ``ddp_mlp_ok``  -> success
-  * non-zero on any failure (no silent fallback)
-
 Environment knobs:
-  * ``DDP_BACKEND``  collective backend: ``nccl`` (RCCL on ROCm) or
-    ``gloo`` (default; CPU-staged collectives). ``gloo`` still trains the
-    model on the GPU -- only the gradient all-reduce goes through host
-    sockets -- which is the combination that runs across *multiple*
-    emulated GPUs today.
-  * ``DDP_DEVICE``   where tensors live: ``auto`` (default; GPU when one
-    is visible, else CPU), ``cuda``, or ``cpu``.
   * ``DDP_STEPS``    number of optimizer steps (default: 50).
   * ``DDP_SEED``     base RNG seed (default: 0).
 """
@@ -70,7 +57,6 @@ class MLP(nn.Module):
 
 
 def main() -> int:
-    backend = os.environ.get("DDP_BACKEND", "gloo").lower()
     steps = env_int("DDP_STEPS", 50)
     seed = env_int("DDP_SEED", 0)
 
@@ -79,35 +65,13 @@ def main() -> int:
     world_size = env_int("WORLD_SIZE", 1)
     local_rank = env_int("LOCAL_RANK", 0)
 
-    # The collective backend (how gradients are all-reduced) is chosen
-    # independently of where the model runs. On the emulator the model
-    # trains on the GPU while `gloo` carries the collective over host
-    # sockets -- the combination that works across multiple emulated GPUs.
-    want = os.environ.get("DDP_DEVICE", "auto").lower()
-    use_cuda = want != "cpu" and torch.cuda.is_available()
-    if want == "cuda" and not use_cuda:
-        print("FAIL: DDP_DEVICE=cuda but torch.cuda.is_available() is False", file=sys.stderr)
-        return 2
-    if use_cuda:
-        if local_rank >= torch.cuda.device_count():
-            print(
-                f"FAIL: local_rank {local_rank} >= device_count "
-                f"{torch.cuda.device_count()}",
-                file=sys.stderr,
-            )
-            return 2
-        torch.cuda.set_device(local_rank)
-        device = torch.device("cuda", local_rank)
-    else:
-        device = torch.device("cpu")
-
-    # Rendezvous. With WORLD_SIZE==1 we still go through the process group
-    # so the DDP code path is identical to the multi-rank case.
-    dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+    # Pin this rank to its GPU and join the NCCL process group.
+    torch.cuda.set_device(local_rank)
+    device = torch.device("cuda", local_rank)
+    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
     log(
-        f"joined process group: backend={backend} world_size={world_size} "
-        f"device={device} master={os.environ.get('MASTER_ADDR')}:"
-        f"{os.environ.get('MASTER_PORT')}"
+        f"joined process group: world_size={world_size} device={device} "
+        f"master={os.environ.get('MASTER_ADDR')}:{os.environ.get('MASTER_PORT')}"
     )
 
     try:
@@ -115,11 +79,7 @@ def main() -> int:
         # broadcast-on-construction has matching replicas to align.
         torch.manual_seed(seed)
         model = MLP().to(device)
-        ddp_model = DDP(
-            model,
-            device_ids=[local_rank] if use_cuda else None,
-            output_device=local_rank if use_cuda else None,
-        )
+        ddp_model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
         # A fixed linear target so the loss is deterministic and must drop.
         torch.manual_seed(1234)
@@ -161,8 +121,7 @@ def main() -> int:
 
         # Sanity check 2: DDP kept every replica in lock-step. After
         # synchronized SGD all ranks must hold byte-identical parameters.
-        # All-reduce a checksum of the flattened weights and compare to
-        # rank 0's value broadcast to everyone.
+        # All-gather a checksum of the flattened weights and compare.
         with torch.no_grad():
             checksum = sum(p.sum() for p in ddp_model.parameters()).to(device)
             gathered = [torch.zeros_like(checksum) for _ in range(world_size)]

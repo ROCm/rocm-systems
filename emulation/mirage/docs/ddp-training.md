@@ -56,7 +56,7 @@ flowchart LR
     end
     tr --> p0
     tr --> p1
-    p0 <-- "all-reduce grads (gloo)" --> p1
+    p0 <-- "all-reduce grads (RCCL)" --> p1
   end
 ```
 
@@ -75,10 +75,12 @@ Three things make this work:
    multi-node you can point `torchrun --rdzv-endpoint` at
    `$MASTER_ADDR:$MASTER_PORT`.
 
-3. **The collective backend.** The model trains on the **emulated GPU**,
-   while gradients are all-reduced with the `gloo` backend (host-staged
-   collectives). This is the combination that works across *multiple*
-   emulated GPUs today — see [Backends](#backends-gloo-vs-nccl).
+3. **The daemon emulator (default).** mirage runs the emulator as a
+   separate daemon process by default, so the rank processes share GPU
+   memory through it — which is what lets RCCL set up its transports
+   across ranks. Pass `mirage run --in-process` to instead give every
+   process its own in-process emulator (no shared GPU memory; multi-GPU
+   RCCL cannot work in that mode).
 
 ## Step by step
 
@@ -110,15 +112,14 @@ From the workspace (so mirage's own rocjitsu discovery works), run:
 cargo run --quiet -- run \
   --profile mi350x \
   --gpus-per-node 2 \
-  --env DDP_BACKEND=gloo \
-  --env DDP_DEVICE=cuda \
   -- .venv-mi350/bin/torchrun --standalone --nproc_per_node=2 \
      tests/fixtures/ml/ddp_mlp.py
 ```
 
 The first `--` ends `cargo run`'s arguments; the second ends mirage's,
 so everything after it is the workload `torchrun` launches once per
-rank.
+rank. mirage already runs the shared-memory daemon emulator by default
+(pass `--in-process` to opt out).
 
 ### 3. Read the output
 
@@ -144,27 +145,6 @@ self-contained DDP program:
    weight checksum is identical on every rank — proof that DDP kept the
    replicas in lock-step.
 
-## Backends: gloo vs nccl
-
-`DDP_BACKEND` selects how gradients are all-reduced:
-
-| Backend | 1 emulated GPU | N emulated GPUs | Notes |
-|---------|:--:|:--:|-------|
-| `gloo` (default) | ✅ | ✅ | Collectives staged through host sockets. Model still runs on the GPU. |
-| `nccl` (RCCL) | ✅ | ❌ | Multi-GPU RCCL collectives are not yet serviced by the functional emulator (ranks fault during the first collective). |
-
-Single-GPU `nccl` works, so you can exercise the RCCL init path:
-
-```sh
-mirage run --profile mi350x --gpus-per-node 1 \
-  --env DDP_BACKEND=nccl \
-  -- torchrun --standalone --nproc_per_node=1 ddp_mlp.py
-```
-
-For multi-GPU runs, keep the default `gloo` backend — the model still
-trains on the emulated GPUs; only the gradient exchange goes over host
-sockets.
-
 ## Tuning the run
 
 The runner script and fixture honor these environment variables:
@@ -172,8 +152,6 @@ The runner script and fixture honor these environment variables:
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `NPROC` | `2` | GPUs / ranks per node (`torchrun --nproc_per_node`, `mirage --gpus-per-node`). |
-| `BACKEND` | `gloo` | Collective backend (`gloo` or `nccl`). |
-| `DEVICE` | `cuda` | Where tensors live (`cuda`, `cpu`, or `auto`). |
 | `STEPS` | `50` | Optimizer steps. |
 | `PROFILE` | `mi350x` | mirage profile / emulated GPU. |
 | `VENV` | `.venv-mi350` | venv location. |
@@ -184,9 +162,6 @@ Examples:
 ```sh
 # 4 emulated GPUs, 100 steps
 NPROC=4 STEPS=100 SKIP_INSTALL=1 ./tests/run_ddp_mlp_mi350.sh
-
-# CPU-only DDP (no GPU emulation in the math, pure gloo)
-DEVICE=cpu SKIP_INSTALL=1 ./tests/run_ddp_mlp_mi350.sh
 ```
 
 ## Multi-node DDP
@@ -210,9 +185,14 @@ the workers find the head without extra configuration.
 - **`torch.cuda.is_available()` is False.** The venv is missing the ROCm
   runtime or `rocm-sdk init` was not run. Re-run the install step in the
   active venv.
-- **A rank SIGSEGV/SIGABRTs during the first collective with `nccl` and
-  `--nproc_per_node > 1`.** Expected — multi-GPU RCCL is not yet
-  emulated. Use the default `gloo` backend.
+- **A rank SIGSEGV/SIGABRTs immediately with `--nproc_per_node > 1`.**
+  You are likely in `--in-process` mode, where each rank has its own
+  emulator and cannot share GPU memory. Drop `--in-process` so the
+  default daemon emulator is used.
+- **Multi-GPU run hangs / times out after a few steps.** Known
+  limitation: RCCL initializes and runs several collectives over the
+  daemon emulator but a later collective stalls. Single-GPU runs train
+  end to end.
 - **`KMD preload library not found`.** You are running an installed
   `mirage` from `PATH` instead of the workspace build. Run via
   `cargo run --` from `emulation/mirage` (see
