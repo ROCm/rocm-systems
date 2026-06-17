@@ -460,8 +460,10 @@ TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath
 
 TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
 {
-    const auto relative_dir = std::string{ "ump-relative" };
-    const auto expected_dir = (test_common::fs::current_path() / relative_dir).string();
+    const auto  relative_dir = std::string{ "ump-relative" };
+    const auto* pwd          = getenv("PWD");
+    const auto  expected_dir =
+        (test_common::fs::path{ (pwd != nullptr) ? pwd : "." } / relative_dir).string();
     test_common::fs::remove_all(expected_dir);
     ASSERT_FALSE(test_common::fs::exists(expected_dir));
     ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, relative_dir };
@@ -483,6 +485,31 @@ TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
     EXPECT_TRUE(saw_json) << "json file not registered";
 
     test_common::fs::remove_all(expected_dir);
+}
+
+TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathCreatesNestedDirectories)
+{
+    auto nested_dir = tmp_dir + "/ump-nested/a/b/c";
+    ASSERT_FALSE(test_common::fs::exists(nested_dir));
+    ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, nested_dir };
+    rebuild_processor();
+
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
+    processor->finalize_processing();
+
+    EXPECT_TRUE(test_common::fs::exists(nested_dir)) << "nested dir not created";
+
+    bool saw_txt  = false;
+    bool saw_json = false;
+    for(const auto& e : registered_files())
+    {
+        EXPECT_THAT(e.path, ::testing::HasSubstr(nested_dir));
+        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
+        if(e.format == output_format::text) saw_txt = true;
+        if(e.format == output_format::json) saw_json = true;
+    }
+    EXPECT_TRUE(saw_txt) << "text file not registered";
+    EXPECT_TRUE(saw_json) << "json file not registered";
 }
 
 TEST_F(UnifiedMemoryProcessorTest, FaultsOnlyEmitsOutput)

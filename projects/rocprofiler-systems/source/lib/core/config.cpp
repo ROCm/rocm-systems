@@ -2737,7 +2737,7 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 std::string
 get_ump_absolute_path()
 {
-    auto ensure_dir = [](const std::string& path) {
+    auto ensure_dir = [](std::string path) {
         if(!path.empty() && !tim::filepath::direxists(path))
         {
             tim::filepath::makedir(path);
@@ -2745,19 +2745,19 @@ get_ump_absolute_path()
         return path;
     };
 
-    auto make_absolute = [](const std::string& path) {
+    auto make_absolute = [](std::string path) {
         if(path.empty()) return path;
-        if(path.at(0) == '/')
+
+        if(path.at(0) != '/')
         {
-            return (settings_are_configured())
-                       ? settings::format(path, get_config()->get_tag())
-                       : path;
+            const auto* pwd  = getenv("PWD");
+            const auto* base = (pwd != nullptr) ? pwd : ".";
+            path             = fmt::format("{}/{}", base, path);
         }
 
-        auto result = fmt::format("{}/{}", tim::filepath::get_cwd(), path);
         return (settings_are_configured())
-                   ? settings::format(std::move(result), get_config()->get_tag())
-                   : result;
+                   ? settings::format(std::move(path), get_config()->get_tag())
+                   : path;
     };
 
     if(settings_are_configured())
@@ -2768,13 +2768,11 @@ get_ump_absolute_path()
             return ensure_dir(make_absolute(*explicit_path));
     }
 
-    // Support early calls before settings have folded in env vars.
-    auto env_path =
-        rocprofsys::get_env<std::string>(env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "");
-    if(!env_path.empty()) return ensure_dir(make_absolute(env_path));
-
     if(!settings_are_configured())
     {
+        auto env_path =
+            rocprofsys::get_env<std::string>(env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "");
+        if(!env_path.empty()) return ensure_dir(make_absolute(env_path));
         return settings::output_path();
     }
 
