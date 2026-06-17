@@ -300,40 +300,46 @@ protected:
     const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                               text->size());
 
-    bool found = false;
     for (const auto &block : blocks) {
       uint64_t cur = block->start_offset();
       for (const Instruction &inst : block->instructions()) {
-        const bool is_vadd = inst.mnemonic().find("v_add_f32") != std::string_view::npos;
-        if (is_vadd && is_relocatable_anchor(inst, cur, text_bytes, ROCJITSU_CODE_ARCH_CDNA2)) {
-          anchor_offset_ = cur; // Instrumentor will need offset
-          anchor_mnemonic_ = std::string(inst.mnemonic());
-          found = true;
-          break;
+        if (is_relocatable_anchor(inst, cur, text_bytes, ROCJITSU_CODE_ARCH_CDNA2)) {
+          anchor_offsets_.push_back(cur); // Instrumentor will need offset
+          anchor_mnemonics_.push_back(std::string(inst.mnemonic()));
+          ++anchor_count_;
         }
         cur += static_cast<uint64_t>(inst.size());
+        if (anchor_count_ == 2)
+          break;
       }
-      if (found)
+      if (anchor_count_ == 2)
         break;
     }
-    ASSERT_TRUE(found) << "No relocatable v_add_f32 anchor in vector_add_gfx90a.o; "
-                          "did the compiler change the lowering?";
+    ASSERT_NE(anchor_count_, 0u) << "No relocatable anchor in vector_add_gfx90a.o; "
+                                    "did the compiler change the lowering?";
 
     // Apply the inline-nop trampoline.
     Instrumentor instrumentor(*co, ROCJITSU_CODE_ARCH_CDNA2);
-    instrumentor.add_point_by_offset(anchor_offset_);
-    auto result = instrumentor.patch();
+    for (uint64_t anchor_idx = 0; anchor_idx < anchor_count_; ++anchor_idx) {
+      instrumentor.add_point_by_offset(anchor_offsets_[anchor_idx]);
+    }
+    auto result = instrumentor.patch_with_debug_summaries();
     ASSERT_TRUE(result.errors.empty())
         << "Instrumentor::patch failed: "
         << (result.errors.empty() ? std::string{} : result.errors.front());
     patched_elf_bytes_ = std::move(result.elf_bytes);
     ASSERT_FALSE(patched_elf_bytes_.empty());
+    // Keep the per-site summaries so tests can locate each trampoline by its
+    // real cave offset rather than guessing the in-section stride.
+    patches_ = std::move(result.patches);
   }
 
   std::vector<uint8_t> original_elf_bytes_;
   std::vector<uint8_t> patched_elf_bytes_;
-  uint64_t anchor_offset_ = 0;
-  std::string anchor_mnemonic_;
+  std::vector<uint64_t> anchor_offsets_;
+  std::vector<std::string> anchor_mnemonics_;
+  std::vector<InstrumentationPatch> patches_;
+  uint64_t anchor_count_ = 0;
 };
 
 // Tests that need only HSA libs (parsing + decoding the patched ELF). Run
@@ -377,25 +383,28 @@ TEST_F(HsaDbiSmokeStatic, PatchedElfActuallyContainsInstrumentation) {
   ASSERT_NE(patched_elf_bytes_, original_elf_bytes_)
       << "Patched ELF is byte-identical to original - patcher silently no-oped?";
 
-  // (b) The patched .text at anchor_offset_ now decodes as s_branch, not the
-  //     original v_add_f32 we recorded as anchor_mnemonic_.
+  // (b) The patched .text at anchor_offsets_[idx] now decodes as s_branch, not the
+  //     original instructions we recorded as anchor_mnemonics_[idx].
   AmdGpuCodeObject patched(patched_elf_bytes_.data(), patched_elf_bytes_.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_FALSE(patched.text_sections().empty());
   const Section *text = patched.text_sections().front();
-  ASSERT_GT(text->size(), anchor_offset_ + 4);
+  ASSERT_GT(text->size(), anchor_offsets_[0] + 4);
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
   ASSERT_NE(decoder, nullptr);
-  rj_code_binary_inst_t anchor_word = 0;
-  std::memcpy(&anchor_word, text->data() + anchor_offset_, sizeof(anchor_word));
-  std::unique_ptr<Instruction> decoded(decoder->decode(&anchor_word));
-  ASSERT_NE(decoded, nullptr);
-  EXPECT_NE(decoded->mnemonic().find("s_branch"), std::string_view::npos)
-      << "Anchor at offset " << anchor_offset_
-      << " should now decode as s_branch; got: " << decoded->mnemonic();
-  EXPECT_NE(decoded->mnemonic(), anchor_mnemonic_)
-      << "Anchor mnemonic unchanged (" << anchor_mnemonic_ << ") - was the patch applied?";
+  for (uint64_t anchor_idx = 0; anchor_idx < anchor_count_; ++anchor_idx) {
+    rj_code_binary_inst_t anchor_word = 0;
+    std::memcpy(&anchor_word, text->data() + anchor_offsets_[anchor_idx], sizeof(anchor_word));
+    std::unique_ptr<Instruction> decoded(decoder->decode(&anchor_word));
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_NE(decoded->mnemonic().find("s_branch"), std::string_view::npos)
+        << "Anchor at offset " << anchor_offsets_[anchor_idx]
+        << " should now decode as s_branch; got: " << decoded->mnemonic();
+    EXPECT_NE(decoded->mnemonic(), anchor_mnemonics_[anchor_idx])
+        << "Anchor mnemonic unchanged (" << anchor_mnemonics_[anchor_idx]
+        << ") - was the patch applied?";
+  }
 
   // (c) Patched ELF has a .rj_trampolines section.
   bool found_tramp = false;
@@ -503,7 +512,7 @@ TEST_F(HsaDbiSmokeHardware, PatchedKernelDispatchMatchesOriginal) {
 
   // The real check: patched dispatch must produce the same buffer as the
   // original. Bit-identical because the trampoline body is just s_nop 0
-  // around the relocated v_add_f32.
+  // around the relocated instruction.
   auto patched_out = dispatch_vector_add(patched_elf_bytes_, gpu, cpu, a, b, N);
   ASSERT_EQ(patched_out.size(), N) << "patched dispatch failed (empty result)";
   assert_kernel_wrote_output(patched_out, "patched");
@@ -512,10 +521,10 @@ TEST_F(HsaDbiSmokeHardware, PatchedKernelDispatchMatchesOriginal) {
          "should be semantically a no-op";
 }
 
-// "Sabotage" verification: overwrite the s_nop 0 placeholder in the patched
-// trampoline with s_endpgm 0. If the GPU genuinely takes the trampoline
-// path, every wave terminates before reaching the relocated v_add_f32 and
-// the output stays at the pre-dispatch zero pattern. If the trampoline is
+// "Sabotage" verification: overwrite the s_nop 0 placeholders in the patched
+// trampolines with s_endpgm 0 one at a time. If the GPU genuinely takes the trampoline
+// path, every wave terminates before reaching the relocated instruction and
+// the output stays at the pre-dispatch zero pattern. If that trampoline is
 // somehow bypassed (e.g., the forward s_branch didn't take effect), the
 // kernel would still produce the golden output.
 //
@@ -546,12 +555,12 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
   ASSERT_NE(tramp, nullptr);
   ASSERT_GE(tramp->size(), 4u);
 
+  ASSERT_EQ(anchor_count_, 2u);
+  ASSERT_EQ(patches_.size(), 2u);
   // Before sabotaging: verify the bytes we're about to overwrite are indeed
   // s_nop 0. If this assertion fails, the orchestrator's trampoline layout
   // no longer starts with the placeholder we think it does, and the
   // sabotage premise ("we replaced the no-op with s_endpgm") would be a lie.
-  // TODO: With multiple instrumentation points, this will no longer be a good
-  // assumption. Will likely need to sabotage the whole section.
   constexpr uint32_t kSNop0 = 0xBF800000u;
   uint32_t pre_overwrite = 0;
   std::memcpy(&pre_overwrite, sabotaged.data() + tramp->sectionOffset(), sizeof(pre_overwrite));
@@ -574,32 +583,83 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
     golden[i] = a[i] + b[i];
   }
 
-  auto sabotaged_out = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);
-  ASSERT_EQ(sabotaged_out.size(), N)
+  auto sabotaged_out_1 = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);
+  ASSERT_EQ(sabotaged_out_1.size(), N)
+      << "Sabotaged dispatch failed (HSA error before s_endpgm could run)";
+
+  // Trampoline-executed path: every thread that enters the trampoline hits
+  // s_endpgm and terminates before reaching the relocated instruction or its
+  // store-to-C. So C stays at the pre-dispatch zero pattern.
+  bool any_nonzero_1 = false;
+  for (float v : sabotaged_out_1) {
+    if (v != 0.0f) {
+      any_nonzero_1 = true;
+      break;
+    }
+  }
+  EXPECT_FALSE(any_nonzero_1)
+      << "Sabotaged dispatch produced non-zero output - did the GPU bypass the trampoline?";
+
+  // And the output must NOT match the golden (would mean the trampoline
+  // wasn't hit and the kernel ran end-to-end normally).
+  int matches_golden_1 = 0;
+  for (uint32_t i = 0; i < N; ++i) {
+    if (std::abs(sabotaged_out_1[i] - golden[i]) < 1e-5f)
+      ++matches_golden_1;
+  }
+  EXPECT_LT(matches_golden_1, N) << "Sabotaged dispatch matched the golden in " << matches_golden_1
+                                 << "/" << N << " elements - trampoline appears bypassed";
+
+  // Revert first trampoline in sabotaged
+  std::memcpy(sabotaged.data() + tramp->sectionOffset(), &kSNop0, sizeof(kSNop0));
+  auto unsabotaged_out = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);
+  ASSERT_EQ(unsabotaged_out.size(), N) << "HSA error before unsabotaged run could finish";
+
+  for (uint32_t i = 0; i < N; ++i) {
+    ASSERT_LT(std::abs(unsabotaged_out[i] - golden[i]), 1e-5f)
+        << "Unsabotaged code differs from golden";
+  }
+
+  // Perform same change and test for second trampoline
+  int64_t offset_between_anchors = patches_[1].trampoline_offset - patches_[0].trampoline_offset;
+  EXPECT_TRUE(offset_between_anchors)
+      << "Both selected trampolines have the same trampoline offset";
+  std::memcpy(&pre_overwrite, sabotaged.data() + tramp->sectionOffset() + offset_between_anchors,
+              sizeof(pre_overwrite));
+  ASSERT_EQ(pre_overwrite, kSNop0) << "Expected s_nop 0 (0x" << std::hex << kSNop0
+                                   << ") at start of .rj_trampolines but found 0x" << pre_overwrite
+                                   << " - trampoline body layout changed?";
+
+  // s_endpgm 0 on CDNA: SOPP prefix (0x17F) << 23 | opcode 1 << 16 | simm16 0.
+  std::memcpy(sabotaged.data() + tramp->sectionOffset() + offset_between_anchors, &kSEndpgm0,
+              sizeof(kSEndpgm0));
+
+  auto sabotaged_out_2 = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);
+  ASSERT_EQ(sabotaged_out_2.size(), N)
       << "Sabotaged dispatch failed (HSA error before s_endpgm could run)";
 
   // Trampoline-executed path: every thread that enters the trampoline hits
   // s_endpgm and terminates before reaching the relocated v_add_f32 or its
   // store-to-C. So C stays at the pre-dispatch zero pattern.
-  bool any_nonzero = false;
-  for (float v : sabotaged_out) {
+  bool any_nonzero_2 = false;
+  for (float v : sabotaged_out_2) {
     if (v != 0.0f) {
-      any_nonzero = true;
+      any_nonzero_2 = true;
       break;
     }
   }
-  EXPECT_FALSE(any_nonzero)
+  EXPECT_FALSE(any_nonzero_2)
       << "Sabotaged dispatch produced non-zero output - did the GPU bypass the trampoline?";
 
   // And the output must NOT match the golden (would mean the trampoline
   // wasn't hit and the kernel ran end-to-end normally).
-  int matches_golden = 0;
+  int matches_golden_2 = 0;
   for (uint32_t i = 0; i < N; ++i) {
-    if (std::abs(sabotaged_out[i] - golden[i]) < 1e-5f)
-      ++matches_golden;
+    if (std::abs(sabotaged_out_2[i] - golden[i]) < 1e-5f)
+      ++matches_golden_2;
   }
-  EXPECT_LT(matches_golden, N) << "Sabotaged dispatch matched the golden in " << matches_golden
-                               << "/" << N << " elements - trampoline appears bypassed";
+  EXPECT_LT(matches_golden_2, N) << "Sabotaged dispatch matched the golden in " << matches_golden_2
+                                 << "/" << N << " elements - trampoline appears bypassed";
 }
 
 #endif // HAS_HOST_AMDGPU
