@@ -30,3 +30,15 @@ rocprofiler_compute_checkout_git_submodule(
 set(FMT_INSTALL OFF CACHE BOOL "Disable fmt installation" FORCE)
 set(FMT_TEST OFF CACHE BOOL "Disable fmt tests" FORCE)
 add_subdirectory(fmt)
+
+rocprofiler_compute_checkout_git_submodule(
+    RELATIVE_PATH json
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    TEST_FILE CMakeLists.txt
+    REPO_URL https://github.com/nlohmann/json.git
+    REPO_BRANCH "develop"
+)
+
+set(JSON_BuildTests OFF CACHE BOOL "Disable nlohmann_json tests" FORCE)
+set(JSON_Install OFF CACHE BOOL "Disable nlohmann_json install" FORCE)
+add_subdirectory(json)

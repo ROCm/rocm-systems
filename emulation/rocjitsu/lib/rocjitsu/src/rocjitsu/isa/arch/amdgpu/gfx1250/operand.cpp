@@ -812,6 +812,8 @@ std::string Operand::name() const {
 }
 
 std::optional<RegisterRef> Operand::to_register_ref() const {
+  if (size_bits_ == 0)
+    return std::nullopt;
   // Liveness tracks operands as contiguous 32-bit register lanes.
   const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);
   if (auto packed = packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, encoding_value_))
@@ -1285,8 +1287,10 @@ uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
     uint32_t raw = wf.cu().read_vgpr(wf.vgpr_alloc().base + off, lane);
     return (raw >> packed->shift) & 0xffffu;
   }
-  if (auto off = Isa::resolved_vgpr_offset(wf, opr_type_, ev, vgpr_msb_role()))
-    return wf.cu().read_vgpr(wf.vgpr_alloc().base + *off, lane);
+  if (auto off = Isa::resolved_vgpr_offset(wf, opr_type_, ev, vgpr_msb_role())) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+    return wf.cu().read_vgpr(wf.vgpr_alloc().base + voff, lane);
+  }
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(ev);
   return resolve_src_scalar(wf, ev);
@@ -1298,7 +1302,8 @@ void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
 
 void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
   if (auto off = Isa::resolved_vgpr_offset(wf, opr_type_, encoding_value_, vgpr_msb_role())) {
-    wf.cu().write_vgpr(wf.vgpr_alloc().base + *off, lane, val);
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    wf.cu().write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
     return;
   }
   throw std::logic_error("write_lane called on non-VGPR operand type");
@@ -1309,7 +1314,8 @@ uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const 
     return delegate()->read_lane64(wf, lane);
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(wf, opr_type_, ev, vgpr_msb_role())) {
-    uint32_t idx = wf.vgpr_alloc().base + *off;
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+    uint32_t idx = wf.vgpr_alloc().base + voff;
     uint32_t lo = wf.cu().read_vgpr(idx, lane);
     uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);
     return static_cast<uint64_t>(hi) << 32 | lo;
@@ -1323,7 +1329,8 @@ uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const 
 
 void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {
   if (auto off = Isa::resolved_vgpr_offset(wf, opr_type_, encoding_value_, vgpr_msb_role())) {
-    uint32_t idx = wf.vgpr_alloc().base + *off;
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t idx = wf.vgpr_alloc().base + voff;
     wf.cu().write_vgpr(idx, lane, static_cast<uint32_t>(val));
     wf.cu().write_vgpr(idx + 1, lane, static_cast<uint32_t>(val >> 32));
     return;

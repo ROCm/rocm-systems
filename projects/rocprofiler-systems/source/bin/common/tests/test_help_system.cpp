@@ -37,6 +37,10 @@ Options:
     --trace-file                   Set the trace output file (min: 1, dtype: filepath)
     --trace-buffer-size            Set buffer size in KB (min: 1, dtype: KB)
 
+    [OUTPUT FORMAT OPTIONS]  Unified selection of output format(s)
+
+    --output-format                Select output format(s) (min: 1, dtype: [format...])
+
     [PRESET OPTIONS]   Load a profiling preset
 
     --preset                       Load a preset configuration (max: 1, dtype: string)
@@ -198,6 +202,18 @@ TEST_F(help_system_test, topic_filter_sampling_extracts_timer_options)
     EXPECT_NE(output.find("--sampling-freq"), std::string::npos);
     EXPECT_NE(output.find("--sample-cputime"), std::string::npos);
     EXPECT_NE(output.find("--sample-realtime"), std::string::npos);
+}
+
+TEST_F(help_system_test, topic_filter_output_extracts_format_option)
+{
+    std::ostringstream oss;
+    bool result = print_help_for_topic(synthetic_help, "output", "run", oss);
+    auto output = oss.str();
+
+    EXPECT_TRUE(result);
+    EXPECT_NE(output.find("--output-format"), std::string::npos);
+    EXPECT_EQ(output.find("--preset"), std::string::npos);
+    EXPECT_EQ(output.find("--trace-file"), std::string::npos);
 }
 
 TEST_F(help_system_test, topic_filter_returns_false_for_unknown_topic)

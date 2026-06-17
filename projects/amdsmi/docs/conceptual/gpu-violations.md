@@ -15,13 +15,13 @@ AMD SMI exposes two distinct throttling APIs -- which one you use depends on you
 
 - On **Instinct MI300 Series and newer data center GPUs** (gpu_metrics v1.6+):
 
-  Use `amdsmi_get_violation_status()` or the CLI (`amd-smi monitor --violation`, `amd-smi metric --violation`). This API reports throttling as time-based percentages, active status flags, and accumulated counters for each violation type — useful for historical and trend-oriented monitoring. See [Interpreting violations API results](#interpreting-violations-api-results) for details.
+  Use {c:func}`amdsmi_get_violation_status` or the CLI (`amd-smi monitor --violation`, `amd-smi metric --violation`). This API reports throttling as time-based percentages, active status flags, and accumulated counters for each violation type — useful for historical and trend-oriented monitoring. See [Interpreting violations API results](#interpreting-violations-api-results) for details.
 
   On these GPUs, `throttle_status` in `amd-smi metric --power` reports N/A.
 
 - On **Radeon (Navi) and Instinct MI100/MI200 Series GPUs** (gpu_metrics v1.3):
 
-  Use `amdsmi_get_gpu_metrics_info()` or `amd-smi metric --power` to check `throttle_status` (throttled/unthrottled) and `indep_throttle_status` (per-reason bit flags such as `PROCHOT_GFX`, `TDC_GFX`, `TEMP_MEM`). These indicate whether throttling is happening right now, not how much over time. See [Interpreting throttle_status results](#interpreting-throttle_status-results) for details.
+  Use {c:func}`amdsmi_get_gpu_metrics_info` or `amd-smi metric --power` to check `throttle_status` (throttled/unthrottled) and `indep_throttle_status` (per-reason bit flags such as `PROCHOT_GFX`, `TDC_GFX`, `TEMP_MEM`). These indicate whether throttling is happening right now, not how much over time. See [Interpreting throttle_status results](#interpreting-throttle_status-results) for details.
 
   On these GPUs, the violations API and `amd-smi [metric/monitor] --violation` return N/A or max_uint.
 
@@ -44,7 +44,7 @@ For example, on Instinct MI300X systems and newer, 50% `TVIOL` means the GPU spe
 
 ### Checking power and thermal violations
 
-- On **Instinct MI300 Series and newer**, check `per_ppt_pwr` (PVIOL) and TVIOL percentages via `amdsmi_get_violation_status()`. Using the CLI, `amd-smi monitor --violation` and `amd-smi metric --violation` display PVIOL and TVIOL percentages. See [Usage](#usage) for more information.
+- On **Instinct MI300 Series and newer**, check `per_ppt_pwr` (PVIOL) and TVIOL percentages via {c:func}`amdsmi_get_violation_status`. Using the CLI, `amd-smi monitor --violation` and `amd-smi metric --violation` display PVIOL and TVIOL percentages. See [Usage](#usage) for more information.
 
   - `PVIOL`, representing power violations, is the percentage of time the GPU throttled due to power (wattage) limits. This occurs when the GPU's power consumption exceeds safe limits, triggering power throttling to stay within the power budget.
 
@@ -58,11 +58,11 @@ For example, on Instinct MI300X systems and newer, 50% `TVIOL` means the GPU spe
 
 - On **Instinct MI300 Series and newer**, use `amd-smi metric --violation` or `amd-smi monitor --violation` to check `PROCHOT_VIOLATION_ACTIVITY` and `PROCHOT_VIOLATION_STATUS`.
 
-- On **Radeon (Navi) and Instinct MI100/MI200 Series**, use `amdsmi_get_gpu_metrics_info()` and check the `indep_throttle_status` field for `PROCHOT_GFX` bits. PROCHOT indicates emergency thermal throttling when the GPU hits critical temperature limits.
+- On **Radeon (Navi) and Instinct MI100/MI200 Series**, use {c:func}`amdsmi_get_gpu_metrics_info` and check the `indep_throttle_status` field for `PROCHOT_GFX` bits. PROCHOT indicates emergency thermal throttling when the GPU hits critical temperature limits.
 
 ### Monitoring GPU hotspot temperature violations
 
-- On **Instinct MI300 Series and newer**, monitor hotspot temperature with `amdsmi_get_temp_metric()` and correlate with TVIOL%. High TVIOL% combined with high hotspot temps (>95°C) indicates thermal throttling. Use `amd-smi metric --gpu all --temperature` to track temperatures alongside violation status. See [Usage](#usage) for more information.
+- On **Instinct MI300 Series and newer**, monitor hotspot temperature with {c:func}`amdsmi_get_temp_metric` and correlate with TVIOL%. High TVIOL% combined with high hotspot temps (>95°C) indicates thermal throttling. Use `amd-smi metric --gpu all --temperature` to track temperatures alongside violation status. See [Usage](#usage) for more information.
 
 ### Detecting HBM (high bandwidth memory) thermal throttling
 
@@ -100,14 +100,14 @@ Lowering the SCLK maximum reduces peak power draw, which can reduce PVIOL percen
 
 ### Adjusting the sample rate
 
-Violations are sampled every 100ms — the fastest rate the driver can update the metric cache. Set `AMDSMI_GPU_METRICS_CACHE_MS=0` to disable AMD SMI's internal cache and let the driver control when the cache updates. See [AMD SMI C++ library usage](../how-to/amdsmi-cpp-lib.md) for environment variable details.
+Violations are sampled every 100ms — the fastest rate the driver can update the metric cache. Set `AMDSMI_GPU_METRICS_CACHE_MS=0` to disable AMD SMI's internal cache and let the driver control when the cache updates. See [AMD SMI C/C++ library usage](../how-to/amdsmi-cpp-lib.md) for environment variable details.
 
 ## Usage
 
 AMD SMI provides tools to programmatically monitor GPU violations and throttling events.
 
 :::{dropdown} Tip for NVML users
-The closest equivalent to `nvmlDeviceGetViolationStatus()` is `amdsmi_get_violation_status()`.
+The closest equivalent to `nvmlDeviceGetViolationStatus()` is {c:func}`amdsmi_get_violation_status`.
 
 | nvidia-smi command | amd-smi equivalent | Notes |
 |--------------------|--------------------|-------|
@@ -122,24 +122,24 @@ The closest equivalent to `nvmlDeviceGetViolationStatus()` is `amdsmi_get_violat
 
 The AMD SMI library provides APIs to query violation status and related functionalities.
 
-See [GPU monitoring](/doxygen/docBin/html/group__tagGPUMonitor) APIs:
+See {ref}`GPU monitoring <tagGPUMonitor>` APIs:
 
-- `amdsmi_get_violation_status()` - Get violation percentages
-- `amdsmi_get_temp_metric()` - Monitor GPU temperatures
-- `amdsmi_get_gpu_activity()` - Monitor GPU utilization
+- {c:func}`amdsmi_get_violation_status` - Get violation percentages
+- {c:func}`amdsmi_get_temp_metric` - Monitor GPU temperatures
+- {c:func}`amdsmi_get_gpu_activity` - Monitor GPU utilization
 
-See [Clock, power, and performance queries](/doxygen/docBin/html/group__tagClkPowerPerfQuery):
+See {ref}`Clock, power, and performance queries <tagClkPowerPerfQuery>`:
 
-- `amdsmi_get_gpu_metrics_info()` - Get throttle_status and detailed metrics
+- {c:func}`amdsmi_get_gpu_metrics_info` - Get throttle_status and detailed metrics
 
-See [PCIe queries](/doxygen/docBin/html/group__tagAsicBoardInfo):
+See {ref}`PCIe queries <tagPCIeQuery>`:
 
-- `amdsmi_get_gpu_asic_info()` - Check ASIC capabilities
+- {c:func}`amdsmi_get_gpu_asic_info` - Check ASIC capabilities
 
-See [ASIC and board static information](/doxygen/docBin/html/group__tagPCIeQuery) APIs:
+See {ref}`ASIC and board static information <tagAsicBoardInfo>` APIs:
 
-- `amdsmi_get_power_cap_info()` - Check power limits
-- `amdsmi_get_gpu_bdf_id()` - Identify GPU device
+- {c:func}`amdsmi_get_power_cap_info` - Check power limits
+- {c:func}`amdsmi_get_gpu_bdf_id` - Identify GPU device
 
 See [`example/amd_smi_drm_example.cc`](../../example/amd_smi_drm_example.cc) for a complete working example.
 
@@ -247,7 +247,7 @@ The violations API returns both power violations (PVIOL) and thermal violations 
 
 ### Violation status fields
 
-The `amdsmi_violation_status_t` struct (returned by `amdsmi_get_violation_status()`) provides three categories of data for each violation type.  See [`amdsmi_violation_status_t`](/doxygen/docBin/html/structamdsmi__violation__status__t) for details.
+The {c:struct}`amdsmi_violation_status_t` struct (returned by {c:func}`amdsmi_get_violation_status`) provides three categories of data for each violation type.  See {c:struct}`amdsmi_violation_status_t` for details.
 
 | Category | Field prefix | Value type | Description |
 |----------|-------------|------------|-------------|
@@ -322,7 +322,7 @@ in the ROCm AMDGPU kernel driver. AMD SMI passes the raw `uint64_t` value throug
 
 ### High PVIOL (Power Violations)?
 
-- Check power limit settings with `amdsmi_get_power_cap_info()`
+- Check power limit settings with {c:func}`amdsmi_get_power_cap_info`
 - View static power cap details (default, min, max): `amd-smi static --limit`
 - Monitor live power consumption: `amd-smi monitor --power`
 - Verify adequate PSU capacity for your system
@@ -345,7 +345,7 @@ in the ROCm AMDGPU kernel driver. AMD SMI passes the raw `uint64_t` value throug
 
 - **For violation fields (`metric --violation`) returning N/A:** The violation API is only supported on MI3x+ (MI300X and newer). On older ASICs (Navi/MI1x/MI2x), use `amd-smi metric --power` and check `THROTTLE_STATUS` instead.
 - **For `THROTTLE_STATUS` in `metric --power` showing N/A:** This field is available on Navi/MI1x/MI2x (gpu_metrics v1.3) but not on MI3x+. On MI3x+, use `amd-smi metric --violation` or `amd-smi monitor --violation` instead.
-- Check your ASIC generation with `amdsmi_get_gpu_asic_info()` or `amd-smi static --asic`
+- Check your ASIC generation with {c:func}`amdsmi_get_gpu_asic_info` or `amd-smi static --asic`
 
 ## Further reading
 

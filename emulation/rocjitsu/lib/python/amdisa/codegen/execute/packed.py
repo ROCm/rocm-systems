@@ -167,7 +167,10 @@ def gen_pk_binop(
         u_op_map = {
             'add': ('a_lo + b_lo', 'a_hi + b_hi'),
             'sub': ('a_lo - b_lo', 'a_hi - b_hi'),
-            'mul': ('a_lo * b_lo', 'a_hi * b_hi'),
+            'mul': (
+                'static_cast<uint32_t>(a_lo) * b_lo',
+                'static_cast<uint32_t>(a_hi) * b_hi',
+            ),
             'max': ('a_lo > b_lo ? a_lo : b_lo', 'a_hi > b_hi ? a_hi : b_hi'),
             'min': ('a_lo < b_lo ? a_lo : b_lo', 'a_hi < b_hi ? a_hi : b_hi'),
             'shl': (
@@ -335,8 +338,12 @@ def gen_pk_ternary(
                 '    uint16_t rhi = static_cast<uint16_t>(std::max(std::max(a_hi, b_hi), c_hi));'
             )
         else:
-            L.append('    uint16_t rlo = static_cast<uint16_t>(a_lo * b_lo + c_lo);')
-            L.append('    uint16_t rhi = static_cast<uint16_t>(a_hi * b_hi + c_hi);')
+            L.append(
+                '    uint16_t rlo = static_cast<uint16_t>(static_cast<uint32_t>(a_lo) * b_lo + c_lo);'
+            )
+            L.append(
+                '    uint16_t rhi = static_cast<uint16_t>(static_cast<uint32_t>(a_hi) * b_hi + c_hi);'
+            )
         L.append(
             f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
         )
@@ -366,8 +373,12 @@ def gen_pk_ternary(
             L.append('    uint16_t rlo = std::max(std::max(a_lo, b_lo), c_lo);')
             L.append('    uint16_t rhi = std::max(std::max(a_hi, b_hi), c_hi);')
         else:
-            L.append('    uint16_t rlo = static_cast<uint16_t>(a_lo * b_lo + c_lo);')
-            L.append('    uint16_t rhi = static_cast<uint16_t>(a_hi * b_hi + c_hi);')
+            L.append(
+                '    uint16_t rlo = static_cast<uint16_t>(static_cast<uint32_t>(a_lo) * b_lo + c_lo);'
+            )
+            L.append(
+                '    uint16_t rhi = static_cast<uint16_t>(static_cast<uint32_t>(a_hi) * b_hi + c_hi);'
+            )
         L.append(
             f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
         )

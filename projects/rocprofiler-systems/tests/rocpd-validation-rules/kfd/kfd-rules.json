@@ -24,7 +24,8 @@
                     "description": "Verify that 'rocm_kfd_page_migrate' appears in category in regions table",
                     "error_message": "'rocm_kfd_page_migrate' category entries not found in regions",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'rocm_kfd_page_migrate';"
+                    "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'rocm_kfd_page_migrate';",
+                    "gpu_category_to_skip": ["apu"]
                 },
                 {
                     "comparison": "greater_than",
@@ -103,14 +104,16 @@
                     "description": "Verify that KFD page migrate events have 'src_agent' argument",
                     "error_message": "No 'src_agent' argument found for kfd_page_migrate events",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_kfd_page_migrate' AND arg_name = 'src_agent';"
+                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_kfd_page_migrate' AND arg_name = 'src_agent';",
+                    "gpu_category_to_skip": ["apu"]
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Verify that KFD page migrate events have 'dst_agent' argument",
                     "error_message": "No 'dst_agent' argument found for kfd_page_migrate events",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_kfd_page_migrate' AND arg_name = 'dst_agent';"
+                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_kfd_page_migrate' AND arg_name = 'dst_agent';",
+                    "gpu_category_to_skip": ["apu"]
                 },
                 {
                     "comparison": "greater_than",
@@ -208,7 +211,8 @@
                     "description": "Check for KFD page migrate PMC event samples",
                     "error_message": "No PMC event samples found for 'rocm_kfd_page_migrate'",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'rocm_kfd_page_migrate'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'rocm_kfd_page_migrate'",
+                    "gpu_category_to_skip": ["apu"]
                 },
                 {
                     "comparison": "greater_than",

@@ -113,7 +113,7 @@ rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id) 
 
 /**
  * @brief (experimental) By default, all buffered results are delivered on the same thread. Using
- * ::rocprofiler_create_callback_thread, one or more buffers can be assigned to deliever their
+ * ::rocprofiler_create_callback_thread, one or more buffers can be assigned to deliver their
  * results on a unique, dedicated thread.
  *
  * @param [in] buffer_id Buffer identifier

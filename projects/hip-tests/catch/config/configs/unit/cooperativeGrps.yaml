@@ -105,6 +105,8 @@ cooperativeGrps:
     tags: [cooperative, launch]
   Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [cooperative, launch]
   Unit_Multi_Grid_Group_Getters_Positive_Basic:
     <<: *level_2
@@ -165,6 +167,8 @@ cooperativeGrps:
     tags: [cooperative, groups]
   Unit_Grid_Group_Sync_Positive_Basic:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [cooperative, groups]
   Unit_tiled_groups_metagrp_basic:
     <<: *level_2

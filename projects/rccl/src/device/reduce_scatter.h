@@ -87,7 +87,9 @@ namespace {
     } else {
   #ifdef ENABLE_WARP_SPEED
       int warp = threadIdx.x / WARP_SIZE;
-      ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
+      ncclRing *ring = ncclShmem.warpComm
+          ? &ncclShmem.warpChannel[warp].ring
+          : &ncclShmem.channel.ring;
   #else
       ncclRing *ring = &ncclShmem.channel.ring;
   #endif
@@ -107,41 +109,11 @@ namespace {
       uint32_t nelem;
       int rankDest;
 
-  #if defined(ENABLE_NPKIT)
-      int npKitCtxIdx = ncclShmem.channelId;
-  #endif
-
-  #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_CPU)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_CPU, 0, 0, NPKIT_GET_CPU_TIMESTAMP_FROM_BLOCK,
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-  #endif
-
-  #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_GPU)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_GPU, 0, 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-  #endif
-
-  #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_ENTRY)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_REDUCE_SCATTER_RING_ENTRY, count*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-  #endif
       // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
       Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, false, 0, Pipeline>
         prims(tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, work->redOpArg, 0, work->connIndex, work->connIndex);
-
-  #if defined(ENABLE_NPKIT)
-      if (tid == 0) {
-        prims.npKitCtxIdx = npKitCtxIdx;
-      }
-  #endif
 
       for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
         nelem = min(chunkCount, channelCount - elemOffset);
@@ -149,63 +121,21 @@ namespace {
         dataOffset = gridOffset + elemOffset;
         /////////////// begin ReduceScatter steps ///////////////
         // step 0: push data to next GPU
-  #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_SEND_ENTRY)
-        if (tid == 0) {
-          NpKit::CollectGpuEvent(NPKIT_EVENT_REDUCE_SCATTER_RING_SEND_ENTRY, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-              ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        }
-  #endif
         rankDest = ringRanks[nranks-1];
         offset = dataOffset + rankDest * count;
         prims.send(offset, nelem);
-  #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_SEND_EXIT)
-        if (tid == 0) {
-          NpKit::CollectGpuEvent(NPKIT_EVENT_REDUCE_SCATTER_RING_SEND_EXIT, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-              ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        }
-  #endif
         // k-2 steps: reduce and copy to next GPU
-  #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_SEND_ENTRY)
-        if (tid == 0) {
-          NpKit::CollectGpuEvent(NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_SEND_ENTRY, nelem*(nranks-2)*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-              ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        }
-  #endif
         for (int j=2; j<nranks; ++j) {
           rankDest = ringRanks[nranks-j];
           offset = dataOffset + rankDest * count;
           prims.recvReduceSend(offset, nelem);
         }
-  #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_SEND_EXIT)
-        if (tid == 0) {
-          NpKit::CollectGpuEvent(NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_SEND_EXIT, nelem*(nranks-2)*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-              ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        }
-  #endif
 
         // step k-1: reduce this buffer and data, which will produce the final result
-  #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_COPY_ENTRY)
-        if (tid == 0) {
-          NpKit::CollectGpuEvent(NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_COPY_ENTRY, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-              ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        }
-  #endif
         rankDest = ringRanks[0];
         offset = dataOffset + rankDest * count;
         prims.recvReduceCopy(offset, dataOffset, nelem, /*postOp=*/true);
-  #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_COPY_EXIT)
-        if (tid == 0) {
-          NpKit::CollectGpuEvent(NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_COPY_EXIT, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-              ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        }
-  #endif
       }
-  #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_EXIT)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_REDUCE_SCATTER_RING_EXIT, count*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-  #endif
     }
   }
 }

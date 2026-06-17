@@ -3,22 +3,35 @@
 
 cmake_minimum_required(VERSION 3.22)
 
+set(_RJ_ROCM_PATH_EXPLICIT OFF)
+if(DEFINED ROCM_PATH AND NOT "${ROCM_PATH}" STREQUAL "")
+    set(_RJ_ROCM_PATH_EXPLICIT ON)
+elseif(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
+    set(_RJ_ROCM_PATH_EXPLICIT ON)
+    set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "Path to the ROCm installation")
+elseif(IS_DIRECTORY "/opt/rocm")
+    set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to the ROCm installation")
+endif()
+
+if(_RJ_ROCM_PATH_EXPLICIT AND NOT IS_DIRECTORY "${ROCM_PATH}")
+    message(FATAL_ERROR "ROCM_PATH must be set to a valid directory")
+endif()
+unset(_RJ_ROCM_PATH_EXPLICIT)
+
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(rj_default_compiler)
 
-project(rocm_jit_suite)
+project(rocm_jit_suite VERSION 0.1.0)
+
+include(rj_version)
 
 # Generate compile_commands.json for clangd, clang-tidy, and other tooling that
 # needs the exact compiler invocations from the configured build tree.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Default install prefix to /opt/rocm, matching other ROCm projects.
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    if(DEFINED ENV{ROCM_PATH})
-        set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "" FORCE)
-    else()
-        set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "" FORCE)
-    endif()
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
+    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "" FORCE)
 endif()
 
 include(CTest)
@@ -49,6 +62,11 @@ include(rj_log)
 # Sanitizer and static analysis options.
 option(RJ_SANITIZER "Enable sanitizer (asan, ubsan, tsan, or msan)" "")
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
+option(
+    RJ_ENABLE_EXPENSIVE_CHECKS
+    "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
+    OFF
+)
 option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
@@ -186,10 +204,15 @@ FetchContent_MakeAvailable(googletest flatbuffers)
 
 include(rj_flatbuffers)
 
+# Set include paths before adding subdirectories so all targets can find them.
+set(ROCJITSU_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include)
+set(ROCJITSU_SRC_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src)
+
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
+add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
@@ -212,10 +235,14 @@ target_link_libraries(
         rocjitsu_isa_gfx1250
         rocjitsu_isa_risc_v
         simdojo
+        rocjitsu_kmd
         rocjitsu_vm
         rocjitsu_vm_amdgpu
+        rocjitsu_plugin_logging
+        rocjitsu_plugin_race_detector
         rocjitsu_vm_risc_v
         rocjitsu_config
+        util
         flatbuffers
         Threads::Threads
 )
@@ -248,7 +275,10 @@ install(
 )
 
 # Libraries: lib/
-install(TARGETS rocjitsu_shared LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(
+    TARGETS rocjitsu_shared rocjitsu_hooks
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(

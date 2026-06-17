@@ -155,6 +155,8 @@ device:
     tags: [query]
   Unit_hipDeviceGetUuid_From_RocmInfo:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [query]
   Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties:
     <<: *level_2
@@ -353,7 +355,10 @@ device:
   Unit_hipGetDriverEntryPoint_spt_Positive: *level_2
   Unit_hipGetDriverEntryPoint_spt_Negative: *level_2
   Unit_hipGetProcAddress_IPC_Memory: *level_2
-  Unit_hipGetProcAddress_IPC_Event: *level_2
+  Unit_hipGetProcAddress_IPC_Event:
+    <<: *level_2
+    # AIRUNTIME-2336: temporarily disabled (subprocess aborted intermittently in CI)
+    disabled: [amd_windows, amd_wsl, amd_linux]
   Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process:
     <<: *level_2
     # Note: Windows disabled

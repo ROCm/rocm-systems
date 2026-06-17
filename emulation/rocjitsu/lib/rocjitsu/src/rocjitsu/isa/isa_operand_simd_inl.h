@@ -50,7 +50,8 @@ void AmdgpuIsaOperand<Isa>::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_
     return;
   }
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    const uint8_t *src = wf.cu().vgpr_data(wf.vgpr_alloc().base + *off);
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+    const uint8_t *src = wf.cu().vgpr_data(wf.vgpr_alloc().base + voff);
     std::memcpy(out, src + lane_base * sizeof(uint32_t), count * sizeof(uint32_t));
     return;
   }
@@ -66,7 +67,8 @@ void AmdgpuIsaOperand<Isa>::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lan
     Operand::write_lane_chunk(wf, lane_base, count, vals, mask);
     return;
   }
-  uint32_t reg = wf.vgpr_alloc().base + *off;
+  uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+  uint32_t reg = wf.vgpr_alloc().base + voff;
   uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
   if ((mask & full_mask) == full_mask) {
     uint8_t *dst = wf.cu().vgpr_data(reg);
@@ -79,24 +81,67 @@ void AmdgpuIsaOperand<Isa>::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lan
 }
 
 template <typename Isa>
-const uint32_t *AmdgpuIsaOperand<Isa>::simd_lane_ptr(const amdgpu::Wavefront &wf,
-                                                     uint32_t lane_base) const {
+std::optional<uint32_t> AmdgpuIsaOperand<Isa>::simd_vgpr_base(const amdgpu::Wavefront &wf) const {
   if (this->delegate())
-    return amdgpu::SimdAccess::lane_ptr(*this->delegate(), wf, lane_base);
+    return amdgpu::SimdAccess::vgpr_base(*this->delegate(), wf);
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this))
+    return wf.vgpr_alloc().base + (wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off);
+  return std::nullopt;
+}
+
+template <typename Isa>
+const amdgpu::VgprStorage *
+AmdgpuIsaOperand<Isa>::simd_vgpr_storage(const amdgpu::Wavefront &wf) const {
+  if (this->delegate())
+    return amdgpu::SimdAccess::vgpr_storage(*this->delegate(), wf);
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    const uint8_t *base = wf.cu().vgpr_data(wf.vgpr_alloc().base + *off);
-    return reinterpret_cast<const uint32_t *>(base + lane_base * sizeof(uint32_t));
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+    return &wf.cu().template vgpr_reg<64>(wf.vgpr_alloc().base + voff);
   }
   return nullptr;
 }
 
 template <typename Isa>
-uint32_t *AmdgpuIsaOperand<Isa>::simd_dst_ptr(amdgpu::Wavefront &wf, uint32_t lane_base) const {
+amdgpu::VgprStorage *AmdgpuIsaOperand<Isa>::simd_vgpr_storage_mut(amdgpu::Wavefront &wf) const {
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
-    uint8_t *base = wf.cu().vgpr_data(wf.vgpr_alloc().base + *off);
-    return reinterpret_cast<uint32_t *>(base + lane_base * sizeof(uint32_t));
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    return &wf.cu().template vgpr_reg<64>(wf.vgpr_alloc().base + voff);
   }
   return nullptr;
+}
+
+template <typename Isa>
+void AmdgpuIsaOperand<Isa>::simd_notify_read(const amdgpu::Wavefront &wf, uint32_t lane_begin,
+                                             uint32_t lane_end, uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+    uint32_t physical_reg = wf.vgpr_alloc().base + voff;
+    wf.cu().notify_vgpr_read(&wf, physical_reg, lane_begin, lane_end, byte_mask);
+  }
+}
+
+template <typename Isa>
+amdgpu::ConstVgprStoragePair64
+AmdgpuIsaOperand<Isa>::simd_vgpr_storage64(const amdgpu::Wavefront &wf) const {
+  if (this->delegate())
+    return amdgpu::SimdAccess::vgpr_storage64(*this->delegate(), wf);
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
+    uint32_t reg = wf.vgpr_alloc().base + voff;
+    return {&wf.cu().template vgpr_reg<64>(reg), &wf.cu().template vgpr_reg<64>(reg + 1)};
+  }
+  return {nullptr, nullptr};
+}
+
+template <typename Isa>
+amdgpu::VgprStoragePair64
+AmdgpuIsaOperand<Isa>::simd_vgpr_storage64_mut(amdgpu::Wavefront &wf) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t reg = wf.vgpr_alloc().base + voff;
+    return {&wf.cu().template vgpr_reg<64>(reg), &wf.cu().template vgpr_reg<64>(reg + 1)};
+  }
+  return {nullptr, nullptr};
 }
 
 } // namespace rocjitsu

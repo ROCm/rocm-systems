@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
+#include "common/units.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/timemory.hpp"
@@ -15,7 +16,6 @@
 #include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/unwind.hpp>
 
 #include <chrono>

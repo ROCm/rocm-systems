@@ -1,12 +1,6 @@
 # Environment for running the rocjitsu-corpus gfx1250 regression under
 # mirage + HotSwap.
 #
-# Unlike the corpus's kmd.so env, this file does NOT set LD_PRELOAD or
-# RJ_CONFIG: mirage injects the HotSwap env contract itself when it runs each
-# IREE tool via `mirage run --profile <profile> -- <tool> ...`. This file's only
-# job is to make the ROCm runtime and the IREE tools discoverable in the outer
-# shell that drives the corpus runner.
-#
 # Point ROCM_VENV (or ROCM_PATH) at your install, or pre-populate PATH before
 # invoking the runner.
 
@@ -26,7 +20,6 @@ export HSA_HOTSWAP_SOURCE_TARGET=${HSA_HOTSWAP_SOURCE_TARGET:-gfx1250:32}
 # HotSwap runs the retargeted code on real hardware. Make sure no stale rocjitsu
 # interposer or sim config leaks in from a previous shell.
 unset LD_PRELOAD
-unset RJ_CONFIG
 unset HSA_MODEL_LIB
 unset HSA_MODEL_TOPOLOGY
 unset HSA_OVERRIDE_GFX_VERSION

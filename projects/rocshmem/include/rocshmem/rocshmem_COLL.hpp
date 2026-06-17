@@ -742,12 +742,32 @@ __host__ int rocshmem_ctx_double_prod_reduce(
 __global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel();
 
 /**
+ * @brief kernel for performing a team-scoped barrier synchronization.
+ * Caller enqueues the kernel on given stream.
+ *
+ * @param[in] team  The team participating in the barrier.
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_barrier_kernel(rocshmem_team_t team);
+
+/**
  * @brief kernel for performing a sync_all operation.
  * Caller enqueues the kernel on given stream
  *
  * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_sync_all_kernel();
+
+/**
+ * @brief kernel for performing a team-scoped sync operation.
+ * Caller enqueues the kernel on given stream.
+ *
+ * @param[in] team  The team participating in the sync.
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_team_sync_kernel(rocshmem_team_t team);
 
 /**
  * @brief kernel for performing an alltoall collective operation.

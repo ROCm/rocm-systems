@@ -11,7 +11,7 @@
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
-#include "rocjitsu/vm/execution_plugin.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
@@ -160,14 +160,11 @@ public:
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
-  /// @brief Run all CUs to completion (functional mode).
-  /// @details Iterates step() across all CUs round-robin until all are idle.
-  /// Each CU gets one scheduler iteration per round, enabling cross-CU
-  /// synchronization (spin-waits on global memory).
   void run_to_idle();
 
-  /// @brief Flat list of all CUs across all XCDs and SEs.
   const std::vector<amdgpu::ComputeUnitCore *> &all_cus();
+
+  ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
 
 private:
   static inline std::atomic<uint32_t> next_gpu_id_{0};

@@ -112,6 +112,9 @@ Lists GPU information.
 ```{note}
 `amd-smi list -e` is useful for mapping physical-to-logical GPU IDs.
 The `oam_id` field identifies the physical board slot in multi-GPU OAM chassis.
+The `ID` shown for `--gpu` (0, 1, 2, …) is an enumeration index assigned in discovery
+order, not the device-type value returned by `amdsmi_get_gpu_id()`; `--gpu` also accepts a
+BDF or UUID to select a specific card.
 ```
 
 ```shell-session
@@ -684,6 +687,17 @@ Command Modifiers:
 
 Reset options for specified devices.
 
+```{warning}
+
+   * On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
+     GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
+
+   * Any process with an open `/dev/kfd` handle will be terminated when a GPU reset occurs,
+     even if that process is not using the GPU being reset. GPU isolation techniques using the
+     environment variables `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` do not
+     prevent this.
+```
+
 ```shell-session
 ~$ amd-smi reset --help
 usage: amd-smi reset [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
@@ -875,10 +889,10 @@ Displays RAS information of specified devices.
 
 ```shell-session
 ~$ amd-smi ras --help
-usage: amd-smi ras [-h] --cper [--severity SEVERITY [SEVERITY ...]] [--folder FOLDER]
-                   [--file-limit FILE_LIMIT] [--follow]
-                   [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
-                   [--json | --csv] [--file FILE] [--loglevel LEVEL]
+usage: amd-smi ras [-h] (--cper | --afid) [--severity SEVERITY [SEVERITY ...]]
+                   [--folder FOLDER] [--file-limit FILE_LIMIT] [--follow]
+                   [--cper-file CPER_FILE] [-g GPU [GPU ...]] [--json | --csv]
+                   [--file FILE] [--overwrite] [--append] [--loglevel LEVEL]
 
 Retrieve and decode RAS (CPER) entries from the kernel driver.
 Supports filtering by severity, exporting to different formats, and continuous monitoring.
@@ -886,14 +900,20 @@ This command accepts options only; no positional arguments are required.
 
 RAS arguments:
   -h, --help                          show this help message and exit
-  --cper                              Trigger CPER data retrieval
-  --afid                              Generate an AFID (AMD Field ID) given a CPER record file.
+  --cper                              Trigger current CPER data retrieval
+  --afid                              Generate an AFID (AMD Field ID) given a CPER record file or folder
+
+CPER Arguments:
   --severity SEVERITY [SEVERITY ...]  Set the SEVERITY filters from the following:
                                           nonfatal-uncorrected, fatal, nonfatal-corrected, all
-  --folder FOLDER                     Folder to dump CPER report files
-  --file-limit FILE_LIMIT             Maximum number of entries per output file
-  --cper-file CPER_FILE               Full path of the CPER record file to generate the AFID
-  --follow                            Continuously monitor for new entries
+  --folder FOLDER                     With --cper: folder to dump current CPER report files (created if missing).
+                                          With --afid: existing folder of CPER records to decode.
+  --file-limit FILE_LIMIT             Maximum number of current CPER files in target folder
+                                          Older files beyond limit will be deleted
+  --follow                            Continuously monitor for new CPER entries
+
+AFID Arguments:
+  --cper-file CPER_FILE               Full path of a retrieved CPER record file to generate the AFID
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
@@ -1047,7 +1067,7 @@ GPU: 0
     ASIC:
         MARKET_NAME: AMD Instinct MI300A
         VENDOR_ID: 0x1002
-        VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
+        VENDOR_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
         SUBVENDOR_ID: 0x1002
         DEVICE_ID: 0x74a0
         SUBSYSTEM_ID: 0x74a0

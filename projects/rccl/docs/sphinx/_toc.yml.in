@@ -26,9 +26,9 @@ subtrees:
 
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/rccl/tree/develop/plugins/tuner/example
+  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/tuner/example
     title: RCCL Tuner plugin examples
-  - url: https://github.com/ROCm/rccl/tree/develop/plugins/net/example
+  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/net/example
     title: NCCL Net plugin examples
 
 - caption: API reference
@@ -36,6 +36,8 @@ subtrees:
   - file: api-reference/library-specification
     title: Library specification
   - file: api-reference/api-library
+  - file: api-reference/data-type-support
+    title: Precision support
   - file: api-reference/env-variables
     title: Environment variables
 

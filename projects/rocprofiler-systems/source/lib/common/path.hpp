@@ -5,6 +5,7 @@
 
 #include "common/defines.h"
 #include "common/delimit.hpp"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/join.hpp"
 
@@ -175,9 +176,8 @@ template <typename RetT>
 RetT
 get_default_lib_search_paths()
 {
-    auto _paths =
-        join(":", get_env("ROCPROFSYS_PATH", ""), get_env("LD_LIBRARY_PATH", ""),
-             get_env("LIBRARY_PATH", ""), get_env("PWD", ""), ".");
+    auto _paths = join(":", get_env(env_vars::PATH, ""), get_env("LD_LIBRARY_PATH", ""),
+                       get_env("LIBRARY_PATH", ""), get_env("PWD", ""), ".");
     if constexpr(std::is_same<RetT, std::string>::value)
         return _paths;
     else
