@@ -1,5 +1,5 @@
 ---
-name: changelog-automation
+name: amdsmi-changelog-automation
 description: "Check and generate changelog entries for amd-smi. Use when: reviewing PRs for changelog updates, generating release notes, checking CHANGELOG.md compliance."
 ---
 
