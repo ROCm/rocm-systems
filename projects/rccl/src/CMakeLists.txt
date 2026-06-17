@@ -572,6 +572,7 @@ if (ENABLE_ROCSHMEM)
   target_link_libraries(rccl PRIVATE ${IBVERBS})
 endif()
 
+#[[ Migrated to root CMakeLists.txt (NCCL L171-190 feature-flag block; ROCTX_ENABLE resolved there).
 if(ROCTX_ENABLE)
   target_compile_definitions(rccl PRIVATE ROCTX_ENABLE)
 else()
@@ -581,6 +582,7 @@ endif()
 if(TRACE)
   target_compile_definitions(rccl PRIVATE ENABLE_TRACE)
 endif()
+]]
 if(QP_TRACKING)
   target_compile_definitions(rccl PRIVATE ENABLE_QP_TRACKING)
 endif()
@@ -773,6 +775,7 @@ endif()
 #  target_compile_options(rccl PRIVATE --offload-arch=${target})
 #endforeach()
 
+#[[ Migrated to root CMakeLists.txt
 if(BUILD_ADDRESS_SANITIZER)
   target_compile_options(rccl PRIVATE -fsanitize=address)
   target_link_options(rccl PRIVATE -fsanitize=address -shared-libasan)
@@ -780,6 +783,7 @@ if(BUILD_ADDRESS_SANITIZER)
     target_link_options(rccl PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
   endif()
 endif()
+]]
 if(TIMETRACE)
   target_compile_options(rccl PRIVATE -ftime-trace)
 endif()

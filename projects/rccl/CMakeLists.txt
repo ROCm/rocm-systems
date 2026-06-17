@@ -528,11 +528,159 @@ message(STATUS "Compiling for ${GPU_TARGETS}")
 include(cmake/Dependencies.cmake) # Reloading to use desired GPU_TARGETS instead of defaults
 # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L141-156, L232-242]
+# [NCCL CMakeLists.txt L141-156]
+# Compiler-specific flags
+#[[ >>> RCCL-DELTA
+if(NCCL_COMPILER_GCC)
+    # GCC/Clang-specific flags
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -fvisibility=hidden -Wall -Wno-unused-function -Wno-sign-compare -Wvla -g")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-extended-lambda -Xptxas -maxrregcount=96 -Xfatbin -compress-all -fPIC")
+elseif(NCCL_COMPILER_MSVC)
+    # MSVC-specific flags
+    # /Zc:preprocessor enables conformant preprocessor for proper variadic macro handling (needed for NVTX)
+    # /wd4146 disables "unary minus on unsigned" warning - intentional for two's complement and alignment masks
+    # /wd4197 disables "top-level volatile in cast ignored" - benign when using atomic intrinsics
+    # /wd5105 disables "macro expansion producing 'defined'" - triggered by Windows SDK headers (winbase.h)
+    # /wd4805 disables "unsafe mix of type 'bool' and type 'int'" - intentional bool/int mixing for flags
+    # /wd4018 disables "signed/unsigned mismatch" - safe comparisons where signed value is always positive
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3 /wd4267 /wd4244 /wd4996 /wd4146 /wd4197 /wd5105 /wd4805 /wd4018 /FS /Zc:preprocessor")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-extended-lambda -Xptxas -maxrregcount=96 --compress-mode=balance")
+endif()
+]] # <<< RCCL-DELTA
+
+# [NCCL CMakeLists.txt L158-169] Sanitizer options. NCCL gates on NCCL_COMPILER_GCC + the ASAN/UBSAN
+# options and sets global CMAKE_*_FLAGS with -static-lib{a,ub}san. RCCL's host-side ASAN was MIGRATED
+# UP HERE from src/CMakeLists.txt (commented out there): it gates on RCCL's BUILD_ADDRESS_SANITIZER
+# option and uses -shared-libasan plus an rpath to the asan runtime resolved in the GPU-resolution
+# block above. NOTE: moving this from a target_compile_options(rccl PRIVATE ...) in src to global
+# CMAKE_*_FLAGS here broadens ASAN instrumentation from just librccl to every in-tree target (tests,
+# rcclras, gtest) -- this matches NCCL's global approach. The device-side :xnack+ append stays in the
+# GPU-resolution block above. NCCL's UBSAN path has no RCCL equivalent (kept below as commented ref).
+# Sanitizer options (GCC/Clang only)
+if(NCCL_COMPILER_GCC)
+    if(BUILD_ADDRESS_SANITIZER)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -shared-libasan")
+        if(DEFINED ASAN_RUNTIME_DIR)
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+        endif()
+    endif()
+#[[ >>> RCCL-DELTA: NCCL UBSAN path; no RCCL equivalent.
+    if(UBSAN)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=undefined -shared-libubsan")
+    endif()
+]] # <<< RCCL-DELTA
+endif()
+
+# [NCCL CMakeLists.txt -- no direct equivalent] RCCL-only: ROCTX/roctracer probe. NCCL's NVTX feature
+# flag (L176) keys off the NVTX option directly; RCCL keys off whether the roctx64 lib + roctracer
+# header are actually present (ROCTX_ENABLE). This probe was MOVED UP from the RCCL-only config-checks
+# region below so ROCTX_ENABLE is resolved before the L171-190 feature-flag block consumes it. It only
+# needs the ROCTX option (set above) and find_library/find_path, so it is safe to run here.
+# Check for ROCTX
+if(ROCTX)
+  find_library(ROCTX_LIB NAMES roctx64)
+  find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h")
+  if(ROCTX_LIB AND ROCTRACER_INCLUDE_DIR)
+    set(ROCTX_ENABLE ON)
+    message(STATUS "ROCTX include directory found: ${ROCTRACER_INCLUDE_DIR}")
+    message(STATUS "ROCTX library found: ${ROCTX_LIB}")
+  else()
+    message(WARNING "ROCTX library not found. Skipping ROCTX linking.")
+  endif()
+endif()
+
+# [NCCL CMakeLists.txt L171-190] Additional feature flags. NCCL sets these as global add_definitions
+# in its root; RCCL historically applied the TRACE/NVTX/ROCTX defines as target_compile_definitions
+# on the rccl target in src/CMakeLists.txt. They were MIGRATED UP HERE (and commented out in src) to
+# match NCCL's root placement. NOTE: as global add_definitions these now reach every in-tree target
+# (tests, rcclras, gtest), not only librccl -- benign for these preprocessor guards, but a scope
+# change from the prior target-private definitions. WERROR/PROFAPI have no prior RCCL src equivalent.
+if(TRACE)
+    add_definitions(-DENABLE_TRACE)
+endif()
+
+if(NOT ROCTX_ENABLE)
+    add_definitions(-DNVTX_NO_IMPL)
+    add_definitions(-DNVTX_DISABLE)
+else()
+    add_definitions(-DROCTX_ENABLE)
+endif()
+
+if(WERROR)
+    if(NCCL_COMPILER_MSVC)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /WX")
+    else()
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+    endif()
+endif()
+
+if(PROFAPI)
+    add_definitions(-DPROFAPI)
+endif()
+
+# [NCCL CMakeLists.txt L192-217] EXTRA_LIBS + RDMA/MLX5DV/NET_PROFILER/MAX_EXT_NET_PLUGINS (NCCL's CPU-side IB/net
+#            stack; RCCL has a different networking layer and no equivalent here).
+#[[ >>> RCCL-DELTA
+set(EXTRA_LIBS)
+
+# RDMA and MLX5DV are Linux-specific features
+if(RDMA_CORE)
+    add_definitions(-DNCCL_BUILD_RDMA_CORE=1)
+    find_library(VERBS_LIBRARY NAMES verbs)
+    if(VERBS_LIBRARY)
+        list(APPEND EXTRA_LIBS verbs)
+    endif()
+endif()
+
+if(MLX5DV)
+    add_definitions(-DNCCL_BUILD_MLX5DV=1)
+    find_library(MLX5_LIBRARY NAMES mlx5)
+    if(MLX5_LIBRARY)
+        list(APPEND EXTRA_LIBS mlx5)
+    endif()
+endif()
+
+if(NET_PROFILER)
+    add_definitions(-DNCCL_ENABLE_NET_PROFILING=1)
+endif()
+
+if(MAX_EXT_NET_PLUGINS GREATER 0)
+    add_definitions(-DNCCL_NET_MAX_PLUGINS=${MAX_EXT_NET_PLUGINS})
+endif()
+
+# [NCCL CMakeLists.txt L219-224] DOCA/GIN/EMIT_LLVM_IR global definitions (NCCL-specific; RCCL has no DOCA/GIN-proxy).
+add_definitions(-DDOCA_VERBS_USE_CUDA_WRAPPER)
+add_definitions(-DDOCA_VERBS_USE_NET_WRAPPER)
+add_definitions(-DNCCL_GIN_PROXY_ENABLE=1)
+if(EMIT_LLVM_IR)
+    add_definitions(-DEMIT_LLVM_IR=1)
+endif()
+
+# [NCCL CMakeLists.txt L226-230] librt dependency (RCCL links rt within src/CMakeLists.txt for the static-lib path).
+# Library dependencies
+find_library(RT_LIBRARY NAMES rt)
+if(RT_LIBRARY)
+    list(APPEND EXTRA_LIBS rt)
+endif()
+
+# [NCCL CMakeLists.txt L232-242]
+# Debug/Release specific flags
+#[[ >>> RCCL-DELTA
+if(NCCL_COMPILER_GCC)
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -O0")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O3")
+elseif(NCCL_COMPILER_MSVC)
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} /Od /Zi /FS")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} /O2 /FS")   # Maximum available optimization for MSVC
+endif()
+]]
 set(CMAKE_CXX_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
 set(CMAKE_C_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
 set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
+# <<< RCCL-DELTA
 
 ### Required for checking HIP device symbols when building with amdclang++
 set(CMAKE_REQUIRED_LIBRARIES hip::device)
@@ -785,19 +933,6 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-# Check for ROCTX
-if(ROCTX)
-  find_library(ROCTX_LIB NAMES roctx64)
-  find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h")
-  if(ROCTX_LIB AND ROCTRACER_INCLUDE_DIR)
-    set(ROCTX_ENABLE ON)
-    message(STATUS "ROCTX include directory found: ${ROCTRACER_INCLUDE_DIR}")
-    message(STATUS "ROCTX library found: ${ROCTX_LIB}")
-  else()
-    message(WARNING "ROCTX library not found. Skipping ROCTX linking.")
-  endif()
-endif()
-
 # [NCCL CMakeLists.txt L3-11] RCCL re-parses version.mk here (guarded by NOT DEFINED NCCL_MAJOR, so
 # it is a no-op on the normal path since the top-of-file block already set these) and then runs the
 # RCCL-only rocm_setup_version(). NCCL parses the version exactly once at the top of its file; this
@@ -862,65 +997,6 @@ file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 ]] # <<< RCCL-DELTA
-
-# [NCCL CMakeLists.txt L158-230] UNMAPPED -- NCCL-only root blocks with no RCCL equivalent. In NCCL
-# these sit between the compiler-flags and add_subdirectory sections; reproduced here (commented, in
-# NCCL order) at the same ordering boundary for merge reference. RCCL either handles the equivalent
-# behavior elsewhere (noted per block) or simply does not need it (CUDA-/NVIDIA-specific):
-# |
-# | # [L158-169] Sanitizer options via CXX/linker flags (RCCL instead enables ASAN on the rccl target
-# | #            in src/CMakeLists.txt and appends :xnack+ to GPU_TARGETS in the GPU-resolution block).
-# | if(NCCL_COMPILER_GCC)
-# | =    if(ASAN)
-# | =        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
-# | =        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -static-libasan")
-# | =    endif()
-# | =    if(UBSAN)
-# | =        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined")
-# | =        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=undefined -static-libubsan")
-# | =    endif()
-# | endif()
-# |
-# | # [L171-190] Additional feature flags (RCCL applies these as target_compile_definitions on the
-# | #            rccl target in src/CMakeLists.txt rather than as global add_definitions here).
-# | if(TRACE)
-# | =    add_definitions(-DENABLE_TRACE)
-# | endif()
-# | if(NOT NVTX)
-# | =    add_definitions(-DNVTX_DISABLE)
-# | endif()
-# | if(WERROR)
-# | =    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")   # (MSVC: /WX)
-# | endif()
-# | if(PROFAPI)
-# | =    add_definitions(-DPROFAPI)
-# | endif()
-# |
-# | # [L192-217] EXTRA_LIBS + RDMA/MLX5DV/NET_PROFILER/MAX_EXT_NET_PLUGINS (NCCL's CPU-side IB/net
-# | #            stack; RCCL has a different networking layer and no equivalent here).
-# | set(EXTRA_LIBS)
-# | if(RDMA_CORE)
-# | =    add_definitions(-DNCCL_BUILD_RDMA_CORE=1)
-# | =    find_library(VERBS_LIBRARY NAMES verbs)
-# | =    if(VERBS_LIBRARY) list(APPEND EXTRA_LIBS verbs) endif()
-# | endif()
-# | if(MLX5DV)
-# | =    add_definitions(-DNCCL_BUILD_MLX5DV=1)
-# | =    find_library(MLX5_LIBRARY NAMES mlx5)
-# | =    if(MLX5_LIBRARY) list(APPEND EXTRA_LIBS mlx5) endif()
-# | endif()
-# | if(NET_PROFILER) add_definitions(-DNCCL_ENABLE_NET_PROFILING=1) endif()
-# | if(MAX_EXT_NET_PLUGINS GREATER 0) add_definitions(-DNCCL_NET_MAX_PLUGINS=${MAX_EXT_NET_PLUGINS}) endif()
-# |
-# | # [L219-224] DOCA/GIN/EMIT_LLVM_IR global definitions (NCCL-specific; RCCL has no DOCA/GIN-proxy).
-# | add_definitions(-DDOCA_VERBS_USE_CUDA_WRAPPER)
-# | add_definitions(-DDOCA_VERBS_USE_NET_WRAPPER)
-# | add_definitions(-DNCCL_GIN_PROXY_ENABLE=1)
-# | if(EMIT_LLVM_IR) add_definitions(-DEMIT_LLVM_IR=1) endif()
-# |
-# | # [L226-230] librt dependency (RCCL links rt within src/CMakeLists.txt for the static-lib path).
-# | find_library(RT_LIBRARY NAMES rt)
-# | if(RT_LIBRARY) list(APPEND EXTRA_LIBS rt) endif()
 
 # [NCCL CMakeLists.txt L244-249] Add subdirectories. NCCL adds several example/plugin subdirs
 # (plugins/mixed, plugins/net, plugins/profiler, plugins/tuner, plugins/env) before add_subdirectory(src).
