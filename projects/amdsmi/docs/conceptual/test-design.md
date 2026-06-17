@@ -267,7 +267,7 @@ source detect_asic_filter.sh
 tests/python/
 ├── common/
 │   ├── __init__.py
-│   ├── helpers.py                     # Common base class, device enumeration, error mapping
+│   ├── common.py                      # Common base class, device enumeration, error mapping, runner machinery
 │   └── runcmd.py                      # CLI subprocess wrapper
 │
 ├── unit/                              # No hardware required — pure logic tests only
@@ -310,12 +310,17 @@ tests/python/
 │       ├── test_init.py               # amdsmi init / shutdown lifecycle
 │       └── test_topology.py           # socket, processor, and utilization count discovery
 │
-└── cli/
-    ├── __init__.py
-    ├── test_cli_common.py             # help, version, list, default, invalid commands
-    ├── test_cli_gpu.py                # static, firmware, metric, process, event, bad_pages, set, reset
-    ├── test_cli_cpu.py                # CPU-specific CLI commands
-    └── test_cli_topology.py           # xgmi, topology, partition, ras, node
+├── cli/
+│   ├── __init__.py
+│   ├── base.py                        # TestCliBase: shared CLI-test scaffolding (FindArgs/CreateCmds/RunCmds)
+│   ├── test_cli_common.py             # help, version, list, default, invalid commands
+│   ├── test_cli_gpu.py                # static, firmware, metric, process, event, bad_pages, set, reset
+│   ├── test_cli_cpu.py                # CPU-specific CLI commands
+│   └── test_cli_topology.py           # xgmi, topology, partition, ras, node
+│
+├── integration_test.py               # Runner: discovers and runs functional/ tests
+├── cli_unit_test.py                  # Runner: discovers and runs cli/ tests
+└── unit_tests.py                     # Runner: discovers and runs unit/ tests
 ```
 
 ### Naming conventions
@@ -324,7 +329,7 @@ tests/python/
 
 **Classes**: One `unittest.TestCase` subclass per file, named `Test{Component}{Feature}`
 (for example, `TestGpuPower`, `TestCpuClock`, `TestSystemInit`). Classes inherit from
-`common.helpers.Common` for device enumeration and error-handling helpers.
+`common.common.Common` for device enumeration and error-handling helpers.
 
 **Methods**: `test_{operation}[_{qualifier}]` (for example, `test_get_power_cap`,
 `test_set_power_cap_dry_run`).
@@ -468,8 +473,8 @@ install(
 | `integration_test.py` — CPU setters | `functional/cpu/test_{feature}.py` |
 | `integration_test.py` — topology | `functional/system/test_topology.py` |
 | `integration_test.py` — NIC/switch | `functional/nic/test_discovery.py` |
-| `cli_unit_test.py` | `cli/test_cli_{common,gpu,cpu,topology}.py` |
+| `cli_unit_test.py` | `cli/base.py` + `cli/test_cli_{common,gpu,cpu,topology}.py` |
 | `perf_tests.py` | `functional/gpu/test_perf_benchmark.py` |
 | `perf_cputests.py` | `functional/cpu/test_perf_benchmark.py` |
-| `common.py` | `common/helpers.py` |
+| `common.py` | `common/common.py` |
 | `runcmd.py` | `common/runcmd.py` |
