@@ -47,6 +47,7 @@ RJ_DIAGNOSTIC_POP
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <linux/memfd.h>
+#include <memory>
 #include <mutex>
 #include <signal.h>
 #include <sstream>
@@ -178,7 +179,7 @@ public:
   /// be locked by threads that no longer exist. We reinitialize everything so
   /// the next open("/dev/kfd") creates a fresh connection.
   void reset_after_fork() {
-    rj_vm_ = nullptr;
+    rj_vm_.store(nullptr, std::memory_order_relaxed);
     remote_.store(nullptr, std::memory_order_relaxed);
     remote_kfd_fd_.store(-1, std::memory_order_relaxed);
     remote_open_refs_.store(0, std::memory_order_relaxed);
@@ -192,13 +193,17 @@ public:
     in_construction = false;
   }
 
-  SimulatedDriver *driver() { return rj_vm_ ? rj_vm_->vm->driver() : nullptr; }
+  SimulatedDriver *driver() {
+    auto *vm = rj_vm_.load(std::memory_order_acquire);
+    return vm ? vm->vm->driver() : nullptr;
+  }
   int driver_fd() {
     auto *d = driver();
     return d ? d->fd() : -1;
   }
   bool initialized() const {
-    return rj_vm_ != nullptr || remote_.load(std::memory_order_acquire) != nullptr;
+    return rj_vm_.load(std::memory_order_acquire) != nullptr ||
+           remote_.load(std::memory_order_acquire) != nullptr;
   }
 
   std::unique_lock<std::mutex> lock_remote() { return std::unique_lock(remote_mutex_); }
@@ -430,7 +435,7 @@ public:
 
   SimulatedDriver *get_or_create() {
     std::lock_guard lock(init_mutex_);
-    if (!rj_vm_) {
+    if (!rj_vm_.load(std::memory_order_acquire)) {
       in_construction = true;
       auto cfg_file = rocjitsu::rpc_default_config_file_path();
       char cfg_buf[4096]{};
@@ -448,14 +453,14 @@ public:
       }
       while (n > 0 && (cfg_buf[n - 1] == '\n' || cfg_buf[n - 1] == '\r'))
         cfg_buf[--n] = '\0';
-      if (rj_vm_create(cfg_buf, RJ_VM_MODE_LOCAL, &rj_vm_) != ROCJITSU_STATUS_SUCCESS) {
+      rj_vm_t *tmp = nullptr;
+      if (rj_vm_create(cfg_buf, RJ_VM_MODE_LOCAL, &tmp) != ROCJITSU_STATUS_SUCCESS) {
         util::Logger::debug_print("rocjitsu: failed to create VM");
         in_construction = false;
         return nullptr;
       }
 
-      // Set up execution plugins based on environment variables.
-      if (rj_vm_->soc) {
+      if (tmp->soc) {
         std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
         if (std::getenv("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP"))
           pg = std::make_shared<rocjitsu::ProfiledExecutionPluginGroup>();
@@ -490,11 +495,12 @@ public:
           pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createRaceDetectorPlugin()));
           fprintf(stderr, "[rocjitsu] Race detection enabled (RJ_RACE)\n");
         }
-        rj_vm_->soc->set_plugin_group(pg);
+        tmp->soc->set_plugin_group(pg);
       }
 
-      std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
+      std::thread([tmp]() { rj_vm_run(tmp, nullptr); }).detach();
       in_construction = false;
+      rj_vm_.store(tmp, std::memory_order_release);
     }
     return driver();
   }
@@ -512,7 +518,7 @@ public:
   }
 
 private:
-  rj_vm_t *rj_vm_ = nullptr;
+  std::atomic<rj_vm_t *> rj_vm_{nullptr};
   /// @brief Active daemon-mode remote driver, or nullptr in local mode.
   /// @details Stored atomically so lock-free readers (`remote()`,
   /// `remote_lookup()`, `initialized()`, the AMDKFD ioctl fallback, the mmap
@@ -947,10 +953,10 @@ int ioctl(int fd, unsigned long request, ...) {
     return -1;
   }
 
-  if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
+  if (auto remote = InterposerContext::ctx.remote_lookup(fd))
     return remote->ioctl(request, arg);
   if (InterposerContext::ctx.is_kfd_dup(fd)) {
-    if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
+    if (auto remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
       return remote->ioctl(request, arg);
   }
   // Late-ioctl safety net: an AMDKFD ('K') ioctl may arrive on a tracked KFD fd
@@ -959,7 +965,7 @@ int ioctl(int fd, unsigned long request, ...) {
   // track as KFD (primary or dup), so an arbitrary unrelated fd carrying a
   // type-'K' ioctl is never misrouted to the remote KFD driver.
   if (_IOC_TYPE(request) == AMDKFD_IOCTL_BASE && InterposerContext::ctx.is_kfd_tracked(fd)) {
-    if (auto *remote = InterposerContext::ctx.remote())
+    if (auto remote = InterposerContext::ctx.remote())
       return remote->ioctl(request, arg);
   }
 
@@ -1152,14 +1158,14 @@ int fcntl64(int fd, int cmd, ...) {
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
   assert(InterposerContext::real.ready());
-  if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
+  if (auto remote = InterposerContext::ctx.remote_lookup(fd))
     return remote->mmap(addr, length, prot, flags, offset);
 
   if (auto *drv = InterposerContext::ctx.lookup(fd))
     return drv->mmap(addr, length, prot, flags, offset);
 
   if (InterposerContext::ctx.is_drm(fd)) {
-    if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
+    if (auto remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
       return remote->mmap(addr, length, prot, flags, offset);
     if (auto *drv = InterposerContext::ctx.driver())
       return drv->mmap(addr, length, prot, flags, offset);
@@ -1168,8 +1174,9 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
   if (fd < 0 && (flags & MAP_FIXED) && prot != PROT_NONE && addr) {
     int memfd_out = -1;
     off_t memfd_offset = 0;
-    if (InterposerContext::ctx.remote() && InterposerContext::ctx.remote()->find_memfd_for_addr(
-                                               addr, length, &memfd_out, &memfd_offset)) {
+    auto remote_memfd = InterposerContext::ctx.remote();
+    if (remote_memfd &&
+        remote_memfd->find_memfd_for_addr(addr, length, &memfd_out, &memfd_offset)) {
       auto total = static_cast<off_t>(length) + memfd_offset;
       [[maybe_unused]] auto ft_rc = ftruncate(memfd_out, total);
       fallocate(memfd_out, 0, memfd_offset, static_cast<off_t>(length));
@@ -1206,7 +1213,7 @@ int madvise(void *addr, size_t length, int advice) {
 
 int munmap(void *addr, size_t length) {
   assert(InterposerContext::real.ready());
-  if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
+  if (auto remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
     int ret = remote->munmap(addr, length);
     if (ret != -ENOENT)
       return ret;
@@ -1370,7 +1377,7 @@ static const Sysfs::GpuInfo *interposer_gpu_info() {
   auto *drv = InterposerContext::ctx.driver();
   if (drv)
     return &drv->topology().gpu_info();
-  if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
+  if (auto remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
     return remote->gpu_info();
   return nullptr;
 }
