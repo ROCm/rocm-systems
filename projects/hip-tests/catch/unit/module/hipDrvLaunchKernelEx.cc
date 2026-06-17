@@ -439,9 +439,12 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_MaxBlockDims) {
  * Test Description
  * ------------------------
  *  - Verifies that hipDrvLaunchKernelEx with hipLaunchAttributeClusterDimension
- *  - is correctly captured during stream capture and that the replayed kernel
- *  - produces the expected output (captures >=1 graph node and writes correct values).
- *  - Only runs on gfx1250/gfx1251 where cluster launches are supported.
+ *  - is correctly captured during stream capture:
+ *  - 1) Captured graph node count >= 1.
+ *  - 2) hipGraphKernelNodeGetAttribute returns the captured cluster dims.
+ *  - 3) hipGraphKernelNodeSetAttribute updates cluster dims on the graph node.
+ *  - 4) Graph replay produces the expected kernel output.
+ *  - Only runs on devices with cluster launch support (gfx1250/gfx1251).
  * Test source
  * ------------------------
  *  - unit/module/hipDrvLaunchKernelEx.cc
@@ -454,12 +457,10 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
   hipDeviceProp_t prop{};
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
 
-  // Cluster launches require hardware support (gfx1250/gfx1251)
   if (!prop.clusterLaunch) {
     HIP_SKIP_TEST("Test requires a device with cluster launch support");
   }
 
-  // Compile a simple fill kernel via hiprtc
   static const char* fill_src = R"(
     extern "C" __global__ void fill(int* out, int val, int n) {
       int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -487,7 +488,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
 
   constexpr int N_ELEM  = 1024;
   constexpr int BLOCK   = 64;
-  constexpr int GRID    = N_ELEM / BLOCK;  // 16
+  constexpr int GRID    = N_ELEM / BLOCK;  // 16 blocks
   constexpr int CLUSTER = 4;              // 4 blocks per cluster
 
   int* d_out = nullptr;
@@ -496,7 +497,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  // Warmup before capture
+  // Warmup run before capture to ensure JIT compilation is done
   {
     HIP_LAUNCH_CONFIG cfg{};
     cfg.gridDimX = GRID; cfg.gridDimY = 1; cfg.gridDimZ = 1;
@@ -515,7 +516,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
 
   HIP_CHECK(hipMemset(d_out, 0, N_ELEM * sizeof(int)));
 
-  // Stream capture
+  // Capture a cluster-dim kernel launch into a graph
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   {
     HIP_LAUNCH_CONFIG cfg{};
@@ -535,12 +536,53 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
   hipGraph_t graph;
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
 
-  // Verify at least one node was captured
+  // 1) Verify at least one kernel node was captured
   size_t num_nodes = 0;
   HIP_CHECK(hipGraphGetNodes(graph, nullptr, &num_nodes));
   REQUIRE(num_nodes >= 1);
 
-  // Instantiate and replay
+  std::vector<hipGraphNode_t> nodes(num_nodes);
+  HIP_CHECK(hipGraphGetNodes(graph, nodes.data(), &num_nodes));
+
+  // Find the kernel node
+  hipGraphNode_t kernel_node = nullptr;
+  for (auto node : nodes) {
+    hipGraphNodeType type;
+    HIP_CHECK(hipGraphNodeGetType(node, &type));
+    if (type == hipGraphNodeTypeKernel) {
+      kernel_node = node;
+      break;
+    }
+  }
+  REQUIRE(kernel_node != nullptr);
+
+  // 2) Verify hipGraphKernelNodeGetAttribute returns the captured cluster dims
+  hipKernelNodeAttrValue got_attr{};
+  HIP_CHECK(hipGraphKernelNodeGetAttribute(kernel_node, hipLaunchAttributeClusterDimension,
+                                           &got_attr));
+  REQUIRE(got_attr.clusterDim.x == CLUSTER);
+  REQUIRE(got_attr.clusterDim.y == 1);
+  REQUIRE(got_attr.clusterDim.z == 1);
+
+  // 3) Update cluster dims via hipGraphKernelNodeSetAttribute and read back
+  hipKernelNodeAttrValue set_attr{};
+  set_attr.clusterDim = {2, 1, 1};
+  HIP_CHECK(hipGraphKernelNodeSetAttribute(kernel_node, hipLaunchAttributeClusterDimension,
+                                           &set_attr));
+
+  hipKernelNodeAttrValue verify_attr{};
+  HIP_CHECK(hipGraphKernelNodeGetAttribute(kernel_node, hipLaunchAttributeClusterDimension,
+                                           &verify_attr));
+  REQUIRE(verify_attr.clusterDim.x == 2);
+  REQUIRE(verify_attr.clusterDim.y == 1);
+  REQUIRE(verify_attr.clusterDim.z == 1);
+
+  // Restore original cluster dim for replay
+  set_attr.clusterDim = {CLUSTER, 1, 1};
+  HIP_CHECK(hipGraphKernelNodeSetAttribute(kernel_node, hipLaunchAttributeClusterDimension,
+                                           &set_attr));
+
+  // 4) Instantiate and replay; verify correct kernel output
   hipGraphExec_t exec;
   HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(exec, stream));
