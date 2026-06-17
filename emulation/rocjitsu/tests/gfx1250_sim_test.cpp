@@ -51,6 +51,7 @@ RJ_DIAGNOSTIC_POP
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -91,6 +92,9 @@ constexpr uint32_t kGfx1250LdsSizeKb = 160;
 constexpr uint32_t kSdmaOpCopy = 1;
 constexpr uint32_t kSdmaOpFence = 5;
 constexpr uint32_t kSdmaOpPollRegmem = 8;
+constexpr uint32_t kSdmaOpConstFill = 11;
+constexpr uint32_t kSdmaOpTimestamp = 13;
+constexpr uint32_t kSdmaOpGcr = 17;
 constexpr uint32_t kSdmaSubopCopyLinear = 0;
 constexpr uint32_t kSdmaSubopFence64 = 2;
 constexpr uint32_t kSdmaSubopPollMem64 = 5;
@@ -644,7 +648,7 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   EXPECT_EQ(cu->config().lds_size_kb, kGfx1250LdsSizeKb);
   EXPECT_EQ(soc->xcd(0)->command_processor()->vgpr_granularity(), kGfx1250VgprEncodingGranule);
   EXPECT_EQ(soc->xcd(0)->command_processor()->sdma_packet_dialect(),
-            amdgpu::SdmaPacketDialect::Gfx11Plus);
+            amdgpu::SdmaPacketDialect::Gfx1250);
 }
 
 TEST(Gfx1250SdmaTest, PollMem64WaitsForFull64BitCondition) {
@@ -687,6 +691,244 @@ TEST(Gfx1250SdmaTest, Fence64WritesFull64BitValue) {
   ASSERT_TRUE(sim.engine->step());
   EXPECT_EQ(queue.read_idx(), 5u * sizeof(uint32_t));
   EXPECT_EQ(std::atomic_ref<uint64_t>(value).load(std::memory_order_acquire), kFenceValue);
+}
+
+// A wrong GCR packet size silently desyncs the SDMA ring read pointer and
+// corrupts the following packet. Emit OP_GCR followed by a 32-bit FENCE and
+// assert both the read pointer advance and that the FENCE decoded at the right
+// boundary (its sentinel lands). gfx11/12 GCR is 5 dwords; gfx1250 is 6.
+TEST(Gfx1250SdmaTest, GcrPacketSizeMatchesDialectAndKeepsRingInSync) {
+  constexpr uint32_t kGcrLegacySize = 5;
+  constexpr uint32_t kGcrGfx1250Size = 6;
+  constexpr uint32_t kFenceSize = 4;
+  constexpr uint32_t kFenceSentinel = 0xC0FFEE11u;
+  // GL2 invalidate control bit position differs by dialect; setting it exercises
+  // a realistic invalidate GCR but does not affect the decoded packet size.
+  constexpr uint32_t kLegacyGl2InvControlDw = 2;
+  constexpr uint32_t kLegacyGl2InvBit = 1u << 30;
+  constexpr uint32_t kGfx1250Gl2InvControlDw = 3;
+  constexpr uint32_t kGfx1250Gl2InvBit = 1u << 14;
+
+  auto run_dialect = [kFenceSentinel](amdgpu::SdmaPacketDialect dialect, uint32_t gcr_size,
+                                      uint32_t control_dw, uint32_t control_bit) {
+    Gfx1250Sim sim;
+    sim.cp()->set_sdma_packet_dialect(dialect);
+    HostSdmaQueueForTest queue(sim);
+    alignas(8) uint32_t fence_value = 0;
+
+    auto *packet = queue.ring();
+    packet[0] = kSdmaOpGcr;
+    packet[control_dw] = control_bit;
+
+    uint32_t *fence = packet + gcr_size;
+    fence[0] = kSdmaOpFence; // 32-bit fence (sub_op 0).
+    write_sdma_qword_address(fence, 1, 2, &fence_value);
+    fence[3] = kFenceSentinel;
+
+    queue.submit(gcr_size + kFenceSize);
+    ASSERT_TRUE(sim.engine->step());
+    EXPECT_EQ(queue.read_idx(), (gcr_size + kFenceSize) * sizeof(uint32_t));
+    EXPECT_EQ(std::atomic_ref<uint32_t>(fence_value).load(std::memory_order_acquire),
+              kFenceSentinel);
+  };
+
+  run_dialect(amdgpu::SdmaPacketDialect::Gfx11Plus, kGcrLegacySize, kLegacyGl2InvControlDw,
+              kLegacyGl2InvBit);
+  run_dialect(amdgpu::SdmaPacketDialect::Gfx1250, kGcrGfx1250Size, kGfx1250Gl2InvControlDw,
+              kGfx1250Gl2InvBit);
+}
+
+// SDMA writes go straight to backing while L2 may still hold a dirty line that
+// overlaps the destination (e.g. left by a prior K$ writeback). The post-write
+// cache maintenance must not write that stale line back over the SDMA result.
+// The fix flushes the caches before the direct write, so the dirty line is
+// published first and the SDMA data supersedes it. Regression for that ordering.
+TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyL2Line) {
+  Gfx1250Sim sim;
+  // The config-driven topology build wires the XCD's L2 into the CP, so the SDMA
+  // cache maintenance operates on the same L2 instance we dirty below.
+  auto *l2 = sim.xcd()->l2_cache();
+  ASSERT_NE(l2, nullptr);
+
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kProcessId = 1251; // matches TranslatedSdmaQueueForTest.
+  constexpr uint32_t kStaleWord = 0x11111111u;
+  constexpr uint32_t kFillWord = 0x22222222u;
+
+  // Seed a dirty L2 line overlapping the destination, without touching backing.
+  uint8_t stale_line[amdgpu::L2Cache::LINE_SIZE];
+  std::memset(stale_line, static_cast<int>(kStaleWord & 0xFF), sizeof(stale_line));
+  l2->writeback_line(queue.dst_va(), stale_line, amdgpu::Mtype::RW, kProcessId);
+
+  // CONST_FILL the destination line with a different byte pattern.
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpConstFill | (0x2u << 30); // fillsize=2 (dword granularity).
+  write_sdma_qword_va(packet, 1, 2, queue.dst_va());
+  packet[3] = kFillWord;
+  packet[4] = amdgpu::L2Cache::LINE_SIZE - 1; // count-1 bytes.
+
+  queue.submit(5);
+  ASSERT_TRUE(sim.engine->step());
+
+  // Backing must reflect the SDMA fill, not the stale cached line.
+  EXPECT_EQ(sim.memory->read32(queue.dst_va(), kProcessId), kFillWord);
+  EXPECT_NE(sim.memory->read32(queue.dst_va(), kProcessId), kStaleWord);
+}
+
+// Same ordering hazard as above, but for a dirty scalar L1 (K$) line rather than
+// an L2 line. A CU can hold a dirty K$ line overlapping an SDMA destination. The
+// pre-write maintenance must write the K$ line back (through L2 to backing)
+// before the direct SDMA write, so the SDMA result is not later clobbered when
+// the stale scalar line is flushed. Regression for K$ inclusion in the flush.
+TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyScalarL1Line) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  ASSERT_NE(cu, nullptr);
+
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kProcessId = 1251; // matches TranslatedSdmaQueueForTest.
+  constexpr uint32_t kStaleWord = 0x11111111u;
+  constexpr uint32_t kFillWord = 0x22222222u;
+
+  // Dirty a K$ line overlapping the SDMA destination via a scalar store. This
+  // leaves the line dirty in K$ (write-back), not yet in L2 or backing.
+  cu->l1_scalar().store(queue.dst_va(), /*num_dwords=*/1, &kStaleWord, kProcessId);
+
+  // CONST_FILL the destination line with a different pattern.
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpConstFill | (0x2u << 30); // fillsize=2 (dword granularity).
+  write_sdma_qword_va(packet, 1, 2, queue.dst_va());
+  packet[3] = kFillWord;
+  packet[4] = amdgpu::L2Cache::LINE_SIZE - 1; // count-1 bytes.
+
+  queue.submit(5);
+  ASSERT_TRUE(sim.engine->step());
+
+  // Force any still-resident dirty K$ line out to backing, mimicking a later
+  // acquire/release flush. With the fix the K$ line was already published and
+  // invalidated before the SDMA write, so this does not resurrect stale data.
+  cu->flush_l1(kProcessId);
+  if (auto *l2 = sim.xcd()->l2_cache())
+    l2->flush_all();
+
+  // Backing must reflect the SDMA fill, not the stale scalar line.
+  EXPECT_EQ(sim.memory->read32(queue.dst_va(), kProcessId), kFillWord);
+  EXPECT_NE(sim.memory->read32(queue.dst_va(), kProcessId), kStaleWord);
+}
+
+// OP_TIMESTAMP is a direct backing-store write like COPY/FENCE/CONST_FILL, so it
+// has the same clobber hazard: a dirty cached line overlapping the timestamp
+// address must be published before the store, not written out over it by a later
+// flush. Seed a dirty L2 line at the timestamp address, issue OP_TIMESTAMP, then
+// force a flush; the stored timestamp must survive (stale word gone, value set).
+TEST(Gfx1250SdmaTest, TimestampSupersedesOverlappingDirtyL2Line) {
+  Gfx1250Sim sim;
+  auto *l2 = sim.xcd()->l2_cache();
+  ASSERT_NE(l2, nullptr);
+
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kProcessId = 1251; // matches TranslatedSdmaQueueForTest.
+  constexpr uint64_t kStaleQword = 0x1111111111111111ULL;
+
+  // Seed a dirty L2 line overlapping the timestamp destination, without touching
+  // backing.
+  uint8_t stale_line[amdgpu::L2Cache::LINE_SIZE];
+  std::memset(stale_line, 0x11, sizeof(stale_line));
+  l2->writeback_line(queue.dst_va(), stale_line, amdgpu::Mtype::RW, kProcessId);
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpTimestamp;
+  write_sdma_qword_va(packet, 1, 2, queue.dst_va());
+
+  queue.submit(3); // TIMESTAMP is 3 dwords.
+  ASSERT_TRUE(sim.engine->step());
+
+  // Force any still-resident dirty line out, mimicking a later flush.
+  if (auto *xl2 = sim.xcd()->l2_cache())
+    xl2->flush_all();
+
+  // The timestamp value is nondeterministic, but it must not be the stale word
+  // and must be a plausible nonzero nanosecond count.
+  const uint64_t stored = sim.memory->read64(queue.dst_va(), kProcessId);
+  EXPECT_NE(stored, kStaleQword);
+  EXPECT_NE(stored, 0u);
+}
+
+// The GCR decoder now distinguishes GL2 writeback (publish dirty lines),
+// invalidate/discard (drop without writeback), and no-op (no GL2 bits). This is
+// the data-loss distinction the PR protects. Dirty an L2 line, then issue each
+// GCR flavor and observe whether the dirty data reaches backing.
+TEST(Gfx1250SdmaTest, GcrWritebackPublishesInvalidateDropsNoopKeeps) {
+  constexpr uint32_t kProcessId = 1251; // matches TranslatedSdmaQueueForTest.
+  constexpr uint32_t kDirtyWord = 0x33333333u;
+  constexpr uint32_t kBackingWord = 0x44444444u;
+  // gfx1250 GCR control dword (DW3) bit positions.
+  constexpr uint32_t kControlDw = 3;
+  constexpr uint32_t kGl2InvBit = 1u << 14;
+  constexpr uint32_t kGl2WbBit = 1u << 15;
+
+  // Outcome of a GCR flavor: the value in backing (read directly through the
+  // page table) and the value seen through L2 (which returns the resident dirty
+  // line if still present, or re-fetches backing if the line was dropped).
+  struct GcrOutcome {
+    uint32_t backing = 0;
+    uint32_t via_l2 = 0;
+  };
+
+  enum class GcrKind { WritebackOnly, InvalidateOnly, Noop };
+  // Void return so a missing L2 is a fatal guard (ASSERT_*) before we deref it.
+  auto run = [&](GcrKind kind, GcrOutcome &out) {
+    Gfx1250Sim sim;
+    auto *l2 = sim.xcd()->l2_cache();
+    ASSERT_NE(l2, nullptr);
+    TranslatedSdmaQueueForTest queue(sim);
+
+    // Put a known value in backing, then a different dirty value in L2 on top.
+    for (uint32_t i = 0; i < sizeof(uint32_t); ++i)
+      sim.memory->write8(queue.dst_va() + i, static_cast<uint8_t>((kBackingWord >> (i * 8)) & 0xFF),
+                         kProcessId);
+    uint8_t dirty_line[amdgpu::L2Cache::LINE_SIZE];
+    std::memset(dirty_line, static_cast<int>(kDirtyWord & 0xFF), sizeof(dirty_line));
+    l2->writeback_line(queue.dst_va(), dirty_line, amdgpu::Mtype::RW, kProcessId);
+
+    auto *packet = queue.ring();
+    packet[0] = kSdmaOpGcr;
+    if (kind == GcrKind::WritebackOnly)
+      packet[kControlDw] = kGl2WbBit;
+    else if (kind == GcrKind::InvalidateOnly)
+      packet[kControlDw] = kGl2InvBit;
+    else
+      packet[kControlDw] = 0; // no GL2 bits: no-op.
+
+    queue.submit(6); // gfx1250 GCR is 6 dwords.
+    EXPECT_TRUE(sim.engine->step());
+
+    out.backing = sim.memory->read32(queue.dst_va(), kProcessId);
+    // Read back through L2: a still-resident dirty line returns kDirtyWord; a
+    // dropped line re-fetches from backing on the miss.
+    uint32_t l2_word = 0;
+    l2->read(queue.dst_va(), reinterpret_cast<uint8_t *>(&l2_word), sizeof(l2_word),
+             amdgpu::Mtype::RW, kProcessId);
+    out.via_l2 = l2_word;
+  };
+
+  // Writeback publishes the dirty line to backing.
+  GcrOutcome wb;
+  run(GcrKind::WritebackOnly, wb);
+  EXPECT_EQ(wb.backing, kDirtyWord);
+  // Invalidate/discard drops the dirty line without writeback; backing keeps its
+  // original value and the line is no longer resident.
+  GcrOutcome inv;
+  run(GcrKind::InvalidateOnly, inv);
+  EXPECT_EQ(inv.backing, kBackingWord);
+  EXPECT_EQ(inv.via_l2, kBackingWord); // line dropped → L2 re-fetches backing.
+  // No GL2 bits: no cache maintenance at all. Backing is untouched and the dirty
+  // line stays resident in L2 (this is what distinguishes no-op from
+  // invalidate-only: an incorrect invalidate would drop the line here too).
+  GcrOutcome noop;
+  run(GcrKind::Noop, noop);
+  EXPECT_EQ(noop.backing, kBackingWord);
+  EXPECT_EQ(noop.via_l2, kDirtyWord); // dirty line still resident in L2.
 }
 
 TEST(Gfx1250SdmaTest, CopyWaitSignalResolvesTranslatedAddresses) {
@@ -3299,6 +3541,64 @@ TEST(Gfx1250SimulationTest, PartialWorkgroupMasksTailWaveExec) {
   std::sort(exec_masks.begin(), exec_masks.end());
   const std::vector<uint64_t> expected{1ULL, 0xFFFFFFFFULL};
   EXPECT_EQ(exec_masks, expected);
+}
+
+// Count the distinct workgroup ids across all wavefronts activated for the
+// (single) dispatch. dispatched_count() counts dispatch packets, not
+// workgroups, so it cannot observe the rounding; wavefront wg_ids can.
+uint32_t count_dispatched_workgroups(Gfx1250Sim &sim) {
+  std::set<uint32_t> wg_ids;
+  for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
+    auto *se = sim.xcd()->shader_engine(se_idx);
+    for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx) {
+      auto *cu = se->compute_unit(cu_idx);
+      for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
+        auto *wf = cu->wf(wf_idx);
+        if (wf && wf->sgpr_alloc().count > 0)
+          wg_ids.insert(wf->wg_id());
+      }
+    }
+  }
+  return static_cast<uint32_t>(wg_ids.size());
+}
+
+// The grid-to-workgroup count must round up: a partial final workgroup still
+// counts. With grid_size_x=65 and workgroup_size_x=32, HW dispatches 3 WGs
+// (ceil(65/32)); the old floor division dropped the tail WG and dispatched 2.
+TEST(Gfx1250SimulationTest, PartialFinalWorkgroupRoundsUpDispatchCount) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, /*grid_size_x=*/65, /*workgroup_size_x=*/32);
+  step_until_xcd_halted(sim);
+
+  EXPECT_EQ(count_dispatched_workgroups(sim), 3u);
+}
+
+// Same rounding rule in 2D: grid 65x33 with workgroups 32x16 dispatches
+// ceil(65/32) * ceil(33/16) = 3 * 3 = 9 workgroups, not floor's 2 * 2 = 4.
+TEST(Gfx1250SimulationTest, PartialFinalWorkgroupRoundsUpDispatchCount2D) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 2; // 2D grid.
+  pkt.workgroup_size_x = 32;
+  pkt.workgroup_size_y = 16;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 65;
+  pkt.grid_size_y = 33;
+  pkt.grid_size_z = 1;
+  pkt.kernel_object = kernel_object;
+  queue.submit(pkt);
+  step_until_xcd_halted(sim);
+
+  EXPECT_EQ(count_dispatched_workgroups(sim), 9u);
 }
 
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {

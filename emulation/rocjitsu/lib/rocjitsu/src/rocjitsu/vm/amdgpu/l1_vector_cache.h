@@ -42,7 +42,7 @@ public:
   void store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
              const uint8_t *src, Mtype mtype, bool non_temporal, uint32_t vmid = 0);
 
-  void invalidate(uint64_t addr) { cache_.invalidate(addr); }
+  void invalidate(uint64_t addr, uint32_t vmid = 0) { cache_.invalidate(addr, vmid); }
   void invalidate_all() { cache_.invalidate_all(); }
   void flush_all();
 
