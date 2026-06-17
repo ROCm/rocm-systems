@@ -208,6 +208,14 @@ impl Engine {
     /// so the container hosts its node directly; an empty `command`
     /// leaves the image's default entrypoint in place.
     ///
+    /// The first element of `command` is passed as `--entrypoint` so it
+    /// *replaces* the image's default `ENTRYPOINT` rather than being
+    /// appended to it (the remaining elements become the entrypoint's
+    /// arguments after the image). Without this, images that ship their
+    /// own entrypoint (e.g. `vllm/vllm-openai`) would run that entrypoint
+    /// with `mirage host …` tacked on as arguments instead of running
+    /// mirage.
+    ///
     /// When `host_gpus` is set, the container is launched with the
     /// supplementary groups needed to open the passed-through GPU device
     /// nodes. The mechanism depends on `provider`: podman inherits the
@@ -282,10 +290,20 @@ impl Engine {
             argv.push("--device".to_string());
             argv.push(d.clone());
         }
-        argv.push(image.to_string());
         // The container's foreground process. Mirage hosts the node from
         // inside the container, so this is normally `mirage host ...`.
-        argv.extend(command.iter().cloned());
+        // The first element overrides the image ENTRYPOINT (so it runs
+        // mirage rather than the image's own entrypoint); the rest become
+        // its arguments after the image. An empty `command` leaves the
+        // image's default entrypoint in place.
+        if let Some((entrypoint, args)) = command.split_first() {
+            argv.push("--entrypoint".to_string());
+            argv.push(entrypoint.clone());
+            argv.push(image.to_string());
+            argv.extend(args.iter().cloned());
+        } else {
+            argv.push(image.to_string());
+        }
         argv
     }
 
@@ -747,7 +765,10 @@ mod tests {
         // options, and already inherits them from the host.
         assert!(!joined.contains("--group-add video"));
         assert!(!joined.contains("--group-add render"));
-        assert!(joined.ends_with("img:latest /mnt/mirage/bin/mirage host --session s --rank 0"));
+        // The first command element overrides the image ENTRYPOINT; the
+        // rest are its arguments after the image.
+        assert!(joined.contains("--entrypoint /mnt/mirage/bin/mirage"));
+        assert!(joined.ends_with("img:latest host --session s --rank 0"));
     }
 
     #[test]
@@ -817,6 +838,10 @@ mod tests {
         );
         assert!(!argv.iter().any(|a| a == "--network"));
         assert_eq!(argv.last().map(String::as_str), Some("infinity"));
+        // `sleep` overrides the entrypoint; `infinity` is its argument.
+        assert!(argv.iter().any(|a| a == "--entrypoint"));
+        let ep = argv.iter().position(|a| a == "--entrypoint").unwrap();
+        assert_eq!(argv[ep + 1], "sleep");
     }
 
     #[test]
