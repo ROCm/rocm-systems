@@ -1,17 +1,17 @@
 # Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
 # Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
 
-# [NCCL CMakeLists.txt L1]
 cmake_minimum_required(VERSION 3.16) # RCCL-DELTA: NCCL requires 3.25; RCCL targets 3.16 for broader ROCm/distro compatibility.
 
+# >>> RCCL-DELTA
 # Locate the shared rocm-systems tree so standalone RCCL builds can pick up
 # shared/ctest/TestCategories.cmake (the test-categories block in test/CMakeLists.txt
 # is gated on ROCM_SYSTEMS_ROOT and is otherwise silently skipped).
 if(NOT DEFINED ROCM_SYSTEMS_ROOT)
   set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 endif()
+# <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L3-11]
 # Version information
 # Read makefiles/version.mk file
 #[[ >>> RCCL-DELTA
@@ -56,39 +56,22 @@ else()
 endif()
 # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L13-20]
+# Make version information available to C++ source files
 add_compile_definitions(
   NCCL_USE_CMAKE
   NCCL_MAJOR=${NCCL_MAJOR}
   NCCL_MINOR=${NCCL_MINOR}
   NCCL_PATCH=${NCCL_PATCH}
-  NCCL_VERSION_CODE=${NCCL_VERSION}
+  NCCL_VERSION_CODE=${NCCL_VERSION} # RCCL-DELTA: NCCL_VERSION_CODE=${NCCL_VERSION_CODE}
 )
 
-# [NCCL CMakeLists.txt -- no direct equivalent] RCCL-only: select the ROCm/HIP toolchain file.
-# NCCL builds with the CUDA toolkit and has no toolchain-file step.
-#
-# As of rocm-systems PR#4938 the toolchain file fully owns ROCm/compiler resolution: at project()
-# time it resolves ROCM_PATH (-DROCM_PATH > $ROCM_PATH > PATH autodetect > /opt/rocm, with a
-# fail-fast existence check), writes it to the CMake cache, and derives CMAKE_CXX_COMPILER /
-# CMAKE_C_COMPILER from it. The old root-level "establish ROCM_PATH" block was therefore removed:
-# pre-defining ROCM_PATH here (before project()) would short-circuit the toolchain's PATH-based
-# autodetection. After project() returns, ROCM_PATH is available from the cache for the
-# find_package()/install logic below.
-# CMake Toolchain file to define compilers and path to ROCm
 # >>> RCCL-DELTA
+# CMake Toolchain file to define compilers and path to ROCm
 if (NOT CMAKE_TOOLCHAIN_FILE)
   set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/toolchain-linux.cmake")
   message(STATUS "CMAKE_TOOLCHAIN_FILE: ${CMAKE_TOOLCHAIN_FILE}")
 endif()
 
-# [NCCL CMakeLists.txt -- no direct equivalent] RCCL-only: ROCM_PATH normalization.
-# Assumes rocm-systems PR#4938: toolchain-linux.cmake resolves ROCM_PATH (-DROCM_PATH > $ROCM_PATH >
-# PATH autodetect > /opt/rocm, with a fail-fast existence check) and caches it during project(), so
-# the previous standalone detection block here was removed. Two safety nets remain:
-#   1. Fallback for non-default toolchain files that don't set ROCM_PATH themselves.
-#   2. Export ROCM_PATH into the environment for child processes (hipconfig, compiler version probes,
-#      etc.) -- the toolchain only sets the CMake cache variable, not the environment.
 if(NOT DEFINED ROCM_PATH)
   set(ROCM_PATH "/opt/rocm")
   message(WARNING "ROCM_PATH not set by the toolchain; falling back to ${ROCM_PATH}")
@@ -97,26 +80,14 @@ else()
 endif()
 set(ENV{ROCM_PATH} ${ROCM_PATH})
 
-# [NCCL CMakeLists.txt UNMAPPED] Compiler/standard/optimization flags. This
-# folds together several NCCL blocks: the C++ standard (NCCL L98-108; NCCL picks 14 or 17 by CUDA
-# version, RCCL always uses C++17), the compiler-specific warning/codegen flags (NCCL L141-156,
-# which are CUDA/MSVC-specific and have no RCCL analog -- RCCL's warning/-fgpu-rdc flags live on the
-# rccl target in src/CMakeLists.txt), and the per-config Debug/Release flags (NCCL L232-242). RCCL
-# also sets CMAKE_INSTALL_PREFIX to ROCM_PATH and prepends ROCm dirs to CMAKE_PREFIX_PATH (RCCL-only).
-# Set CMAKE flags
-#==================================================================================================
-if(ROCM_PATH)
-  list(APPEND CMAKE_PREFIX_PATH  # Add ROCM_PATH to CMake search paths (for finding HIP / HSA
-              ${ROCM_PATH}
-              ${ROCM_PATH}/hip
-              ${ROCM_PATH}/llvm)
-endif()
+list(APPEND CMAKE_PREFIX_PATH  # Add ROCM_PATH to CMake search paths (for finding HIP / HSA
+            ${ROCM_PATH}
+            ${ROCM_PATH}/hip
+            ${ROCM_PATH}/llvm)
 # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L22]
 set(ENV{NCCL_USE_CMAKE} "1")
 
-# [NCCL CMakeLists.txt L24-25]
 #[[ >>> RCCL-DELTA
 project(NCCL VERSION ${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}
         LANGUAGES CUDA CXX C)
@@ -127,11 +98,8 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L27]
 include(GNUInstallDirs)
 
-# [NCCL CMakeLists.txt L29-32] UNMAPPED -- NCCL-only default build type. RCCL does not force a
-# default CMAKE_BUILD_TYPE here. Verbatim NCCL block kept for merge reference:
 #[[ >>> RCCL-DELTA
 # Make CMAKE_BUILD_TYPE to release by default if not set
 if(NOT CMAKE_BUILD_TYPE)
@@ -139,7 +107,6 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 ]] # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L34-56]
 # Package building options
 #[[ >>> RCCL-DELTA
 option(BUILD_DEBIAN_PACKAGE "Build Debian package" OFF)
@@ -215,7 +182,6 @@ option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit test
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L58-67]
 # Detect OS
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(NCCL_OS_WINDOWS ON)
@@ -227,11 +193,6 @@ else()
     message(FATAL_ERROR "Unsupported OS: ${CMAKE_SYSTEM_NAME}")
 endif()
 
-# [NCCL CMakeLists.txt L69-78] Detect the compiler. NCCL classifies MSVC vs GCC/Clang and sets
-# NCCL_COMPILER_*; RCCL instead identifies the specific ROCm front-end (amdclang++ / clang++ /
-# hipcc) to drive version probing below, and errors out for anything else. NCCL detects the
-# compiler right after OS detection; RCCL does it here because it keys off CMAKE_CXX_COMPILER, which
-# is set by toolchain-linux.cmake (which also resolves ROCM_PATH per PR#4938) when project() runs above.
 # Detect compiler
 #[[ >>> RCCL-DELTA
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
@@ -264,7 +225,6 @@ else()
 endif()
 # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L80-82]
 #[[ >>> RCCL-DELTA
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
@@ -283,11 +243,11 @@ if(NOT "${HIP_COMPILER}" MATCHES "clang")
 endif()
 # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L84-85]
-## HIP version detection
 #[[ >>> RCCL-DELTA
+# CUDA version detection
 string(REGEX MATCH "([0-9]+\\.[0-9]+)" CUDA_VERSION "${CUDAToolkit_VERSION}")
 ]]
+## HIP version detection
 find_program(hipconfig_executable hipconfig)
 message(STATUS "hipconfig executable: ${hipconfig_executable}")
 execute_process(
@@ -327,13 +287,13 @@ else()
 endif()
 # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L87-90]
-# Extract major, minor, and patch version numbers
 #[[ >>> RCCL-DELTA
+# Extract major and minor version numbers
 string(REGEX MATCH "([0-9]+)" CUDA_MAJOR "${CUDA_VERSION}")
 string(REGEX MATCH "([0-9]+)$" CUDA_MINOR "${CUDA_VERSION}")
 string(REGEX REPLACE ".*\\.([0-9]+)$" "\\1" CUDA_MINOR "${CUDA_VERSION}")
 ]]
+# Extract major, minor, and patch version numbers
 string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
 if (rocm_version_matches)
     set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
@@ -350,18 +310,16 @@ else()
 endif()
 # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L92-96]
-# Add CUDA version definitions after find_package
 #[[ >>> RCCL-DELTA
+# Add CUDA version definitions after find_package
 add_compile_definitions(
     CUDA_MAJOR=${CUDA_MAJOR}
     CUDA_MINOR=${CUDA_MINOR}
 )
 ]] # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L98-108]
-# RCCL requires C++17
 #[[ >>> RCCL-DELTA
+# CUDA 13.0 requires C++17
 if(${CUDA_MAJOR} GREATER_EQUAL 13)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CUDA_STANDARD 17)
@@ -373,18 +331,13 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 ]]
+# RCCL requires C++17
 set(CMAKE_CXX_STANDARD   17)   # We use C++17 features, this will add compile option: -std=c++17
 set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++20 instead, which has some issues.
 # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt -- mostly no direct equivalent] RCCL-only: load the CMake check-modules and
-# RCCL's dependency module (rocm-cmake, GTest, rocm_local_targets, rocm_check_target_ids). NCCL does
-# not need these. Loaded here -- after the build options / NcclCompat (so rccl_apply_nccl_compat_-
-# translations() can run) and before the unified GPU-architecture block below -- because the GPU
-# target resolution depends on rocm_local_targets / rocm_check_target_ids from Dependencies.cmake.
-# (GNUInstallDirs, the one overlap with NCCL L27, is included earlier near project().)
+# >>> RCCL-DELTA
 # Load CMake modules
-#==================================================================================================
 include(CheckIncludeFiles)
 include(CheckIncludeFileCXX)
 include(CheckSymbolExists)
@@ -401,8 +354,8 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
 rccl_apply_nccl_compat_translations()
+# <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L110-139]
 #[[ >>> RCCL-DELTA
 # CUDA architecture flags
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR CMAKE_CUDA_ARCHITECTURES STREQUAL "")
@@ -435,6 +388,7 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR CMAKE_CUDA_ARCHITECTURES STREQUAL "")
 endif()
 message(STATUS "Using CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 ]]
+# Default GPU architectures to build
 set(DEFAULT_GPUS
       gfx906
       gfx908
@@ -528,9 +482,8 @@ message(STATUS "Compiling for ${GPU_TARGETS}")
 include(cmake/Dependencies.cmake) # Reloading to use desired GPU_TARGETS instead of defaults
 # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L141-156]
-# Compiler-specific flags
 #[[ >>> RCCL-DELTA
+# Compiler-specific flags
 if(NCCL_COMPILER_GCC)
     # GCC/Clang-specific flags
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -fvisibility=hidden -Wall -Wno-unused-function -Wno-sign-compare -Wvla -g")
@@ -548,16 +501,14 @@ elseif(NCCL_COMPILER_MSVC)
 endif()
 ]] # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L158-169] Sanitizer options. NCCL gates on NCCL_COMPILER_GCC + the ASAN/UBSAN
-# options and sets global CMAKE_*_FLAGS with -static-lib{a,ub}san. RCCL's host-side ASAN was MIGRATED
-# UP HERE from src/CMakeLists.txt (commented out there): it gates on RCCL's BUILD_ADDRESS_SANITIZER
-# option and uses -shared-libasan plus an rpath to the asan runtime resolved in the GPU-resolution
-# block above. NOTE: moving this from a target_compile_options(rccl PRIVATE ...) in src to global
-# CMAKE_*_FLAGS here broadens ASAN instrumentation from just librccl to every in-tree target (tests,
-# rcclras, gtest) -- this matches NCCL's global approach. The device-side :xnack+ append stays in the
-# GPU-resolution block above. NCCL's UBSAN path has no RCCL equivalent (kept below as commented ref).
 # Sanitizer options (GCC/Clang only)
 if(NCCL_COMPILER_GCC)
+#[[ >>> RCCL-DELTA
+    if(ASAN)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -static-libasan")
+    endif()
+]] # <<< RCCL-DELTA
     if(BUILD_ADDRESS_SANITIZER)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -shared-libasan")
@@ -565,19 +516,25 @@ if(NCCL_COMPILER_GCC)
             set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} LINKER:-rpath,${ASAN_RUNTIME_DIR}")
         endif()
     endif()
-#[[ >>> RCCL-DELTA: NCCL UBSAN path; no RCCL equivalent.
+
+#[[ >>> RCCL-DELTA
     if(UBSAN)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=undefined -shared-libubsan")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=undefined -static-libubsan")
     endif()
 ]] # <<< RCCL-DELTA
 endif()
 
-# [NCCL CMakeLists.txt -- no direct equivalent] RCCL-only: ROCTX/roctracer probe. NCCL's NVTX feature
-# flag (L176) keys off the NVTX option directly; RCCL keys off whether the roctx64 lib + roctracer
-# header are actually present (ROCTX_ENABLE). This probe was MOVED UP from the RCCL-only config-checks
-# region below so ROCTX_ENABLE is resolved before the L171-190 feature-flag block consumes it. It only
-# needs the ROCTX option (set above) and find_library/find_path, so it is safe to run here.
+# Additional options
+if(TRACE)
+    add_definitions(-DENABLE_TRACE)
+endif()
+
+#[[ >>> RCCL-DELTA
+if(NOT NVTX)
+    add_definitions(-DNVTX_DISABLE)
+endif()
+]]
 # Check for ROCTX
 if(ROCTX)
   find_library(ROCTX_LIB NAMES roctx64)
@@ -590,23 +547,13 @@ if(ROCTX)
     message(WARNING "ROCTX library not found. Skipping ROCTX linking.")
   endif()
 endif()
-
-# [NCCL CMakeLists.txt L171-190] Additional feature flags. NCCL sets these as global add_definitions
-# in its root; RCCL historically applied the TRACE/NVTX/ROCTX defines as target_compile_definitions
-# on the rccl target in src/CMakeLists.txt. They were MIGRATED UP HERE (and commented out in src) to
-# match NCCL's root placement. NOTE: as global add_definitions these now reach every in-tree target
-# (tests, rcclras, gtest), not only librccl -- benign for these preprocessor guards, but a scope
-# change from the prior target-private definitions. WERROR/PROFAPI have no prior RCCL src equivalent.
-if(TRACE)
-    add_definitions(-DENABLE_TRACE)
-endif()
-
 if(NOT ROCTX_ENABLE)
     add_definitions(-DNVTX_NO_IMPL)
     add_definitions(-DNVTX_DISABLE)
 else()
     add_definitions(-DROCTX_ENABLE)
 endif()
+# <<< RCCL-DELTA
 
 if(WERROR)
     if(NCCL_COMPILER_MSVC)
@@ -620,9 +567,6 @@ if(PROFAPI)
     add_definitions(-DPROFAPI)
 endif()
 
-# [NCCL CMakeLists.txt L192-217] EXTRA_LIBS + RDMA/MLX5DV/NET_PROFILER/MAX_EXT_NET_PLUGINS (NCCL's CPU-side IB/net
-#            stack; RCCL has a different networking layer and no equivalent here).
-#[[ >>> RCCL-DELTA
 set(EXTRA_LIBS)
 
 # RDMA and MLX5DV are Linux-specific features
@@ -650,22 +594,23 @@ if(MAX_EXT_NET_PLUGINS GREATER 0)
     add_definitions(-DNCCL_NET_MAX_PLUGINS=${MAX_EXT_NET_PLUGINS})
 endif()
 
-# [NCCL CMakeLists.txt L219-224] DOCA/GIN/EMIT_LLVM_IR global definitions (NCCL-specific; RCCL has no DOCA/GIN-proxy).
+#[[ >>> RCCL-DELTA
 add_definitions(-DDOCA_VERBS_USE_CUDA_WRAPPER)
 add_definitions(-DDOCA_VERBS_USE_NET_WRAPPER)
 add_definitions(-DNCCL_GIN_PROXY_ENABLE=1)
+]] # <<< RCCL-DELTA
 if(EMIT_LLVM_IR)
     add_definitions(-DEMIT_LLVM_IR=1)
 endif()
 
-# [NCCL CMakeLists.txt L226-230] librt dependency (RCCL links rt within src/CMakeLists.txt for the static-lib path).
+#[[ >>> RCCL-DELTA
 # Library dependencies
 find_library(RT_LIBRARY NAMES rt)
 if(RT_LIBRARY)
     list(APPEND EXTRA_LIBS rt)
 endif()
+]] # <<< RCCL-DELTA
 
-# [NCCL CMakeLists.txt L232-242]
 # Debug/Release specific flags
 #[[ >>> RCCL-DELTA
 if(NCCL_COMPILER_GCC)
@@ -675,13 +620,18 @@ elseif(NCCL_COMPILER_MSVC)
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} /Od /Zi /FS")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} /O2 /FS")   # Maximum available optimization for MSVC
 endif()
+
+set(CMAKE_CUDA_FLAGS_DEBUG "${CMAKE_CUDA_FLAGS} -O0 -G -g")
+set(CMAKE_CUDA_FLAGS_RELEASE "${CMAKE_CUDA_FLAGS} -O3")
 ]]
+# Base settings set in toolchain file.
 set(CMAKE_CXX_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
 set(CMAKE_C_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
 set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
 # <<< RCCL-DELTA
 
+# >>> RCCL-DELTA
 ### Required for checking HIP device symbols when building with amdclang++
 set(CMAKE_REQUIRED_LIBRARIES hip::device)
 
@@ -933,78 +883,18 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-# [NCCL CMakeLists.txt L3-11] RCCL re-parses version.mk here (guarded by NOT DEFINED NCCL_MAJOR, so
-# it is a no-op on the normal path since the top-of-file block already set these) and then runs the
-# RCCL-only rocm_setup_version(). NCCL parses the version exactly once at the top of its file; this
-# second RCCL pass has no NCCL equivalent and exists mainly as a defensive fallback.
-# Determine version from makefiles/version.mk and fill in templates
-#==================================================================================================
-## parse version from Makefile NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH must exist
-## NCCL_SUFFIX is optional
-## NCCL_VERSION formatting is ((X) * 1000 + (Y) * 100 + (Z)) so we must first detect one or two digits first
-if(NOT DEFINED NCCL_MAJOR)
-file(READ makefiles/version.mk version_mk_text)
-if("${version_mk_text}" MATCHES "NCCL_MAJOR *:= *([0-9]*)")
-  set(NCCL_MAJOR ${CMAKE_MATCH_1})
-else()
-  message(FATAL_ERROR "Failed to parse NCCL_MAJOR")
-endif()
-if("${version_mk_text}" MATCHES "NCCL_MINOR *:= *([0-9]*)")
-  set(NCCL_MINOR ${CMAKE_MATCH_1})
-else()
-  message(FATAL_ERROR "Failed to parse NCCL_MINOR")
-endif()
-if("${version_mk_text}" MATCHES "NCCL_PATCH *:= *([0-9]*)")
-  set(NCCL_PATCH ${CMAKE_MATCH_1})
-else()
-  message(FATAL_ERROR "Failed to parse NCCL_PATCH")
-endif()
-# Parse NCCL_SUFFIX line-by-line to avoid multiline regex pitfalls.
-set(NCCL_SUFFIX "")
-string(REPLACE "\n" ";" _version_mk_lines "${version_mk_text}")
-foreach(_line IN LISTS _version_mk_lines)
-  if("${_line}" MATCHES "^NCCL_SUFFIX[ \t]*:=[ \t]*(.*)$")
-    set(NCCL_SUFFIX "${CMAKE_MATCH_1}")
-    string(STRIP "${NCCL_SUFFIX}" NCCL_SUFFIX)
-    break()
-  endif()
-endforeach()
-if("${version_mk_text}" MATCHES "PKG_REVISION *:= *([0-9]*)")
-  set(PKG_REVISION ${CMAKE_MATCH_1})
-else()
-  message(FATAL_ERROR "Failed to parse PKG_REVISION")
-endif()
-if("${NCCL_PATCH}" MATCHES "[0-9][0-9]")
-  set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}${NCCL_PATCH}")
-else()
-  set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}0${NCCL_PATCH}")
-endif()
-endif()
-
 ## Setup VERSION
 set(VERSION_STRING "${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}")
 rocm_setup_version(VERSION ${VERSION_STRING})
+# <<< RCCL-DELTA
 
-## Fill in version information for main header file
-## [NCCL CMakeLists.txt L92-102 -- lives in NCCL's src/CMakeLists.txt, not its root] This header
-## generation was DUPLICATED INTO projects/rccl/src/CMakeLists.txt (at the NCCL L92-102 position) in
-## the prior src/ reorder. Now COMMENTED OUT here so the src/ copy is the single live generator,
-## matching NCCL (which generates the header from within src/). Left in place (disabled) for
-## reference; re-enable if the src/ copy is ever removed.
-#[[ >>> RCCL-DELTA: duplicated into src/CMakeLists.txt; disabled here.
-file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include")
-file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
-configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
-configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
-]] # <<< RCCL-DELTA
-
-# [NCCL CMakeLists.txt L244-249] Add subdirectories. NCCL adds several example/plugin subdirs
-# (plugins/mixed, plugins/net, plugins/profiler, plugins/tuner, plugins/env) before add_subdirectory(src).
-# RCCL builds those plugins only conditionally (under BUILD_TESTS/BUILD_EXT_EXAMPLES in the tests
-# block below), so here it only adds src/, which performs the library creation.
-# Add subdirectories
-#==================================================================================================
-# Source directory contains library creation
+if(BUILD_PLUGIN_EXAMPLES) # RCCL-DELTA
+add_subdirectory(plugins/mixed/example)
+add_subdirectory(plugins/net/example) # RCCL-DELTA: add_subdirectory(plugins/net)
+add_subdirectory(plugins/profiler/example)
+add_subdirectory(plugins/profiler/proxytrace) # RCCL-DELTA
+add_subdirectory(plugins/tuner/example)
+endif() # RCCL-DELTA
 add_subdirectory(src)
 
 # NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via
@@ -1012,6 +902,33 @@ add_subdirectory(src)
 if(BUILD_PROFILER_INSPECTOR)
   add_subdirectory(plugins/profiler/inspector)
 endif()
+
+#[[ >>> RCCL-DELTA
+# Add package building subdirectories
+if(BUILD_DEBIAN_PACKAGE OR BUILD_PACKAGES)
+  add_subdirectory(pkg/debian)
+endif()
+
+if(BUILD_REDHAT_PACKAGE OR BUILD_PACKAGES)
+  add_subdirectory(pkg/redhat)
+endif()
+
+if(BUILD_TXZ_PACKAGE OR BUILD_PACKAGES)
+  add_subdirectory(pkg/txz)
+endif()
+
+if(BUILD_CONDA_PACKAGE OR BUILD_PACKAGES)
+  add_subdirectory(pkg/conda)
+endif()
+
+if(BUILD_SRCTXZ_PACKAGE OR BUILD_PACKAGES)
+  add_subdirectory(pkg/srctxz)
+endif()
+
+if(BUILD_DOC_PACKAGE OR BUILD_PACKAGES)
+  add_subdirectory(pkg/doc)
+endif()
+]] # <<< RCCL-DELTA
 
 # [NCCL CMakeLists.txt L276-281] EMIT_LLVM_IR. Mirrors NCCL closely: add the bindings/ir subdir, wire
 # the IR target to the header-prep dependency (NCCL: nccl_header; RCCL: copy_nccl_device_headers), and
@@ -1029,6 +946,7 @@ if(EMIT_LLVM_IR)
   add_dependencies(llvm_ir copy_nccl_device_headers)
   # Convenience aggregate target: builds librccl.so together with the bitcode.
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
+  message(STATUS "LLVM IR generation will be included in default build")
 endif()
 
 # nccl4py Python bindings (opt-in)
@@ -1048,31 +966,44 @@ if(BUILD_NCCL4PY)
   # <<< RCCL-DELTA
 endif()
 
-# [NCCL CMakeLists.txt L287-322] Install / export. NCCL's root performs only the CMake package-config
-# export here (install(EXPORT NCCLTargets), configure_package_config_file, write_basic_package_version_file,
-# install(FILES NCCLConfig*.cmake), export(EXPORT ...)); its actual target/header install() calls live
-# in NCCL's src/CMakeLists.txt (L260-281). RCCL's analog is rocm_export_targets() below, plus the
-# RCCL-only rocm packaging machinery (tuner, package deps, Debian copyright/changelog, rocm_create_package).
-# Install settings
-#==================================================================================================
-## Specify install targets
-## [NCCL CMakeLists.txt L260-281 -- lives in NCCL's src/CMakeLists.txt] The rccl target + header
-## install rules were DUPLICATED INTO projects/rccl/src/CMakeLists.txt in the prior src/ reorder.
-## Now COMMENTED OUT here so the src/ copies are the single live install rules, matching NCCL (which
-## installs targets/headers from within src/). Left in place (disabled) for reference; re-enable if
-## the src/ copies are ever removed.
-#[[ >>> RCCL-DELTA: duplicated into src/CMakeLists.txt; disabled here.
-rocm_install_targets(TARGETS rccl)
-rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/plugin/nccl_net.h
-             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
-rocm_install(FILES       src/include/api_trace.h
-             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
-rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
-                         ${PROJECT_BINARY_DIR}/include/nccl_device.h
-             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device/
-             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device)
-]] # <<< RCCL-DELTA
+###################### CMake package config for find_package(NCCL) ######################
+#[[ >>> RCCL-DELTA
+include(CMakePackageConfigHelpers)
+
+set(NCCL_CMAKE_CONFIG_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/NCCL")
+
+# Export installed targets (NCCL::nccl, NCCL::nccl_static)
+install(EXPORT NCCLTargets
+  FILE NCCLTargets.cmake
+  NAMESPACE NCCL::
+  DESTINATION "${NCCL_CMAKE_CONFIG_DIR}"
+)
+
+# Generate & install NCCLConfig.cmake / NCCLConfigVersion.cmake
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/NCCLConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/NCCLConfig.cmake"
+  INSTALL_DESTINATION "${NCCL_CMAKE_CONFIG_DIR}"
+)
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/NCCLConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/NCCLConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/NCCLConfigVersion.cmake"
+  DESTINATION "${NCCL_CMAKE_CONFIG_DIR}"
+)
+
+# Also export targets for build-tree usage (optional convenience).
+export(EXPORT NCCLTargets
+  FILE "${CMAKE_CURRENT_BINARY_DIR}/NCCLTargets.cmake"
+  NAMESPACE NCCL::
+)
+]]
 ## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
 ## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
 ## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
@@ -1087,29 +1018,19 @@ if(EMIT_LLVM_IR)
   rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 endif()
-## [NCCL CMakeLists.txt -- no direct equivalent] RCCL-only: stage and install the CSV tuner config.
 ## Install tuner config directory for CSV-based tuner
 file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
 rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
-
-# [NCCL CMakeLists.txt L287-322] CMake package config / target export. NCCL uses install(EXPORT
-# NCCLTargets) + configure_package_config_file + write_basic_package_version_file + export(EXPORT).
-# RCCL's rocm-cmake analog is rocm_export_targets(), which generates and installs the rccl package
-# config (roc:: namespace) and records the hip dependency.
 rocm_export_targets(
   NAMESPACE roc::
   TARGETS   rccl
   DEPENDS   hip)
 
-# [NCCL CMakeLists.txt L251-274] Package building. NCCL conditionally adds pkg/{debian,redhat,txz,
-# conda,srctxz,doc} subdirectories. RCCL's analog is the rocm-cmake CPack machinery below (package
-# dependencies, Debian copyright/changelog, rocm_create_package) -- this whole packaging section is
-# RCCL-specific in mechanism but mirrors NCCL's "build the distro packages" intent and position.
 ## Set package dependencies
 if(BUILD_ADDRESS_SANITIZER)
-  set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
+  set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan")
 else()
-  set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
+  set(DEPENDS_HIP_RUNTIME "hip-runtime-amd")
 endif()
 
 rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0" "${SMI_LIB_NAME}")
@@ -1119,7 +1040,7 @@ set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "${ROCM_PATH}/lib")
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/opt" "${ROCM_PATH}")
 
-find_file (DEBIAN debian_version debconf.conf PATHS /etc)
+find_file(DEBIAN debian_version debconf.conf PATHS /etc)
 if(DEBIAN)
   # Write copyright file
   file(WRITE "${CMAKE_BINARY_DIR}/copyright"
@@ -1134,7 +1055,7 @@ Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT Licens
 License: See LICENSE.txt for license information\n")
   rocm_install(FILES "${CMAKE_BINARY_DIR}/copyright" DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
   # Write changelog file
-  find_program( date_executable date )
+  find_program(date_executable date)
   execute_process(COMMAND ${date_executable} -R OUTPUT_VARIABLE TIMESTAMP)
   file(WRITE "${CMAKE_BINARY_DIR}/changelog"
   "rccl (${VERSION_STRING}-1) unstable; urgency=medium
@@ -1142,7 +1063,7 @@ License: See LICENSE.txt for license information\n")
   * Initial release.
 
  -- RCCL Maintainer <rccl-maintainer@amd.com>  ${TIMESTAMP}\n")
-  find_program( gzip_executable gzip )
+  find_program(gzip_executable gzip)
   execute_process(COMMAND bash "-c" "${gzip_executable} -9 -c -n ${CMAKE_BINARY_DIR}/changelog"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR} OUTPUT_FILE "${CMAKE_BINARY_DIR}/changelog.Debian.gz")
   rocm_install(FILES "${CMAKE_BINARY_DIR}/changelog.Debian.gz" DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
@@ -1150,55 +1071,29 @@ License: See LICENSE.txt for license information\n")
   Optimized primitives for collective multi-GPU communication")
 endif()
 
-## [NCCL CMakeLists.txt L268-271 -- lives in NCCL's src/CMakeLists.txt] The rcclras install was
-## DUPLICATED INTO projects/rccl/src/CMakeLists.txt in the prior src/ reorder. Now COMMENTED OUT
-## here so the src/ copy is the single live install rule, matching NCCL (which installs ncclras from
-## within src/). Left in place (disabled) for reference; re-enable if the src/ copy is ever removed.
-#[[ >>> RCCL-DELTA: duplicated into src/CMakeLists.txt; disabled here.
-## Install RCCL RAS client (built in src/CMakeLists.txt)
-rocm_install(TARGETS rcclras)
-]] # <<< RCCL-DELTA
-
-# [NCCL CMakeLists.txt -- no direct equivalent] RCCL-only: tests + example plugins. NCCL always adds
-# its plugin example subdirs at the top of its root (NCCL L244-248) and keeps tests elsewhere; RCCL
-# gates both behind BUILD_TESTS/BUILD_EXT_EXAMPLES and also stamps a post-build metadata extraction.
 if(BUILD_TESTS)
   enable_testing()
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
-  if(BUILD_PLUGIN_EXAMPLES)
-    add_subdirectory(plugins/net/example)
-    add_subdirectory(plugins/tuner/example)
-    add_subdirectory(plugins/profiler/example)
-    add_subdirectory(plugins/profiler/proxytrace)
-  endif()
   add_subdirectory(test)
 
 endif()
 
-# [NCCL CMakeLists.txt L251-274] Create the distro package(s). NCCL drives this via the per-format
-# pkg/* subdirectories; RCCL's analog is rocm_create_package() (CPack), plus the RCCL-only NCCL-compat
-# package targets.
 rocm_create_package(
   NAME        rccl
   DESCRIPTION "ROCm Communication Collectives Library"
   MAINTAINER  "RCCL Maintainer <rccl-maintainer@amd.com>"
   LDCONFIG)
 
-# [NCCL CMakeLists.txt -- no direct equivalent] RCCL-only: emit the nccl-compat package alias targets.
 rccl_add_nccl_compat_package_targets()
 
-# [NCCL CMakeLists.txt -- no direct equivalent] RCCL-only: GENERATE_SYM_KERNELS compile definition on
-# the rccl target. NCCL has no symmetric-kernel generation switch.
 if(GENERATE_SYM_KERNELS)
   target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
 endif()
 
-# [NCCL CMakeLists.txt L176-179 -- lives in NCCL's src/CMakeLists.txt] Library output directory.
-# NCCL sets LIBRARY_OUTPUT_DIRECTORY on the nccl target inside src/. RCCL keeps librccl in the
-# top-level build dir (for existing scripts) and sets it here at root, after the rccl target exists.
 # Keep librccl outputs in the top-level build dir for existing scripts.
 set_target_properties(rccl PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
   LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+# <<< RCCL-DELTA
