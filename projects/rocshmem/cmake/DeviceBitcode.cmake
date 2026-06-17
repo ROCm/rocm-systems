@@ -34,6 +34,30 @@ function(strip_arch_features targets_list out_var)
   set(${out_var} "${_result}" PARENT_SCOPE)
 endfunction()
 
+# Convert arch feature suffix to a list of llc -mattr=<feature> flags.
+# gfx950:sramecc+:xnack-  →  CMake list: "-mattr=+sramecc;-mattr=-xnack"
+# Caller uses the list directly in add_custom_command COMMAND so each element
+# becomes a separate shell argument (avoiding comma-joining issues).
+function(arch_features_to_mattr_flags full_arch out_var)
+  # Split the full arch string on ":" into a list
+  string(REPLACE ":" ";" _all_tokens "${full_arch}")
+  # Skip the first token (the base arch name) and process the rest as features
+  list(LENGTH _all_tokens _ntokens)
+  set(_flags "")
+  if(_ntokens GREATER 1)
+    list(SUBLIST _all_tokens 1 -1 _feat_tokens)
+    foreach(_tok ${_feat_tokens})
+      if(_tok STREQUAL "")
+        continue()
+      endif()
+      # "sramecc+" → "+sramecc", "xnack-" → "-xnack"
+      string(REGEX REPLACE "([a-zA-Z0-9_]+)([+-])$" "\\2\\1" _part "${_tok}")
+      list(APPEND _flags "-mattr=${_part}")
+    endforeach()
+  endif()
+  set(${out_var} "${_flags}" PARENT_SCOPE)
+endfunction()
+
 # Resolve the default arch list: GPU_TARGETS if set, otherwise auto-detect local GPUs.
 if(GPU_TARGETS)
   # Convert comma-separated string to CMake list (semicolon-separated)
@@ -65,6 +89,7 @@ set(BITCODE_COMPILE_FLAGS_BASE
     -std=c++17
     -emit-llvm
     -fvisibility=default
+    -O3
     -Xclang -mcode-object-version=none
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/rocshmem
     -I${CMAKE_CURRENT_SOURCE_DIR}/include

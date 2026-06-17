@@ -7,6 +7,7 @@
 #include <timemory/utility/types.hpp>
 
 #include "common/delimit.hpp"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
 
 #include <cstddef>
@@ -471,7 +472,7 @@ shmem_gotcha<SHMEMPolicy>::configure()
     shmem_gotcha_t::get_reject_list() = []() {
         std::set<std::string> tokens;
         auto                  reject_list =
-            rocprofsys::common::get_env<std::string>("ROCPROFSYS_SHMEM_REJECT_LIST", "");
+            rocprofsys::common::get_env<std::string>(env_vars::SHMEM_REJECT_LIST, "");
         for(const auto& itr : rocprofsys::common::delimit(reject_list))
             tokens.insert(itr);
         return shmem_categories::expand_tokens_to_apis(tokens);
@@ -483,7 +484,7 @@ shmem_gotcha<SHMEMPolicy>::configure()
     // Set to "all" to permit every bound API; or list categories/APIs to trace.
     shmem_gotcha_t::get_permit_list() = []() {
         auto permit_list =
-            rocprofsys::common::get_env<std::string>("ROCPROFSYS_SHMEM_PERMIT_LIST", "");
+            rocprofsys::common::get_env<std::string>(env_vars::SHMEM_PERMIT_LIST, "");
         std::set<std::string> tokens;
         for(const auto& itr : rocprofsys::common::delimit(permit_list))
             tokens.insert(itr);
