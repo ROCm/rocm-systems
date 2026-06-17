@@ -120,13 +120,11 @@ class TestMPI(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        BINARY_REWRITE_PASS_REGEX = [
-            r"Successfully executed: .+rocprof-sys-merge-output.sh.*"
-        ]
+        BINARY_REWRITE_PASS_REGEX = [r"merged\.proto"]
         BINARY_REWRITE_FAIL_REGEX = ["Script not found", "Failed to execute"]
         ENV = {
             "ROCPROFSYS_VERBOSE": "1",
-            "ROCPROFSYS_MERGE_PERFETTO_FILES": "ON",
+            "ROCPROFSYS_PERFETTO_COMBINE_TRACES": "ON",
         }
         result = self.run_test(
             mode,

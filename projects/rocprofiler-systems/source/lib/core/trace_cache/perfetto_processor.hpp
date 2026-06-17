@@ -39,8 +39,7 @@ public:
     perfetto_processor_t(const std::shared_ptr<metadata_registry>& metadata,
                          const std::shared_ptr<agent_manager>& agent_mngr, int pid,
                          int ppid, output_file_registry& output_registry,
-                         core::cached_perfetto_engine& engine,
-                         rocprofsys::track_registry&   tracks);
+                         rocprofsys::track_registry& tracks);
 
     void prepare_for_processing();
     // Cached-mode drain runs at cache_manager scope (engine.stop());
@@ -80,13 +79,12 @@ private:
     void handle_kfd_page_fault(const kfd_sample& sample);
     void handle_kfd_page_migrate(const kfd_sample& sample);
 
-    metadata_registry&            m_metadata;
-    std::uint64_t                 m_process_id;
-    agent_manager&                m_agent_manager;
-    bool                          m_use_annotations{ false };
-    bool                          m_default_group_by_queue{ true };
-    core::cached_perfetto_engine& m_engine;
-    rocprofsys::track_registry&   m_tracks;
+    metadata_registry&          m_metadata;
+    std::uint64_t               m_process_id;
+    agent_manager&              m_agent_manager;
+    bool                        m_use_annotations{ false };
+    bool                        m_default_group_by_queue{ true };
+    rocprofsys::track_registry& m_tracks;
 
     // Each perfetto_processor_t instance is owned by a single consumer thread
     // for its entire lifetime (see process_buffered_storage in cache_manager.cpp).

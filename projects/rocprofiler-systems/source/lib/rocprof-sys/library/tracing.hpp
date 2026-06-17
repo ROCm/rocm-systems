@@ -8,7 +8,8 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
-#include "core/perfetto/category_registry.hpp"
+#include "core/perfetto.hpp"
+#include "core/perfetto/emitter.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -50,24 +51,17 @@ namespace rocprofsys
 namespace tracing
 {
 using interval_data_instances = thread_data<std::vector<bool>>;
-using hash_value_t            = tim::hash_value_t;
+using hash_value_t            = core::perfetto::hash_value_t;
 
-constexpr std::uint64_t
-hash_combine(std::uint64_t seed, std::uint64_t value) noexcept
-{
-    constexpr std::uint64_t golden_ratio = 0x9e3779b97f4a7c17ULL;
-    return seed ^ (value + golden_ratio + (seed << 6) + (seed >> 2));
-}
-
-template <typename... Args>
-inline std::uint64_t
-hash_combine_all(std::uint64_t seed, Args&&... args) noexcept
-{
-    ((seed =
-          hash_combine(seed, std::hash<std::decay_t<Args>>{}(std::forward<Args>(args)))),
-     ...);
-    return seed;
-}
+using core::perfetto::ensure_synthetic_process_track_emitted;
+using core::perfetto::get_active_process_track;
+using core::perfetto::get_perfetto_category_uuid;
+using core::perfetto::get_perfetto_string;
+using core::perfetto::get_perfetto_track;
+using core::perfetto::get_perfetto_track_uuids;
+using core::perfetto::get_perfetto_track_uuids_mutex;
+using core::perfetto::hash_combine;
+using core::perfetto::hash_combine_all;
 
 using perfetto_annotate_component_types = tim::mpl::available_t<type_list<
     comp::cpu_clock, comp::cpu_util, comp::kernel_mode_time, comp::num_major_page_faults,
@@ -85,18 +79,6 @@ extern ROCPROFSYS_HIDDEN_API bool debug_pop;
 extern ROCPROFSYS_HIDDEN_API bool debug_user;
 extern ROCPROFSYS_HIDDEN_API bool debug_mark;
 
-std::unordered_map<hash_value_t, std::string>&
-get_perfetto_track_uuids();
-
-std::mutex&
-get_perfetto_track_uuids_mutex();
-
-::perfetto::Track
-get_active_process_track();
-
-void
-ensure_synthetic_process_track_emitted(int pid);
-
 void
 copy_timemory_hash_ids();
 
@@ -113,22 +95,6 @@ template <typename CategoryT>
 auto&
 get_category_stack();
 
-template <typename T>
-    requires std::is_const_v<T>
-auto
-get_perfetto_string(T& name)
-{
-    return ::perfetto::StaticString{ name };
-}
-
-template <typename T>
-    requires(!std::is_const_v<T>)
-auto
-get_perfetto_string(T& name)
-{
-    return ::perfetto::DynamicString{ name };
-}
-
 template <typename CategoryT, typename... Args>
 inline void
 push_perfetto(CategoryT, const char*, Args&&...);
@@ -139,7 +105,7 @@ pop_perfetto(CategoryT, const char*, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
-push_perfetto_ts(CategoryT, const char*, std::uint64_t _ts, Args&&...);
+push_perfetto_ts(CategoryT, const char*, std::uint64_t, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
@@ -164,63 +130,6 @@ mark_perfetto_ts(CategoryT, const char*, std::uint64_t, Args&&...);
 template <typename CategoryT, typename... Args>
 inline void
 mark_perfetto_track(CategoryT, const char*, ::perfetto::Track, std::uint64_t, Args&&...);
-
-//
-//  definitions
-//
-
-template <typename CategoryT, typename... Args>
-auto
-get_perfetto_category_uuid(Args&&... _args)
-{
-    const auto seed = std::hash<std::string>{}(
-        fmt::format("rocprofsys_{}", trait::name<CategoryT>::value));
-    return hash_combine_all(
-        seed, std::forward<Args>(_args)...,
-        static_cast<std::int64_t>(::rocprofsys::core::get_emitting_pid()));
-}
-
-template <typename CategoryT, typename TrackT = ::perfetto::Track, typename FuncT,
-          typename... Args>
-auto
-get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
-{
-    auto _uuid = get_perfetto_category_uuid<CategoryT>(std::forward<Args>(_args)...);
-
-    std::lock_guard<std::mutex> _lk{ get_perfetto_track_uuids_mutex() };
-    auto&                       _track_uuids = get_perfetto_track_uuids();
-
-    if(_track_uuids.find(_uuid) == _track_uuids.end())
-    {
-        const auto _track = TrackT(_uuid, get_active_process_track());
-        auto       _desc  = _track.Serialize();
-
-        auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
-        _desc.set_name(_name);
-        ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
-
-        LOG_TRACE("[{}] Created {}({}) with description: \"{}\"",
-                  trait::name<CategoryT>::value, rocprofsys::utility::demangle<TrackT>(),
-                  _uuid, _name);
-
-        _track_uuids.emplace(_uuid, _name);
-    }
-
-    // guard this with ppdefs in addition to runtime check to avoid
-    // overhead of generating string during releases
-#if defined(ROCPROFSYS_CI) && ROCPROFSYS_CI > 0
-    auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
-    if(_track_uuids.at(_uuid) != _name)
-    {
-        throw std::runtime_error(
-            fmt::format("Error! Multiple invocations of UUID {} produced different "
-                        "descriptions: \"{}\" and \"{}\"",
-                        _uuid, _track_uuids.at(_uuid), _name));
-    }
-#endif
-
-    return TrackT(_uuid, get_active_process_track());
-}
 
 template <typename Tp = std::uint64_t>
 ROCPROFSYS_INLINE auto
@@ -588,8 +497,8 @@ push_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track,
     if(category_push_disabled<CategoryT>()) return;
 
     ++get_tracing_stack<CategoryT>();
-    TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, get_perfetto_string(name), _track,
-                      _ts, std::forward<Args>(args)...);
+    core::perfetto::push_perfetto_track(CategoryT{}, name, _track, _ts,
+                                        std::forward<Args>(args)...);
 }
 
 template <typename CategoryT, typename... Args>
@@ -603,8 +512,8 @@ pop_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track,
     // decrement tracing stack
     --get_tracing_stack<CategoryT>();
 
-    TRACE_EVENT_END(
-        trait::name<CategoryT>::value, _track, _ts,
+    core::perfetto::pop_perfetto_track(
+        CategoryT{}, name, _track, _ts,
         perfetto_annotate_timemory_data(CategoryT{}, name, std::forward<Args>(args))...);
 }
 

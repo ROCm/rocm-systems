@@ -19,4 +19,7 @@ set(perfetto_sink_headers
     ${CMAKE_CURRENT_LIST_DIR}/trace_sink.hpp
 )
 
-target_sources(rocprofiler-systems-core-library PRIVATE ${perfetto_sink_sources} ${perfetto_sink_headers})
+target_sources(
+    rocprofiler-systems-core-library
+    PRIVATE ${perfetto_sink_sources} ${perfetto_sink_headers}
+)
