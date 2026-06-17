@@ -54,6 +54,9 @@
 #    include <libdrm/amdgpu_drm.h>
 #endif
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <iomanip>
 #include <limits>
 #include <set>
@@ -890,6 +893,22 @@ internal_refresh_topology()
 {
     auto _updated_topology = enumerate_platform_agents();
     std::swap(get_agent_topology(), _updated_topology);
+}
+
+bool
+kfd_device_available()
+{
+    // Open-probe the KFD device node once. On a real KFD platform this succeeds;
+    // on WSL2/DXG (which exposes /dev/dxg but not /dev/kfd) it fails, letting
+    // callers gracefully degrade (e.g. disable KFD event tracing) instead of
+    // aborting. Cached so repeated queries from different subsystems are cheap.
+    static const bool _available = []() {
+        int probe_fd = ::open("/dev/kfd", O_RDWR | O_CLOEXEC);
+        if(probe_fd == -1) return false;
+        ::close(probe_fd);
+        return true;
+    }();
+    return _available;
 }
 }  // namespace agent
 }  // namespace rocprofiler

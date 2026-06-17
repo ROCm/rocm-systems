@@ -172,34 +172,27 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
         ctx.dispatch_counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
 
-        // When the KFD device node is absent (e.g. WSL2/DXG, which exposes
-        // /dev/dxg but not /dev/kfd) hardware counters are not armed through the
-        // KFD profiler ioctl; instead aqlprofile's vendor-specific PM4 IB is
-        // submitted through the dxg path in libhsakmt. That path is gated by
-        // WSLKMT_VENDOR_PACKET (enabled by default by the WSL platform layer).
-        // A single counter is collected correctly this way, but a large
-        // multi-counter set can exceed libhsakmt's per-queue PM4 command-buffer
-        // frame and fail to arm until that limit is raised. Note this once so the
-        // behavior is understood rather than mistaken for a configuration bug.
-        //
-        // NOTE: this is intentionally a /dev/kfd-presence check, not the
-        // counter_collection_has_device_lock() / profiler-ioctl probe used at
-        // lock time. Those report driver capability and are unrelated to whether
-        // a successfully-armed counter reads back non-zero; conflating them would
-        // mis-warn on Linux systems where the device lock is simply unavailable.
-        static const bool kfd_node_present = (::access("/dev/kfd", F_OK) == 0);
-        if(!kfd_node_present)
+        // On WSL2/DXG the KFD device node is absent (/dev/dxg is exposed but not
+        // /dev/kfd), so hardware counters are not armed through the KFD profiler
+        // ioctl; instead aqlprofile's vendor-specific PM4 IB is submitted through
+        // the dxg path in libhsakmt, gated by WSLKMT_VENDOR_PACKET (enabled by
+        // default by the WSL platform layer). A single counter is collected
+        // correctly this way; a large multi-counter set can exceed libhsakmt's
+        // per-queue PM4 command-buffer frame and fail to arm until that limit is
+        // raised. The /dev/kfd capability probe is shared at the topology level
+        // (rocprofiler::agent) so this stays consistent with KFD event tracing
+        // rather than being an ad-hoc check here.
+        if(!::rocprofiler::agent::kfd_device_available())
         {
             static std::once_flag warned_once{};
             std::call_once(warned_once, []() {
                 ROCP_WARNING
-                    << "/dev/kfd is not present (expected under WSL/DXG). Hardware "
+                    << "/dev/kfd is not available (expected under WSL/DXG). Hardware "
                        "performance counters are collected via the dxg vendor-packet "
-                       "path in libhsakmt rather than the KFD profiler interface; this "
-                       "requires WSLKMT_VENDOR_PACKET=1, which the WSL platform layer "
-                       "enables automatically. A single counter is collected correctly, "
-                       "but large multi-counter sets may currently fail to arm due to "
-                       "the libhsakmt PM4 command-buffer frame-size limit.";
+                       "path in libhsakmt (requires WSLKMT_VENDOR_PACKET=1, enabled "
+                       "automatically by the WSL platform layer). Single-counter "
+                       "collection works; large multi-counter sets may currently fail "
+                       "to arm due to the libhsakmt PM4 command-buffer frame-size limit.";
             });
         }
     }

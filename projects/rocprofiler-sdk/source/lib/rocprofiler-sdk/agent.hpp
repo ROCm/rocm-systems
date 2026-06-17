@@ -129,5 +129,13 @@ internal_refresh_topology();  // only for internal testing
 // materialize agents. Defined in agent.cpp.
 void
 update_agent_runtime_visibility(rocprofiler_agent_t& agent_info);
+
+// True if the KFD device node (/dev/kfd) can actually be opened. False on
+// platforms without a real KFD such as WSL2/DXG (which exposes /dev/dxg only).
+// Consolidates the /dev/kfd capability probe at the topology level so KFD event
+// tracing and counter collection share a single source of truth instead of each
+// doing its own ad-hoc check. Cached on first call.
+bool
+kfd_device_available();
 }  // namespace agent
 }  // namespace rocprofiler

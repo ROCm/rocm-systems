@@ -44,6 +44,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -883,32 +884,53 @@ enumerate()
 
         info.product_name = common::get_string_entry(adapter_name)->c_str();
         info.vendor_name  = common::get_string_entry("AMD")->c_str();
-        // Counter YAML (config.yaml) is keyed by gfx target (e.g. "gfx1150"),
-        // not the marketing product name. WSL DXCore does not expose KFD topology so
-        // we can't reliably derive gfx from the PCI device ID; honor an override env
-        // var and default to gfx1150 (RDNA 3.5).
-        const char* forced_gfx = std::getenv("ROCPROFILER_FORCE_GFX");
-        const char* gfx_name   = (forced_gfx && *forced_gfx) ? forced_gfx : "gfx1150";
-        info.name              = common::get_string_entry(gfx_name)->c_str();
-        info.model_name        = common::get_string_entry("")->c_str();
+        // Counter YAML (config.yaml) is keyed by the gfx target (e.g. "gfx1150"),
+        // not the marketing product name. WSL DXCore does not expose KFD topology,
+        // so the gfx target cannot be derived from the adapter; default to the only
+        // WSL-validated target (gfx1150, RDNA 3.5) and allow an override via the
+        // ROCPROFILER_FORCE_GFX environment variable (see docs/ for the full list of
+        // WSL macros/env vars).
+        //
+        // Compute gfx_target_version = major*10000 + minor*100 + step from a
+        // "gfx<NNN>" name, where step is the last digit, minor the second-to-last,
+        // and major the remaining leading digits (gfx1150 -> 110500). Returns
+        // nullopt for anything that is not "gfx" followed by >=3 decimal digits so a
+        // malformed override can never feed garbage into gfx_target_version.
+        static constexpr std::string_view kDefaultGfxName = "gfx1150";
 
-        // gfx_target_version = major*10000 + minor*100 + step.
-        // gfx1150 -> 110500. Parse trailing digits from gfx_name suffix.
+        auto parse_gfx_version = [](std::string_view gfx) -> std::optional<uint32_t> {
+            if(gfx.substr(0, 3) != "gfx") return std::nullopt;
+            auto digits = gfx.substr(3);
+            if(digits.size() < 3) return std::nullopt;
+            for(char c : digits)
+                if(c < '0' || c > '9') return std::nullopt;
+            uint32_t stp = static_cast<uint32_t>(digits[digits.size() - 1] - '0');
+            uint32_t min = static_cast<uint32_t>(digits[digits.size() - 2] - '0');
+            uint32_t maj = 0;
+            for(size_t k = 0; k + 2 < digits.size(); ++k)
+                maj = maj * 10 + static_cast<uint32_t>(digits[k] - '0');
+            return maj * 10000 + min * 100 + stp;
+        };
+
+        std::string_view gfx_name = kDefaultGfxName;
+        if(const char* forced_gfx = std::getenv("ROCPROFILER_FORCE_GFX");
+           forced_gfx != nullptr && *forced_gfx != '\0')
         {
-            uint32_t    maj = 11, min = 5, stp = 0;
-            const char* p = gfx_name;
-            if(p[0] == 'g' && p[1] == 'f' && p[2] == 'x') p += 3;
-            size_t n = std::strlen(p);
-            if(n >= 3)
+            if(parse_gfx_version(forced_gfx))
             {
-                stp = static_cast<uint32_t>(p[n - 1] - '0');
-                min = static_cast<uint32_t>(p[n - 2] - '0');
-                maj = 0;
-                for(size_t k = 0; k + 2 < n; ++k)
-                    maj = maj * 10 + static_cast<uint32_t>(p[k] - '0');
+                gfx_name = forced_gfx;
             }
-            info.gfx_target_version = maj * 10000 + min * 100 + stp;
+            else
+            {
+                ROCP_WARNING << "Ignoring malformed ROCPROFILER_FORCE_GFX='" << forced_gfx
+                             << "'; expected gfx<NNN> with >=3 decimal digits. Falling back to "
+                             << kDefaultGfxName;
+            }
         }
+
+        info.name               = common::get_string_entry(std::string{gfx_name})->c_str();
+        info.model_name         = common::get_string_entry("")->c_str();
+        info.gfx_target_version = parse_gfx_version(gfx_name).value();
 
         info.mem_banks_count = 0;
         info.caches_count    = 0;
