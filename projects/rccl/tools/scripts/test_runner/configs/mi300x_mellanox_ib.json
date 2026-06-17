@@ -2528,7 +2528,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes",
-          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.SignalAdd_AndShadow",
+          "test_filter": "GinMPIDeviceTests.*",
           "timeout": 600
         },
         {

@@ -1029,7 +1029,11 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::waitSignalFollowShadow(Coop
   uint32_t steps = 0;
   coop.sync();
   uint64_t before64 = this->_signalShadows[signal];
+#if defined(__HIP_PLATFORM_AMD__)
+  uint64_t after64 = 0;  // must be zero-initialized, else non-root threads broadcast an indeterminate value and hang
+#else
   uint64_t after64;
+#endif
   if (coop.thread_rank() == 0) {
     uint64_t* ptr = ncclGinCall<ncclGinApi_GetSignalPtr>(this->_makeCtx(), signal);
     #pragma unroll 1
