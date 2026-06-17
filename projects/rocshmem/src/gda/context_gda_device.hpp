@@ -289,6 +289,17 @@ class GDAContext : public Context {
   __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems,
       int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
+  __device__ void internal_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    long *p_sync);
+
+  __device__ void internal_get_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, ActiveWFInfo &wf_info);
+
+  __device__ void internal_put_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    ActiveWFInfo &wf_info);
+
   template <typename T>
   __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
       const T *source, int nelems);
