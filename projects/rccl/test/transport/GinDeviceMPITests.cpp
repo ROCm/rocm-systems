@@ -2644,15 +2644,8 @@ TEST_F(GinMPIDeviceTests, MultiContext_Exclusive) {
   ASSERT_EQ(kNumContexts, (int)devComm.ginContextCount)
       << "exclusive allocation returned " << (int)devComm.ginContextCount;
 
-  // Exclusive contexts are carved from the TOP of the pool (ctxLastExclusive
-  // counts down), whereas shared contexts always start at base 0. With the
-  // pool sized to leave headroom (NCCL_GIN_NCONTEXTS >= 8, as this test
-  // requires), the exclusive carve-out must therefore land at a non-zero base.
-  // base == 0 would mean we were handed ordinary shared contexts rather than an
-  // exclusive reservation, so this distinguishes the exclusive path from shared.
-  EXPECT_GT((int)devComm.ginContextBase, 0)
-      << "exclusive contexts should be carved from the top of the pool; got base "
-      << (int)devComm.ginContextBase;
+  // 2.30 dropped ncclDevComm.ginContextBase; contexts are addressed 0-based via
+  // ginContextCount. Exclusivity is exercised by the producer/consumer kernels below.
 
   std::vector<uint8_t> hostSrc(kBufBytes, 0), hostDst(kBufBytes, 0);
   for (int b = 0; b < kNumContexts; b++)

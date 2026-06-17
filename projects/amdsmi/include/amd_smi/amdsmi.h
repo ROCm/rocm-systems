@@ -3640,7 +3640,8 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_han
 /**
  *  @brief Get the vram vendor string of a device.
  *
- *  @deprecated ::amdsmi_get_gpu_vram_info() should be used instead
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_get_gpu_vram_info() should be used instead
  *
  *  @ingroup tagIdentQuery
  *
