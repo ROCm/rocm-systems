@@ -206,6 +206,7 @@ private:
   std::vector<GpuDevice> gpus_;
   bool daemon_mode_ = false;
   int fd_ = -1;
+  std::once_flag fd_init_flag_;
 
   /// @brief Process table mapping process_id to KfdProcess.
   /// @details Protected by process_mutex_ for concurrent daemon access.

@@ -162,6 +162,7 @@ public:
   pid_t client_pid_ = 0;
   std::atomic<uint32_t> open_ref_count_{1};
 
+  std::mutex op_mutex_;
   mutable std::mutex alloc_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;
   uint64_t next_handle_ = 1;

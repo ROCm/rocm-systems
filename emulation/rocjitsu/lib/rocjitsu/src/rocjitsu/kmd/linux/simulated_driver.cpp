@@ -189,8 +189,15 @@ const SimulatedDriver::GpuDevice *SimulatedDriver::find_gpu(uint32_t gpu_id) con
 }
 
 SimulatedDriver::~SimulatedDriver() {
-  while (!processes_.empty())
-    close(processes_.begin()->first);
+  std::vector<uint32_t> pids;
+  {
+    std::lock_guard<std::mutex> lk(process_mutex_);
+    pids.reserve(processes_.size());
+    for (auto &[id, proc] : processes_)
+      pids.push_back(id);
+  }
+  for (auto pid : pids)
+    close(pid);
 }
 
 void SimulatedDriver::setup_topology(const Sysfs::GpuInfo &gpu) {
@@ -279,11 +286,10 @@ int SimulatedDriver::open() {
     }
   });
 
-  if (fd_ < 0) {
-    fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0));
-    if (fd_ < 0)
-      return -1;
-  }
+  std::call_once(fd_init_flag_,
+                 [this] { fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0)); });
+  if (fd_ < 0)
+    return -1;
 
   std::lock_guard<std::mutex> lk(process_mutex_);
   if (!daemon_mode_ && local_process_id_ != 0 && processes_.contains(local_process_id_)) {
@@ -367,11 +373,10 @@ void SimulatedDriver::set_process_client_pid(uint32_t process_id, pid_t client_p
 }
 
 uint32_t SimulatedDriver::open_process(pid_t client_pid) {
-  if (fd_ < 0) {
-    fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0));
-    if (fd_ < 0)
-      return 0;
-  }
+  std::call_once(fd_init_flag_,
+                 [this] { fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0)); });
+  if (fd_ < 0)
+    return 0;
 
   uint32_t pid;
   {
@@ -408,49 +413,49 @@ uint32_t SimulatedDriver::open_process(pid_t client_pid) {
       std::lock_guard<std::mutex> ilk(interrupt_mutex_);
       event_dispatch_[pid] = &proc->event_state_;
     }
-  }
 
-  for (size_t i = 0; i < gpus_.size(); ++i) {
-    auto &g = gpus_[i];
-    if (g.cps_initialized)
-      continue;
-    if (!g.soc)
-      continue;
-    uint64_t lds_base = 0x1000000000000ULL + i * 0x10000000000ULL;
-    uint64_t scratch_base = 0x2000000000000ULL + i * 0x10000000000ULL;
-    g.soc->set_apertures(lds_base, lds_base + 0xFFFFFFFFULL, scratch_base,
-                         scratch_base + 0xFFFFFFFFULL);
-    g.soc->for_each_cp([this](amdgpu::CommandProcessor *cp) {
-      cp->set_interrupt_callback([this](uint32_t process_id, uint32_t event_id) {
-        std::lock_guard<std::mutex> ilk(interrupt_mutex_);
-        auto it = event_dispatch_.find(process_id);
-        if (it != event_dispatch_.end()) {
-          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                           " found=true");
-          it->second->signal_interrupt(event_id);
-        } else {
-          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                           " found=false");
-        }
-      });
-      cp->set_scratch_backing_resolver([this](uint32_t process_id) -> uint64_t {
-        std::lock_guard<std::mutex> plk(process_mutex_);
-        for (auto &[fd, proc] : processes_) {
-          if (proc->process_id() == process_id) {
-            for (auto &gs : proc->gpu_state_) {
-              if (gs.scratch_backing_va != 0)
-                return gs.scratch_backing_va << 16;
+    for (size_t i = 0; i < gpus_.size(); ++i) {
+      auto &g = gpus_[i];
+      if (g.cps_initialized)
+        continue;
+      if (!g.soc)
+        continue;
+      uint64_t lds_base = 0x1000000000000ULL + i * 0x10000000000ULL;
+      uint64_t scratch_base = 0x2000000000000ULL + i * 0x10000000000ULL;
+      g.soc->set_apertures(lds_base, lds_base + 0xFFFFFFFFULL, scratch_base,
+                           scratch_base + 0xFFFFFFFFULL);
+      g.soc->for_each_cp([this](amdgpu::CommandProcessor *cp) {
+        cp->set_interrupt_callback([this](uint32_t process_id, uint32_t event_id) {
+          std::lock_guard<std::mutex> ilk(interrupt_mutex_);
+          auto it = event_dispatch_.find(process_id);
+          if (it != event_dispatch_.end()) {
+            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                             " found=true");
+            it->second->signal_interrupt(event_id);
+          } else {
+            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                             " found=false");
+          }
+        });
+        cp->set_scratch_backing_resolver([this](uint32_t process_id) -> uint64_t {
+          std::lock_guard<std::mutex> plk(process_mutex_);
+          for (auto &[fd, proc] : processes_) {
+            if (proc->process_id() == process_id) {
+              for (auto &gs : proc->gpu_state_) {
+                if (gs.scratch_backing_va != 0)
+                  return gs.scratch_backing_va << 16;
+              }
             }
           }
-        }
-        return 0;
+          return 0;
+        });
+        cp->set_scratch_backing_allocator(
+            [this](uint32_t process_id, uint64_t gpu_va, size_t size) -> bool {
+              return allocate_scratch_backing(process_id, gpu_va, size);
+            });
       });
-      cp->set_scratch_backing_allocator(
-          [this](uint32_t process_id, uint64_t gpu_va, size_t size) -> bool {
-            return allocate_scratch_backing(process_id, gpu_va, size);
-          });
-    });
-    g.cps_initialized = true;
+      g.cps_initialized = true;
+    }
   }
 
   return pid;
@@ -650,7 +655,13 @@ static const char *ioctl_name(unsigned long req) {
 int SimulatedDriver::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg) {
   util::Logger::cp("IOCTL pid=", proc.process_id(), " ", ioctl_name(request));
 
-  switch (canonical_ioctl_request(request)) {
+  unsigned long dispatch_request = canonical_ioctl_request(request);
+
+  if (dispatch_request == AMDKFD_IOC_WAIT_EVENTS)
+    return wait_events_ioctl(proc, arg);
+
+  std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
+  switch (dispatch_request) {
   case AMDKFD_IOC_GET_VERSION:
     return get_version_ioctl(arg);
   case AMDKFD_IOC_GET_CLOCK_COUNTERS:
@@ -681,8 +692,9 @@ int SimulatedDriver::dispatch_ioctl(KfdProcess &proc, unsigned long request, voi
     return set_event_ioctl(proc, arg);
   case AMDKFD_IOC_RESET_EVENT:
     return reset_event_ioctl(proc, arg);
-  case AMDKFD_IOC_WAIT_EVENTS:
-    return wait_events_ioctl(proc, arg);
+  // WAIT_EVENTS is handled before op_mutex_ above (it blocks on a condition
+  // variable and must not hold the per-process op lock), so it never reaches
+  // this switch.
   case AMDKFD_IOC_SET_XNACK_MODE:
     return set_xnack_mode_ioctl(arg);
   case AMDKFD_IOC_SET_MEMORY_POLICY:
@@ -704,7 +716,10 @@ int SimulatedDriver::dispatch_ioctl(KfdProcess &proc, unsigned long request, voi
   case AMDKFD_IOC_SET_SCRATCH_BACKING_VA: {
     auto *a = static_cast<kfd_ioctl_set_scratch_backing_va_args *>(arg);
     uint32_t ord = gpu_ordinal(a->gpu_id);
-    proc.gpu(ord).scratch_backing_va = a->va_addr;
+    {
+      std::lock_guard<std::mutex> plk(process_mutex_);
+      proc.gpu(ord).scratch_backing_va = a->va_addr;
+    }
     util::Logger::vm([&](auto &os) {
       os << "SET_SCRATCH_BACKING_VA pid=" << proc.process_id() << " gpu_id=" << a->gpu_id
          << " va=" << std::hex << a->va_addr << std::dec;
@@ -714,8 +729,11 @@ int SimulatedDriver::dispatch_ioctl(KfdProcess &proc, unsigned long request, voi
   case AMDKFD_IOC_SET_TRAP_HANDLER: {
     auto *a = static_cast<kfd_ioctl_set_trap_handler_args *>(arg);
     uint32_t ord = gpu_ordinal(a->gpu_id);
-    proc.gpu(ord).trap_tba_addr = a->tba_addr;
-    proc.gpu(ord).trap_tma_addr = a->tma_addr;
+    {
+      std::lock_guard<std::mutex> plk(process_mutex_);
+      proc.gpu(ord).trap_tba_addr = a->tba_addr;
+      proc.gpu(ord).trap_tma_addr = a->tma_addr;
+    }
     return 0;
   }
   case AMDKFD_IOC_GET_TILE_CONFIG:
@@ -823,11 +841,14 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
       // processes the submission.
       std::memset(ptr, 0xFF, length);
 
-      auto &gs = proc.gpu(ord);
-      gs.doorbell_page = ptr;
-      gs.doorbell_page_size = length;
-      gs.doorbell_gpu_va = reinterpret_cast<uint64_t>(ptr);
-      map_to_gpu(proc, gs.doorbell_gpu_va, ptr, length, amdgpu::Mtype::UC);
+      {
+        std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+        auto &gs = proc.gpu(ord);
+        gs.doorbell_page = ptr;
+        gs.doorbell_page_size = length;
+        gs.doorbell_gpu_va = reinterpret_cast<uint64_t>(ptr);
+      }
+      map_to_gpu(proc, proc.gpu(ord).doorbell_gpu_va, ptr, length, amdgpu::Mtype::UC);
       if (gpu && gpu->soc)
         gpu->soc->for_each_cp(
             [&](amdgpu::CommandProcessor *cp) { cp->set_doorbell_base(proc.process_id(), ptr); });
@@ -980,19 +1001,24 @@ int SimulatedDriver::munmap(uint32_t process_id, void *addr, size_t length) {
 }
 
 int SimulatedDriver::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
-  for (auto &gs : proc.gpu_state_) {
-    if (gs.doorbell_page == addr) {
-      if (!proc.event_state_.is_closing()) {
-        errno = EPERM;
-        return -1;
+  {
+    std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+    for (auto &gs : proc.gpu_state_) {
+      if (gs.doorbell_page == addr) {
+        if (!proc.event_state_.is_closing()) {
+          errno = EPERM;
+          return -1;
+        }
+        uint64_t gpu_va = gs.doorbell_gpu_va;
+        size_t page_size = gs.doorbell_page_size;
+        gs.doorbell_page = nullptr;
+        gs.doorbell_gpu_va = 0;
+        gs.doorbell_page_size = 0;
+        if (gpu_va && page_size)
+          unmap_from_gpu(proc, gpu_va, page_size);
+        syscall(SYS_munmap, addr, length);
+        return 0;
       }
-      if (gs.doorbell_gpu_va && gs.doorbell_page_size)
-        unmap_from_gpu(proc, gs.doorbell_gpu_va, gs.doorbell_page_size);
-      gs.doorbell_page = nullptr;
-      gs.doorbell_gpu_va = 0;
-      gs.doorbell_page_size = 0;
-      syscall(SYS_munmap, addr, length);
-      return 0;
     }
   }
   if (addr == proc.event_state_.page) {
@@ -1478,20 +1504,20 @@ int SimulatedDriver::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
     alloc.dmabuf_fd = dupfd;
     alloc.host_ptr = reinterpret_cast<void *>(args->va_addr);
     proc.allocations_[handle] = alloc;
+
+    KfdProcess::ImportedDmabuf info{};
+    info.handle = handle;
+    info.fd = dupfd;
+    info.size = size;
+    info.va = args->va_addr;
+    info.gpu_id = args->gpu_id;
+    proc.imported_dmabufs_[handle] = info;
+    proc.fd_to_import_handle_[dupfd] = handle;
   }
 
   if (args->va_addr)
     map_to_gpu(proc, args->va_addr, reinterpret_cast<void *>(args->va_addr), size,
                amdgpu::Mtype::UC);
-
-  KfdProcess::ImportedDmabuf info{};
-  info.handle = handle;
-  info.fd = dupfd;
-  info.size = size;
-  info.va = args->va_addr;
-  info.gpu_id = args->gpu_id;
-  proc.imported_dmabufs_[handle] = info;
-  proc.fd_to_import_handle_[dupfd] = handle;
 
   args->handle = handle;
   return 0;
@@ -1728,13 +1754,16 @@ int SimulatedDriver::get_dmabuf_info_ioctl(KfdProcess &proc, void *arg) {
   uint32_t gpu_id = gpus_.empty() ? 0 : gpus_[0].gpu_id;
 
   bool found = false;
-  for (const auto &[handle, info] : proc.imported_dmabufs_) {
-    [[maybe_unused]] auto &_ = handle;
-    if (info.fd >= 0 && static_cast<uint32_t>(info.fd) == args->dmabuf_fd) {
-      size = info.size;
-      gpu_id = info.gpu_id;
-      found = true;
-      break;
+  {
+    std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
+    for (const auto &[handle, info] : proc.imported_dmabufs_) {
+      [[maybe_unused]] auto &_ = handle;
+      if (info.fd >= 0 && static_cast<uint32_t>(info.fd) == args->dmabuf_fd) {
+        size = info.size;
+        gpu_id = info.gpu_id;
+        found = true;
+        break;
+      }
     }
   }
 
