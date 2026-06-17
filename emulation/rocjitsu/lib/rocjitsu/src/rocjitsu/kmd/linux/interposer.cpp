@@ -503,8 +503,14 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
 
   uint32_t render_minor = 128;
   auto minor_str = std::string_view(path).substr(16);
-  if (!minor_str.empty())
-    render_minor = static_cast<uint32_t>(std::atoi(minor_str.data()));
+  if (!minor_str.empty()) {
+    uint32_t parsed_minor = 0;
+    auto *first = minor_str.data();
+    auto *last = first + minor_str.size();
+    if (auto result = std::from_chars(first, last, parsed_minor);
+        result.ec == std::errc{} && result.ptr == last)
+      render_minor = parsed_minor;
+  }
 
   auto raw_drm_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", MFD_CLOEXEC));
   if (raw_drm_fd < 0) {
@@ -819,12 +825,21 @@ int ioctl(int fd, unsigned long request, ...) {
             auto *gpu = interposer_gpu_info();
             if (gpu) {
               dev->device_id = gpu->device_id;
+              dev->chip_rev = gpu->revision_id;
+              dev->external_rev = rocjitsu::kmd::external_rev_id_for_gfx_target_version(
+                  gpu->gfx_target_version, gpu->revision_id);
+              dev->pci_rev = gpu->pci_revision_id;
               dev->family = gpu->family_id;
               dev->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
                   gpu->num_shader_engines, gpu->num_shader_arrays_per_engine);
               dev->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
+              dev->gpu_counter_freq = 100000;
+              dev->max_engine_clock = gpu->max_engine_clk_fcompute;
+              dev->max_memory_clock = gpu->mem_clk_max;
               dev->wave_front_size = gpu->wave_front_size;
               dev->num_cu_per_sh = gpu->num_cu_per_sh;
+              dev->num_hw_gfx_contexts = rocjitsu::kmd::num_hw_gfx_contexts_for_gfx_target_version(
+                  gpu->gfx_target_version);
               dev->vram_type = gpu->vram_type;
               dev->vram_bit_width = gpu->mem_width;
               dev->cu_active_number =
@@ -1094,9 +1109,7 @@ const char *amdgpu_get_marketing_name(void * /*device_handle*/) {
   if (gpu->marketing_name && gpu->marketing_name[0] != '\0') {
     name = gpu->marketing_name;
   } else {
-    char buf[16];
-    snprintf(buf, sizeof(buf), "gfx%u", gpu->gfx_target_version / 100);
-    name = buf;
+    name = rocjitsu::kmd::gfx_target_name(gpu->gfx_target_version);
   }
   return name.c_str();
 }
@@ -1111,8 +1124,9 @@ int amdgpu_query_gpu_info(void * /*device_handle*/, amdgpu_gpu_info *info) {
 
   std::memset(info, 0, sizeof(*info));
   info->asic_id = gpu->device_id;
-  info->chip_rev = gpu->gfx_target_version % 100;
-  info->chip_external_rev = info->chip_rev;
+  info->chip_rev = gpu->revision_id;
+  info->chip_external_rev = rocjitsu::kmd::external_rev_id_for_gfx_target_version(
+      gpu->gfx_target_version, gpu->revision_id);
   info->family_id = gpu->family_id;
   info->max_engine_clk = gpu->max_engine_clk_fcompute;
   info->max_memory_clk = gpu->mem_clk_max;
@@ -1122,14 +1136,15 @@ int amdgpu_query_gpu_info(void * /*device_handle*/, amdgpu_gpu_info *info) {
   info->avail_quad_shader_pipes =
       rocjitsu::kmd::drm_quad_shader_pipe_count(gpu->num_shader_engines);
   info->max_quad_shader_pipes = info->avail_quad_shader_pipes;
-  info->num_hw_gfx_contexts = 1;
+  info->num_hw_gfx_contexts =
+      rocjitsu::kmd::num_hw_gfx_contexts_for_gfx_target_version(gpu->gfx_target_version);
   info->gpu_counter_freq = 100000;
   info->gb_addr_cfg = rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
   info->cu_active_number =
       rocjitsu::kmd::drm_cu_active_number(gpu->num_shader_engines, gpu->num_cu_per_sh);
   info->vram_type = gpu->vram_type;
   info->vram_bit_width = gpu->mem_width;
-  info->pci_rev_id = info->chip_rev;
+  info->pci_rev_id = gpu->pci_revision_id;
   return 0;
 }
 
@@ -1617,7 +1632,7 @@ static drmDevice *alloc_drm_device(const Sysfs::GpuInfo &gpu, uint32_t card_idx)
   pci_dev->device_id = static_cast<uint16_t>(gpu.device_id);
   pci_dev->subvendor_id = static_cast<uint16_t>(gpu.vendor_id);
   pci_dev->subdevice_id = static_cast<uint16_t>(gpu.device_id);
-  pci_dev->revision_id = static_cast<uint8_t>(gpu.gfx_target_version % 100);
+  pci_dev->revision_id = static_cast<uint8_t>(gpu.pci_revision_id);
 
   dev->nodes = nodes;
   dev->available_nodes = (1 << DRM_NODE_PRIMARY) | (1 << DRM_NODE_RENDER);

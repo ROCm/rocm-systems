@@ -14,6 +14,8 @@
         "unique_id": 7155534708977696464,
         "marketing_name": "AMD Radeon Pro W7900",
         "drm_render_minor": 129,
+        "revision_id": 0,
+        "pci_revision_id": 0,
         "simd_count": 192,
         "max_waves_per_simd": 16,
         "num_shader_engines": 12,

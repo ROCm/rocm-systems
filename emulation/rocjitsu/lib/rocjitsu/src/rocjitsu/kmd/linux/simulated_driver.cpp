@@ -130,6 +130,8 @@ void SimulatedDriver::setup_topology(const config::KfdDeviceConfig &dev, uint32_
   gpu.unique_id = dev.unique_id;
   gpu.marketing_name = dev.marketing_name.c_str();
   gpu.drm_render_minor = dev.drm_render_minor;
+  gpu.revision_id = dev.revision_id;
+  gpu.pci_revision_id = dev.pci_revision_id;
   gpu.simd_count = dev.simd_count;
   gpu.max_waves_per_simd = dev.max_waves_per_simd;
   gpu.num_shader_engines = dev.num_shader_engines;
@@ -214,6 +216,8 @@ void SimulatedDriver::setup_topology(const std::vector<config::KfdDeviceConfig> 
     gpu.unique_id = dev.unique_id;
     gpu.marketing_name = dev.marketing_name.c_str();
     gpu.drm_render_minor = dev.drm_render_minor;
+    gpu.revision_id = dev.revision_id;
+    gpu.pci_revision_id = dev.pci_revision_id;
     gpu.simd_count = dev.simd_count;
     gpu.max_waves_per_simd = dev.max_waves_per_simd;
     gpu.num_shader_engines = dev.num_shader_engines;
@@ -1008,24 +1012,25 @@ int SimulatedDriver::get_apertures_ioctl(void *arg) {
 
 int SimulatedDriver::get_tile_config_ioctl(void *arg) {
   auto *args = static_cast<kfd_ioctl_get_tile_config_args *>(arg);
+  if (daemon_mode_)
+    return -ENOTSUP;
+
   uint32_t tile_write_count = std::min(args->num_tile_configs, kTileConfigCount);
   uint32_t macro_write_count = std::min(args->num_macro_tile_configs, kMacroTileConfigCount);
 
-  if (!daemon_mode_) {
-    if (args->tile_config_ptr && tile_write_count > 0) {
-      auto *tile_config = reinterpret_cast<uint32_t *>(args->tile_config_ptr);
-      std::fill_n(tile_config, tile_write_count, 0u);
-    }
-    if (args->macro_tile_config_ptr && macro_write_count > 0) {
-      auto *macro_tile_config = reinterpret_cast<uint32_t *>(args->macro_tile_config_ptr);
-      std::fill_n(macro_tile_config, macro_write_count, 0u);
-    }
+  if (args->tile_config_ptr && tile_write_count > 0) {
+    auto *tile_config = reinterpret_cast<uint32_t *>(args->tile_config_ptr);
+    std::fill_n(tile_config, tile_write_count, 0u);
+  }
+  if (args->macro_tile_config_ptr && macro_write_count > 0) {
+    auto *macro_tile_config = reinterpret_cast<uint32_t *>(args->macro_tile_config_ptr);
+    std::fill_n(macro_tile_config, macro_write_count, 0u);
   }
 
   auto *gpu = find_gpu(args->gpu_id);
   rj_code_arch_t arch = (gpu && gpu->soc) ? gpu->soc->arch() : ROCJITSU_CODE_ARCH_INVALID;
-  args->num_tile_configs = kTileConfigCount;
-  args->num_macro_tile_configs = kMacroTileConfigCount;
+  args->num_tile_configs = tile_write_count;
+  args->num_macro_tile_configs = macro_write_count;
   args->gb_addr_config = kmd::gb_addr_config_for_arch(arch);
   args->num_banks = 0;
   args->num_ranks = 0;

@@ -36,6 +36,8 @@ public:
     uint32_t domain = 0;
     uint64_t hive_id = 0;
     uint32_t drm_render_minor = 128;
+    uint32_t revision_id = 0;
+    uint32_t pci_revision_id = 0;
     const char *marketing_name = "";
 
     // Compute unit organization

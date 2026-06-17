@@ -60,6 +60,8 @@ table KfdDeviceInfo {
   unique_id: uint64;              // Globally unique GPU identifier (PSP-generated on real HW).
   marketing_name: string;         // Human-readable name (e.g., "AMD Instinct MI350X").
   drm_render_minor: uint32 = 128; // DRM render device minor number.
+  revision_id: uint32 = 0;        // amdgpu adev->rev_id; KFD capability ASIC revision bits.
+  pci_revision_id: uint32 = 0;    // PCI config-space revision from DRM sysfs device/revision.
 
   // Compute organization (from kfd_topology.c kfd_fill_gpu_properties)
   simd_count: uint32;             // Total SIMD units (CUs * SIMDs/CU).

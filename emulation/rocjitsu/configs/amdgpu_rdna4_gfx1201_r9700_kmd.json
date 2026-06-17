@@ -14,6 +14,8 @@
         "unique_id": 7607916237085355008,
         "marketing_name": "AMD Radeon AI PRO R9700",
         "drm_render_minor": 128,
+        "revision_id": 1,
+        "pci_revision_id": 192,
         "simd_count": 128,
         "max_waves_per_simd": 16,
         "num_shader_engines": 8,

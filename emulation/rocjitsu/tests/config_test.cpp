@@ -55,6 +55,8 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.device.device_id, 0x7551u);
   EXPECT_EQ(rdna4.device.family_id, 0x98u);
   EXPECT_EQ(rdna4.device.gfx_target_version, 120001u);
+  EXPECT_EQ(rdna4.device.revision_id, 1u);
+  EXPECT_EQ(rdna4.device.pci_revision_id, 192u);
   EXPECT_EQ(rdna4.device.simd_count, 128u);
   EXPECT_EQ(rdna4.device.num_shader_engines, 8u);
   EXPECT_EQ(rdna4.device.num_shader_arrays_per_engine, 2u);
@@ -68,9 +70,16 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
             4u);
   EXPECT_EQ(kmd::drm_cu_active_number(rdna4.device.num_shader_engines, rdna4.device.num_cu_per_sh),
             64u);
+  EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna4.device.gfx_target_version,
+                                                        rdna4.device.revision_id),
+            0x51u);
+  EXPECT_EQ(kmd::gfx_target_name(rdna4.device.gfx_target_version), "gfx1201");
+  EXPECT_EQ(kmd::num_hw_gfx_contexts_for_gfx_target_version(rdna4.device.gfx_target_version), 8u);
   EXPECT_EQ(rdna4.soc()->num_xcds(), 1u);
   EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
-  EXPECT_TRUE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_FALSE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_EQ(rdna4.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+            amdgpu::SdmaPacketDialect::Gfx11Plus);
 
   auto rdna3 = config::load_config(CONFIG_DIR_PATH + "/amdgpu_rdna3_gfx1100_w7900_kmd.json",
                                    rocjitsu::kEmbeddedSchema);
@@ -79,6 +88,8 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna3.device.device_id, 0x7448u);
   EXPECT_EQ(rdna3.device.family_id, 0x91u);
   EXPECT_EQ(rdna3.device.gfx_target_version, 110000u);
+  EXPECT_EQ(rdna3.device.revision_id, 0u);
+  EXPECT_EQ(rdna3.device.pci_revision_id, 0u);
   EXPECT_EQ(rdna3.device.simd_count, 192u);
   EXPECT_EQ(rdna3.device.num_shader_engines, 12u);
   EXPECT_EQ(rdna3.device.num_shader_arrays_per_engine, 2u);
@@ -92,9 +103,16 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
             6u);
   EXPECT_EQ(kmd::drm_cu_active_number(rdna3.device.num_shader_engines, rdna3.device.num_cu_per_sh),
             96u);
+  EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna3.device.gfx_target_version,
+                                                        rdna3.device.revision_id),
+            0x1u);
+  EXPECT_EQ(kmd::gfx_target_name(rdna3.device.gfx_target_version), "gfx1100");
+  EXPECT_EQ(kmd::num_hw_gfx_contexts_for_gfx_target_version(rdna3.device.gfx_target_version), 8u);
   EXPECT_EQ(rdna3.soc()->num_xcds(), 1u);
   EXPECT_EQ(rdna3.soc()->xcd(0)->num_shader_engines(), 6u);
-  EXPECT_TRUE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_FALSE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_EQ(rdna3.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+            amdgpu::SdmaPacketDialect::Gfx11Plus);
 }
 
 TEST(ConfigLoaderTest, BuildFromJsonString) {
