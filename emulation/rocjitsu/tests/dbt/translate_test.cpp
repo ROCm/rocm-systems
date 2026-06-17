@@ -425,6 +425,23 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text() {
   return make_minimal_amdgpu_elf_with_descriptor_after_text({0xBF800000u, 0xBF800000u});
 }
 
+std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch) {
+  auto decoder = Decoder::create(arch);
+  if (!decoder)
+    return nullptr;
+  return std::unique_ptr<Instruction>(decoder->decode(&word));
+}
+
+bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kind,
+                          std::string_view message) {
+  return std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
+                     [&](const TranslationDiagnostic &diagnostic) {
+                       return diagnostic.severity == DiagnosticSeverity::Error &&
+                              diagnostic.kind == kind &&
+                              diagnostic.message.find(message) != std::string::npos;
+                     });
+}
+
 std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors() {
   using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
   constexpr uint64_t text_offset = 0x100;
@@ -808,6 +825,21 @@ const Section *find_section(const CodeObject &co, std::string_view name) {
       return section.get();
   }
   return nullptr;
+}
+
+void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+
+  AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(KD));
+
+  KD kd{};
+  std::memcpy(&kd, image.data() + rodata->sectionOffset(), sizeof(kd));
+  kd.compute_pgm_rsrc2 |= rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X;
+  std::memcpy(image.data() + rodata->sectionOffset(), &kd, sizeof(kd));
 }
 
 TEST(CoherencyRemap, Gfx940ToGfx12AgentScope) {
@@ -1304,6 +1336,49 @@ TEST(BinaryTranslator, PreservesKernargPreloadEntrySkipWindow) {
         << "preload skip window padding word " << i << " must remain executable padding";
   EXPECT_EQ(target_words[64], 0xBF810000u)
       << "compatible firmware starts at descriptor entry + 256 when kernargs are preloaded";
+}
+
+TEST(InstructionBuilder, PatchPcrelBranchOffsetInRange) {
+  const uint32_t source_word = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  auto inst = decode_one(source_word, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(inst, nullptr);
+
+  std::array<uint32_t, 1> words = {build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3)};
+  EXPECT_TRUE(patch_pcrel_branch_offset(*inst, words, -8, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(words[0], build_s_branch(-2, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(InstructionBuilder, PatchPcrelBranchOffsetRejectsOutOfRange) {
+  const uint32_t source_word = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  auto inst = decode_one(source_word, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(inst, nullptr);
+
+  std::array<uint32_t, 1> words = {build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3)};
+  EXPECT_FALSE(patch_pcrel_branch_offset(*inst, words, 32768LL * 4, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(words[0], build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+
+  EXPECT_FALSE(patch_pcrel_branch_offset(*inst, words, -32769LL * 4, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(words[0], build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(InstructionBuilder, PatchPcrelBranchOffsetRejectsNonBranch) {
+  const uint32_t source_word = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  auto inst = decode_one(source_word, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(inst, nullptr);
+
+  std::array<uint32_t, 1> words = {build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3)};
+  EXPECT_FALSE(patch_pcrel_branch_offset(*inst, words, 4, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(words[0], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(InstructionBuilder, PatchPcrelBranchOffsetRejectsMisalignedDelta) {
+  const uint32_t source_word = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  auto inst = decode_one(source_word, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(inst, nullptr);
+
+  std::array<uint32_t, 1> words = {build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3)};
+  EXPECT_FALSE(patch_pcrel_branch_offset(*inst, words, 2, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(words[0], build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
 }
 
 } // namespace
@@ -2078,6 +2153,94 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsSourceGapsAndPatchesBranches) {
     SCOPED_TRACE(i);
     EXPECT_EQ(target_words[i], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
   }
+}
+
+TEST(BinaryTranslatorE2E, RejectsIndirectBranchAndCallInstructions) {
+  struct Case {
+    const char *name;
+    std::vector<uint32_t> words;
+    const char *mnemonic;
+  };
+
+  const std::array<Case, 3> cases = {{
+      {"Setpc", {0xBE801D00u, 0x00000000u}, "s_setpc_b64"},
+      {"Swappc", {0xBE801E00u, 0x00000000u}, "s_swappc_b64"},
+      {"Call", {0xBA800000u, 0x00000000u}, "s_call_b64"},
+  }};
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(test_case.words);
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+
+    rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+    auto result = translator.translate(source);
+
+    EXPECT_EQ(result.elf_bytes, image);
+    EXPECT_TRUE(rocjitsu::has_error_containing(
+        result, rocjitsu::DiagnosticKind::Legalization,
+        "indirect branch or call target recovery is not implemented"));
+    const auto diagnostic =
+        std::find_if(result.diagnostics.begin(), result.diagnostics.end(),
+                     [&](const auto &d) { return d.mnemonic == test_case.mnemonic; });
+    EXPECT_NE(diagnostic, result.diagnostics.end());
+  }
+}
+
+TEST(BinaryTranslatorE2E, RejectsDirectBranchTargetBeforeText) {
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(-2, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> -0x04.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(
+      rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::Legalization,
+                                     "direct branch target is outside the source .text range"));
+}
+
+TEST(BinaryTranslatorE2E, RejectsDirectBranchTargetAbsentFromRelocatedBody) {
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> .text end.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(
+      result, rocjitsu::DiagnosticKind::Legalization,
+      "direct branch target is not present in the kernel-local relocated body"));
+}
+
+TEST(BinaryTranslatorE2E, RejectsDescriptorPrologueBranchRangeOverflow) {
+  constexpr size_t kBodyWordsPastBranchRange = 32769;
+  std::vector<uint32_t> words(kBodyWordsPastBranchRange, 0xBF800000u);
+  words.push_back(0xBF810000u);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::enable_workgroup_id_x_sgpr(image);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(source);
+
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(
+      result, rocjitsu::DiagnosticKind::ResourceLimit,
+      "kernel descriptor prologue branch range exceeds s_branch simm16"));
 }
 
 TEST(BinaryTranslatorE2E, ExpandLegalizationWithoutSemanticRuleFails) {
