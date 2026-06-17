@@ -4710,6 +4710,25 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
                                             uint32_t* gpu_busy_percent);
 
 /**
+ *  @brief Get VCN busy percent from vcn_busy_percent sysfs file
+ *
+ *  @ingroup tagClkPowerPerfQuery
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle, this function returns VCN busy
+ *  percentage.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in,out] vcn_busy_percent Direct output from the vcn_busy_percent sysfs file
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_vcn_busy_percent(amdsmi_processor_handle processor_handle,
+                                            uint32_t* vcn_busy_percent);
+
+/**
  *  @brief Get coarse grain utilization counter of the specified device
  *
  *  @ingroup tagClkPowerPerfQuery

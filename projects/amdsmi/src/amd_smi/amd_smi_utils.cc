@@ -797,6 +797,33 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* device,
+                                                uint32_t* vcn_busy_percent) {
+  if (vcn_busy_percent == nullptr) {
+    return AMDSMI_STATUS_API_FAILED;
+  }
+
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/vcn_busy_percent";
+
+  std::ifstream fs(fullpath.c_str());
+  if (fs.fail()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  std::string line;
+  if (std::getline(fs, line)) {
+    try {
+      *vcn_busy_percent = std::stoul(line);
+      return AMDSMI_STATUS_SUCCESS;
+    } catch (const std::exception&) {
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+  }
+
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
 std::string smi_amdgpu_split_string(std::string str, char delim) {
   std::vector<std::string> tokens;
   std::stringstream ss(str);

@@ -528,6 +528,12 @@ class MetricCommands:
                                 current_xcp
                             ]
                         engine_usage["vcn_busy"] = new_xcp_dict
+                    elif gpu_metric["vcn_busy"] is not "N/A":
+                        engine_usage["vcn_busy"] = gpu_metric["vcn_busy"]
+                    else:
+                        engine_usage["vcn_busy"] = amdsmi_interface.amdsmi_get_vcn_busy_percent(
+                            args.gpu
+                        )
 
                     logging.debug(f"After updates to engine_usage dictionary = {engine_usage}")
 
