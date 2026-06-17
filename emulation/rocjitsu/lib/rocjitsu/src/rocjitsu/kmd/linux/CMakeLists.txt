@@ -54,9 +54,4 @@ target_compile_options(
     rocjitsu_kmd_shim
     PRIVATE -Wall -Wextra -Wpedantic -Werror
 )
-target_link_options(
-    rocjitsu_kmd_shim
-    PRIVATE
-        "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/rocjitsu_kmd_shim.map"
-)
 set_target_properties(rocjitsu_kmd_shim PROPERTIES OUTPUT_NAME "rocjitsu_kmd")
