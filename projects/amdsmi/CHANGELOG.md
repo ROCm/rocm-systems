@@ -53,6 +53,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Changed
 - **Deprecated `amdsmi_get_gpu_vram_vendor()` in favor of `amdsmi_get_gpu_vram_info()`**.  
 
+- **Renamed "AINIC version" to "ionic version" in `amd-smi version` output**.  
+  - The label now correctly reflects that it shows the ionic kernel driver version.
+
 ### Removed
 
 - **Removed the non-functional `--decode` flag from `amd-smi ras`**. Out-of-band CPER decoding is available via `amd-smi ras --afid --cper-file <path>` or `--afid --folder <DIR>`.

@@ -574,6 +574,7 @@ Examples:
         metavar="",
         dest="pc_sampling_method",
         default="stochastic",
+        choices=["stochastic", "host_trap"],
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
@@ -588,16 +589,18 @@ Examples:
         required=False,
         metavar="",
         dest="pc_sampling_interval",
-        default=1048576,
+        default=None,
+        type=int,
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="PC Sampling",
         help=(
             "\t\t\tSet the interval of pc sampling.\n"
-            "\t\t\t  For stochastic sampling, the interval is in cycles.\n"
-            "\t\t\t  For host_trap sampling, the interval is in microsecond "
-            "(DEFAULT: 1048576)."
+            "\t\t\t  For stochastic sampling, the interval is in cycles; it "
+            "must be a power of 2 and at least 65536 (DEFAULT: 1048576).\n"
+            "\t\t\t  For host_trap sampling, the interval is in microseconds "
+            "(DEFAULT: 512)."
         ),
     )
 
@@ -793,7 +796,7 @@ Examples:
         "-m",
         "--mem-level",
         required=False,
-        choices=["HBM", "L2", "vL1D", "LDS"],
+        choices=["HBM", "L2", "vL1D", "L0", "LDS"],
         metavar="",
         nargs="+",
         type=str,
@@ -803,6 +806,7 @@ Examples:
             "\t\t   HBM\n"
             "\t\t   L2\n"
             "\t\t   vL1D\n"
+            "\t\t   L0\n"
             "\t\t   LDS"
         ),
     )

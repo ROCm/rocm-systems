@@ -311,6 +311,7 @@ class TestEvaluationPipeline:
             "ip_blocks": "standard",
             "gpu_arch": "gfx90a",
             "se_per_gpu": 4,
+            "sa_per_se": 2,
             "pipes_per_gpu": 4,
             "cu_per_gpu": 64,
             "simd_per_cu": 4,

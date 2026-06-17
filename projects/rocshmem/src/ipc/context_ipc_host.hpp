@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_IPC_CONTEXT_HOST_HPP_
 
 #include "context.hpp"
+#include "memory/window_info.hpp"
 
 namespace rocshmem {
 
@@ -186,6 +187,24 @@ class IPCHostContext : public Context {
 
   /* An MPI Window implements a context */
   WindowInfo *context_window_info{nullptr};
+
+  /* Per-context HIP stream for non-MPI IPC host ops (nullptr on MPI path) */
+  hipStream_t ctx_stream_{nullptr};
+
+  /* Helper functions to launch AMO kernel on ctx_stream_ and 
+   * return the old value via ipc_staging_buf_.
+   */
+  __host__ uint64_t ipc_amo_fadd(void *dst, uint64_t val, bool is32);
+  __host__ uint64_t ipc_amo_fcas(void *dst, uint64_t cond, uint64_t val,
+                                  bool is32);
+
+  /* Fine-grained staging buffer for AMO kernel result readback (non-MPI only) */
+  uint64_t *ipc_staging_buf_{nullptr};
+
+  /* Returns true when running on the non-MPI IPC path */
+  bool is_ipc_non_mpi() const {
+    return dynamic_cast<WindowInfoMPI *>(context_window_info) == nullptr;
+  }
 };
 
 }  // namespace rocshmem

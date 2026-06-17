@@ -52,6 +52,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+- Split PMC AMD SMI, ROCProfiler-SDK, and procfs wrappers into standalone
+  internal backend targets under `source/lib/backends`, replacing the old
+  PMC `drivers` layout.
 - Remove Boost as a Dyninst dependency by replacing Boost usage with in-tree
   `dyncompat` shims and C++17 standard library equivalents; Bundled Dyninst now
   requires **GCC ≥ 10**.

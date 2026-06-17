@@ -15,7 +15,7 @@ metric names in ROCm Compute Profiler.
 
 * :llvm-docs:`LLVM User Guide for AMDGPU Backend <>`
 
-* `RDNA3 shader instruction set architecture <https://docs.amd.com/v/u/en-US/rdna3-shader-instruction-set-architecture-feb-2023_0>`__
+* `RDNA3.5 shader instruction set architecture <https://docs.amd.com/v/u/en-US/rdna35_instruction_set_architecture>`__
 
 * `RDNA3: beyond the current generation (PDF) <https://gpuopen.com/download/RDNA3_Beyond-the-current-gen-v4.pdf>`__
 

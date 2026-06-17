@@ -906,7 +906,7 @@ bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, const char* archName)
     supported = false;
 #endif
   } else if (info->acc) {
-    supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950"));
+    supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx1250"));
   }
 
   return supported;

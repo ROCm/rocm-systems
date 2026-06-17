@@ -24,6 +24,7 @@
  *   M2  - StressManySmallPuts:     100×64-byte PUTs, opCnt=100 wait
  *   P6  - PutToSelf:              PUT to own window (peer=self loopback)
  *   W3  - DoubleDeregister:       ncclCommWindowDeregister twice on same handle
+ *   W4  - DestroyCommWithoutDeregister: window auto-freed during commFree
  *
  * Constraints (proxy GIN path, current API limits):
  *   sigIdx = 0, ctx = 0, flags = 0, winFlags = winMode()
@@ -1635,6 +1636,74 @@ TEST_F(HostApiTest, DoubleDeregister)
 
     TEST_INFO("W3 rank %d: DoubleDeregister passed (second deregister returned %d).",
               myRank, static_cast<int>(res2));
+}
+
+// ============================================================================
+// W4 — DestroyCommWithoutDeregister
+// ============================================================================
+
+/**
+ * @test HostApiTest.DestroyCommWithoutDeregister
+ * @brief A registered window must be freed automatically when the communicator
+ *        is destroyed, even if the user never calls ncclCommWindowDeregister.
+ *
+ * Validates the NCCL fix "Free symmetric window objects automatically during
+ * commFree" — ncclCommDestroy drives the internal commFree -> ncclDevrFinalize
+ * path, whose window drain loop releases any still-registered windows.
+ *
+ * Uses a dedicated communicator (not the fixture's shared one) so it can call
+ * ncclCommDestroy explicitly and assert it still returns ncclSuccess.
+ */
+TEST_F(HostApiTest, DestroyCommWithoutDeregister)
+{
+    if(!validateTestPrerequisites(/*min=*/2))
+    {
+        GTEST_SKIP() << "Need at least 2 MPI processes";
+    }
+
+    const int worldRank = rank();
+    const int worldSize = nRanks();
+
+    // Build a communicator we fully own so we can destroy it explicitly and
+    // observe the result of commFree -> ncclDevrFinalize.
+    ncclUniqueId id{};
+    ncclResult_t idRes = ncclSuccess; // non-root ranks stay success
+    if(worldRank == 0)
+    {
+        idRes = ncclGetUniqueId(&id);
+    }
+    MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
+    // Collective assert (must be called by every rank, not just root).
+    ASSERT_MPI_EQ(ncclSuccess, idRes);
+
+    ncclComm_t ownComm = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommInitRank(&ownComm, worldSize, id, worldRank));
+    ASSERT_MPI_NE(ownComm, nullptr);
+
+    // Safety net: if a later assertion aborts the test before the intentional
+    // destroy below, this guard still tears the comm down. It is cleared after
+    // the explicit ncclCommDestroy to avoid a double-destroy.
+    auto ownCommGuard = makeScopeGuard([&]() { if(ownComm) (void)ncclCommDestroy(ownComm); });
+
+    // Allocate a fine-grain buffer and register it as a window.
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclCommWindowRegister(ownComm, winBuf, kOneMB, &win, winMode()));
+    ASSERT_MPI_NE(win, nullptr);
+
+    // Intentionally skip ncclCommWindowDeregister — this is the whole point of
+    // the test. Destroying the comm must auto-free the leftover window objects
+    // during commFree -> ncclDevrFinalize and therefore still succeed.
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(ownComm));
+    ownComm = nullptr; // destroyed explicitly; disarm the guard
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    TEST_INFO("W4 rank %d: DestroyCommWithoutDeregister passed.", worldRank);
 }
 
 } // namespace RcclUnitTesting
