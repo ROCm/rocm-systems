@@ -4,6 +4,7 @@
 // Unit tests for unified_memory_processor_t using synthetic agents and a
 // recording output sink.
 
+#include "common/env_vars.hpp"
 #include "common/tests/filesystem.hpp"
 #include "core/categories.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
@@ -41,6 +42,8 @@ using rocprofsys::trace_cache::test::make_kfd_page_migrate_sample;
 using rocprofsys::trace_cache::test::make_kfd_page_migrate_sample_raw_args;
 
 using ::testing::HasSubstr;
+
+namespace env_vars = rocprofsys::env_vars;
 
 namespace
 {
@@ -436,7 +439,7 @@ TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath
 {
     auto explicit_dir = tmp_dir + "/ump-explicit";
     ASSERT_FALSE(test_common::fs::exists(explicit_dir));
-    ScopedEnv ump_output_path{ "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH", explicit_dir };
+    ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, explicit_dir };
     rebuild_processor();
 
     processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
@@ -461,7 +464,7 @@ TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
     const auto expected_dir = (test_common::fs::current_path() / relative_dir).string();
     test_common::fs::remove_all(expected_dir);
     ASSERT_FALSE(test_common::fs::exists(expected_dir));
-    ScopedEnv ump_output_path{ "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH", relative_dir };
+    ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, relative_dir };
     rebuild_processor();
 
     processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));

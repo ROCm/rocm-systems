@@ -350,7 +350,7 @@ configure_settings(bool _init)
         false, "backend", "unified_memory", "kfd");
 
     ROCPROFSYS_CONFIG_SETTING(
-        std::string, "env_vars::UNIFIED_MEMORY_OUTPUT_PATH",
+        std::string, env_vars::UNIFIED_MEMORY_OUTPUT_PATH,
         "Explicitly specify the output folder for unified memory profiling reports. "
         "When empty, unified memory reports are written next to the active trace "
         "backend output.",
@@ -2762,15 +2762,15 @@ get_ump_absolute_path()
 
     if(settings_are_configured())
     {
-        auto explicit_path =
-            get_setting_value<std::string>("ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH");
+        auto explicit_path = get_setting_value<std::string>(
+            std::string{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH });
         if(explicit_path && !explicit_path->empty())
             return ensure_dir(make_absolute(*explicit_path));
     }
 
     // Support early calls before settings have folded in env vars.
     auto env_path =
-        rocprofsys::get_env<std::string>("ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH", "");
+        rocprofsys::get_env<std::string>(env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "");
     if(!env_path.empty()) return ensure_dir(make_absolute(env_path));
 
     if(!settings_are_configured())
