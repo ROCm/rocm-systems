@@ -47,7 +47,6 @@ class TestAmdSmiCli(unittest.TestCase):
     TMP_FILENAME = "_tmp.log"
     TMP_FOLDER = "_tmp"
 
-    amd_smi_exe = "amdsmi_cli/amdsmi_cli.py"
     amd_smi_exe = "amd-smi"
 
     @classmethod
@@ -149,7 +148,10 @@ class TestAmdSmiCli(unittest.TestCase):
         self.tmp_filename = self.TMP_FILENAME
         self.tmp_folder = self.TMP_FOLDER
 
-        self.not_supported_error_codes = [2, 207]
+        # error codes:
+        #      2: from amdsmi.h, AMDSMI_STATUS_NOT_SUPPORTED
+        #    199: from amd-smi,  AmdSmiCommandNotSupportedException
+        self.not_supported_error_codes = [2, 199]
 
         self.openBracket = "["
         self.closeBracket = "]"
@@ -211,7 +213,7 @@ class TestAmdSmiCli(unittest.TestCase):
         return
 
     @classmethod
-    def StrToNumber(cls, num_str):
+    def _str_to_number(cls, num_str):
         rc = 0
         num_str = num_str.strip()
         try:
@@ -226,7 +228,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 value = num_str
         return (rc, value)
 
-    def _PrintResults(self, results, fail_on_results=False):
+    def _print_results(self, results, fail_on_results=False):
         if results:
             cmd_len = 0
             for cmd, _ in results:
@@ -244,12 +246,6 @@ class TestAmdSmiCli(unittest.TestCase):
             msg = msg.strip()
             msg = f"{self.tab}{msg}"
 
-            # Output to file if set
-            if False:
-                if my_args.output:
-                    with open(my_args.output, "a", encoding=self.use_encoding) as fout:
-                        fout.write(f"{msg}\n")
-
             # Output to std_out
             if verbose == common.VERBOSITY_VERBOSE:
                 self.common.print(f"{msg}")
@@ -259,7 +255,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 self.fail(f"Fail:\n\n{msg}")
         return
 
-    def _GetErrorCode(self, std_out, std_err, cond):
+    def _get_error_code(self, std_out, std_err, cond):
         error_code = 0
         items = []
         output_stream = None
@@ -277,10 +273,10 @@ class TestAmdSmiCli(unittest.TestCase):
                 output_stream = "std_err"
                 items = std_err.strip().split()
         if items:
-            rc, error_code = self.StrToNumber(items[-1])
+            rc, error_code = self._str_to_number(items[-1])
         return (error_code, output_stream)
 
-    def _GetCmdReturnMsg(self, rc_num, ec_num, cond):
+    def _get_command_return_msg(self, rc_num, ec_num, cond):
         msg = ""
         if cond == self.PASS:
             if rc_num in self.not_supported_error_codes:
@@ -333,7 +329,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 else:
                     unit = monitor1[i][key]["unit"]
                     data1 = int(monitor1[i][key]["value"])
-                    if monitor2 != None:
+                    if monitor2 is not None:
                         data2 = int(monitor2[i][key]["value"])
                     else:
                         if key == "power_usage":
@@ -384,7 +380,7 @@ class TestAmdSmiCli(unittest.TestCase):
                     successes.append((msg_title, _msg))
         return (failures, successes)
 
-    def FindArgs(self, cmd, match_str):
+    def _find_args(self, cmd, match_str):
         if (
             (not match_str)
             or (not self.AddDeviceArgs and "Device" in match_str)
@@ -545,12 +541,12 @@ class TestAmdSmiCli(unittest.TestCase):
             return ["pass"]
         return options
 
-    def CreateCmds(self, cmd_name, list1_name, list2_name, list3_name, list4_name):
+    def _create_cmds(self, cmd_name, list1_name, list2_name, list3_name, list4_name):
         cmd = f"{self.amd_smi_exe} {cmd_name} --help"
-        list1_args = self.FindArgs(cmd, list1_name)
-        list2_args = self.FindArgs(cmd, list2_name)
-        list3_args = self.FindArgs(cmd, list3_name)
-        list4_args = self.FindArgs(cmd, list4_name)
+        list1_args = self._find_args(cmd, list1_name)
+        list2_args = self._find_args(cmd, list2_name)
+        list3_args = self._find_args(cmd, list3_name)
+        list4_args = self._find_args(cmd, list4_name)
         if self.Debug:
             print(f"{list1_name}: {'*' * 80}")
             print(json.dumps(list1_args, sort_keys=False, indent=4), flush=True)
@@ -882,15 +878,7 @@ class TestAmdSmiCli(unittest.TestCase):
             print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         return cmds
 
-    def RunCmds(self, cmds):
-        # Find the longest message length
-        msg_len = 0
-        for cmd, cond in cmds:
-            num = len(cmd)
-            if num > msg_len:
-                msg_len = num
-        msg_len += 2
-
+    def _run_cmds(self, cmds):
         failures = []
         successes = []
         for cmd, cond in cmds:
@@ -906,19 +894,19 @@ class TestAmdSmiCli(unittest.TestCase):
 
             (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
             if rc:
-                error_code, output_stream = self._GetErrorCode(std_out, std_err, cond)
+                error_code, output_stream = self._get_error_code(std_out, std_err, cond)
             else:
                 error_code = 0
                 output_stream = None
-            msg, passed = self._GetCmdReturnMsg(rc, error_code, cond)
+            msg, passed = self._get_command_return_msg(rc, error_code, cond)
 
             if passed:
                 successes.append((cmd, msg))
             else:
                 failures.append((cmd, msg))
 
-        self._PrintResults(successes)
-        self._PrintResults(failures, fail_on_results=True)
+        self._print_results(successes)
+        self._print_results(failures, fail_on_results=True)
         return
 
     def test_help(self):
@@ -926,7 +914,7 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"### amd-smi help"
         self.common.print(msg)
 
-        cmd = "{self.amd_smi_exe} --help"
+        cmd = f"{self.amd_smi_exe} --help"
         (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
         lines = std_out.split("\n")
         # Find all available command line args
@@ -956,7 +944,7 @@ class TestAmdSmiCli(unittest.TestCase):
         for cmd_arg in cmd_args:
             cmds.append((f"{self.amd_smi_exe} {cmd_arg} --help", self.PASS))
 
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_invalid(self):
@@ -1121,7 +1109,7 @@ class TestAmdSmiCli(unittest.TestCase):
                     (f"{self.amd_smi_exe} set --xgmi-plpd {num_supported} --gpu {index}", self.FAIL)
                 )
 
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_default(self):
@@ -1131,7 +1119,7 @@ class TestAmdSmiCli(unittest.TestCase):
 
         cmds = [(f"{self.amd_smi_exe}", self.PASS)]
 
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_version(self):
@@ -1145,7 +1133,7 @@ class TestAmdSmiCli(unittest.TestCase):
             (f"{self.amd_smi_exe} version --gpu_version", self.PASS),
         ]
 
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_list(self):
@@ -1153,10 +1141,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi list"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "list", "List Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_static(self):
@@ -1164,10 +1152,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi static"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "static", "Static Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_firmware(self):
@@ -1175,14 +1163,14 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi firmware"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "firmware", "Firmware Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
-        cmds = self.CreateCmds(
+        self._run_cmds(cmds)
+        cmds = self._create_cmds(
             "ucode", "Firmware Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_bad_pages(self):
@@ -1190,10 +1178,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi bad-pages"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "bad-pages", "Bad Pages Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_metric(self):
@@ -1201,14 +1189,14 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi metric"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "metric",
             "Metric arguments:",
             "Device Arguments:",
             "Command Modifiers:",
             "Watch Arguments:",
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_process(self):
@@ -1216,14 +1204,14 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi process"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "process",
             "Process arguments:",
             "Device Arguments:",
             "Command Modifiers:",
             "Watch Arguments:",
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_event(self):
@@ -1240,10 +1228,10 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # Start process with f"{self.amd_smi_exe} event"
         # In another process create an event with like f"{self.amd_smi_exe} reset --gpureset"
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "event", "Event Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_topology(self):
@@ -1251,10 +1239,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi topology"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "topology", "Topology arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_set(self):
@@ -1277,10 +1265,10 @@ class TestAmdSmiCli(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 power_profile[index] = None
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "set", "Set Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
 
         # Restore starting values
         cmds = []
@@ -1486,7 +1474,7 @@ class TestAmdSmiCli(unittest.TestCase):
             )
 
         print("Restore Starting Values")
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
 
         return
 
@@ -1502,10 +1490,10 @@ class TestAmdSmiCli(unittest.TestCase):
                 self.common.print(msg)
                 self.skipTest(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "reset", "Reset Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_monitor(self):
@@ -1513,14 +1501,14 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi monitor"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "monitor",
             "Monitor Arguments:",
             "Device Arguments:",
             "Command Modifiers:",
             "Watch Arguments:",
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_monitor_serial(self):
@@ -1545,9 +1533,9 @@ class TestAmdSmiCli(unittest.TestCase):
         metric_failures, metric_successes = self._compare_monitor_metric_data("Metric", data)
 
         results = monitor_successes + metric_successes
-        self._PrintResults(results)
+        self._print_results(results)
         results = monitor_failures + metric_failures
-        self._PrintResults(results, fail_on_results=True)
+        self._print_results(results, fail_on_results=True)
         return
 
     def test_monitor_parallel(self):
@@ -1556,10 +1544,6 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common.print(msg)
 
         def _Process(q, cmd):
-            if False:
-                if my_args.diagnostic == "DEBUG":
-                    print(f"_Process pid={os.getpid()} received: cmd={cmd}")
-
             # Receive timestamp
             time_stamp = q.get()
 
@@ -1591,11 +1575,6 @@ class TestAmdSmiCli(unittest.TestCase):
         time_stamp_process = q.get()
         p1.join()
 
-        if False:
-            if my_args.diagnostic == "DEBUG":
-                print(f"Collection TimeStamp: Monitor2={time_stamp_process}  Monitor1={time_stamp}")
-                print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
-
         # Data from monitor and metric should be the same
         monitor1 = json.loads(data1)
         monitor2 = json.loads(data2)
@@ -1621,11 +1600,6 @@ class TestAmdSmiCli(unittest.TestCase):
         time_stamp_process = q.get()
         p1.join()
 
-        if False:
-            if my_args.diagnostic == "DEBUG":
-                print(f"Collection TimeStamp: Monitor={time_stamp_process}  Metric={time_stamp}")
-                print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
-
         monitor = json.loads(data2)
         metric3 = json.loads(data1)
         data = self._get_monitor_metric_data(monitor, None, metric3)
@@ -1633,9 +1607,9 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # Report results
         results = monitor_successes + metric_successes
-        self._PrintResults(results)
+        self._print_results(results)
         results = monitor_failures + metric_failures
-        self._PrintResults(results, fail_on_results=True)
+        self._print_results(results, fail_on_results=True)
         return
 
     def test_monitor_with_workload(self):
@@ -1651,10 +1625,6 @@ class TestAmdSmiCli(unittest.TestCase):
                 self.skipTest(msg)
 
         def _Process(q, cmd):
-            if False:
-                if my_args.diagnostic == "DEBUG":
-                    print(f"_Process pid={os.getpid()} received: cmd={cmd}")
-
             # Receive timestamp
             time_stamp = q.get()
 
@@ -1694,11 +1664,6 @@ class TestAmdSmiCli(unittest.TestCase):
         process_time_stamp = q.get()
         p1.join()
 
-        if False:
-            if my_args.diagnostic == "DEBUG":
-                print(f"Collection TimeStamp: Monitor2={time_stamp_process}  Monitor1={time_stamp}")
-                print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
-
         monitor1 = json.loads(data1)
         monitor2 = json.loads(data2)
         data = self._get_monitor_metric_data(monitor1, monitor2, None)
@@ -1721,8 +1686,8 @@ class TestAmdSmiCli(unittest.TestCase):
         monitor_successes = tmp
 
         # Report results
-        self._PrintResults(monitor_successes)
-        self._PrintResults(monitor_failures, fail_on_results=True)
+        self._print_results(monitor_successes)
+        self._print_results(monitor_failures, fail_on_results=True)
         return
 
     def test_xgmi(self):
@@ -1730,10 +1695,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi xgmi"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "xgmi", "XGMI arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_partition(self):
@@ -1741,10 +1706,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi partition"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "partition", "Partition arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_ras(self):
@@ -1760,10 +1725,10 @@ class TestAmdSmiCli(unittest.TestCase):
                 self.common.print(msg)
                 self.skipTest(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "ras", "RAS arguments:", "CPER Arguments", "Device Arguments:", "Command Modifiers:"
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_ras_afid_folder(self):
@@ -1811,7 +1776,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 # Symlinked folder is refused even though it contains a .cper.
                 (f"amd-smi ras --afid --folder {symlink_dir}", self.FAIL),
             ]
-            self.RunCmds(cmds)
+            self._run_cmds(cmds)
 
             # The --json output must be a flat list of per-file objects, not a
             # doubly-wrapped [[...]]. Guards against the logger wrapping a list
@@ -1839,10 +1804,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi node"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "node", "Node arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_fabric(self):
@@ -1850,10 +1815,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi fabric"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "fabric", "Fabric arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
     def test_static_mem_carveout_gtt(self):
@@ -1861,10 +1826,10 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi static --mem-carveout and node --gtt"
         self.common.print(msg)
-        cmds = self.CreateCmds(
+        cmds = self._create_cmds(
             "fabric", "Fabric arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self._run_cmds(cmds)
         return
 
         # Test mem-carveout display (static subcommand)
