@@ -3,16 +3,18 @@
  * SPDX-License-Identifier: MIT
  */
 
-/* no-odirect-write - Write a registered GPU buffer to a file opened without
- * O_DIRECT. hipFile falls back to its POSIX-IO path because the fast
- * GPU-direct path requires O_DIRECT.
+/* no-odirect-write - Write a registered GPU buffer to a file the caller opened
+ * without O_DIRECT. hipFile does not require O_DIRECT on the caller's fd: on an
+ * O_DIRECT-capable filesystem it transparently reopens the file with O_DIRECT
+ * and still takes the fast GPU-direct path; only when the filesystem cannot do
+ * O_DIRECT does it use the POSIX compat fallback.
  *
  * Usage: ./no-odirect-write OUTPUT [GPUID]
  *
  *   OUTPUT   Path to the output file. Created/truncated. Receives NOW_SIZE
- *            (default 128 KiB) bytes of generated test pattern via the
- *            compat/POSIX fallback path because the file is opened without
- *            O_DIRECT.
+ *            (default 128 KiB) bytes of generated test pattern. The file is
+ *            opened without O_DIRECT; hipFile decides fast path vs. compat
+ *            fallback based on the filesystem.
  *   GPUID    GPU device index (optional, default 0).
  *
  * Steps:
@@ -20,12 +22,15 @@
  *   2. Build CPU pattern + copy to GPU
  *   3. hipFileBufRegister
  *   4. open file without O_DIRECT + hipFileHandleRegister
- *   5. hipFileWrite via POSIX fallback
+ *   5. hipFileWrite (fast path via hipFile's internal O_DIRECT reopen on an
+ *      O_DIRECT-capable filesystem; POSIX compat fallback otherwise)
  *   6. ftruncate to exact size
  *   7. Hash verify
  *
- * Compat mode must be enabled via env var:
- *   HIPFILE_ALLOW_COMPAT_MODE=1 ./no-odirect-write OUTPUT
+ * No env var is needed. The compat fallback is enabled by default and is only
+ * exercised on a filesystem that cannot do O_DIRECT; set
+ * HIPFILE_ALLOW_COMPAT_MODE=true only if you previously disabled it (and are
+ * running on such a filesystem).
  */
 
 #include "examples_common.h"
