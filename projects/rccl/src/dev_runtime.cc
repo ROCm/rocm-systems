@@ -744,7 +744,7 @@ static ncclResult_t symMemoryObtain(
 
   // ginEnabled is set in ncclDevrCommCreateInternal, which might not be called for RMA proxy
   // so we introduce rmaProxyEnabled to track if RMA proxy is enabled
-  devr->rmaProxyEnabled = devr->nLsaTeams > 1 && comm->config.numRmaCtx > 0 && comm->globalRmaProxySupport;
+  devr->rmaProxyEnabled = comm->globalRmaProxySupport;
   if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
     NCCLCHECKGOTO(symMemoryRegisterRma(comm, mem), ret, fail_mem_space_teams);
   }
