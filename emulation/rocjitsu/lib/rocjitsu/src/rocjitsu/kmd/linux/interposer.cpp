@@ -513,15 +513,14 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
   }
 
   auto raw_drm_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", MFD_CLOEXEC));
-  if (raw_drm_fd < 0) {
-    errno = EMFILE;
+  if (raw_drm_fd < 0)
     return {true, -1};
-  }
 
   int high_fd = fcntl(raw_drm_fd, F_DUPFD_CLOEXEC, 512);
+  int saved_errno = errno;
   InterposerContext::real.close(raw_drm_fd);
   if (high_fd < 0) {
-    errno = EMFILE;
+    errno = saved_errno;
     return {true, -1};
   }
 
@@ -628,6 +627,8 @@ int openat(int dirfd, const char *path, int flags, ...) {
 
   auto *volatile p_at = path;
   if (!p_at)
+    return InterposerContext::real.openat(dirfd, path, flags, mode);
+  if (InterposerContext::in_construction)
     return InterposerContext::real.openat(dirfd, path, flags, mode);
 
   if (path[0] == '/') {
@@ -765,6 +766,10 @@ int ioctl(int fd, unsigned long request, ...) {
         uint64_t pad;
       };
       auto *info = static_cast<drm_amdgpu_info *>(arg);
+      if (info->query == kAmdgpuInfoDevInfo && !interposer_gpu_info()) {
+        errno = ENODEV;
+        return -1;
+      }
       if (info->return_pointer && info->return_size > 0) {
         auto *out = reinterpret_cast<void *>(info->return_pointer);
         std::memset(out, 0, info->return_size);
@@ -1106,7 +1111,7 @@ const char *amdgpu_get_marketing_name(void * /*device_handle*/) {
     return nullptr;
 
   static thread_local std::string name;
-  if (gpu->marketing_name && gpu->marketing_name[0] != '\0') {
+  if (!gpu->marketing_name.empty()) {
     name = gpu->marketing_name;
   } else {
     name = rocjitsu::kmd::gfx_target_name(gpu->gfx_target_version);

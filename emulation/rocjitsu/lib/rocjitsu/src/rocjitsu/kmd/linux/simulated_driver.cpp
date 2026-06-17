@@ -128,7 +128,7 @@ void SimulatedDriver::setup_topology(const config::KfdDeviceConfig &dev, uint32_
   gpu.device_id = dev.device_id;
   gpu.family_id = dev.family_id;
   gpu.unique_id = dev.unique_id;
-  gpu.marketing_name = dev.marketing_name.c_str();
+  gpu.marketing_name = dev.marketing_name;
   gpu.drm_render_minor = dev.drm_render_minor;
   gpu.revision_id = dev.revision_id;
   gpu.pci_revision_id = dev.pci_revision_id;
@@ -178,14 +178,14 @@ SimulatedDriver::GpuDevice *SimulatedDriver::find_gpu(uint32_t gpu_id) {
   for (auto &g : gpus_)
     if (g.gpu_id == gpu_id)
       return &g;
-  return gpus_.empty() ? nullptr : &gpus_[0];
+  return nullptr;
 }
 
 const SimulatedDriver::GpuDevice *SimulatedDriver::find_gpu(uint32_t gpu_id) const {
   for (auto &g : gpus_)
     if (g.gpu_id == gpu_id)
       return &g;
-  return gpus_.empty() ? nullptr : &gpus_[0];
+  return nullptr;
 }
 
 SimulatedDriver::~SimulatedDriver() {
@@ -214,7 +214,7 @@ void SimulatedDriver::setup_topology(const std::vector<config::KfdDeviceConfig> 
     gpu.device_id = dev.device_id;
     gpu.family_id = dev.family_id;
     gpu.unique_id = dev.unique_id;
-    gpu.marketing_name = dev.marketing_name.c_str();
+    gpu.marketing_name = dev.marketing_name;
     gpu.drm_render_minor = dev.drm_render_minor;
     gpu.revision_id = dev.revision_id;
     gpu.pci_revision_id = dev.pci_revision_id;
@@ -1015,9 +1015,15 @@ int SimulatedDriver::get_tile_config_ioctl(void *arg) {
   if (daemon_mode_)
     return -ENOTSUP;
 
+  auto *gpu = find_gpu(args->gpu_id);
+  if (!gpu || !gpu->soc)
+    return -EINVAL;
+
   uint32_t tile_write_count = std::min(args->num_tile_configs, kTileConfigCount);
   uint32_t macro_write_count = std::min(args->num_macro_tile_configs, kMacroTileConfigCount);
 
+  // ROCr needs gb_addr_config for swizzled-address calculation. Tile-mode arrays are stubbed until
+  // a simulator consumer needs their packed register encodings.
   if (args->tile_config_ptr && tile_write_count > 0) {
     auto *tile_config = reinterpret_cast<uint32_t *>(args->tile_config_ptr);
     std::fill_n(tile_config, tile_write_count, 0u);
@@ -1027,11 +1033,9 @@ int SimulatedDriver::get_tile_config_ioctl(void *arg) {
     std::fill_n(macro_tile_config, macro_write_count, 0u);
   }
 
-  auto *gpu = find_gpu(args->gpu_id);
-  rj_code_arch_t arch = (gpu && gpu->soc) ? gpu->soc->arch() : ROCJITSU_CODE_ARCH_INVALID;
   args->num_tile_configs = tile_write_count;
   args->num_macro_tile_configs = macro_write_count;
-  args->gb_addr_config = kmd::gb_addr_config_for_arch(arch);
+  args->gb_addr_config = kmd::gb_addr_config_for_arch(gpu->soc->arch());
   args->num_banks = 0;
   args->num_ranks = 0;
   return 0;

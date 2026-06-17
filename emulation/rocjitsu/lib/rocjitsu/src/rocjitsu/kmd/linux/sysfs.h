@@ -38,7 +38,7 @@ public:
     uint32_t drm_render_minor = 128;
     uint32_t revision_id = 0;
     uint32_t pci_revision_id = 0;
-    const char *marketing_name = "";
+    std::string marketing_name;
 
     // Compute unit organization
     uint32_t simd_count = 0;

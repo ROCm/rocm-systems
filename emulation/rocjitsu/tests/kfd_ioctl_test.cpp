@@ -164,6 +164,28 @@ TEST_F(KfdIoctlTest, GetTileConfigReportsWrittenCounts) {
     EXPECT_EQ(value, 0u);
 }
 
+TEST_F(KfdIoctlTest, GetTileConfigRejectsUnknownGpuId) {
+  std::array<uint32_t, 4> tile_config;
+  std::array<uint32_t, 3> macro_tile_config;
+  tile_config.fill(0xdeadbeef);
+  macro_tile_config.fill(0xdeadbeef);
+
+  kfd_ioctl_get_tile_config_args args{};
+  args.gpu_id = 0xdeadbeef;
+  args.tile_config_ptr = reinterpret_cast<uint64_t>(tile_config.data());
+  args.macro_tile_config_ptr = reinterpret_cast<uint64_t>(macro_tile_config.data());
+  args.num_tile_configs = static_cast<uint32_t>(tile_config.size());
+  args.num_macro_tile_configs = static_cast<uint32_t>(macro_tile_config.size());
+
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_GET_TILE_CONFIG, &args), -EINVAL);
+  EXPECT_EQ(args.num_tile_configs, static_cast<uint32_t>(tile_config.size()));
+  EXPECT_EQ(args.num_macro_tile_configs, static_cast<uint32_t>(macro_tile_config.size()));
+  for (auto value : tile_config)
+    EXPECT_EQ(value, 0xdeadbeefu);
+  for (auto value : macro_tile_config)
+    EXPECT_EQ(value, 0xdeadbeefu);
+}
+
 TEST_F(KfdIoctlTest, GetTileConfigReturnsUnsupportedInDaemonMode) {
   rocjitsu::SimulatedDriver daemon_driver(*loaded_.soc(), true);
   uint32_t process_id = daemon_driver.open_process();

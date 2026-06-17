@@ -6,6 +6,8 @@
 
 #include "rocjitsu/code/rj_code.h"
 
+#include "util/bit.h"
+
 #include <cstdint>
 #include <string>
 
@@ -20,7 +22,7 @@ struct GfxIpVersion {
   uint32_t stepping = 0;
 };
 
-inline constexpr GfxIpVersion decode_gfx_target_version(uint32_t gfx_target_version) {
+constexpr GfxIpVersion decode_gfx_target_version(uint32_t gfx_target_version) {
   return {
       gfx_target_version / 10000u,
       (gfx_target_version / 100u) % 100u,
@@ -30,11 +32,14 @@ inline constexpr GfxIpVersion decode_gfx_target_version(uint32_t gfx_target_vers
 
 inline std::string gfx_target_name(uint32_t gfx_target_version) {
   auto ip = decode_gfx_target_version(gfx_target_version);
+  constexpr char kHexDigits[] = "0123456789abcdef";
+  if (ip.minor < 16 && ip.stepping < 16)
+    return "gfx" + std::to_string(ip.major) + kHexDigits[ip.minor] + kHexDigits[ip.stepping];
   return "gfx" + std::to_string(ip.major) + std::to_string(ip.minor) + std::to_string(ip.stepping);
 }
 
-inline constexpr uint32_t external_rev_id_for_gfx_target_version(uint32_t gfx_target_version,
-                                                                 uint32_t revision_id) {
+constexpr uint32_t external_rev_id_for_gfx_target_version(uint32_t gfx_target_version,
+                                                          uint32_t revision_id) {
   auto ip = decode_gfx_target_version(gfx_target_version);
   if (ip.major == 12 && ip.minor == 0) {
     if (ip.stepping == 0)
@@ -72,7 +77,7 @@ inline constexpr uint32_t external_rev_id_for_gfx_target_version(uint32_t gfx_ta
   return revision_id;
 }
 
-inline constexpr uint32_t num_hw_gfx_contexts_for_gfx_target_version(uint32_t gfx_target_version) {
+constexpr uint32_t num_hw_gfx_contexts_for_gfx_target_version(uint32_t gfx_target_version) {
   auto ip = decode_gfx_target_version(gfx_target_version);
   return (ip.major >= 9 && ip.major <= 12) ? 8u : 1u;
 }
@@ -80,10 +85,9 @@ inline constexpr uint32_t num_hw_gfx_contexts_for_gfx_target_version(uint32_t gf
 // gb_addr_config is read by the kernel from the GB_ADDR_CONFIG register
 // (gfx_v11_0/gfx_v12_0 get_gb_addr_config). These constants were captured
 // from local W7900/R9700 hardware through AMDKFD_IOC_GET_TILE_CONFIG.
-inline constexpr uint32_t gb_addr_config_for_arch(rj_code_arch_t arch) {
+constexpr uint32_t gb_addr_config_for_arch(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
     return 0x545;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return 0x8200545;
@@ -92,25 +96,24 @@ inline constexpr uint32_t gb_addr_config_for_arch(rj_code_arch_t arch) {
   }
 }
 
-inline constexpr uint32_t gb_addr_config_for_gfx_target_version(uint32_t gfx_target_version) {
-  if (gfx_target_version >= 120000 && gfx_target_version < 130000)
+constexpr uint32_t gb_addr_config_for_gfx_target_version(uint32_t gfx_target_version) {
+  auto ip = decode_gfx_target_version(gfx_target_version);
+  if (ip.major == 12 && ip.minor == 0)
     return gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
-  if (gfx_target_version >= 110000 && gfx_target_version < 120000)
+  if (ip.major == 11 && ip.minor == 0)
     return gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3);
   return 0;
 }
 
-inline constexpr uint32_t drm_shader_engine_count(uint32_t kfd_array_count,
-                                                  uint32_t arrays_per_engine) {
-  return arrays_per_engine == 0 ? kfd_array_count : kfd_array_count / arrays_per_engine;
+constexpr uint32_t drm_shader_engine_count(uint32_t kfd_array_count, uint32_t arrays_per_engine) {
+  if (kfd_array_count == 0 || arrays_per_engine <= 1)
+    return kfd_array_count;
+  return util::ceil_div(kfd_array_count, arrays_per_engine);
 }
 
-inline constexpr uint32_t drm_quad_shader_pipe_count(uint32_t kfd_array_count) {
-  return kfd_array_count;
-}
+constexpr uint32_t drm_quad_shader_pipe_count(uint32_t kfd_array_count) { return kfd_array_count; }
 
-inline constexpr uint32_t drm_cu_active_number(uint32_t kfd_array_count,
-                                               uint32_t cu_per_shader_array) {
+constexpr uint32_t drm_cu_active_number(uint32_t kfd_array_count, uint32_t cu_per_shader_array) {
   return kfd_array_count * cu_per_shader_array;
 }
 

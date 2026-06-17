@@ -161,7 +161,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   std::ostringstream gpu_id;
   gpu_id << gpu.gpu_id << "\n";
   write_file(node_dir + "/gpu_id", gpu_id.str());
-  write_file(node_dir + "/name", std::string(gpu.marketing_name) + "\n");
+  write_file(node_dir + "/name", gpu.marketing_name + "\n");
 
   uint32_t cap = gpu.capability;
   if (cap == 0) {

@@ -525,7 +525,7 @@ TEST(RdnaAddrCalcTest, Rdna3Saddr7cUsesVgprPair) {
   EXPECT_EQ(d.per_lane_addr[0], 0x2'0000'3050ULL);
 }
 
-TEST(RdnaAddrCalcTest, Rdna4Saddr7cUsesVgprPair) {
+TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
   amdgpu::GpuMemory mem("rdna4_addr_mem");
   amdgpu::L2Cache l2("rdna4_addr_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
@@ -547,13 +547,13 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cUsesVgprPair) {
   cu->write_sgpr(wf->sgpr_alloc().base + 0x7C, 0xDEAD0000);
   cu->write_sgpr(wf->sgpr_alloc().base + 0x7D, 0xDEAD0001);
 
-  rdna4::VglobalMachineInst inst{};
-  inst.saddr = 0x7C;
-  inst.vaddr = 0;
-  inst.ioffset = 0x20;
+  rdna4::VglobalMachineInst global_inst{};
+  global_inst.saddr = 0x7C;
+  global_inst.vaddr = 0;
+  global_inst.ioffset = 0x20;
 
   amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
-  rdna4::flat_calculate_addresses(inst, *wf, d);
+  rdna4::flat_calculate_addresses(global_inst, *wf, d);
   EXPECT_EQ(d.per_lane_addr[0], 0x3'0000'4020ULL);
 
   cu->write_sgpr(wf->sgpr_alloc().base + 4, 0x5000);
@@ -561,10 +561,41 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cUsesVgprPair) {
   cu->write_vgpr(vbase, 0, 0x60);
   cu->write_vgpr(vbase + 1, 0, 0xDEAD);
 
-  inst.saddr = 4;
-  inst.ioffset = 0x10;
-  rdna4::flat_calculate_addresses(inst, *wf, d);
+  global_inst.saddr = 4;
+  global_inst.ioffset = 0x10;
+  rdna4::flat_calculate_addresses(global_inst, *wf, d);
   EXPECT_EQ(d.per_lane_addr[0], 0x4'0000'5070ULL);
+
+  cu->write_vgpr(vbase, 0, 0x8000);
+  cu->write_vgpr(vbase + 1, 0, 0x0005);
+  cu->write_sgpr(wf->sgpr_alloc().base + 0x7C, 0xBAD00000);
+  cu->write_sgpr(wf->sgpr_alloc().base + 0x7D, 0xBAD00001);
+
+  rdna4::VflatMachineInst flat_inst{};
+  flat_inst.saddr = 0x7C;
+  flat_inst.vaddr = 0;
+  flat_inst.ioffset = 0x30;
+  rdna4::flat_calculate_addresses(flat_inst, *wf, d);
+  EXPECT_EQ(d.per_lane_addr[0], 0x5'0000'8030ULL);
+
+  wf->set_scratch_base(0x6'0000'0000ULL);
+  cu->write_vgpr(vbase, 0, 0x80);
+  cu->write_vgpr(vbase + 1, 0, 0xBAD);
+  cu->write_sgpr(wf->sgpr_alloc().base + 0x7C, 0xBAD00000);
+
+  rdna4::VscratchMachineInst scratch_inst{};
+  scratch_inst.saddr = 0x7C;
+  scratch_inst.vaddr = 0;
+  scratch_inst.ioffset = 0x24;
+  rdna4::flat_calculate_addresses(scratch_inst, *wf, d);
+  EXPECT_EQ(d.per_lane_addr[0], 0x6'0000'00A4ULL);
+
+  cu->write_sgpr(wf->sgpr_alloc().base + 4, 0x7000);
+  cu->write_vgpr(vbase, 0, 0x60);
+  scratch_inst.saddr = 4;
+  scratch_inst.ioffset = 0x10;
+  rdna4::flat_calculate_addresses(scratch_inst, *wf, d);
+  EXPECT_EQ(d.per_lane_addr[0], 0x6'0000'7070ULL);
 }
 
 } // namespace
