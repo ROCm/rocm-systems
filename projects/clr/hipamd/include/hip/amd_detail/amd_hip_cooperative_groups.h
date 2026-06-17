@@ -22,6 +22,11 @@
 #endif
 
 namespace cooperative_groups {
+  class thread_group;
+namespace impl {
+  template <typename TyGroup>
+__CG_QUALIFIER__ unsigned long long groupMask(const TyGroup&);
+}
 
 /** \brief The base type of all cooperative group types.
  *
@@ -32,12 +37,13 @@ namespace cooperative_groups {
  *         on Microsoft Windows.
  */
 class thread_group {
+  template <typename TyGroup>
+  friend __CG_QUALIFIER__ unsigned long long cooperative_groups::impl::groupMask(const TyGroup&);
  protected:
   __hip_uint32_t _type;         //! Type of the thread_group.
   __hip_uint32_t _num_threads;  //! Total number of threads in the thread_group.
   __hip_uint64_t _mask;         //! Lanemask for coalesced and tiled partitioned group types,
                                 //! LSB represents lane 0, and MSB represents lane 63
-
   //! Construct a thread group, and set thread group type and other essential
   //! thread group properties. This generic thread group is directly constructed
   //! only when the group is supposed to contain only the calling thread
@@ -387,6 +393,7 @@ class coalesced_group : public thread_group {
   friend __CG_QUALIFIER__ coalesced_group tiled_partition(const coalesced_group& parent,
                                                           unsigned int tile_size);
   friend __CG_QUALIFIER__ coalesced_group binary_partition(const coalesced_group& cgrp, bool pred);
+
   template <unsigned int fsize, class fparent> friend __CG_QUALIFIER__ coalesced_group
   binary_partition(const thread_block_tile<fsize, fparent>& tgrp, bool pred);
 
@@ -1452,8 +1459,7 @@ __CG_QUALIFIER__ unsigned long long groupMask(const TyGroup& group)
   unsigned long long mask = ~0ull;
 
   if constexpr (impl::isCoalescedGroup<TyGroup>::value) {
-    // for coalesced_groups, the mask is simply the activemask
-    mask &= __activemask();
+    mask = group.coalesced_info.member_mask;
   } else {
     // we cannot simply just use the __activemask() here, because more than one tile could have active
     // threads at a time; we need to mask away the threads that not part of this tile first
