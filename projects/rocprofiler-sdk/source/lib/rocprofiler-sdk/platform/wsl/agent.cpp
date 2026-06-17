@@ -52,8 +52,9 @@
 // libhsakmt-windows (librocdxg) headers. These are only available when the shim
 // is built/linked, which today is the native-Windows path (gdi32 + matching
 // KMD). On the WSL2 / Linux build ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS is left
-// undefined, so the shim call below compiles out and enumerate() keeps using
-// the hardcoded per-arch fallback.
+// undefined, so the shim call below compiles out and enumerate() seeds documented
+// gfx1150 defaults, which the HSA refinement in agent::construct_agent_cache()
+// then overrides with real per-device values at runtime.
 #if defined(ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS)
 #    include <hsakmt/hsakmt.h>
 #    include <hsakmt/hsakmttypes.h>
@@ -389,8 +390,9 @@ struct DxcoreHandle
 //
 // Holds KFD-equivalent topology fields that DXCore does not surface. Populated
 // by fetch_libhsakmt_topology() from HsaNodeProperties on systems where the
-// libhsakmt-windows shim (librocdxg) is available; otherwise the caller falls
-// back to a hardcoded per-arch table (see enumerate() below).
+// libhsakmt-windows shim (librocdxg) is available; otherwise the caller seeds
+// documented defaults that the HSA refinement in agent::construct_agent_cache()
+// overrides at runtime (see enumerate() below).
 struct WslTopology
 {
     uint32_t cu_count                = 0;
@@ -427,8 +429,8 @@ struct WslTopology
 //
 // The shim only links on native Windows (gdi32 + the matching KMD). On the
 // WSL2 / Linux build ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS is undefined and this
-// unconditionally returns false, so enumerate() keeps using the hardcoded
-// per-arch fallback and today's behavior is unchanged.
+// unconditionally returns false, so enumerate() seeds documented gfx1150 defaults
+// that the HSA refinement in agent::construct_agent_cache() overrides at runtime.
 [[maybe_unused]] bool
 fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
                          [[maybe_unused]] const DxcLuid& luid,
@@ -445,8 +447,8 @@ fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
     if(auto _st = hsaKmtOpenKFD(); _st != HSAKMT_STATUS_SUCCESS)
     {
         ROCP_INFO << fmt::format(
-            "[libhsakmt-windows] hsaKmtOpenKFD failed status={}; falling back to hardcoded "
-            "topology",
+            "[libhsakmt-windows] hsaKmtOpenKFD failed status={}; falling back to documented "
+            "defaults (refined from HSA at runtime)",
             static_cast<int>(_st));
         return false;
     }
@@ -462,7 +464,7 @@ fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
     {
         ROCP_INFO << fmt::format(
             "[libhsakmt-windows] hsaKmtAcquireSystemProperties failed status={}; falling back to "
-            "hardcoded topology",
+            "documented defaults (refined from HSA at runtime)",
             static_cast<int>(_st));
         return false;
     }
@@ -529,7 +531,7 @@ fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
     }
 
     ROCP_INFO << "fetch_libhsakmt_topology: no KFD node matched the DXCore "
-                 "adapter LUID; falling back to hardcoded topology";
+                 "adapter LUID; falling back to documented defaults (refined from HSA at runtime)";
     return false;
 #endif
 }
@@ -783,74 +785,55 @@ enumerate()
         info.device_id   = devids.DeviceIds.DeviceID;
         info.location_id = ((addr.BusNumber & 0xFF) << 8) | ((addr.DeviceNumber & 0x1F) << 3) |
                            (addr.FunctionNumber & 0x7);
-        info.domain         = 0;
         info.local_mem_size = seg.DedicatedVideoMemorySize;
-        // DXCore on WSL does not expose XCC topology; consumer-class adapters
-        // shipped on WSL today are single-XCC, so 1 is the only correct value
-        // here. Multi-XCC datacenter parts are not supported on this path.
+        // num_xcc / domain are not surfaced by DXCore. Seed documented defaults at
+        // enumeration time so pre-HSA consumers (rocprofv3-avail) are not zero; the
+        // HSA refinement in agent::construct_agent_cache() overrides them at runtime.
         info.num_xcc = 1;
+        info.domain  = 0;
 
-        // Resolve the gfx target up-front so the hardcoded-topology fallback
-        // below can gate its constants on the actual family. Counter YAML
-        // (config.yaml) is keyed by the gfx target (e.g. "gfx1150"), not the
-        // marketing product name. WSL DXCore does not expose KFD topology, so the
-        // gfx target cannot be derived from the adapter; default to the only
-        // WSL-validated target (gfx1150, RDNA 3.5) and allow an override via the
-        // ROCPROFILER_FORCE_GFX environment variable (see docs/ for the full list
-        // of WSL macros/env vars).
+        // Resolve the gfx target name + version AT ENUMERATION TIME. These must
+        // never be empty/zero for an enumerated GPU agent: counter-metric
+        // (config.yaml) resolution and pre-HSA tools such as rocprofv3-avail (which
+        // list agents without starting the HSA runtime, so they never run the HSA
+        // refinement in agent::construct_agent_cache()) read agent->name /
+        // gfx_target_version directly. An empty architecture makes metric lookup
+        // fail with "Agent HW architecture is not supported".
         //
-        // Compute gfx_target_version = major*10000 + minor*100 + step from a
-        // "gfx<NNN>" name, where step is the last digit, minor the second-to-last,
-        // and major the remaining leading digits (gfx1150 -> 110500). Returns
-        // nullopt for anything that is not "gfx" followed by >=3 decimal digits so a
-        // malformed override can never feed garbage into gfx_target_version.
+        // DXCore does not expose the gfx target, so default to the only
+        // WSL-validated target (gfx1150, RDNA 3.5); ROCPROFILER_FORCE_GFX overrides
+        // it (see docs/ for the WSL env vars). For other GPUs run without
+        // FORCE_GFX, the HSA refinement later corrects name/version at runtime; the
+        // gfx1150 default only governs the brief pre-HSA window (and avail).
         static constexpr std::string_view kDefaultGfxName = "gfx1150";
-
-        auto parse_gfx_version = [](std::string_view gfx) -> std::optional<uint32_t> {
-            if(gfx.substr(0, 3) != "gfx") return std::nullopt;
-            auto digits = gfx.substr(3);
-            if(digits.size() < 3) return std::nullopt;
-            for(char c : digits)
-                if(c < '0' || c > '9') return std::nullopt;
-            uint32_t stp = static_cast<uint32_t>(digits[digits.size() - 1] - '0');
-            uint32_t min = static_cast<uint32_t>(digits[digits.size() - 2] - '0');
-            uint32_t maj = 0;
-            for(size_t k = 0; k + 2 < digits.size(); ++k)
-                maj = maj * 10 + static_cast<uint32_t>(digits[k] - '0');
-            return maj * 10000 + min * 100 + stp;
-        };
 
         std::string_view gfx_name = kDefaultGfxName;
         if(const char* forced_gfx = std::getenv("ROCPROFILER_FORCE_GFX");
            forced_gfx != nullptr && *forced_gfx != '\0')
         {
-            if(parse_gfx_version(forced_gfx))
-            {
+            if(::rocprofiler::agent::parse_gfx_target_version(forced_gfx))
                 gfx_name = forced_gfx;
-            }
             else
-            {
                 ROCP_WARNING << "Ignoring malformed ROCPROFILER_FORCE_GFX='" << forced_gfx
                              << "'; expected gfx<NNN> with >=3 decimal digits. Falling back to "
                              << kDefaultGfxName;
-            }
         }
 
-        info.gfx_target_version = parse_gfx_version(gfx_name).value();
+        info.name               = common::get_string_entry(std::string{gfx_name})->c_str();
+        info.gfx_target_version = ::rocprofiler::agent::parse_gfx_target_version(gfx_name).value();
 
         // DXCore does not expose KFD topology (NumArrays, NumShaderBanks,
-        // NumFComputeCores, MaxEngineClockMhz*, etc.). Without these
-        // aql_profile::Gfx11Factory::Init() SIGFPEs on integer divide-by-zero.
+        // NumFComputeCores, MaxEngineClockMhz*, etc.). Without non-zero topology
+        // aql_profile::Gfx11Factory::Init() SIGFPEs on integer divide-by-zero, and
+        // pre-HSA tools (rocprofv3-avail) print zeros.
         //
-        // First try to populate them via the libhsakmt-windows shim
-        // (hsaKmtOpenKFD + hsaKmtAcquireSystemProperties +
-        // hsaKmtGetNodeProperties; see fetch_libhsakmt_topology() above for
-        // the planned wiring). When the shim is unavailable (the plain WSL2 /
-        // Linux build), the fields are left zero here and backfilled from the
-        // HSA runtime — the authoritative per-device source — in
-        // agent::construct_agent_cache(), once the HSA agent for this adapter is
-        // known. HSA is not yet initialized at enumeration time, so it cannot be
-        // queried here.
+        // First try the libhsakmt-windows shim (hsaKmtOpenKFD +
+        // hsaKmtAcquireSystemProperties + hsaKmtGetNodeProperties). When the shim
+        // is unavailable (the plain WSL2 / Linux build), seed the documented
+        // gfx1150 (RDNA 3.5) defaults so the fields are never zero at enumeration
+        // time; the HSA refinement in agent::construct_agent_cache() then overrides
+        // them with the real per-device values once the HSA agent is known. (HSA is
+        // not yet initialized here, so it cannot be queried at this point.)
         WslTopology topo{};
         if(fetch_libhsakmt_topology(a.hAdapter, a.AdapterLuid, topo))
         {
@@ -865,30 +848,23 @@ enumerate()
             info.max_waves_per_simd      = topo.max_waves_per_simd;
             info.max_engine_clk_fcompute = topo.max_engine_clk_fcompute;
             info.max_engine_clk_ccompute = topo.max_engine_clk_ccompute;
-            // NOTE: gfx_target_version is still derived from ROCPROFILER_FORCE_GFX
-            // below, since that env-var override is the canonical source of
-            // truth for which per-arch counter YAML rocprofiler-sdk loads. The
-            // EngineId from HsaNodeProperties is captured into `topo` for
-            // future use (e.g. cross-checking the env override).
         }
         else
         {
-            // The libhsakmt-windows shim is unavailable on this (WSL2 / Linux)
-            // build, so there is no per-device topology source at enumeration
-            // time. Leave the compute-unit topology fields zero here; they are
-            // backfilled from the HSA runtime later in
-            // agent::construct_agent_cache() (see backfill_gpu_topology_from_hsa),
-            // which only fills GPU agents whose cu_count is still zero. The
-            // explicit zero assignments mark which fields that backfill owns.
-            info.cu_count               = 0;
-            info.num_shader_banks       = 0;
-            info.simd_arrays_per_engine = 0;
-            info.array_count            = 0;
-            info.cu_per_simd_array      = 0;
-            info.simd_per_cu            = 0;
-            info.simd_count             = 0;
-            info.wave_front_size        = 0;
-            info.max_waves_per_simd     = 0;
+            // gfx1150 (RDNA 3.5) documented defaults — see the gfx target note
+            // above. These keep aql_profile init from dividing by zero and keep
+            // pre-HSA tools non-zero; the HSA refinement in
+            // agent::construct_agent_cache() replaces them with the real per-device
+            // topology at runtime (so non-gfx1150 GPUs report correct values).
+            info.cu_count               = 16;  // 8 WGPs * 2 CUs
+            info.num_shader_banks       = 1;   // 1 SE
+            info.simd_arrays_per_engine = 2;   // 2 SAs per SE
+            info.array_count            = 2;   // 1 SE * 2 SA
+            info.cu_per_simd_array      = 8;   // 16 CUs / 2 SAs
+            info.simd_per_cu            = 2;   // RDNA: 2 SIMDs per CU
+            info.simd_count             = 32;  // 16 CUs * 2 SIMDs
+            info.wave_front_size        = 32;  // RDNA wave32
+            info.max_waves_per_simd     = 16;
         }
 
         // Fields not surfaced by DXCore but reported by the HSA runtime for
@@ -922,16 +898,17 @@ enumerate()
             ::rocprofiler::agent::get_agent_available_properties().insert(prop);
         }
 
-        // gfx11 workgroup/grid limits are hardcoded in the HSA runtime.
+        // workgroup/grid limits, family code, and firmware versions are not
+        // exposed by DXCore. Seed documented defaults here so pre-HSA consumers are
+        // non-zero; the HSA refinement in agent::construct_agent_cache() overrides
+        // them at runtime. workgroup/grid limits are fixed by the HSA runtime for
+        // gfx11; family/firmware only affect agent-info parity (tests/agent.cpp),
+        // not profiling.
         info.workgroup_max_size = 1024;
         info.workgroup_max_dim  = {1024, 1024, 1024};
         info.grid_max_size      = std::numeric_limits<uint32_t>::max();
         info.grid_max_dim       = {2147483647u, 65535u, 65535u};
 
-        // Family code and firmware versions are not exposed by DXCore. These are
-        // the values the HSA runtime reports for gfx1150 on WSL. The
-        // firmware versions can change with the installed driver; they only
-        // affect agent-info parity (tests/agent.cpp), not profiling behavior.
         info.family_id                 = 150;
         info.fw_version.ui32.uCode     = 34;
         info.sdma_fw_version.uCodeSDMA = 15;
@@ -941,10 +918,8 @@ enumerate()
 
         info.product_name = common::get_string_entry(adapter_name)->c_str();
         info.vendor_name  = common::get_string_entry("AMD")->c_str();
-        // gfx_name / gfx_target_version were resolved above (before the topology
-        // fallback, which gates its constants on the gfx family). info.name is the
-        // gfx target string the counter YAML (config.yaml) is keyed by.
-        info.name       = common::get_string_entry(std::string{gfx_name})->c_str();
+        // info.name (the gfx target string config.yaml is keyed by) was resolved
+        // at enumeration time above (gfx1150 default or ROCPROFILER_FORCE_GFX).
         info.model_name = common::get_string_entry("")->c_str();
 
         info.mem_banks_count = 0;

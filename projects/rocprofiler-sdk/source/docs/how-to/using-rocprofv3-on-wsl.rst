@@ -48,8 +48,14 @@ Build-time macro
    (``librocdxg``) shim, which is the native-Windows build path (it links
    ``gdi32`` and a matching KMD). On the WSL2 / Linux build this macro is left
    **undefined**, so the shim calls compile out and the WSL agent enumerator
-   falls back to a per-architecture topology derived from DXCore. Most WSL2
-   users build with the macro undefined.
+   seeds documented ``gfx1150`` defaults for the gfx target name/version and the
+   compute-unit topology (DXCore cannot read them, and tools such as
+   ``rocprofv3-avail`` query agents before the HSA runtime is up). Once the HSA
+   runtime is initialized, ``construct_agent_cache()`` refines those fields
+   (topology, ``num_xcc``, ``domain``, ``family_id``, firmware versions,
+   workgroup/grid limits, and — unless ``ROCPROFILER_FORCE_GFX`` is set — the gfx
+   target name/version) from the HSA runtime, so non-``gfx1150`` GPUs report
+   correct values at runtime. Most WSL2 users build with the macro undefined.
 
 Environment variables
 ======================
@@ -69,12 +75,16 @@ Environment variables
 ``ROCPROFILER_FORCE_GFX``
    Overrides the GPU's ``gfx`` target name used to look up the counter
    definitions (``config.yaml`` is keyed by gfx target, for example
-   ``gfx1150``). DXCore on WSL2 does not expose the KFD topology, so the gfx
-   target cannot be derived from the adapter; ROCprofiler-SDK defaults to
-   ``gfx1150`` (RDNA 3.5) and honors this variable as an override. The value is
-   validated and must be of the form ``gfx<NNN>`` with at least three decimal
-   digits (for example ``gfx1151``); a malformed value is ignored with a
-   warning and the default is used.
+   ``gfx1150``). DXCore on WSL2 does not expose the gfx target, so the enumerator
+   defaults to ``gfx1150`` (RDNA 3.5) at agent-creation time and, once the HSA
+   runtime is up, refines the name/version from the HSA runtime
+   (``HSA_AGENT_INFO_NAME``) in ``construct_agent_cache()``. Set this variable to
+   force a specific target; an explicit value wins over the HSA-derived one (and
+   is the way to get a correct target for pre-HSA tools such as
+   ``rocprofv3-avail`` on non-``gfx1150`` GPUs). The value is validated and must
+   be of the form ``gfx<NNN>`` with at least three decimal digits (for example
+   ``gfx1151``); a malformed value is ignored with a warning and the default is
+   used.
 
 .. note::
 

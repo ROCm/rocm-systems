@@ -315,9 +315,24 @@ using unique_agent_t = ::rocprofiler::platform::unique_agent_t;
 //   4. Fallback: gnulinux enumerator (will log and return an empty vector).
 //
 // Windows builds collapse to a single candidate (platform::windows).
+
+// Records whether the WSL/DXCore enumerator produced the current agent topology.
+// The WSL enumerator seeds documented placeholder device info at enumeration time
+// (it cannot read the real per-device topology before HSA is up);
+// construct_agent_cache() reads this to refine those fields from the HSA runtime
+// at runtime without touching the KFD path. File-local to this translation unit.
+bool&
+wsl_platform_selected()
+{
+    static bool _v = false;
+    return _v;
+}
+
 std::vector<unique_agent_t>
 enumerate_platform_agents()
 {
+    wsl_platform_selected() = false;
+
     const auto forced = common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
     if(!forced.empty())
     {
@@ -330,6 +345,7 @@ enumerate_platform_agents()
         if(forced == "wsl")
         {
             ROCP_INFO << "agent topology: forced wsl via ROCPROFILER_FORCE_PLATFORM";
+            wsl_platform_selected() = true;
             return platform::wsl::enumerate();
         }
 #endif
@@ -356,6 +372,7 @@ enumerate_platform_agents()
     {
         ROCP_INFO << "agent topology: selected " << platform::wsl::name
                   << " (libdxcore.so present)";
+        wsl_platform_selected() = true;
         return platform::wsl::enumerate();
     }
     ROCP_WARNING << "agent topology: no platform matched; falling back to "
@@ -741,34 +758,67 @@ construct_agent_cache(::HsaApiTable* table)
         }
     }
 
-    // Backfill compute-unit topology from the HSA runtime for any GPU agent whose
-    // enumerator could not read it (cu_count == 0). The WSL/DXCore enumerator
-    // leaves these zero because /dev/dxg exposes no KFD topology and HSA is not
-    // yet initialized at enumeration time; here each rocprofiler GPU agent is
-    // mapped to its hsa_agent_t, so HSA — the authoritative per-device source,
-    // the same one aqlprofile reads — can supply them. The cu_count == 0 gate
-    // means KFD-derived topology (bare-metal Linux) and the libhsakmt-windows
-    // shim path are never overwritten. Without this, aqlprofile's
-    // Gfx*Factory::Init() divides by zero on se_num / cu_num, which are
-    // registered from these fields in get_aql_handles().
+    // Refine GPU device info from the HSA runtime on the WSL/DXCore platform.
+    //
+    // The WSL enumerator must populate name / gfx_target_version and a documented
+    // default topology at enumeration time, because counter-metric (config.yaml)
+    // resolution and pre-HSA tools (rocprofv3-avail, which lists agents without
+    // starting the HSA runtime and therefore never reaches this function) read
+    // those fields directly — an empty architecture makes metric lookup fail with
+    // "Agent HW architecture is not supported". DXCore cannot read the real
+    // per-device CU topology, so the enumerator seeds gfx1150 (RDNA 3.5) defaults.
+    // Here, where each agent is mapped to its hsa_agent_t, HSA — the authoritative
+    // source aqlprofile also reads — overrides those placeholders so non-default
+    // GPUs report correct topology at runtime.
+    //
+    // Gated on wsl_platform_selected() so the KFD (bare-metal Linux) path is never
+    // touched: its agents already carry authoritative KFD-sysfs values. Each HSA
+    // query overrides only on success with a non-zero value, so a query failure
+    // keeps the enumerator's safe defaults rather than zeroing a field.
+    if(wsl_platform_selected())
     {
-        auto query_hsa_u32 =
-            [&table](hsa_agent_t hsa_agent, hsa_agent_info_t attr, uint32_t& dst) {
-                uint32_t v = 0;
-                if(table->core_->hsa_agent_get_info_fn(hsa_agent, attr, &v) == HSA_STATUS_SUCCESS)
-                    dst = v;
-            };
+        // An explicit, valid ROCPROFILER_FORCE_GFX (applied in wsl::enumerate) is a
+        // user override of the gfx target and must win over the HSA-reported name.
+        const bool force_gfx = []() {
+            const char* _f = std::getenv("ROCPROFILER_FORCE_GFX");
+            return _f != nullptr && *_f != '\0' && parse_gfx_target_version(_f).has_value();
+        }();
+
+        auto query_hsa_u32 = [&table](hsa_agent_t hsa_agent, hsa_agent_info_t attr, uint32_t& dst) {
+            uint32_t v = 0;
+            if(table->core_->hsa_agent_get_info_fn(hsa_agent, attr, &v) == HSA_STATUS_SUCCESS &&
+               v != 0)
+                dst = v;
+        };
 
         for(const auto& itr : agent_map)
         {
             const auto* rocp_agent = std::get<0>(itr.second);
             auto        hsa_agent  = std::get<1>(itr.second);
-            if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU || rocp_agent->cu_count != 0) continue;
+            if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
             // The agents are heap-allocated and owned (non-const) by
             // get_agent_topology(); get_agents() only hands out const views. This
             // runs during initialization, before any consumer reads the agent.
             auto& mut = *const_cast<rocprofiler_agent_t*>(rocp_agent);
+
+            // gfx target name + version, unless ROCPROFILER_FORCE_GFX is in effect.
+            // tests/agent.cpp compares agent->name to the HSA agent name, so the
+            // HSA-reported name is the correct source.
+            if(!force_gfx)
+            {
+                char hsa_name[64] = {};
+                if(table->core_->hsa_agent_get_info_fn(hsa_agent, HSA_AGENT_INFO_NAME, hsa_name) ==
+                       HSA_STATUS_SUCCESS &&
+                   hsa_name[0] != '\0')
+                {
+                    if(auto _ver = parse_gfx_target_version(hsa_name))
+                    {
+                        mut.name = common::get_string_entry(std::string{hsa_name})->c_str();
+                        mut.gfx_target_version = *_ver;
+                    }
+                }
+            }
 
             query_hsa_u32(hsa_agent,
                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
@@ -779,27 +829,77 @@ construct_agent_cache(::HsaApiTable* table)
             query_hsa_u32(hsa_agent,
                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
                           mut.num_shader_banks);
-            query_hsa_u32(hsa_agent,
-                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE),
-                          mut.simd_arrays_per_engine);
+            query_hsa_u32(
+                hsa_agent,
+                static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE),
+                mut.simd_arrays_per_engine);
             query_hsa_u32(hsa_agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, mut.wave_front_size);
             query_hsa_u32(hsa_agent,
                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU),
                           mut.max_waves_per_cu);
 
-            // Derive composite fields the same way the gnulinux/KFD path does.
+            // Derive composite fields the same way the gnulinux/KFD path does. The
+            // operands are non-zero (HSA values or the enumerator defaults), so the
+            // results stay self-consistent even if some HSA query failed.
             if(mut.simd_per_cu > 0) mut.max_waves_per_simd = mut.max_waves_per_cu / mut.simd_per_cu;
-            mut.simd_count  = mut.cu_count * mut.simd_per_cu;
-            mut.array_count = mut.num_shader_banks * mut.simd_arrays_per_engine;
+            if(mut.simd_per_cu > 0) mut.simd_count = mut.cu_count * mut.simd_per_cu;
+            if(mut.simd_arrays_per_engine > 0)
+                mut.array_count = mut.num_shader_banks * mut.simd_arrays_per_engine;
             if(mut.array_count > 0) mut.cu_per_simd_array = mut.cu_count / mut.array_count;
             if(mut.num_shader_banks > 0) mut.cu_per_engine = mut.cu_count / mut.num_shader_banks;
 
+            // num_xcc / domain. DXCore could not surface these; HSA is authoritative.
+            query_hsa_u32(
+                hsa_agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_XCC), mut.num_xcc);
+            query_hsa_u32(
+                hsa_agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN), mut.domain);
+
+            // Family id + firmware versions. fw fields are bitfields, so they
+            // cannot bind to query_hsa_u32's uint32_t&; query into locals first.
+            query_hsa_u32(hsa_agent,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_FAMILY_ID),
+                          mut.family_id);
+            if(uint32_t _ucode = 0;
+               table->core_->hsa_agent_get_info_fn(
+                   hsa_agent,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UCODE_VERSION),
+                   &_ucode) == HSA_STATUS_SUCCESS &&
+               _ucode != 0)
+                mut.fw_version.ui32.uCode = _ucode;
+            if(uint32_t _sdma = 0;
+               table->core_->hsa_agent_get_info_fn(
+                   hsa_agent,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SDMA_UCODE_VERSION),
+                   &_sdma) == HSA_STATUS_SUCCESS &&
+               _sdma != 0)
+                mut.sdma_fw_version.uCodeSDMA = _sdma;
+
+            // Workgroup / grid limits. HSA reports workgroup_max_dim as uint16_t[3]
+            // and grid_max_dim as hsa_dim3_t; widen into rocprofiler_dim3_t.
+            query_hsa_u32(hsa_agent, HSA_AGENT_INFO_WORKGROUP_MAX_SIZE, mut.workgroup_max_size);
+            query_hsa_u32(hsa_agent, HSA_AGENT_INFO_GRID_MAX_SIZE, mut.grid_max_size);
+            if(uint16_t _wdim[3] = {0, 0, 0};
+               table->core_->hsa_agent_get_info_fn(
+                   hsa_agent, HSA_AGENT_INFO_WORKGROUP_MAX_DIM, _wdim) == HSA_STATUS_SUCCESS &&
+               _wdim[0] != 0)
+                mut.workgroup_max_dim = {static_cast<uint32_t>(_wdim[0]),
+                                         static_cast<uint32_t>(_wdim[1]),
+                                         static_cast<uint32_t>(_wdim[2])};
+            if(hsa_dim3_t _gdim = {};
+               table->core_->hsa_agent_get_info_fn(
+                   hsa_agent, HSA_AGENT_INFO_GRID_MAX_DIM, &_gdim) == HSA_STATUS_SUCCESS &&
+               _gdim.x != 0)
+                mut.grid_max_dim = {_gdim.x, _gdim.y, _gdim.z};
+
             ROCP_INFO << fmt::format(
-                "agent topology backfilled from HSA for logical_node_id={} ({}): cu_count={} "
-                "simd_count={} simd_per_cu={} num_shader_banks={} simd_arrays_per_engine={} "
-                "array_count={} wave_front_size={} max_waves_per_simd={}",
+                "agent device info refined from HSA for logical_node_id={} ({}): "
+                "gfx_target_version={} cu_count={} simd_count={} simd_per_cu={} "
+                "num_shader_banks={} "
+                "simd_arrays_per_engine={} array_count={} wave_front_size={} max_waves_per_simd={} "
+                "num_xcc={} domain={} family_id={} workgroup_max_size={}",
                 rocp_agent->logical_node_id,
                 rocp_agent->name,
+                mut.gfx_target_version,
                 mut.cu_count,
                 mut.simd_count,
                 mut.simd_per_cu,
@@ -807,13 +907,11 @@ construct_agent_cache(::HsaApiTable* table)
                 mut.simd_arrays_per_engine,
                 mut.array_count,
                 mut.wave_front_size,
-                mut.max_waves_per_simd);
-
-            ROCP_WARNING_IF(mut.cu_count == 0)
-                << "HSA did not report a compute-unit count for agent "
-                << rocp_agent->logical_node_id
-                << "; counter collection may fail (divide-by-zero in aqlprofile). This platform "
-                   "requires HSA or the libhsakmt-windows shim to supply compute-unit topology.";
+                mut.max_waves_per_simd,
+                mut.num_xcc,
+                mut.domain,
+                mut.family_id,
+                mut.workgroup_max_size);
         }
     }
 
@@ -969,6 +1067,22 @@ internal_refresh_topology()
 {
     auto _updated_topology = enumerate_platform_agents();
     std::swap(get_agent_topology(), _updated_topology);
+}
+
+std::optional<uint32_t>
+parse_gfx_target_version(std::string_view gfx_name)
+{
+    if(gfx_name.substr(0, 3) != "gfx") return std::nullopt;
+    auto digits = gfx_name.substr(3);
+    if(digits.size() < 3) return std::nullopt;
+    for(char c : digits)
+        if(c < '0' || c > '9') return std::nullopt;
+    uint32_t stp = static_cast<uint32_t>(digits[digits.size() - 1] - '0');
+    uint32_t min = static_cast<uint32_t>(digits[digits.size() - 2] - '0');
+    uint32_t maj = 0;
+    for(size_t k = 0; k + 2 < digits.size(); ++k)
+        maj = maj * 10 + static_cast<uint32_t>(digits[k] - '0');
+    return maj * 10000 + min * 100 + stp;
 }
 
 bool

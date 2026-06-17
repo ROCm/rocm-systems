@@ -186,13 +186,12 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
         {
             static std::once_flag warned_once{};
             std::call_once(warned_once, []() {
-                ROCP_WARNING
-                    << "/dev/kfd is not available (expected under WSL/DXG). Hardware "
-                       "performance counters are collected via the dxg vendor-packet "
-                       "path in libhsakmt (requires WSLKMT_VENDOR_PACKET=1, enabled "
-                       "automatically by the WSL platform layer). Single-counter "
-                       "collection works; large multi-counter sets may currently fail "
-                       "to arm due to the libhsakmt PM4 command-buffer frame-size limit.";
+                ROCP_WARNING << "/dev/kfd is not available (expected under WSL/DXG). Hardware "
+                                "performance counters are collected via the dxg vendor-packet "
+                                "path in libhsakmt (requires WSLKMT_VENDOR_PACKET=1, enabled "
+                                "automatically by the WSL platform layer). Single-counter "
+                                "collection works; large multi-counter sets may currently fail "
+                                "to arm due to the libhsakmt PM4 command-buffer frame-size limit.";
             });
         }
     }

@@ -30,6 +30,7 @@
 #include <hsa/hsa_api_trace.h>
 
 #include <optional>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -137,5 +138,15 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info);
 // doing its own ad-hoc check. Cached on first call.
 bool
 kfd_device_available();
+
+// Parse a "gfx<NNN>" target name into the KFD-style numeric encoding
+// (major*10000 + minor*100 + step, e.g. "gfx1150" -> 110500). The last digit is
+// the step, the second-to-last the minor, and the remaining leading digits the
+// major. Returns std::nullopt for anything that is not "gfx" followed by >= 3
+// decimal digits, so a malformed name can never feed garbage into
+// gfx_target_version. Shared by the WSL enumerator (for ROCPROFILER_FORCE_GFX
+// validation) and the HSA topology backfill (to encode the HSA-reported name).
+std::optional<uint32_t>
+parse_gfx_target_version(std::string_view gfx_name);
 }  // namespace agent
 }  // namespace rocprofiler

@@ -13,11 +13,11 @@ find_package(rocprofiler-sdk REQUIRED)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-# WSL/DXG does not expose /dev/kfd and currently uses libhsakmt's
-# vendor-packet path for counter collection. Single-counter collection works,
-# but larger multi-counter AQL/PM4 packets can exceed libhsakmt's per-queue PM4
-# frame-size limit until that is raised. Keep single-counter coverage enabled
-# and disable only multi-counter integration paths on WSL/no-KFD.
+# WSL/DXG does not expose /dev/kfd and currently uses libhsakmt's vendor-packet path for
+# counter collection. Single-counter collection works, but larger multi-counter AQL/PM4
+# packets can exceed libhsakmt's per-queue PM4 frame-size limit until that is raised. Keep
+# single-counter coverage enabled and disable only multi-counter integration paths on
+# WSL/no-KFD.
 set(IS_WSL_DXG_MULTI_COUNTER_DISABLED OFF)
 if(NOT EXISTS "/dev/kfd")
     set(IS_WSL_DXG_MULTI_COUNTER_DISABLED ON)
