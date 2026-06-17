@@ -148,7 +148,7 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
             }
             continue;
         }
-        else if (inst_index == 0)
+        else if (gfxip >= 12 && inst_index == 0)
         {
             // AM
             try
@@ -158,13 +158,13 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
             catch (...)
             {};
 
-            if (!next) return {0, barrier_gap};
+            if (!next || next->line.empty()) return {0, barrier_gap};
         }
 
         line = std::move(next);
         next = nullptr;
 
-        if (!line || inst.category == WaveInstCategory::WAVE_NOT_FINISHED) break;
+        if (!line || line->line.empty() || inst.category == WaveInstCategory::WAVE_NOT_FINISHED) break;
 
         try
         {

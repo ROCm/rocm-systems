@@ -117,7 +117,7 @@ gfx10::Token TokenGenerator::next()
     // Duplicated for performance reasons. Avoiding duplication leads to worse performance.
     while (byte_ptr < BUFFER_SIZE || current)
     {
-        if (bits_toread/8 + byte_ptr > BUFFER_SIZE) break;
+        if (bits_toread / 8 + byte_ptr > BUFFER_SIZE) break;
 
         readOne_safe400();
 

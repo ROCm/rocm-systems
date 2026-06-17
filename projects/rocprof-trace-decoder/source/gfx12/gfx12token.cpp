@@ -97,7 +97,7 @@ gfx10::Token TokenGenerator::next()
     // Safe reads when the buffer is not padded. TODO: Avoid duplication.
     while (bufferValid_unsafe())
     {
-        if (bits_toread + bit_ptr > 8*BUFFER_SIZE) break;
+        if (bits_toread + bit_ptr > 8 * BUFFER_SIZE) break;
 
         readOne_safe();
 
@@ -147,7 +147,7 @@ gfx10::Token TokenGenerator::next()
     }
 
     current = 0;
-    bit_ptr = 8*BUFFER_SIZE;
+    bit_ptr = 8 * BUFFER_SIZE;
     return Token{0, 0, RdnaType::TIMESTAMP};
 }
 
