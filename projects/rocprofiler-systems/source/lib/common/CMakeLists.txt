@@ -14,6 +14,16 @@ add_library(
     ALIAS rocprofiler-systems-common-library
 )
 
+# Query clang for host target triple for defines.h
+# This is useful when LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON and
+# the openmp libraries are installed one level deeper in lib/<host-target-triple>.
+execute_process(
+    COMMAND "${ROCM_PATH}/lib/llvm/bin/amdclang" --print-target-triple
+    OUTPUT_VARIABLE LLVM_HOST_TRIPLE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY
+)
+
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/defines.h.in
     ${CMAKE_CURRENT_BINARY_DIR}/defines.h

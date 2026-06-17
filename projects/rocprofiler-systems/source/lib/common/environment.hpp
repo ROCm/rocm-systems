@@ -439,8 +439,10 @@ discover_llvm_libdir_for_ompt()
     }
     push_unique(rocm_dir + "/llvm/lib");
     push_unique(rocm_dir + "/lib/llvm/lib");
+    push_unique(rocm_dir + "/lib/llvm/lib/" + std::string{ROCPROFSYS_ROCM_LLVM_HOST_TRIPLE});
     push_unique("/opt/rocm/llvm/lib");
     push_unique("/opt/rocm/lib/llvm/lib");
+    push_unique("/opt/rocm/lib/llvm/lib/" + std::string{ROCPROFSYS_ROCM_LLVM_HOST_TRIPLE});
 
     auto has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
