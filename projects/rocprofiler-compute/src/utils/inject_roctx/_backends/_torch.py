@@ -26,8 +26,6 @@ from typing import Any, Callable, Optional
 from utils.inject_roctx import _core
 from utils.inject_roctx._core import (
     _marker_only_init_wrapper,
-    _pop_scope,
-    _push_scope,
     _walk_subclasses,
     get_context_stack,
     get_marker_stack,
@@ -133,9 +131,86 @@ class _RecordFnHook:
             pass
 
 
+# The native C++ RecordFunction tier, installed by _initialize_c_tier().
+_native_hook: Optional[_RecordFnHook] = None
+
+
+def _get_tier_stack() -> list[bool]:
+    # Per-frame record of the tier that handled each push: True for the native
+    # C++ RecordFunction tier, False for the Python tier.
+    if not hasattr(_thread_local, "tier_stack"):
+        _thread_local.tier_stack = []
+    return _thread_local.tier_stack
+
+
+def _push_scope(marker: str, context: str, backend: str = "") -> None:
+    """Push a scope, routing through the native C++ RecordFunction tier when
+    active and otherwise emitting on the Python tier.
+    """
+    marker_stack = get_marker_stack()
+    context_stack = get_context_stack()
+    tier_stack = _get_tier_stack()
+
+    used_native = False
+    hook = _native_hook
+    if hook is not None and hook.active():
+        try:
+            used_native = bool(hook.push(marker, context, backend))
+        except Exception:
+            used_native = False
+
+    if not used_native:
+        full = _core.compose_marker(marker, context, backend)
+        range_push, _ = _core.get_python_tier_io()
+        range_push(full)
+
+    snapshot_len = len(tier_stack)
+    try:
+        tier_stack.append(used_native)
+        marker_stack.append(marker)
+        context_stack.append(context)
+    except Exception:
+        del tier_stack[snapshot_len:]
+        del marker_stack[snapshot_len:]
+        del context_stack[snapshot_len:]
+        try:
+            if used_native and _native_hook is not None:
+                _native_hook.pop()
+            else:
+                _, range_pop = _core.get_python_tier_io()
+                range_pop()
+        except Exception:
+            pass
+        raise
+
+
+def _pop_scope() -> None:
+    """Pop a scope, routing to the tier that handled its push."""
+    marker_stack = get_marker_stack()
+    context_stack = get_context_stack()
+    tier_stack = _get_tier_stack()
+
+    # Unmatched pop: no-op.
+    if not tier_stack:
+        return
+
+    used_native = tier_stack.pop()
+    try:
+        if used_native and _native_hook is not None:
+            _native_hook.pop()
+        else:
+            _, range_pop = _core.get_python_tier_io()
+            range_pop()
+    finally:
+        if marker_stack:
+            marker_stack.pop()
+        if context_stack:
+            context_stack.pop()
+
+
 def _initialize_c_tier() -> bool:
     """Load and install roctx_recordfn.so once per process."""
-    global _roctx_recordfn, _USING_C_TIER, _C_TIER_INITIALIZED
+    global _roctx_recordfn, _USING_C_TIER, _C_TIER_INITIALIZED, _native_hook
 
     if _C_TIER_INITIALIZED:
         return _USING_C_TIER
@@ -167,7 +242,7 @@ def _initialize_c_tier() -> bool:
                 ),
             )
             _USING_C_TIER = True
-            _core.set_native_tier_hook(_RecordFnHook())
+            _native_hook = _RecordFnHook()
             return True
         except Exception as exc:
             console_warning(
@@ -223,7 +298,11 @@ def patch_distributed_collectives() -> None:
                 dist,
                 fn_name,
                 roctx_wrapper(
-                    fn, f"torch.distributed.{fn_name}", backend=_BACKEND_NAME
+                    fn,
+                    f"torch.distributed.{fn_name}",
+                    backend=_BACKEND_NAME,
+                    push=_push_scope,
+                    pop=_pop_scope,
                 ),
             )
             wrapped.append(fn_name)
@@ -253,6 +332,8 @@ def patch_distributed_collectives() -> None:
                         fn,
                         f"torch.distributed._functional_collectives.{fn_name}",
                         backend=_BACKEND_NAME,
+                        push=_push_scope,
+                        pop=_pop_scope,
                     ),
                 )
                 wrapped.append(f"_functional_collectives.{fn_name}")
@@ -292,7 +373,13 @@ def patch_process_group_methods() -> None:
                 continue
             try:
                 marker = f"ProcessGroup.{cls.__name__}.{method_name}"
-                wrapped = roctx_wrapper(fn, marker, backend=_BACKEND_NAME)
+                wrapped = roctx_wrapper(
+                    fn,
+                    marker,
+                    backend=_BACKEND_NAME,
+                    push=_push_scope,
+                    pop=_pop_scope,
+                )
                 setattr(cls, method_name, wrapped)
                 wrapped_method_count["count"] += 1
             except Exception as exc:
@@ -364,7 +451,13 @@ def patch_cuda_graph() -> None:
             continue
         try:
             marker = f"torch.cuda.CUDAGraph.{method_name}"
-            wrapped = roctx_wrapper(fn, marker, backend=_BACKEND_NAME)
+            wrapped = roctx_wrapper(
+                fn,
+                marker,
+                backend=_BACKEND_NAME,
+                push=_push_scope,
+                pop=_pop_scope,
+            )
             setattr(cls, method_name, wrapped)
             wrapped_methods.append(method_name)
         except Exception as exc:
@@ -703,7 +796,13 @@ def wrap_module_function(
         return False
     if getattr(fn, "_roctx_wrapped", False):
         return True
-    wrapped = roctx_wrapper(fn, marker_name, backend=_BACKEND_NAME)
+    wrapped = roctx_wrapper(
+        fn,
+        marker_name,
+        backend=_BACKEND_NAME,
+        push=_push_scope,
+        pop=_pop_scope,
+    )
     try:
         setattr(module, attr_name, wrapped)
     except Exception as exc:
@@ -879,7 +978,11 @@ def install_tensor_method_wrappers() -> None:
             continue
         try:
             wrapped_fn = roctx_wrapper(
-                fn, f"torch.Tensor.{method_name}", backend=_BACKEND_NAME
+                fn,
+                f"torch.Tensor.{method_name}",
+                backend=_BACKEND_NAME,
+                push=_push_scope,
+                pop=_pop_scope,
             )
             setattr(torch.Tensor, method_name, wrapped_fn)
             wrapped.append(method_name)
@@ -924,11 +1027,18 @@ def install_extra_structural_wrappers() -> None:
                 # inherited from object.
                 if init is object.__init__:
                     cls.__init__ = _marker_only_init_wrapper(
-                        f"torch.cuda.{cls_name}", backend=_BACKEND_NAME
+                        f"torch.cuda.{cls_name}",
+                        backend=_BACKEND_NAME,
+                        push=_push_scope,
+                        pop=_pop_scope,
                     )
                 else:
                     wrapped_init = roctx_wrapper(
-                        init, f"torch.cuda.{cls_name}", backend=_BACKEND_NAME
+                        init,
+                        f"torch.cuda.{cls_name}",
+                        backend=_BACKEND_NAME,
+                        push=_push_scope,
+                        pop=_pop_scope,
                     )
                     cls.__init__ = wrapped_init
                 wrapped.append(f"torch.cuda.{cls_name}")

@@ -274,11 +274,32 @@ def core_with_python_tier():
     pushed: list[str] = []
     popped: list[None] = []
     _core.set_python_tier_io(push=pushed.append, pop=lambda: popped.append(None))
-    _core.set_native_tier_hook(None)
-    for attr in ("marker_stack", "context_stack", "tier_stack"):
+    for attr in ("marker_stack", "context_stack"):
         if hasattr(_core._thread_local, attr):
             delattr(_core._thread_local, attr)
     return _core, pushed, popped
+
+
+@pytest.fixture
+def torch_backend_tiers():
+    """Return ``_torch`` wired to in-memory Python-tier sinks with empty stacks."""
+    from utils.inject_roctx import _core
+    from utils.inject_roctx._backends import _torch
+
+    pushed: list[str] = []
+    popped: list[None] = []
+    _core.set_python_tier_io(push=pushed.append, pop=lambda: popped.append(None))
+    for attr in ("marker_stack", "context_stack"):
+        if hasattr(_core._thread_local, attr):
+            delattr(_core._thread_local, attr)
+    if hasattr(_torch._thread_local, "tier_stack"):
+        delattr(_torch._thread_local, "tier_stack")
+    saved_hook = _torch._native_hook
+    _torch._native_hook = None
+    try:
+        yield _torch, pushed, popped
+    finally:
+        _torch._native_hook = saved_hook
 
 
 def test_push_scope_appends_backend_suffix(core_with_python_tier):
@@ -295,8 +316,8 @@ def test_push_scope_omits_suffix_when_backend_empty(core_with_python_tier):
     assert pushed == ["op:#1@x:1"]
 
 
-def test_push_scope_routes_to_native_tier_when_active(core_with_python_tier):
-    core, pushed, _ = core_with_python_tier
+def test_torch_push_scope_routes_to_native_tier_when_active(torch_backend_tiers):
+    torch_backend, pushed, _ = torch_backend_tiers
 
     seen: list[tuple] = []
 
@@ -311,18 +332,15 @@ def test_push_scope_routes_to_native_tier_when_active(core_with_python_tier):
         def pop(self):
             pass
 
-    core.set_native_tier_hook(Hook())
-    try:
-        core._push_scope("op", "#1@x:1", backend="torch")
-    finally:
-        core.set_native_tier_hook(None)
+    torch_backend._native_hook = Hook()
+    torch_backend._push_scope("op", "#1@x:1", backend="torch")
 
     assert seen == [("op", "#1@x:1", "torch")]
     assert pushed == []
 
 
-def test_pop_scope_routes_each_frame_to_its_originating_tier(core_with_python_tier):
-    core, pushed, popped = core_with_python_tier
+def test_torch_pop_scope_routes_each_frame_to_its_originating_tier(torch_backend_tiers):
+    torch_backend, pushed, popped = torch_backend_tiers
 
     native_pops: list[None] = []
 
@@ -339,15 +357,12 @@ def test_pop_scope_routes_each_frame_to_its_originating_tier(core_with_python_ti
             native_pops.append(None)
 
     hook = Hook()
-    core.set_native_tier_hook(hook)
-    try:
-        core._push_scope("native_op", "#1@x:1", backend="torch")
-        hook.active_flag = False
-        core._push_scope("py_op", "#2@x:2", backend="torch")
-        core._pop_scope()
-        core._pop_scope()
-    finally:
-        core.set_native_tier_hook(None)
+    torch_backend._native_hook = hook
+    torch_backend._push_scope("native_op", "#1@x:1", backend="torch")
+    hook.active_flag = False
+    torch_backend._push_scope("py_op", "#2@x:2", backend="torch")
+    torch_backend._pop_scope()
+    torch_backend._pop_scope()
 
     assert pushed == ["native_op/py_op:#1@x:1/#2@x:2|torch"]
     assert popped == [None]
