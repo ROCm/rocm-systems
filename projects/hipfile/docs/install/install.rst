@@ -1,0 +1,211 @@
+
+.. meta::
+   :description: Installation instructions for hipFile, including prerequisites, package installation, and building from source.
+   :keywords: hipFile, install, ROCm, build, CMake, GPU IO, AMD, direct storage
+
+
+
+***************
+Install hipFile
+***************
+
+Before you begin, verify that your system is supported. For more information,
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
+
+Prerequisites
+=============
+
+hipFile requires the following software to build and run:
+
+- ``ROCm`` with ``hsa-runtime64`` and HIP runtime
+- ``CMake`` 3.21 or later
+- ``C++17`` compiler (Clang or GCC)
+- ``libmount`` (from ``util-linux``)
+- Linux kernel with P2PDMA support
+
+For Python bindings:
+
+* Python 3.12 or later
+* Cython
+
+
+Install the ROCm core SDK
+=========================
+
+hipFile is included with the AMD ROCm Core SDK on Linux. For the most complete
+installation, use the ``amdrocm-core-sdk`` meta package.
+
+For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
+selector panel on that page to view instructions appropriate for your system
+environment.
+
+Install on Linux
+================
+
+.. note::
+
+   The exact ``amdrocm-*`` group package name for hipFile could not be
+   determined from the available packaging files. Verify the correct
+   package name with the latest ROCm release documentation before
+   installing.
+
+If you want to install hipFile as part of a library group (a subset of the
+ROCm Core SDK) without additional ROCm libraries and tools, use the
+appropriate ``amdrocm-*`` meta package.
+
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+   install dependencies and configure GPU access permissions.
+
+2. Install the package that matches your desired ROCm version, development
+   package needs, and AMD GPU architecture. Package names use the following
+   format:
+
+   .. code-block:: shell-session
+
+      amdrocm-<group><-dev/-devel><rocm_version><-llvm_target>
+
+   Where:
+
+   * ``<-dev/-devel>`` specifies whether to install library files and headers.
+     Omit this suffix to install only runtime packages.
+
+     * ``-dev`` is used on Debian-based distributions, including Ubuntu.
+     * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
+
+   * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+     suffix to install the latest available version.
+
+   * ``<-llvm_target>`` (starting with ``gfx``) is used if you are installing
+     for a single AMD GPU architecture. Omit this to install for all
+     architectures at the cost of disk space.
+
+Building from source
+====================
+
+Source download
+---------------
+
+hipFile lives in the ``rocm-systems`` super-repository. Use a sparse checkout
+to fetch only the hipFile project:
+
+.. code:: shell
+
+   git clone --filter=blob:none --sparse \
+       https://github.com/ROCm/rocm-systems.git
+   cd rocm-systems
+   git sparse-checkout set projects/hipfile
+
+Library dependencies
+--------------------
+
+The CMake configuration step automatically locates the required packages:
+
+* ``hsa-runtime64`` — found via CMake ``find_package`` in CONFIG mode
+* ``hip`` — found via CMake ``find_package`` in CONFIG mode
+
+On NVIDIA platforms, the following are also required:
+
+* ``CUDAToolkit`` — found via CMake ``find_package``
+* ``cuFile`` — the ``cufile`` shared library, located in the CUDA toolkit
+  library directory
+
+Build commands
+--------------
+
+Configure, build, and install with the standard CMake workflow:
+
+.. code:: shell
+
+   cmake -B build \
+       -DCMAKE_HIP_PLATFORM=amd \
+       -DBUILD_SHARED_LIBS=ON \
+       ..
+   cmake --build build -j
+   sudo cmake --install build
+
+By default, the install prefix is set to the value of ``ROCM_PATH``. If
+``ROCM_PATH`` is not set, it defaults to ``/opt/rocm``. You can override
+the install location with ``-DCMAKE_INSTALL_PREFIX=<path>``.
+
+CMake options
+-------------
+
+The following table lists key CMake options recognized by the hipFile build
+system. All options shown here appear in the top-level ``CMakeLists.txt``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 10 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``BUILD_SHARED_LIBS``
+     - ``ON``
+     - Build shared libraries instead of static libraries.
+   * - ``AIS_CXX_STANDARD``
+     - ``17``
+     - C++ standard to build with. Accepted values: ``17``, ``20``.
+   * - ``CMAKE_HIP_PLATFORM``
+     - ``amd``
+     - Target HIP platform. Accepted values: ``amd``, ``nvidia``.
+   * - ``ROCM_PATH``
+     - ``/opt/rocm``
+     - Path to the ROCm installation. Also used as the default install prefix.
+   * - ``ROCM_VERSION``
+     - Auto-detected
+     - ROCm version to build against. Read from ``$ROCM_PATH/.info/version``
+       if not specified.
+   * - ``AIS_INSTALL_EXAMPLES``
+     - ``ON``
+     - Build and install example programs (such as ``aiscp``).
+   * - ``AIS_INSTALL_TOOLS``
+     - ``ON``
+     - Build and install tool programs (such as ``ais-stats``). AMD platform
+       only.
+   * - ``AIS_BUILD_DOCS``
+     - See ``AISDocumentation`` module
+     - Generate API documentation with Doxygen.
+   * - ``AIS_USE_CODE_COVERAGE``
+     - ``OFF``
+     - Build with LLVM code-coverage instrumentation.
+   * - ``BUILD_TESTING``
+     - ``ON``
+     - Build the test suite (uses CTest).
+
+NVIDIA platform build
+^^^^^^^^^^^^^^^^^^^^^
+
+To build for an NVIDIA platform, set ``CMAKE_HIP_PLATFORM`` to ``nvidia``.
+The build requires the CUDAToolkit and the cuFile library:
+
+.. code-block:: shell
+
+   cmake -B build \
+       -DCMAKE_HIP_PLATFORM=nvidia \
+       ..
+   cmake --build build -j
+
+Python bindings
+---------------
+
+hipFile provides Python bindings built with Cython. The bindings have their
+own CMake project under ``python/`` and a ``pyproject.toml`` for
+Python-ecosystem tooling.
+
+To build the Python bindings with CMake:
+
+.. code-block:: shell
+
+   cmake -B build-python python/
+   cmake --build build-python
+
+For details on using the Python API, see :doc:`/how-to/use-python-api` and
+:doc:`/reference/api-python`.
+
+Post-install configuration
+==========================
+
+hipFile uses environment variables to control runtime behavior such as IO
+backend selection and statistics collection. For a full list, see
+:doc:`/reference/hipFile-environment-variables`.
