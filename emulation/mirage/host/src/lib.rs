@@ -492,7 +492,27 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     if let Some(preload) = &injection.ld_preload {
-        injected_env.push(("LD_PRELOAD".to_string(), preload.clone()));
+        // `injection.ld_preload` is resolved against the orchestrator's
+        // *host* filesystem, but the library is bind-mounted into each
+        // node container at its in-container path (see the emulator's
+        // injection mounts, e.g. rocjitsu's `/mnt/mirage/lib/...`).
+        // Translate each colon-separated entry to its mounted container
+        // path so `ld.so` can actually preload it; passing the host path
+        // verbatim makes the in-container `ld.so` fail with "cannot be
+        // preloaded (cannot open shared object file)".
+        let container_preload = preload
+            .split(':')
+            .map(|entry| {
+                injection
+                    .mounts
+                    .iter()
+                    .find(|m| m.host_path == entry)
+                    .map(|m| m.container_path.clone())
+                    .unwrap_or_else(|| entry.to_string())
+            })
+            .collect::<Vec<_>>()
+            .join(":");
+        injected_env.push(("LD_PRELOAD".to_string(), container_preload));
     }
     injected_env.push((
         "MIRAGE_RUNTIME".to_string(),
