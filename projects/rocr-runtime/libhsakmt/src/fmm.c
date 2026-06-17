@@ -1190,9 +1190,17 @@ static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
 
 /*
  * Drop a reference on the SVM-API range covering @addr. If this was the last
- * reference, remove it from the RB tree and return its aligned base/size through
- * @out_addr/@out_size so the caller can issue the inverse SET_ATTR outside the
- * lock. Returns true if the range dropped to zero references.
+ * reference, remove it from the RB tree and return the page-aligned range that
+ * should have GPU access revoked through @out_addr/@out_size, so the caller can
+ * issue the inverse SET_ATTR outside the lock. Returns true if there is a range
+ * to revoke.
+ *
+ * Registrations are page-expanded (fmm_register_mem_svm_api rounds the base down
+ * and the end up), so two adjacent host buffers can land in distinct tree nodes
+ * that still share a boundary page. Unconditionally issuing NO_ACCESS for the whole
+ * [base, base+size) would clobber a shared head/tail page that a surviving
+ * neighbor still owns, faulting that neighbor. We therefore trim a shared head
+ * and/or tail page off the revoke range.
  */
 static bool svm_api_range_put(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
 			      void **out_addr, uint64_t *out_size)
@@ -1204,12 +1212,46 @@ static bool svm_api_range_put(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
 
 	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 	r = svm_api_range_find(fmm_ctx, aligned_addr);
-	if (r) {
-		if (--r->refcount == 0) {
-			hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, &r->node);
-			*out_addr = r->start;
-			*out_size = r->size;
-			free(r);
+	if (r && --r->refcount == 0) {
+		HSAuint64 start = (HSAuint64)r->start;
+		HSAuint64 end = start + r->size;
+		rbtree_key_t key;
+		rbtree_node_t *n;
+
+		hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, &r->node);
+		free(r);
+
+		/* Head: if the nearest preceding range extends into our first
+		 * page, that page is still owned - skip past it.
+		 */
+		key = rbtree_key(start, 0);
+		n = rbtree_lookup_nearest(&fmm_ctx->svm_api_range_tree, &key,
+					  LKP_ADDR, LEFT);
+		if (n) {
+			svm_api_range_t *p = rb_entry(n, svm_api_range_t, node);
+			HSAuint64 pend = (HSAuint64)p->start + p->size;
+
+			if (pend > start)
+				start = pend < end ? pend : end;
+		}
+
+		/* Tail: if the next range starts inside ours, it owns our last
+		 * page(s) - stop before it.
+		 */
+		key = rbtree_key(start, 0);
+		n = rbtree_lookup_nearest(&fmm_ctx->svm_api_range_tree, &key,
+					  LKP_ADDR, RIGHT);
+		if (n) {
+			svm_api_range_t *s = rb_entry(n, svm_api_range_t, node);
+			HSAuint64 sstart = (HSAuint64)s->start;
+
+			if (sstart < end)
+				end = sstart > start ? sstart : start;
+		}
+
+		if (start < end) {
+			*out_addr = (void *)start;
+			*out_size = end - start;
 			released = true;
 		}
 	}
@@ -4531,6 +4573,10 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 			void *aligned_addr;
 			uint64_t aligned_size;
 
+			/* Revoke only the pages no surviving registration still
+			 * owns, so a neighbor sharing a boundary page keeps its
+			 * GPU access.
+			 */
 			if (svm_api_range_put(fmm_ctx, address, &aligned_addr,
 					      &aligned_size))
 				fmm_unregister_mem_svm_api(ctx, aligned_addr,
