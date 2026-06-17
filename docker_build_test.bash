@@ -53,11 +53,6 @@ RCCL_ENV_COMMON="-x HSA_FORCE_FINE_GRAIN_PCIE=1 -x NCCL_DEBUG=VERSION"
 # If you bake docker-gin-plugin/libnccl-gin.so into the image (Dockerfile-rccl-gin-anvil), set
 # GIN_HOST_USE_EXTERNAL_PLUGIN=1 so we do not pass NCCL_GIN_PLUGIN=none.
 # GIN_ANVIL is NCCL_GIN_TYPE=5 (built-in); no IB needed. Skip host-proxy stanzas with RUN_GIN_HOST_PROXY=0.
-if [ "${GIN_HOST_USE_EXTERNAL_PLUGIN:-0}" = 1 ]; then
-  GIN_HOST_PROXY_EXTRA="-x NCCL_IB_DISABLE=0"
-else
-  GIN_HOST_PROXY_EXTRA="-x NCCL_GIN_PLUGIN=none -x NCCL_IB_DISABLE=0"
-fi
 
 # rccl-tests alltoall_perf: -R is local_register (0=off, 1=local, 2=symmetric ncclCommWindowRegister).
 # common.cu requires -R 2 whenever -D>0 (device/GIN kernels use ncclWindow_t from symmetric collective windows).
@@ -100,7 +95,7 @@ docker run --rm ${DOCKER_IMAGE} bash -lc "
 if [ 1 -eq 1 ]; then
 #####
 # rocSHMEM IPC alltoall (reference)
-echo "=== rocSHMEM IPC alltoall np=${NP} max_bytes=${MAX_BYTES} ==="
+echo "=== Test#1: rocSHMEM IPC alltoall np=${NP} max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
@@ -117,7 +112,7 @@ fi
 if [ 1 -eq 1 ]; then
 #####
 # RCCL AlltoAll: -D 0, (host-initiated, inter-node capable)
-echo "=== RCCL AlltoAll: -D 0, non-GIN (inter-node capable) np=${NP} max_bytes=${MAX_BYTES} ==="
+echo "=== Test#2: RCCL AlltoAll: -D 0, non-GIN (inter-node capable) np=${NP} max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
@@ -137,10 +132,41 @@ docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
 set +x
 fi
 
-if [ "${RUN_GIN_HOST_PROXY:-1}" -eq 1 ]; then
+if [ 1 -eq 1 ]; then
+# RCCL AlltoAll: -D 0, (host-initiated, inter-node capable)
+echo "=== Test#2b: RCCL AlltoAll: -D 0, non-GIN (inter-node capable) np=${NP} max_bytes=${MAX_BYTES} ==="
+set -x
+# srun --jobid=14348 -N 1 -n 8 --ntasks-per-node=8 --mpi=pmix --export=ALL,LD_LIBRARY_PATH=/opt/sre-tools/ompi/lib:/home/prmuruge/ROCm/rocm-systems/workspace/rccl/lib:/apps/prmuruge/rocm-7.13/lib:${LD_LIBRARY_PATH:-},UCX_TLS=tcp,UCX_NET_DEVICES=fenic0,NCCL_SOCKET_IFNAME=fenic0,ROCSHMEM_BACKEND=ipc,ROCSHMEM_DISABLE_MIXED_IPC=1,RCCL_ROCSHMEM_ENABLE=0,ROCSHMEM_SDMA_ENABLED=1,ROCSHMEM_GDA_ENABLE_DMABUF=0,RCCL_ROCSHMEM_THRESHOLD=134217728,NCCL_DEBUG=WARN,NCCL_GIN_ENABLE=1,NCCL_GIN_TYPE=5,NCCL_DEBUG_SUBSYS=INIT,NET,NCCL_CUMEM_ENABLE=1,RCCL_ENABLE_INTRANET=1,NCCL_DMABUF_ENABLE=1,NCCL_MSCCL_ENABLE=0,HSA_NO_SCRATCH_RECLAIM=1 /home/prmuruge/ROCm/rocm-systems/workspace/rccl-tests/alltoall_perf -b 128 -e 128M -f 2 -g 1 -R 2 -D 0 -A 1 -M 1
+docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
+  mpirun ${MPIRUN_BASE} \
+  ${RCCL_ENV_COMMON} \
+  -x UCX_TLS=tcp \
+  -x UCX_NET_DEVICES=fenic0 \
+  -x NCCL_SOCKET_IFNAME=fenic0 \
+  -x ROCSHMEM_BACKEND=ipc \
+  -x ROCSHMEM_DISABLE_MIXED_IPC=1 \
+  -x RCCL_ROCSHMEM_ENABLE=0 \
+  -x ROCSHMEM_SDMA_ENABLED=1 \
+  -x ROCSHMEM_GDA_ENABLE_DMABUF=0 \
+  -x RCCL_ROCSHMEM_THRESHOLD=134217728 \
+  -x NCCL_DEBUG=WARN \
+  -x NCCL_GIN_ENABLE=1 \
+  -x NCCL_GIN_TYPE=5 \
+  -x NCCL_DEBUG_SUBSYS=INIT,NET \
+  -x NCCL_CUMEM_ENABLE=1 \
+  -x RCCL_ENABLE_INTRANET=1 \
+  -x NCCL_DMABUF_ENABLE=1 \
+  -x NCCL_MSCCL_ENABLE=0 \
+  -x HSA_NO_SCRATCH_RECLAIM=1 \
+  /workspace/rccl-tests/alltoall_perf \
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 0 -A 1 -M 1
+set +x
+fi
+
+if [ 1 -eq 1 ]; then
 #####
 # RCCL AlltoAll: -D 2, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only)
-echo "=== RCCL AlltoAll: -D 2, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only) np=${NP} max_bytes=${MAX_BYTES} ==="
+echo "=== Test#3: RCCL AlltoAll: -D 2, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only) np=${NP} max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
@@ -149,7 +175,7 @@ docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=2 \
-  ${GIN_HOST_PROXY_EXTRA} \
+  -x NCCL_IB_DISABLE=0 \
   -x NCCL_DEBUG_SUBSYS=INIT,NET \
   -x NCCL_CUMEM_ENABLE=1 \
   -x RCCL_ENABLE_INTRANET=1 \
@@ -163,10 +189,10 @@ set +x
 fi
 
 # NCCL_GIN_TYPE=2 + -D 3: same host-proxy plugin as above; compare timing to GIN_ANVIL (-D 3/5, TYPE=5) below.
-if [ "${RUN_GIN_HOST_PROXY:-1}" -eq 1 ]; then
+if [ 1 -eq 1 ]; then
 #####
 # RCCL AlltoAll: -D 3, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only)
-echo "=== RCCL AlltoAll: -D 3, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only) np=${NP} max_bytes=${MAX_BYTES} ==="
+echo "=== Test#4: RCCL AlltoAll: -D 3, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only) np=${NP} max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
@@ -175,7 +201,7 @@ docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=2 \
-  ${GIN_HOST_PROXY_EXTRA} \
+  -x NCCL_IB_DISABLE=0 \
   -x NCCL_DEBUG_SUBSYS=INIT,NET \
   -x NCCL_CUMEM_ENABLE=1 \
   -x RCCL_ENABLE_INTRANET=1 \
@@ -192,7 +218,7 @@ fi
 if [ 1 -eq 1 ]; then
 #####
 # RCCL AlltoAll: -D 3, GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA path
-echo "=== RCCL AlltoAll: -D 3, GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA np=${NP} max_bytes=${MAX_BYTES} ==="
+echo "=== Test#5: RCCL AlltoAll: -D 3, GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA np=${NP} max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
@@ -218,7 +244,7 @@ fi
 if [ 1 -eq 1 ]; then
 #####
 # RCCL AlltoAll: -D 4, GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA path
-echo "=== RCCL AlltoAll: -D 4, GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA np=${NP} max_bytes=${MAX_BYTES} ==="
+echo "=== Test#6: RCCL AlltoAll: -D 4, GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA np=${NP} max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
@@ -244,7 +270,7 @@ fi
 if [ 1 -eq 1 ]; then
 # --- RCCL AlltoAll with GIN_ANVIL (NCCL_GIN_TYPE=5, intra-node MI300 xGMI SDMA)
 # Matches Dockerfile-rccl-gin-anvil example; single-node only (no IB device required).
-echo "=== RCCL AlltoAll: -D 3, GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
+echo "=== Test#7: RCCL AlltoAll: -D 3, GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
@@ -267,7 +293,7 @@ fi
 if [ 1 -eq 1 ]; then
 # --- RCCL AlltoAll with GIN_ANVIL (NCCL_GIN_TYPE=5, intra-node MI300 xGMI SDMA)
 # Matches Dockerfile-rccl-gin-anvil example; single-node only (no IB device required).
-echo "=== RCCL AlltoAll: -D 4, GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
+echo "=== Test#8: RCCL AlltoAll: -D 4, GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
@@ -293,7 +319,7 @@ if [ 1 -eq 1 ]; then
 # Single-node -D 5 uses cooperative AlltoAllLsaCopy for large slices; do not raise -V beyond defaults
 # without matching devComm barrier counts — oversubscribing CTAs regresses badly on MI355-class nodes.
 # Matches Dockerfile-rccl-gin-anvil example; single-node only (no IB device required).
-echo "=== RCCL AlltoAll: -D 5, GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
+echo "=== Test#9: RCCL AlltoAll: -D 5, GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
@@ -316,7 +342,7 @@ set +x
 fi
 
 if [ 1 -eq 1 ]; then
-echo "=== RCCL AlltoAll: -D 5, GIN_ANVIL (NCCL_GIN_TYPE=5, NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS=2) np=${NP} max_bytes=${MAX_BYTES} ==="
+echo "=== Test#10: RCCL AlltoAll: -D 5, GIN_ANVIL (NCCL_GIN_TYPE=5, NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS=2) np=${NP} max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
@@ -344,7 +370,7 @@ if [ 1 -eq 1 ]; then
 # GIN_ANVIL (NCCL_GIN_TYPE=5) is single-node only (gin_host_anvil.cc). With nnodes>1, RCCL
 # emits WARN + ncclInvalidUsage. Multi-node: run standard alltoall (-D 0) instead.
 if [[ "${NNODES}" -gt 1 ]]; then
-echo "=== RCCL AlltoAll: -D 0 (hostfile, nnodes=${NNODES} PPN=${PPN}; GIN_ANVIL skipped, single-node only) max_bytes=${MAX_BYTES} ==="
+echo "=== Test#11: RCCL AlltoAll: -D 0 (hostfile, nnodes=${NNODES} PPN=${PPN}; GIN_ANVIL skipped, single-node only) max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE_HFILE} \
@@ -363,7 +389,7 @@ docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 0 -A 1
 set +x
 else
-echo "=== RCCL AlltoAll: -D 5, GIN_ANVIL (NCCL_GIN_TYPE=5) nnodes=${NNODES} PPN=${PPN} max_bytes=${MAX_BYTES} ==="
+echo "=== Test#12: RCCL AlltoAll: -D 5, GIN_ANVIL (NCCL_GIN_TYPE=5) nnodes=${NNODES} PPN=${PPN} max_bytes=${MAX_BYTES} ==="
 set -x
 docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE_HFILE} \
