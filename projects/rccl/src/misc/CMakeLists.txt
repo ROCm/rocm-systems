@@ -36,7 +36,6 @@ list(APPEND MISC_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/api_trace.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/ionicdvsymbols.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/ionicdvwrap.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/npkit.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/nvmlwrap_stub.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/rocmwrap.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/roctx.cc
