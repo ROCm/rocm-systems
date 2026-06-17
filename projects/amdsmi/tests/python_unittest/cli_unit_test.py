@@ -1178,12 +1178,20 @@ class TestAmdSmiCli(unittest.TestCase):
                             self.PASS,
                         )
                     )
-                    # The lower bound is inclusive: setting the power cap to the
-                    # exact minimum must succeed.
-                    min_power = _power_type["min_power_limit"]["value"]
+                    # Both bounds are inclusive: the exact min and max must
+                    # succeed. A reported min of 0 means the technical minimum
+                    # is 1, since setting 0 reads back the current cap.
+                    min_power = max(_power_type["min_power_limit"]["value"], 1)
+                    max_power = _power_type["max_power_limit"]["value"]
                     cmds.append(
                         (
                             f"amd-smi set --power-cap {min_power} {power_type} --gpu {index}",
+                            self.PASS,
+                        )
+                    )
+                    cmds.append(
+                        (
+                            f"amd-smi set --power-cap {max_power} {power_type} --gpu {index}",
                             self.PASS,
                         )
                     )
