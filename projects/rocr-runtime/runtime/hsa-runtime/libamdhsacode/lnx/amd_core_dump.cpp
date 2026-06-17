@@ -242,9 +242,8 @@ class PackageBuilder {
   std::stringstream st_;
 };
 
-// Track memory regions that should be included in lightweight coredumps (Scratch + CWSR)
+// Track memory regions that should be included in lightweight coredumps
 class MemoryRegionFilter {
-public:
   struct AddressRange {
     uint64_t start;
     uint64_t end;
@@ -269,27 +268,21 @@ public:
     return false;
   }
 
-  // Helper to check if address range overlaps with any scratch or CWSR memory ranges
+public:
+  // Check if address range overlaps with any region required for the
+  // coredump.
   bool should_include(const uint64_t& addr, const uint64_t& size) {
-    return address_in_map(scratch_ranges, addr, size) ||
-           address_in_map(code_object_ranges, addr, size);
+    return address_in_map(ranges, addr, size);
   }
 
-  void add_scratch_range(uint64_t start, size_t size) {
+  void add_range(uint64_t start, size_t size) {
     if (size > 0) {
-      scratch_ranges.emplace(start, AddressRange{start, start + size});
-    }
-  }
-
-  void add_code_object_range(uint64_t start, size_t size) {
-    if (size > 0) {
-      code_object_ranges.emplace(start, AddressRange{start, start + size});
+      ranges.emplace(start, AddressRange{start, start + size});
     }
   }
 
 private:
-  std::map<uint64_t, AddressRange> scratch_ranges;
-  std::map<uint64_t, AddressRange> code_object_ranges;
+  std::map<uint64_t, AddressRange> ranges;
 }; 
 
 // Build list of memory regions to be included in the lightweight coredump
@@ -308,7 +301,7 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
 
     if (scratch_base && scratch_size > 0) {
       // Filter will hold all of the reserved address range, even if unused 
-      filter.add_scratch_range(reinterpret_cast<uint64_t>(scratch_base), scratch_size);
+      filter.add_range(reinterpret_cast<uint64_t>(scratch_base), scratch_size);
       debug_print("Added scratch range: 0x%lx - 0x%lx (size: %zu)\n",
                   reinterpret_cast<uint64_t>(scratch_base),
                   reinterpret_cast<uint64_t>(scratch_base) + scratch_size,
@@ -319,7 +312,7 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
   // Add code object allocations from allocation_map_
   core::Runtime::runtime_singleton_->IterateCodeObjectAllocations(
     [&filter](uint64_t start, size_t size) {
-      filter.add_code_object_range(start, size);
+      filter.add_range(start, size);
       debug_print("Added code object range: 0x%lx - 0x%lx (size: %zu)\n",
                     start, start + size, size);
   });
@@ -580,7 +573,7 @@ struct LoadSegmentBuilder : public SegmentBuilder {
 
       // For lightweight dumps, keep only scratch allocations
       if (lightweight_dump && !filter.should_include(start, size)) {
-        debug_print("Skipping load 0x%lx size: %ld (Not Scratch or Code Object)\n", start, size);
+        debug_print("Skipping load 0x%lx size: %ld\n", start, size);
         continue;
       }
 
