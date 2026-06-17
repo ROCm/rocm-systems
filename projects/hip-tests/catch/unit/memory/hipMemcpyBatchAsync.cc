@@ -289,6 +289,77 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyBatchAsync_H2H_Functional, char, int,
   // Clean up
   HIP_CHECK(hipStreamDestroy(stream));
 }
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verify hipMemcpyBatchAsync with hipMemcpyFlagExtOpSwap exchanges the
+ *   contents of two device buffers.
+ * 1. Allocate two device buffers and fill with distinct values.
+ * 2. Issue hipMemcpyBatchAsync with swap attribute.
+ * 3. Read back both buffers and verify values are exchanged.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_cp) {
+  constexpr size_t kNumElements = 4096;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kValA = 42;
+  constexpr int kValB = 99;
+
+  // Allocate device buffers
+  void* d_a = nullptr;
+  void* d_b = nullptr;
+  HIP_CHECK(hipMalloc(&d_a, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_b, kSizeBytes));
+
+  // Fill with distinct values
+  std::vector<int> hostA(kNumElements, kValA);
+  std::vector<int> hostB(kNumElements, kValB);
+  HIP_CHECK(hipMemcpy(d_a, hostA.data(), kSizeBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_b, hostB.data(), kSizeBytes, hipMemcpyHostToDevice));
+
+  // Set up batch swap: dst=d_a, src=d_b with swap flag
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {d_a};
+  void* srcs[] = {d_b};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+
+  hipMemcpyAttributes attr{};
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+
+  size_t failIdx = 0;
+  hipError_t err = hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1,
+                                       &failIdx, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipFree(d_a));
+    HIP_CHECK(hipFree(d_b));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(err);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // Read back and verify swap
+  std::vector<int> resultA(kNumElements);
+  std::vector<int> resultB(kNumElements);
+  HIP_CHECK(hipMemcpy(resultA.data(), d_a, kSizeBytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(resultB.data(), d_b, kSizeBytes, hipMemcpyDeviceToHost));
+
+  for (size_t i = 0; i < kNumElements; i++) {
+    REQUIRE(resultA[i] == kValB);
+    REQUIRE(resultB[i] == kValA);
+  }
+
+  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK(hipFree(d_b));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
 #endif
 /**
  * Test Description

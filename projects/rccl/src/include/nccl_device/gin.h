@@ -34,6 +34,11 @@ struct ncclGin_CounterInc { ncclGinCounter_t counter; };
 
 struct ncclGin_DescriptorSmem { ncclGinDescriptorSmem* descriptor; };
 
+// Segment type tags describe the composition of a buffer's physical cuMem segments.
+struct ncclGin_SegmentDevice {};       // all segments are device-backed
+struct ncclGin_SegmentMixed {}; // mix of HOST_NUMA and device-backed segments
+struct ncclGin_SegmentHostNuma {};     // all segments are HOST_NUMA (CPU-backed)
+
 template<unsigned backendMask>
 struct ncclGin_BackendMask;
 
@@ -49,6 +54,7 @@ struct ncclGin_C {
   ncclDevComm const& comm;
   uint32_t nConnections:8, connectionId:8, _ginBackend:8;
   uint32_t contextId;
+  ncclGinResourceSharingMode resourceSharingMode;
 
   //////////////////////////////////////////////////////////////////////////////
   // internal:
@@ -56,12 +62,18 @@ struct ncclGin_C {
   uint64_t* _signalShadows;
   unsigned backendMask;
 
-  NCCL_DEVICE_INLINE ncclGin_C(ncclDevComm const& comm_, unsigned backendMask_, int contextIndex);
+  NCCL_DEVICE_INLINE ncclGin_C(ncclDevComm const& comm_, unsigned backendMask_, int contextIndex,
+                               ncclGinResourceSharingMode resourceSharingMode_ = NCCL_GIN_RESOURCE_SHARING_GPU);
 };
 
 // Helper init function that wraps placement new
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGin_C_init(
   ncclGin_C* net, unsigned backendMask, ncclDevComm const& comm, int contextIndex);
+
+// Helper init function with explicit resource sharing mode.
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGin_C_initWithResourceSharingMode(
+  ncclGin_C* net, unsigned backendMask, ncclDevComm const& comm, int contextIndex,
+  ncclGinResourceSharingMode resourceSharingMode);
 
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinPut(
   ncclGin_C* net,
@@ -174,9 +186,34 @@ struct ncclGin_BackendMask {
   ncclDevComm const& comm;
   uint32_t nConnections:8, connectionId:8, _ginBackend:8;
   uint32_t contextId;
+  // Runtime-selected resource sharing mode for this context.
+  ncclGinResourceSharingMode resourceSharingMode;
 
   // Loads GIN context into registers. Each context has one QP per peer.
-  NCCL_DEVICE_INLINE ncclGin_BackendMask(ncclDevComm const&, int contextIndex);
+  NCCL_DEVICE_INLINE ncclGin_BackendMask(
+    ncclDevComm const&, int contextIndex,
+    ncclGinResourceSharingMode resourceSharingMode_ = NCCL_GIN_RESOURCE_SHARING_GPU);
+
+  template <typename Coop = ncclCoopThread>
+  NCCL_DEVICE_INLINE void flushAsync(ncclTeam team, uint32_t peer, ncclGinRequest_t* outRequest,
+                                     Coop coop = ncclCoopThread{}, uint32_t optFlags = ncclGinOptFlagsDefault) const;
+
+  template <typename Coop = ncclCoopThread, typename DescriptorSmem = ncclGin_None>
+  NCCL_DEVICE_INLINE void wait(ncclGinRequest_t& outRequest,
+                               Coop coop = ncclCoopThread{}, DescriptorSmem descriptor = ncclGin_None{},
+                               cuda::memory_order ord = cuda::memory_order_acquire) const;
+
+  template<typename Coop = ncclCoopThread,
+           typename DescriptorSmem = ncclGin_None,
+           typename SegmentType = ncclGin_SegmentDevice>
+  NCCL_DEVICE_INLINE void get(
+    ncclTeam, int peer,
+    ncclWindow_t remoteWnd, size_t remoteOffset,
+    ncclWindow_t localWnd, size_t localOffset,
+    size_t bytes, Coop coop = ncclCoopThread{},
+    DescriptorSmem descriptor = ncclGin_None{},
+    uint32_t optFlags = ncclGinOptFlagsDefault,
+    SegmentType bufType = ncclGin_SegmentDevice{}) const;
 
   template<
     // Action to take on peer when put completes. If a signalling action is used
@@ -188,7 +225,10 @@ struct ncclGin_BackendMask {
     // Set of threads participating in this put. Must be a subset of Coop.
     typename Coop = ncclCoopThread,
     // Optional smem descriptor space to use. Either ncclGin_{None|DescriptorSmem}
-    typename DescriptorSmem = ncclGin_None
+    typename DescriptorSmem = ncclGin_None,
+    // Use ncclGin_SegmentMixed or ncclGin_SegmentHostNuma when the VA contains
+    // CPU-backed (HOST_NUMA) segments
+    typename SegmentType = ncclGin_SegmentDevice
   >
   NCCL_DEVICE_INLINE void put(
     ncclTeam, int peer,
@@ -200,7 +240,8 @@ struct ncclGin_BackendMask {
     DescriptorSmem descriptor = ncclGin_None{},
     cuda::thread_scope givenRelease = cuda::thread_scope_thread,
     cuda::thread_scope requiredRelease = cuda::thread_scope_device,
-    uint32_t optFlags = ncclGinOptFlagsDefault
+    uint32_t optFlags = ncclGinOptFlagsDefault,
+    SegmentType bufType = ncclGin_SegmentDevice{}
   ) const;
 
   template<
@@ -214,7 +255,9 @@ struct ncclGin_BackendMask {
     // Set of threads participating in this put. Must be a subset of Coop.
     typename Coop = ncclCoopThread,
     // Optional smem descriptor space to use. Either ncclGin_{None|DescriptorSmem}
-    typename DescriptorSmem = ncclGin_None
+    typename DescriptorSmem = ncclGin_None,
+    // One of ncclGin_{SegmentDevice|SegmentMixed|SegmentHostNuma}; use a non-Device tag when the VA contains CPU-backed (HOST_NUMA) segments
+    typename SegmentType = ncclGin_SegmentDevice
   >
   NCCL_DEVICE_INLINE void put(
     ncclTeam, int peer,
@@ -225,7 +268,8 @@ struct ncclGin_BackendMask {
     DescriptorSmem descriptor = ncclGin_None{},
     cuda::thread_scope givenRelease = cuda::thread_scope_thread,
     cuda::thread_scope requiredRelease = cuda::thread_scope_device,
-    uint32_t optFlags = ncclGinOptFlagsDefault
+    uint32_t optFlags = ncclGinOptFlagsDefault,
+    SegmentType bufType = ncclGin_SegmentDevice{}
   ) const;
 
   template<

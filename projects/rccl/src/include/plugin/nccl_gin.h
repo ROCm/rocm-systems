@@ -13,7 +13,6 @@
 #include "nccl_device/net_device.h"
 #include <stdint.h>
 
-#include "nccl_merge_stubs.h"
 
 #define NCCL_GIN_HANDLE_MAXSIZE 128
 #define MAX_GIN_SIZE (1024*1024*1024L) // Rather than send INT_MAX which is 2G-1, send a power of two.

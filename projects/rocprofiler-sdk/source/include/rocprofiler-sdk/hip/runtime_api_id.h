@@ -624,6 +624,12 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetManaged,
 #endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 30
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemDiscardBatchAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvMemDiscardBatchAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemDiscardAndPrefetchBatchAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 31
     ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleGetLoadingMode,
 #endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,

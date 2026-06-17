@@ -707,8 +707,16 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 30
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemDiscardBatchAsync, hipMemDiscardBatchAsync, hipMemDiscardBatchAsync_fn, dev_ptrs, sizes, count, flags, stream);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvMemDiscardBatchAsync, hipDrvMemDiscardBatchAsync, hipDrvMemDiscardBatchAsync_fn, dptrs, sizes, count, flags, stream);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemDiscardAndPrefetchBatchAsync, hipMemDiscardAndPrefetchBatchAsync, hipMemDiscardAndPrefetchBatchAsync_fn, dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync, hipDrvMemDiscardAndPrefetchBatchAsync, hipDrvMemDiscardAndPrefetchBatchAsync_fn, dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 30
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleGetLoadingMode, hipModuleGetLoadingMode, hipModuleGetLoadingMode_fn, mode);
 #endif
+
 // clang-format on
 
 #else

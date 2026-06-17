@@ -725,7 +725,7 @@ _VOP1_OP_MAP = {
     # RDNA4 renamed bit-counting ops:
     'V_CLZ_I32_U32': ('vector_unary', 'ffbh_u32'),
     'V_CTZ_I32_B32': ('vector_unary', 'ffbl'),
-    'V_CLS_I32': ('vector_unary', 'ffbh_i32'),
+    'V_CLS_I32': ('vector_unary', 'cls_i32'),
     # Pipeline / system (nop in simulation):
     'V_PIPEFLUSH': ('true_nop', None),
     # Relative addressing through M0.
