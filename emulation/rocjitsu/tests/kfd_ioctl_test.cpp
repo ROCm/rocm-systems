@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
@@ -129,14 +130,15 @@ TEST_F(KfdIoctlTest, SvmSetAndGetAttributes) {
   attrs[1].type = KFD_IOCTL_SVM_ATTR_SET_FLAGS;
   attrs[1].value = KFD_IOCTL_SVM_FLAG_GPU_EXEC;
 
-  int rc = driver_->ioctl(AMDKFD_IOC_SVM, svm_args);
+  unsigned long svm_request = rocjitsu::ioctl_with_size(AMDKFD_IOC_SVM, buffer.size());
+  int rc = driver_->ioctl(svm_request, svm_args);
   EXPECT_EQ(rc, 0);
 
   svm_args->op = KFD_IOCTL_SVM_OP_GET_ATTR;
   attrs[0].value = 0;
   attrs[1].value = 0;
 
-  rc = driver_->ioctl(AMDKFD_IOC_SVM, svm_args);
+  rc = driver_->ioctl(svm_request, svm_args);
   EXPECT_EQ(rc, 0);
   EXPECT_EQ(attrs[0].value, kGpuId);
   EXPECT_EQ(attrs[1].value, KFD_IOCTL_SVM_FLAG_GPU_EXEC);
