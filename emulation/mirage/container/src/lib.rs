@@ -376,8 +376,11 @@ impl Engine {
     ///
     /// Used to realise profile [hacks](mirage_core::profile::Hack): a
     /// derivative image is built once from the base image and then run in
-    /// place of it. The build output is captured and, on failure,
-    /// surfaced in the error so a broken `RUN` step is actionable.
+    /// place of it. The provider's build output (which can take a while —
+    /// apt updates, package installs, …) is streamed line by line to the
+    /// log at INFO so progress is visible live; the captured lines are
+    /// also retained and, on failure, surfaced in the error so a broken
+    /// `RUN` step is actionable.
     pub fn build_image(&self, tag: &str, dockerfile: &str) -> Result<()> {
         let args = vec![
             "build".to_string(),
@@ -400,7 +403,7 @@ impl Engine {
         })?;
         // Stream the Dockerfile to the build's stdin, then close it so the
         // provider proceeds.
-        use std::io::Write;
+        use std::io::{BufRead, BufReader, Write};
         if let Some(mut stdin) = child.stdin.take() {
             stdin
                 .write_all(dockerfile.as_bytes())
@@ -410,21 +413,58 @@ impl Engine {
                     source,
                 })?;
         }
-        let output = child
-            .wait_with_output()
-            .map_err(|source| ContainerError::Spawn {
-                provider: self.provider.clone(),
-                args: args.clone(),
-                source,
-            })?;
-        if output.status.success() {
+
+        // Drain stdout and stderr concurrently, logging each line at INFO
+        // as it arrives and retaining it so a failing build's output can
+        // be surfaced in the error. Build providers write most progress
+        // to stderr, so both streams are followed.
+        fn log_stream<R: std::io::Read + Send + 'static>(
+            reader: Option<R>,
+            tag: String,
+        ) -> (
+            std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+            Option<std::thread::JoinHandle<()>>,
+        ) {
+            let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+            let lines_for_thread = lines.clone();
+            let handle = reader.map(|r| {
+                std::thread::spawn(move || {
+                    for line in BufReader::new(r).lines().map_while(std::result::Result::ok) {
+                        tracing::info!(image = %tag, "{line}");
+                        lines_for_thread.lock().unwrap().push(line);
+                    }
+                })
+            });
+            (lines, handle)
+        }
+        let (out_lines, out_handle) = log_stream(child.stdout.take(), tag.to_string());
+        let (err_lines, err_handle) = log_stream(child.stderr.take(), tag.to_string());
+
+        let status = child.wait().map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.clone(),
+            source,
+        })?;
+        if let Some(h) = out_handle {
+            let _ = h.join();
+        }
+        if let Some(h) = err_handle {
+            let _ = h.join();
+        }
+
+        if status.success() {
             Ok(())
         } else {
+            // Prefer stderr (where build errors land); fall back to stdout.
+            let mut captured = err_lines.lock().unwrap().join("\n");
+            if captured.trim().is_empty() {
+                captured = out_lines.lock().unwrap().join("\n");
+            }
             Err(ContainerError::Command {
                 provider: self.provider.clone(),
                 args,
-                code: output.status.code().unwrap_or(-1),
-                stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                code: status.code().unwrap_or(-1),
+                stderr: captured.trim().to_string(),
             })
         }
     }

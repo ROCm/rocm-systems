@@ -602,25 +602,20 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         mirage_core::profile::hacks_dockerfile(&def.image, &def.hacks),
     ) {
         if engine.image_present(&tag) {
-            publish_health(
-                layout,
-                false,
-                "building",
-                Some(format!("derived image {tag} already built; skipping build")),
-            )?;
+            let msg = format!("derived image {tag} already built; skipping build");
+            tracing::info!(image = %tag, "{msg}");
+            publish_health(layout, false, "building", Some(msg))?;
         } else {
-            publish_health(
-                layout,
-                false,
-                "building",
-                Some(format!(
-                    "building derived image {tag} from {} (this can take a while)…",
-                    def.image
-                )),
-            )?;
+            let msg = format!(
+                "building derived image {tag} from {} (this can take a while)…",
+                def.image
+            );
+            tracing::info!(image = %tag, base = %def.image, hacks = ?def.hacks, "{msg}");
+            publish_health(layout, false, "building", Some(msg))?;
             engine.build_image(&tag, &dockerfile).map_err(|e| {
                 MirageError::other(format!("building derived image {tag} failed: {e}"))
             })?;
+            tracing::info!(image = %tag, "derived image built");
         }
         def.image = tag;
     }
@@ -661,8 +656,10 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
             |phase| {
                 // Mirror each bring-up phase into session health so
                 // clients see live, detailed progress (pulling the image,
-                // creating the network, starting each node).
+                // creating the network, starting each node), and log it
+                // at INFO so it's visible in the host log too.
                 let (state, message) = phase.health();
+                tracing::info!(state, "{message}");
                 let _ = publish_health(layout, false, state, Some(message));
                 *last_phase.borrow_mut() = Some(phase);
             },

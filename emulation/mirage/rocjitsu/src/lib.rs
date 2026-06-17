@@ -345,6 +345,11 @@ fn kmd_search_dirs() -> Vec<PathBuf> {
                 ))
                 .collect::<PathBuf>()
         }));
+        // Install layout: a `<prefix>/bin/mirage` finds its sibling
+        // `<prefix>/lib/librocjitsu.so` (e.g. both installed to /opt/rocm
+        // by scripts/mirage-docker-build.sh). Searched via KMD_LIB_NAMES,
+        // so a combined `librocjitsu.so` is picked up here too.
+        dirs.push(exe_dir.join("..").join("lib"));
     }
     // ROCm install root.
     if let Some(root) = std::env::var_os("ROCM_HOME").filter(|v| !v.is_empty()) {
