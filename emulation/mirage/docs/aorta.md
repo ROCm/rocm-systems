@@ -75,10 +75,12 @@ virtualenv==21.1.0
 ## test 1
 ```
 
-cd /home/arosa/rocm-systems/emulation/mirage && source .venv/bin/activate 2>/dev/null && mirage run --profile mi350x --gpus-per-node 2 --daemon \
+cd emulation/mirage
+
+source .venv/bin/activate && cargo run -- run --profile mi350x --daemon \
   --env RANK=0 --env WORLD_SIZE=1 --env LOCAL_RANK=0 \
   --env MASTER_ADDR=127.0.0.1 --env MASTER_PORT=29500 \
-  -- $(which aorta) triage run --recipe recipes/example-llm-determinism-smoke.yaml
+  -- $(which aorta) triage run --verbose --recipe recipes/example-llm-determinism-smoke.yaml
 ```
 
 ## test 2
