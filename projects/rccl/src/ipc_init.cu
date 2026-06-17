@@ -6,6 +6,7 @@
 
 #include "ipc_init.h"
 
+#include "archinfo.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -38,8 +39,19 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   // - multi-node runs
   // - not using 1 process per GPU
   // - MNNVL (fabric-based P2P)
+  // - the arch is not one the DDA algorithm actually runs on. The dispatch path
+  //   (rcclDdaEnabled() in collectives.cc) only enables DDA on gfx942/gfx950; on
+  //   every other arch the algorithm is never selected, so allocating the IPC
+  //   scratch/barrier here is not necessary. On gfx12xx (RDNA4) the
+  //   uncached-memory IPC export fails (hipIpcGetMemHandle -> hipErrorInvalidValue),
+  //   which aborts comm init entirely. Gate init to match dispatch.
+  const bool ddaArchSupported =
+      comm->archName != nullptr &&
+      (IsArchMatch(comm->archName, "gfx942") ||
+       IsArchMatch(comm->archName, "gfx950"));
   if (comm->nRanks != kDdaNranks || comm->nNodes != 1 ||
-      comm->bootstrap == nullptr || comm->directMode || comm->MNNVL) {
+      comm->bootstrap == nullptr || comm->directMode || comm->MNNVL ||
+      !ddaArchSupported) {
     return ncclSuccess;
   }
 
