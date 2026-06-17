@@ -104,8 +104,10 @@ Wave instruction mix
 
    The **Instructions - Dual VALU (VOPD)** row counts ``SQ_INSTS_DUAL_VALU_WAVE32`` —
    the number of VOPD-encoded wave32 instructions issued per normalization unit.
-   Each unit corresponds to one dual-issue VALU slot consumed, so a workload that
-   saturates VOPD will show this counter approaching the total VALU instruction count.
+   Each unit corresponds to one dual-issue VALU slot consumed; kernels that use VOPD
+   heavily typically show a large value relative to the **Instructions - VALU** row.
+   The exact ratio depends on ISA counting semantics for paired operations, so treat
+   the two rows as complementary signals rather than a fixed ceiling relationship.
    For peak-rate theory and FLOPs ceilings see :ref:`rdna-dual-issue-valu`.
 
 VMEM instruction mix
