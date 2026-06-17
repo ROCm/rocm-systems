@@ -4,7 +4,7 @@
 #pragma once
 
 #include "core/agent_manager.hpp"
-#include "core/output_file_registry.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/sample_type.hpp"
 

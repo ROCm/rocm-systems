@@ -21,9 +21,8 @@
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
-#include "core/output/emit_summary.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/output/perfetto_log_filter.hpp"
-#include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/progress/bar.hpp"
 #include "core/progress/callback.hpp"
@@ -107,15 +106,7 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
-// Library-load timestamp captured on first access. Used for the
-// Output Summary duration because metadata_registry's start/end
-// fields are std::uint32_t and lose precision for runs > ~4.29 s.
-const std::chrono::steady_clock::time_point&
-lib_load_steady_time()
-{
-    static const auto t = std::chrono::steady_clock::now();
-    return t;
-}
+const auto         library_load_time = std::chrono::steady_clock::now();
 std::atomic<bool>  rocprofsys_init_library_done{ false };
 std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
 std::atomic<bool>  rocprofsys_finalization_done{ false };
@@ -492,11 +483,6 @@ rocprofsys_set_mpi_hidden(bool use, bool attached)
 extern "C" void
 rocprofsys_init_library_hidden()
 {
-    // Materialize the lib-load timestamp at the earliest call so the
-    // Output Summary's duration measures from library init, not from
-    // the first finalize-time read.
-    (void) lib_load_steady_time();
-
     auto _tid = threading::get_id();
     (void) _tid;
 
@@ -1158,8 +1144,8 @@ rocprofsys_finalize_hidden(void)
         sampling::post_process();
     }
 
-    auto& _output_registry =
-        rocprofsys::output_file_registry::instance_for_top_level_attach_finalize();
+    auto& _output_summary =
+        rocprofsys::output_summary::instance_for_top_level_attach_finalize();
 
     if(get_use_causal())
     {
@@ -1167,10 +1153,10 @@ rocprofsys_finalize_hidden(void)
         causal::finish_experimenting();
 
         auto _base = config::get_causal_output_filename();
-        _output_registry.register_file(fmt::format("{}.json", _base),
-                                       output_format::causal_json, getpid());
-        _output_registry.register_file(fmt::format("{}.txt", _base),
-                                       output_format::causal_text, getpid());
+        _output_summary.register_file(fmt::format("{}.json", _base),
+                                      output_format::causal_json, getpid());
+        _output_summary.register_file(fmt::format("{}.txt", _base),
+                                      output_format::causal_text, getpid());
     }
 
     if(get_use_process_sampling())
@@ -1197,7 +1183,7 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Finalizing perfetto...");
         rocprofsys::perfetto::post_process(_timemory_manager.get(),
-                                           _perfetto_output_error, _output_registry);
+                                           _perfetto_output_error, _output_summary);
     }
 
     {
@@ -1216,7 +1202,7 @@ rocprofsys_finalize_hidden(void)
             } };
         } };
 
-        _manager.post_process_bulk(_output_registry, _tracker);
+        _manager.post_process_bulk(_output_summary, _tracker);
     }
 
     if(_timemory_manager && _timemory_manager != nullptr)
@@ -1270,8 +1256,8 @@ rocprofsys_finalize_hidden(void)
             settings::compose_output_filename("functions", "json", _cfg);
         if(std::filesystem::exists(_functions_path))
         {
-            _output_registry.register_file(std::move(_functions_path),
-                                           output_format::json, getpid());
+            _output_summary.register_file(std::move(_functions_path), output_format::json,
+                                          getpid());
         }
 
         if(config::get_use_timemory())
@@ -1284,10 +1270,10 @@ rocprofsys_finalize_hidden(void)
             {
                 if(_comp_name.empty()) continue;
 
-                _output_registry.register_file(
+                _output_summary.register_file(
                     settings::compose_output_filename(_comp_name, "txt", _cfg),
                     output_format::text, getpid());
-                _output_registry.register_file(
+                _output_summary.register_file(
                     settings::compose_output_filename(_comp_name, "json", _cfg),
                     output_format::json, getpid());
             }
@@ -1296,8 +1282,7 @@ rocprofsys_finalize_hidden(void)
 
     if(config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
     {
-        rocprofsys::output::emit_summary(std::cout, _output_registry,
-                                         lib_load_steady_time());
+        _output_summary.print(std::cout, library_load_time);
     }
 
     // Clear perfetto's log callback before the spdlog function-local-static

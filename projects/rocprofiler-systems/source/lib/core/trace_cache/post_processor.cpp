@@ -53,8 +53,7 @@ sum_storage_bytes(const std::vector<std::shared_ptr<data::processor_config_t>>& 
 [[nodiscard]] data::processor_storage_t
 configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinator,
                      const std::shared_ptr<data::processor_config_t>& _config,
-                     const data::enabled_formats_t&                   _formats,
-                     output_file_registry&                            _registry)
+                     const data::enabled_formats_t& _formats, output_summary& _summary)
 {
     // Feed the Output Summary its per-process metadata (tree shape +
     // GPU aggregation) from the trace metadata and the agent manager.
@@ -74,9 +73,9 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinat
                 if(gpu_agent)
                     proc_meta.gpu_ids.push_back(gpu_agent->logical_node_type_id);
             }
-            _registry.set_node_gpu_count(gpu_agents.size());
+            _summary.set_node_gpu_count(gpu_agents.size());
         }
-        _registry.record_process(std::move(proc_meta));
+        _summary.record_process(std::move(proc_meta));
     }
 
     data::processor_storage_t storage;
@@ -84,21 +83,21 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinat
     {
         storage.rocpd_processor = std::make_shared<rocpd_processor_t>(
             _config->_metadata_registry, _config->_agent_manager, _config->_pid,
-            _config->_ppid, _registry);
+            _config->_ppid, _summary);
         _coordinator->add_handler(*storage.rocpd_processor);
     }
     if(_formats.is_perfetto_enabled())
     {
         storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
             _config->_metadata_registry, _config->_agent_manager, _config->_pid,
-            _config->_ppid, _registry);
+            _config->_ppid, _summary);
         _coordinator->add_handler(*storage.perfetto_processor);
     }
 
     if(_formats.is_unified_memory_enabled())
     {
         storage.unified_memory_processor = std::make_shared<unified_memory_processor_t>(
-            _config->_agent_manager, _config->_pid, output_file_sink_view{ _registry });
+            _config->_agent_manager, _config->_pid, output_file_sink_view{ _summary });
         _coordinator->add_handler(*storage.unified_memory_processor);
         LOG_DEBUG("Unified memory processor enabled for PID {}", _config->_pid);
     }
@@ -110,7 +109,7 @@ void
 process_buffered_storage(const std::shared_ptr<data::processor_config_t>& _config,
                          const std::string&             _storage_filename,
                          const data::enabled_formats_t& _formats,
-                         output_file_registry&          _registry,
+                         output_summary&                _summary,
                          progress::progress_callback    _progress_cb)
 {
     LOG_DEBUG("Processing buffered storage: {} for pid={}", _storage_filename,
@@ -121,7 +120,7 @@ process_buffered_storage(const std::shared_ptr<data::processor_config_t>& _confi
     // returned processors as handlers on _coordinator. Holding _storage in scope
     // keeps those processors alive until the parse + finalize is done.
     [[maybe_unused]] auto _storage =
-        configure_processors(_coordinator, _config, _formats, _registry);
+        configure_processors(_coordinator, _config, _formats, _summary);
     storage_parser_t _parser(_storage_filename);
 
     _coordinator->prepare_for_processing();
@@ -140,10 +139,10 @@ process_buffered_storage(const std::shared_ptr<data::processor_config_t>& _confi
 }
 }  // namespace
 
-post_processor::post_processor(progress::tracker&    tracker,
-                               output_file_registry& registry) noexcept
+post_processor::post_processor(progress::tracker& tracker,
+                               output_summary&    summary) noexcept
 : m_tracker(tracker)
-, m_registry(registry)
+, m_output_summary(summary)
 {}
 
 void
@@ -171,7 +170,7 @@ post_processor::run_sequential(
         auto _progress_cb = m_tracker.begin(
             fmt::format("Generating trace-cache output for process [{}]", cfg->_pid),
             file_size_or_zero(_filename));
-        process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb);
+        process_buffered_storage(cfg, _filename, formats, m_output_summary, _progress_cb);
     }
     LOG_DEBUG("Sequential processing completed");
 }
@@ -197,7 +196,8 @@ post_processor::run_multithreaded(
         processing_threads.emplace_back([this, cfg, &formats, _progress_cb] {
             const auto _filename =
                 utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
-            process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb);
+            process_buffered_storage(cfg, _filename, formats, m_output_summary,
+                                     _progress_cb);
         });
     }
 

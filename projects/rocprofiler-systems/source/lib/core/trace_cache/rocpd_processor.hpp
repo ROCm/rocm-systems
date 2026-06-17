@@ -4,7 +4,7 @@
 #pragma once
 #include "agent_manager.hpp"
 #include "core/node_info.hpp"
-#include "core/output_file_registry.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
@@ -23,7 +23,7 @@ class rocpd_processor_t : public processor_t<rocpd_processor_t>
 public:
     rocpd_processor_t(const std::shared_ptr<metadata_registry>& metadata,
                       const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid,
-                      output_file_registry& output_registry);
+                      output_summary& summary);
 
     void prepare_for_processing();
     void finalize_processing();
@@ -52,9 +52,8 @@ private:
     std::shared_ptr<metadata_registry>     m_metadata;
     std::shared_ptr<agent_manager>         m_agent_manager;
     std::shared_ptr<rocpd::data_processor> m_data_processor;
-    output_file_registry&                  m_output_registry;
+    output_summary&                        m_output_summary;
     std::string                            m_db_output_path;
-    pid_t                                  m_pid;
 };
 
 }  // namespace trace_cache

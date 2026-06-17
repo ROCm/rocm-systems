@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "core/output/output_summary.hpp"
 #include "core/output/process_metadata.hpp"
-#include "core/output_file_registry.hpp"
 
 #include <sys/types.h>
 

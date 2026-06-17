@@ -12,7 +12,7 @@ namespace rocprofsys::output
 {
 
 // Per-process metadata carried into the Output Summary pipeline.
-// Lives in its own tiny header so the registry can value-store it
+// Lives in its own tiny header so output_summary can value-store it
 // without pulling in the rest of the tree-builder API.
 struct process_metadata
 {

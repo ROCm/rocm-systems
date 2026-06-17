@@ -11,7 +11,7 @@
 #include "core/containers/stable_vector.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu.hpp"
-#include "core/output_file_registry.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/state.hpp"
@@ -2942,14 +2942,14 @@ tool_attach_fini(void* /* tool_data */)
     rocprofsys_flush_pending_region_cache_hidden();
 
     // Register into the singleton so the rows survive into
-    // rocprofsys_finalize_hidden's print_summary().
+    // rocprofsys_finalize_hidden's output_summary::print().
     if(get_use_perfetto())
     {
         bool  _perfetto_output_error = false;
-        auto& _output_registry =
-            rocprofsys::output_file_registry::instance_for_top_level_attach_finalize();
+        auto& _output_summary =
+            rocprofsys::output_summary::instance_for_top_level_attach_finalize();
         ::rocprofsys::perfetto::post_process(nullptr, _perfetto_output_error,
-                                             _output_registry);
+                                             _output_summary);
         if(_perfetto_output_error)
             LOG_ERROR("Perfetto output error occurred during attach finalization");
     }
@@ -2968,9 +2968,9 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
     // Bump unconditionally so each attach (including the first) owns
     // a unique session id; bump_session() compacts prior-session rows.
     const auto _attach_session_id =
-        rocprofsys::output_file_registry::instance_for_top_level_attach_finalize()
+        rocprofsys::output_summary::instance_for_top_level_attach_finalize()
             .bump_session();
-    LOG_DEBUG("Output registry bumped to session {} for attach (pid={})",
+    LOG_DEBUG("Output summary bumped to session {} for attach (pid={})",
               _attach_session_id, getpid());
 
     if(current_count > 0)

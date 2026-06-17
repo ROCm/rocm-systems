@@ -11,7 +11,7 @@ class manager;
 namespace rocprofsys
 {
 
-class output_file_registry;
+class output_summary;
 
 namespace perfetto
 {
@@ -25,6 +25,6 @@ void
 stop();
 
 void
-post_process(tim::manager*, bool&, output_file_registry&);
+post_process(tim::manager*, bool&, output_summary&);
 }  // namespace perfetto
 }  // namespace rocprofsys

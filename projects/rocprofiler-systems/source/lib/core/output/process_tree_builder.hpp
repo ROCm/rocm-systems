@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "core/output/output_summary.hpp"
 #include "core/output/process_metadata.hpp"
-#include "core/output_file_registry.hpp"
 
 #include <sys/types.h>
 
@@ -17,14 +17,7 @@
 namespace rocprofsys::output
 {
 
-enum class role_hint : std::uint8_t
-{
-    main,
-    gpu,
-    engine,
-};
-
-struct helper_range
+struct collapsed_process_range
 {
     pid_t       min_pid{ -1 };
     pid_t       max_pid{ -1 };
@@ -33,13 +26,10 @@ struct helper_range
 
 struct process_node
 {
-    process_metadata            meta;
-    std::vector<output_file>    rows;
-    std::optional<role_hint>    role;
-    std::optional<helper_range> collapsed;
-    std::vector<process_node>   children;
-    // Sort-unique union over self + descendants, filled by classify().
-    std::vector<int> effective_gpu_ids;
+    process_metadata                       meta;
+    std::vector<output_file>               rows;
+    std::optional<collapsed_process_range> collapsed;
+    std::vector<process_node>              children;
     // Filled by compute_subtree_sizes(): own_size_bytes sums this node's
     // known row sizes; cumulative_size_bytes adds every descendant.
     std::uintmax_t own_size_bytes{ 0 };
@@ -69,6 +59,16 @@ build_tree(std::span<const output_file>      rows,
 // the final (post-collapse) tree. Unknown row sizes contribute zero.
 void
 compute_subtree_sizes(std::vector<process_node>& roots);
+
+// Childless, GPU-agent-free processes whose largest registered row is below
+// this threshold are small enough to collapse with similar siblings in the
+// printed process tree. Unknown sizes are never collapsed.
+inline constexpr std::uintmax_t SMALL_PROCESS_MAX_SIZE_BYTES = 16ULL * 1024;
+
+// Sibling small processes of count >= 2 collapse into one synthetic range node
+// with `collapsed` set. Singletons render normally.
+[[nodiscard]] std::vector<process_node>
+collapse_small_processes(std::vector<process_node> roots);
 
 // Post-order visitor. `fn` is taken by lvalue so a stateful functor
 // is not moved-from between siblings.

@@ -10,8 +10,8 @@
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/output/perfetto_log_filter.hpp"
-#include "core/output_file_registry.hpp"
 #include "core/perfetto.hpp"
 #include "core/utility.hpp"
 #include "library/tracing.hpp"
@@ -442,7 +442,7 @@ emit_grouped_event(bool group_by_queue, QueueCategory queue_cat,
 perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<metadata_registry>& metadata,
     const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid,
-    output_file_registry& output_registry)
+    output_summary& summary)
 : processor_t<perfetto_processor_t>()
 , m_metadata(*metadata)
 , m_process_id(pid)
@@ -452,7 +452,7 @@ perfetto_processor_t::perfetto_processor_t(
 , m_tracing_session(nullptr)
 , m_use_annotations(config::get_perfetto_annotations())
 , m_default_group_by_queue(config::get_group_by_queue())
-, m_output_registry(output_registry)
+, m_output_summary(summary)
 {
     for(const auto& agent_ptr : m_agent_manager.get_agents())
     {
@@ -642,8 +642,8 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
         {
             // Write the trace into a file.
             ofs.write(trace_data.data(), trace_data.size());
-            m_output_registry.register_file(_filename, output_format::perfetto,
-                                            static_cast<pid_t>(m_process_id));
+            m_output_summary.register_file(_filename, output_format::perfetto,
+                                           static_cast<pid_t>(m_process_id));
         }
         ofs.close();
     }

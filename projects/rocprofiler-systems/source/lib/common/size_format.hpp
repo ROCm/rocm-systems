@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "common/units.hpp"
+
 #include <spdlog/fmt/fmt.h>
 
 #include <cstdint>
@@ -16,14 +18,12 @@ inline namespace common
 [[nodiscard]] inline std::string
 format_size_human(std::uintmax_t bytes)
 {
-    constexpr std::uintmax_t KIB = 1024ULL;
-    constexpr std::uintmax_t MIB = KIB * 1024ULL;
-    constexpr std::uintmax_t GIB = MIB * 1024ULL;
-
-    if(bytes < KIB) return fmt::format("{} B", bytes);
-    if(bytes < MIB) return fmt::format("{:.2f} KiB", static_cast<double>(bytes) / KIB);
-    if(bytes < GIB) return fmt::format("{:.2f} MiB", static_cast<double>(bytes) / MIB);
-    return fmt::format("{:.2f} GiB", static_cast<double>(bytes) / GIB);
+    if(bytes < units::kilobyte) return fmt::format("{} B", bytes);
+    if(bytes < units::megabyte)
+        return fmt::format("{:.2f} KB", static_cast<double>(bytes) / units::kilobyte);
+    if(bytes < units::gigabyte)
+        return fmt::format("{:.2f} MB", static_cast<double>(bytes) / units::megabyte);
+    return fmt::format("{:.2f} GB", static_cast<double>(bytes) / units::gigabyte);
 }
 
 [[nodiscard]] inline std::string

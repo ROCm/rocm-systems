@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/output_file_registry.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/progress/tracker.hpp"
 #include "core/trace_cache/data_types.hpp"
 
@@ -17,7 +17,7 @@ namespace rocprofsys::trace_cache
 class post_processor
 {
 public:
-    post_processor(progress::tracker& tracker, output_file_registry& registry) noexcept;
+    post_processor(progress::tracker& tracker, output_summary& summary) noexcept;
 
     post_processor(const post_processor&)            = delete;
     post_processor& operator=(const post_processor&) = delete;
@@ -39,8 +39,8 @@ private:
         const std::vector<std::shared_ptr<data::processor_config_t>>& configs,
         const data::enabled_formats_t&                                formats);
 
-    progress::tracker&    m_tracker;
-    output_file_registry& m_registry;
+    progress::tracker& m_tracker;
+    output_summary&    m_output_summary;
 };
 
 }  // namespace rocprofsys::trace_cache

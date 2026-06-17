@@ -3,8 +3,8 @@
 
 #include "gtest/gtest.h"
 
+#include "core/output/output_summary.hpp"
 #include "core/output/process_tree_builder.hpp"
-#include "core/output_file_registry.hpp"
 #include "test_support/process_tree_builders.hpp"
 
 #include <sys/types.h>

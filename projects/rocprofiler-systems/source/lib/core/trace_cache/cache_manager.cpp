@@ -6,7 +6,7 @@
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
-#include "core/output_file_registry.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/discovery.hpp"
 #include "core/trace_cache/post_processor.hpp"
@@ -29,8 +29,8 @@ cache_manager::get_instance()
 }
 
 void
-cache_manager::post_process_bulk(output_file_registry& _output_registry,
-                                 progress::tracker&    _tracker)
+cache_manager::post_process_bulk(output_summary&    _output_summary,
+                                 progress::tracker& _tracker)
 {
     LOG_TRACE("Starting trace cache bulk post-processing");
 
@@ -70,7 +70,7 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
             std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
 
         LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
-        post_processor processor{ _tracker, _output_registry };
+        post_processor processor{ _tracker, _output_summary };
         processor.process(processor_configs, enabled_formats);
 
         if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())

@@ -8,7 +8,7 @@
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
-#include "core/output_file_registry.hpp"
+#include "core/output/output_summary.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -754,14 +754,12 @@ rocpd_processor_t::handle(const kfd_sample& _kfd)
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
                                      const std::shared_ptr<agent_manager>&     agent_mngr,
-                                     int pid, int ppid,
-                                     output_file_registry& output_registry)
+                                     int pid, int ppid, output_summary& summary)
 : processor_t<rocpd_processor_t>()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
-, m_output_registry(output_registry)
+, m_output_summary(summary)
 , m_db_output_path(generate_db_output_path(pid))
-, m_pid(pid)
 {
     m_data_processor = std::make_shared<rocpd::data_processor>(
         std::make_shared<rocpd::data_storage::database>(pid, ppid, m_db_output_path));
@@ -781,7 +779,8 @@ rocpd_processor_t::finalize_processing()
     LOG_DEBUG("Finalizing rocpd processor");
     m_data_processor->flush();
 
-    m_output_registry.register_file(m_db_output_path, output_format::rocpd, m_pid);
+    m_output_summary.register_file(m_db_output_path, output_format::rocpd,
+                                   m_metadata->get_process_info().pid);
 
     LOG_INFO("Rocpd processor finalized successfully");
 }

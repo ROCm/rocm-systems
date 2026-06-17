@@ -5,7 +5,7 @@
 
 #include <spdlog/fmt/fmt.h>
 
-#include <algorithm>
+#include <set>
 #include <vector>
 
 namespace rocprofsys::output
@@ -65,11 +65,8 @@ format_gpu_ids(const std::vector<int>& gpu_ids)
 {
     if(gpu_ids.empty()) return "";
 
-    std::vector<int> sorted = gpu_ids;
-
-    std::ranges::sort(sorted);
-    const auto duplicates = std::ranges::unique(sorted);
-    sorted.erase(duplicates.begin(), duplicates.end());
+    const std::set<int>    unique_ids{ gpu_ids.begin(), gpu_ids.end() };
+    const std::vector<int> sorted{ unique_ids.begin(), unique_ids.end() };
 
     std::vector<std::string> tokens;
     for(std::size_t i = 0; i < sorted.size();)

@@ -7,8 +7,10 @@
 
 #include <sys/types.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <iosfwd>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -35,7 +37,7 @@ struct output_file
     output_format                 format{ output_format::perfetto };
 };
 
-// One registry per process: one output dir, one Output Summary, one
+// One output summary per process: one output dir, one Output Summary, one
 // finalize. Process-singleton, not SDK-session-scoped, because the
 // rocprofiler-sdk attach/detach protocol can leak its client_data
 // blob and there is no natural shared owner across the registration
@@ -45,18 +47,20 @@ struct output_file
 // call the singleton accessor; downstream consumers take a reference
 // so tests can substitute their own instance. Attach/detach resets go
 // through bump_session() — see its declaration for the race argument.
-class output_file_registry
+class output_summary
 {
 public:
     // Process-singleton accessor. The ugly name documents the
     // constraint: only call this from a top-level attach or finalize
     // entry point.
-    [[nodiscard]] static output_file_registry& instance_for_top_level_attach_finalize();
+    [[nodiscard]] static output_summary& instance_for_top_level_attach_finalize();
 
-    output_file_registry() = default;
+    output_summary() = default;
 
     void register_file(std::string path, output_format format,
                        std::optional<pid_t> pid = std::nullopt);
+
+    void print(std::ostream& os, std::chrono::steady_clock::time_point load_baseline);
 
     // Filtered to the current session. Older records stay in internal
     // storage so an in-flight prior-session registration can still
