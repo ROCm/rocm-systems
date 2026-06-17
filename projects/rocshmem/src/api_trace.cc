@@ -49,34 +49,34 @@ namespace rocshmem {
 
 // Forward declarations for implementation functions with C linkage
 extern "C" {
-__host__ void barrier_all_on_stream_impl(hipStream_t stream);
+__host__ void rocshmem_barrier_all_on_stream_impl(hipStream_t stream);
 
-__host__ void quiet_on_stream_impl(hipStream_t stream);
+__host__ void rocshmem_quiet_on_stream_impl(hipStream_t stream);
 
-__host__ void sync_all_on_stream_impl(hipStream_t stream);
+__host__ void rocshmem_sync_all_on_stream_impl(hipStream_t stream);
 
-__host__ void alltoallmem_on_stream_impl(rocshmem_team_t team, void *dest,
-                                      const void *source, size_t size,
-                                      hipStream_t stream);
+__host__ void rocshmem_alltoallmem_on_stream_impl(rocshmem_team_t team, void *dest,
+                                                   const void *source, size_t size,
+                                                   hipStream_t stream);
 
-__host__ void broadcastmem_on_stream_impl(rocshmem_team_t team, void *dest,
-                                       const void *source, size_t nelems,
-                                       int pe_root, hipStream_t stream);
+__host__ void rocshmem_broadcastmem_on_stream_impl(rocshmem_team_t team, void *dest,
+                                                    const void *source, size_t nelems,
+                                                    int pe_root, hipStream_t stream);
 
-__host__ void getmem_on_stream_impl(void *dest, const void *source, size_t nelems,
-                                 int pe, hipStream_t stream);
+__host__ void rocshmem_getmem_on_stream_impl(void *dest, const void *source, size_t nelems,
+                                              int pe, hipStream_t stream);
 
-__host__ void putmem_on_stream_impl(void *dest, const void *source, size_t nelems,
-                                 int pe, hipStream_t stream);
+__host__ void rocshmem_putmem_on_stream_impl(void *dest, const void *source, size_t nelems,
+                                              int pe, hipStream_t stream);
 
-__host__ void putmem_signal_on_stream_impl(void *dest, const void *source,
-                                        size_t nelems, uint64_t *sig_addr,
-                                        uint64_t signal, int sig_op, int pe,
-                                        hipStream_t stream);
+__host__ void rocshmem_putmem_signal_on_stream_impl(void *dest, const void *source,
+                                                     size_t nelems, uint64_t *sig_addr,
+                                                     uint64_t signal, int sig_op, int pe,
+                                                     hipStream_t stream);
 
-__host__ void signal_wait_until_on_stream_impl(uint64_t *sig_addr, int cmp,
-                                            uint64_t cmp_value,
-                                            hipStream_t stream);
+__host__ void rocshmem_signal_wait_until_on_stream_impl(uint64_t *sig_addr, int cmp,
+                                                         uint64_t cmp_value,
+                                                         hipStream_t stream);
 }  // extern "C"
 
 namespace rocshmem
@@ -130,15 +130,15 @@ RocshmemGetFunctionTable_impl()
     static auto* tbl =
         new(m_buffer.data()) rocshmemApiFuncTable{
             sizeof(rocshmemApiFuncTable),
-            &barrier_all_on_stream_impl,
-            &quiet_on_stream_impl,
-            &sync_all_on_stream_impl,
-            &alltoallmem_on_stream_impl,
-            &broadcastmem_on_stream_impl,
-            &getmem_on_stream_impl,
-            &putmem_on_stream_impl,
-            &putmem_signal_on_stream_impl,
-            &signal_wait_until_on_stream_impl
+            &rocshmem_barrier_all_on_stream_impl,
+            &rocshmem_quiet_on_stream_impl,
+            &rocshmem_sync_all_on_stream_impl,
+            &rocshmem_alltoallmem_on_stream_impl,
+            &rocshmem_broadcastmem_on_stream_impl,
+            &rocshmem_getmem_on_stream_impl,
+            &rocshmem_putmem_on_stream_impl,
+            &rocshmem_putmem_signal_on_stream_impl,
+            &rocshmem_signal_wait_until_on_stream_impl
         };
 
 #if defined(ROCSHMEM_ROCPROFILER_REGISTER) && ROCSHMEM_ROCPROFILER_REGISTER > 0
@@ -180,74 +180,74 @@ RocshmemGetFunctionTable()
 
 extern "C" {
 
-__host__ void barrier_all_on_stream_impl(hipStream_t stream)
+__host__ void rocshmem_barrier_all_on_stream_impl(hipStream_t stream)
 {
     LOG_API("host::barrier_all_on_stream ()");
     rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
     ctx->barrier_all_on_stream(stream);
 }
 
-__host__ void quiet_on_stream_impl(hipStream_t stream)
+__host__ void rocshmem_quiet_on_stream_impl(hipStream_t stream)
 {
     LOG_API("rocshmem_quiet_on_stream");
     rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
     ctx->quiet_on_stream(stream);
 }
 
-__host__ void sync_all_on_stream_impl(hipStream_t stream)
+__host__ void rocshmem_sync_all_on_stream_impl(hipStream_t stream)
 {
     LOG_API("rocshmem_sync_all_on_stream");
     rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
     ctx->sync_all_on_stream(stream);
 }
 
-__host__ void alltoallmem_on_stream_impl(rocshmem_team_t team, void *dest,
-                                          const void *source, size_t size,
-                                          hipStream_t stream)
+__host__ void rocshmem_alltoallmem_on_stream_impl(rocshmem_team_t team, void *dest,
+                                                   const void *source, size_t size,
+                                                   hipStream_t stream)
 {
      LOG_API("host::alltoallmem_on_stream (dest=%p, source=%p, size=%zd)", dest, source, size);
     rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
     ctx->alltoallmem_on_stream(team, dest, source, size, stream);
 }
 
-__host__ void broadcastmem_on_stream_impl(rocshmem_team_t team, void *dest,
-                                           const void *source, size_t nelems,
-                                           int pe_root, hipStream_t stream)
+__host__ void rocshmem_broadcastmem_on_stream_impl(rocshmem_team_t team, void *dest,
+                                                    const void *source, size_t nelems,
+                                                    int pe_root, hipStream_t stream)
 {
     LOG_API("host::broadcastmem_on_stream (dest=%p, source=%p, nelems=%zd, pe_root=%d)", dest, source, nelems, pe_root);
     rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
     ctx->broadcastmem_on_stream(team, dest, source, nelems, pe_root, stream);
 }
 
-__host__ void getmem_on_stream_impl(void *dest, const void *source, size_t nelems,
-                                     int pe, hipStream_t stream)
+__host__ void rocshmem_getmem_on_stream_impl(void *dest, const void *source, size_t nelems,
+                                              int pe, hipStream_t stream)
 {
     LOG_API("host::getmem_on_stream (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
     rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
     ctx->getmem_on_stream(dest, source, nelems, pe, stream);
 }
 
-__host__ void putmem_on_stream_impl(void *dest, const void *source, size_t nelems,
-                                     int pe, hipStream_t stream)
+__host__ void rocshmem_putmem_on_stream_impl(void *dest, const void *source, size_t nelems,
+                                              int pe, hipStream_t stream)
 {
     LOG_API("host::putmem_on_stream (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
     rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
     ctx->putmem_on_stream(dest, source, nelems, pe, stream);
 }
 
-__host__ void putmem_signal_on_stream_impl(void *dest, const void *source,
-                                            size_t nelems, uint64_t *sig_addr,
-                                            uint64_t signal, int sig_op, int pe,
-                                            hipStream_t stream)
+__host__ void rocshmem_putmem_signal_on_stream_impl(void *dest, const void *source,
+                                                     size_t nelems, uint64_t *sig_addr,
+                                                     uint64_t signal, int sig_op, int pe,
+                                                     hipStream_t stream)
 {
     LOG_API("host::putmem_signal_on_stream (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
     rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
     ctx->putmem_signal_on_stream(dest, source, nelems, sig_addr, signal, sig_op, pe, stream);
 }
 
-__host__ void signal_wait_until_on_stream_impl(uint64_t *sig_addr, int cmp,
-                                                uint64_t cmp_value,
-                                                hipStream_t stream)
+__host__ void rocshmem_signal_wait_until_on_stream_impl(uint64_t *sig_addr, int cmp,
+                                                         uint64_t cmp_value,
+                                                         hipStream_t stream)
 {
     LOG_API("host::signal_wait_until_on_stream (sig_addr=%p, cmp=%d)", sig_addr, cmp);
     rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
