@@ -150,7 +150,7 @@ if(BUILD_PYTHON_WHEEL)
         # bundled .so fails loudly instead of loading an unrelated system lib.
         COMMAND
             ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/disable_system_fallback.py
-            ${PY_PACKAGE_DIR}/amdsmi_wrapper.py
+            ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}/amdsmi_wrapper.py
         COMMAND
             ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} ${Python3_EXECUTABLE} -m pip
             wheel --no-deps -w ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
