@@ -37,6 +37,18 @@
 #   READY_TIMEOUT  seconds to wait for the server (default: 600)
 #   MIRAGE_BIN  manylinux mirage binary (default: <mirage>/build/manylinux/bin/mirage)
 #   SKIP_BUILD  set to 1 to reuse an existing MIRAGE_BIN without rebuilding
+#   GPU_MEM_UTIL    vLLM --gpu-memory-utilization (default: 0.2)
+#   MAX_MODEL_LEN   vLLM --max-model-len (default: 2048)
+#   VLLM_EXTRA_ARGS extra args appended verbatim to `vllm serve`
+#
+# Why the vLLM init is constrained: the emulated MI350X advertises ~288
+# GiB of VRAM, and vLLM's engine-core init runs a memory-profiling
+# forward pass that by default grabs 90% of it and captures HIP graphs.
+# That stresses the functional emulator into a GPU memory access fault
+# ("Engine core initialization failed" / "Memory critical error by
+# agent"). `--enforce-eager`, a small `--gpu-memory-utilization`, a
+# short `--max-model-len`, and `--max-num-seqs 1` keep init light enough
+# for the emulator to service.
 #
 set -euo pipefail
 
@@ -50,6 +62,8 @@ HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 PORT="${PORT:-8000}"
 READY_TIMEOUT="${READY_TIMEOUT:-600}"
 MIRAGE_BIN="${MIRAGE_BIN:-$MIRAGE_DIR/build/manylinux/bin/mirage}"
+GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.2}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-2048}"
 
 log()  { printf '==> %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
@@ -85,6 +99,10 @@ log "caching model weights in $HF_CACHE"
 # given argv inside the node container, so we invoke vLLM's `serve` CLI
 # directly (the image ENTRYPOINT does not apply to `exec`ed commands).
 # Bind to 0.0.0.0 so the port is reachable over the session network.
+#
+# The serve flags keep engine-core init light enough for the functional
+# emulator (see header): eager mode (no HIP graph capture), a small
+# fraction of the emulated VRAM, a short context, and a single sequence.
 # ---------------------------------------------------------------------------
 RUN_LOG="$(mktemp -t mirage-vllm.XXXXXX.log)"
 log "starting vLLM (model=$MODEL) via mirage run --daemon"
@@ -97,6 +115,11 @@ cd "$MIRAGE_DIR"
   --port "$PORT:$PORT" \
   --mount "$HF_CACHE:/root/.cache/huggingface" \
   -- vllm serve "$MODEL" --host 0.0.0.0 --port "$PORT" \
+       --enforce-eager \
+       --gpu-memory-utilization "$GPU_MEM_UTIL" \
+       --max-model-len "$MAX_MODEL_LEN" \
+       --max-num-seqs 1 \
+       ${VLLM_EXTRA_ARGS:-} \
   >"$RUN_LOG" 2>&1 &
 MIRAGE_PID=$!
 
