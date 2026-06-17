@@ -665,20 +665,16 @@ TEST(core, kernel_replay_configure)
 
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
 
-    EXPECT_EQ(rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
-                                                                   nullptr,
-                                                                   nullptr,
-                                                                   null_record_callback,
-                                                                   nullptr),
+    EXPECT_EQ(rocprofiler_configure_kernel_replay_counting_service(
+                  get_client_ctx(), nullptr, nullptr, null_record_callback, nullptr),
               ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
 
-    ROCPROFILER_CALL(
-        rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
-                                                               null_dispatch_callback,
-                                                               (void*) 0x12345,
-                                                               null_record_callback,
-                                                               (void*) 0x54321),
-        "kernel replay configure failed");
+    ROCPROFILER_CALL(rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
+                                                                          null_dispatch_callback,
+                                                                          (void*) 0x12345,
+                                                                          null_record_callback,
+                                                                          (void*) 0x54321),
+                     "kernel replay configure failed");
 
     EXPECT_EQ(rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
                                                                    null_dispatch_callback,
@@ -724,10 +720,10 @@ TEST(core, kernel_replay_rejects_after_callback_dispatch)
     ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
 
     EXPECT_EQ(rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
-                                                                     null_dispatch_callback,
-                                                                     (void*) 0x12345,
-                                                                     null_record_callback,
-                                                                     (void*) 0x54321),
+                                                                   null_dispatch_callback,
+                                                                   (void*) 0x12345,
+                                                                   null_record_callback,
+                                                                   (void*) 0x54321),
               ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID);
 
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
