@@ -192,8 +192,8 @@ bool StartsWith(const std::string& s, const std::string& prefix) {
 // "unknown error" string, which fails both assertions below.
 TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
   if (!enum_reflect::kAvailable) {
-    GTEST_SKIP() << "enum reflection unavailable on this compiler ("
-                 << enum_reflect::CompilerId() << "); it needs Clang or GCC >= 9 "
+    GTEST_SKIP() << "enum reflection unavailable on this compiler (" << enum_reflect::CompilerId()
+                 << "); it needs Clang or GCC >= 9 "
                  << "(older GCC renders enum template args as numeric casts). "
                  << "The matching Python test covers this case elsewhere.";
   }
@@ -208,9 +208,9 @@ TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
   ASSERT_GE(all_status_codes.size(), 40u)
       << "enum reflection found too few codes (" << all_status_codes.size()
       << "); the __PRETTY_FUNCTION__ parser in enum_reflect likely broke due to a "
-      << "compiler change (or kScanLimit is too low). Compiler: "
-      << enum_reflect::CompilerId() << "; sample signature: \""
-      << enum_reflect::SampleSignature() << "\". This is a test-harness problem, "
+      << "compiler change (or kScanLimit is too low). Compiler: " << enum_reflect::CompilerId()
+      << "; sample signature: \"" << enum_reflect::SampleSignature()
+      << "\". This is a test-harness problem, "
       << "not an amdsmi library bug.";
   auto contains = [&](amdsmi_status_t code) {
     for (const auto& [value, name] : all_status_codes) {
