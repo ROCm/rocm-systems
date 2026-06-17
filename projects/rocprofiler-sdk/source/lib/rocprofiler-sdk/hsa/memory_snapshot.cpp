@@ -188,8 +188,8 @@ Snapshot::snap()
             void*  src = static_cast<char*>(ptr) + off;
             if(dma_copy(buf.data(), src, n) != HSA_STATUS_SUCCESS)
             {
-                ROCP_WARNING << "replay snapshot: hsa_memory_copy failed for region "
-                             << blk.path << " at offset " << off;
+                ROCP_WARNING << "replay snapshot: hsa_memory_copy failed for region " << blk.path
+                             << " at offset " << off;
                 region_ok = false;
                 break;
             }
@@ -353,12 +353,13 @@ Snapshot::restore()
             in.seekg(static_cast<std::streamoff>(off), std::ios::beg);
             in.read(disk.data(), static_cast<std::streamsize>(n));
 
-            // Walk pages, collecting maximal contiguous dirty runs and writing them back in one DMA.
+            // Walk pages, collecting maximal contiguous dirty runs and writing them back in one
+            // DMA.
             size_t run_start = n;  // sentinel "no open run"
             auto   flush_run = [&](size_t run_end) {
                 if(run_start == n) return;
-                void*  dst    = static_cast<char*>(blk.gpu_addr) + off + run_start;
-                size_t len    = run_end - run_start;
+                void*  dst = static_cast<char*>(blk.gpu_addr) + off + run_start;
+                size_t len = run_end - run_start;
                 if(dma_copy(dst, disk.data() + run_start, len) != HSA_STATUS_SUCCESS)
                 {
                     ROCP_WARNING << "replay restore: hsa_memory_copy (H2D) failed writing dirty "
@@ -375,7 +376,7 @@ Snapshot::restore()
                 uint32_t orig_hash = (page_index < blk.checksums1.size())
                                          ? blk.checksums1[page_index]
                                          : (cur_hash ^ 1U);  // force dirty if checksum missing
-                bool dirty = (cur_hash != orig_hash);
+                bool     dirty     = (cur_hash != orig_hash);
                 if(dirty)
                 {
                     if(run_start == n) run_start = poff;

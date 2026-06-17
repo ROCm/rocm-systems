@@ -65,10 +65,10 @@ inventory()
 
 // Saved "next" function pointers (the already-installed tracing wrappers) we chain through. Types
 // taken from the HSA table members so signatures match exactly.
-decltype(AmdExtTable{}.hsa_amd_memory_pool_allocate_fn) next_pool_allocate = nullptr;
-decltype(AmdExtTable{}.hsa_amd_memory_pool_free_fn)     next_pool_free     = nullptr;
-decltype(AmdExtTable{}.hsa_amd_vmem_map_fn)             next_vmem_map      = nullptr;
-decltype(AmdExtTable{}.hsa_amd_vmem_unmap_fn)           next_vmem_unmap    = nullptr;
+decltype(AmdExtTable{}.hsa_amd_memory_pool_allocate_fn) next_pool_allocate   = nullptr;
+decltype(AmdExtTable{}.hsa_amd_memory_pool_free_fn)     next_pool_free       = nullptr;
+decltype(AmdExtTable{}.hsa_amd_vmem_map_fn)             next_vmem_map        = nullptr;
+decltype(AmdExtTable{}.hsa_amd_vmem_unmap_fn)           next_vmem_unmap      = nullptr;
 decltype(CoreApiTable{}.hsa_memory_allocate_fn)         next_memory_allocate = nullptr;
 decltype(CoreApiTable{}.hsa_memory_free_fn)             next_memory_free     = nullptr;
 
@@ -183,20 +183,20 @@ update_table(hsa_amd_ext_table_t* table)
 {
     if(!table) return;
 
-    next_pool_allocate                   = table->hsa_amd_memory_pool_allocate_fn;
-    next_pool_free                       = table->hsa_amd_memory_pool_free_fn;
+    next_pool_allocate                     = table->hsa_amd_memory_pool_allocate_fn;
+    next_pool_free                         = table->hsa_amd_memory_pool_free_fn;
     table->hsa_amd_memory_pool_allocate_fn = pool_allocate_wrapper;
     table->hsa_amd_memory_pool_free_fn     = pool_free_wrapper;
 
     // VMEM hooks may be absent on older HSA tables; only wrap if present.
     if(table->hsa_amd_vmem_map_fn)
     {
-        next_vmem_map          = table->hsa_amd_vmem_map_fn;
+        next_vmem_map              = table->hsa_amd_vmem_map_fn;
         table->hsa_amd_vmem_map_fn = vmem_map_wrapper;
     }
     if(table->hsa_amd_vmem_unmap_fn)
     {
-        next_vmem_unmap          = table->hsa_amd_vmem_unmap_fn;
+        next_vmem_unmap              = table->hsa_amd_vmem_unmap_fn;
         table->hsa_amd_vmem_unmap_fn = vmem_unmap_wrapper;
     }
 }
