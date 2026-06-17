@@ -39,6 +39,15 @@ pub const ENV_HEAD_ADDR: &str = "MIRAGE_HEAD_ADDR";
 /// Always set on every node process.
 pub const ENV_HEAD_PORT: &str = "MIRAGE_HEAD_PORT";
 
+/// `torch.distributed` rendezvous address. Aliases [`ENV_HEAD_ADDR`] so
+/// PyTorch's `env://` init method (and `torchrun --rdzv-endpoint`) work
+/// out of the box on every node without the workload having to translate
+/// mirage's own variables.
+pub const ENV_MASTER_ADDR: &str = "MASTER_ADDR";
+
+/// `torch.distributed` rendezvous port. Aliases [`ENV_HEAD_PORT`].
+pub const ENV_MASTER_PORT: &str = "MASTER_PORT";
+
 /// Deterministic container name for a node of a session.
 ///
 /// Doubles as the container's network hostname, so other nodes can

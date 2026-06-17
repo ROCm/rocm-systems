@@ -39,7 +39,8 @@ use std::time::Duration;
 use chrono::Utc;
 use mirage_core::common::MaybeRef;
 use mirage_core::container::{
-    ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_RANK, container_name,
+    ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_MASTER_ADDR, ENV_MASTER_PORT, ENV_RANK,
+    container_name,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
@@ -697,14 +698,18 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
 /// `MIRAGE_RANK` and `MIRAGE_HEAD_PORT` are set on every node.
 /// `MIRAGE_HEAD_ADDR` is also set on every node: worker nodes get the
 /// head's address, while the head (rank 0) gets `localhost` since it is
-/// itself the head. These are injected whether or not the session is
-/// containerised.
+/// itself the head. `MASTER_ADDR`/`MASTER_PORT` mirror the head address
+/// and port so `torch.distributed` (and `torchrun`) can rendezvous
+/// without the workload translating mirage's own variables. These are
+/// injected whether or not the session is containerised.
 fn node_mirage_env(rank: u32, head_addr: &str, head_port: u16) -> Vec<(String, String)> {
     let head = if rank == 0 { "localhost" } else { head_addr };
     vec![
         (ENV_RANK.to_string(), rank.to_string()),
         (ENV_HEAD_PORT.to_string(), head_port.to_string()),
         (ENV_HEAD_ADDR.to_string(), head.to_string()),
+        (ENV_MASTER_ADDR.to_string(), head.to_string()),
+        (ENV_MASTER_PORT.to_string(), head_port.to_string()),
     ]
 }
 
@@ -1345,3 +1350,35 @@ async fn wait_node(node: SpawnedNode) -> i32 {
 
 // silence unused-import in case OS-specific items get conditionally compiled.
 use std::os::unix::fs::OpenOptionsExt;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn head_node_env_uses_localhost_and_aliases_master() {
+        let env: std::collections::BTreeMap<_, _> =
+            node_mirage_env(0, "mirage-sess-node-0", 29500)
+                .into_iter()
+                .collect();
+        assert_eq!(env[ENV_RANK], "0");
+        assert_eq!(env[ENV_HEAD_ADDR], "localhost");
+        assert_eq!(env[ENV_HEAD_PORT], "29500");
+        // torch.distributed rendezvous vars alias the head addr/port.
+        assert_eq!(env[ENV_MASTER_ADDR], "localhost");
+        assert_eq!(env[ENV_MASTER_PORT], "29500");
+    }
+
+    #[test]
+    fn worker_node_env_points_master_at_head() {
+        let env: std::collections::BTreeMap<_, _> =
+            node_mirage_env(2, "mirage-sess-node-0", 29500)
+                .into_iter()
+                .collect();
+        assert_eq!(env[ENV_RANK], "2");
+        // Workers see the head's address, not localhost.
+        assert_eq!(env[ENV_HEAD_ADDR], "mirage-sess-node-0");
+        assert_eq!(env[ENV_MASTER_ADDR], "mirage-sess-node-0");
+        assert_eq!(env[ENV_MASTER_PORT], "29500");
+    }
+}
