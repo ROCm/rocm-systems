@@ -1583,6 +1583,70 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_boolean, int, unsigned int, 
   }
 }
 
+void __global__ binaryPartition(int* out, int* ranks)
+{
+   if (threadIdx.x >= warpSize / 2) {
+     // this group will contain the upper part of the threads
+     auto coalesced = cg::coalesced_threads();
+
+     // this group is subsequently split in two: on even and odd indexes
+     auto partitioned = cg::binary_partition(coalesced, threadIdx.x % 2);
+
+     ranks[threadIdx.x] = partitioned.thread_rank();
+     out[threadIdx.x] = cg::inclusive_scan(partitioned, threadIdx.x);
+   } else {
+     ranks[threadIdx.x] = -1;
+     out[threadIdx.x] = -1;
+   }
+}
+
+TEST_CASE(Unit_Thread_Block_Coalesced_Scan_partition)
+{
+  int wavefrontSize = getWarpSize();
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int) * wavefrontSize);
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, h_result.size_bytes());
+  LinearAllocGuard<int> h_ranks(LinearAllocs::malloc, sizeof(int) * wavefrontSize);
+  LinearAllocGuard<int> d_ranks(LinearAllocs::hipMalloc, h_ranks.size_bytes());
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { static_cast<unsigned short>(getWarpSize()) };
+  void* resultsPtr = d_result.ptr();
+  void* ranksPtr = d_ranks.ptr();
+  void* args[] = { &resultsPtr, &ranksPtr };
+  int accumEven = 0;
+  int accumOdd = 0;
+
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(binaryPartition),
+                                       gridDim,
+                                       blockDim,
+                                       args,
+                                       0,
+                                       nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_ranks.host_ptr(), d_ranks.ptr(),
+                      h_ranks.size_bytes(), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+
+  for (int laneId = 0; laneId < getWarpSize(); laneId++) {
+    if (laneId >= wavefrontSize / 2) {
+      if (laneId % 2 == 0) {
+        accumEven += laneId;
+      } else {
+        accumOdd += laneId;
+      }
+
+      INFO("laneId: " << laneId);
+      REQUIRE(h_ranks.host_ptr()[laneId] == (laneId - wavefrontSize / 2) / 2);
+      REQUIRE(h_result.host_ptr()[laneId] == (laneId % 2 ? accumOdd : accumEven));
+    } else {
+      INFO("laneId: " << laneId);
+      REQUIRE(h_ranks.host_ptr()[laneId] == -1);
+      REQUIRE(h_result.host_ptr()[laneId] == -1);
+    }
+  }
+}
+
 /**
  * End doxygen group DeviceLanguageTest.
  * @}
