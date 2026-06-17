@@ -48,8 +48,8 @@ struct mem_block
     void*                 gpu_addr = nullptr;  // live GPU allocation base pointer
     size_t                size     = 0;        // allocation size in bytes
     bool                  is_vmem  = false;
-    std::string           path;                // on-disk snapshot path
-    std::vector<uint32_t> checksums1;          // Murmur3 hashes of 1 MB pages (pre-kernel)
+    std::string           path;        // on-disk snapshot path
+    std::vector<uint32_t> checksums1;  // Murmur3 hashes of 1 MB pages (pre-kernel)
 };
 
 // Module-variable (HSA_SYMBOL_KIND_VARIABLE) snapshot record. Kernels launched via constant-memory
@@ -70,7 +70,7 @@ public:
     Snapshot();
     ~Snapshot();
 
-    Snapshot(const Snapshot&)            = delete;
+    Snapshot(const Snapshot&) = delete;
     Snapshot& operator=(const Snapshot&) = delete;
 
     // DMA every tracked allocation GPU->disk via a single reused staging buffer, recording
