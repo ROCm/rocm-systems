@@ -18,10 +18,6 @@
 
 namespace cooperative_groups {
 namespace impl {
-  template <typename T, typename U>
-  using is_param_type_same = __hip_internal::is_same<typename __hip_internal::remove_cvref<T>,
-                                                     typename __hip_internal::remove_cvref<U>>;
-
   template <typename T, typename = void>
   struct has_add : __hip_internal::false_type {
   };

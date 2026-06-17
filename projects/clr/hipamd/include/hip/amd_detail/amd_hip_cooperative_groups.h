@@ -1317,6 +1317,7 @@ __CG_QUALIFIER__ coalesced_group binary_partition(const thread_block_tile<size, 
   }
 }
 
+
 template <class T>
 struct plus {
   __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
@@ -1366,6 +1367,12 @@ struct bit_or {
 };
 
 namespace impl {
+// when instantiated with two parameter types, allows to know if there are the same, regardless
+// of const/volatile qualifiers
+template <typename T, typename U>
+using is_param_type_same = __hip_internal::is_same<typename __hip_internal::remove_cvref<T>,
+                                                   typename __hip_internal::remove_cvref<U>>;
+
 template <class T, class Op>
 struct isArithmeticFunc : __hip_internal::false_type {
 };
