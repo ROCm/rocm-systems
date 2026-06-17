@@ -27,7 +27,7 @@ use mirage_core::emulator::{
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
-use mirage_core::profile::{FileMount, ProfileDef};
+use mirage_core::profile::ProfileDef;
 use mirage_core::session::{SessionHealth, SessionId};
 use mirage_core::topology::TopologyDef;
 
@@ -173,37 +173,27 @@ impl EmulatorBackend for Rocjitsu {
         // For a containerised session the workload runs inside a node
         // container that does *not* share the host filesystem, so the
         // rocjitsu libraries (the KMD interposer and the host-side library
-        // it may dlopen) must be bind-mounted in. The per-node host
-        // *inside* the container re-resolves this injection against its own
-        // environment, where its discovery searches `CONTAINER_LIB_DIR`
-        // (`/mnt/mirage/lib`). We bind-mount each host library there,
-        // preserving its file name, so the in-container resolution finds it
-        // with no extra configuration. Without these mounts the
+        // it may dlopen) must be made available inside it. We declare them
+        // as `libraries`; the orchestrator bind-mounts each into
+        // `CONTAINER_LIB_DIR` (`/mnt/mirage/lib`), preserving its file
+        // name, and adds that directory to `LD_LIBRARY_PATH`. The per-node
+        // host *inside* the container re-resolves this injection against
+        // its own environment, where its discovery also searches
+        // `CONTAINER_LIB_DIR`, so the in-container resolution finds the
+        // KMD library there with no extra configuration. Without these the
         // in-container host fails to locate the KMD library and the exec
         // can never start.
-        let mounts = if profile.containerize.is_some() {
-            let kmd_name = ld_preload
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| KMD_LIB_NAME.to_string());
-            let mut mounts = vec![FileMount {
-                host_path: ld_preload.display().to_string(),
-                container_path: format!("{CONTAINER_LIB_DIR}/{kmd_name}"),
-                read_only: true,
-            }];
+        let libraries = if profile.containerize.is_some() {
+            let mut libraries = vec![ld_preload.display().to_string()];
             // A sibling host-side `librocjitsu.so`, if present next to the
             // KMD interposer: the interposer may dlopen it at runtime.
             if let Some(host_lib) = ld_preload.parent().map(|d| d.join(LIB_NAME))
                 && host_lib != ld_preload
                 && host_lib.exists()
             {
-                mounts.push(FileMount {
-                    host_path: host_lib.display().to_string(),
-                    container_path: format!("{CONTAINER_LIB_DIR}/{LIB_NAME}"),
-                    read_only: true,
-                });
+                libraries.push(host_lib.display().to_string());
             }
-            mounts
+            libraries
         } else {
             Default::default()
         };
@@ -213,7 +203,8 @@ impl EmulatorBackend for Rocjitsu {
             ld_preload: Some(ld_preload.display().to_string()),
             files: Default::default(),
             env,
-            mounts,
+            mounts: Default::default(),
+            libraries,
             host_gpus: false,
         })
     }

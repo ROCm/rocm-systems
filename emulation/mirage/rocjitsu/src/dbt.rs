@@ -215,6 +215,7 @@ impl EmulatorBackend for RocjitsuDbt {
             files: Default::default(),
             env,
             mounts,
+            libraries: Default::default(),
             // DBT runs the translated code on the host's physical GPU, so
             // a containerised node needs the host GPUs exposed.
             host_gpus: true,

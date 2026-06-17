@@ -168,6 +168,19 @@ pub struct InjectionDef {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mounts: Vec<FileMount>,
 
+    /// Host paths of shared libraries the workload needs available. For
+    /// a containerised session each is bind-mounted into `/mnt/mirage/lib`
+    /// (preserving its file name) and that directory is prepended to
+    /// `LD_LIBRARY_PATH`, so the dynamic loader prefers them over the
+    /// container image's own copies. Used to supply libraries that the
+    /// bind-mounted mirage binary and emulator interposers were built
+    /// against but the image's system libraries are too old to satisfy
+    /// (e.g. a newer `libc.so.6` or `libstdc++.so.6`). Ignored for
+    /// non-containerised sessions, where the workload already sees the
+    /// host's libraries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub libraries: Vec<String>,
+
     /// Whether the emulator needs the host's GPUs exposed to each node's
     /// container. When set, every node container is launched with the
     /// host's GPU device nodes (`/dev/kfd`, `/dev/dri`) and the

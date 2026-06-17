@@ -176,6 +176,7 @@ impl EmulatorBackend for Hotswap {
             files: Default::default(),
             env,
             mounts,
+            libraries: Default::default(),
             host_gpus: true,
         })
     }

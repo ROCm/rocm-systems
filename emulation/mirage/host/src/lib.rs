@@ -77,6 +77,13 @@ const CONTAINER_CONFIG_DIR: &str = "/mnt/mirage/config";
 /// instead of falling back to a non-existent in-container XDG path.
 const CONTAINER_STATE_DIR: &str = "/mnt/mirage/state";
 
+/// Directory inside every node container where host shared libraries are
+/// bind-mounted (the emulator's interposer/`libraries` plus the host
+/// `libc`/`libstdc++` the mirage binary was built against). Added to
+/// `LD_LIBRARY_PATH` so the loader prefers them over the image's own,
+/// possibly older, system libraries.
+const CONTAINER_LIB_DIR: &str = "/mnt/mirage/lib";
+
 /// Configuration for running a host.
 #[derive(Debug, Clone)]
 pub struct HostConfig {
@@ -479,6 +486,66 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         });
     }
 
+    // Expose the host's shared libraries inside each node container under
+    // `CONTAINER_LIB_DIR` (`/mnt/mirage/lib`). The container image's own
+    // system libraries can be older than the ones the bind-mounted mirage
+    // binary and the emulator's interposer were built against, so the
+    // in-container `mirage host` (or the interposer it preloads) fails to
+    // start with errors like "version `GLIBC_2.39' not found" or
+    // "`GLIBCXX_3.4.32' not found". We bind-mount, in priority order:
+    //   1. the host `libc.so.6` / `libstdc++.so.6` the mirage binary and
+    //      interposers need,
+    //   2. the emulator's declared `libraries`,
+    //   3. the emulator's `LD_PRELOAD` interposer itself,
+    // each preserving its file name, and put `CONTAINER_LIB_DIR` on
+    // `LD_LIBRARY_PATH` (below) so the loader prefers them.
+    let mut libraries: Vec<String> = Vec::new();
+    for name in ["libc.so.6", "libstdc++.so.6"] {
+        match find_system_library(name) {
+            Some(path) => libraries.push(path.to_string_lossy().into_owned()),
+            None => tracing::warn!(
+                "system library {name} not found on host; the container's own \
+                 copy will be used and may be too old for the mirage binary"
+            ),
+        }
+    }
+    libraries.extend(injection.libraries.iter().cloned());
+    if let Some(preload) = &injection.ld_preload {
+        libraries.push(preload.clone());
+    }
+
+    // `LD_PRELOAD` is resolved against the orchestrator's *host*
+    // filesystem; once mounted under `CONTAINER_LIB_DIR` we point the
+    // container's `LD_PRELOAD` at that in-container path (the host path
+    // does not exist inside the container, so passing it verbatim makes
+    // `ld.so` fail with "cannot be preloaded").
+    let container_ld_preload = injection.ld_preload.as_deref().and_then(|p| {
+        std::path::Path::new(p)
+            .file_name()
+            .map(|n| format!("{CONTAINER_LIB_DIR}/{}", n.to_string_lossy()))
+    });
+
+    let mut mounted_libs: HashSet<String> = HashSet::new();
+    for lib in &libraries {
+        let Some(name) = std::path::Path::new(lib)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+        else {
+            continue;
+        };
+        // Mount only the first library seen for each file name; later
+        // duplicates (e.g. the `LD_PRELOAD` interposer also listed in
+        // `libraries`) would collide on the same container path.
+        if !mounted_libs.insert(name.clone()) {
+            continue;
+        }
+        def.mounts.push(FileMount {
+            host_path: lib.clone(),
+            container_path: format!("{CONTAINER_LIB_DIR}/{name}"),
+            read_only: true,
+        });
+    }
+
     // Environment every node container inherits: the emulator's injected
     // env (already remapped to container paths), its `LD_PRELOAD`, and
     // the `MIRAGE_*` directory overrides so the in-container host
@@ -491,28 +558,20 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    if let Some(preload) = &injection.ld_preload {
-        // `injection.ld_preload` is resolved against the orchestrator's
-        // *host* filesystem, but the library is bind-mounted into each
-        // node container at its in-container path (see the emulator's
-        // injection mounts, e.g. rocjitsu's `/mnt/mirage/lib/...`).
-        // Translate each colon-separated entry to its mounted container
-        // path so `ld.so` can actually preload it; passing the host path
-        // verbatim makes the in-container `ld.so` fail with "cannot be
-        // preloaded (cannot open shared object file)".
-        let container_preload = preload
-            .split(':')
-            .map(|entry| {
-                injection
-                    .mounts
-                    .iter()
-                    .find(|m| m.host_path == entry)
-                    .map(|m| m.container_path.clone())
-                    .unwrap_or_else(|| entry.to_string())
-            })
-            .collect::<Vec<_>>()
-            .join(":");
-        injected_env.push(("LD_PRELOAD".to_string(), container_preload));
+    if let Some(preload) = &container_ld_preload {
+        injected_env.push(("LD_PRELOAD".to_string(), preload.clone()));
+    }
+    // Prepend the mirage library mount dir to `LD_LIBRARY_PATH` so the
+    // loader finds the host `libc`/`libstdc++`/interposer libraries
+    // mounted there ahead of the image's own copies.
+    {
+        let value = match injection.env.get("LD_LIBRARY_PATH") {
+            Some(existing) if !existing.is_empty() => {
+                format!("{CONTAINER_LIB_DIR}:{existing}")
+            }
+            _ => CONTAINER_LIB_DIR.to_string(),
+        };
+        injected_env.push(("LD_LIBRARY_PATH".to_string(), value));
     }
     injected_env.push((
         "MIRAGE_RUNTIME".to_string(),
@@ -613,6 +672,30 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         write_bytes(&nlayout.cid(), cid.as_bytes())?;
     }
     Ok(())
+}
+
+/// Directories on the host searched for a system shared library by its
+/// soname, in roughly the order the dynamic loader consults them on a
+/// glibc multiarch system.
+const SYSTEM_LIB_DIRS: &[&str] = &[
+    "/lib/x86_64-linux-gnu",
+    "/usr/lib/x86_64-linux-gnu",
+    "/lib64",
+    "/usr/lib64",
+    "/lib",
+    "/usr/lib",
+];
+
+/// Resolve a system shared library (e.g. `libc.so.6`) to its real host
+/// path, following symlinks so a bind mount targets the actual file
+/// rather than a versioned symlink that may be absent in the container.
+fn find_system_library(name: &str) -> Option<PathBuf> {
+    SYSTEM_LIB_DIRS.iter().find_map(|dir| {
+        let candidate = std::path::Path::new(dir).join(name);
+        candidate
+            .exists()
+            .then(|| std::fs::canonicalize(&candidate).unwrap_or(candidate))
+    })
 }
 
 /// Build the always-present mirage environment for a node of `rank`.
