@@ -151,9 +151,12 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
         else if (inst_index == 0)
         {
             // AM
-            try {
+            try
+            {
                 next = pctranslator->getcode(inst.pc);
-            } catch(...) {};
+            }
+            catch (...)
+            {};
 
             if (!next) return {0, barrier_gap};
         }
@@ -419,4 +422,5 @@ void Stitcher::stitch(WaveDataInternal& wave)
 Stitcher::Stitcher(
     std::shared_ptr<ICodeServicer> service, rocprof_trace_decoder_trace_callback_t _callback, void* _cbdata
 ) :
-codeobj_service(service), callback(_callback), cbdata(_cbdata) {}
+codeobj_service(service), callback(_callback), cbdata(_cbdata)
+{}

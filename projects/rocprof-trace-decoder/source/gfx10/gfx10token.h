@@ -283,10 +283,7 @@ union misc_fields
     };
     uint8_t raw;
 
-    void tt5_shift()
-    {
-        raw = (raw & 0x3) | ((raw & 0x7C) << 1);
-    }
+    void tt5_shift() { raw = (raw & 0x3) | ((raw & 0x7C) << 1); }
 };
 
 union misc_type

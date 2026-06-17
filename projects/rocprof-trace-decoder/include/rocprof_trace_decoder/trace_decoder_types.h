@@ -169,8 +169,8 @@ typedef struct rocprofiler_thread_trace_decoder_wave_t
 
     uint8_t dispatcher;   ///< [0:3] PIPE_ID, [4:6] ME_ID
     uint8_t workgroup_id; ///< Workgroup ID
-    uint8_t cluster_id;  ///< 0 = not in a cluster
-    uint8_t reserved;    ///< Reserved
+    uint8_t cluster_id;   ///< 0 = not in a cluster
+    uint8_t reserved;     ///< Reserved
     uint64_t size;        ///< Size of this struct
 
     int64_t begin_time; ///< Wave begin time. Should match occupancy event wave start.
@@ -247,15 +247,15 @@ typedef enum rocprofiler_thread_trace_decoder_event_type_t
     ROCPROF_TRACE_DECODER_EVENT_DISPATCH_END,
     ROCPROF_TRACE_DECODER_EVENT_CACHE_FLUSH,
     ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS,
-    ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_LOAD,   ///< Payload is the ID
-    ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_UNLOAD, ///< Payload is the ID
+    ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_LOAD,   ///< ID = payload.code_object_id
+    ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_UNLOAD, ///< ID = payload.code_object_id
     ROCPROF_TRACE_DECODER_EVENT_TT_STALL_BEGIN,
     ROCPROF_TRACE_DECODER_EVENT_TT_STALL_END,
     ROCPROF_TRACE_DECODER_EVENT_TT_FLUSH,
     ROCPROF_TRACE_DECODER_EVENT_DIDT_STALL_BEGIN,
     ROCPROF_TRACE_DECODER_EVENT_DIDT_STALL_END,
-    ROCPROF_TRACE_DECODER_EVENT_CLUSTER_BEGIN, ///< Payload is the ID
-    ROCPROF_TRACE_DECODER_EVENT_CLUSTER_END,   ///< Payload is the ID
+    ROCPROF_TRACE_DECODER_EVENT_CLUSTER_BARRIER, ///< IDs = cluster_barrier.{cluster_id, barrier_id}
+    ROCPROF_TRACE_DECODER_EVENT_RESERVED,
     ROCPROF_TRACE_DECODER_EVENT_GC_RINSE,
     ROCPROF_TRACE_DECODER_EVENT_SPM_SAMPLE,
     ROCPROF_TRACE_DECODER_EVENT_LAST
@@ -269,6 +269,17 @@ typedef enum rocprofiler_thread_trace_decoder_event_flags_t
     ROCPROF_TRACE_DECODER_EVENT_FLAGS_LAST = ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP,
 } rocprofiler_thread_trace_decoder_event_flags_t;
 
+typedef union rocprofiler_thread_trace_decoder_event_payload_t
+{
+    uint64_t raw;
+    uint64_t code_object_id;
+    struct
+    {
+        int cluster_id;
+        int barrier_id;
+    } cluster_barrier;
+} rocprofiler_thread_trace_decoder_event_payload_t;
+
 typedef struct rocprofiler_thread_trace_decoder_event_t
 {
     uint64_t size; ///< Size of this struct
@@ -277,7 +288,7 @@ typedef struct rocprofiler_thread_trace_decoder_event_t
     uint8_t me_id;
     uint8_t pipe_id;
     uint16_t flags;
-    uint64_t payload;
+    rocprofiler_thread_trace_decoder_event_payload_t payload;
     uint64_t byte_offset; ///< Byte offset within the trace data
 } rocprofiler_thread_trace_decoder_event_t;
 
