@@ -126,7 +126,7 @@ jobs:
         run: |
           if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MODE=Nightly
-            INCLUDED_LABELS=""
+            INCLUDED_LABELS="gpu"
             EXCLUDED_LABELS="${{ env.EXCLUDED_LABELS }}"
           else
             MODE=Continuous
@@ -161,7 +161,7 @@ jobs:
 
       - name: Configure, Build, and Test
         id: run_ci
-        timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 60 }}
+        timeout-minutes: 60
         working-directory: projects/rocprofiler-systems
         run: |
           set -e
