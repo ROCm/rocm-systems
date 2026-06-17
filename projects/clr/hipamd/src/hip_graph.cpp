@@ -386,34 +386,14 @@ hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CON
 
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   dim3 clusterDim = {1, 1, 1};
-
-  auto addKernelNode = [&](int coopKernel, void** nodeExtra, dim3 clusterDim) -> hipError_t {
-    hipKernelNodeParams nodeParams;
-    nodeParams.func = f;
-    nodeParams.blockDim = {config->blockDimX, config->blockDimY, config->blockDimZ};
-    nodeParams.extra = nodeExtra;
-    nodeParams.gridDim = {config->gridDimX, config->gridDimY, config->gridDimZ};
-    nodeParams.kernelParams = kernelParams;
-    nodeParams.sharedMemBytes = config->sharedMemBytes;
-
-    hip::GraphNode* pGraphNode;
-    hipError_t status = ihipGraphAddKernelNode(
-        &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
-        s->GetLastCapturedNodes().size(), &nodeParams, nullptr, true, coopKernel, s->DeviceId(),
-        0, 0, 0, clusterDim);
-    if (status != hipSuccess) {
-      return status;
-    }
-    s->SetLastCapturedNode(pGraphNode);
-    return hipSuccess;
-  };
+  int coopKernel = 0;
 
   for (size_t attr_idx = 0; attr_idx < config->numAttrs; ++attr_idx) {
     const hipLaunchAttribute& attr = config->attrs[attr_idx];
     switch (attr.id) {
       case hipLaunchAttributeCooperative:
         if (attr.value.cooperative != 0) {
-          return addKernelNode(amd::NDRangeKernelCommand::CooperativeGroups, nullptr, {1, 1, 1});
+          coopKernel = amd::NDRangeKernelCommand::CooperativeGroups;
         }
         break;
       case hipLaunchAttributeClusterDimension:
@@ -436,7 +416,24 @@ hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CON
     }
   }
 
-  return addKernelNode(0, extra, clusterDim);
+  hipKernelNodeParams nodeParams;
+  nodeParams.func = f;
+  nodeParams.blockDim = {config->blockDimX, config->blockDimY, config->blockDimZ};
+  nodeParams.gridDim = {config->gridDimX, config->gridDimY, config->gridDimZ};
+  nodeParams.sharedMemBytes = config->sharedMemBytes;
+  nodeParams.kernelParams = kernelParams;
+  nodeParams.extra = coopKernel ? nullptr : extra;
+
+  hip::GraphNode* pGraphNode;
+  hipError_t status = ihipGraphAddKernelNode(
+      &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
+      s->GetLastCapturedNodes().size(), &nodeParams, nullptr, true, coopKernel, s->DeviceId(),
+      0, 0, 0, clusterDim);
+  if (status != hipSuccess) {
+    return status;
+  }
+  s->SetLastCapturedNode(pGraphNode);
+  return hipSuccess;
 }
 
 hipError_t capturehipModuleLaunchCooperativeKernel(hipStream_t& stream, hipFunction_t& f,
