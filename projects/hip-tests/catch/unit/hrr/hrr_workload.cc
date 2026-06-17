@@ -2082,6 +2082,7 @@ TEST_CASE("Unit_HRR_MiscAPIs_Direct", "[.][hrr][direct]") {
   hipStream_t s;
   HIP_CHECK(hipStreamCreate(&s));
 
+  // hipProfilerStart / hipProfilerStop
   (void)hipProfilerStart();
   (void)hipProfilerStop();
 
