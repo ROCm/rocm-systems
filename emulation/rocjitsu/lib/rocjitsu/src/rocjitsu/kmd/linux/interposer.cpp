@@ -443,15 +443,42 @@ __attribute__((constructor(101))) static void resolve_real_dlsym() {
 
 __attribute__((constructor)) static void init_interposer() { InterposerContext::init(); }
 
-} // namespace
+constexpr int DRM_NODE_PRIMARY = 0;
+constexpr int DRM_NODE_RENDER = 2;
+constexpr int DRM_BUS_PCI = 0;
+constexpr unsigned kDrmCommandBase = 0x40;
+constexpr unsigned kDrmAmdgpuInfo = 0x05;
+constexpr unsigned kAmdgpuInfoDevInfo = 0x16;
 
-extern "C" {
+// Local ABI mirrors for the libdrm calls we interpose. The source of truth is
+// the Linux UAPI DRM headers for drm_version, drm_amdgpu_info, and
+// drm_amdgpu_info_device, plus libdrm's amdgpu.h for amdgpu_device_handle and
+// amdgpu_gpu_info. Keep this target independent of libdrm headers; the layout
+// test covers the drm_amdgpu_info_device prefix where that dependency already
+// existed.
+struct RjAmdgpuDevice;
+using RjAmdgpuDeviceHandle = RjAmdgpuDevice *;
 
-static std::string redirect_sysfs_path(const char *path);
-static std::string redirect_sys_dev_char(const char *path);
-static const Sysfs::GpuInfo *interposer_gpu_info();
+struct RjDrmVersion {
+  int version_major;
+  int version_minor;
+  int version_patchlevel;
+  size_t name_len;
+  char *name;
+  size_t date_len;
+  char *date;
+  size_t desc_len;
+  char *desc;
+};
 
-struct amdgpu_gpu_info {
+struct RjDrmAmdgpuInfo {
+  uint64_t return_pointer;
+  uint32_t return_size;
+  uint32_t query;
+  uint64_t pad;
+};
+
+struct RjAmdgpuGpuInfo {
   uint32_t asic_id;
   uint32_t chip_rev;
   uint32_t chip_external_rev;
@@ -485,13 +512,101 @@ struct amdgpu_gpu_info {
   uint32_t pci_rev_id;
 };
 
+struct RjDrmAmdgpuInfoDevice {
+  uint32_t device_id;
+  uint32_t chip_rev;
+  uint32_t external_rev;
+  uint32_t pci_rev;
+  uint32_t family;
+  uint32_t num_shader_engines;
+  uint32_t num_shader_arrays_per_engine;
+  uint32_t gpu_counter_freq;
+  uint64_t max_engine_clock;
+  uint64_t max_memory_clock;
+  uint32_t cu_active_number;
+  uint32_t cu_ao_mask;
+  uint32_t cu_bitmap[4][4];
+  uint32_t enabled_rb_pipes_mask;
+  uint32_t num_rb_pipes;
+  uint32_t num_hw_gfx_contexts;
+  uint32_t pcie_gen;
+  uint64_t ids_flags;
+  uint64_t virtual_address_offset;
+  uint64_t virtual_address_max;
+  uint32_t virtual_address_alignment;
+  uint32_t pte_fragment_size;
+  uint32_t gart_page_size;
+  uint32_t ce_ram_size;
+  uint32_t vram_type;
+  uint32_t vram_bit_width;
+  uint32_t vce_harvest_config;
+  uint32_t gc_double_offchip_lds_buf;
+  uint64_t prim_buf_gpu_addr;
+  uint64_t pos_buf_gpu_addr;
+  uint64_t cntl_sb_buf_gpu_addr;
+  uint64_t param_buf_gpu_addr;
+  uint32_t prim_buf_size;
+  uint32_t pos_buf_size;
+  uint32_t cntl_sb_buf_size;
+  uint32_t param_buf_size;
+  uint32_t wave_front_size;
+  uint32_t num_shader_visible_vgprs;
+  uint32_t num_cu_per_sh;
+  uint32_t num_tcc_blocks;
+  uint32_t gs_vgt_table_depth;
+  uint32_t gs_prim_buffer_depth;
+  uint32_t max_gs_waves_per_vgt;
+  uint32_t pcie_num_lanes;
+  uint32_t cu_ao_bitmap[4][4];
+  uint64_t high_va_offset;
+  uint64_t high_va_max;
+  uint32_t pa_sc_tile_steering_override;
+  uint64_t tcc_disabled_mask;
+};
+
+struct drmPciBusInfo {
+  uint16_t domain;
+  uint8_t bus;
+  uint8_t dev;
+  uint8_t func;
+};
+
+struct drmPciDeviceInfo {
+  uint16_t vendor_id;
+  uint16_t device_id;
+  uint16_t subvendor_id;
+  uint16_t subdevice_id;
+  uint8_t revision_id;
+};
+
+struct drmDevice {
+  char **nodes;
+  int available_nodes;
+  int bustype;
+  union {
+    drmPciBusInfo *pci;
+  } businfo;
+  union {
+    drmPciDeviceInfo *pci;
+  } deviceinfo;
+};
+
+} // namespace
+
+extern "C" {
+
+static std::string redirect_sysfs_path(const char *path);
+static std::string redirect_sys_dev_char(const char *path);
+static const Sysfs::GpuInfo *interposer_gpu_info();
+
 struct SyntheticDrmOpenResult {
   bool handled = false;
   int fd = -1;
 };
 
 static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
-  if (!path || !std::string_view(path).starts_with("/dev/dri/renderD"))
+  static constexpr std::string_view kRenderPrefix = "/dev/dri/renderD";
+  if (!path || !std::string_view(path).starts_with(kRenderPrefix))
     return {};
 
   if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
@@ -502,7 +617,7 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
     return {};
 
   uint32_t render_minor = 128;
-  auto minor_str = std::string_view(path).substr(16);
+  auto minor_str = std::string_view(path).substr(kRenderPrefix.size());
   if (!minor_str.empty()) {
     uint32_t parsed_minor = 0;
     auto *first = minor_str.data();
@@ -726,23 +841,13 @@ int ioctl(int fd, unsigned long request, ...) {
 
   constexpr unsigned kDrmIoctlType = 'd';
   constexpr unsigned kDrmIoctlNrVersion = 0x00;
-  constexpr unsigned kDrmIoctlNrAmdgpuInfo = 0x45;
-  constexpr unsigned kAmdgpuInfoDevInfo = 0x16;
+  constexpr unsigned kDrmIoctlNrAmdgpuInfo = kDrmCommandBase + kDrmAmdgpuInfo;
 
   if (InterposerContext::ctx.is_drm(fd)) {
     unsigned nr = _IOC_NR(request);
     unsigned type = _IOC_TYPE(request);
     if (type == kDrmIoctlType && nr == kDrmIoctlNrVersion && arg) {
-      struct drm_version {
-        int version_major, version_minor, version_patchlevel;
-        size_t name_len;
-        char *name;
-        size_t date_len;
-        char *date;
-        size_t desc_len;
-        char *desc;
-      };
-      auto *ver = static_cast<drm_version *>(arg);
+      auto *ver = static_cast<RjDrmVersion *>(arg);
       ver->version_major = 3;
       ver->version_minor = 57;
       ver->version_patchlevel = 0;
@@ -759,13 +864,7 @@ int ioctl(int fd, unsigned long request, ...) {
       return 0;
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrAmdgpuInfo && arg) {
-      struct drm_amdgpu_info {
-        uint64_t return_pointer;
-        uint32_t return_size;
-        uint32_t query;
-        uint64_t pad;
-      };
-      auto *info = static_cast<drm_amdgpu_info *>(arg);
+      auto *info = static_cast<RjDrmAmdgpuInfo *>(arg);
       if (info->query == kAmdgpuInfoDevInfo && !interposer_gpu_info()) {
         errno = ENODEV;
         return -1;
@@ -774,59 +873,8 @@ int ioctl(int fd, unsigned long request, ...) {
         auto *out = reinterpret_cast<void *>(info->return_pointer);
         std::memset(out, 0, info->return_size);
         if (info->query == kAmdgpuInfoDevInfo) {
-          struct drm_amdgpu_info_device {
-            uint32_t device_id;
-            uint32_t chip_rev;
-            uint32_t external_rev;
-            uint32_t pci_rev;
-            uint32_t family;
-            uint32_t num_shader_engines;
-            uint32_t num_shader_arrays_per_engine;
-            uint32_t gpu_counter_freq;
-            uint64_t max_engine_clock;
-            uint64_t max_memory_clock;
-            uint32_t cu_active_number;
-            uint32_t cu_ao_mask;
-            uint32_t cu_bitmap[4][4];
-            uint32_t enabled_rb_pipes_mask;
-            uint32_t num_rb_pipes;
-            uint32_t num_hw_gfx_contexts;
-            uint32_t pcie_gen;
-            uint64_t ids_flags;
-            uint64_t virtual_address_offset;
-            uint64_t virtual_address_max;
-            uint32_t virtual_address_alignment;
-            uint32_t pte_fragment_size;
-            uint32_t gart_page_size;
-            uint32_t ce_ram_size;
-            uint32_t vram_type;
-            uint32_t vram_bit_width;
-            uint32_t vce_harvest_config;
-            uint32_t gc_double_offchip_lds_buf;
-            uint64_t prim_buf_gpu_addr;
-            uint64_t pos_buf_gpu_addr;
-            uint64_t cntl_sb_buf_gpu_addr;
-            uint64_t param_buf_gpu_addr;
-            uint32_t prim_buf_size;
-            uint32_t pos_buf_size;
-            uint32_t cntl_sb_buf_size;
-            uint32_t param_buf_size;
-            uint32_t wave_front_size;
-            uint32_t num_shader_visible_vgprs;
-            uint32_t num_cu_per_sh;
-            uint32_t num_tcc_blocks;
-            uint32_t gs_vgt_table_depth;
-            uint32_t gs_prim_buffer_depth;
-            uint32_t max_gs_waves_per_vgt;
-            uint32_t pcie_num_lanes;
-            uint32_t cu_ao_bitmap[4][4];
-            uint64_t high_va_offset;
-            uint64_t high_va_max;
-            uint32_t pa_sc_tile_steering_override;
-            uint64_t tcc_disabled_mask;
-          };
-          if (info->return_size >= sizeof(drm_amdgpu_info_device)) {
-            auto *dev = static_cast<drm_amdgpu_info_device *>(out);
+          if (info->return_size >= sizeof(RjDrmAmdgpuInfoDevice)) {
+            auto *dev = static_cast<RjDrmAmdgpuInfoDevice *>(out);
             auto *gpu = interposer_gpu_info();
             if (gpu) {
               dev->device_id = gpu->device_id;
@@ -1083,29 +1131,29 @@ int munmap(void *addr, size_t length) {
 // -- libdrm interposition --
 
 int amdgpu_device_initialize(int /*fd*/, uint32_t *major_version, uint32_t *minor_version,
-                             void **device_handle) {
+                             RjAmdgpuDeviceHandle *device_handle) {
   if (InterposerContext::ctx.driver_fd() < 0 && InterposerContext::ctx.remote_kfd_fd() < 0)
     return -1;
   *major_version = 3;
   *minor_version = 57;
   static int dummy_handle = 1;
-  *device_handle = &dummy_handle;
+  *device_handle = reinterpret_cast<RjAmdgpuDeviceHandle>(&dummy_handle);
   return 0;
 }
 
 int amdgpu_device_initialize2(int fd, bool /*deduplicate_device*/, uint32_t *major_version,
-                              uint32_t *minor_version, void **device_handle) {
+                              uint32_t *minor_version, RjAmdgpuDeviceHandle *device_handle) {
   return amdgpu_device_initialize(fd, major_version, minor_version, device_handle);
 }
 
-int amdgpu_device_deinitialize(void * /*device_handle*/) { return 0; }
+int amdgpu_device_deinitialize(RjAmdgpuDeviceHandle /*device_handle*/) { return 0; }
 
-int amdgpu_device_get_fd(void * /*device_handle*/) {
+int amdgpu_device_get_fd(RjAmdgpuDeviceHandle /*device_handle*/) {
   int fd = InterposerContext::ctx.remote_kfd_fd();
   return fd >= 0 ? fd : InterposerContext::ctx.driver_fd();
 }
 
-const char *amdgpu_get_marketing_name(void * /*device_handle*/) {
+const char *amdgpu_get_marketing_name(RjAmdgpuDeviceHandle /*device_handle*/) {
   auto *gpu = interposer_gpu_info();
   if (!gpu)
     return nullptr;
@@ -1119,7 +1167,7 @@ const char *amdgpu_get_marketing_name(void * /*device_handle*/) {
   return name.c_str();
 }
 
-int amdgpu_query_gpu_info(void * /*device_handle*/, amdgpu_gpu_info *info) {
+int amdgpu_query_gpu_info(RjAmdgpuDeviceHandle /*device_handle*/, RjAmdgpuGpuInfo *info) {
   if (!info)
     return -EINVAL;
 
@@ -1299,6 +1347,8 @@ static const Sysfs::GpuInfo *interposer_gpu_info() {
   auto *drv = InterposerContext::ctx.driver();
   if (drv)
     return &drv->topology().gpu_info();
+  if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
+    return remote->gpu_info();
   return nullptr;
 }
 
@@ -1560,37 +1610,6 @@ int __lxstat64(int ver, const char *path, struct stat64 *buf) {
 }
 
 // -- DRM device enumeration (direct PLT linkage consumers) --
-
-struct drmPciBusInfo {
-  uint16_t domain;
-  uint8_t bus;
-  uint8_t dev;
-  uint8_t func;
-};
-
-struct drmPciDeviceInfo {
-  uint16_t vendor_id;
-  uint16_t device_id;
-  uint16_t subvendor_id;
-  uint16_t subdevice_id;
-  uint8_t revision_id;
-};
-
-struct drmDevice {
-  char **nodes;
-  int available_nodes;
-  int bustype;
-  union {
-    drmPciBusInfo *pci;
-  } businfo;
-  union {
-    drmPciDeviceInfo *pci;
-  } deviceinfo;
-};
-
-static constexpr int DRM_NODE_PRIMARY = 0;
-static constexpr int DRM_NODE_RENDER = 2;
-static constexpr int DRM_BUS_PCI = 0;
 
 static std::unordered_set<void *> our_drm_allocs;
 static std::mutex drm_alloc_mutex;

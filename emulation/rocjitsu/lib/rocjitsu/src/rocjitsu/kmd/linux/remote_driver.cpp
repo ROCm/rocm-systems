@@ -54,6 +54,58 @@ void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
   return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
 }
 
+Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
+  Sysfs::GpuInfo gpu{};
+  gpu.gpu_id = src.gpu_id;
+  gpu.gfx_target_version = src.gfx_target_version;
+  gpu.vendor_id = src.vendor_id;
+  gpu.device_id = src.device_id;
+  gpu.family_id = src.family_id;
+  gpu.unique_id = src.unique_id;
+  gpu.location_id = src.location_id;
+  gpu.domain = src.domain;
+  gpu.hive_id = src.hive_id;
+  gpu.drm_render_minor = src.drm_render_minor;
+  gpu.revision_id = src.revision_id;
+  gpu.pci_revision_id = src.pci_revision_id;
+  gpu.simd_count = src.simd_count;
+  gpu.max_waves_per_simd = src.max_waves_per_simd;
+  gpu.num_shader_engines = src.num_shader_engines;
+  gpu.num_shader_arrays_per_engine = src.num_shader_arrays_per_engine;
+  gpu.num_cu_per_sh = src.num_cu_per_sh;
+  gpu.simd_per_cu = src.simd_per_cu;
+  gpu.wave_front_size = src.wave_front_size;
+  gpu.num_xcc = src.num_xcc;
+  gpu.max_slots_scratch_cu = src.max_slots_scratch_cu;
+  gpu.local_mem_size = src.local_mem_size;
+  gpu.vram_type = src.vram_type;
+  gpu.lds_size_kb = src.lds_size_kb;
+  gpu.mem_width = src.mem_width;
+  gpu.mem_clk_max = src.mem_clk_max;
+  gpu.l1_size_kb = src.l1_size_kb;
+  gpu.l1_line_size = src.l1_line_size;
+  gpu.l1_assoc = src.l1_assoc;
+  gpu.l2_size_kb = src.l2_size_kb;
+  gpu.l2_line_size = src.l2_line_size;
+  gpu.l2_assoc = src.l2_assoc;
+  gpu.num_sdma_engines = src.num_sdma_engines;
+  gpu.num_sdma_xgmi_engines = src.num_sdma_xgmi_engines;
+  gpu.num_cp_queues = src.num_cp_queues;
+  gpu.max_engine_clk_fcompute = src.max_engine_clk_fcompute;
+  gpu.capability = src.capability;
+  gpu.capability2 = src.capability2;
+  gpu.debug_prop = src.debug_prop;
+  gpu.fw_version = src.fw_version;
+  gpu.sdma_fw_version = src.sdma_fw_version;
+
+  auto *name_end =
+      static_cast<const char *>(std::memchr(src.marketing_name, '\0', sizeof(src.marketing_name)));
+  auto name_len =
+      name_end ? static_cast<size_t>(name_end - src.marketing_name) : sizeof(src.marketing_name);
+  gpu.marketing_name.assign(src.marketing_name, name_len);
+  return gpu;
+}
+
 } // namespace
 
 bool RemoteDriver::find_memfd_for_addr(void *addr, size_t length, int *memfd_out,
@@ -90,6 +142,10 @@ RemoteDriver::~RemoteDriver() {
 int RemoteDriver::open() {
   assert(sock_ >= 0 && "open called on disconnected RemoteDriver");
   closing_.store(false, std::memory_order_release);
+  has_gpu_info_ = false;
+  gpu_info_ = {};
+  topology_path_.clear();
+  drm_path_.clear();
   // Drain the shutdown eventfd so it doesn't immediately wake pollers.
   if (shutdown_efd_ >= 0) {
     uint64_t val = 0;
@@ -118,6 +174,10 @@ int RemoteDriver::open() {
 
   if (hs.version != kRpcProtocolVersion)
     return -1;
+
+  has_gpu_info_ = hs.gpu_info.present != 0;
+  if (has_gpu_info_)
+    gpu_info_ = gpu_info_from_rpc(hs.gpu_info);
 
   constexpr uint32_t kMaxPathLen = 4096;
   if (hs.topology_path_len > kMaxPathLen)
@@ -179,6 +239,10 @@ int RemoteDriver::close() {
     }
     handle_memfds_.clear();
     alloc_ranges_.clear();
+    topology_path_.clear();
+    drm_path_.clear();
+    gpu_info_ = {};
+    has_gpu_info_ = false;
   }
 
   return 0;

@@ -30,16 +30,18 @@ constexpr uint32_t kGpuId = 38144;
 
 uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
   auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
-  auto *soc = loaded.soc();
+  auto root = loaded.take_root();
+  auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
+  if (!soc)
+    return 0;
   auto num_xcds = soc->num_xcds();
 
   loaded.engine_config.max_ticks = 0;
   loaded.engine_config.await_primaries = true;
   simdojo::SimulationEngine engine(loaded.engine_config);
 
-  auto root = loaded.take_root();
-  root.release();
-  auto vm = std::make_unique<rocjitsu::VirtualMachine>(std::unique_ptr<rocjitsu::SoC>(soc));
+  auto soc_root = std::unique_ptr<rocjitsu::SoC>(static_cast<rocjitsu::SoC *>(root.release()));
+  auto vm = std::make_unique<rocjitsu::VirtualMachine>(std::move(soc_root));
   auto *driver = vm->driver();
 
   engine.topology().set_root(std::move(vm));
@@ -65,16 +67,17 @@ protected:
   void SetUp() override {
     setenv("RJ_CONFIG", CONFIG_PATH.c_str(), 1);
     loaded_ = rocjitsu::config::load_config(CONFIG_PATH.c_str(), rocjitsu::kEmbeddedSchema);
-    auto *soc = loaded_.soc();
+    auto root = loaded_.take_root();
+    auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
+    ASSERT_NE(soc, nullptr);
     auto num_xcds = soc->num_xcds();
 
     loaded_.engine_config.max_ticks = 0;
     loaded_.engine_config.await_primaries = true;
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);
 
-    auto root = loaded_.take_root();
-    root.release();
-    auto vm = std::make_unique<rocjitsu::VirtualMachine>(std::unique_ptr<rocjitsu::SoC>(soc));
+    auto soc_root = std::unique_ptr<rocjitsu::SoC>(static_cast<rocjitsu::SoC *>(root.release()));
+    auto vm = std::make_unique<rocjitsu::VirtualMachine>(std::move(soc_root));
     driver_ = vm->driver();
 
     engine_->topology().set_root(std::move(vm));
