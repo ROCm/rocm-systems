@@ -61,7 +61,7 @@ struct wave_t : public WaveDataInternal
     void apply_inst(int64_t token_time, int enum_inst, mapped_inst_t mapped, int tt_version);
     void apply_valu_inst(int64_t token_time);
     void apply_immediate(int64_t token_time);
-    void new_pc(int64_t time, int64_t pc_value, CodeobjTableTranslator& table);
+    void new_pc(int64_t time, int64_t pc_value, const CachedTable& table);
 };
 
 using CSRegisterHandler = ::CSRegisterHandler;

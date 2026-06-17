@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/perfetto_processor.hpp"
+#include "common/units.hpp"
 #include "core/agent_manager.hpp"
 #include "core/categories.hpp"
 #include "core/common.hpp"
@@ -635,9 +636,9 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
         {
             _fom(_filename, std::string{ "perfetto" },
                  " (%.2f KB / %.2f MB / %.2f GB)... ",
-                 static_cast<double>(trace_data.size()) / units::KB,
-                 static_cast<double>(trace_data.size()) / units::MB,
-                 static_cast<double>(trace_data.size()) / units::GB);
+                 static_cast<double>(trace_data.size()) / units::kilobyte,
+                 static_cast<double>(trace_data.size()) / units::megabyte,
+                 static_cast<double>(trace_data.size()) / units::gigabyte);
         }
         std::ofstream ofs{};
         if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))

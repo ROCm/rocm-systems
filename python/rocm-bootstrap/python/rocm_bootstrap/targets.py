@@ -477,7 +477,7 @@ BUNDLE_GFX11_5 = TargetBundle(
     members=(GFX1150, GFX1151, GFX1152, GFX1153),
 )
 
-# gfx12-generic covers gfx1200, gfx1201 only (not gfx1250+).
+# gfx12-generic covers gfx1200, gfx1201 only.
 BUNDLE_GFX12_0 = TargetBundle(
     key="gfx12_0",
     level=_SF,
@@ -490,7 +490,7 @@ BUNDLE_GFX12_5 = TargetBundle(
     key="gfx12_5",
     level=_SF,
     display_name="GFX12.5",
-    llvm_generic=None,
+    llvm_generic="gfx12-5-generic",
     members=(GFX1250, GFX1251),
 )
 

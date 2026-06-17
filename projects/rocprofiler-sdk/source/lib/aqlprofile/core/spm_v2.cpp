@@ -486,7 +486,8 @@ aqlprofile_spm_stop(aqlprofile_handle_t handle)
 PUBLIC_API void
 aqlprofile_spm_delete_packets(aqlprofile_handle_t handle)
 {
-    aqlprofile::spm::spm_state_map()->remove(handle);
+    if(auto* map = rocprofiler::common::static_object<aqlprofile::spm::SpmStateMap>::get())
+        map->remove(handle);
 }
 
 struct consumer_thread_handle_t
@@ -523,7 +524,7 @@ producer(std::shared_ptr<spm_state_t> s)
         args.size_copied = 0;
         args.dest_buf    = s->prod_buf;
         // s->stop_prod_thread should be set after SPM End() sequence is submitted, this is the
-        // handshake protocal between app/library and aqlprofile.
+        // handshake protocol between app/library and aqlprofile.
         // If s->stop_prod_thread is set in current loop, producer thread will exit after all
         // SPM counters are drained (args.size_copied == 0) which could be at least one
         // HsaSpmSetDestBuffer() call or maybe more than one.

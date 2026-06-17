@@ -363,7 +363,8 @@ StatsClient::generateReportV1(std::ostream &stream, const StatsV1 *stats)
     }
 
     stream << "File Handle Registrations: " << stats->getFileRegistrations().load() << '\n';
-    stream << "Buffer Registrations: " << stats->getBufferRegistrations().load() << "\n\n";
+    stream << "Buffer Registrations: " << stats->getBufferRegistrations().load() << "\n";
+    stream << "Fastpath Rejections: " << stats->getFastpathRejections().load() << "\n\n";
 
     static constexpr IoType       ioTypes[]{IoType::Read, IoType::Write};
     static constexpr StatsBackend backends[]{StatsBackend::Fastpath, StatsBackend::Fallback};
@@ -540,5 +541,15 @@ StatsCollection::bufferRegistration() const noexcept
         return;
     }
     stats->getBufferRegistrations().fetch_add(1, std::memory_order_relaxed);
+}
+
+void
+StatsCollection::fastpathRejection() const noexcept
+{
+    Stats *stats{Context<IStatsServer>::get()->getStats()};
+    if (stats == nullptr || stats->getLevel() < StatsLevel::Basic) {
+        return;
+    }
+    stats->getFastpathRejections().fetch_add(1, std::memory_order_relaxed);
 }
 }

@@ -68,6 +68,8 @@ struct HookEvent {
   uint32_t dispatch_id = 0;
   uint32_t wg_id = 0;
   uint32_t wf_id = 0;
+  uint32_t physical_vgpr_count = 0;
+  uint32_t sgpr_count = 0;
   uint64_t pc = 0;
   std::string mnemonic;
 };
@@ -100,11 +102,14 @@ public:
     events.push_back(e);
   }
 
-  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
+                                   uint32_t physical_vgpr_count, uint32_t sgpr_count,
                                    std::span<amdgpu::Wavefront *>) override {
     HookEvent e{HookEvent::WORKGROUP_DISPATCHED};
     e.dispatch_id = dispatch_id;
     e.wg_id = wg_id;
+    e.physical_vgpr_count = physical_vgpr_count;
+    e.sgpr_count = sgpr_count;
     events.push_back(e);
   }
 
@@ -486,6 +491,22 @@ TEST(HookOrderingTest, BarrierTwoWaves) {
 
   ASSERT_EQ(p->events.front().kind, HookEvent::INIT);
   ASSERT_EQ(p->events.back().kind, HookEvent::SHUTDOWN);
+}
+
+TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalVgprBlockSize) {
+  PluginFixture f;
+  auto *p = f.attach_ordering_plugin();
+  const uint32_t code[] = {S_ENDPGM};
+  f.run_kernel(code, 1);
+  f.shutdown();
+
+  auto it = std::find_if(p->events.begin(), p->events.end(), [](const HookEvent &e) {
+    return e.kind == HookEvent::WORKGROUP_DISPATCHED;
+  });
+  ASSERT_NE(it, p->events.end());
+  EXPECT_EQ(it->physical_vgpr_count, f.cu()->vgpr_allocation_block_size());
+  EXPECT_GT(it->physical_vgpr_count, f.cu()->config().vgprs_per_wf);
+  EXPECT_EQ(it->sgpr_count, f.cu()->config().sgprs_per_wf);
 }
 
 TEST(HookOrderingTest, FiveDispatchLifecycle) {

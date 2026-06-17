@@ -358,7 +358,7 @@ TEST(Gfx10WaveTest, NewPcPushesEntry)
     gfx10::wave_t wave(0, 0, 0, pcinfo_t{100, 1}, start_tok, false);
     wave.trap_status = WaveTrapStatus::TRAP_RESTORED;
 
-    CodeobjTableTranslator table;
+    CachedTable table;
     size_t before = wave.pc_infos.size();
     wave.new_pc(200, 0x1000, table);
     EXPECT_GT(wave.pc_infos.size(), before);

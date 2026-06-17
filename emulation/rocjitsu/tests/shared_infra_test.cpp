@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
@@ -23,6 +24,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 
 #include "simdojo/sim/simulation.h"
+#include "util/bit.h"
 
 #include <gtest/gtest.h>
 
@@ -42,7 +44,9 @@ using namespace rocjitsu;
 static_assert(GpuIsa<cdna3::Isa>);
 static_assert(GpuIsa<gfx1250::Isa>);
 static_assert(GpuIsa<rdna4::Isa>);
+static_assert(HasAccVgpr<cdna2::Isa>);
 static_assert(HasAccVgpr<cdna3::Isa>);
+static_assert(HasAccVgpr<cdna4::Isa>);
 static_assert(!HasAccVgpr<gfx1250::Isa>);
 static_assert(!HasAccVgpr<rdna4::Isa>);
 static_assert(HasMonolithicWaitcnt<cdna3::Isa>);
@@ -56,10 +60,19 @@ static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
 static_assert(rdna2::Isa::WF_SIZE_MAX == 64);
 static_assert(gfx1250::Isa::WF_SIZE_MAX == 32);
 
-// CDNA1 has no AccVGPRs; CDNA2/3/4 have 256.
+// CDNA1 and GFX1250 have no AccVGPRs; CDNA2/3/4 have 256.
+constexpr uint32_t kCdnaAccVgprsPerWf = cdna2::Isa::MAX_ACC_VGPRS_PER_WF;
 static_assert(cdna1::Isa::MAX_ACC_VGPRS_PER_WF == 0);
-static_assert(cdna2::Isa::MAX_ACC_VGPRS_PER_WF == 256);
-static_assert(cdna3::Isa::MAX_ACC_VGPRS_PER_WF == 256);
+static_assert(kCdnaAccVgprsPerWf == 256);
+static_assert(cdna3::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
+static_assert(cdna4::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
+static_assert(gfx1250::Isa::MAX_ACC_VGPRS_PER_WF == 0);
+
+TEST(UtilBitTest, IsAlignedChecksPowerOfTwoAlignment) {
+  EXPECT_TRUE(util::is_aligned<uint64_t>(0x1000u, 4u));
+  EXPECT_TRUE(util::is_aligned<uint32_t>(0u, 8u));
+  EXPECT_FALSE(util::is_aligned<uint64_t>(0x1003u, 4u));
+}
 
 // ---------------------------------------------------------------------------
 // MFMA register layout tests
@@ -125,7 +138,7 @@ TEST(MfmaExecTest, ResolveAccAccVgpr) {
   uint32_t result = amdgpu::resolve_acc<amdgpu::AccMode::Unified>(
       /*vb=*/100, /*dst=*/200, /*src2_ev=*/770, const_acc, [&]() -> uint32_t { return 99u; });
   EXPECT_EQ(const_acc, amdgpu::ACC_FROM_VGPR);
-  EXPECT_EQ(result, 100u + 256u + 2u); // vb + ACC_VGPR_OFFSET + (770 - 768)
+  EXPECT_EQ(result, 100u + amdgpu::ACC_VGPR_OFFSET + 2u);
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +162,79 @@ TEST_P(CuFactoryTest, CreatesSuccessfully) {
   auto cu = amdgpu::ComputeUnitCore::create("test_cu", cfg, &mem, &l2);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->arch(), arch);
+}
+
+TEST(CuFactoryTest, CdnaAccVgprsDoNotAliasNextWaveSlot) {
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(::testing::Message() << "arch=" << static_cast<int>(arch));
+    amdgpu::GpuMemory mem("test_mem");
+    amdgpu::L2Cache l2("test_l2");
+
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 2;
+    cfg.sgprs_per_wf = 104;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+
+    auto cu = amdgpu::ComputeUnitCore::create("test_cu", cfg, &mem, &l2);
+    ASSERT_NE(cu, nullptr);
+
+    auto *wf0 = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf0, nullptr);
+    auto *wf1 = cu->dispatch_wf(1, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf1, nullptr);
+
+    const uint32_t wf0_acc0 = wf0->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
+    const uint32_t wf0_acc_last = wf0_acc0 + kCdnaAccVgprsPerWf - 1;
+    const uint32_t wf1_v0 = wf1->vgpr_alloc().base;
+    EXPECT_NE(wf0_acc0, wf1_v0);
+    EXPECT_LT(wf0_acc_last, wf1_v0);
+
+    cu->write_vgpr(wf0_acc0, 0, 0xA55A0001u);
+    cu->write_vgpr(wf0_acc_last, 0, 0xDEADBEEFu);
+    cu->write_vgpr(wf1_v0, 0, 0x5AA50002u);
+
+    EXPECT_EQ(cu->read_vgpr(wf0_acc0, 0), 0xA55A0001u);
+    EXPECT_EQ(cu->read_vgpr(wf0_acc_last, 0), 0xDEADBEEFu);
+    EXPECT_EQ(cu->read_vgpr(wf1_v0, 0), 0x5AA50002u);
+  }
+}
+
+TEST(CuFactoryTest, CdnaAccVgprsAreClearedOnRedispatch) {
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(::testing::Message() << "arch=" << static_cast<int>(arch));
+    amdgpu::GpuMemory mem("test_mem");
+    amdgpu::L2Cache l2("test_l2");
+
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 104;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+
+    auto cu = amdgpu::ComputeUnitCore::create("test_cu", cfg, &mem, &l2);
+    ASSERT_NE(cu, nullptr);
+
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t acc0 = wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
+    const uint32_t acc_last = acc0 + kCdnaAccVgprsPerWf - 1;
+    cu->write_vgpr(acc0, 0, 0xFFFFFFFFu);
+    cu->write_vgpr(acc_last, 0, 0xDEADBEEFu);
+
+    cu->reset_all_wf();
+    wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+
+    EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 0), 0u);
+    EXPECT_EQ(
+        cu->read_vgpr(wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET + kCdnaAccVgprsPerWf - 1, 0),
+        0u);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(AllIsas, CuFactoryTest,

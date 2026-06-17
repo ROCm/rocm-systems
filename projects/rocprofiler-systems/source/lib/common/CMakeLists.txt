@@ -35,6 +35,7 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/static_object.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronized.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/traits.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/units.hpp
 )
 
 get_filename_component(COMMON_SOURCE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)

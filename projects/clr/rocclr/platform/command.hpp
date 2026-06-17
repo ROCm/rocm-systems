@@ -443,6 +443,10 @@ class Command : public Event {
    */
   virtual void submit(device::VirtualDevice& device) = 0;
 
+  //! True only for marker commands; lets the device layer keep its coalescing
+  //! window across markers while resetting it for any other (intervening) command.
+  virtual bool isMarkerCommand() const { return false; }
+
   //! Release the resources associated with this event.
   virtual void releaseResources();
 
@@ -1497,6 +1501,10 @@ class ExternalSemaphoreCmd : public Command {
 class Marker : public Command {
   device::Signal* ipc_completion_signal_ = nullptr;
   device::Signal* ipc_dep_signal_ = nullptr;
+  //! Monotonic client (HIP) coalesce identity for detecting consecutive records;
+  //! a non-zero value also opts the record into coalescing. 0 = not coalesceable.
+  uint64_t coalesce_event_ = 0;
+  bool synced_since_record_ = false;  //!< Client synced the event since its last record
 
  public:
   //! Create a new Marker
@@ -1513,6 +1521,15 @@ class Marker : public Command {
   //! Attach an IPC signal as dep_signal on the barrier packet (for stream wait)
   void setIpcDepSignal(device::Signal* s) { ipc_dep_signal_ = s; }
   device::Signal* ipcDepSignal() const { return ipc_dep_signal_; }
+
+  //! Coalescing metadata set by the client layer (opaque to rocclr). A non-zero
+  //! coalesceEvent() both identifies the event and marks the record eligible.
+  void setCoalesceEvent(uint64_t id) { coalesce_event_ = id; }
+  uint64_t coalesceEvent() const { return coalesce_event_; }
+  void setSyncedSinceRecord(bool v) { synced_since_record_ = v; }
+  bool syncedSinceRecord() const { return synced_since_record_; }
+
+  bool isMarkerCommand() const override { return true; }
 
   //! The actual command implementation.
   virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }
@@ -2100,6 +2117,29 @@ class SvmPrefetchBatchAsyncCommand : public Command {
   size_t count_;                              //!< Number of prefetch operations
 };
 
+class SvmDiscardBatchAsyncCommand : public Command {
+ public:
+  SvmDiscardBatchAsyncCommand(HostQueue& queue, std::vector<void*>& dev_ptrs,
+                              std::vector<size_t>& sizes)
+      : Command(queue, 1),
+        dev_ptrs_(std::move(dev_ptrs)),
+        sizes_(std::move(sizes)),
+        count_(dev_ptrs_.size()) {
+    assert(sizes_.size() == count_ && "sizes vector must match dev_ptrs size");
+  }
+
+  virtual void submit(device::VirtualDevice& device) { device.SubmitSvmDiscardBatchAsync(*this); }
+
+  void* const* DevicePointers() const { return dev_ptrs_.data(); }
+  const size_t* Sizes() const { return sizes_.data(); }
+  size_t Count() const { return count_; }
+
+ private:
+  std::vector<void*> dev_ptrs_;  //!< Array of device pointers to memory for discard
+  std::vector<size_t> sizes_;    //!< Array of sizes for discard
+  size_t count_;                 //!< Number of discard operations
+};
+
 /*! \brief  A virtual map memory command.
  *
  */
@@ -2172,6 +2212,7 @@ union ComputeCommand {
   VirtualMapCommand cmd27;
   BatchMemoryOperationCommand cmd28;
   SvmPrefetchBatchAsyncCommand cmd29;
+  SvmDiscardBatchAsyncCommand cmd30;
   ComputeCommand() {}
   ~ComputeCommand() {}
 };

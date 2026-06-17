@@ -34,5 +34,6 @@ public:
                 (const, noexcept, override));
     MOCK_METHOD(void, fileRegistration, (), (const, noexcept, override));
     MOCK_METHOD(void, bufferRegistration, (), (const, noexcept, override));
+    MOCK_METHOD(void, fastpathRejection, (), (const, noexcept, override));
 };
 }

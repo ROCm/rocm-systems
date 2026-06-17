@@ -515,6 +515,7 @@ SWaitXcntSopp::SWaitXcntSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= WAITCNT;
 }
 
 void SWaitXcntSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }

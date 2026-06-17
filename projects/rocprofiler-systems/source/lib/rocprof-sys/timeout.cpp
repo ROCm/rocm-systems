@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/env_vars.hpp"
+#include "common/units.hpp"
 #include "core/categories.hpp"
 #include "core/config.hpp"
 #include "core/locking.hpp"
@@ -79,9 +81,8 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
 
     std::uint64_t _ci_timeout_nitr    = 0;
     std::int64_t  _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
-    auto          _ci_timeout_total_count =
-        get_env<std::uint64_t>("ROCPROFSYS_CI_TIMEOUT_COUNT", 1);
-    const auto root_pid = get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id());
+    auto _ci_timeout_total_count = get_env<std::uint64_t>(env_vars::CI_TIMEOUT_COUNT, 1);
+    const auto root_pid = get_env<pid_t>(env_vars::ROOT_PROCESS, process::get_id());
 
     while(get_state() < State::Finalized && _ci_timeout_nitr < _ci_timeout_total_count)
     {
@@ -169,14 +170,14 @@ setup()
     // set, start a thread that will print out the backtrace for each thread
     // before the timeout is hit (i.e. killed by CTest) so we can potentially
     // diagnose where the code is stuck
-    auto _ci = get_env("ROCPROFSYS_CI", false);
+    auto _ci = get_env(env_vars::CI, false);
     if(_ci)
     {
         // set by CTest
-        auto _ci_timeout_default = get_env("ROCPROFSYS_CI_TIMEOUT", -1.0);
+        auto _ci_timeout_default = get_env(env_vars::CI_TIMEOUT, -1.0);
         // allow override by user
         auto _ci_timeout_seconds =
-            get_env("ROCPROFSYS_CI_TIMEOUT_OVERRIDE", _ci_timeout_default);
+            get_env(env_vars::CI_TIMEOUT_OVERRIDE, _ci_timeout_default);
 
         if(_ci_timeout_seconds > 0.0)
         {
