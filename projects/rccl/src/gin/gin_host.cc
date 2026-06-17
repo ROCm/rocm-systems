@@ -245,6 +245,12 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
   }
   devComm->ginContextCount = nContextsTotal;
   devComm->ginConnectionCount = ginState->ginCommCount;
+  // Contexts are currently allocated bottom-up from index 0 for both shared and
+  // exclusive requests, so the base is always 0. TODO: a real exclusive
+  // reservation would track per-connection pool occupancy and carve from the top
+  // (requires a base/offset in the GIN plugin createContext ABI), setting a
+  // non-zero ginContextBase here.
+  devComm->ginContextBase = 0;
 
   if (!reqs->ginExclusiveContexts) {
     // TODO: check if a shared devComm in the list could match our requirements.

@@ -50,6 +50,7 @@ struct ncclDevComm {
   int ginCounterCount;
   uint64_t* ginSignalShadows;
   uint32_t ginContextCount;
+  uint32_t ginContextBase;
   bool ginIsRailed; // Whether the GIN connections are railed
 
   // FT related
