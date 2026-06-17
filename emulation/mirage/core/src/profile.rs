@@ -163,6 +163,95 @@ impl PortMapping {
     }
 }
 
+/// An opt-in environment "hack": a best-effort workaround for image
+/// incompatibilities, applied by building a derivative image from the
+/// profile's base image before launching any node containers.
+///
+/// Hacks are explicit and additive (a profile may carry several). They
+/// are deliberately scoped to containerised sessions, where mirage owns
+/// the image build, and are a no-op otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Hack {
+    /// Update GCC's runtime libraries (`libstdc++6`/`libgcc-s1`) in the
+    /// base image via the `ubuntu-toolchain-r/test` PPA. Resolves
+    /// `GLIBCXX_*`/`GCC_*` "version not found" failures from binaries
+    /// (e.g. the bind-mounted mirage host and emulator interposers)
+    /// built against a newer toolchain than the image ships.
+    UpdateGccViaPpa,
+}
+
+impl Hack {
+    /// Stable slug used in derived-image tags and logs.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Hack::UpdateGccViaPpa => "update-gcc-via-ppa",
+        }
+    }
+
+    /// The Dockerfile `RUN` step that realises this hack, layered on top
+    /// of the base image. Each is written to be idempotent and to clean
+    /// up package-manager caches so the derived image stays lean.
+    pub fn dockerfile_step(self) -> &'static str {
+        match self {
+            // Pull a newer libstdc++/libgcc from the well-known Ubuntu
+            // toolchain PPA. `add-apt-repository` is broken in some
+            // containers (its Python can't import `apt_pkg`), so add the
+            // PPA manually via curl + a dearmored keyring — mirroring
+            // emulation/rocjitsu/scripts/rocjitsu-docker-build.sh.
+            // `DEBIAN_FRONTEND=noninteractive` keeps apt from prompting.
+            Hack::UpdateGccViaPpa => {
+                "RUN export DEBIAN_FRONTEND=noninteractive \\\n \
+                 && apt-get update \\\n \
+                 && apt-get install -y --no-install-recommends curl gnupg ca-certificates \\\n \
+                 && mkdir -p /root/.gnupg && chmod 700 /root/.gnupg \\\n \
+                 && curl -fsSL \"https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x1E9377A2BA9EF27F\" \\\n \
+                 | gpg --dearmor > /usr/share/keyrings/toolchain.gpg \\\n \
+                 && echo \"deb [signed-by=/usr/share/keyrings/toolchain.gpg] http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu jammy main\" \\\n \
+                 > /etc/apt/sources.list.d/toolchain.list \\\n \
+                 && apt-get update \\\n \
+                 && apt-get install -y --only-upgrade libstdc++6 libgcc-s1 \\\n \
+                 && rm -rf /var/lib/apt/lists/*"
+            }
+        }
+    }
+}
+
+/// Generate the Dockerfile that builds a derivative of `base` with each
+/// of `hacks` applied as an additional layer, in order. Returns `None`
+/// when `hacks` is empty (no derivative image is needed).
+pub fn hacks_dockerfile(base: &str, hacks: &[Hack]) -> Option<String> {
+    if hacks.is_empty() {
+        return None;
+    }
+    let mut dockerfile = format!("FROM {base}\n");
+    for hack in hacks {
+        dockerfile.push_str(hack.dockerfile_step());
+        dockerfile.push('\n');
+    }
+    Some(dockerfile)
+}
+
+/// Deterministic tag for the derivative image built from `base` with
+/// `hacks` applied. The tag is a pure function of the base image and the
+/// (order-independent) set of hacks, so repeated runs reuse a previously
+/// built image instead of rebuilding it. Returns `None` when `hacks` is
+/// empty.
+pub fn hacks_image_tag(base: &str, hacks: &[Hack]) -> Option<String> {
+    if hacks.is_empty() {
+        return None;
+    }
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut slugs: Vec<&str> = hacks.iter().map(|h| h.slug()).collect();
+    slugs.sort_unstable();
+    slugs.dedup();
+    let mut hasher = DefaultHasher::new();
+    base.hash(&mut hasher);
+    slugs.hash(&mut hasher);
+    Some(format!("mirage-hack-{:016x}:latest", hasher.finish()))
+}
+
 /// Containerisation settings for a profile.
 ///
 /// When a profile carries a `ContainerizedDef`, every node of a session
@@ -200,6 +289,12 @@ pub struct ContainerizedDef {
     /// the GPU device nodes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<String>,
+
+    /// Opt-in image [`Hack`]s applied by building a derivative image
+    /// from `image` before launching node containers. Empty for the
+    /// common case (run the image as-is).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hacks: Vec<Hack>,
 }
 
 /// A profile is a named, on-disk emulator preset that can be referenced

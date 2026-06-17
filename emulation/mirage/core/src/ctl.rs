@@ -365,11 +365,20 @@ impl MirageCtl for FileCtl {
     }
 
     fn session_wait_ready(&self, id: &SessionId, timeout: Duration) -> Result<SessionHealth> {
-        let deadline = std::time::Instant::now() + timeout;
+        let mut deadline = std::time::Instant::now() + timeout;
         loop {
             let h = self.session_health(id)?;
             if h.healthy || h.terminal {
                 return Ok(h);
+            }
+            // Pulling a base image and building a derived image (for
+            // profile hacks) are externally-bounded operations that can
+            // legitimately run far longer than the ready timeout. The
+            // timeout exists to catch a *hung* host, not a slow pull or
+            // build, so don't count time spent in those states against
+            // the deadline — keep pushing it out while they're in flight.
+            if matches!(h.state.as_deref(), Some("pulling" | "building")) {
+                deadline = std::time::Instant::now() + timeout;
             }
             if std::time::Instant::now() >= deadline {
                 return Err(MirageError::HostStartTimeout(timeout));

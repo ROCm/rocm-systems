@@ -101,6 +101,11 @@ fn host_gpu_groups() -> Vec<String> {
 /// keeping the full set of bring-up conditions described in one place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BringUpPhase {
+    /// The derived image already exists locally, so the build is skipped.
+    ImageBuilt { image: String },
+    /// Building a derived image (applying profile hacks); can take a
+    /// while as it runs package-manager commands inside the build.
+    BuildingImage { base: String, image: String },
     /// The image is already present locally, so the pull is skipped.
     ImagePresent { image: String },
     /// Pulling the image from its registry (can take a while).
@@ -123,6 +128,7 @@ impl BringUpPhase {
     /// off while [`message`](Self::message) carries the human detail.
     pub fn state(&self) -> &'static str {
         match self {
+            BringUpPhase::ImageBuilt { .. } | BringUpPhase::BuildingImage { .. } => "building",
             BringUpPhase::ImagePresent { .. }
             | BringUpPhase::Pulling { .. }
             | BringUpPhase::Pulled { .. } => "pulling",
@@ -137,6 +143,12 @@ impl BringUpPhase {
     /// surfacing directly to the user as the session's status message.
     pub fn message(&self) -> String {
         match self {
+            BringUpPhase::ImageBuilt { image } => {
+                format!("derived image {image} already built; skipping build")
+            }
+            BringUpPhase::BuildingImage { base, image } => {
+                format!("building derived image {image} from {base} (this can take a while)…")
+            }
             BringUpPhase::ImagePresent { image } => {
                 format!("image {image} already present locally; skipping pull")
             }
@@ -356,6 +368,65 @@ impl Engine {
     /// Pull `image` so node launches don't race on an implicit pull.
     pub fn pull(&self, image: &str) -> Result<()> {
         self.checked(&["pull".to_string(), image.to_string()])
+    }
+
+    /// Build an image tagged `tag` from the given `dockerfile` contents,
+    /// streamed to the provider's `build` over stdin (`build -t <tag> -`,
+    /// which both podman and docker accept for a context-less build).
+    ///
+    /// Used to realise profile [hacks](mirage_core::profile::Hack): a
+    /// derivative image is built once from the base image and then run in
+    /// place of it. The build output is captured and, on failure,
+    /// surfaced in the error so a broken `RUN` step is actionable.
+    pub fn build_image(&self, tag: &str, dockerfile: &str) -> Result<()> {
+        let args = vec![
+            "build".to_string(),
+            "-t".to_string(),
+            tag.to_string(),
+            "-".to_string(),
+        ];
+        let mut child = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(&args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.clone(),
+            source,
+        })?;
+        // Stream the Dockerfile to the build's stdin, then close it so the
+        // provider proceeds.
+        use std::io::Write;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(dockerfile.as_bytes())
+                .map_err(|source| ContainerError::Spawn {
+                    provider: self.provider.clone(),
+                    args: args.clone(),
+                    source,
+                })?;
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|source| ContainerError::Spawn {
+                provider: self.provider.clone(),
+                args: args.clone(),
+                source,
+            })?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(ContainerError::Command {
+                provider: self.provider.clone(),
+                args,
+                code: output.status.code().unwrap_or(-1),
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            })
+        }
     }
 
     /// Whether `image` is already present locally.
@@ -887,6 +958,7 @@ mod tests {
             ports: vec![],
             devices: vec![],
             groups: vec![],
+            hacks: vec![],
         };
         let engine = Engine::resolve(&def).unwrap();
         assert_eq!(engine.provider(), "docker");
@@ -973,6 +1045,7 @@ mod tests {
             ports: vec![],
             devices: vec![],
             groups: vec![],
+            hacks: vec![],
         };
 
         let mut phases: Vec<BringUpPhase> = Vec::new();

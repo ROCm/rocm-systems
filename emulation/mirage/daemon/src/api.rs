@@ -447,6 +447,7 @@ async fn create_session(
                     ports: Vec::new(),
                     devices: Vec::new(),
                     groups: Vec::new(),
+                    hacks: Vec::new(),
                 });
             }
         }

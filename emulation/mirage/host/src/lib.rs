@@ -486,29 +486,16 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         });
     }
 
-    // Expose the host's shared libraries inside each node container under
-    // `CONTAINER_LIB_DIR` (`/mnt/mirage/lib`). The container image's own
-    // system libraries can be older than the ones the bind-mounted mirage
-    // binary and the emulator's interposer were built against, so the
-    // in-container `mirage host` (or the interposer it preloads) fails to
-    // start with errors like "version `GLIBC_2.39' not found" or
-    // "`GLIBCXX_3.4.32' not found". We bind-mount, in priority order:
-    //   1. the host `libc.so.6` / `libstdc++.so.6` the mirage binary and
-    //      interposers need,
-    //   2. the emulator's declared `libraries`,
-    //   3. the emulator's `LD_PRELOAD` interposer itself,
+    // Expose the emulator's shared libraries inside each node container
+    // under `CONTAINER_LIB_DIR` (`/mnt/mirage/lib`). The per-node host
+    // *inside* the container re-resolves its injection against this
+    // directory, and the workload's `LD_PRELOAD` interposer is loaded
+    // from here, so we bind-mount, in priority order:
+    //   1. the emulator's declared `libraries`,
+    //   2. the emulator's `LD_PRELOAD` interposer itself,
     // each preserving its file name, and put `CONTAINER_LIB_DIR` on
     // `LD_LIBRARY_PATH` (below) so the loader prefers them.
     let mut libraries: Vec<String> = Vec::new();
-    for name in ["libc.so.6", "libstdc++.so.6"] {
-        match find_system_library(name) {
-            Some(path) => libraries.push(path.to_string_lossy().into_owned()),
-            None => tracing::warn!(
-                "system library {name} not found on host; the container's own \
-                 copy will be used and may be too old for the mirage binary"
-            ),
-        }
-    }
     libraries.extend(injection.libraries.iter().cloned());
     if let Some(preload) = &injection.ld_preload {
         libraries.push(preload.clone());
@@ -562,8 +549,8 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         injected_env.push(("LD_PRELOAD".to_string(), preload.clone()));
     }
     // Prepend the mirage library mount dir to `LD_LIBRARY_PATH` so the
-    // loader finds the host `libc`/`libstdc++`/interposer libraries
-    // mounted there ahead of the image's own copies.
+    // loader finds the emulator's `libraries`/interposer mounted there
+    // ahead of the image's own copies.
     {
         let value = match injection.env.get("LD_LIBRARY_PATH") {
             Some(existing) if !existing.is_empty() => {
@@ -604,6 +591,40 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
 
     let engine =
         mirage_container::Engine::resolve(&def).map_err(|e| MirageError::other(format!("{e}")))?;
+
+    // Apply any profile hacks by building a derivative image from the
+    // base image and running that in place of it. The derived tag is a
+    // pure function of the base image + hack set, so a previously built
+    // image is reused rather than rebuilt. On failure the bring-up aborts
+    // before any container is started.
+    if let (Some(tag), Some(dockerfile)) = (
+        mirage_core::profile::hacks_image_tag(&def.image, &def.hacks),
+        mirage_core::profile::hacks_dockerfile(&def.image, &def.hacks),
+    ) {
+        if engine.image_present(&tag) {
+            publish_health(
+                layout,
+                false,
+                "building",
+                Some(format!("derived image {tag} already built; skipping build")),
+            )?;
+        } else {
+            publish_health(
+                layout,
+                false,
+                "building",
+                Some(format!(
+                    "building derived image {tag} from {} (this can take a while)…",
+                    def.image
+                )),
+            )?;
+            engine.build_image(&tag, &dockerfile).map_err(|e| {
+                MirageError::other(format!("building derived image {tag} failed: {e}"))
+            })?;
+        }
+        def.image = tag;
+    }
+
     let node_count = resolve_node_count(&profile)?;
     let head_port = pick_head_port();
     let head_addr = container_name(session, 0);
@@ -672,30 +693,6 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         write_bytes(&nlayout.cid(), cid.as_bytes())?;
     }
     Ok(())
-}
-
-/// Directories on the host searched for a system shared library by its
-/// soname, in roughly the order the dynamic loader consults them on a
-/// glibc multiarch system.
-const SYSTEM_LIB_DIRS: &[&str] = &[
-    "/lib/x86_64-linux-gnu",
-    "/usr/lib/x86_64-linux-gnu",
-    "/lib64",
-    "/usr/lib64",
-    "/lib",
-    "/usr/lib",
-];
-
-/// Resolve a system shared library (e.g. `libc.so.6`) to its real host
-/// path, following symlinks so a bind mount targets the actual file
-/// rather than a versioned symlink that may be absent in the container.
-fn find_system_library(name: &str) -> Option<PathBuf> {
-    SYSTEM_LIB_DIRS.iter().find_map(|dir| {
-        let candidate = std::path::Path::new(dir).join(name);
-        candidate
-            .exists()
-            .then(|| std::fs::canonicalize(&candidate).unwrap_or(candidate))
-    })
 }
 
 /// Build the always-present mirage environment for a node of `rank`.

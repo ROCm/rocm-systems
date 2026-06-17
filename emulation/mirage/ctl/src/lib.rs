@@ -22,7 +22,7 @@ use mirage_core::common::{MaybeRef, SimpleValue};
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
 use mirage_core::emulator::ExecMode;
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
-use mirage_core::profile::{ContainerizedDef, FileMount, PortMapping, ProfileDef};
+use mirage_core::profile::{ContainerizedDef, FileMount, Hack, PortMapping, ProfileDef};
 use mirage_core::registry::EmulatorInfo;
 use mirage_core::session::SessionId;
 use tokio_stream::StreamExt;
@@ -555,6 +555,11 @@ pub struct RunArgs {
     /// has the same effect.
     #[arg(long = "container-provider")]
     container_provider: Option<String>,
+    /// Apply an opt-in image hack by building a derivative image from the
+    /// base image before launching containers. May be repeated. Requires
+    /// a containerised profile or `--image`.
+    #[arg(long = "hack", value_name = "HACK")]
+    hacks: Vec<HackArg>,
     /// Override the emulator execution mode (`functional` or `clocked`).
     #[arg(long)]
     exec_mode: Option<ExecModeArg>,
@@ -927,6 +932,7 @@ fn build_containerize(
             ports: parse_ports(ports)?,
             devices: Vec::new(),
             groups: Vec::new(),
+            hacks: Vec::new(),
         })),
         None => {
             if !mounts.is_empty() || !ports.is_empty() || provider.is_some() {
@@ -1183,6 +1189,25 @@ impl From<ExecModeArg> for ExecMode {
     }
 }
 
+/// Opt-in image hack, exposed on the CLI as `--hack` (repeatable).
+/// Mirrors [`mirage_core::profile::Hack`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum HackArg {
+    /// Build a derivative image that updates `libstdc++6`/`libgcc-s1`
+    /// from the `ubuntu-toolchain-r/test` PPA, fixing `GLIBCXX_*`/`GCC_*`
+    /// "version not found" errors from binaries built against a newer
+    /// toolchain than the base image ships.
+    UpdateGccViaPpa,
+}
+
+impl From<HackArg> for Hack {
+    fn from(h: HackArg) -> Self {
+        match h {
+            HackArg::UpdateGccViaPpa => Hack::UpdateGccViaPpa,
+        }
+    }
+}
+
 /// Parse a `KEY=VALUE` emulator option into a typed [`SimpleValue`].
 ///
 /// Values that look like booleans or integers are stored as such so the
@@ -1226,6 +1251,7 @@ fn apply_profile_overrides(
     config: Option<String>,
     num_nodes: Option<u32>,
     gpus_per_node: Option<u32>,
+    hacks: &[HackArg],
     profile_name: &str,
 ) -> anyhow::Result<MaybeRef<ProfileDef>> {
     if image.is_none()
@@ -1238,15 +1264,22 @@ fn apply_profile_overrides(
         && config.is_none()
         && num_nodes.is_none()
         && gpus_per_node.is_none()
+        && hacks.is_empty()
     {
         // No overrides: keep the cheap by-name reference.
         return Ok(MaybeRef::Ref(profile_name.to_string()));
     }
 
     // Container overrides.
-    if image.is_some() || !mounts.is_empty() || !ports.is_empty() || provider.is_some() {
+    if image.is_some()
+        || !mounts.is_empty()
+        || !ports.is_empty()
+        || provider.is_some()
+        || !hacks.is_empty()
+    {
         let parsed = parse_mounts(mounts)?;
         let parsed_ports = parse_ports(ports)?;
+        let parsed_hacks: Vec<Hack> = hacks.iter().copied().map(Hack::from).collect();
         match &mut profile.containerize {
             Some(c) => {
                 if let Some(img) = image {
@@ -1257,10 +1290,15 @@ fn apply_profile_overrides(
                 }
                 c.mounts.extend(parsed);
                 c.ports.extend(parsed_ports);
+                for hack in parsed_hacks {
+                    if !c.hacks.contains(&hack) {
+                        c.hacks.push(hack);
+                    }
+                }
             }
             None => {
                 let image = image.ok_or_else(|| {
-                    anyhow::anyhow!("--mount/--port/--container-provider require a containerised profile or --image")
+                    anyhow::anyhow!("--mount/--port/--container-provider/--hack require a containerised profile or --image")
                 })?;
                 profile.containerize = Some(ContainerizedDef {
                     provider,
@@ -1269,6 +1307,7 @@ fn apply_profile_overrides(
                     ports: parsed_ports,
                     devices: Vec::new(),
                     groups: Vec::new(),
+                    hacks: parsed_hacks,
                 });
             }
         }
@@ -1384,6 +1423,7 @@ async fn session_start<C: MirageCtl>(
         args.config,
         None,
         None,
+        &[],
         &profile_name,
     )?;
     let def = ctl.session_create(CreateSessionRequest {
@@ -1887,6 +1927,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                 a.config.clone(),
                 a.num_nodes,
                 a.gpus_per_node,
+                &a.hacks,
                 &a.profile,
             )?;
             tracing::info!(profile = %a.profile, "creating transient session");
@@ -2150,6 +2191,7 @@ mod tests {
             None,
             None,
             None,
+            &[],
             "mi450x",
         )
         .unwrap();
@@ -2171,6 +2213,7 @@ mod tests {
             None,
             None,
             None,
+            &[],
             "mi450x",
         )
         .unwrap();
@@ -2205,6 +2248,7 @@ mod tests {
             None,
             Some(2),
             Some(4),
+            &[],
             "mi450x",
         )
         .unwrap();
