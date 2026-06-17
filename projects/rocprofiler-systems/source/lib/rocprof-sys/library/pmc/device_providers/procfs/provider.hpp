@@ -26,7 +26,13 @@ namespace rocprofsys::pmc::device_providers::procfs
  *
  * @tparam DriverFactory Factory for creating procfs driver instances.
  */
-template <typename DriverFactory>
+template <typename T>
+concept driver_factory = requires(size_t _n) {
+    typename T::driver_t;
+    T::create_driver(_n);
+};
+
+template <driver_factory DriverFactory>
 class provider
 {
 public:

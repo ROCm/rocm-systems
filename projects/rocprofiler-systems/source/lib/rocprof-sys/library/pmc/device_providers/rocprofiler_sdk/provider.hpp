@@ -21,7 +21,13 @@
 namespace rocprofsys::pmc::device_providers::rocprofiler_sdk
 {
 
-template <typename DriverFactory>
+template <typename T>
+concept driver_factory = requires {
+    typename T::driver_t;
+    T::create_driver();
+};
+
+template <driver_factory DriverFactory>
 class provider
 {
 public:
