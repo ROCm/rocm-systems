@@ -25,8 +25,11 @@
 //! 1. Every directory on `$LD_LIBRARY_PATH`.
 //! 2. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root
 //!    (`<root>/lib`).
-//! 3. `../lib` relative to the `mirage` binary.
-//! 4. Standard system / ROCm library directories: `/opt/rocm/lib`,
+//! 3. The ROCm SDK install root reported by `rocm-sdk path --root`
+//!    (`<root>/lib`) — present when a ROCm Python wheel venv is
+//!    active.
+//! 4. `../lib` relative to the `mirage` binary.
+//! 5. Standard system / ROCm library directories: `/opt/rocm/lib`,
 //!    `/usr/local/lib`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu`.
 
 use std::path::{Path, PathBuf};
@@ -122,6 +125,12 @@ impl LibSearch<'_> {
                 if let Some(root) = non_empty_var(key) {
                     dirs.push(PathBuf::from(root).join("lib"));
                 }
+            }
+            // ROCm SDK install root reported by the `rocm-sdk` CLI
+            // (present when a ROCm Python wheel venv is active), e.g.
+            // `<venv>/lib/pythonX.Y/site-packages/_rocm_sdk_devel/lib`.
+            if let Some(root) = rocm_sdk_root() {
+                dirs.push(root.join("lib"));
             }
             // ../lib relative to the mirage binary.
             if let Some(dir) = &exe_dir {
@@ -222,6 +231,26 @@ fn non_empty_var(key: &str) -> Option<String> {
         Ok(v) if !v.is_empty() => Some(v),
         _ => None,
     }
+}
+
+/// Best-effort query of the ROCm SDK install root via the `rocm-sdk`
+/// CLI, which is on `PATH` when a ROCm Python wheel venv is active.
+/// Returns the trimmed `<root>` from `rocm-sdk path --root`, or `None`
+/// if the CLI is unavailable, fails, or prints nothing.
+fn rocm_sdk_root() -> Option<PathBuf> {
+    let out = std::process::Command::new("rocm-sdk")
+        .args(["path", "--root"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let root = String::from_utf8(out.stdout).ok()?;
+    let root = root.trim();
+    if root.is_empty() {
+        return None;
+    }
+    PathBuf::try_from(root).ok()
 }
 
 /// Convenience helper: a directory contains a usable library.

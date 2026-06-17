@@ -523,9 +523,9 @@ typedef struct _RocdecAvcSliceParams
 {
     uint32_t slice_data_size;    // slice size in bytes
     uint32_t slice_data_offset;  // byte offset of the current slice in the slice data buffer
-    uint32_t slice_data_flag;    /* see VA_SLICE_DATA_FLAG_XXX defintions */
+    uint32_t slice_data_flag;    /* see VA_SLICE_DATA_FLAG_XXX definitions */
     /**
-     * \brief Bit offset from NAL Header Unit to the begining of slice_data().
+     * \brief Bit offset from NAL Header Unit to the beginning of slice_data().
      *
      * This bit offset is relative to and includes the NAL unit byte
      * and represents the number of bits parsed in the slice_header()
@@ -647,7 +647,7 @@ typedef struct _RocdecHevcPicParams
     uint8_t num_tile_rows_minus1;
     /**
      * when uniform_spacing_flag equals 1, application should populate
-     * column_width_minus[], and row_height_minus1[] with approperiate values.
+     * column_width_minus[], and row_height_minus1[] with appropriate values.
      */
     uint16_t column_width_minus1[19];
     uint16_t row_height_minus1[21];
@@ -721,7 +721,7 @@ typedef struct _RocdecHevcSliceParams
     /** \brief Slice data buffer flags. See \c VA_SLICE_DATA_FLAG_XXX. */
     uint32_t slice_data_flag;
     /**
-     * \brief Byte offset from NAL unit header to the begining of slice_data().
+     * \brief Byte offset from NAL unit header to the beginning of slice_data().
      *
      * This byte offset is relative to and includes the NAL unit header
      * and represents the number of bytes parsed in the slice_header()
@@ -1067,7 +1067,7 @@ typedef struct _RocdecVp9SliceParams
 {
     /** \brief The byte count of current frame in the bitstream buffer,
      *  starting from first byte of the buffer.
-     *  It uses the name slice_data_size to be consitent with other codec,
+     *  It uses the name slice_data_size to be consistent with other codec,
      *  but actually means frame_data_size.
      */
     uint32_t slice_data_size;
@@ -1337,9 +1337,9 @@ typedef struct _RocdecAV1PicParams
      *  pixel frames. And this process may happen multiple times.
      *  The array anchor_frames_list[] is used to register all the available
      *  anchor frames from both external and internal, up to the current
-     *  frame instance. If a previously registerred anchor frame is no longer
+     *  frame instance. If a previously registered anchor frame is no longer
      *  needed, it should be removed from the list. But it does not prevent
-     *  applications from relacing the frame buffer with new anchor frames.
+     *  applications from replacing the frame buffer with new anchor frames.
      *  Please note that the internal anchor frames may not still be present
      *  in the current DPB buffer. But if it is in the anchor_frames_list[],
      *  it should not be replaced with other frames or removed from memory
@@ -1856,7 +1856,7 @@ rocDecReconfigureDecoder(rocDecDecoderHandle           decoder_handle,
 //! \ingroup group_amd_rocdecode
 //! Post-process and map video frame corresponding to pic_idx for use in HIP. Returns HIP device
 //! pointer and associated pitch(horizontal stride) of the video frame. Returns device memory
-//! pointers and pitch for each plane (Y, U and V) seperately horizontal_pitch is a pointer to an
+//! pointers and pitch for each plane (Y, U and V) separately horizontal_pitch is a pointer to an
 //! unsigned 32-bit integer array of size 3.
 /************************************************************************************************************************/
 extern rocDecStatus ROCDECAPI

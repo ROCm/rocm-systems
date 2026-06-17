@@ -138,6 +138,7 @@ public:
   }
 
   void startup() override;
+  void shutdown() override;
   bool step() override;
   simdojo::Event *doorbell_event() { return &doorbell_event_; }
 

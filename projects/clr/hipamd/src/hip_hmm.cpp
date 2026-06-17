@@ -144,6 +144,182 @@ hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
 }
 
 // ================================================================================================
+hipError_t ihipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                   unsigned long long flags, hipStream_t stream) {
+  // Validate input parameters
+  if ((dev_ptrs == nullptr) || (sizes == nullptr)) {
+    return hipErrorInvalidValue;
+  }
+
+  if (count == 0) {
+    return hipErrorInvalidValue;
+  }
+
+  if ((flags != 0) || (stream == nullptr)) {
+    return hipErrorInvalidValue;
+  }
+
+  // Validate each operation's arguments before checking device capability, so
+  // that invalid arguments are reported as hipErrorInvalidValue regardless of
+  // whether the device supports the discard feature. Otherwise a bad argument
+  // would be masked by hipErrorNotSupported on platforms without HMM.
+  for (size_t op_idx = 0; op_idx < count; op_idx++) {
+    if (dev_ptrs[op_idx] == nullptr || sizes[op_idx] == 0) {
+      return hipErrorInvalidValue;
+    }
+  }
+
+  // Check that all devices support HMM (required for discard)
+  if (!AllDevicesSupportHmm()) {
+    return hipErrorNotSupported;
+  }
+
+  getStreamPerThread(stream);
+
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  bool requires_pageable_support = false;
+  amd::SvmDiscardBatchAsyncCommand* command = nullptr;
+  {
+    std::vector<void*> dev_ptrs_vec(count);
+    std::vector<size_t> sizes_vec(count);
+
+    // Batched memory object lookup with single lock acquisition
+    std::vector<size_t> offsets;
+    std::vector<amd::Memory*> mem_objs =
+        getMemoryObjectBatch(hip::getCurrentDevice(), dev_ptrs, count, offsets);
+
+    // Prepare each operation. Null pointers and zero sizes were already
+    // rejected above, before the device-capability check.
+    for (size_t op_idx = 0; op_idx < count; op_idx++) {
+      void* dev_ptr = dev_ptrs[op_idx];
+      size_t size = sizes[op_idx];
+
+      amd::Memory* mem_obj = mem_objs[op_idx];
+      size_t offset = offsets[op_idx];
+      if (mem_obj != nullptr) {
+        if (size > (mem_obj->getSize() - offset)) {
+          return hipErrorInvalidValue;
+        }
+        const bool is_managed_memory =
+            (mem_obj->getMemFlags() &
+             (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR)) != 0;
+        requires_pageable_support |= !is_managed_memory;
+      } else {
+        // System-allocated pointer — requires pageable memory access support
+        requires_pageable_support = true;
+      }
+
+      dev_ptrs_vec[op_idx] = dev_ptr;
+      sizes_vec[op_idx] = size;
+    }
+
+    if (requires_pageable_support && !AllDevicesSupportPageableMemoryAccess()) {
+      return hipErrorInvalidValue;
+    }
+
+    command = new amd::SvmDiscardBatchAsyncCommand(*hip_stream, dev_ptrs_vec, sizes_vec);
+  }
+
+  if (command == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+
+  command->enqueue();
+  command->release();
+
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t ihipMemDiscardAndPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                               hipMemLocation* prefetch_locs,
+                                               size_t* prefetch_loc_idxs,
+                                               size_t num_prefetch_locs,
+                                               unsigned long long flags, hipStream_t stream) {
+  // Validate prefetch-specific parameters before enqueuing discard to ensure
+  // all-or-nothing semantics (matching CUDA behavior).
+  if ((prefetch_locs == nullptr) || (prefetch_loc_idxs == nullptr)) {
+    return hipErrorInvalidValue;
+  }
+
+  if ((num_prefetch_locs == 0) || (num_prefetch_locs > count)) {
+    return hipErrorInvalidValue;
+  }
+
+  if (prefetch_loc_idxs[0] != 0) {
+    return hipErrorInvalidValue;
+  }
+
+  for (size_t idx = 0; idx < num_prefetch_locs; idx++) {
+    if (prefetch_loc_idxs[idx] >= count) {
+      return hipErrorInvalidValue;
+    }
+    if (idx > 0 && prefetch_loc_idxs[idx] <= prefetch_loc_idxs[idx - 1]) {
+      return hipErrorInvalidValue;
+    }
+  }
+
+  hipError_t err = ihipMemDiscardBatchAsync(dev_ptrs, sizes, count, flags, stream);
+  if (err != hipSuccess) {
+    return err;
+  }
+  return ihipMemPrefetchBatchAsync(dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs,
+                                   num_prefetch_locs, flags, stream);
+}
+
+// ================================================================================================
+hipError_t hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                   unsigned long long flags, hipStream_t stream) {
+  HIP_INIT_API(hipMemDiscardBatchAsync, dev_ptrs, sizes, count, flags, stream);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  HIP_RETURN(ihipMemDiscardBatchAsync(dev_ptrs, sizes, count, flags, stream));
+}
+
+// ================================================================================================
+hipError_t hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                      unsigned long long flags, hipStream_t stream) {
+  HIP_INIT_API(hipDrvMemDiscardBatchAsync, dptrs, sizes, count, flags, stream);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  HIP_RETURN(ihipMemDiscardBatchAsync(reinterpret_cast<void**>(dptrs), sizes, count, flags, stream));
+}
+
+// ================================================================================================
+hipError_t hipMemDiscardAndPrefetchBatchAsync(void** dptrs, size_t* sizes, size_t count,
+                                              hipMemLocation* prefetchLocs,
+                                              size_t* prefetchLocIdxs,
+                                              size_t numPrefetchLocs,
+                                              unsigned long long flags, hipStream_t stream) {
+  HIP_INIT_API(hipMemDiscardAndPrefetchBatchAsync, dptrs, sizes, count, prefetchLocs,
+               prefetchLocIdxs, numPrefetchLocs, flags, stream);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  HIP_RETURN(ihipMemDiscardAndPrefetchBatchAsync(dptrs, sizes, count, prefetchLocs,
+                                                 prefetchLocIdxs, numPrefetchLocs, flags,
+                                                 stream));
+}
+
+// ================================================================================================
+hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                                 hipMemLocation* prefetchLocs,
+                                                 size_t* prefetchLocIdxs,
+                                                 size_t numPrefetchLocs,
+                                                 unsigned long long flags, hipStream_t stream) {
+  HIP_INIT_API(hipDrvMemDiscardAndPrefetchBatchAsync, dptrs, sizes, count, prefetchLocs,
+               prefetchLocIdxs, numPrefetchLocs, flags, stream);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  HIP_RETURN(ihipMemDiscardAndPrefetchBatchAsync(reinterpret_cast<void**>(dptrs), sizes, count,
+                                                 prefetchLocs, prefetchLocIdxs,
+                                                 numPrefetchLocs, flags, stream));
+}
+
+// ================================================================================================
 hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice, int device) {
   HIP_INIT_API(hipMemAdvise, dev_ptr, count, advice, device);
   CHECK_STREAM_CAPTURE_SUPPORTED();

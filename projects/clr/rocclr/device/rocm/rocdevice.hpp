@@ -237,6 +237,16 @@ class NullDevice : public amd::Device {
     return true;
   }
 
+  cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override {
+    ShouldNotReachHere();
+    return CL_INVALID_OPERATION;
+  }
+
+  cl_int virtualUnmap(void* va, size_t size) override {
+    ShouldNotReachHere();
+    return CL_INVALID_OPERATION;
+  }
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) override {
     ShouldNotReachHere();
@@ -469,16 +479,22 @@ class Device : public NullDevice {
   virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment) override;
   virtual bool virtualFree(void* addr) override;
 
+  virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override;
+  virtual cl_int virtualUnmap(void* va, size_t size) override;
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) override;
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override { return true; }
 
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle) override;
+  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle,
+                                        amd::Memory::HandleType handle_type) override;
 
-  bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) const;
+  bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr,
+                                amd::Memory::HandleType handle_type) const;
 
-  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle) override;
+  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle,
+                                                amd::Memory::HandleType handle_type) override;
 
   virtual bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
                             cl_set_device_clock_mode_output_amd* pSetClockModeOutput) override;

@@ -1,0 +1,75 @@
+# =============================================================================
+# RDNA3.5 (gfx115x) - RDNA3.5 GRBM (Graphics Register Bus Manager) Metrics
+# =============================================================================
+# GRBM provides top-level GPU utilization metrics
+# =============================================================================
+
+Panel Config:
+  id: 1700
+  title: Graphics Register Bus Manager (GRBM)
+  data source:
+  # =========================================================================
+  # GPU Utilization
+  # =========================================================================
+  - metric_table:
+      id: 1701
+      title: "GPU Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GPU Busy:
+          avg: SUM(100 * GRBM_GUI_ACTIVE) / SUM(GRBM_COUNT)
+          min: MIN(100 * GRBM_GUI_ACTIVE / GRBM_COUNT)
+          max: MAX(100 * GRBM_GUI_ACTIVE / GRBM_COUNT)
+          unit: Percent
+        CP Busy:
+          avg: SUM(100 * GRBM_CP_BUSY) / SUM(GRBM_GUI_ACTIVE)
+          min: MIN(100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE)
+          max: MAX(100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE)
+          unit: Percent
+        GL2C Busy:
+          avg: SUM(100 * GRBM_GL2C_BUSY) / SUM(GRBM_GUI_ACTIVE)
+          min: MIN(100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE)
+          max: MAX(100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE)
+          unit: Percent
+
+  # =========================================================================
+  # Shader Engine Utilization
+  # =========================================================================
+  - metric_table:
+      id: 1702
+      title: "Shader Engine Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        TA Busy:
+          avg: SUM(100 * GRBM_TA_BUSY) / SUM(GRBM_GUI_ACTIVE)
+          min: MIN(100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE)
+          max: MAX(100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE)
+          unit: Percent
+
+  metrics_description:
+    GPU Busy: >-
+      Percentage of time the GPU was actively processing work. This is the primary
+      utilization metric showing overall GPU activity. Low GPU busy indicates
+      underutilization, possibly due to insufficient workload or host-side bottlenecks.
+    CP Busy: >-
+      Percentage of GPU active time the Command Processor was busy dispatching work
+      and processing commands. High CP busy with low shader activity may indicate
+      dispatch bottlenecks or excessive command stream overhead.
+    GL2C Busy: >-
+      Percentage of GPU active time the GL2 cache was busy servicing memory requests.
+      High GL2 busy indicates memory-intensive workloads. Compare with compute activity
+      to determine if the workload is memory-bound or compute-bound.
+    TA Busy: >-
+      Percentage of GPU active time the Texture Addresser was busy processing memory
+      address calculations. High TA busy indicates active texture or buffer memory
+      operations. This reflects the address generation workload for memory requests.
