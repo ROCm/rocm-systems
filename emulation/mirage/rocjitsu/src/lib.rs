@@ -53,6 +53,7 @@ const RCCL_ENV_DEFAULTS: &[(&str, &str)] = &[
     ("NCCL_SOCKET_NTHREADS", "1"),
     ("NCCL_NSOCKS_PERTHREAD", "1"),
     ("NCCL_SOCKET_IFNAME", "lo"),
+    ("NCCL_MAX_NCHANNELS", "1"),
 ];
 
 /// rocjitsu [`EmulatorBackend`] implementation. Bundles the
