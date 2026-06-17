@@ -383,7 +383,7 @@ ROCPROFILER_ENUM_LABEL(TEST_ENUM_VALUE_V3);
 }  // namespace sdk
 }  // namespace rocprofiler
 
-TEST(enum_string, unsuported)
+TEST(enum_string, unsupported)
 {
     using namespace rocprofiler::sdk;
     using namespace enum_string_test;

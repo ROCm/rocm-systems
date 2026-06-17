@@ -249,6 +249,15 @@ constexpr inline T align_up(T val, T alignment) {
   return (val + alignment - 1) & ~(alignment - 1);
 }
 
+/// @brief Return true when @p val is aligned to @p alignment.
+/// @param alignment Must be a power of 2.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline bool is_aligned(T val, T alignment) {
+  assert(std::has_single_bit(alignment));
+  return (val & (alignment - 1)) == 0;
+}
+
 } // namespace util
 
 #endif // UTIL_BIT_H_

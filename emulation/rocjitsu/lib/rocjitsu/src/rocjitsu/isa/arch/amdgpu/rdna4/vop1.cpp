@@ -10069,7 +10069,20 @@ void VCvtPkF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
-  amdgpu::execute_v_cvt_pk_f32_fp8_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t packed = src0.read_lane(wf, lane);
+    bool src_hi = 0u & 1;
+    uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
+    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(half & 0xFFu));
+    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
+    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
+    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
+    vdst.write_lane64(wf, lane,
+                      static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
+  }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
@@ -10180,7 +10193,20 @@ void VCvtPkF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
-  amdgpu::execute_v_cvt_pk_f32_bf8_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t packed = src0.read_lane(wf, lane);
+    bool src_hi = 0u & 1;
+    uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
+    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(half & 0xFFu));
+    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
+    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
+    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
+    vdst.write_lane64(wf, lane,
+                      static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
+  }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {

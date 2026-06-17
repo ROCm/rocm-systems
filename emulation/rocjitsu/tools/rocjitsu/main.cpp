@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/rj_vm.h"
 
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/version.h"
 
 #include <cerrno>
 #include <csignal>
@@ -316,7 +317,12 @@ static void print_usage() {
          "  rocjitsu --config foo.json -- ./app          Local mode (in-process simulation)\n"
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
-         "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n";
+         "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n"
+         "\n"
+         "Options:\n"
+         "  --config <path>   Simulation config JSON (required)\n"
+         "  --version, -v     Print version and exit\n"
+         "  --help, -h        Print this help and exit\n";
 }
 
 int main(int argc, char *argv[]) {
@@ -341,6 +347,9 @@ int main(int argc, char *argv[]) {
       attach_mode = true;
     } else if (arg == "--help" || arg == "-h") {
       print_usage();
+      return 0;
+    } else if (arg == "--version" || arg == "-v") {
+      std::cout << "rocjitsu " << ROCJITSU_VERSION << "\n";
       return 0;
     } else {
       std::cerr << std::format("rocjitsu: unknown option: {}\n", arg);

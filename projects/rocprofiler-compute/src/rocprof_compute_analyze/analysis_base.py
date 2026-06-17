@@ -30,6 +30,7 @@ from utils.utils_analysis import (
     merge_counters_spatial_multiplex,
 )
 from utils.utils_common import (
+    canonical_config_arch,
     get_uuid,
     is_only_pc_sampling,
     load_panel_configs,
@@ -117,6 +118,7 @@ class OmniAnalyze_Base:
         list_stats: bool,
         filter_metrics: Optional[list[str]],
         sys_info: pd.Series,
+        profiling_config: dict[str, Any],
     ) -> dict[str, schema.ArchConfig]:
         single_panel_config = file_io.is_single_panel_config(
             config_dir, self.__supported_archs
@@ -126,8 +128,11 @@ class OmniAnalyze_Base:
         if list_stats:
             ac.panel_configs = TOP_STATS_BUILD_IN_CONFIG
         else:
+            config_arch = canonical_config_arch(arch) or arch
             arch_panel_config = [
-                config_dir if single_panel_config else str(f"{config_dir}/{arch}")
+                config_dir
+                if single_panel_config
+                else str(Path(config_dir) / config_arch)
             ]
             # Use restructured perf metrics in TUI analyze mode
             if self.get_args().tui and arch in ["gfx942", "gfx950"]:
@@ -141,9 +146,12 @@ class OmniAnalyze_Base:
                 )
             ac.panel_configs = load_panel_configs(arch_panel_config)
 
-        # TODO: filter_metrics should/might be one per arch
         parser.build_dfs(
-            arch_configs=ac, filter_metrics=filter_metrics, sys_info=sys_info
+            arch_configs=ac,
+            filter_metrics=filter_metrics,
+            sys_info=sys_info,
+            profiling_config=profiling_config,
+            arch=arch,
         )
         self._arch_configs[arch] = ac
         return self._arch_configs
@@ -186,7 +194,7 @@ class OmniAnalyze_Base:
         for path_info in args.path:
             sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
-                sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+                sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
                 arch = sys_info.iloc[0]["gpu_arch"]
                 self.generate_configs(
                     arch,
@@ -194,6 +202,7 @@ class OmniAnalyze_Base:
                     args.list_stats,
                     args.filter_metrics,
                     sys_info.iloc[0],
+                    getattr(self, "_profiling_config", {}),
                 )
 
         self.load_options(normalization_filter)
@@ -206,7 +215,7 @@ class OmniAnalyze_Base:
             w = schema.Workload()
             sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
-                w.sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+                w.sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
                 if not getattr(args, "no_roof", False):
                     # Validate roofline CSV before loading
 

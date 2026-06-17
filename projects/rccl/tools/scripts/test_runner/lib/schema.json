@@ -1,0 +1,383 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "rccl-test-runner-config",
+  "title": "RCCL Test Runner Configuration",
+  "description": "Schema for RCCL test runner JSON configuration files",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+
+    "system_configurations": {
+      "description": "Human-readable metadata about this configuration",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name":        { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+
+    "paths": {
+      "description": "Filesystem paths used by the runner. Values support ${VAR}, $VAR, and ${VAR:-default} expansion.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workdir":         { "type": "string", "description": "RCCL source and build root (default: $PWD)" },
+        "rocm_path":       { "type": "string", "description": "ROCm installation prefix (default: /opt/rocm)" },
+        "mpi_path":        { "type": "string", "description": "MPI installation prefix" },
+        "test_binary_dir": { "type": "string", "description": "Directory containing test binaries; overrides the default build_dir/test/" }
+      }
+    },
+
+    "env_variables": {
+      "$ref": "#/$defs/env_variables_map",
+      "description": "Global environment variables applied to every test run"
+    },
+
+    "auto_detect_hosts": {
+      "type": "boolean",
+      "description": "When true, auto-detect MPI hosts from SLURM_NODELIST or similar"
+    },
+
+    "mpi_args": {
+      "description": "Base mpirun arguments that replace the built-in defaults. May be a string or list of strings applied to all tests, OR an object keyed by --system profile name (e.g. 'mellanox', 'ainic', 'thor2') whose values are strings or lists of strings.",
+      "oneOf": [
+        { "$ref": "#/$defs/mpi_args_value" },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/mpi_args_value" }
+        }
+      ]
+    },
+
+    "system_env_variables": {
+      "description": "Per-system-profile environment variable overrides (keyed by profile name)",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/env_variables_map" }
+    },
+
+    "build_configuration": {
+      "description": "Controls how librccl.so and test binaries are built via install.sh",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "install_flags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "install.sh command-line flags, e.g. ['--debug', '-t', '-l', '--no_clean']"
+        },
+        "cmake_options": {
+          "description": "Additional CMake options. Either a string ('-DFOO=BAR -DBAZ=1') or an object whose keys become -DKEY=VAL entries.",
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "additionalProperties": { "type": ["string", "number", "boolean"] }
+            }
+          ]
+        },
+        "env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Environment variables set only during the build step"
+        },
+        "parallel_jobs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of parallel compile jobs passed to install.sh via -j"
+        },
+        "generator": {
+          "type": "string",
+          "description": "CMake generator, e.g. 'Unix Makefiles' or 'Ninja'"
+        }
+      }
+    },
+
+    "rccl_tests_build_configuration": {
+      "description": "Controls how the rccl-tests perf binaries (all_reduce_perf, etc.) are built. Absent section => step skipped.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Set to false to skip building rccl-tests. Default: true when the section is present."
+        },
+        "source_dir": {
+          "type": "string",
+          "description": "Path to the rccl-tests checkout. Supports ~ and $VAR expansion. Default: $workdir/rccl-tests."
+        },
+        "install_script": {
+          "type": "string",
+          "description": "Name of the build script inside source_dir. Default: 'install.sh'."
+        },
+        "build_command": {
+          "description": "Explicit build command (string run via shell, or argv array). Overrides install_script + install_flags.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "install_flags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Flags passed to install_script, e.g. ['--mpi']. Supports ~ and $VAR expansion."
+        },
+        "rccl_home": {
+          "type": "string",
+          "description": "RCCL install/build prefix to link rccl-tests against. Default: the RCCL build_dir."
+        },
+        "env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Environment variables set only during the rccl-tests build step"
+        }
+      }
+    },
+
+    "test_configurations": {
+      "description": "Named test configuration blocks. Each key is a configuration name referenced by test_suites or via 'extends'.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/test_configuration" }
+    },
+
+    "test_suites": {
+      "description": "Ordered list of test suites to execute",
+      "type": "array",
+      "items": { "$ref": "#/$defs/test_suite" }
+    }
+  },
+
+  "$defs": {
+
+    "env_variables_map": {
+      "description": "Key/value pairs of environment variables. Values are always strings (use '' to unset).",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+
+    "mpi_args_value": {
+      "description": "Extra mpirun arguments expressed as either a single string ('--bind-to none --oversubscribe') or a list of strings (['--bind-to none', '--oversubscribe']).",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+
+    "test_defaults": {
+      "description": "Fields that can appear at the test_configuration level as defaults and be overridden per-test",
+      "type": "object",
+      "properties": {
+        "is_gtest": {
+          "type": "boolean",
+          "description": "True → GTest binary using --gtest_filter; false → plain executable with direct args. Default: true."
+        },
+        "binary": {
+          "type": "string",
+          "description": "Test binary name or path. Relative names are resolved under build_dir/test/ (or test_binary_dir if set). Supports ~ and $VAR expansion."
+        },
+        "num_ranks": {
+          "description": "Total MPI ranks. 1 → no mpirun wrapper. The string \"auto\" resolves to (detected GPUs per node × num_nodes), i.e. use all GPUs.",
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "enum": ["auto"] }
+          ]
+        },
+        "num_nodes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of nodes across which ranks are distributed"
+        },
+        "num_gpus": {
+          "description": "GPUs per node; controls --map-by ppr:{num_gpus}:node for multi-node runs. The string \"auto\" (also the default when omitted) resolves to the detected GPUs per node.",
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "enum": ["auto"] }
+          ]
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Timeout in seconds. 0 = unlimited."
+        },
+        "is_pytest": {
+          "type": "boolean",
+          "description": "True → run a pytest harness (in test_dir) instead of a gtest/plain binary; results are derived from a JUnit report. Default: false."
+        },
+        "test_dir": {
+          "type": "string",
+          "description": "For pytest tests: directory containing the harness (absolute, or relative to workdir). Supports ~ and $VAR expansion."
+        },
+        "python_bin": {
+          "type": "string",
+          "description": "For pytest tests: interpreter to use (default: <test_dir>/venv else python3, or the venv created by setup_venv)."
+        },
+        "setup_venv": {
+          "type": "boolean",
+          "description": "For pytest tests: create/reuse a venv and install requirements before running. Default: false."
+        },
+        "venv_dir": {
+          "type": "string",
+          "description": "For pytest tests with setup_venv: venv location (default: <test_dir>/venv)."
+        },
+        "requirements": {
+          "type": "string",
+          "description": "For pytest tests with setup_venv: requirements file to install (default: <test_dir>/requirements.txt)."
+        }
+      }
+    },
+
+    "test_configuration": {
+      "description": "A named test configuration. May extend another configuration and define a list of tests.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "extends": {
+          "description": "Name (or list of names) of parent configuration(s) to inherit from",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ]
+        },
+        "is_gtest":    { "$ref": "#/$defs/test_defaults/properties/is_gtest" },
+        "binary":      { "$ref": "#/$defs/test_defaults/properties/binary" },
+        "num_ranks":   { "$ref": "#/$defs/test_defaults/properties/num_ranks" },
+        "num_nodes":   { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
+        "num_gpus":    { "$ref": "#/$defs/test_defaults/properties/num_gpus" },
+        "timeout":     { "$ref": "#/$defs/test_defaults/properties/timeout" },
+        "is_pytest":    { "$ref": "#/$defs/test_defaults/properties/is_pytest" },
+        "test_dir":     { "$ref": "#/$defs/test_defaults/properties/test_dir" },
+        "python_bin":   { "$ref": "#/$defs/test_defaults/properties/python_bin" },
+        "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
+        "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
+        "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
+        "env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Environment variables applied to every test in this configuration (merged on top of global env_variables)"
+        },
+        "rerun_env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Additional environment variables merged in when a failed test is rerun (requires --rerun-failed)"
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Extra command-line arguments appended to the test binary invocation. Lists are de-duplicated and appended when configs are merged via 'extends'."
+        },
+        "mpi_args": {
+          "$ref": "#/$defs/mpi_args_value",
+          "description": "Extra mpirun arguments for tests in this configuration, appended after the base mpi_args. Accepts a string or list of strings; lists are de-duplicated and appended when configs are merged via 'extends'."
+        },
+        "command_args": {
+          "type": "string",
+          "description": "Shared base command-line arguments for this configuration. A test's own 'command_args' is appended to this base at execution time (see test_executor.run_test). Inherited via 'extends': a child that omits command_args takes the parent's value."
+        },
+        "_comment": {
+          "type": "string",
+          "description": "Informal annotation for this configuration block (not interpreted by the runner)"
+        },
+        "tests": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/test_item" },
+          "description": "Individual test cases belonging to this configuration"
+        }
+      }
+    },
+
+    "test_item": {
+      "description": "A single test case within a test_configuration",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique test identifier used for --test-name filtering (supports glob patterns)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description shown in output and logs"
+        },
+        "is_gtest":    { "$ref": "#/$defs/test_defaults/properties/is_gtest" },
+        "binary":      { "$ref": "#/$defs/test_defaults/properties/binary" },
+        "test_binary_dir": {
+          "type": "string",
+          "description": "Per-test override of the directory in which binary is looked up"
+        },
+        "test_filter": {
+          "type": "string",
+          "description": "For GTest binaries: passed as --gtest_filter=<value>. For non-GTest: passed as a plain argument."
+        },
+        "command_args": {
+          "type": "string",
+          "description": "Additional command-line arguments appended after the binary (and after test_filter for non-GTest)"
+        },
+        "num_ranks":   { "$ref": "#/$defs/test_defaults/properties/num_ranks" },
+        "num_nodes":   { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
+        "num_gpus":    { "$ref": "#/$defs/test_defaults/properties/num_gpus" },
+        "timeout":     { "$ref": "#/$defs/test_defaults/properties/timeout" },
+        "is_pytest":    { "$ref": "#/$defs/test_defaults/properties/is_pytest" },
+        "test_dir":     { "$ref": "#/$defs/test_defaults/properties/test_dir" },
+        "python_bin":   { "$ref": "#/$defs/test_defaults/properties/python_bin" },
+        "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
+        "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
+        "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
+        "env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Test-specific environment variables (highest priority, merged on top of all other levels)"
+        },
+        "rerun_env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Per-test additional environment variables used only on rerun"
+        },
+        "mpi_args": {
+          "$ref": "#/$defs/mpi_args_value",
+          "description": "Per-test extra mpirun arguments (MPI tests only), appended after the base and suite/configuration mpi_args. Accepts a string or list of strings."
+        }
+      }
+    },
+
+    "test_suite": {
+      "description": "A suite entry that binds a test_configuration to a named run with optional overrides",
+      "type": "object",
+      "required": ["name", "config"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable suite name used for --suite-name filtering"
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional longer description of what this suite exercises"
+        },
+        "config": {
+          "type": "string",
+          "description": "Name of the test_configuration to use for this suite"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "When false the suite is skipped unless targeted by --suite-name. Default: true."
+        },
+        "is_gtest":  { "$ref": "#/$defs/test_defaults/properties/is_gtest" },
+        "binary":    { "$ref": "#/$defs/test_defaults/properties/binary" },
+        "num_ranks": { "$ref": "#/$defs/test_defaults/properties/num_ranks" },
+        "num_nodes": { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
+        "num_gpus":  { "$ref": "#/$defs/test_defaults/properties/num_gpus" },
+        "timeout":   { "$ref": "#/$defs/test_defaults/properties/timeout" },
+        "is_pytest":    { "$ref": "#/$defs/test_defaults/properties/is_pytest" },
+        "test_dir":     { "$ref": "#/$defs/test_defaults/properties/test_dir" },
+        "python_bin":   { "$ref": "#/$defs/test_defaults/properties/python_bin" },
+        "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
+        "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
+        "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
+        "env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Suite-level environment variable overrides (between configuration-level and test-level in priority)"
+        },
+        "mpi_args": {
+          "$ref": "#/$defs/mpi_args_value",
+          "description": "Suite-level extra mpirun arguments, appended after the base and configuration mpi_args (and before per-test mpi_args). Accepts a string or list of strings."
+        }
+      }
+    }
+
+  }
+}

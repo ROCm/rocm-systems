@@ -3,10 +3,12 @@
 
 """Unit tests for analysis_db.py static methods."""
 
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from rocprof_compute_analyze.analysis_db import db_analysis
 from utils import schema
@@ -212,8 +214,8 @@ def test_evaluate_with_none_in_formula_does_not_nullify_valid_result():
 def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
     """
     Divide-by-zero (x/0 -> inf, 0/0 -> NaN) emits a numpy RuntimeWarning
-    that is captured and logged via console_debug. The misleading
-    "missing counter data" console_warning must not fire.
+    that is captured and logged via console_debug. The "evaluated to N/A"
+    console_warning must not fire when a RuntimeWarning was caught.
     """
     pmc_df = pd.DataFrame({"Counter1": [10, 20, 30]})
     sys_info = {}
@@ -282,17 +284,20 @@ def test_calc_builtin_vars_processes_per_xcd_first():
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
         ),
+        patch(
+            "utils.utils_counter_defs.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
     ):
-        result = db_analysis.calc_builtin_vars(pmc_df, sys_info)
+        db_analysis.calc_builtin_vars(
+            pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
+        )
 
     # Verify PER_XCD var was computed
     assert sys_info["PER_XCD_VAR"] == 20
 
     # Verify DERIVED_VAR used the computed PER_XCD_VAR value
     assert sys_info["DERIVED_VAR"] == 25
-
-    # Verify pmc_df is returned unchanged
-    pd.testing.assert_frame_equal(result, pmc_df)
 
 
 def test_calc_builtin_vars_with_dataframe_expressions():
@@ -317,8 +322,14 @@ def test_calc_builtin_vars_with_dataframe_expressions():
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
         ),
+        patch(
+            "utils.utils_counter_defs.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
     ):
-        db_analysis.calc_builtin_vars(pmc_df, sys_info)
+        db_analysis.calc_builtin_vars(
+            pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
+        )
 
     assert sys_info["TOTAL_COUNT"] == 60
     assert sys_info["SCALED_TOTAL"] == 120
@@ -385,6 +396,10 @@ def test_calc_dataframe_expressions_with_builtin_vars():
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
         ),
+        patch(
+            "utils.utils_counter_defs.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
     ):
         result = db_analysis.calc_dataframe_expressions(pmc_df, sys_info, expression_df)
 
@@ -428,6 +443,7 @@ def test_calc_expressions_noise_clamp():
     analyzer = db_analysis(MagicMock(), {})
     analyzer._pmc_df_per_workload = {workload_path: pmc_df}
     analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
+    analyzer._metrics_info_data_per_workload = {}
     analyzer._roofline_ceilings_per_workload = {workload_path: {}}
     analyzer._runs = {workload_path: MagicMock(sys_info=sys_info_df)}
     analyzer._arch_configs = MagicMock()
@@ -494,6 +510,91 @@ def test_calc_expressions_noise_clamp():
     assert "1.1 - clamped" in variance_warning_calls[0].args[0]
     print_noise_clamp_summary_mock.assert_called_once()
     assert get_noise_clamp_warnings()["count"] >= 1
+
+
+# =============================================================================
+# _derive_pop_values tests
+# =============================================================================
+
+
+class TestDerivePopValues:
+    """Tests for db_analysis._derive_pop_values."""
+
+    def _make_values_df(
+        self,
+        metric_ids: list[str],
+        value_names: list[str],
+        values: list[float],
+        kernel_names: Optional[list[str]] = None,
+    ):
+        """Build a long-format values DataFrame as produced by calc_expressions."""
+        data = {
+            "metric_id": metric_ids,
+            "value_name": value_names,
+            "value": values,
+        }
+        if kernel_names is not None:
+            data["kernel_name"] = kernel_names
+        return pd.DataFrame(data)
+
+    def test_pop_true_metric_appends_pct_of_peak_row(self):
+        """A pop-enabled metric produces one new Pct of Peak row."""
+        values_df = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[50.0, 200.0],
+        )
+        new_rows = db_analysis._derive_pop_values({"1.1"}, values_df)
+        assert len(new_rows) == 1
+        assert new_rows[0]["value_name"] == "Pct of Peak"
+        assert new_rows[0]["value"] == pytest.approx(25.0)
+
+    def test_multi_kernel_produces_one_row_per_kernel(self):
+        """Calling once per kernel produces one Pct of Peak row per kernel."""
+        kernel_a_df = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[100.0, 200.0],
+            kernel_names=["kernel_a", "kernel_a"],
+        )
+        kernel_b_df = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[60.0, 300.0],
+            kernel_names=["kernel_b", "kernel_b"],
+        )
+        rows_a = db_analysis._derive_pop_values({"1.1"}, kernel_a_df)
+        rows_b = db_analysis._derive_pop_values({"1.1"}, kernel_b_df)
+        assert len(rows_a) == 1
+        assert rows_a[0]["value"] == pytest.approx(50.0)  # 100/200*100
+        assert len(rows_b) == 1
+        assert rows_b[0]["value"] == pytest.approx(20.0)  # 60/300*100
+
+    def test_pop_false_metric_produces_no_pct_row(self):
+        """A metric not in pop_metric_ids produces no Pct of Peak row."""
+        values_df = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[50.0, 100.0],
+        )
+        new_rows = db_analysis._derive_pop_values(set(), values_df)
+        assert new_rows == []
+
+    def test_incomplete_data_skips_metric(self):
+        """A metric missing Peak or Avg/Value must be skipped gracefully."""
+        incomplete_cases = [
+            # Only "Avg" present -- no "Peak" row
+            self._make_values_df(
+                metric_ids=["1.1"], value_names=["Avg"], values=[50.0]
+            ),
+            # Only "Peak" present -- no "Avg" or "Value" row
+            self._make_values_df(
+                metric_ids=["1.1"], value_names=["Peak"], values=[100.0]
+            ),
+        ]
+        for incomplete_values in incomplete_cases:
+            new_rows = db_analysis._derive_pop_values({"1.1"}, incomplete_values)
+            assert new_rows == []
 
 
 # =============================================================================

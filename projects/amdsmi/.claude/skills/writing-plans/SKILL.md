@@ -9,18 +9,18 @@ Translate an approved spec into a concrete plan an engineer (or fresh subagent) 
 
 **Announce at start:** "I'm using the `writing-plans` skill to create the implementation plan."
 
-**Save plans to:** `docs/dev/plans/YYYY-MM-DD-<feature-name>.md`
+**Save plans to:** `${TMPDIR:-/tmp}/amdsmi-agent-plans/YYYY-MM-DD-<feature-name>.md` (ephemeral, never committed to the workspace)
 
 ## Required Inputs
 
-- An approved spec at `docs/dev/specs/YYYY-MM-DD-<topic>-design.md`
+- An approved spec at `${TMPDIR:-/tmp}/amdsmi-agent-specs/YYYY-MM-DD-<topic>-design.md`
 - Familiarity with the amd-smi project layout (see `project-layout` rule)
 
-If no spec exists, STOP and invoke the `brainstorming` skill first.
+If no spec exists, STOP and invoke the `amdsmi-interrogate` skill first.
 
 ## Scope Check
 
-If the spec covers multiple independent subsystems, it should have been split during brainstorming. If it wasn't, push back: each plan must produce working, testable software on its own. Suggest splitting before writing the plan.
+If the spec covers multiple independent subsystems, it should have been split during interrogate. If it wasn't, push back: each plan must produce working, testable software on its own. Suggest splitting before writing the plan.
 
 ## File Structure (Map First)
 
@@ -130,7 +130,7 @@ Fix inline. Move on.
 
 After saving the plan, offer the user a choice:
 
-> Plan saved to `docs/dev/plans/<filename>.md`. Two execution options:
+> Plan saved to `${TMPDIR:-/tmp}/amdsmi-agent-plans/<filename>.md`. Two execution options:
 >
 > 1. **Subagent-driven** (recommended for multi-task plans) — invoke the `amdsmi-development` agent or planning agent, fresh subagent per task with review between tasks
 > 2. **Inline execution** — execute tasks in this session using the `executing-plans` skill, batched with checkpoints

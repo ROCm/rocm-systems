@@ -6,6 +6,7 @@
 
 #include "EnvVars.hpp"
 #include "CollectiveArgs.hpp"
+#include "ProcessIsolatedTestRunner.hpp"
 #include <cstdlib>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -206,19 +207,23 @@ namespace RcclUnitTesting
 
   EnvVars::EnvVars()
   {
+    // Skip fork+HIP calls in re-exec'd children: GPU enumeration is irrelevant
+    // there and concurrent hipGetDeviceCount forks cause KFD contention.
+    const bool isIsolatedChild = (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr);
+
     // Collect number of GPUs available
     // NOTE: Cannot use HIP call prior to launching unless it is inside another child process
     numDetectedGpus = 0;
-    getDeviceCount(&numDetectedGpus);
+    if(!isIsolatedChild) getDeviceCount(&numDetectedGpus);
     numDetectedGpus = min(numDetectedGpus, 16);
     isGfx94 = false;
-    getArchInfo(&isGfx94, "gfx94");
+    if(!isIsolatedChild) getArchInfo(&isGfx94, "gfx94");
     isGfx95 = false;
-    getArchInfo(&isGfx95, "gfx95");
+    if(!isIsolatedChild) getArchInfo(&isGfx95, "gfx95");
     isGfx12 = false;
-    getArchInfo(&isGfx12, "gfx12");
+    if(!isIsolatedChild) getArchInfo(&isGfx12, "gfx12");
     isGfx90 = false;
-    getArchInfo(&isGfx90, "gfx90");
+    if(!isIsolatedChild) getArchInfo(&isGfx90, "gfx90");
 
     debugPause     = GetEnvVar("UT_DEBUG_PAUSE" , 0);
     showNames      = GetEnvVar("UT_SHOW_NAMES"  , 1);
@@ -241,7 +246,7 @@ namespace RcclUnitTesting
       gpuPriorityOrder[i] = i;
     }
     bool isCpxMode = false;
-    if(isGfx94) {
+    if(isGfx94 && !isIsolatedChild) {
       getDeviceMode(&isCpxMode);
       if(isCpxMode) {
         getDevicePriority(&gpuPriorityOrder);

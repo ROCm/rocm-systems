@@ -2564,49 +2564,7 @@ VMadLegacyF32Vop3::VMadLegacyF32Vop3(const MachineInst *inst)
 }
 
 void VMadLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
-                      float v = [&]() {
-                        float v = (([&]() {
-                                     float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
-                                     if (inst_.abs & (1u << 0))
-                                       sv = std::fabs(sv);
-                                     if (inst_.neg & (1u << 0))
-                                       sv = -sv;
-                                     return sv;
-                                   }() *
-                                    [&]() {
-                                      float sv = std::bit_cast<float>(src1.read_lane(wf, lane));
-                                      if (inst_.abs & (1u << 1))
-                                        sv = std::fabs(sv);
-                                      if (inst_.neg & (1u << 1))
-                                        sv = -sv;
-                                      return sv;
-                                    }()) +
-                                   [&]() {
-                                     float sv = std::bit_cast<float>(src2.read_lane(wf, lane));
-                                     if (inst_.abs & (1u << 2))
-                                       sv = std::fabs(sv);
-                                     if (inst_.neg & (1u << 2))
-                                       sv = -sv;
-                                     return sv;
-                                   }());
-                        if (inst_.omod == 1)
-                          v *= 2.0f;
-                        else if (inst_.omod == 2)
-                          v *= 4.0f;
-                        else if (inst_.omod == 3)
-                          v *= 0.5f;
-                        return v;
-                      }();
-                      if (inst_.clamp)
-                        v = std::clamp(v, 0.0f, 1.0f);
-                      return v;
-                    }()));
-  }
+  amdgpu::execute_v_mad_legacy_f32_vop3(*this, wf);
 }
 
 VMadF32Vop3::VMadF32Vop3(const MachineInst *inst)
@@ -2635,51 +2593,7 @@ VMadF32Vop3::VMadF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMadF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
-                      float v = [&]() {
-                        float v = (([&]() {
-                                     float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
-                                     if (inst_.abs & (1u << 0))
-                                       sv = std::fabs(sv);
-                                     if (inst_.neg & (1u << 0))
-                                       sv = -sv;
-                                     return sv;
-                                   }() *
-                                    [&]() {
-                                      float sv = std::bit_cast<float>(src1.read_lane(wf, lane));
-                                      if (inst_.abs & (1u << 1))
-                                        sv = std::fabs(sv);
-                                      if (inst_.neg & (1u << 1))
-                                        sv = -sv;
-                                      return sv;
-                                    }()) +
-                                   [&]() {
-                                     float sv = std::bit_cast<float>(src2.read_lane(wf, lane));
-                                     if (inst_.abs & (1u << 2))
-                                       sv = std::fabs(sv);
-                                     if (inst_.neg & (1u << 2))
-                                       sv = -sv;
-                                     return sv;
-                                   }());
-                        if (inst_.omod == 1)
-                          v *= 2.0f;
-                        else if (inst_.omod == 2)
-                          v *= 4.0f;
-                        else if (inst_.omod == 3)
-                          v *= 0.5f;
-                        return v;
-                      }();
-                      if (inst_.clamp)
-                        v = std::clamp(v, 0.0f, 1.0f);
-                      return v;
-                    }()));
-  }
-}
+void VMadF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mad_f32_vop3(*this, wf); }
 
 VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
     : Vop3("v_mad_i32_i24", reinterpret_cast<const OpEncoding *>(inst),

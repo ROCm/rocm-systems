@@ -116,6 +116,21 @@ TEST_F(HipFileStats, StatsCollectionBufferRegistration)
     ASSERT_EQ(2, stats.getBufferRegistrations().load());
 }
 
+TEST_F(HipFileStats, StatsCollectionFastpathRejection)
+{
+    Stats                    stats{};
+    StrictMock<MStatsServer> mstats{};
+    EXPECT_CALL(mstats, getStats).WillRepeatedly(testing::Return(&stats));
+    stats.setLevel(StatsLevel::Basic);
+    Context<StatsCollection>::get()->fastpathRejection();
+    ASSERT_EQ(1, stats.getFastpathRejections().load());
+    Context<StatsCollection>::get()->fastpathRejection();
+    ASSERT_EQ(2, stats.getFastpathRejections().load());
+    stats.setLevel(StatsLevel::Disabled);
+    Context<StatsCollection>::get()->fastpathRejection();
+    ASSERT_EQ(2, stats.getFastpathRejections().load());
+}
+
 TEST_F(HipFileStats, StatsContainer)
 {
     StrictMock<MSys>           msys{};
@@ -178,6 +193,7 @@ TEST_F(HipFileStats, GenerateReportV1)
         .buckets[0]                = 4;
     stats.getBufferRegistrations() = 10;
     stats.getFileRegistrations()   = 20;
+    stats.getFastpathRejections()  = 30;
     StatsClient::generateReportV1(os, &stats);
     std::string str{os.str()};
     ASSERT_GT(std::string::npos, str.find("Total Fastpath Read Size (B): 2"));
@@ -190,6 +206,7 @@ TEST_F(HipFileStats, GenerateReportV1)
     ASSERT_GT(std::string::npos, str.find("Total Fallback Write Errors: 4"));
     ASSERT_GT(std::string::npos, str.find("Buffer Registrations: 10"));
     ASSERT_GT(std::string::npos, str.find("File Handle Registrations: 20"));
+    ASSERT_GT(std::string::npos, str.find("Fastpath Rejections: 30"));
 }
 
 TEST_F(HipFileStats, GenerateReportV1TwoGpus)

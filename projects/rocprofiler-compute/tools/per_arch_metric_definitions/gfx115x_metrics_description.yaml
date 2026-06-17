@@ -1,0 +1,939 @@
+System Speed-of-Light:
+  VALU FLOPs:
+    plain: 'Floating-point operations per second on the VALU. Peak is based on FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles throughput: FP32 to 256, FP16 packed to 512 FLOPs/CU/cycle. Uses aggregate instruction counter.'
+    rst: 'Floating-point operations per second on the VALU. Peak is based on FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles throughput: FP32 to 256, FP16 packed to 512 FLOPs/CU/cycle. Uses aggregate instruction counter.'
+    unit: GFLOP/s
+  VALU FLOPs (F64):
+    plain: 64-bit floating-point operations per second on the VALU. Peak is 4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
+    rst: 64-bit floating-point operations per second on the VALU. Peak is 4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
+    unit: GFLOP/s
+  IPC:
+    plain: Instructions executed per cycle, measuring overall instruction throughput efficiency. Higher IPC indicates better utilization of the shader pipeline. Low IPC may indicate stalls due to memory latency, register dependencies, or insufficient wavefront occupancy to hide latencies.
+    rst: Instructions executed per cycle, measuring overall instruction throughput efficiency. Higher IPC indicates better utilization of the shader pipeline. Low IPC may indicate stalls due to memory latency, register dependencies, or insufficient wavefront occupancy to hide latencies.
+    unit: Instr/cycle
+  Wavefront Occupancy:
+    plain: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
+    rst: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
+    unit: Wavefronts
+  GL2 Cache Hit Rate:
+    plain: Percentage of GL2 cache requests that are serviced from cache without accessing system memory. Higher hit rates reduce memory bandwidth pressure and improve performance. Low hit rates may indicate poor data locality or working sets that exceed cache capacity.
+    rst: Percentage of GL2 cache requests that are serviced from cache without accessing system memory. Higher hit rates reduce memory bandwidth pressure and improve performance. Low hit rates may indicate poor data locality or working sets that exceed cache capacity.
+    unit: Percent
+  GL2-Fabric Read BW:
+    plain: Read bandwidth between the GL2 cache and the memory fabric/system memory. High bandwidth utilization indicates memory-intensive read patterns. This metric helps identify when memory bandwidth is a performance bottleneck. Requires $max_mclk populated in sysinfo (max MEM clock from amd-smi).
+    rst: Read bandwidth between the GL2 cache and the memory fabric/system memory. High bandwidth utilization indicates memory-intensive read patterns. This metric helps identify when memory bandwidth is a performance bottleneck. Requires $max_mclk populated in sysinfo (max MEM clock from amd-smi).
+    unit: Bytes/s
+  GL2-Fabric Write BW:
+    plain: Write bandwidth between the GL2 cache and the memory fabric/system memory. High values indicate write-intensive workloads. Combined with read bandwidth, this shows total memory traffic leaving the GPU caches.
+    rst: Write bandwidth between the GL2 cache and the memory fabric/system memory. High values indicate write-intensive workloads. Combined with read bandwidth, this shows total memory traffic leaving the GPU caches.
+    unit: Bytes/s
+  LDS Bank Conflicts:
+    plain: Number of Local Data Share bank conflicts during execution. Bank conflicts occur when multiple work-items in a wavefront access the same LDS bank simultaneously, causing serialized accesses. Reducing conflicts improves shared memory throughput.
+    rst: Number of Local Data Share bank conflicts during execution. Bank conflicts occur when multiple work-items in a wavefront access the same LDS bank simultaneously, causing serialized accesses. Reducing conflicts improves shared memory throughput.
+    unit: Conflicts
+  Wave Dependency Wait:
+    plain: Percentage of wavefront execution time spent waiting for data dependencies to resolve, such as pending memory operations or prior instruction results. High values indicate latency-bound execution that could benefit from increased occupancy or reduced dependency chains.
+    rst: Percentage of wavefront execution time spent waiting for data dependencies to resolve, such as pending memory operations or prior instruction results. High values indicate latency-bound execution that could benefit from increased occupancy or reduced dependency chains.
+    unit: Percent
+  Wave Issue Wait:
+    plain: Percentage of wavefront execution time spent waiting for instructions to become ready for issue. High values may indicate instruction cache misses, complex control flow, or pipeline stalls preventing instruction dispatch.
+    rst: Percentage of wavefront execution time spent waiting for instructions to become ready for issue. High values may indicate instruction cache misses, complex control flow, or pipeline stalls preventing instruction dispatch.
+    unit: Percent
+  GL0 Cache Hit Rate (TCP Cache):
+    plain: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP cache is the first-level cache for vector memory operations. High hit rates reduce traffic to the GL1 cache and improve memory access latency.
+    rst: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP cache is the first-level cache for vector memory operations. High hit rates reduce traffic to the GL1 cache and improve memory access latency.
+    unit: Percent
+  GL0 Cache BW (TCP Cache):
+    plain: Bandwidth of requests to the GL0 vector cache (TCP Cache). This represents the rate at which the shader cores are requesting data from the cache hierarchy. High bandwidth indicates memory-intensive workloads.
+    rst: Bandwidth of requests to the GL0 vector cache (TCP Cache). This represents the rate at which the shader cores are requesting data from the cache hierarchy. High bandwidth indicates memory-intensive workloads.
+    unit: Bytes/s
+  GL1 Cache Hit Rate:
+    plain: Percentage of L1 cache (GL1C) requests that hit in cache. GL1C is shared across multiple workgroup processors within a shader engine. Higher hit rates reduce traffic to the L2 cache and improve performance.
+    rst: Percentage of L1 cache (GL1C) requests that hit in cache. GL1C is shared across multiple workgroup processors within a shader engine. Higher hit rates reduce traffic to the L2 cache and improve performance.
+    unit: Percent
+  GL1 Cache Read BW:
+    plain: Read bandwidth between L1 (GL1C) and L2 (GL2C) caches. This represents cache miss traffic from L1 that must be serviced by L2. Lower values indicate better L1 cache efficiency.
+    rst: Read bandwidth between L1 (GL1C) and L2 (GL2C) caches. This represents cache miss traffic from L1 that must be serviced by L2. Lower values indicate better L1 cache efficiency.
+    unit: Bytes/s
+  GL2 Cache BW:
+    plain: Bandwidth of read operations at the L2 cache level. This metric shows overall L2 cache utilization and helps identify memory subsystem bottlenecks.
+    rst: Bandwidth of read operations at the L2 cache level. This metric shows overall L2 cache utilization and helps identify memory subsystem bottlenecks.
+    unit: Bytes/s
+  Scalar Data Cache Hit Rate:
+    plain: Percentage of scalar data cache accesses that hit in cache. The scalar cache stores uniform data accessed by scalar instructions. High hit rates indicate efficient reuse of constant and uniform data across wavefronts.
+    rst: Percentage of scalar data cache accesses that hit in cache. The scalar cache stores uniform data accessed by scalar instructions. High hit rates indicate efficient reuse of constant and uniform data across wavefronts.
+    unit: Percent
+  Scalar Data Cache BW:
+    plain: Bandwidth of scalar data cache requests to the GL1 cache. Scalar operations load uniform data shared across all threads in a wavefront, making efficient caching critical for performance.
+    rst: Bandwidth of scalar data cache requests to the GL1 cache. Scalar operations load uniform data shared across all threads in a wavefront, making efficient caching critical for performance.
+    unit: Bytes/s
+  Instruction Cache Hit Rate:
+    plain: Percentage of instruction fetch requests that hit in the instruction cache. High hit rates are essential for sustained instruction throughput. Low hit rates may indicate large kernel code size or divergent control flow.
+    rst: Percentage of instruction fetch requests that hit in the instruction cache. High hit rates are essential for sustained instruction throughput. Low hit rates may indicate large kernel code size or divergent control flow.
+    unit: Percent
+  Instruction Cache BW:
+    plain: Bandwidth of instruction cache requests to the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
+    rst: Bandwidth of instruction cache requests to the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
+    unit: Bytes/s
+Memory chart - Instruction Cache:
+  ICache Utilization:
+    plain: Percentage of shader busy cycles spent actively servicing instruction fetch requests. High utilization indicates the instruction cache is keeping pace with shader execution. Low utilization may indicate instruction cache misses causing stalls, or idle shaders.
+    rst: Percentage of shader busy cycles spent actively servicing instruction fetch requests. High utilization indicates the instruction cache is keeping pace with shader execution. Low utilization may indicate instruction cache misses causing stalls, or idle shaders.
+    unit: Percent
+  ICache Hit Rate:
+    plain: Percentage of instruction cache accesses that are serviced from cache without fetching from the GL1 cache. High hit rates indicate good instruction locality. Low hit rates may indicate large kernels exceeding instruction cache capacity or divergent branches.
+    rst: Percentage of instruction cache accesses that are serviced from cache without fetching from the GL1 cache. High hit rates indicate good instruction locality. Low hit rates may indicate large kernels exceeding instruction cache capacity or divergent branches.
+    unit: Percent
+  ICache Miss Rate:
+    plain: Percentage of instruction cache accesses that miss and require fetching from the GL1 cache. High miss rates increase instruction fetch latency and may cause shader stalls. Consider reducing kernel code size or improving branch coherence.
+    rst: Percentage of instruction cache accesses that miss and require fetching from the GL1 cache. High miss rates increase instruction fetch latency and may cause shader stalls. Consider reducing kernel code size or improving branch coherence.
+    unit: Percent
+  ICache Requests:
+    plain: 'Count of instruction-cache (SQC ICache) requests issued, per normalization unit. Formula: SQC_ICACHE_REQ_sum / $denom'
+    rst: 'Count of instruction-cache (SQC ICache) requests issued, per normalization unit. Formula: SQC_ICACHE_REQ_sum / $denom'
+    unit: Requests per Normalization Unit
+  ICache Request Stall Rate:
+    plain: 'Percent of shader busy cycles where the instruction cache input interface was stalled (valid without ready). Formula: 100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum.'
+    rst: 'Percent of shader busy cycles where the instruction cache input interface was stalled (valid without ready). Formula: 100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum.'
+    unit: Percent
+  ICache-GL1 Read Bandwidth:
+    plain: Bytes per second of read traffic from the instruction path toward GL1 (texture-cache path instruction requests), using 128 B per SQC_TC_INST_REQ event.
+    rst: Bytes per second of read traffic from the instruction path toward GL1 (texture-cache path instruction requests), using 128 B per SQC_TC_INST_REQ event.
+    unit: Bytes/s
+Memory chart - Scalar Data Cache:
+  Dcache Utilization:
+    plain: Percentage of shader busy cycles spent actively servicing scalar data cache requests. The scalar data cache holds uniform data accessed by scalar instructions. High utilization indicates active use of scalar memory operations.
+    rst: Percentage of shader busy cycles spent actively servicing scalar data cache requests. The scalar data cache holds uniform data accessed by scalar instructions. High utilization indicates active use of scalar memory operations.
+    unit: Percent
+  Dcache Hit Rate:
+    plain: Percentage of scalar data cache accesses that hit in cache. High hit rates indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive unique constant data or poor temporal locality.
+    rst: Percentage of scalar data cache accesses that hit in cache. High hit rates indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive unique constant data or poor temporal locality.
+    unit: Percent
+  Dcache Requests:
+    plain: 'Count of scalar data-cache (SQC DCache) requests, per normalization unit. Formula: SQC_DCACHE_REQ_sum / $denom'
+    rst: 'Count of scalar data-cache (SQC DCache) requests, per normalization unit. Formula: SQC_DCACHE_REQ_sum / $denom'
+    unit: Requests per Normalization Unit
+  Dcache Request Stall Rate:
+    plain: 'Percent of shader busy cycles where the scalar data cache input interface was stalled. Formula: 100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum.'
+    rst: 'Percent of shader busy cycles where the scalar data cache input interface was stalled. Formula: 100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum.'
+    unit: Percent
+  Dcache-GL1 Read Bandwidth:
+    plain: Bytes per second of scalar read traffic from SQC toward GL1 (SQC_TC_DATA_READ_REQ at 128 B per request).
+    rst: Bytes per second of scalar read traffic from SQC toward GL1 (SQC_TC_DATA_READ_REQ at 128 B per request).
+    unit: Bytes/s
+Memory chart - TCP Cache (GL0 Vector Cache):
+  GL0 Cache Hit Rate (TCP Cache):
+    plain: Percentage of GL0 vector cache (TCP Cache) requests serviced from cache. TCP Cache is the first-level cache for vector memory operations. Higher hit rates reduce traffic to the GL1 cache and lower memory access latency for vector operations.
+    rst: Percentage of GL0 vector cache (TCP Cache) requests serviced from cache. TCP Cache is the first-level cache for vector memory operations. Higher hit rates reduce traffic to the GL1 cache and lower memory access latency for vector operations.
+    unit: Percent
+  TCP Total Requests:
+    plain: Total TCP (vector L0) requests per normalization unit (reads, writes and related traffic aggregated in TCP_REQ_sum).
+    rst: Total TCP (vector L0) requests per normalization unit (reads, writes and related traffic aggregated in TCP_REQ_sum).
+    unit: Requests per Normalization Unit
+  TCP Read Requests:
+    plain: TCP read requests per normalization unit (TCP_REQ_READ_sum).
+    rst: TCP read requests per normalization unit (TCP_REQ_READ_sum).
+    unit: Requests per Normalization Unit
+  TCP Write Requests:
+    plain: TCP write requests per normalization unit (TCP_REQ_WRITE_sum).
+    rst: TCP write requests per normalization unit (TCP_REQ_WRITE_sum).
+    unit: Requests per Normalization Unit
+  TCP Miss Requests:
+    plain: TCP requests that missed in the L0 vector cache and required a fill from GL1C (TCP_REQ_MISS_sum / $denom).
+    rst: TCP requests that missed in the L0 vector cache and required a fill from GL1C (TCP_REQ_MISS_sum / $denom).
+    unit: Requests per Normalization Unit
+Memory chart - LDS (Local Data Share):
+  LDS Atomic Instructions:
+    plain: Number of atomic operations executed on Local Data Share memory. Atomic operations provide thread-safe read-modify-write operations but may serialize if multiple work-items access the same address.
+    rst: Number of atomic operations executed on Local Data Share memory. Atomic operations provide thread-safe read-modify-write operations but may serialize if multiple work-items access the same address.
+    unit: Instructions per Normalization Unit
+  LDS Bank Conflict Rate:
+    plain: Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
+    rst: Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when multiple work-items in a wavefront access different addresses in the same LDS bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
+    unit: Percent
+  LDS Estimated Bandwidth:
+    plain: Estimated achieved bandwidth for Local Data Share operations. This reflects the effective throughput after accounting for bank conflicts. RDNA 3.5 provides 32 LDS banks per compute unit for high-bandwidth shared memory access.
+    rst: Estimated achieved bandwidth for Local Data Share operations. This reflects the effective throughput after accounting for bank conflicts. RDNA 3.5 provides 32 LDS banks per compute unit for high-bandwidth shared memory access.
+    unit: Bytes/s
+  LDS Instructions:
+    plain: Total LDS (Local Data Share) instructions executed per normalization unit (SQ_INSTS_LDS_sum).
+    rst: Total LDS (Local Data Share) instructions executed per normalization unit (SQ_INSTS_LDS_sum).
+    unit: Instructions per Normalization Unit
+  LDS Instruction Cycles:
+    plain: Cycles spent executing LDS instructions per normalization unit (SQ_INST_CYCLES_LDS_sum).
+    rst: Cycles spent executing LDS instructions per normalization unit (SQ_INST_CYCLES_LDS_sum).
+    unit: Cycles per Normalization Unit
+  LDS Wait Cycles:
+    plain: Cycles waves spent waiting on LDS (wait-state attribution), per normalization unit (SQ_WAIT_INST_LDS_sum).
+    rst: Cycles waves spent waiting on LDS (wait-state attribution), per normalization unit (SQ_WAIT_INST_LDS_sum).
+    unit: Cycles per Normalization Unit
+Memory chart - GL1 Cache (L1):
+  GL1 Cache Utilization:
+    plain: Percentage of cycles the GL1 cache is actively processing requests. GL1 cache is shared across multiple workgroup processors within a shader engine. High utilization indicates active memory traffic through the GL1 cache.
+    rst: Percentage of cycles the GL1 cache is actively processing requests. GL1 cache is shared across multiple workgroup processors within a shader engine. High utilization indicates active memory traffic through the GL1 cache.
+    unit: Percent
+  GL1 Cache Hit Rate:
+    plain: Percentage of L1 cache requests that hit in cache. Higher hit rates reduce traffic to the L2 cache and improve memory access latency. Low hit rates may indicate poor data locality or working sets exceeding L1 capacity.
+    rst: Percentage of L1 cache requests that hit in cache. Higher hit rates reduce traffic to the L2 cache and improve memory access latency. Low hit rates may indicate poor data locality or working sets exceeding L1 capacity.
+    unit: Percent
+Memory chart - GL2 Cache (L2):
+  GL2 Cache Hit Rate:
+    plain: Percentage of L2 cache requests that hit in cache. GL2 cache is the GPU's final on-chip cache before accessing system memory via GCEA. High hit rates reduce memory bandwidth pressure. Low hit rates cause traffic to system memory, increasing latency.
+    rst: Percentage of L2 cache requests that hit in cache. GL2 cache is the GPU's final on-chip cache before accessing system memory via GCEA. High hit rates reduce memory bandwidth pressure. Low hit rates cause traffic to system memory, increasing latency.
+    unit: Percent
+Memory chart - GCEA to System Memory:
+  SARB Utilization:
+    plain: Percentage of cycles the System Arbiter is actively processing memory requests. The arbiter handles traffic between the GPU caches and system memory interface. High utilization indicates significant off-chip memory activity.
+    rst: Percentage of cycles the System Arbiter is actively processing memory requests. The arbiter handles traffic between the GPU caches and system memory interface. High utilization indicates significant off-chip memory activity.
+    unit: Percent
+  DRAM Read Bandwidth:
+    plain: Achieved read bandwidth to system memory. RDNA 3.5 APUs use DDR5/LPDDR5 system memory. High read bandwidth indicates memory-intensive read patterns. This is a key metric for identifying memory-bound workloads.
+    rst: Achieved read bandwidth to system memory. RDNA 3.5 APUs use DDR5/LPDDR5 system memory. High read bandwidth indicates memory-intensive read patterns. This is a key metric for identifying memory-bound workloads.
+    unit: Bytes/s
+  DRAM Write Bandwidth:
+    plain: Achieved write bandwidth to system memory. High write bandwidth indicates write-intensive workloads. Combined with read bandwidth, this shows total memory traffic between the GPU and system memory.
+    rst: Achieved write bandwidth to system memory. High write bandwidth indicates write-intensive workloads. Combined with read bandwidth, this shows total memory traffic between the GPU and system memory.
+    unit: Bytes/s
+  SARB Stall Rate:
+    plain: 'Percent of GCEA sample cycles the System Arbiter (SARB) was stalled. Formula: 100 * GCEA_SARB_STALLED_sum / GCEA_ALWAYS_COUNT_sum.'
+    rst: 'Percent of GCEA sample cycles the System Arbiter (SARB) was stalled. Formula: 100 * GCEA_SARB_STALLED_sum / GCEA_ALWAYS_COUNT_sum.'
+    unit: Percent
+  DRAM Read Requests:
+    plain: DRAM read requests per client group from the GCEA memory path (GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom).
+    rst: DRAM read requests per client group from the GCEA memory path (GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom).
+    unit: Requests per Normalization Unit
+  DRAM Write Requests:
+    plain: DRAM write requests per client group from the GCEA memory path (GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom).
+    rst: DRAM write requests per client group from the GCEA memory path (GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom).
+    unit: Requests per Normalization Unit
+  Read Returns:
+    plain: Valid read-return events on the GCEA return path per normalization unit (GCEA_RRET_VLD_sum / $denom).
+    rst: Valid read-return events on the GCEA return path per normalization unit (GCEA_RRET_VLD_sum / $denom).
+    unit: Count per Normalization Unit
+  Write Returns:
+    plain: Valid write-return events on the GCEA return path per normalization unit (GCEA_WRET_VLD_sum / $denom).
+    rst: Valid write-return events on the GCEA return path per normalization unit (GCEA_WRET_VLD_sum / $denom).
+    unit: Count per Normalization Unit
+Roofline Performance Rates:
+  VALU FLOPs:
+    plain: 'Floating-point operations per second on the VALU. Peak is based on FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles throughput: FP32 to 256, FP16 packed to 512 FLOPs/CU/cycle. Uses aggregate instruction counter.'
+    rst: 'Floating-point operations per second on the VALU. Peak is based on FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles throughput: FP32 to 256, FP16 packed to 512 FLOPs/CU/cycle. Uses aggregate instruction counter.'
+    unit: GFLOP/s
+  VALU FLOPs (F64):
+    plain: 64-bit floating-point operations per second on the VALU. Peak is 4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
+    rst: 64-bit floating-point operations per second on the VALU. Peak is 4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
+    unit: GFLOP/s
+  GL2 Cache BW:
+    plain: Achieved bandwidth between the GL1 and GL2 caches. This represents GL1 miss traffic that must be serviced by GL2. High bandwidth relative to peak may indicate GL1 cache pressure or poor data locality at the GL1 level.
+    rst: Achieved bandwidth between the GL1 and GL2 caches. This represents GL1 miss traffic that must be serviced by GL2. High bandwidth relative to peak may indicate GL1 cache pressure or poor data locality at the GL1 level.
+    unit: Bytes/s
+  GL1 Cache BW:
+    plain: Achieved bandwidth between the GL0 (TCP Cache) and GL1 caches. This represents GL0 miss traffic. High bandwidth relative to peak may indicate cache pressure at the GL0 level or memory access patterns with poor locality.
+    rst: Achieved bandwidth between the GL0 (TCP Cache) and GL1 caches. This represents GL0 miss traffic. High bandwidth relative to peak may indicate cache pressure at the GL0 level or memory access patterns with poor locality.
+    unit: Bytes/s
+  GL0 Cache BW (TCP Cache):
+    plain: Achieved bandwidth at the GL0 vector cache (TCP Cache). This represents total data requested by shader cores from the memory hierarchy. Compare against peak to assess memory subsystem utilization.
+    rst: Achieved bandwidth at the GL0 vector cache (TCP Cache). This represents total data requested by shader cores from the memory hierarchy. Compare against peak to assess memory subsystem utilization.
+    unit: Bytes/s
+  LDS BW:
+    plain: Achieved bandwidth for Local Data Share memory operations. LDS provides high-bandwidth, low-latency shared memory within a workgroup. Compare against peak to identify if LDS bandwidth is limiting performance.
+    rst: Achieved bandwidth for Local Data Share memory operations. LDS provides high-bandwidth, low-latency shared memory within a workgroup. Compare against peak to identify if LDS bandwidth is limiting performance.
+    unit: Bytes/s
+Roofline Plot Points:
+  AI L2:
+    plain: Arithmetic Intensity relative to the L2 cache. This metric shows compute density relative to L2 cache traffic. Higher values indicate better data reuse upstream of L2, while lower values suggest heavy traffic into L2.
+    rst: Arithmetic Intensity relative to the L2 cache. This metric shows compute density relative to L2 cache traffic. Higher values indicate better data reuse upstream of L2, while lower values suggest heavy traffic into L2.
+    unit: FLOPs/Byte
+  AI L1:
+    plain: Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L1 bandwidth.
+    rst: Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L1 bandwidth.
+    unit: FLOPs/Byte
+  AI LDS:
+    plain: Arithmetic Intensity relative to the Local Data Share (LDS). Higher values indicate more compute per byte of LDS traffic, suggesting effective reuse of shared data within a workgroup. Lower values suggest memory-bound behavior limited by LDS bandwidth or bank-conflict pressure.
+    rst: Arithmetic Intensity relative to the Local Data Share (LDS). Higher values indicate more compute per byte of LDS traffic, suggesting effective reuse of shared data within a workgroup. Lower values suggest memory-bound behavior limited by LDS bandwidth or bank-conflict pressure.
+    unit: FLOPs/Byte
+  Performance (GFLOPs):
+    plain: Achieved compute throughput measured in billions of floating-point operations per second. This value, combined with arithmetic intensity, determines the kernel's position on the roofline chart for performance analysis.
+    rst: Achieved compute throughput measured in billions of floating-point operations per second. This value, combined with arithmetic intensity, determines the kernel's position on the roofline chart for performance analysis.
+    unit: GFLOP/s
+CPC Utilization:
+  CPC Busy:
+    plain: Percentage of time the Command Processor Compute is actively processing commands. High busy percentage indicates efficient command stream processing. Low values may indicate gaps in workload submission or dispatch bottlenecks.
+    rst: Percentage of time the Command Processor Compute is actively processing commands. High busy percentage indicates efficient command stream processing. Low values may indicate gaps in workload submission or dispatch bottlenecks.
+    unit: Percent
+  CPC Idle:
+    plain: Percentage of time the Command Processor Compute has no work to process. High idle time indicates underutilization, often due to gaps between kernel dispatches or insufficient workload to keep the GPU busy.
+    rst: Percentage of time the Command Processor Compute has no work to process. High idle time indicates underutilization, often due to gaps between kernel dispatches or insufficient workload to keep the GPU busy.
+    unit: Percent
+  CPC Stalled:
+    plain: Percentage of time the Command Processor Compute is stalled waiting for resources. High stall rates may indicate memory bottlenecks, synchronization issues, or contention for internal command processor resources.
+    rst: Percentage of time the Command Processor Compute is stalled waiting for resources. High stall rates may indicate memory bottlenecks, synchronization issues, or contention for internal command processor resources.
+    unit: Percent
+CPC Interface Utilization:
+  TCIU Busy:
+    plain: Percentage of time the Texture Cache Interface Unit is busy handling command processor memory requests. High utilization indicates significant memory traffic from command processing activities.
+    rst: Percentage of time the Texture Cache Interface Unit is busy handling command processor memory requests. High utilization indicates significant memory traffic from command processing activities.
+    unit: Percent
+  UTCL2 Busy:
+    plain: Percentage of time the Unified Translation Cache L2 interface is busy handling address translation requests. High utilization may indicate heavy virtual memory activity or TLB pressure.
+    rst: Percentage of time the Unified Translation Cache L2 interface is busy handling address translation requests. High utilization may indicate heavy virtual memory activity or TLB pressure.
+    unit: Percent
+  GCRIU Busy:
+    plain: Percentage of time the Graphics Cache Rinse Interface Unit is busy. This unit handles cache coherency operations. High utilization may indicate frequent cache flushes or synchronization points.
+    rst: Percentage of time the Graphics Cache Rinse Interface Unit is busy. This unit handles cache coherency operations. High utilization may indicate frequent cache flushes or synchronization points.
+    unit: Percent
+MEC Stall Cycles:
+  ME1 Stall on RCIU Ready:
+    plain: Cycles the Micro Engine is stalled waiting for the Register Cache Interface Unit. High stall counts may indicate register allocation bottlenecks or excessive register pressure during command processing.
+    rst: Cycles the Micro Engine is stalled waiting for the Register Cache Interface Unit. High stall counts may indicate register allocation bottlenecks or excessive register pressure during command processing.
+    unit: Cycles per Normalization Unit
+  ME1 Stall on Memory Read:
+    plain: Cycles the Micro Engine is stalled waiting for memory read operations to complete. High stall counts indicate memory latency is impacting command processing throughput.
+    rst: Cycles the Micro Engine is stalled waiting for memory read operations to complete. High stall counts indicate memory latency is impacting command processing throughput.
+    unit: Cycles per Normalization Unit
+  ME1 Stall on Memory Write:
+    plain: Cycles the Micro Engine is stalled waiting for memory write operations to complete. High stall counts may indicate memory bandwidth saturation or write queue pressure.
+    rst: Cycles the Micro Engine is stalled waiting for memory write operations to complete. High stall counts may indicate memory bandwidth saturation or write queue pressure.
+    unit: Cycles per Normalization Unit
+  ME1 Stall on ROQ Data:
+    plain: Cycles the Micro Engine is stalled waiting for data from the Ring Output Queue. High stall counts may indicate command stream processing bottlenecks.
+    rst: Cycles the Micro Engine is stalled waiting for data from the Ring Output Queue. High stall counts may indicate command stream processing bottlenecks.
+    unit: Cycles per Normalization Unit
+CPC Memory Requests:
+  TCIU Read Requests:
+    plain: Number of read requests issued by the command processor through the texture cache interface. These requests fetch command buffer data and kernel arguments.
+    rst: Number of read requests issued by the command processor through the texture cache interface. These requests fetch command buffer data and kernel arguments.
+    unit: Count per Normalization Unit
+  TCIU Write Requests:
+    plain: Number of write requests issued by the command processor through the texture cache interface. These handle completion signals and status updates.
+    rst: Number of write requests issued by the command processor through the texture cache interface. These handle completion signals and status updates.
+    unit: Count per Normalization Unit
+  GUS Read Requests:
+    plain: Number of read requests to the Global Unified Shader memory interface. This path handles direct memory access for command processor operations.
+    rst: Number of read requests to the Global Unified Shader memory interface. This path handles direct memory access for command processor operations.
+    unit: Count per Normalization Unit
+  GUS Write Requests:
+    plain: Number of write requests to the Global Unified Shader memory interface. High write counts may indicate frequent state updates or completion notifications.
+    rst: Number of write requests to the Global Unified Shader memory interface. High write counts may indicate frequent state updates or completion notifications.
+    unit: Count per Normalization Unit
+MEC Instruction Cache:
+  Instruction Cache Hits:
+    plain: Number of Micro Engine instruction fetches serviced from the instruction cache. Higher hit counts indicate good instruction locality in command processing code.
+    rst: Number of Micro Engine instruction fetches serviced from the instruction cache. Higher hit counts indicate good instruction locality in command processing code.
+    unit: Count per Normalization Unit
+  Instruction Cache Misses:
+    plain: Number of Micro Engine instruction fetches that missed in the instruction cache. High miss counts increase command processing latency due to memory fetches.
+    rst: Number of Micro Engine instruction fetches that missed in the instruction cache. High miss counts increase command processing latency due to memory fetches.
+    unit: Count per Normalization Unit
+  Instruction Cache Hit Rate:
+    plain: Percentage of Micro Engine instruction fetches that hit in cache. High hit rates are essential for efficient command processing. Low rates may indicate complex or large command processing routines.
+    rst: Percentage of Micro Engine instruction fetches that hit in cache. High hit rates are essential for efficient command processing. Low rates may indicate complex or large command processing routines.
+    unit: Percent
+SPI Utilization:
+  SPI Busy:
+    plain: Percentage of GPU active cycles where the Shader Processor Input is busy dispatching wavefronts. High SPI busy indicates active workload dispatch. Low values may suggest insufficient parallelism or dispatch bottlenecks limiting GPU utilization.
+    rst: Percentage of GPU active cycles where the Shader Processor Input is busy dispatching wavefronts. High SPI busy indicates active workload dispatch. Low values may suggest insufficient parallelism or dispatch bottlenecks limiting GPU utilization.
+    unit: Percent
+Wave Dispatch Statistics:
+  Compute Wave Dispatches:
+    plain: Total number of compute wavefronts dispatched by the Shader Processor Input. This represents the work scheduled for execution on the shader engines. Compare with completed waves to identify dispatch-related bottlenecks.
+    rst: Total number of compute wavefronts dispatched by the Shader Processor Input. This represents the work scheduled for execution on the shader engines. Compare with completed waves to identify dispatch-related bottlenecks.
+    unit: Count per Normalization Unit
+  Wave Dispatch Rate:
+    plain: Average wavefronts dispatched per GPU active cycle. Values greater than one indicate parallel dispatch across multiple shader engines. Low dispatch rates may indicate workload submission bottlenecks or insufficient parallelism in the application.
+    rst: Average wavefronts dispatched per GPU active cycle. Values greater than one indicate parallel dispatch across multiple shader engines. Low dispatch rates may indicate workload submission bottlenecks or insufficient parallelism in the application.
+    unit: Waves/cycle
+WGP Utilization:
+  WGP Utilization:
+    plain: Percentage of GPU active cycles where the Workgroup Processor is busy executing wavefronts. RDNA 3.5 WGPs contain two compute units, each with dual SIMD32 units. Low utilization may indicate insufficient parallelism or resource bottlenecks.
+    rst: Percentage of GPU active cycles where the Workgroup Processor is busy executing wavefronts. RDNA 3.5 WGPs contain two compute units, each with dual SIMD32 units. Low utilization may indicate insufficient parallelism or resource bottlenecks.
+    unit: Percent
+Wave Life:
+  Wave Life:
+    plain: Average number of cycles from wavefront creation to completion. Longer wave life indicates more execution time per wavefront, which may be due to complex kernels, memory latency, or synchronization waits.
+    rst: Average number of cycles from wavefront creation to completion. Longer wave life indicates more execution time per wavefront, which may be due to complex kernels, memory latency, or synchronization waits.
+    unit: Cycles
+Wave Instruction Mix:
+  Total Instructions:
+    plain: Total number of instructions executed across all wavefronts. This provides an overall measure of computational work. Compare with specific instruction types to understand the workload characteristics.
+    rst: Total number of instructions executed across all wavefronts. This provides an overall measure of computational work. Compare with specific instruction types to understand the workload characteristics.
+    unit: Count per Normalization Unit
+  Instructions - Internal:
+    plain: Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit. These represent bookkeeping or non-user-visible work issued by the SQ.
+    rst: Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit. These represent bookkeeping or non-user-visible work issued by the SQ.
+    unit: Count per Normalization Unit
+  Instructions - VALU:
+    plain: Number of Vector ALU instructions executed. VALU handles arithmetic and logic operations across all work-items in a wavefront. High VALU counts indicate compute-intensive kernels.
+    rst: Number of Vector ALU instructions executed. VALU handles arithmetic and logic operations across all work-items in a wavefront. High VALU counts indicate compute-intensive kernels.
+    unit: Count per Normalization Unit
+  Instructions - SALU:
+    plain: Number of Scalar ALU instructions executed. SALU handles operations with uniform values across the wavefront. Efficient kernels often have a balance of VALU and SALU operations.
+    rst: Number of Scalar ALU instructions executed. SALU handles operations with uniform values across the wavefront. Efficient kernels often have a balance of VALU and SALU operations.
+    unit: Count per Normalization Unit
+  Instructions - SMEM:
+    plain: Number of scalar memory instructions executed. SMEM loads constant and uniform data through the scalar cache. High counts may indicate heavy use of constant buffers or kernel arguments.
+    rst: Number of scalar memory instructions executed. SMEM loads constant and uniform data through the scalar cache. High counts may indicate heavy use of constant buffers or kernel arguments.
+    unit: Count per Normalization Unit
+  Instructions - Transcendental:
+    plain: Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit. These cover hardware approximations such as sin, cos, and log on the vector ALU.
+    rst: Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit. These cover hardware approximations such as sin, cos, and log on the vector ALU.
+    unit: Count per Normalization Unit
+  Instructions - VMEM:
+    plain: Number of vector memory instructions executed, including global, buffer, and texture operations. High VMEM counts relative to VALU may indicate memory-bound workloads.
+    rst: Number of vector memory instructions executed, including global, buffer, and texture operations. High VMEM counts relative to VALU may indicate memory-bound workloads.
+    unit: Count per Normalization Unit
+  Instructions - LDS:
+    plain: Number of Local Data Share instructions executed. LDS provides fast shared memory within a workgroup. High counts indicate active use of shared memory for inter-work-item communication.
+    rst: Number of Local Data Share instructions executed. LDS provides fast shared memory within a workgroup. High counts indicate active use of shared memory for inter-work-item communication.
+    unit: Count per Normalization Unit
+LDS Instruction Mix:
+  LDS Direct Load Instructions:
+    plain: Number of direct LDS load instructions. Direct loads fetch data from LDS without address indirection. These are typically faster than indexed LDS operations.
+    rst: Number of direct LDS load instructions. Direct loads fetch data from LDS without address indirection. These are typically faster than indexed LDS operations.
+    unit: Count per Normalization Unit
+  LDS Parameter Load Instructions:
+    plain: Number of LDS parameter load instructions. These load shader input parameters that have been staged in LDS for efficient access by the wavefront.
+    rst: Number of LDS parameter load instructions. These load shader input parameters that have been staged in LDS for efficient access by the wavefront.
+    unit: Count per Normalization Unit
+  WAVE32 LDS Parameter Load Instructions:
+    plain: Number of LDS parameter loads executed in wave32 mode. RDNA 3.5 supports both wave32 and wave64 execution modes, with wave32 providing lower latency for some operations.
+    rst: Number of LDS parameter loads executed in wave32 mode. RDNA 3.5 supports both wave32 and wave64 execution modes, with wave32 providing lower latency for some operations.
+    unit: Count per Normalization Unit
+Wait State Analysis:
+  Wait for Any:
+    plain: Percentage of wavefront lifetime spent waiting for any reason. High wait percentages indicate opportunities to improve performance through better memory access patterns, reduced synchronization, or increased occupancy.
+    rst: Percentage of wavefront lifetime spent waiting for any reason. High wait percentages indicate opportunities to improve performance through better memory access patterns, reduced synchronization, or increased occupancy.
+    unit: Percent
+  Wait for Instruction Fetch:
+    plain: Percentage of wavefront lifetime spent waiting for instruction fetch. High values may indicate instruction cache misses, large kernel code, or divergent control flow impacting instruction locality.
+    rst: Percentage of wavefront lifetime spent waiting for instruction fetch. High values may indicate instruction cache misses, large kernel code, or divergent control flow impacting instruction locality.
+    unit: Percent
+  Wait for Barrier:
+    plain: Percentage of wavefront lifetime spent at barrier synchronization points. High barrier wait times may indicate workload imbalance within workgroups. Consider restructuring algorithms to reduce synchronization frequency.
+    rst: Percentage of wavefront lifetime spent at barrier synchronization points. High barrier wait times may indicate workload imbalance within workgroups. Consider restructuring algorithms to reduce synchronization frequency.
+    unit: Percent
+  Wait for Counter:
+    plain: Percentage of wavefront lifetime spent waiting for memory operation counters. High values indicate memory latency is impacting performance. Consider improving memory access patterns or increasing occupancy to hide latency.
+    rst: Percentage of wavefront lifetime spent waiting for memory operation counters. High values indicate memory latency is impacting performance. Consider improving memory access patterns or increasing occupancy to hide latency.
+    unit: Percent
+WGP Instruction Cache:
+  Icache Hit Rate:
+    plain: Percentage of instruction cache accesses that hit. High hit rates are essential for sustained instruction throughput. Low rates may indicate large kernels or divergent branches causing instruction cache thrashing.
+    rst: Percentage of instruction cache accesses that hit. High hit rates are essential for sustained instruction throughput. Low rates may indicate large kernels or divergent branches causing instruction cache thrashing.
+    unit: Percent
+WGP Scalar Data Cache:
+  Dcache Hit Rate:
+    plain: Percentage of scalar data cache accesses that hit. High hit rates indicate efficient reuse of constant and uniform data. Low rates may suggest excessive unique constant data or poor temporal locality.
+    rst: Percentage of scalar data cache accesses that hit. High hit rates indicate efficient reuse of constant and uniform data. Low rates may suggest excessive unique constant data or poor temporal locality.
+    unit: Percent
+GL0 Utilization:
+  GL0 Busy (TCP):
+    plain: Percentage of cycles the GL0 vector cache (TCP) is actively processing requests. Each Workgroup Processor has its own GL0/TCP instance. Low utilization may indicate compute-bound workloads with minimal memory traffic or idle shader engines.
+    rst: Percentage of cycles the GL0 vector cache (TCP) is actively processing requests. Each Workgroup Processor has its own GL0/TCP instance. Low utilization may indicate compute-bound workloads with minimal memory traffic or idle shader engines.
+    unit: Percent
+GL0 Request Statistics:
+  Total Requests:
+    plain: Total number of requests to the GL0 vector cache, including reads, writes, and atomics. This represents the overall memory traffic generated by vector memory instructions from the shader cores.
+    rst: Total number of requests to the GL0 vector cache, including reads, writes, and atomics. This represents the overall memory traffic generated by vector memory instructions from the shader cores.
+    unit: Count per Normalization Unit
+  Read Requests:
+    plain: Number of read requests to the GL0 vector cache. High read counts indicate memory-intensive load operations. Compare with hit rate to assess cache effectiveness for read traffic.
+    rst: Number of read requests to the GL0 vector cache. High read counts indicate memory-intensive load operations. Compare with hit rate to assess cache effectiveness for read traffic.
+    unit: Count per Normalization Unit
+  Write Requests:
+    plain: Number of write requests to the GL0 vector cache. Write traffic may include global memory stores and cache writebacks. High write counts indicate write-intensive workloads.
+    rst: Number of write requests to the GL0 vector cache. Write traffic may include global memory stores and cache writebacks. High write counts indicate write-intensive workloads.
+    unit: Count per Normalization Unit
+  Miss Requests:
+    plain: Number of GL0 cache requests that missed and required fetching from the GL1 cache. High miss counts increase memory access latency. Consider improving data locality or access patterns to reduce misses.
+    rst: Number of GL0 cache requests that missed and required fetching from the GL1 cache. High miss counts increase memory access latency. Consider improving data locality or access patterns to reduce misses.
+    unit: Count per Normalization Unit
+GL0 Cache Performance:
+  Hit Rate:
+    plain: Percentage of GL0 cache requests serviced from cache without accessing GL1 cache. Higher hit rates indicate better data locality and lower memory access latency. Low hit rates may indicate working sets exceeding GL0 capacity or poor access patterns.
+    rst: Percentage of GL0 cache requests serviced from cache without accessing GL1 cache. Higher hit rates indicate better data locality and lower memory access latency. Low hit rates may indicate working sets exceeding GL0 capacity or poor access patterns.
+    unit: Percent
+GL0-GL1 Interface:
+  GL1 Read Requests:
+    plain: Number of read requests forwarded from GL0 (TCP) to GL1 cache due to misses. This represents GL0 miss traffic that must be serviced by higher cache levels.
+    rst: Number of read requests forwarded from GL0 (TCP) to GL1 cache due to misses. This represents GL0 miss traffic that must be serviced by higher cache levels.
+    unit: Count per Normalization Unit
+  GL1 Read 128B Requests:
+    plain: Number of 128-byte read requests forwarded from GL0 (TCP) to GL1 cache. This represents large cache line fetches for memory-intensive workloads.
+    rst: Number of 128-byte read requests forwarded from GL0 (TCP) to GL1 cache. This represents large cache line fetches for memory-intensive workloads.
+    unit: Count per Normalization Unit
+  GL1 Write Requests:
+    plain: Number of write requests forwarded from GL0 (TCP) to GL1 cache. This includes writebacks and stores that missed in GL0.
+    rst: Number of write requests forwarded from GL0 (TCP) to GL1 cache. This includes writebacks and stores that missed in GL0.
+    unit: Count per Normalization Unit
+GL0 Stalls:
+  TA Req Stall:
+    plain: Cycles the Texture Addresser was stalled waiting for the GL0 cache to accept requests. High stall counts indicate GL0 cache backpressure limiting memory request throughput.
+    rst: Cycles the Texture Addresser was stalled waiting for the GL0 cache to accept requests. High stall counts indicate GL0 cache backpressure limiting memory request throughput.
+    unit: Cycles per Normalization Unit
+  GL1 Back Pressure:
+    plain: Cycles the GL0 cache was stalled due to backpressure from the GL1 cache. High values indicate GL1 cache contention or bandwidth limitations impacting GL0 throughput.
+    rst: Cycles the GL0 cache was stalled due to backpressure from the GL1 cache. High values indicate GL1 cache contention or bandwidth limitations impacting GL0 throughput.
+    unit: Cycles per Normalization Unit
+  Data FIFO Stall:
+    plain: Cycles the GL0 cache data FIFO was stalled. High stall counts may indicate data path congestion or insufficient buffering for high-throughput workloads.
+    rst: Cycles the GL0 cache data FIFO was stalled. High stall counts may indicate data path congestion or insufficient buffering for high-throughput workloads.
+    unit: Cycles per Normalization Unit
+GL1 Cache Utilization:
+  GL1 Cache Busy:
+    plain: Percentage of cycles the GL1 cache is actively processing requests. GL1 cache is shared across multiple Workgroup Processors within a Shader Engine. High utilization indicates active memory traffic from the GL0 caches.
+    rst: Percentage of cycles the GL1 cache is actively processing requests. GL1 cache is shared across multiple Workgroup Processors within a Shader Engine. High utilization indicates active memory traffic from the GL0 caches.
+    unit: Percent
+  GL1 Cache Starve:
+    plain: Percentage of cycles the GL1 cache had no pending requests. High starvation indicates either compute-bound workloads with minimal memory traffic, or effective GL0 caching reducing traffic to GL1.
+    rst: Percentage of cycles the GL1 cache had no pending requests. High starvation indicates either compute-bound workloads with minimal memory traffic, or effective GL0 caching reducing traffic to GL1.
+    unit: Percent
+GL1 Cache Request Statistics:
+  Total Requests:
+    plain: Total number of requests received by the GL1 cache from all GL0 caches (TCP instances) within the shader engine. This represents aggregated memory traffic from multiple Workgroup Processors.
+    rst: Total number of requests received by the GL1 cache from all GL0 caches (TCP instances) within the shader engine. This represents aggregated memory traffic from multiple Workgroup Processors.
+    unit: Count per Normalization Unit
+  Read Requests:
+    plain: Number of read requests to the GL1 cache. High read counts indicate memory-intensive load operations that missed in GL0. Compare with miss requests to assess GL1 cache effectiveness.
+    rst: Number of read requests to the GL1 cache. High read counts indicate memory-intensive load operations that missed in GL0. Compare with miss requests to assess GL1 cache effectiveness.
+    unit: Count per Normalization Unit
+  Write Requests:
+    plain: Number of write requests to the GL1 cache. Write traffic includes stores that missed in GL0 and cache writebacks. High write counts may indicate write-intensive workloads.
+    rst: Number of write requests to the GL1 cache. Write traffic includes stores that missed in GL0 and cache writebacks. High write counts may indicate write-intensive workloads.
+    unit: Count per Normalization Unit
+  Miss Requests:
+    plain: Number of GL1 cache requests that missed and required fetching from GL2. High miss counts increase memory latency and traffic to GL2. Consider improving data locality at the shader engine level.
+    rst: Number of GL1 cache requests that missed and required fetching from GL2. High miss counts increase memory latency and traffic to GL2. Consider improving data locality at the shader engine level.
+    unit: Count per Normalization Unit
+GL1 Cache Performance:
+  Hit Rate:
+    plain: Percentage of GL1 cache requests serviced from cache. Higher hit rates reduce traffic to GL2 and improve performance. Low hit rates may indicate working sets exceeding GL1 capacity or poor data locality across Workgroup Processors.
+    rst: Percentage of GL1 cache requests serviced from cache. Higher hit rates reduce traffic to GL2 and improve performance. Low hit rates may indicate working sets exceeding GL1 capacity or poor data locality across Workgroup Processors.
+    unit: Percent
+GL1-GL2 Interface:
+  GL2 Read Requests:
+    plain: Number of read requests forwarded from GL1 to GL2 cache due to misses. This represents GL1 miss traffic that consumes GL2 bandwidth. High counts may indicate GL1 capacity limitations.
+    rst: Number of read requests forwarded from GL1 to GL2 cache due to misses. This represents GL1 miss traffic that consumes GL2 bandwidth. High counts may indicate GL1 capacity limitations.
+    unit: Count per Normalization Unit
+  GL2 Read 128B Requests:
+    plain: Number of 128-byte read requests forwarded from GL1 to GL2 cache. This represents large cache line fetches for memory-intensive workloads.
+    rst: Number of 128-byte read requests forwarded from GL1 to GL2 cache. This represents large cache line fetches for memory-intensive workloads.
+    unit: Count per Normalization Unit
+  GL2 Write Requests:
+    plain: Number of write requests forwarded from GL1 to GL2 cache. This includes writebacks and stores that missed in GL1.
+    rst: Number of write requests forwarded from GL1 to GL2 cache. This includes writebacks and stores that missed in GL1.
+    unit: Count per Normalization Unit
+GL1 Cache Stalls:
+  GL2 Stall:
+    plain: Cycles the GL1 cache was stalled waiting for GL2 to accept requests. High stall counts indicate GL2 bandwidth saturation or contention, limiting GL1 throughput.
+    rst: Cycles the GL1 cache was stalled waiting for GL2 to accept requests. High stall counts indicate GL2 bandwidth saturation or contention, limiting GL1 throughput.
+    unit: Cycles per Normalization Unit
+  LFIFO Full Stall:
+    plain: Cycles the GL1 cache was stalled due to the LFIFO (Load FIFO) being full. High stall counts indicate data return path congestion from GL2 to GL1.
+    rst: Cycles the GL1 cache was stalled due to the LFIFO (Load FIFO) being full. High stall counts indicate data return path congestion from GL2 to GL1.
+    unit: Cycles per Normalization Unit
+GL2 Cache Performance:
+  GL2 Cache Hit Rate:
+    plain: Percentage of GL2 cache requests serviced from cache without forwarding through GCEA (Graphics Core Efficiency Arbiter). GL2 cache is the GPU's final on-chip cache before accessing system memory. Higher hit rates significantly reduce memory bandwidth pressure and improve performance.
+    rst: Percentage of GL2 cache requests serviced from cache without forwarding through GCEA (Graphics Core Efficiency Arbiter). GL2 cache is the GPU's final on-chip cache before accessing system memory. Higher hit rates significantly reduce memory bandwidth pressure and improve performance.
+    unit: Percent
+  GL2 Cache Hits:
+    plain: Number of GL2 cache requests that were serviced from cache. High hit counts relative to total requests indicate effective caching. Low hit counts suggest memory-bound workloads or poor data locality.
+    rst: Number of GL2 cache requests that were serviced from cache. High hit counts relative to total requests indicate effective caching. Low hit counts suggest memory-bound workloads or poor data locality.
+    unit: Count per Normalization Unit
+  GL2 Cache Misses:
+    plain: Number of GL2 cache requests that missed and required fetching through GCEA (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic. Consider improving data locality or reducing working set size.
+    rst: Number of GL2 cache requests that missed and required fetching through GCEA (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic. Consider improving data locality or reducing working set size.
+    unit: Count per Normalization Unit
+GL2 Cache Request Statistics:
+  Total Requests:
+    plain: Total number of requests received by the GL2 cache from all GL1 caches and other clients. This represents the aggregate memory traffic at the GPU's final on-chip cache.
+    rst: Total number of requests received by the GL2 cache from all GL1 caches and other clients. This represents the aggregate memory traffic at the GPU's final on-chip cache.
+    unit: Count per Normalization Unit
+  Read Requests:
+    plain: Number of read requests to the GL2 cache. High read counts indicate memory-intensive load operations. Compare with hit rate to assess GL2 cache effectiveness for reads.
+    rst: Number of read requests to the GL2 cache. High read counts indicate memory-intensive load operations. Compare with hit rate to assess GL2 cache effectiveness for reads.
+    unit: Count per Normalization Unit
+  Write Requests:
+    plain: Number of write requests to the GL2 cache. Write traffic includes stores and cache writebacks from GL1. High write counts indicate write-intensive workloads.
+    rst: Number of write requests to the GL2 cache. Write traffic includes stores and cache writebacks from GL1. High write counts indicate write-intensive workloads.
+    unit: Count per Normalization Unit
+  Atomic Requests:
+    plain: Number of atomic memory operations processed by the GL2 cache. Atomics provide thread-safe memory access but may serialize at contended addresses. High counts may impact performance.
+    rst: Number of atomic memory operations processed by the GL2 cache. Atomics provide thread-safe memory access but may serialize at contended addresses. High counts may impact performance.
+    unit: Count per Normalization Unit
+  EA Read Requests (DRAM):
+    plain: Number of read requests forwarded from GL2 cache through GCEA (Graphics Core Efficiency Arbiter). These requests go toward system memory, though they may be served by system-level caches before reaching DRAM. High counts indicate memory-bound workloads.
+    rst: Number of read requests forwarded from GL2 cache through GCEA (Graphics Core Efficiency Arbiter). These requests go toward system memory, though they may be served by system-level caches before reaching DRAM. High counts indicate memory-bound workloads.
+    unit: Count per Normalization Unit
+  EA Write Requests (DRAM):
+    plain: Number of write requests forwarded from GL2 cache through GCEA (Graphics Core Efficiency Arbiter). These include evictions and writebacks going toward system memory. High counts indicate write-intensive workloads consuming memory bandwidth.
+    rst: Number of write requests forwarded from GL2 cache through GCEA (Graphics Core Efficiency Arbiter). These include evictions and writebacks going toward system memory. High counts indicate write-intensive workloads consuming memory bandwidth.
+    unit: Count per Normalization Unit
+GL2 Cache Bandwidth:
+  GL2 Cache Read BW:
+    plain: Achieved read bandwidth at the GL2 cache level. This represents total read traffic from GL1 caches to GL2. High bandwidth indicates memory-intensive read patterns.
+    rst: Achieved read bandwidth at the GL2 cache level. This represents total read traffic from GL1 caches to GL2. High bandwidth indicates memory-intensive read patterns.
+    unit: Bytes/s
+  GL2 Cache Write BW:
+    plain: Achieved write bandwidth at the GL2 cache level. This represents total write traffic from GL1 caches to GL2. High bandwidth indicates memory-intensive write patterns.
+    rst: Achieved write bandwidth at the GL2 cache level. This represents total write traffic from GL1 caches to GL2. High bandwidth indicates memory-intensive write patterns.
+    unit: Bytes/s
+DRAM Read Interface:
+  DRAM Read Requests:
+    plain: Number of read requests sent to system memory. RDNA 3.5 APUs use DDR5/LPDDR5 system memory. High read request counts indicate memory-intensive workloads that may be bandwidth limited.
+    rst: Number of read requests sent to system memory. RDNA 3.5 APUs use DDR5/LPDDR5 system memory. High read request counts indicate memory-intensive workloads that may be bandwidth limited.
+    unit: Count per Normalization Unit
+  DRAM Read Chained Requests:
+    plain: Number of sequential read request chains to system memory. Chained requests combine multiple sequential accesses for better memory efficiency. High chain counts indicate good memory access patterns.
+    rst: Number of sequential read request chains to system memory. Chained requests combine multiple sequential accesses for better memory efficiency. High chain counts indicate good memory access patterns.
+    unit: Count per Normalization Unit
+  DRAM Read Banks Active:
+    plain: Number of system memory banks with pending read requests. More active banks enable better memory-level parallelism. Low bank utilization may indicate suboptimal access patterns limiting bandwidth.
+    rst: Number of system memory banks with pending read requests. More active banks enable better memory-level parallelism. Low bank utilization may indicate suboptimal access patterns limiting bandwidth.
+    unit: Count per Normalization Unit
+  DRAM Read Size (32B increments):
+    plain: Total volume of read data transferred from system memory. This metric helps quantify memory read bandwidth consumption. Compare with theoretical bandwidth to assess memory utilization.
+    rst: Total volume of read data transferred from system memory. This metric helps quantify memory read bandwidth consumption. Compare with theoretical bandwidth to assess memory utilization.
+    unit: Count per Normalization Unit
+DRAM Write Interface:
+  DRAM Write Requests:
+    plain: Number of write requests sent to system memory. High write request counts indicate write-intensive workloads. Combined with read requests, this shows total memory traffic.
+    rst: Number of write requests sent to system memory. High write request counts indicate write-intensive workloads. Combined with read requests, this shows total memory traffic.
+    unit: Count per Normalization Unit
+  DRAM Write Chained Requests:
+    plain: Number of sequential write request chains to system memory. Chained writes combine sequential stores for better efficiency. High chain counts indicate good write access patterns.
+    rst: Number of sequential write request chains to system memory. Chained writes combine sequential stores for better efficiency. High chain counts indicate good write access patterns.
+    unit: Count per Normalization Unit
+  DRAM Write Banks Active:
+    plain: Number of system memory banks with pending write requests. Higher bank utilization enables better write bandwidth. Low values may indicate access pattern issues.
+    rst: Number of system memory banks with pending write requests. Higher bank utilization enables better write bandwidth. Low values may indicate access pattern issues.
+    unit: Count per Normalization Unit
+  DRAM Write Size (32B increments):
+    plain: Total volume of write data transferred to system memory. This quantifies memory write bandwidth consumption. High values indicate write-intensive workloads.
+    rst: Total volume of write data transferred to system memory. This quantifies memory write bandwidth consumption. High values indicate write-intensive workloads.
+    unit: Count per Normalization Unit
+System Arbiter (SARB):
+  SARB Busy:
+    plain: Percentage of cycles the System Arbiter is actively processing memory requests. High busy percentage indicates significant off-chip memory traffic. This is a key indicator of memory-bound behavior.
+    rst: Percentage of cycles the System Arbiter is actively processing memory requests. High busy percentage indicates significant off-chip memory traffic. This is a key indicator of memory-bound behavior.
+    unit: Percent
+  SARB Stalled:
+    plain: Percentage of cycles the System Arbiter has requests but cannot make progress due to downstream backpressure. High stall rates indicate memory bandwidth saturation or system memory contention.
+    rst: Percentage of cycles the System Arbiter has requests but cannot make progress due to downstream backpressure. High stall rates indicate memory bandwidth saturation or system memory contention.
+    unit: Percent
+  SARB Starving:
+    plain: Percentage of cycles the System Arbiter has no requests to process. High starvation indicates compute-bound workloads or effective caching reducing memory traffic.
+    rst: Percentage of cycles the System Arbiter has no requests to process. High starvation indicates compute-bound workloads or effective caching reducing memory traffic.
+    unit: Percent
+  SARB Total Requests:
+    plain: Total memory requests processed by the System Arbiter. This represents all traffic between the GPU caches and system memory interface, including reads, writes, and atomics.
+    rst: Total memory requests processed by the System Arbiter. This represents all traffic between the GPU caches and system memory interface, including reads, writes, and atomics.
+    unit: Count per Normalization Unit
+  SARB DRAM Requests:
+    plain: Memory requests specifically destined for system memory (DRAM). This excludes requests serviced by other system components. High counts indicate memory-intensive workloads.
+    rst: Memory requests specifically destined for system memory (DRAM). This excludes requests serviced by other system components. High counts indicate memory-intensive workloads.
+    unit: Count per Normalization Unit
+Return Interface:
+  Read Returns:
+    plain: Number of completed read operations returning data from system memory. Each return delivers requested data to the GPU caches. High counts indicate successful memory read traffic.
+    rst: Number of completed read operations returning data from system memory. Each return delivers requested data to the GPU caches. High counts indicate successful memory read traffic.
+    unit: Count per Normalization Unit
+  Write Returns:
+    plain: Number of completed write acknowledgements from system memory. Each return confirms successful data write. High counts indicate write-intensive workloads completing successfully.
+    rst: Number of completed write acknowledgements from system memory. Each return confirms successful data write. High counts indicate write-intensive workloads completing successfully.
+    unit: Count per Normalization Unit
+  Probe Requests:
+    plain: Number of cache coherency probe operations. These occur when external agents or system components require cache synchronization. High counts may indicate coherency traffic impacting performance.
+    rst: Number of cache coherency probe operations. These occur when external agents or system components require cache synchronization. High counts may indicate coherency traffic impacting performance.
+    unit: Count per Normalization Unit
+GPU Utilization:
+  GPU Busy:
+    plain: Percentage of time the GPU was actively processing work. This is the primary utilization metric showing overall GPU activity. Low GPU busy indicates underutilization, possibly due to insufficient workload or host-side bottlenecks.
+    rst: Percentage of time the GPU was actively processing work. This is the primary utilization metric showing overall GPU activity. Low GPU busy indicates underutilization, possibly due to insufficient workload or host-side bottlenecks.
+    unit: Percent
+  CP Busy:
+    plain: Percentage of GPU active time the Command Processor was busy dispatching work and processing commands. High CP busy with low shader activity may indicate dispatch bottlenecks or excessive command stream overhead.
+    rst: Percentage of GPU active time the Command Processor was busy dispatching work and processing commands. High CP busy with low shader activity may indicate dispatch bottlenecks or excessive command stream overhead.
+    unit: Percent
+  GL2C Busy:
+    plain: Percentage of GPU active time the GL2 cache was busy servicing memory requests. High GL2 busy indicates memory-intensive workloads. Compare with compute activity to determine if the workload is memory-bound or compute-bound.
+    rst: Percentage of GPU active time the GL2 cache was busy servicing memory requests. High GL2 busy indicates memory-intensive workloads. Compare with compute activity to determine if the workload is memory-bound or compute-bound.
+    unit: Percent
+Shader Engine Utilization:
+  TA Busy:
+    plain: Percentage of GPU active time the Texture Addresser was busy processing memory address calculations. High TA busy indicates active texture or buffer memory operations. This reflects the address generation workload for memory requests.
+    rst: Percentage of GPU active time the Texture Addresser was busy processing memory address calculations. High TA busy indicates active texture or buffer memory operations. This reflects the address generation workload for memory requests.
+    unit: Percent
+Command processor fetcher (CPF):
+  CPC Busy:
+    plain: Percentage of time the Command Processor Compute is actively processing commands. High busy percentage indicates efficient command stream processing. Low values may indicate gaps in workload submission or dispatch bottlenecks.
+    rst: Percentage of time the Command Processor Compute is actively processing commands. High busy percentage indicates efficient command stream processing. Low values may indicate gaps in workload submission or dispatch bottlenecks.
+    unit: Percent
+  CPC Idle:
+    plain: Percentage of time the Command Processor Compute has no work to process. High idle time indicates underutilization, often due to gaps between kernel dispatches or insufficient workload to keep the GPU busy.
+    rst: Percentage of time the Command Processor Compute has no work to process. High idle time indicates underutilization, often due to gaps between kernel dispatches or insufficient workload to keep the GPU busy.
+    unit: Percent
+  CPC Stalled:
+    plain: Percentage of time the Command Processor Compute is stalled waiting for resources. High stall rates may indicate memory bottlenecks, synchronization issues, or contention for internal command processor resources.
+    rst: Percentage of time the Command Processor Compute is stalled waiting for resources. High stall rates may indicate memory bottlenecks, synchronization issues, or contention for internal command processor resources.
+    unit: Percent
+Command processor packet processor (CPC):
+  TCIU Busy:
+    plain: Percentage of time the Texture Cache Interface Unit is busy handling command processor memory requests. High utilization indicates significant memory traffic from command processing activities.
+    rst: Percentage of time the Texture Cache Interface Unit is busy handling command processor memory requests. High utilization indicates significant memory traffic from command processing activities.
+    unit: Percent
+  UTCL2 Busy:
+    plain: Percentage of time the Unified Translation Cache L2 interface is busy handling address translation requests. High utilization may indicate heavy virtual memory activity or TLB pressure.
+    rst: Percentage of time the Unified Translation Cache L2 interface is busy handling address translation requests. High utilization may indicate heavy virtual memory activity or TLB pressure.
+    unit: Percent
+  GCRIU Busy:
+    plain: Percentage of time the Graphics Cache Rinse Interface Unit is busy. This unit handles cache coherency operations. High utilization may indicate frequent cache flushes or synchronization points.
+    rst: Percentage of time the Graphics Cache Rinse Interface Unit is busy. This unit handles cache coherency operations. High utilization may indicate frequent cache flushes or synchronization points.
+    unit: Percent
+Workgroup manager utilizations:
+  SPI Busy:
+    plain: Percentage of GPU active cycles where the Shader Processor Input is busy dispatching wavefronts. High SPI busy indicates active workload dispatch. Low values may suggest insufficient parallelism or dispatch bottlenecks limiting GPU utilization.
+    rst: Percentage of GPU active cycles where the Shader Processor Input is busy dispatching wavefronts. High SPI busy indicates active workload dispatch. Low values may suggest insufficient parallelism or dispatch bottlenecks limiting GPU utilization.
+    unit: Percent
+Workgroup Manager - Resource Allocation:
+  Compute Wave Dispatches:
+    plain: Total number of compute wavefronts dispatched by the Shader Processor Input. This represents the work scheduled for execution on the shader engines. Compare with completed waves to identify dispatch-related bottlenecks.
+    rst: Total number of compute wavefronts dispatched by the Shader Processor Input. This represents the work scheduled for execution on the shader engines. Compare with completed waves to identify dispatch-related bottlenecks.
+    unit: Count per Normalization Unit
+  Wave Dispatch Rate:
+    plain: Average wavefronts dispatched per GPU active cycle. Values greater than one indicate parallel dispatch across multiple shader engines. Low dispatch rates may indicate workload submission bottlenecks or insufficient parallelism in the application.
+    rst: Average wavefronts dispatched per GPU active cycle. Values greater than one indicate parallel dispatch across multiple shader engines. Low dispatch rates may indicate workload submission bottlenecks or insufficient parallelism in the application.
+    unit: Waves/cycle
+Wavefront launch stats:
+  WGP Utilization:
+    plain: Percentage of GPU active cycles where the Workgroup Processor is busy executing wavefronts. RDNA 3.5 WGPs contain two compute units, each with dual SIMD32 units. Low utilization may indicate insufficient parallelism or resource bottlenecks.
+    rst: Percentage of GPU active cycles where the Workgroup Processor is busy executing wavefronts. RDNA 3.5 WGPs contain two compute units, each with dual SIMD32 units. Low utilization may indicate insufficient parallelism or resource bottlenecks.
+    unit: Percent
+Compute Speed-of-Light:
+  GL1 Cache Busy:
+    plain: Percentage of cycles the GL1 cache is actively processing requests. GL1 cache is shared across multiple Workgroup Processors within a Shader Engine. High utilization indicates active memory traffic from the GL0 caches.
+    rst: Percentage of cycles the GL1 cache is actively processing requests. GL1 cache is shared across multiple Workgroup Processors within a Shader Engine. High utilization indicates active memory traffic from the GL0 caches.
+    unit: Percent
+  GL1 Cache Starve:
+    plain: Percentage of cycles the GL1 cache had no pending requests. High starvation indicates either compute-bound workloads with minimal memory traffic, or effective GL0 caching reducing traffic to GL1.
+    rst: Percentage of cycles the GL1 cache had no pending requests. High starvation indicates either compute-bound workloads with minimal memory traffic, or effective GL0 caching reducing traffic to GL1.
+    unit: Percent
+Pipeline statistics:
+  Total Requests:
+    plain: Total number of requests received by the GL1 cache from all GL0 caches (TCP instances) within the shader engine. This represents aggregated memory traffic from multiple Workgroup Processors.
+    rst: Total number of requests received by the GL1 cache from all GL0 caches (TCP instances) within the shader engine. This represents aggregated memory traffic from multiple Workgroup Processors.
+    unit: Count per Normalization Unit
+  Read Requests:
+    plain: Number of read requests to the GL1 cache. High read counts indicate memory-intensive load operations that missed in GL0. Compare with miss requests to assess GL1 cache effectiveness.
+    rst: Number of read requests to the GL1 cache. High read counts indicate memory-intensive load operations that missed in GL0. Compare with miss requests to assess GL1 cache effectiveness.
+    unit: Count per Normalization Unit
+  Write Requests:
+    plain: Number of write requests to the GL1 cache. Write traffic includes stores that missed in GL0 and cache writebacks. High write counts may indicate write-intensive workloads.
+    rst: Number of write requests to the GL1 cache. Write traffic includes stores that missed in GL0 and cache writebacks. High write counts may indicate write-intensive workloads.
+    unit: Count per Normalization Unit
+  Miss Requests:
+    plain: Number of GL1 cache requests that missed and required fetching from GL2. High miss counts increase memory latency and traffic to GL2. Consider improving data locality at the shader engine level.
+    rst: Number of GL1 cache requests that missed and required fetching from GL2. High miss counts increase memory latency and traffic to GL2. Consider improving data locality at the shader engine level.
+    unit: Count per Normalization Unit
+Arithmetic operations:
+  Hit Rate:
+    plain: Percentage of GL1 cache requests serviced from cache. Higher hit rates reduce traffic to GL2 and improve performance. Low hit rates may indicate working sets exceeding GL1 capacity or poor data locality across Workgroup Processors.
+    rst: Percentage of GL1 cache requests serviced from cache. Higher hit rates reduce traffic to GL2 and improve performance. Low hit rates may indicate working sets exceeding GL1 capacity or poor data locality across Workgroup Processors.
+    unit: Percent
+L1I Speed-of-Light:
+  GL2 Cache Hit Rate:
+    plain: Percentage of GL2 cache requests serviced from cache without forwarding through GCEA (Graphics Core Efficiency Arbiter). GL2 cache is the GPU's final on-chip cache before accessing system memory. Higher hit rates significantly reduce memory bandwidth pressure and improve performance.
+    rst: Percentage of GL2 cache requests serviced from cache without forwarding through GCEA (Graphics Core Efficiency Arbiter). GL2 cache is the GPU's final on-chip cache before accessing system memory. Higher hit rates significantly reduce memory bandwidth pressure and improve performance.
+    unit: Percent
+  GL2 Cache Hits:
+    plain: Number of GL2 cache requests that were serviced from cache. High hit counts relative to total requests indicate effective caching. Low hit counts suggest memory-bound workloads or poor data locality.
+    rst: Number of GL2 cache requests that were serviced from cache. High hit counts relative to total requests indicate effective caching. Low hit counts suggest memory-bound workloads or poor data locality.
+    unit: Count per Normalization Unit
+  GL2 Cache Misses:
+    plain: Number of GL2 cache requests that missed and required fetching through GCEA (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic. Consider improving data locality or reducing working set size.
+    rst: Number of GL2 cache requests that missed and required fetching through GCEA (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic. Consider improving data locality or reducing working set size.
+    unit: Count per Normalization Unit
+L1I cache accesses:
+  Total Requests:
+    plain: Total number of requests received by the GL2 cache from all GL1 caches and other clients. This represents the aggregate memory traffic at the GPU's final on-chip cache.
+    rst: Total number of requests received by the GL2 cache from all GL1 caches and other clients. This represents the aggregate memory traffic at the GPU's final on-chip cache.
+    unit: Count per Normalization Unit
+  Read Requests:
+    plain: Number of read requests to the GL2 cache. High read counts indicate memory-intensive load operations. Compare with hit rate to assess GL2 cache effectiveness for reads.
+    rst: Number of read requests to the GL2 cache. High read counts indicate memory-intensive load operations. Compare with hit rate to assess GL2 cache effectiveness for reads.
+    unit: Count per Normalization Unit
+  Write Requests:
+    plain: Number of write requests to the GL2 cache. Write traffic includes stores and cache writebacks from GL1. High write counts indicate write-intensive workloads.
+    rst: Number of write requests to the GL2 cache. Write traffic includes stores and cache writebacks from GL1. High write counts indicate write-intensive workloads.
+    unit: Count per Normalization Unit
+  Atomic Requests:
+    plain: Number of atomic memory operations processed by the GL2 cache. Atomics provide thread-safe memory access but may serialize at contended addresses. High counts may impact performance.
+    rst: Number of atomic memory operations processed by the GL2 cache. Atomics provide thread-safe memory access but may serialize at contended addresses. High counts may impact performance.
+    unit: Count per Normalization Unit
+  EA Read Requests (DRAM):
+    plain: Number of read requests forwarded from GL2 cache through GCEA (Graphics Core Efficiency Arbiter). These requests go toward system memory, though they may be served by system-level caches before reaching DRAM. High counts indicate memory-bound workloads.
+    rst: Number of read requests forwarded from GL2 cache through GCEA (Graphics Core Efficiency Arbiter). These requests go toward system memory, though they may be served by system-level caches before reaching DRAM. High counts indicate memory-bound workloads.
+    unit: Count per Normalization Unit
+  EA Write Requests (DRAM):
+    plain: Number of write requests forwarded from GL2 cache through GCEA (Graphics Core Efficiency Arbiter). These include evictions and writebacks going toward system memory. High counts indicate write-intensive workloads consuming memory bandwidth.
+    rst: Number of write requests forwarded from GL2 cache through GCEA (Graphics Core Efficiency Arbiter). These include evictions and writebacks going toward system memory. High counts indicate write-intensive workloads consuming memory bandwidth.
+    unit: Count per Normalization Unit
+L1I <-> L2 interface:
+  GL2 Cache Read BW:
+    plain: Achieved read bandwidth at the GL2 cache level. This represents total read traffic from GL1 caches to GL2. High bandwidth indicates memory-intensive read patterns.
+    rst: Achieved read bandwidth at the GL2 cache level. This represents total read traffic from GL1 caches to GL2. High bandwidth indicates memory-intensive read patterns.
+    unit: Bytes/s
+  GL2 Cache Write BW:
+    plain: Achieved write bandwidth at the GL2 cache level. This represents total write traffic from GL1 caches to GL2. High bandwidth indicates memory-intensive write patterns.
+    rst: Achieved write bandwidth at the GL2 cache level. This represents total write traffic from GL1 caches to GL2. High bandwidth indicates memory-intensive write patterns.
+    unit: Bytes/s
+Scalar L1D Speed-of-Light:
+  DRAM Read Requests:
+    plain: Number of read requests sent to system memory. RDNA 3.5 APUs use DDR5/LPDDR5 system memory. High read request counts indicate memory-intensive workloads that may be bandwidth limited.
+    rst: Number of read requests sent to system memory. RDNA 3.5 APUs use DDR5/LPDDR5 system memory. High read request counts indicate memory-intensive workloads that may be bandwidth limited.
+    unit: Count per Normalization Unit
+  DRAM Read Chained Requests:
+    plain: Number of sequential read request chains to system memory. Chained requests combine multiple sequential accesses for better memory efficiency. High chain counts indicate good memory access patterns.
+    rst: Number of sequential read request chains to system memory. Chained requests combine multiple sequential accesses for better memory efficiency. High chain counts indicate good memory access patterns.
+    unit: Count per Normalization Unit
+  DRAM Read Banks Active:
+    plain: Number of system memory banks with pending read requests. More active banks enable better memory-level parallelism. Low bank utilization may indicate suboptimal access patterns limiting bandwidth.
+    rst: Number of system memory banks with pending read requests. More active banks enable better memory-level parallelism. Low bank utilization may indicate suboptimal access patterns limiting bandwidth.
+    unit: Count per Normalization Unit
+  DRAM Read Size (32B increments):
+    plain: Total volume of read data transferred from system memory. This metric helps quantify memory read bandwidth consumption. Compare with theoretical bandwidth to assess memory utilization.
+    rst: Total volume of read data transferred from system memory. This metric helps quantify memory read bandwidth consumption. Compare with theoretical bandwidth to assess memory utilization.
+    unit: Count per Normalization Unit
+Scalar L1D cache accesses:
+  DRAM Write Requests:
+    plain: Number of write requests sent to system memory. High write request counts indicate write-intensive workloads. Combined with read requests, this shows total memory traffic.
+    rst: Number of write requests sent to system memory. High write request counts indicate write-intensive workloads. Combined with read requests, this shows total memory traffic.
+    unit: Count per Normalization Unit
+  DRAM Write Chained Requests:
+    plain: Number of sequential write request chains to system memory. Chained writes combine sequential stores for better efficiency. High chain counts indicate good write access patterns.
+    rst: Number of sequential write request chains to system memory. Chained writes combine sequential stores for better efficiency. High chain counts indicate good write access patterns.
+    unit: Count per Normalization Unit
+  DRAM Write Banks Active:
+    plain: Number of system memory banks with pending write requests. Higher bank utilization enables better write bandwidth. Low values may indicate access pattern issues.
+    rst: Number of system memory banks with pending write requests. Higher bank utilization enables better write bandwidth. Low values may indicate access pattern issues.
+    unit: Count per Normalization Unit
+  DRAM Write Size (32B increments):
+    plain: Total volume of write data transferred to system memory. This quantifies memory write bandwidth consumption. High values indicate write-intensive workloads.
+    rst: Total volume of write data transferred to system memory. This quantifies memory write bandwidth consumption. High values indicate write-intensive workloads.
+    unit: Count per Normalization Unit
+L2 Speed-of-Light:
+  GPU Busy:
+    plain: Percentage of time the GPU was actively processing work. This is the primary utilization metric showing overall GPU activity. Low GPU busy indicates underutilization, possibly due to insufficient workload or host-side bottlenecks.
+    rst: Percentage of time the GPU was actively processing work. This is the primary utilization metric showing overall GPU activity. Low GPU busy indicates underutilization, possibly due to insufficient workload or host-side bottlenecks.
+    unit: Percent
+  CP Busy:
+    plain: Percentage of GPU active time the Command Processor was busy dispatching work and processing commands. High CP busy with low shader activity may indicate dispatch bottlenecks or excessive command stream overhead.
+    rst: Percentage of GPU active time the Command Processor was busy dispatching work and processing commands. High CP busy with low shader activity may indicate dispatch bottlenecks or excessive command stream overhead.
+    unit: Percent
+  GL2C Busy:
+    plain: Percentage of GPU active time the GL2 cache was busy servicing memory requests. High GL2 busy indicates memory-intensive workloads. Compare with compute activity to determine if the workload is memory-bound or compute-bound.
+    rst: Percentage of GPU active time the GL2 cache was busy servicing memory requests. High GL2 busy indicates memory-intensive workloads. Compare with compute activity to determine if the workload is memory-bound or compute-bound.
+    unit: Percent
+L2-Fabric interface metrics:
+  TA Busy:
+    plain: Percentage of GPU active time the Texture Addresser was busy processing memory address calculations. High TA busy indicates active texture or buffer memory operations. This reflects the address generation workload for memory requests.
+    rst: Percentage of GPU active time the Texture Addresser was busy processing memory address calculations. High TA busy indicates active texture or buffer memory operations. This reflects the address generation workload for memory requests.
+    unit: Percent
+Memory chart - TCP-GL1 Interface:
+  TCP-GL1 Read Requests:
+    plain: Read requests from TCP to GL1C (miss/refill path), per normalization unit.
+    rst: Read requests from TCP to GL1C (miss/refill path), per normalization unit.
+    unit: Requests per Normalization Unit
+  TCP-GL1 Write Requests:
+    plain: Write-related requests from TCP toward GL1C, per normalization unit.
+    rst: Write-related requests from TCP toward GL1C, per normalization unit.
+    unit: Requests per Normalization Unit
+  TCP-GL1 Read Bandwidth:
+    plain: Bytes per second for TCP→GL1 read traffic (64 B per TCP_GL1_REQ_READ event).
+    rst: Bytes per second for TCP→GL1 read traffic (64 B per TCP_GL1_REQ_READ event).
+    unit: Bytes/s
+  TCP-GL1 Write Bandwidth:
+    plain: Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).
+    rst: Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).
+    unit: Bytes/s
+Memory chart - GL1-GL2 Interface:
+  GL1-GL2 Read Requests:
+    plain: Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).
+    rst: Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).
+    unit: Requests per Normalization Unit
+  GL1-GL2 Write Requests:
+    plain: Write requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_WRITE_sum).
+    rst: Write requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_WRITE_sum).
+    unit: Requests per Normalization Unit
+  GL1-GL2 Read Bandwidth:
+    plain: Bytes per second on the GL1C→GL2C read interface (32/64/128 B request bins).
+    rst: Bytes per second on the GL1C→GL2C read interface (32/64/128 B request bins).
+    unit: Bytes/s
+  GL1-GL2 Write Bandwidth:
+    plain: Bytes per second on the GL1C→GL2C write interface (32/64 B request bins).
+    rst: Bytes per second on the GL1C→GL2C write interface (32/64 B request bins).
+    unit: Bytes/s
+  GL1-GL2 Read Latency:
+    plain: Average cycles from GL1C read request to response (GL1C_GL2_REQ_READ_LATENCY_sum / GL1C_GL2_REQ_READ_sum) when the denominator is non-zero.
+    rst: Average cycles from GL1C read request to response (GL1C_GL2_REQ_READ_LATENCY_sum / GL1C_GL2_REQ_READ_sum) when the denominator is non-zero.
+    unit: Cycles
+  GL1-GL2 Write Latency:
+    plain: Average cycles from GL1C write request to completion (GL1C_GL2_REQ_WRITE_LATENCY_sum / GL1C_GL2_REQ_WRITE_sum) when the denominator is non-zero.
+    rst: Average cycles from GL1C write request to completion (GL1C_GL2_REQ_WRITE_LATENCY_sum / GL1C_GL2_REQ_WRITE_sum) when the denominator is non-zero.
+    unit: Cycles
+Wavefront Launch Stats:
+  Grid Size:
+    plain: Number of work-items in the dispatch grid for the kernel (Grid_Size), averaged/min/maxed across samples. Defines total parallel work launched.
+    rst: Number of work-items in the dispatch grid for the kernel (Grid_Size), averaged/min/maxed across samples. Defines total parallel work launched.
+    unit: Work-items
+  Workgroup Size:
+    plain: Number of work-items per workgroup (Workgroup_Size). Together with grid size and resource limits it determines wave/wavefront count.
+    rst: Number of work-items per workgroup (Workgroup_Size). Together with grid size and resource limits it determines wave/wavefront count.
+    unit: Work-items
+  VGPRs:
+    plain: Vector general-purpose registers allocated per wave (Arch_VGPR). Limits occupancy when the per-CU VGPR capacity is exhausted.
+    rst: Vector general-purpose registers allocated per wave (Arch_VGPR). Limits occupancy when the per-CU VGPR capacity is exhausted.
+    unit: Registers
+  SGPRs:
+    plain: Scalar general-purpose registers allocated for the wave (SGPR). Uniform data and execution state live in the scalar path.
+    rst: Scalar general-purpose registers allocated for the wave (SGPR). Uniform data and execution state live in the scalar path.
+    unit: Registers
+  LDS Allocation:
+    plain: Local Data Share bytes reserved per workgroup (LDS_Per_Workgroup). High LDS per group reduces how many workgroups can run concurrently on a CU/WGP.
+    rst: Local Data Share bytes reserved per workgroup (LDS_Per_Workgroup). High LDS per group reduces how many workgroups can run concurrently on a CU/WGP.
+    unit: Bytes
+  Scratch Allocation:
+    plain: Scratch (private) memory bytes per work-item (Scratch_Per_Workitem). Backed by off-chip memory when spill/stack exceeds limits.
+    rst: Scratch (private) memory bytes per work-item (Scratch_Per_Workitem). Backed by off-chip memory when spill/stack exceeds limits.
+    unit: Bytes per Work-item
+Wave Dispatch:
+  Dispatched Waves:
+    plain: Number of shader waves launched (SQ_WAVES_sum), averaged/min/maxed. Each wave is a SIMD execution entity (typically wave32 on this configuration).
+    rst: Number of shader waves launched (SQ_WAVES_sum), averaged/min/maxed. Each wave is a SIMD execution entity (typically wave32 on this configuration).
+    unit: Waves
+  Dispatched Threads:
+    plain: Number of work-items launched as attributed in SQ_ITEMS_sum (threads), averaged/min/maxed.
+    rst: Number of work-items launched as attributed in SQ_ITEMS_sum (threads), averaged/min/maxed.
+    unit: Threads
+VMEM Instruction Mix:
+  Instructions - VMEM Flat:
+    plain: Flat-addressing vector memory instructions (SQ_INSTS_FLAT) per normalization unit. Flat can resolve to global, scratch or LDS depending on address.
+    rst: Flat-addressing vector memory instructions (SQ_INSTS_FLAT) per normalization unit. Flat can resolve to global, scratch or LDS depending on address.
+    unit: Count per Normalization Unit
+  Instructions - TEX Load:
+    plain: Texture / image load instructions (SQ_INSTS_TEX_LOAD) per normalization unit.
+    rst: Texture / image load instructions (SQ_INSTS_TEX_LOAD) per normalization unit.
+    unit: Count per Normalization Unit
+  Instructions - TEX Store:
+    plain: Texture / image store instructions (SQ_INSTS_TEX_STORE) per normalization unit.
+    rst: Texture / image store instructions (SQ_INSTS_TEX_STORE) per normalization unit.
+    unit: Count per Normalization Unit
+  Instructions - Flat Load:
+    plain: Flat load instructions (SQ_INSTS_FLAT_LOAD) per normalization unit.
+    rst: Flat load instructions (SQ_INSTS_FLAT_LOAD) per normalization unit.
+    unit: Count per Normalization Unit
+  Instructions - Flat Store:
+    plain: Flat store instructions (SQ_INSTS_FLAT_STORE) per normalization unit.
+    rst: Flat store instructions (SQ_INSTS_FLAT_STORE) per normalization unit.
+    unit: Count per Normalization Unit
