@@ -1213,6 +1213,7 @@ fn parse_option(spec: &str) -> anyhow::Result<(String, SimpleValue)> {
 /// returned so the session keeps tracking the on-disk profile. As soon
 /// as any field is overridden the whole (mutated) profile is inlined as
 /// [`MaybeRef::Owned`].
+#[allow(clippy::too_many_arguments)]
 fn apply_profile_overrides(
     profile: &mut ProfileDef,
     image: Option<String>,
