@@ -48,6 +48,18 @@ pub const ENV_MASTER_ADDR: &str = "MASTER_ADDR";
 /// `torch.distributed` rendezvous port. Aliases [`ENV_HEAD_PORT`].
 pub const ENV_MASTER_PORT: &str = "MASTER_PORT";
 
+/// `torch.distributed` world size: the total number of ranks in the
+/// job. mirage runs one workload process per node, so this equals the
+/// session's node count. Set on every node so PyTorch's `env://` init
+/// method works without a launcher like `torchrun`.
+pub const ENV_WORLD_SIZE: &str = "WORLD_SIZE";
+
+/// `torch.distributed` local rank: the rank's index *within* its node.
+/// mirage runs exactly one workload process per node, so this is always
+/// `0`. Set on every node so PyTorch's `env://` init method works
+/// without a launcher like `torchrun`.
+pub const ENV_LOCAL_RANK: &str = "LOCAL_RANK";
+
 /// Deterministic container name for a node of a session.
 ///
 /// Doubles as the container's network hostname, so other nodes can

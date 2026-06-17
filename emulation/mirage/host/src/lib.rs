@@ -39,8 +39,8 @@ use std::time::Duration;
 use chrono::Utc;
 use mirage_core::common::MaybeRef;
 use mirage_core::container::{
-    ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_MASTER_ADDR, ENV_MASTER_PORT, ENV_RANK,
-    container_name,
+    ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_LOCAL_RANK, ENV_MASTER_ADDR,
+    ENV_MASTER_PORT, ENV_RANK, ENV_WORLD_SIZE, container_name,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
@@ -173,10 +173,11 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     // because that is where the workload — and thus the
     // `ROCJITSU_RUNTIME_DIR` the daemon binds its socket under — lives.
     //
-    // Daemon mode is opt-in per session (`mirage run --daemon`); by
-    // default the emulator runs in-process (local mode), where the
-    // interposer reads the session's local config directly and no daemon
-    // socket is bound.
+    // Daemon mode is the default per session; pass `mirage run
+    // --in-process` to opt into in-process (local mode) instead, where
+    // the interposer reads the session's local config directly and no
+    // daemon socket is bound. Daemon mode is required for cross-process
+    // GPU memory sharing (e.g. multi-GPU RCCL collectives).
     let mut emulator_daemon = if run_execs_here && session_uses_daemon(&config.session) {
         start_emulator_daemon(&config.session)
     } else {
@@ -640,7 +641,7 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
             node_count,
             head_port,
             |rank| {
-                let mut env = node_mirage_env(rank, &head_addr, head_port);
+                let mut env = node_mirage_env(rank, node_count, &head_addr, head_port);
                 env.extend(injected_env.iter().cloned());
                 env
             },
@@ -699,10 +700,18 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
 /// `MIRAGE_HEAD_ADDR` is also set on every node: worker nodes get the
 /// head's address, while the head (rank 0) gets `localhost` since it is
 /// itself the head. `MASTER_ADDR`/`MASTER_PORT` mirror the head address
-/// and port so `torch.distributed` (and `torchrun`) can rendezvous
-/// without the workload translating mirage's own variables. These are
-/// injected whether or not the session is containerised.
-fn node_mirage_env(rank: u32, head_addr: &str, head_port: u16) -> Vec<(String, String)> {
+/// and port, and `RANK`/`WORLD_SIZE`/`LOCAL_RANK` mirror the node's rank,
+/// the session's node count, and `0` (mirage runs one workload process
+/// per node), so `torch.distributed` (and `torchrun`) can rendezvous
+/// without the workload translating mirage's own variables or needing a
+/// launcher. These are injected whether or not the session is
+/// containerised.
+fn node_mirage_env(
+    rank: u32,
+    world_size: u32,
+    head_addr: &str,
+    head_port: u16,
+) -> Vec<(String, String)> {
     let head = if rank == 0 { "localhost" } else { head_addr };
     vec![
         (ENV_RANK.to_string(), rank.to_string()),
@@ -710,6 +719,8 @@ fn node_mirage_env(rank: u32, head_addr: &str, head_port: u16) -> Vec<(String, S
         (ENV_HEAD_ADDR.to_string(), head.to_string()),
         (ENV_MASTER_ADDR.to_string(), head.to_string()),
         (ENV_MASTER_PORT.to_string(), head_port.to_string()),
+        (ENV_WORLD_SIZE.to_string(), world_size.to_string()),
+        (ENV_LOCAL_RANK.to_string(), "0".to_string()),
     ]
 }
 
@@ -887,7 +898,7 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
             path: nlayout.root.clone(),
             source: e,
         })?;
-        let mirage_env = node_mirage_env(rank, &head_addr, head_port);
+        let mirage_env = node_mirage_env(rank, node_count, &head_addr, head_port);
         match spawn_node(
             &def,
             rank,
@@ -1358,7 +1369,7 @@ mod tests {
     #[test]
     fn head_node_env_uses_localhost_and_aliases_master() {
         let env: std::collections::BTreeMap<_, _> =
-            node_mirage_env(0, "mirage-sess-node-0", 29500)
+            node_mirage_env(0, 4, "mirage-sess-node-0", 29500)
                 .into_iter()
                 .collect();
         assert_eq!(env[ENV_RANK], "0");
@@ -1367,12 +1378,16 @@ mod tests {
         // torch.distributed rendezvous vars alias the head addr/port.
         assert_eq!(env[ENV_MASTER_ADDR], "localhost");
         assert_eq!(env[ENV_MASTER_PORT], "29500");
+        // One workload process per node: world size is the node count
+        // and the local rank is always 0.
+        assert_eq!(env[ENV_WORLD_SIZE], "4");
+        assert_eq!(env[ENV_LOCAL_RANK], "0");
     }
 
     #[test]
     fn worker_node_env_points_master_at_head() {
         let env: std::collections::BTreeMap<_, _> =
-            node_mirage_env(2, "mirage-sess-node-0", 29500)
+            node_mirage_env(2, 4, "mirage-sess-node-0", 29500)
                 .into_iter()
                 .collect();
         assert_eq!(env[ENV_RANK], "2");
@@ -1380,5 +1395,7 @@ mod tests {
         assert_eq!(env[ENV_HEAD_ADDR], "mirage-sess-node-0");
         assert_eq!(env[ENV_MASTER_ADDR], "mirage-sess-node-0");
         assert_eq!(env[ENV_MASTER_PORT], "29500");
+        assert_eq!(env[ENV_WORLD_SIZE], "4");
+        assert_eq!(env[ENV_LOCAL_RANK], "0");
     }
 }
