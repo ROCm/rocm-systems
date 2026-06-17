@@ -787,6 +787,109 @@ static size_t replay_padded_alloc_size(size_t orig_sz) {
     return std::max(orig_sz, pad_sz);
 }
 
+// Zero-initialise freshly allocated replay device memory.
+//
+// hipMalloc/hipMallocAsync do NOT guarantee zeroed memory: AMD only scrubs a
+// physical page on its FIRST allocation (for cross-process security). Memory
+// that is reused within the process (vLLM allocates/frees constantly) comes
+// back holding stale bytes from a previous replay allocation. Any kernel that
+// reads a region the recorded stream never explicitly wrote — e.g. a workload
+// that implicitly relies on first-touch-zeroed memory, or a reduction/argmax
+// scratch buffer — then sees run-to-run-varying garbage. That nondeterministic
+// divergence cascades (a flipped argmax tie -> a different token -> a different
+// block table -> a slot-mapping kernel writing out of bounds), surfacing as the
+// intermittent "_compute_slot_mapping_kernel" memory fault at a low address.
+//
+// Zeroing makes replay deterministic and matches the first-touch-zeroed
+// semantics these workloads implicitly assume. Default on; set
+// HIP_HRR_REPLAY_ZERO_INIT=0 to skip it (faster, but reintroduces the garbage).
+static bool hrr_replay_zero_init() {
+    static std::once_flag once;
+    static bool g_enabled = true;
+    std::call_once(once, [] {
+        if (const char* e = std::getenv("HIP_HRR_REPLAY_ZERO_INIT")) {
+            if (e[0] == '0' && e[1] == '\0') {
+                g_enabled = false;
+                fprintf(stderr, "[HRR] replay zero-init DISABLED "
+                                "(HIP_HRR_REPLAY_ZERO_INIT=0)\n");
+            }
+        }
+    });
+    return g_enabled;
+}
+
+// ---- Divergence-abort guard -------------------------------------------------
+// Replaying a numerically-unstable workload (e.g. a model emitting degenerate
+// output) cannot reproduce bit-identical results from nondeterministic GPU
+// reductions, so data diverges wholesale and a downstream kernel eventually
+// writes out of bounds, killing the GPU context unrecoverably. Rather than die
+// on that fault, watch the D2H validation failure fraction and stop cleanly
+// once it is clearly broken — this turns the intermittent fault into a
+// deterministic, diagnosable "replay diverged" exit.
+//
+// HIP_HRR_REPLAY_DIVERGENCE_ABORT : fail fraction in [0,1]; default 0.25.
+//                                   0 disables the guard.
+// HIP_HRR_REPLAY_DIVERGENCE_MIN_SAMPLES : min D2H attempts before the ratio is
+//                                   evaluated (avoids tripping on noise);
+//                                   default 64.
+static double hrr_divergence_abort_frac() {
+    static std::once_flag once;
+    static double frac = 0.25;
+    std::call_once(once, [] {
+        if (const char* e = std::getenv("HIP_HRR_REPLAY_DIVERGENCE_ABORT")) {
+            char* end = nullptr;
+            double v = std::strtod(e, &end);
+            if (end != e && v >= 0.0 && v <= 1.0) {
+                frac = v;
+                fprintf(stderr,
+                        "[HRR] replay divergence-abort threshold = %.3f%s\n",
+                        frac, frac == 0.0 ? " (DISABLED)" : "");
+            }
+        }
+    });
+    return frac;
+}
+
+static size_t hrr_divergence_min_samples() {
+    static std::once_flag once;
+    static size_t n = 64;
+    std::call_once(once, [] {
+        if (const char* e = std::getenv("HIP_HRR_REPLAY_DIVERGENCE_MIN_SAMPLES")) {
+            char* end = nullptr;
+            unsigned long v = std::strtoul(e, &end, 10);
+            if (end != e && v > 0)
+                n = static_cast<size_t>(v);
+        }
+    });
+    return n;
+}
+
+void PlaybackContext::note_d2h_fail(uint64_t seq) {
+    size_t fail = d2h_fail.fetch_add(1, std::memory_order_relaxed) + 1;
+    double frac = hrr_divergence_abort_frac();
+    if (frac <= 0.0)
+        return;  // guard disabled
+    size_t att = d2h_attempted.load(std::memory_order_relaxed);
+    if (att < hrr_divergence_min_samples())
+        return;
+    if (static_cast<double>(fail) < frac * static_cast<double>(att))
+        return;
+    // Threshold crossed — flag once and stop the replay cleanly.
+    if (!diverged.exchange(true, std::memory_order_acq_rel)) {
+        fprintf(stderr,
+                "[HRR] replay DIVERGED at recorded event seq %llu: %zu/%zu D2H "
+                "validations failed (%.1f%% >= %.1f%% threshold). Aborting "
+                "cleanly before a downstream GPU fault. This is a replay-fidelity "
+                "divergence (e.g. nondeterministic GPU reductions in an unstable "
+                "model state), not an HRR translation/memory bug. Set "
+                "HIP_HRR_REPLAY_DIVERGENCE_ABORT=0 to disable this guard.\n",
+                static_cast<unsigned long long>(seq), fail, att,
+                100.0 * static_cast<double>(fail) / static_cast<double>(att),
+                100.0 * frac);
+        fatal_error.store(true, std::memory_order_release);
+    }
+}
+
 static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
                                 bool managed = false) {
     const auto* a = reinterpret_cast<const hrr_args_hipMalloc*>(pl);
@@ -799,8 +902,12 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
     else
         r = hipMalloc(&live, pad_sz);
     if (r == hipSuccess) {
-        // hipMalloc on AMD returns zeroed memory (HIP spec requirement).
-        // No explicit hipMemset needed — avoids blocking 256MB zeroing per alloc.
+        // hipMalloc does NOT guarantee zeroed memory (only first-touch pages are
+        // scrubbed; reused allocations carry stale bytes). Zero so replay is
+        // deterministic and matches first-touch-zeroed assumptions. See
+        // hrr_replay_zero_init().
+        if (hrr_replay_zero_init())
+            (void)hipMemset(live, 0, pad_sz);
         ctx.record_alloc(a->ptr, live, pad_sz);
         if (ctx.verbose && pad_sz > orig_sz)
             fprintf(stderr, "[HRR] hipMalloc 0x%llx: orig=%zu padded=%zu\n",
@@ -831,8 +938,11 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     size_t orig_sz = static_cast<size_t>(a->size);
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     hipError_t r = hipMallocAsync(&live, pad_sz, stream);
-    if (r == hipSuccess)
+    if (r == hipSuccess) {
+        if (hrr_replay_zero_init())
+            (void)hipMemsetAsync(live, 0, pad_sz, stream);
         ctx.record_alloc(a->dev_ptr, live, pad_sz);
+    }
     return r;
 }
 
@@ -845,8 +955,11 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     size_t orig_sz = static_cast<size_t>(a->size);
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     hipError_t r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
-    if (r == hipSuccess)
+    if (r == hipSuccess) {
+        if (hrr_replay_zero_init())
+            (void)hipMemsetAsync(live, 0, pad_sz, stream);
         ctx.record_alloc(a->dev_ptr, live, pad_sz);
+    }
     return r;
 }
 
@@ -1146,7 +1259,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
         if (!src_dev) {
             fprintf(stderr, "[HRR] D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
                     (unsigned long long)src_rec);
-            ctx.d2h_fail++;
+            ctx.note_d2h_fail(hrr_dispatch_seq);
             return hipErrorInvalidValue;
         } else {
             size_t copy_sz = static_cast<size_t>(size);
@@ -1154,7 +1267,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
             const void* expected = ctx.load_blob(hash_lo, hash_hi, &blob_sz);
             if (!expected) {
                 fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
-                ctx.d2h_fail++;
+                ctx.note_d2h_fail(hrr_dispatch_seq);
             } else {
                 copy_sz = std::min(copy_sz, blob_sz);
                 std::vector<uint8_t> actual(copy_sz);
@@ -1166,13 +1279,13 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                 if (r != hipSuccess) {
                     fprintf(stderr, "[HRR] D2H validate: hipMemcpy failed: %d (%s)\n",
                             r, hipGetErrorString(r));
-                    ctx.d2h_fail++;
+                    ctx.note_d2h_fail(hrr_dispatch_seq);
                 } else if (memcmp(actual.data(), expected, copy_sz) == 0) {
                     ctx.d2h_pass++;
                     if (ctx.verbose)
                         fprintf(stderr, "[HRR] D2H validate: %zu bytes OK\n", copy_sz);
                 } else {
-                    ctx.d2h_fail++;
+                    ctx.note_d2h_fail(hrr_dispatch_seq);
                     // Find first differing byte for diagnostics
                     size_t first_diff = 0;
                     const uint8_t* exp = static_cast<const uint8_t*>(expected);
@@ -1256,7 +1369,7 @@ hipError_t playback_hipMemcpyDtoH(PlaybackContext& ctx,
     if (!src_dev) {
         fprintf(stderr, "[HRR] hipMemcpyDtoH: src 0x%llx not mapped — D2H validate FAIL\n",
                 (unsigned long long)a->src);
-        if (hash_lo || hash_hi) ctx.d2h_fail++;
+        if (hash_lo || hash_hi) ctx.note_d2h_fail(hrr_dispatch_seq);
         return hipErrorInvalidValue;
     }
     size_t sz = static_cast<size_t>(a->sizeBytes);
@@ -1264,7 +1377,7 @@ hipError_t playback_hipMemcpyDtoH(PlaybackContext& ctx,
     hipError_t r = hipMemcpyDtoH(actual.data(), (hipDeviceptr_t)src_dev, sz);
     if (r != hipSuccess) {
         fprintf(stderr, "[HRR] hipMemcpyDtoH failed: %d (%s)\n", r, hipGetErrorString(r));
-        if (hash_lo || hash_hi) ctx.d2h_fail++;
+        if (hash_lo || hash_hi) ctx.note_d2h_fail(hrr_dispatch_seq);
         return r;
     }
     if (hash_lo || hash_hi) {
@@ -1272,7 +1385,7 @@ hipError_t playback_hipMemcpyDtoH(PlaybackContext& ctx,
         const void* expected = ctx.load_blob(hash_lo, hash_hi, &blob_sz);
         if (!expected) {
             fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
-            ctx.d2h_fail++;
+            ctx.note_d2h_fail(hrr_dispatch_seq);
         } else {
             size_t cmp_sz = std::min(sz, blob_sz);
             if (memcmp(actual.data(), expected, cmp_sz) == 0) {
@@ -1280,7 +1393,7 @@ hipError_t playback_hipMemcpyDtoH(PlaybackContext& ctx,
                 if (ctx.verbose)
                     fprintf(stderr, "[HRR] hipMemcpyDtoH D2H validate: %zu bytes OK\n", cmp_sz);
             } else {
-                ctx.d2h_fail++;
+                ctx.note_d2h_fail(hrr_dispatch_seq);
                 size_t first_diff = 0;
                 const uint8_t* exp = static_cast<const uint8_t*>(expected);
                 while (first_diff < cmp_sz && actual[first_diff] == exp[first_diff])
@@ -1306,7 +1419,7 @@ hipError_t playback_hipMemcpyDtoHAsync(PlaybackContext& ctx,
     if (!src_dev) {
         fprintf(stderr, "[HRR] hipMemcpyDtoHAsync: src 0x%llx not mapped — D2H validate FAIL\n",
                 (unsigned long long)a->src);
-        if (hash_lo || hash_hi) ctx.d2h_fail++;
+        if (hash_lo || hash_hi) ctx.note_d2h_fail(hrr_dispatch_seq);
         return hipErrorInvalidValue;
     }
     size_t sz = static_cast<size_t>(a->sizeBytes);
@@ -1316,7 +1429,7 @@ hipError_t playback_hipMemcpyDtoHAsync(PlaybackContext& ctx,
     if (r == hipSuccess) (void)hipStreamSynchronize(stream);
     if (r != hipSuccess) {
         fprintf(stderr, "[HRR] hipMemcpyDtoHAsync failed: %d (%s)\n", r, hipGetErrorString(r));
-        if (hash_lo || hash_hi) ctx.d2h_fail++;
+        if (hash_lo || hash_hi) ctx.note_d2h_fail(hrr_dispatch_seq);
         return r;
     }
     if (hash_lo || hash_hi) {
@@ -1324,7 +1437,7 @@ hipError_t playback_hipMemcpyDtoHAsync(PlaybackContext& ctx,
         const void* expected = ctx.load_blob(hash_lo, hash_hi, &blob_sz);
         if (!expected) {
             fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
-            ctx.d2h_fail++;
+            ctx.note_d2h_fail(hrr_dispatch_seq);
         } else {
             size_t cmp_sz = std::min(sz, blob_sz);
             if (memcmp(actual.data(), expected, cmp_sz) == 0) {
@@ -1332,7 +1445,7 @@ hipError_t playback_hipMemcpyDtoHAsync(PlaybackContext& ctx,
                 if (ctx.verbose)
                     fprintf(stderr, "[HRR] hipMemcpyDtoHAsync D2H validate: %zu bytes OK\n", cmp_sz);
             } else {
-                ctx.d2h_fail++;
+                ctx.note_d2h_fail(hrr_dispatch_seq);
                 size_t first_diff = 0;
                 const uint8_t* exp = static_cast<const uint8_t*>(expected);
                 while (first_diff < cmp_sz && actual[first_diff] == exp[first_diff])
@@ -1686,7 +1799,7 @@ static hipError_t replay_memcpy3d_d2h(PlaybackContext& ctx,
     if (r != hipSuccess) {
         fprintf(stderr, "[HRR] hipMemcpy3D D2H: device readback failed: %d (%s)\n",
                 r, hipGetErrorString(r));
-        ctx.d2h_fail++;
+        ctx.note_d2h_fail(hrr_dispatch_seq);
         return r;
     }
     if (!ctx.validate_d2h || !(d2h_hash_lo || d2h_hash_hi))
@@ -1697,7 +1810,7 @@ static hipError_t replay_memcpy3d_d2h(PlaybackContext& ctx,
     const void* expected = ctx.load_blob(d2h_hash_lo, d2h_hash_hi, &blob_sz);
     if (!expected) {
         fprintf(stderr, "[HRR] hipMemcpy3D D2H validate FAIL: expected blob not found in archive\n");
-        ctx.d2h_fail++;
+        ctx.note_d2h_fail(hrr_dispatch_seq);
         return hipSuccess;
     }
     size_t cmp_sz = std::min(byte_count, blob_sz);
@@ -1706,7 +1819,7 @@ static hipError_t replay_memcpy3d_d2h(PlaybackContext& ctx,
         if (ctx.verbose)
             fprintf(stderr, "[HRR] hipMemcpy3D D2H validate: %zu bytes OK\n", cmp_sz);
     } else {
-        ctx.d2h_fail++;
+        ctx.note_d2h_fail(hrr_dispatch_seq);
         size_t first_diff = 0;
         const uint8_t* exp = static_cast<const uint8_t*>(expected);
         while (first_diff < cmp_sz && actual[first_diff] == exp[first_diff]) ++first_diff;
@@ -1737,7 +1850,7 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
             fprintf(stderr, "[HRR] hipMemcpy3D D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
                     (unsigned long long)src_rec);
             ctx.d2h_attempted++;
-            ctx.d2h_fail++;
+            ctx.note_d2h_fail(hrr_dispatch_seq);
             return hipSuccess;
         }
         size_t byte_count = parms.extent.width * parms.extent.height * parms.extent.depth;
@@ -1771,7 +1884,7 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
             fprintf(stderr, "[HRR] hipMemcpy3DAsync D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
                     (unsigned long long)src_rec);
             ctx.d2h_attempted++;
-            ctx.d2h_fail++;
+            ctx.note_d2h_fail(hrr_dispatch_seq);
             return hipSuccess;
         }
         size_t byte_count = parms.extent.width * parms.extent.height * parms.extent.depth;

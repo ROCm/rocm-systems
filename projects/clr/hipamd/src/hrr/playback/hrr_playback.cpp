@@ -876,6 +876,15 @@ int main(int argc, char** argv) {
                        wall_end - wall_start).count();
 
   if (!pass_ok) {
+    if (ctx.diverged.load(std::memory_order_acquire)) {
+      fprintf(stderr,
+              "[HRR] Replay stopped: data divergence exceeded threshold "
+              "(%zu/%zu D2H validations failed). This is a replay-fidelity "
+              "limit (nondeterministic GPU reductions in an unstable workload), "
+              "not an HRR bug — see the [HRR] replay DIVERGED message above.\n",
+              ctx.d2h_fail.load(), ctx.d2h_attempted.load());
+      return 2;
+    }
     fprintf(stderr, "[HRR] Replay aborted due to fatal HIP error — exiting\n");
     return 1;
   }

@@ -124,6 +124,18 @@ struct PlaybackContext {
     // skipped — pointer translation or blob loading failed for all D2H events.
     std::atomic<size_t> d2h_attempted{0};
 
+    // Set true by note_d2h_fail when the running D2H-failure fraction crosses the
+    // configured divergence-abort threshold. Distinguishes a clean "replay
+    // diverged" stop (replay-fidelity limit) from a genuine HIP error abort.
+    std::atomic<bool> diverged{false};
+
+    // Records one D2H validation failure (replaces a bare d2h_fail++). When the
+    // running failure fraction exceeds HIP_HRR_REPLAY_DIVERGENCE_ABORT (after a
+    // minimum sample count), sets `diverged` + `fatal_error` so the replay stops
+    // cleanly before a downstream GPU fault instead of dying unrecoverably.
+    // `seq` is the recorded event sequence id (hrr_dispatch_seq) for diagnostics.
+    void note_d2h_fail(uint64_t seq);
+
     // Timing events — one pair per replay thread, created on first kernel launch
     // and reused for every subsequent launch on that thread. Registered here so
     // cleanup can destroy them without per-kernel create/destroy overhead.
