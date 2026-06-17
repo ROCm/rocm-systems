@@ -269,6 +269,12 @@ __device__ void IPCContext::internal_broadcastmem_wave(void *dst, const void *sr
 
 __device__ int IPCContext::broadcastmem_wave(rocshmem_team_t team,
                               void *dest, const void *source, int nelement, int PE_root) {
+
+  if (dest == nullptr || 
+    source == nullptr || 
+    team == ROCSHMEM_TEAM_INVALID)
+    return ROCSHMEM_ERROR;
+
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int stride = team_obj->tinfo_wrt_world->stride;
@@ -283,7 +289,7 @@ __device__ int IPCContext::broadcastmem_wave(rocshmem_team_t team,
 
   internal_broadcastmem_wave(dest, source, nelement, pe_root_world, 
                               pe_start, stride, pe_size, p_sync);
-  return 0;
+  return ROCSHMEM_SUCCESS;
 }
 
 }  // namespace rocshmem
