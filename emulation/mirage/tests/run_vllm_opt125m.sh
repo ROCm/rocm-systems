@@ -40,6 +40,16 @@
 #   GPU_MEM_UTIL    vLLM --gpu-memory-utilization (default: 0.2)
 #   MAX_MODEL_LEN   vLLM --max-model-len (default: 2048)
 #   VLLM_EXTRA_ARGS extra args appended verbatim to `vllm serve`
+#   LOG_KERNELS     when 1, log every kernel execution from BOTH torch/HIP and
+#                   the rocjitsu emulator to the server log (default: 0)
+#
+# Kernel-execution logging (LOG_KERNELS=1) surfaces two independent traces in
+# the vLLM server log ($RUN_LOG):
+#   * torch/HIP dispatch  -> AMD_LOG_LEVEL=3 makes the ROCm runtime print every
+#     HIP kernel launch; PYTORCH_JIT_LOG_LEVEL / PYTORCH_SHOW_DISPATCH_TRACE add
+#     the aten dispatch trace on instrumented torch builds.
+#   * rocjitsu emulator   -> RJ_LOG=1 enables the interposer's kernel-logging
+#     plugin and RJ_SINKS=stderr streams each emulated kernel to stderr.
 #
 # Why the vLLM init is constrained: the emulated MI350X advertises ~288
 # GiB of VRAM, and vLLM's engine-core init runs a memory-profiling
@@ -64,6 +74,22 @@ READY_TIMEOUT="${READY_TIMEOUT:-600}"
 MIRAGE_BIN="${MIRAGE_BIN:-$MIRAGE_DIR/build/manylinux/bin/mirage}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.2}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-2048}"
+LOG_KERNELS="${LOG_KERNELS:-0}"
+
+# Build the list of --env flags that enable kernel-execution logging. Only
+# populated when LOG_KERNELS=1 so the default run stays quiet.
+KERNEL_LOG_ENV=()
+if [[ "$LOG_KERNELS" == "1" ]]; then
+  KERNEL_LOG_ENV+=(
+    # torch / HIP kernel dispatch trace.
+    --env AMD_LOG_LEVEL=3
+    --env PYTORCH_JIT_LOG_LEVEL=kernels
+    --env PYTORCH_SHOW_DISPATCH_TRACE=1
+    # rocjitsu emulator kernel-execution logging (interposer plugin -> stderr).
+    --env RJ_LOG=1
+    --env RJ_SINKS=stderr
+  )
+fi
 
 log()  { printf '==> %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
@@ -106,6 +132,9 @@ log "caching model weights in $HF_CACHE"
 # ---------------------------------------------------------------------------
 RUN_LOG="$(mktemp -t mirage-vllm.XXXXXX.log)"
 log "starting vLLM (model=$MODEL) via mirage run --daemon"
+if [[ "$LOG_KERNELS" == "1" ]]; then
+  log "kernel-execution logging enabled (torch/HIP + rocjitsu) -> $RUN_LOG"
+fi
 cd "$MIRAGE_DIR"
 "$MIRAGE_BIN" run \
   --daemon \
@@ -114,6 +143,7 @@ cd "$MIRAGE_DIR"
   --container-provider "$PROVIDER" \
   --port "$PORT:$PORT" \
   --mount "$HF_CACHE:/root/.cache/huggingface" \
+  "${KERNEL_LOG_ENV[@]}" \
   -- vllm serve "$MODEL" --host 0.0.0.0 --port "$PORT" \
        --enforce-eager \
        --gpu-memory-utilization "$GPU_MEM_UTIL" \

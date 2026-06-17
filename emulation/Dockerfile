@@ -41,6 +41,8 @@
 #   BUILD_IMAGE    builder base (default ghcr.io/rocm/therock_build_manylinux_x86_64:main)
 #   RUNTIME_IMAGE  final image base (default ubuntu:24.04)
 #   CARGO_PROFILE  release or debug (default release)
+#   RJ_LOG_GROUPS  rocjitsu compile-time log groups (default VM; see
+#                  rocjitsu/cmake/rj_log.cmake: OFF, ALL, or names like VM,CP)
 #
 # Extract artifacts to the host without running the image, e.g.:
 #   id=$(docker create mirage); docker cp "$id:/opt/mirage" ./out; docker rm "$id"
@@ -48,6 +50,7 @@
 ARG BUILD_IMAGE=ghcr.io/rocm/therock_build_manylinux_x86_64:main
 ARG RUNTIME_IMAGE=ubuntu:24.04
 ARG CARGO_PROFILE=release
+ARG RJ_LOG_GROUPS=VM
 
 # --------------------------------------------------------------------------
 # Common builder base: shared toolchain setup so the heavy image is pulled
@@ -68,6 +71,7 @@ RUN set -e; \
 # rocjitsu (C++ / cmake + ninja) -- builds in parallel with mirage.
 # --------------------------------------------------------------------------
 FROM builder-base AS rocjitsu-builder
+ARG RJ_LOG_GROUPS
 
 # Only the rocjitsu subtree is needed; copying it alone keeps this stage's
 # cache valid when only mirage sources change.
@@ -82,7 +86,7 @@ COPY rocjitsu /src/rocjitsu
 #   /rjbuild -> cmake/ninja build tree (incremental rebuilds)
 RUN --mount=type=cache,target=/deps,sharing=locked \
     --mount=type=cache,target=/rjbuild,sharing=locked \
-    echo "== Configuring rocjitsu ==" && \
+    echo "== Configuring rocjitsu (RJ_LOG_GROUPS=${RJ_LOG_GROUPS:-OFF}) ==" && \
     cmake -G Ninja -S /src/rocjitsu -B /rjbuild \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_SCAN_FOR_MODULES=OFF \
@@ -90,6 +94,7 @@ RUN --mount=type=cache,target=/deps,sharing=locked \
         -DCMAKE_INSTALL_PREFIX=/opt/mirage \
         -DCMAKE_INSTALL_LIBDIR=lib \
         -DFETCHCONTENT_BASE_DIR=/deps \
+        -DRJ_LOG_GROUPS="${RJ_LOG_GROUPS:-OFF}" \
         -DBUILD_TESTING=OFF && \
     echo "== Building rocjitsu ==" && \
     ninja -C /rjbuild -j"$(nproc)" && \

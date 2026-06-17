@@ -40,12 +40,21 @@
 # links an old, broadly-compatible glibc.
 #
 # Env knobs:
-#   PROFILE     mirage profile (default: mi350x)
-#   IMAGE       container image (default: vllm/vllm-openai-rocm:latest)
-#   HF_CACHE    host HuggingFace cache (default: ~/.cache/huggingface)
-#   PYTHON      python interpreter inside the container (default: python3)
-#   PROVIDER    container provider binary (default: autodetect docker/podman)
+#   PROFILE      mirage profile (default: mi350x)
+#   IMAGE        container image (default: vllm/vllm-openai-rocm:latest)
+#   HF_CACHE     host HuggingFace cache (default: ~/.cache/huggingface)
+#   PYTHON       python interpreter inside the container (default: python3)
+#   PROVIDER     container provider binary (default: autodetect docker/podman)
+#   LOG_KERNELS  when 1, log every kernel execution from BOTH torch/HIP and
+#                the rocjitsu emulator to the workload's stderr (default: 0)
 #   (plus everything honoured by scripts/mirage.sh, e.g. MIRAGE_REBUILD)
+#
+# Kernel-execution logging (LOG_KERNELS=1) surfaces two independent traces:
+#   * torch/HIP dispatch  -> AMD_LOG_LEVEL=3 makes the ROCm runtime print every
+#     HIP kernel launch; PYTORCH_JIT_LOG_LEVEL / PYTORCH_SHOW_DISPATCH_TRACE add
+#     the aten dispatch trace on instrumented torch builds.
+#   * rocjitsu emulator   -> RJ_LOG=1 enables the interposer's kernel-logging
+#     plugin and RJ_SINKS=stderr streams each emulated kernel to stderr.
 #
 set -euo pipefail
 
@@ -56,6 +65,22 @@ PROFILE="${PROFILE:-mi350x}"
 IMAGE="${IMAGE:-docker.io/vllm/vllm-openai-rocm:latest}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 PYTHON="${PYTHON:-python3}"
+LOG_KERNELS="${LOG_KERNELS:-0}"
+
+# Build the list of --env flags that enable kernel-execution logging. Only
+# populated when LOG_KERNELS=1 so the default run stays quiet.
+KERNEL_LOG_ENV=()
+if [[ "$LOG_KERNELS" == "1" ]]; then
+  KERNEL_LOG_ENV+=(
+    # torch / HIP kernel dispatch trace.
+    --env AMD_LOG_LEVEL=3
+    --env PYTORCH_JIT_LOG_LEVEL=kernels
+    --env PYTORCH_SHOW_DISPATCH_TRACE=1
+    # rocjitsu emulator kernel-execution logging (interposer plugin -> stderr).
+    --env RJ_LOG=1
+    --env RJ_SINKS=stderr
+  )
+fi
 
 # Launch mirage through the convenience wrapper, which builds the
 # glibc-portable manylinux prefix on demand and execs the installed
@@ -101,6 +126,9 @@ log "caching model weights in $HF_CACHE"
 # PASS/FAIL verdict; we surface mirage's exit code.
 # ---------------------------------------------------------------------------
 log "running $FIXTURE_NAME via mirage run (profile=$PROFILE, image=$IMAGE)"
+if [[ "$LOG_KERNELS" == "1" ]]; then
+  log "kernel-execution logging enabled (torch/HIP + rocjitsu)"
+fi
 cd "$MIRAGE_DIR"
 "$MIRAGE" run \
   --profile "$PROFILE" \
@@ -108,6 +136,5 @@ cd "$MIRAGE_DIR"
   --container-provider "$PROVIDER" \
   --mount "$FIXTURE_DIR:$CONTAINER_FIXTURE_DIR:ro" \
   --mount "$HF_CACHE:/root/.cache/huggingface" \
-  --env PYTORCH_JIT_LOG_LEVEL=kernels \
-  --env PYTORCH_SHOW_DISPATCH_TRACE=1 \
+  "${KERNEL_LOG_ENV[@]}" \
   -- "$PYTHON" "$CONTAINER_FIXTURE"

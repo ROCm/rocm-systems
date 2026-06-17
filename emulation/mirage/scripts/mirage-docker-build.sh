@@ -44,6 +44,10 @@
 #   MIRAGE_IMAGE_TAG    - tag for the built image (default: mirage:local)
 #   CONTAINER_ENGINE    - docker or podman (default: docker)
 #   CARGO_PROFILE       - cargo profile: release or debug (default: release)
+#   RJ_LOG_GROUPS       - rocjitsu compile-time log groups passed as the
+#                         Dockerfile RJ_LOG_GROUPS arg (default: VM; see
+#                         rocjitsu/cmake/rj_log.cmake -- OFF, ALL, or
+#                         comma-separated names like VM,CP,DBT_HOOKS)
 
 set -euo pipefail
 
@@ -56,6 +60,7 @@ BUILD_IMAGE="${MIRAGE_BUILD_IMAGE:-ghcr.io/rocm/therock_build_manylinux_x86_64:m
 IMAGE_TAG="${MIRAGE_IMAGE_TAG:-mirage:local}"
 ENGINE="${CONTAINER_ENGINE:-docker}"
 CARGO_PROFILE="${CARGO_PROFILE:-release}"
+RJ_LOG_GROUPS="${RJ_LOG_GROUPS:-3}"
 
 # Resolve the output prefix to an absolute host path and create it so we
 # can copy artifacts into it.
@@ -70,6 +75,7 @@ echo "  builder:    $BUILD_IMAGE" >&2
 echo "  image tag:  $IMAGE_TAG" >&2
 echo "  engine:     $ENGINE" >&2
 echo "  profile:    $CARGO_PROFILE" >&2
+echo "  log groups: $RJ_LOG_GROUPS" >&2
 echo "  install:    $OUTPUT_PREFIX" >&2
 
 # --- Build the image (mirage + rocjitsu stages run in parallel) -------
@@ -80,6 +86,7 @@ DOCKER_BUILDKIT=1 "$ENGINE" build \
     -t "$IMAGE_TAG" \
     --build-arg "BUILD_IMAGE=${BUILD_IMAGE}" \
     --build-arg "CARGO_PROFILE=${CARGO_PROFILE}" \
+    --build-arg "RJ_LOG_GROUPS=${RJ_LOG_GROUPS}" \
     "$EMULATION_DIR"
 
 # --- Extract /opt/mirage out of the image into the host prefix --------

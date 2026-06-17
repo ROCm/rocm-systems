@@ -20,7 +20,10 @@
 #
 # Environment variables:
 #   MIRAGE_PREFIX  - install/run prefix (default: <mirage>/build/manylinux)
-#   MIRAGE_REBUILD - set to 1 to force a rebuild even if the binary exists
+#   MIRAGE_SKIP_BUILD - set to 1 to skip the rebuild and run the existing binary
+#   RJ_LOG_GROUPS  - rocjitsu compile-time log groups (default: VM; see
+#                    rocjitsu/cmake/rj_log.cmake -- OFF, ALL, or names like
+#                    VM,CP,DBT_HOOKS)
 #   plus everything honoured by mirage-docker-build.sh
 #   (MIRAGE_BUILD_IMAGE, MIRAGE_IMAGE_TAG, CONTAINER_ENGINE, CARGO_PROFILE)
 
@@ -32,9 +35,10 @@ MIRAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PREFIX="${MIRAGE_PREFIX:-${MIRAGE_DIR}/build/manylinux}"
 MIRAGE_BIN="$PREFIX/bin/mirage"
 
-# Build via the Docker image when the binary is missing or a rebuild is
-# explicitly requested.
-if [ "${MIRAGE_REBUILD:-0}" = "1" ] || [ ! -x "$MIRAGE_BIN" ]; then
+# Always rebuild via the Docker image -- BuildKit layer + cache mounts make
+# re-runs fast, and this guarantees source/log-group changes are picked up.
+# Set MIRAGE_SKIP_BUILD=1 to bypass and run the already-installed binary.
+if [ "${MIRAGE_SKIP_BUILD:-0}" != "1" ]; then
     echo "mirage: building via mirage-docker-build.sh ($PREFIX)" >&2
     "$SCRIPT_DIR/mirage-docker-build.sh" "$PREFIX" >&2
 fi
