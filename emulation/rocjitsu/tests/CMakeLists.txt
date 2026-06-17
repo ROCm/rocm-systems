@@ -612,7 +612,8 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
                 ${HIPCC_EXECUTABLE} --offload-arch=${ARG_ARCH} -std=c++20
                 -isystem ${GTEST_INC} -I${CMAKE_CURRENT_SOURCE_DIR}
                 -L${GTEST_LIB_DIR} -lgtest -lpthread ${ARG_EXTRA_LIBS}
-                -Wl,-rpath,${GTEST_LIB_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
+                -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} -o
+                ${HIP_TEST_BIN} ${HIP_TEST_SRC}
             DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
             COMMENT "Building ${TEST_NAME} with hipcc (${ARG_ARCH})"
             VERBATIM
