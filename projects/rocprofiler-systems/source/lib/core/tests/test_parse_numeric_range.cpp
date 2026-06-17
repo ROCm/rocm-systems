@@ -50,6 +50,14 @@ TEST(parse_numeric_range, range_with_inline_increment)
     EXPECT_EQ(parse_set("20-40:10"), (std::set<std::int64_t>{ 20, 30, 40 }));
 }
 
+TEST(parse_numeric_range, increment_stops_before_exceeding_end)
+{
+    // When the stride does not divide the range evenly, the last value is the
+    // greatest one <= end: 20, 30, 40; the next step (50) exceeds 45 and stops,
+    // so 45 itself is never emitted.
+    EXPECT_EQ(parse_set("20-45:10"), (std::set<std::int64_t>{ 20, 30, 40 }));
+}
+
 TEST(parse_numeric_range, mixed_values_and_ranges)
 {
     EXPECT_EQ(parse_set("0-3,8,10-12"),
