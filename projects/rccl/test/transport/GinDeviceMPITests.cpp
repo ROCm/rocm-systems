@@ -2812,9 +2812,6 @@ TEST_F(GinMPIDeviceTests, MultiContext_Exclusive) {
   ASSERT_EQ(kNumContexts, (int)devComm.ginContextCount)
       << "exclusive allocation returned " << (int)devComm.ginContextCount;
 
-  // 2.30 dropped ncclDevComm.ginContextBase; contexts are addressed 0-based via
-  // ginContextCount. Exclusivity is exercised by the producer/consumer kernels below.
-
   std::vector<uint8_t> hostSrc(kBufBytes, 0), hostDst(kBufBytes, 0);
   for (int b = 0; b < kNumContexts; b++)
     std::fill_n(hostSrc.begin() + b * kSlotStride, kTransferBytes,
