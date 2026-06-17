@@ -110,9 +110,6 @@ sudo systemctl reboot
 * amdgpu-dkms >= 30.20.1
 
 #### Other Packages
-* Boost.Program\_options
-    * `libboost-program-options-dev` (Debian/Ubuntu)
-    * `libboost-program-options-devel` (RHEL/Fedora/openSUSE)
 * libmount
     * `libmount-dev` (Debian/Ubuntu)
     * `libmount-devel` (RHEL/Fedora/openSUSE)

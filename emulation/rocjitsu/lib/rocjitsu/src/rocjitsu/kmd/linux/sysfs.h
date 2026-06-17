@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -86,10 +87,14 @@ public:
   Sysfs(Sysfs &&other) noexcept;
   Sysfs &operator=(Sysfs &&other) noexcept;
 
-  /// @brief Generate the sysfs topology directory.
-  /// @param gpu GPU configuration to represent.
+  /// @brief Generate the sysfs topology directory for one or more GPUs.
+  /// @param gpu GPU configuration to represent (single GPU).
   /// @returns Path to the generated directory.
   std::string generate(const GpuInfo &gpu);
+
+  /// @brief Generate the sysfs topology directory for multiple GPUs.
+  /// @param gpus Per-GPU configurations. Each gets its own topology node.
+  std::string generate(const std::vector<GpuInfo> &gpus);
 
   /// @brief Get the generated KFD topology path (empty if not yet generated).
   const std::string &path() const { return topology_dir_; }
@@ -114,10 +119,11 @@ private:
   void write_file(const std::string &path, const std::string &content);
   void make_dir(const std::string &path);
   void write_generation_id();
-  void write_system_properties();
-  void write_cpu_node(const std::string &nodes_dir);
-  void write_gpu_node(const std::string &nodes_dir, const GpuInfo &gpu);
-  void write_drm_tree(const GpuInfo &gpu);
+  void write_system_properties(uint32_t num_devices);
+  void write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links);
+  void write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, const GpuInfo &gpu,
+                      uint32_t total_gpus);
+  void write_drm_tree(const std::vector<GpuInfo> &gpus);
 };
 
 } // namespace rocjitsu

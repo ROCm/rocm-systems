@@ -267,7 +267,7 @@ class HwIdTest : public WaveSnapTest<GFX9, PcSamplingRecordT>
             uint32_t wave_id : 4;  ///< wave slot index
             uint32_t simd_id : 2;  ///< SIMD index
             uint32_t pipe_id : 2;  ///< pipe index
-            uint32_t cu_id : 4;  ///< Index of compute unit on GFX9 or workgroup processer on other
+            uint32_t cu_id : 4;  ///< Index of compute unit on GFX9 or workgroup processor on other
                                  ///< architectures
             uint32_t shader_array_id  : 1;  ///< Shared array index
             uint32_t shader_engine_id : 3;  ///< shared engine index
@@ -355,7 +355,7 @@ class HwIdTest : public WaveSnapTest<GFX9, PcSamplingRecordT>
         PcSamplingRecordT sample;
         ::memset(&sample, 0, sizeof(sample));
         // Unpacking individual fields
-        // NOTE: chiplet is tested in a WaveOtherFieldsTest test, becuase it's not
+        // NOTE: chiplet is tested in a WaveOtherFieldsTest test, because it's not
         // transferred via hw_id, but chiplet_and_wave_id field.
         sample.hw_id.wave_id          = hw_id.wave_id;
         sample.hw_id.simd_id          = hw_id.simd_id;

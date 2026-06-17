@@ -9,10 +9,10 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
-find_package(rocDecode)
+find_package(rocdecode)
 
 file(GLOB_RECURSE ROCDECODE_VIDEO_FILE
-     "${rocDecode_ROOT_DIR}/share/rocdecode/video/*AMD_driving_virtual_20-H265.265")
+     "${rocdecode_ROOT_DIR}/share/rocdecode/video/*AMD_driving_virtual_20-H265.265")
 if(TARGET rocdecode-demo AND NOT EXISTS "${ROCDECODE_VIDEO_FILE}")
     message(
         WARNING "Unable to find video file for rocdecode tests: ${ROCDECODE_VIDEO_FILE}")

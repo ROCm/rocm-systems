@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/perfetto_processor.hpp"
+#include "common/units.hpp"
 #include "core/agent_manager.hpp"
 #include "core/categories.hpp"
 #include "core/common.hpp"
@@ -635,9 +636,9 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
         {
             _fom(_filename, std::string{ "perfetto" },
                  " (%.2f KB / %.2f MB / %.2f GB)... ",
-                 static_cast<double>(trace_data.size()) / units::KB,
-                 static_cast<double>(trace_data.size()) / units::MB,
-                 static_cast<double>(trace_data.size()) / units::GB);
+                 static_cast<double>(trace_data.size()) / units::kilobyte,
+                 static_cast<double>(trace_data.size()) / units::megabyte,
+                 static_cast<double>(trace_data.size()) / units::gigabyte);
         }
         std::ofstream ofs{};
         if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
@@ -1363,8 +1364,8 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     // Scalar metrics
     emit_gpu_scalar<amd_smi_gfx_track>(_device_id, _ts, _em.bits.gfx_activity, "GFX Busy",
                                        "%", _m.gfx_activity);
-    emit_gpu_scalar<amd_smi_umc_track>(_device_id, _ts, _em.bits.umc_activity, "UMC Busy",
-                                       "%", _m.umc_activity);
+    emit_gpu_scalar<amd_smi_umc_track>(_device_id, _ts, _em.bits.umc_activity,
+                                       "UMC Avg. Busy", "%", _m.umc_activity);
     emit_gpu_scalar<amd_smi_mm_track>(_device_id, _ts, _em.bits.mm_activity, "MM Busy",
                                       "%", _m.mm_activity);
 
@@ -1375,9 +1376,8 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 
     emit_gpu_scalar<amd_smi_power_track>(
         _device_id, _ts, _em.bits.current_socket_power || _em.bits.average_socket_power,
-        "Current Power", "watts",
-        _em.bits.average_socket_power ? _m.average_socket_power
-                                      : _m.current_socket_power);
+        pmc::collectors::gpu::socket_power_track_label(_em), "watts",
+        pmc::collectors::gpu::select_socket_power(_em, _m));
 
     emit_gpu_scalar<amd_smi_mem_track>(
         _device_id, _ts, _em.bits.memory_usage, "Memory Usage", "megabytes",

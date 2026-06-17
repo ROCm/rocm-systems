@@ -88,6 +88,32 @@ set_tests_properties(
                "${counter-collection-buffer-device-serialization-env}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+set(counter-collection-buffer-finalize-at-exit-env
+    ${counter-collection-buffer-device-serialization-env}
+    "ROCPROFILER_QUEUE_INTERPOSITION=0" "ROCPROFILER_LOG_LEVEL=INFO")
+
+add_test(NAME counter-collection-buffer-finalize-at-exit
+         COMMAND $<TARGET_FILE:counter-collection-buffer-device-serialization>)
+
+set_tests_properties(
+    counter-collection-buffer-finalize-at-exit
+    PROPERTIES TIMEOUT 120 LABELS "samples;repro" ENVIRONMENT
+               "${counter-collection-buffer-finalize-at-exit-env}"
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(counter-collection-buffer-finalize-at-exit-forced-inline-env
+    ${counter-collection-buffer-device-serialization-env}
+    "ROCPROFILER_QUEUE_INTERPOSITION=1" "ROCPROFILER_LOG_LEVEL=INFO")
+
+add_test(NAME counter-collection-buffer-finalize-at-exit-forced-inline
+         COMMAND $<TARGET_FILE:counter-collection-buffer-device-serialization>)
+
+set_tests_properties(
+    counter-collection-buffer-finalize-at-exit-forced-inline
+    PROPERTIES TIMEOUT 120 LABELS "samples;repro" ENVIRONMENT
+               "${counter-collection-buffer-finalize-at-exit-forced-inline-env}"
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 add_library(counter-collection-callback-client SHARED)
 target_sources(counter-collection-callback-client PRIVATE callback_client.cpp client.hpp)
 target_link_libraries(

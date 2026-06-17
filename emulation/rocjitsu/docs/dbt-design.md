@@ -11,28 +11,28 @@ The translation pipeline is organized into layers with clear responsibility boun
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  BinaryTranslator                                            │
-│  Orchestration: code objects, basic blocks, code caves, ELF  │
-│                                                              │
-│  ┌────────────────────────┐  ┌─────────────────────────────┐ │
-│  │  SemanticTranslator    │  │  EncodingTranslator         │ │
-│  │  Behavioral changes:   │  │  Binary format conversion:  │ │
-│  │  - waitcnt splitting   │  │  - opcode remapping         │ │
-│  │  - instruction lowering│  │  - field layout changes     │ │
-│  │  - instruction expand  │  │  - coherency bit remap      │ │
-│  └────────────────────────┘  └─────────────────────────────┘ │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────────┐│
-│  │  KernelDescriptorTranslator                              ││
+┌───────────────────────────────────────────────────────────────┐
+│  BinaryTranslator                                             │
+│  Orchestration: code objects, basic blocks, code caves, ELF   │
+│                                                               │
+│  ┌─────────────────────────┐  ┌─────────────────────────────┐ │
+│  │  SemanticTranslator     │  │  EncodingTranslator         │ │
+│  │  Behavioral changes:    │  │  Binary format conversion:  │ │
+│  │  - waitcnt splitting    │  │  - opcode remapping         │ │
+│  │  - instruction lowering │  │  - field layout changes     │ │
+│  │  - instruction expand   │  │  - coherency bit remap      │ │
+│  └─────────────────────────┘  └─────────────────────────────┘ │
+│                                                               │
+│  ┌───────────────────────────────────────────────────────────┐│
+│  │  KernelDescriptorTranslator                               ││
 │  │  Descriptor ABI/resource policy and entry prologue words  ││
-│  └──────────────────────────────────────────────────────────┘│
-│                                                              │
-│  ┌──────────────────────────────────────────────────────────┐│
-│  │  CodeObjectPatcher                                       ││
-│  │  ELF mutation: descriptor bytes, entry redirects, .text  ││
-│  └──────────────────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────────────────┘
+│  └───────────────────────────────────────────────────────────┘│
+│                                                               │
+│  ┌───────────────────────────────────────────────────────────┐│
+│  │  CodeObjectPatcher                                        ││
+│  │  ELF mutation: descriptor bytes, entry redirects, .text   ││
+│  └───────────────────────────────────────────────────────────┘│
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -48,9 +48,9 @@ The binary translator is the top-level orchestrator. It operates on binary and s
 - Load code objects via the `AmdGpuCodeObject` API
 - Decode guest instructions into basic blocks via `Decoder::create(guest_arch)`
 - Traverse each basic block and apply semantic rules first, then per-instruction encoding translation
-- Manage code caves for expanded instructions (branch stubs in .text, bodies in `.rj_translations`)
+- Relocate each kernel into a new `.text` layout with kernel-local code caves
 - Delegate descriptor ABI/resource policy to `KernelDescriptorTranslator`
-- Delegate byte-level ELF mutation and entry prologue redirects to `CodeObjectPatcher`
+- Delegate byte-level ELF mutation to `CodeObjectPatcher`
 
 ### Key design constraint
 
@@ -58,7 +58,14 @@ The binary translator's per-instruction loop is ISA-agnostic. It contains no con
 
 ### Code cave mechanism
 
-When a translated instruction sequence is larger than the source instruction, the binary translator creates a code cave: a branch stub replaces the original instruction slot, and the expanded sequence is placed in the executable `.rj_translations` section immediately after `.text`. A return branch at the end of the cave jumps back to the next instruction. The `s_branch` target is computed as `(cave_offset - (branch_pc + 4)) / 4` per the AMDGPU branch encoding, where `cave_offset` is the `.text`-relative offset into the combined `.text` + `.rj_translations` code range. The patcher may add file padding after `.rj_translations` so later `PT_LOAD` segments keep their required `p_offset`/`p_vaddr` alignment.
+When a translated instruction sequence is larger than the source instruction,
+the binary translator creates a kernel-local code cave in the rewritten `.text`:
+a branch stub replaces the relocated instruction slot, the expanded sequence is
+appended after that kernel's emitted body, and a return branch jumps back to the
+relocated fallthrough instruction. The `s_branch` target is computed as
+`(target - (branch_pc + 4)) / 4` per the AMDGPU branch encoding. Because each
+cave sits next to its kernel body, branch reach is bounded by one kernel instead
+of the entire original `.text`.
 
 ---
 
@@ -96,7 +103,7 @@ The function decodes the guest instruction into neutral field values using a typ
 
 ### Legalization tables
 
-A companion table (auto-generated by `legalization_codegen.py`) classifies every (encoding_id, opcode) pair as Identity, Substitute, Expand, or Illegal. The binary translator consults this table to decide which layer handles each instruction.
+A companion table (auto-generated by `legalization_codegen.py`) classifies every (encoding_id, opcode) pair as Identity, Substitute, Expand, or Illegal. The binary translator consults this table to decide which layer handles each instruction. See [codegen.md](codegen.md) for regeneration commands.
 
 ---
 
@@ -131,7 +138,7 @@ struct TranslationRule {
 
 The `try_lower_expand()` method performs binary search over the sorted rule table. For matrix instructions, the `guest_layout` and `host_layout` pointers are passed to the expansion function, which uses `compute_lane_permutation()` to derive the cross-lane shuffle rather than hardcoding it.
 
-Context-dependent descriptor ABI translations are handled by `KernelDescriptorTranslator` and handed to `CodeObjectPatcher` as prebuilt kernel-entry prologue words. The original kernel entry stays untouched; when a prologue is actually required, the kernel descriptor is redirected to a prologue cave that branches into the original entry. For CDNA-to-RDNA4 translation today, CDNA workgroup-id SGPRs are materialized from RDNA4's `TTMP9` and packed `TTMP7` launch payload.
+Context-dependent descriptor ABI translations are handled by `KernelDescriptorTranslator` and handed to `BinaryTranslator` as prebuilt kernel-entry prologue words. The original kernel entry stays untouched; when a prologue is required, the descriptor is redirected to a kernel-local `.text` cave prologue that branches into the relocated original body entry. For CDNA-to-RDNA4 translation today, CDNA workgroup-id SGPRs are materialized from RDNA4's `TTMP9` and packed `TTMP7` launch payload.
 
 ### Supporting infrastructure
 
@@ -155,11 +162,11 @@ Kernel-scoped backward liveness analysis over the CFG embedded in `BasicBlock`. 
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`)
 
-Handles ELF-level mutations: descriptor byte overwrite, entry prologue cave placement, kernel-entry descriptor redirects, ELF flag updates, `.text` overwrite, code cave storage, and load-segment alignment preservation. It does not decide descriptor translation policy.
+Handles ELF-level mutations: descriptor byte overwrite, kernel-entry descriptor redirects, ELF flag updates, `.text` replacement, and load-segment alignment preservation. It does not decide descriptor translation policy or own DBT cave layout.
 
 ### Kernel Descriptor Translator (`code/dbt/kernel_descriptor_translator.h`)
 
-Handles descriptor-level ABI and resource policy: `compute_pgm_rsrc1/2/3`, `kernel_code_properties`, AccVGPR placement metadata, and kernel-entry prologue words for descriptor ABI shuffles when the target launch state cannot preserve the guest-visible register layout directly. It produces descriptor bytes and prologue words; `CodeObjectPatcher` places those words in the ELF and redirects the descriptor entry point when needed.
+Handles descriptor-level ABI and resource policy: `compute_pgm_rsrc1/2/3`, `kernel_code_properties`, AccVGPR placement metadata, and kernel-entry prologue words for descriptor ABI shuffles when the target launch state cannot preserve the guest-visible register layout directly. It produces descriptor patches and prologue words; `BinaryTranslator` places those words in the kernel-local `.text` cave and `CodeObjectPatcher` redirects the descriptor entry to the recorded target offset.
 
 ### Instruction Builder (`code/patch/instruction_builder.h`)
 
@@ -176,26 +183,20 @@ For each code object:
 3. **Analyze:** Build per-kernel CFG scopes from kernel descriptor entry offsets and compute `LivenessAnalysis` for each scope.
 4. **Per-instruction pass:** For each instruction in each basic block:
    - Call `try_lower_expand(inst, offset, liveness)` — binary search the expand rules table by `(encoding_id, opcode)`. If a rule matches, the `ExpandFn` generates replacement instruction words using the `HazardTracker` for automatic `s_delay_alu` insertion and liveness-based register allocation for temp VGPRs/SGPRs.
-   - If no expand rule matched, look up the legalization table. If Identity or Substitute, call the encoding translator. If Expand with no handler, NOP-fill and emit a warning.
-   - If the replacement is larger than the source instruction, create a code cave (branch to `.rj_translations`, return branch at end of cave).
-5. **Entry prologues:** `CodeObjectPatcher` places descriptor-provided prologue words in a cave and redirects the kernel descriptor entry point to that cave.
-6. **Patch:** Update ELF flags, write descriptor byte patches, and materialize cave body bytes in `.rj_translations`.
+   - If no expand rule matched, look up the legalization table. If Identity or Substitute, call the encoding translator. If Expand with no handler, report `ExpandMissing` and leave translation unchanged.
+   - If the replacement is larger than the source instruction, create a kernel-local code cave in `.text` with a branch stub and return branch.
+5. **Entry prologues:** `BinaryTranslator` places descriptor-provided prologue words in the kernel-local cave and records the redirected descriptor entry.
+6. **Patch:** Replace `.text`, update ELF flags, and write descriptor byte patches.
 7. **Emit:** Return the modified ELF bytes.
 
-**Code cave sizing:** The cave body is placed in `.rj_translations`, so translation no longer depends on compiler-emitted NOP padding after `s_endpgm`. Direct `s_branch` cave stubs still require the cave entry to be within the SOPP signed-16-bit branch range; trampoline islands remain future work for unusually large kernels.
+**Code cave sizing:** Cave bodies are placed in each kernel's local `.text`
+cave, so branch reach no longer depends on the size of the whole original
+`.text`. Direct `s_branch` cave stubs still require the local cave entry to be
+within the SOPP signed-16-bit branch range; trampoline islands remain future
+work for unusually large kernels.
 
 ---
 
 ## Coverage
 
 Across all ISA pairs, the encoding translator handles 60–99% of instructions depending on how similar the source and target are. Adjacent generations within the same family (CDNA3→CDNA4) are ~99% Identity. Cross-family pairs (CDNA4→RDNA4) are ~60% encoding-translatable, with ~40% marked Expand. Most Expand instructions are exotic (MFMA, buffer atomics, image ops) — common compute kernels translate with high coverage.
-
----
-
-## Testing
-
-- **Simulator tests (292):** Encoding correctness, legalization tables, coherency remapping, waitcnt translation, end-to-end translation with disassembly validation.
-- **Hardware tests (2):**
-  - `vector_add`: Translate CDNA4 → RDNA4, dispatch on GFX1201 via HSA, verify 1024 elements with random float inputs against CPU golden.
-  - `matmul_mfma_16x16`: Translate MFMA 16×16×16 FP16 → WMMA with ds_bpermute lane remap, 10 fuzzing iterations with random FP16 inputs, verify 256 elements per iteration against CPU golden.
-  - Run with `build/tests/hsa_translate_test`.

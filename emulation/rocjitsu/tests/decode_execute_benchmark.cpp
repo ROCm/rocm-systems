@@ -21,6 +21,7 @@
 #include "util/except.h"
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/test_encodings.h"
 
 #include <gtest/gtest.h>
@@ -71,7 +72,7 @@ inline bool should_skip(std::string_view mn) {
       "s_waitcnt",    "s_wait_",       "s_barrier",  "s_trap",      "s_sleep",         "s_sethalt",
       "s_sendmsg",    "s_nop",         "s_getpc",    "s_getreg",    "s_setreg",        "s_rfe",
       "s_icache_inv", "s_sendmsghalt", "v_readlane", "v_writelane", "v_readfirstlane", "v_mfma_",
-      "v_smfma_",     "v_wmma_",       "v_swmmac_",
+      "v_permlane",   "v_smfma_",      "v_wmma_",    "v_swmmac_",
   };
   for (auto p : SKIP)
     if (mn.substr(0, p.size()) == p)
@@ -241,6 +242,12 @@ TEST(DecodeExecuteBenchmark, Rdna4) {
   run_benchmark(ROCJITSU_CODE_ARCH_RDNA4, "rdna4",
                 reinterpret_cast<const TestEncEntry *>(rdna4::test_data::ENCODINGS),
                 rdna4::test_data::NUM_ENCODINGS);
+}
+
+TEST(DecodeExecuteBenchmark, Gfx1250) {
+  run_benchmark(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
+                reinterpret_cast<const TestEncEntry *>(gfx1250::test_data::ENCODINGS),
+                gfx1250::test_data::NUM_ENCODINGS);
 }
 
 } // namespace

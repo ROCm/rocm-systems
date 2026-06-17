@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 set(trace_cache_tests_sources
+    test_args_serialization.cpp
     test_buffer_storage.cpp
     test_cache_integration.cpp
     test_cacheable.cpp

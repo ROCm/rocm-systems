@@ -328,4 +328,8 @@ int Backend::buffer_unregister(void *addr) {
   return ROCSHMEM_ERROR;
 }
 
+void Backend::buffer_unregister_all() {
+  user_buffer_regions.clear();
+}
+
 }  // namespace rocshmem

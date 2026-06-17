@@ -2884,6 +2884,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(include && (!exclude || tool::get_config().kernel_filter_exclude.empty()))
         add_kernel_target(0, tool::get_config().kernel_filter_range);
 
+    ROCP_ERROR_IF(tool::get_config().selected_regions &&
+                  !tool::get_config().collection_periods.empty())
+        << "selected-regions and collection-period options are mutually exclusive";
+
     if(tool::get_config().benchmark_mode == tool::config::benchmark::disabled_contexts_overhead)
     {
         ROCP_INFO << "rocprofv3 is not recording data because the overhead of inactive contexts is "
@@ -3363,7 +3367,7 @@ tool_detach(void* /*tool_data*/)
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
 
     // Flush all buffers, stop context to ensure in-flight GPU operations complete,
-    // then flush again to capture any final events (same pattern as tool_fini)
+    // then flush again to capture any final events (same pattern as tool_fini).
     flush();
     rocprofiler_stop_context(get_client_ctx());
     flush();

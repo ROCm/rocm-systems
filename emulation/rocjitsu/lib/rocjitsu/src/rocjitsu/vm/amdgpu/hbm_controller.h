@@ -56,21 +56,23 @@ public:
     return raw;
   }
 
-  void read(uint64_t addr, uint8_t *dst, uint32_t size) {
+  void read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid = 0) {
     for (uint32_t i = 0; i < size; ++i)
-      dst[i] = memory_->read8(addr + i);
+      dst[i] = memory_->read8(addr + i, vmid);
   }
 
-  void write(uint64_t addr, const uint8_t *src, uint32_t size) {
+  void write(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid = 0) {
     for (uint32_t i = 0; i < size; ++i)
-      memory_->write8(addr + i, src[i]);
+      memory_->write8(addr + i, src[i], vmid);
   }
 
   /// @brief Read a 32-bit dword (little-endian).
-  uint32_t read32(uint64_t addr) const { return memory_->read32(addr); }
+  uint32_t read32(uint64_t addr, uint32_t vmid = 0) const { return memory_->read32(addr, vmid); }
 
   /// @brief Write a 32-bit dword (little-endian).
-  void write32(uint64_t addr, uint32_t val) { memory_->write32(addr, val); }
+  void write32(uint64_t addr, uint32_t val, uint32_t vmid = 0) {
+    memory_->write32(addr, val, vmid);
+  }
 
   /// @brief Direct access to the underlying GpuMemory.
   GpuMemory *memory() const { return memory_; }

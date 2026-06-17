@@ -197,7 +197,7 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int src
   getStreamPerThread(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   HIP_RETURN(ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *hip_stream, true, true));
 }
@@ -228,11 +228,11 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream) {
   getStreamPerThread(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   hipMemcpy3DParms copyParms = getMemcpy3DParms(*p);
-  HIP_RETURN(ihipMemcpy3D(&copyParms, stream, true));
+  HIP_RETURN(ihipMemcpy3D(&copyParms), stream, true);
 }
 
 hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags) {

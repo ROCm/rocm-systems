@@ -118,8 +118,7 @@ Each exec gets a directory under `<session>/exec/<exec-id>/`:
 └── node/
     └── <node-id>/
         ├── stdin     # FIFO (named pipe), read by the child
-        ├── stdout    # file, child stdout appended here
-        ├── stderr    # file, child stderr appended here
+        ├── stdout    # file, child stdout+stderr (merged by the PTY) appended here
         ├── pid       # ASCII pid of the child process
         └── exit_code # ASCII exit code, written after the child exits
 ```
@@ -176,8 +175,9 @@ detail.
 * `stdin` is a Unix FIFO created with `mkfifo(2)`. To write to a
   running exec's stdin: `printf 'data\n' > <node>/stdin`. The CLI
   exposes this via `MirageCtl::session_stdin`.
-* `stdout` and `stderr` are plain files opened with `O_APPEND` by the
-  host. Concurrent readers can `tail -f` them safely.
+* `stdout` is a plain file opened with `O_APPEND` by the
+  host (the PTY merges the child's stderr into it). Concurrent readers
+  can `tail -f` it safely.
 * `pid` is written before the child runs; readers that need a pid can
   poll the file. The file is removed when the host removes the exec
   directory (only when `keep=false`).
@@ -187,7 +187,7 @@ detail.
 ## Atomicity guarantees
 
 * All JSON writes are atomic (`<path>.tmp.<pid>` followed by `rename`).
-* `stdin` (FIFO) and `stdout`/`stderr` (append-only files) are created
+* `stdin` (FIFO) and `stdout` (append-only file) are created
   before the child is spawned, so readers can attach as soon as the
   per-node directory exists.
 * `status.json` may be rewritten many times; each rewrite is atomic.

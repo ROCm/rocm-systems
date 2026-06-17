@@ -247,6 +247,13 @@ public:
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+  bool has_lit_0();
+  bool has_lit_1();
+  bool has_lit_0_has_lit_1();
+  bool has_lit_2();
+  bool has_lit_0_has_lit_2();
+  bool has_lit_1_has_lit_2();
+  bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
 };

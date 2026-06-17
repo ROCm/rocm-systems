@@ -145,7 +145,7 @@ gfx10::Token TokenGenerator::next()
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
             if (real != 0) addRealtime(real);
-            continue;
+            if (!packetlost) continue;
         }
 
         auto token = Token{globaltime, current, type};

@@ -227,6 +227,61 @@ class TestVop3Modifiers:
         assert len(clamp_calls) == 1
         assert len(omod_calls) == 1
 
+    def test_cvt_norm_i16_f16_ignores_dst_modifiers(self):
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), SemaType.B32),
+                SemaNode(
+                    SemaNodeKind.CALL,
+                    ty=SemaType.B32,
+                    call_name='cvt_norm_i16_f16',
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='cvt_norm_i16_f16'),
+                        _src(0),
+                    ),
+                ),
+            ),
+        )
+        block = SemaBlock('V_CVT_NORM_I16_F16', ExecModel.VECTOR, body)
+        enriched = enrich_block(block, enc_field_names=frozenset({'clamp', 'omod'}))
+        call_names = [
+            n.call_name for n in enriched.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
+        assert 'apply_clamp' not in call_names
+        assert 'apply_omod' not in call_names
+
+    @pytest.mark.parametrize(
+        ('name', 'op'),
+        [
+            ('V_CVT_F16_FP8', 'cvt_f16_fp8'),
+            ('V_CVT_F16_BF8', 'cvt_f16_bf8'),
+        ],
+    )
+    def test_cvt_f16_fp8_bf8_ignores_dst_modifiers(self, name, op):
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), SemaType.B32),
+                SemaNode(
+                    SemaNodeKind.CALL,
+                    ty=SemaType.B32,
+                    call_name=op,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name=op),
+                        _src(0),
+                    ),
+                ),
+            ),
+        )
+        block = SemaBlock(name, ExecModel.VECTOR, body)
+        enriched = enrich_block(block, enc_field_names=frozenset({'clamp', 'omod'}))
+        call_names = [
+            n.call_name for n in enriched.body.walk() if n.kind == SemaNodeKind.CALL
+        ]
+        assert 'apply_clamp' not in call_names
+        assert 'apply_omod' not in call_names
+
     def test_all_modifiers(self):
         block = self._make_vop3_add()
         enriched = enrich_block(

@@ -15,6 +15,7 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
   static thread_local std::unique_ptr<Decoder> cdna3_decoder;
   static thread_local std::unique_ptr<Decoder> cdna4_decoder;
   static thread_local std::unique_ptr<Decoder> rdna4_decoder;
+  static thread_local std::unique_ptr<Decoder> gfx1250_decoder;
 
   switch (target) {
   case ROCJITSU_CODE_TARGET_GFX942:
@@ -30,6 +31,10 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
     if (!rdna4_decoder)
       rdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
     return rdna4_decoder.get();
+  case ROCJITSU_CODE_TARGET_GFX1250:
+    if (!gfx1250_decoder)
+      gfx1250_decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    return gfx1250_decoder.get();
   default:
     return nullptr;
   }
@@ -122,9 +127,9 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
 
   auto owned = std::make_unique<rj_code_inst_list_t>();
 
-  // DBT-generated cave bodies live outside .text, but they still need normal
-  // disassembly/validation alongside original text bytes.
-  for (const auto *sec : obj->co->code_sections()) {
+  // DBT local caves are emitted into .text, so instruction-list callers only
+  // need the text sections to see translated code.
+  for (const auto *sec : obj->co->text_sections()) {
     const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
     std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
     // Each executable section owns a separate data buffer, so decoding starts

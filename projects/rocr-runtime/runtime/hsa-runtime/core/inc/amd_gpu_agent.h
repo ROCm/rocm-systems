@@ -93,22 +93,6 @@ class GpuAgentInt : public core::Agent {
 
    virtual void ReleaseResources() = 0;
 
-   // @brief Invoke the user provided callback for each region accessible by
-   // this agent.
-   //
-   // @param [in] include_peer If true, the callback will be also invoked on
-   // each peer memory region accessible by this agent. If false, only invoke
-   // the callback on memory region owned by this agent.
-   // @param [in] callback User provided callback function.
-   // @param [in] data User provided pointer as input for @p callback.
-   //
-   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
-   // region returns ::HSA_STATUS_SUCCESS.
-   virtual hsa_status_t
-   VisitRegion(bool include_peer,
-               hsa_status_t (*callback)(hsa_region_t region, void *data),
-               void *data) const = 0;
-
    // @brief Carve scratch memory for main from scratch pool.
    //
    // @param [in,out] scratch Structure to be populated with the carved memory
@@ -567,8 +551,15 @@ class GpuAgent : public GpuAgentInt {
     *size = scratch_pool_.size();
   }
 
-  /// @brief Get list of AQL queues for core dump filtering
-  const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
+  /// @brief Get a snapshot of AQL queues for core dump filtering.
+  /// Returns a copy to avoid iterator invalidation from concurrent queue destruction.
+  std::vector<core::Queue*> GetAqlQueues() const {
+    std::lock_guard<std::mutex> lock(aql_queues_lock_);
+    return aql_queues_;
+  }
+
+  /// @brief Remove a destroyed AQL queue from agent-owned tracking.
+  void UnregisterAqlQueue(core::Queue* queue);
 
  protected:
   // Sizes are in packets.
@@ -707,6 +698,12 @@ class GpuAgent : public GpuAgentInt {
 
   double historical_clock_ratio_;
 
+  // @brief Offset (in GPU ticks) between AQL dispatch timestamp clock and
+  // D3DKMTQueryClockCalibration GPU clock.  Non-zero on Windows where the two
+  // GPU clock domains share frequency but differ in epoch.  Computed on first
+  // TranslateTime call; zero on Linux (clocks match).
+  int64_t gpu_clock_offset_;
+
   // @brief s_memrealtime nominal clock frequency
   uint64_t wallclock_frequency_;
 
@@ -773,14 +770,14 @@ class GpuAgent : public GpuAgentInt {
   // @brief Initialize scratch handler thresholds
   void InitAsyncScratchThresholds();
 
-  // @brief Initialize Secondary CUID for GPU device that 
+  // @brief Initialize Secondary CUID for GPU device that
   // this agent is running on.
   void InitDerivedCuid() override;
 
   // @brief Register signal for notification when scratch may become available.
   // @p signal is notified by OR'ing with @p value.
   bool AddScratchNotifier(hsa_signal_t signal, hsa_signal_value_t value) {
-    if (signal.handle != 0) return false;
+    if (signal.handle == 0) return false;
     scratch_notifiers_[signal] = value;
     return true;
   }
@@ -875,11 +872,14 @@ class GpuAgent : public GpuAgentInt {
   // @brief list of AQL queues owned by this agent. Indexed by queue pointer
   std::vector<core::Queue*> aql_queues_;
 
+  // @brief Protects aql_queues_ from concurrent modification/iteration.
+  mutable std::mutex aql_queues_lock_;
+
   // Sets and Tracks pending SDMA status check or request counts
   void SetCopyRequestRefCount(bool set);
   void SetCopyStatusCheckRefCount(bool set);
-  int pending_copy_req_ref_;
-  int pending_copy_stat_check_ref_;
+  std::atomic<int> pending_copy_req_ref_;
+  std::atomic<int> pending_copy_stat_check_ref_;
 
   // Tracks what SDMA blits have been used since initialization.
   uint32_t sdma_blit_used_mask_;
