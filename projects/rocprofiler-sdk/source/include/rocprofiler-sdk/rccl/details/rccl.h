@@ -447,37 +447,6 @@ pncclCommGrow(ncclComm_t          comm,
               ncclComm_t*         newcomm,
               ncclConfig_t*       config);
 
-/* Generate per-communicator unique ID for grow.
- * Constraints:
- * - Cannot generate a new UID while a previous UID is unconsumed
- * - Each UID can only be used once (no reuse after consumption)
- * - Must wait for grow operation to complete before calling again */
-ncclResult_t
-ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
-ncclResult_t
-pncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
-
-/* Grow communicator by adding new ranks.
- * Parameter usage:
- * - Existing non-root: comm, uniqueId=NULL, rank=-1
- * - Existing root: comm, uniqueId=&id, rank=-1
- * - New ranks: comm=NULL, uniqueId=&id, rank=assigned
- * The UID is consumed upon successful grow and cannot be reused. */
-ncclResult_t
-ncclCommGrow(ncclComm_t          comm,
-             int                 nRanks,
-             const ncclUniqueId* uniqueId,
-             int                 rank,
-             ncclComm_t*         newcomm,
-             ncclConfig_t*       config);
-ncclResult_t
-pncclCommGrow(ncclComm_t          comm,
-              int                 nRanks,
-              const ncclUniqueId* uniqueId,
-              int                 rank,
-              ncclComm_t*         newcomm,
-              ncclConfig_t*       config);
-
 /*! @brief      Creates a new communicator (multi thread/process version), similar to
    ncclCommInitRankConfig.
      @details    Allows to use more than one ncclUniqueId (up to one per rank),

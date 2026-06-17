@@ -178,10 +178,10 @@ typedef ncclResult_t (*ncclPutSignal_fn_t)(const void* localbuff, size_t count, 
     int peer, ncclWindow_t peerWin, size_t peerWinOffset,
     int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, hipStream_t stream);
 
-    typedef ncclResult_t (*ncclSignal_fn_t)(int peer, int sigIdx, int ctx, unsigned int flags,
+typedef ncclResult_t (*ncclSignal_fn_t)(int peer, int sigIdx, int ctx, unsigned int flags,
     ncclComm_t comm, hipStream_t stream);
 
-    typedef ncclResult_t (*ncclWaitSignal_fn_t)(int nDesc, ncclWaitSignalDesc_t* signalDescs,
+typedef ncclResult_t (*ncclWaitSignal_fn_t)(int nDesc, ncclWaitSignalDesc_t* signalDescs,
     ncclComm_t comm, hipStream_t stream);
 
 typedef ncclResult_t (*ncclCommGetUniqueId_fn_t)(ncclComm_t comm, ncclUniqueId* uniqueId);
