@@ -25,11 +25,12 @@ endif()
 
 # LLVM_CLANG and LLVM_LINK are already set by DeviceBitcode.cmake.
 # Search for additional tools needed for HSACO generation.
-find_program(LLVM_LLC llc PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH QUIET)
-find_program(LLVM_LLD ld.lld PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH QUIET)
+find_program(LLVM_LLC llc PATHS ${ROCM_PATH}/llvm/bin ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin NO_DEFAULT_PATH QUIET)
+find_program(LLVM_LLD ld.lld PATHS ${ROCM_PATH}/llvm/bin ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin NO_DEFAULT_PATH QUIET)
+find_program(LLVM_OPT opt PATHS ${ROCM_PATH}/llvm/bin ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin NO_DEFAULT_PATH QUIET)
 
-if(NOT LLVM_LLC OR NOT LLVM_LLD)
-  message(WARNING "device_bitcode_tester: llc/ld.lld not found (ROCM_PATH=${ROCM_PATH}). "
+if(NOT LLVM_LLC OR NOT LLVM_LLD OR NOT LLVM_OPT)
+  message(WARNING "device_bitcode_tester: llc/ld.lld/opt not found (ROCM_PATH=${ROCM_PATH}). "
     "HSACOs will not be built; test will skip at runtime.")
   return()
 endif()
@@ -72,24 +73,56 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   add_custom_command(
     OUTPUT ${KERNEL_BC}
     COMMAND ${LLVM_CLANG}
-      -x hip --cuda-device-only -std=c++17 -emit-llvm
+      ${_TESTER_KERNEL_FLAGS}
       --offload-arch=${GPU_ARCH}
-      -fvisibility=default
       -c ${CMAKE_CURRENT_SOURCE_DIR}/device_bitcode_tester_kernel.hip
       -o ${KERNEL_BC}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/device_bitcode_tester_kernel.hip
     COMMENT "device_bitcode_tester: compiling kernel for ${GPU_ARCH}"
     VERBATIM
   )
+  list(APPEND _TESTER_BCS ${KERNEL_BC})
+
+  foreach(_src ${BITCODE_SOURCES})
+    get_filename_component(_src_name "${_src}" NAME_WE)
+    set(_src_bc ${CMAKE_CURRENT_BINARY_DIR}/tester_device_${GPU_ARCH}_${_src_name}.bc)
+    add_custom_command(
+      OUTPUT ${_src_bc}
+      COMMAND ${LLVM_CLANG}
+        ${_TESTER_DEVICE_FLAGS}
+        --offload-arch=${GPU_ARCH}
+        -c ${_src}
+        -o ${_src_bc}
+      DEPENDS ${_src}
+      COMMENT "device_bitcode_tester: compiling ${_src_name} for ${GPU_ARCH}"
+      VERBATIM
+    )
+    list(APPEND _TESTER_BCS ${_src_bc})
+  endforeach()
+
+  set(_UNOPT_BC ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}_unopt.bc)
 
   add_custom_command(
-    OUTPUT ${LINKED_BC}
+    OUTPUT ${_UNOPT_BC}
     COMMAND ${LLVM_LINK}
-      ${KERNEL_BC}
-      --override=${DEVICE_LIB}
+      ${_TESTER_BCS}
+      -o ${_UNOPT_BC}
+    DEPENDS ${_TESTER_BCS}
+    COMMENT "device_bitcode_tester: linking all device sources for ${GPU_ARCH}"
+    VERBATIM
+  )
+
+  # Optimize the merged BC at -O3 so the final HSACO has efficient code.
+  add_custom_command(
+    OUTPUT ${LINKED_BC}
+    COMMAND ${LLVM_OPT}
+      -O3
+      -mtriple=amdgcn-amd-amdhsa
+      -mcpu=${GPU_ARCH}
+      ${_UNOPT_BC}
       -o ${LINKED_BC}
-    DEPENDS ${KERNEL_BC} ${DEVICE_LIB} rocshmem_device_bitcode
-    COMMENT "device_bitcode_tester: linking with device bitcode for ${GPU_ARCH}"
+    DEPENDS ${_UNOPT_BC}
+    COMMENT "device_bitcode_tester: optimizing merged BC for ${GPU_ARCH}"
     VERBATIM
   )
 
@@ -98,6 +131,7 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
     COMMAND ${LLVM_LLC}
       -mtriple=amdgcn-amd-amdhsa
       -mcpu=${GPU_ARCH}
+      ${_LLC_MATTR_FLAGS}
       --amdgpu-internalize-symbols=false
       -filetype=obj
       ${LINKED_BC}
