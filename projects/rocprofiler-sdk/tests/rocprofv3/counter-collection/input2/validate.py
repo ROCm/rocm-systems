@@ -22,15 +22,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import os
 import sys
 import pytest
 
-# WSL/DXG does not expose /dev/kfd, so the KFD profiler interface cannot arm the
-# hardware counter blocks and every Counter_Value reads back 0. (gfx115x additionally
-# has known AQLProfile counter-reporting bugs.) Skip the counter-value assertions
-# on platforms that cannot collect them.
-HW_COUNTERS_SUPPORTED = os.path.exists("/dev/kfd")
+from rocprofiler_sdk.pytest_utils.hardware_counters import (
+    skip_if_hw_counter_values_unavailable,
+)
 
 
 def test_agent_info(agent_info_input_data):
@@ -54,6 +51,9 @@ def test_agent_info(agent_info_input_data):
 def test_validate_counter_collection_pmc2(counter_input_data):
     counter_names = ["SQ_WAVES", "GRBM_COUNT"]
     di_list = []
+    skip_if_hw_counter_values_unavailable(
+        row["Counter_Value"] for row in counter_input_data
+    )
 
     for row in counter_input_data:
         assert int(row["Agent_Id"].split(" ")[-1]) >= 0
@@ -64,11 +64,6 @@ def test_validate_counter_collection_pmc2(counter_input_data):
         assert len(row["Counter_Value"]) > 0
         # assert row["Counter_Name"].contains("SQ_WAVES").all()
         assert row["Counter_Name"] in counter_names
-        if not HW_COUNTERS_SUPPORTED:
-            pytest.skip(
-                "hardware counter collection requires the KFD profiler interface "
-                "(/dev/kfd), which is unavailable on this platform (e.g. WSL2/DXG)"
-            )
         assert float(row["Counter_Value"]) > 0
 
         di_list.append(int(row["Dispatch_Id"]))

@@ -741,6 +741,82 @@ construct_agent_cache(::HsaApiTable* table)
         }
     }
 
+    // Backfill compute-unit topology from the HSA runtime for any GPU agent whose
+    // enumerator could not read it (cu_count == 0). The WSL/DXCore enumerator
+    // leaves these zero because /dev/dxg exposes no KFD topology and HSA is not
+    // yet initialized at enumeration time; here each rocprofiler GPU agent is
+    // mapped to its hsa_agent_t, so HSA — the authoritative per-device source,
+    // the same one aqlprofile reads — can supply them. The cu_count == 0 gate
+    // means KFD-derived topology (bare-metal Linux) and the libhsakmt-windows
+    // shim path are never overwritten. Without this, aqlprofile's
+    // Gfx*Factory::Init() divides by zero on se_num / cu_num, which are
+    // registered from these fields in get_aql_handles().
+    {
+        auto query_hsa_u32 =
+            [&table](hsa_agent_t hsa_agent, hsa_agent_info_t attr, uint32_t& dst) {
+                uint32_t v = 0;
+                if(table->core_->hsa_agent_get_info_fn(hsa_agent, attr, &v) == HSA_STATUS_SUCCESS)
+                    dst = v;
+            };
+
+        for(const auto& itr : agent_map)
+        {
+            const auto* rocp_agent = std::get<0>(itr.second);
+            auto        hsa_agent  = std::get<1>(itr.second);
+            if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU || rocp_agent->cu_count != 0) continue;
+
+            // The agents are heap-allocated and owned (non-const) by
+            // get_agent_topology(); get_agents() only hands out const views. This
+            // runs during initialization, before any consumer reads the agent.
+            auto& mut = *const_cast<rocprofiler_agent_t*>(rocp_agent);
+
+            query_hsa_u32(hsa_agent,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
+                          mut.cu_count);
+            query_hsa_u32(hsa_agent,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU),
+                          mut.simd_per_cu);
+            query_hsa_u32(hsa_agent,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
+                          mut.num_shader_banks);
+            query_hsa_u32(hsa_agent,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE),
+                          mut.simd_arrays_per_engine);
+            query_hsa_u32(hsa_agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, mut.wave_front_size);
+            query_hsa_u32(hsa_agent,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU),
+                          mut.max_waves_per_cu);
+
+            // Derive composite fields the same way the gnulinux/KFD path does.
+            if(mut.simd_per_cu > 0) mut.max_waves_per_simd = mut.max_waves_per_cu / mut.simd_per_cu;
+            mut.simd_count  = mut.cu_count * mut.simd_per_cu;
+            mut.array_count = mut.num_shader_banks * mut.simd_arrays_per_engine;
+            if(mut.array_count > 0) mut.cu_per_simd_array = mut.cu_count / mut.array_count;
+            if(mut.num_shader_banks > 0) mut.cu_per_engine = mut.cu_count / mut.num_shader_banks;
+
+            ROCP_INFO << fmt::format(
+                "agent topology backfilled from HSA for logical_node_id={} ({}): cu_count={} "
+                "simd_count={} simd_per_cu={} num_shader_banks={} simd_arrays_per_engine={} "
+                "array_count={} wave_front_size={} max_waves_per_simd={}",
+                rocp_agent->logical_node_id,
+                rocp_agent->name,
+                mut.cu_count,
+                mut.simd_count,
+                mut.simd_per_cu,
+                mut.num_shader_banks,
+                mut.simd_arrays_per_engine,
+                mut.array_count,
+                mut.wave_front_size,
+                mut.max_waves_per_simd);
+
+            ROCP_WARNING_IF(mut.cu_count == 0)
+                << "HSA did not report a compute-unit count for agent "
+                << rocp_agent->logical_node_id
+                << "; counter collection may fail (divide-by-zero in aqlprofile). This platform "
+                   "requires HSA or the libhsakmt-windows shim to supply compute-unit topology.";
+        }
+    }
+
     ROCP_INFO << "# agent node maps: " << hsa_agent_node_map.size();
 
     ROCP_FATAL_IF(agent_map.size() != hsa_agents.size())

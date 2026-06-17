@@ -22,18 +22,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import os
 import sys
 import pytest
 import numpy as np
 import pandas as pd
 import re
 
-# WSL/DXG does not expose /dev/kfd, so the KFD profiler interface cannot arm the
-# hardware counter blocks and every Counter_Value reads back 0. (gfx115x additionally
-# has known AQLProfile counter-reporting bugs.) Skip the counter-value assertions
-# on platforms that cannot collect them.
-HW_COUNTERS_SUPPORTED = os.path.exists("/dev/kfd")
+from rocprofiler_sdk.pytest_utils.hardware_counters import (
+    skip_if_hw_counter_values_unavailable,
+)
 
 kernel_list = sorted(
     ["addition_kernel", "subtract_kernel", "multiply_kernel", "divide_kernel"]
@@ -73,11 +70,7 @@ def test_validate_counter_collection_pmc1(input_data: pd.DataFrame):
 
     assert len(df["Counter_Value"]) > 0
     assert df["Counter_Name"].str.contains("SQ_WAVES").all()
-    if not HW_COUNTERS_SUPPORTED:
-        pytest.skip(
-            "hardware counter collection requires the KFD profiler interface "
-            "(/dev/kfd), which is unavailable on this platform (e.g. WSL2/DXG)"
-        )
+    skip_if_hw_counter_values_unavailable(df["Counter_Value"])
     assert (df["Counter_Value"].astype(int).values > 0).all()
 
     di_list = df["Dispatch_Id"].astype(int).values.tolist()

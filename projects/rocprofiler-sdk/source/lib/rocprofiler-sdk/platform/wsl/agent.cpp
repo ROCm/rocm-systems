@@ -790,6 +790,54 @@ enumerate()
         // here. Multi-XCC datacenter parts are not supported on this path.
         info.num_xcc = 1;
 
+        // Resolve the gfx target up-front so the hardcoded-topology fallback
+        // below can gate its constants on the actual family. Counter YAML
+        // (config.yaml) is keyed by the gfx target (e.g. "gfx1150"), not the
+        // marketing product name. WSL DXCore does not expose KFD topology, so the
+        // gfx target cannot be derived from the adapter; default to the only
+        // WSL-validated target (gfx1150, RDNA 3.5) and allow an override via the
+        // ROCPROFILER_FORCE_GFX environment variable (see docs/ for the full list
+        // of WSL macros/env vars).
+        //
+        // Compute gfx_target_version = major*10000 + minor*100 + step from a
+        // "gfx<NNN>" name, where step is the last digit, minor the second-to-last,
+        // and major the remaining leading digits (gfx1150 -> 110500). Returns
+        // nullopt for anything that is not "gfx" followed by >=3 decimal digits so a
+        // malformed override can never feed garbage into gfx_target_version.
+        static constexpr std::string_view kDefaultGfxName = "gfx1150";
+
+        auto parse_gfx_version = [](std::string_view gfx) -> std::optional<uint32_t> {
+            if(gfx.substr(0, 3) != "gfx") return std::nullopt;
+            auto digits = gfx.substr(3);
+            if(digits.size() < 3) return std::nullopt;
+            for(char c : digits)
+                if(c < '0' || c > '9') return std::nullopt;
+            uint32_t stp = static_cast<uint32_t>(digits[digits.size() - 1] - '0');
+            uint32_t min = static_cast<uint32_t>(digits[digits.size() - 2] - '0');
+            uint32_t maj = 0;
+            for(size_t k = 0; k + 2 < digits.size(); ++k)
+                maj = maj * 10 + static_cast<uint32_t>(digits[k] - '0');
+            return maj * 10000 + min * 100 + stp;
+        };
+
+        std::string_view gfx_name = kDefaultGfxName;
+        if(const char* forced_gfx = std::getenv("ROCPROFILER_FORCE_GFX");
+           forced_gfx != nullptr && *forced_gfx != '\0')
+        {
+            if(parse_gfx_version(forced_gfx))
+            {
+                gfx_name = forced_gfx;
+            }
+            else
+            {
+                ROCP_WARNING << "Ignoring malformed ROCPROFILER_FORCE_GFX='" << forced_gfx
+                             << "'; expected gfx<NNN> with >=3 decimal digits. Falling back to "
+                             << kDefaultGfxName;
+            }
+        }
+
+        info.gfx_target_version = parse_gfx_version(gfx_name).value();
+
         // DXCore does not expose KFD topology (NumArrays, NumShaderBanks,
         // NumFComputeCores, MaxEngineClockMhz*, etc.). Without these
         // aql_profile::Gfx11Factory::Init() SIGFPEs on integer divide-by-zero.
@@ -797,9 +845,12 @@ enumerate()
         // First try to populate them via the libhsakmt-windows shim
         // (hsaKmtOpenKFD + hsaKmtAcquireSystemProperties +
         // hsaKmtGetNodeProperties; see fetch_libhsakmt_topology() above for
-        // the planned wiring). When the shim is unavailable, fall back to a
-        // hardcoded gfx1150 (RDNA 3.5) topology — gated by the same
-        // FORCE_GFX env knob.
+        // the planned wiring). When the shim is unavailable (the plain WSL2 /
+        // Linux build), the fields are left zero here and backfilled from the
+        // HSA runtime — the authoritative per-device source — in
+        // agent::construct_agent_cache(), once the HSA agent for this adapter is
+        // known. HSA is not yet initialized at enumeration time, so it cannot be
+        // queried here.
         WslTopology topo{};
         if(fetch_libhsakmt_topology(a.hAdapter, a.AdapterLuid, topo))
         {
@@ -822,16 +873,22 @@ enumerate()
         }
         else
         {
-            // Hardcoded fallback: gfx1150 (RDNA 3.5) topology.
-            info.cu_count               = 16;  // 8 WGPs * 2 CUs
-            info.num_shader_banks       = 1;   // 1 SE
-            info.simd_arrays_per_engine = 2;   // 2 SAs per SE
-            info.array_count            = 2;   // 1 SE * 2 SA
-            info.cu_per_simd_array      = 8;   // 16 CUs / 2 SAs
-            info.simd_per_cu            = 2;   // RDNA: 2 SIMDs per CU
-            info.simd_count             = 32;  // 16 CUs * 2 SIMDs
-            info.wave_front_size        = 32;  // RDNA wave32
-            info.max_waves_per_simd     = 16;
+            // The libhsakmt-windows shim is unavailable on this (WSL2 / Linux)
+            // build, so there is no per-device topology source at enumeration
+            // time. Leave the compute-unit topology fields zero here; they are
+            // backfilled from the HSA runtime later in
+            // agent::construct_agent_cache() (see backfill_gpu_topology_from_hsa),
+            // which only fills GPU agents whose cu_count is still zero. The
+            // explicit zero assignments mark which fields that backfill owns.
+            info.cu_count               = 0;
+            info.num_shader_banks       = 0;
+            info.simd_arrays_per_engine = 0;
+            info.array_count            = 0;
+            info.cu_per_simd_array      = 0;
+            info.simd_per_cu            = 0;
+            info.simd_count             = 0;
+            info.wave_front_size        = 0;
+            info.max_waves_per_simd     = 0;
         }
 
         // Fields not surfaced by DXCore but reported by the HSA runtime for
@@ -884,53 +941,11 @@ enumerate()
 
         info.product_name = common::get_string_entry(adapter_name)->c_str();
         info.vendor_name  = common::get_string_entry("AMD")->c_str();
-        // Counter YAML (config.yaml) is keyed by the gfx target (e.g. "gfx1150"),
-        // not the marketing product name. WSL DXCore does not expose KFD topology,
-        // so the gfx target cannot be derived from the adapter; default to the only
-        // WSL-validated target (gfx1150, RDNA 3.5) and allow an override via the
-        // ROCPROFILER_FORCE_GFX environment variable (see docs/ for the full list of
-        // WSL macros/env vars).
-        //
-        // Compute gfx_target_version = major*10000 + minor*100 + step from a
-        // "gfx<NNN>" name, where step is the last digit, minor the second-to-last,
-        // and major the remaining leading digits (gfx1150 -> 110500). Returns
-        // nullopt for anything that is not "gfx" followed by >=3 decimal digits so a
-        // malformed override can never feed garbage into gfx_target_version.
-        static constexpr std::string_view kDefaultGfxName = "gfx1150";
-
-        auto parse_gfx_version = [](std::string_view gfx) -> std::optional<uint32_t> {
-            if(gfx.substr(0, 3) != "gfx") return std::nullopt;
-            auto digits = gfx.substr(3);
-            if(digits.size() < 3) return std::nullopt;
-            for(char c : digits)
-                if(c < '0' || c > '9') return std::nullopt;
-            uint32_t stp = static_cast<uint32_t>(digits[digits.size() - 1] - '0');
-            uint32_t min = static_cast<uint32_t>(digits[digits.size() - 2] - '0');
-            uint32_t maj = 0;
-            for(size_t k = 0; k + 2 < digits.size(); ++k)
-                maj = maj * 10 + static_cast<uint32_t>(digits[k] - '0');
-            return maj * 10000 + min * 100 + stp;
-        };
-
-        std::string_view gfx_name = kDefaultGfxName;
-        if(const char* forced_gfx = std::getenv("ROCPROFILER_FORCE_GFX");
-           forced_gfx != nullptr && *forced_gfx != '\0')
-        {
-            if(parse_gfx_version(forced_gfx))
-            {
-                gfx_name = forced_gfx;
-            }
-            else
-            {
-                ROCP_WARNING << "Ignoring malformed ROCPROFILER_FORCE_GFX='" << forced_gfx
-                             << "'; expected gfx<NNN> with >=3 decimal digits. Falling back to "
-                             << kDefaultGfxName;
-            }
-        }
-
-        info.name               = common::get_string_entry(std::string{gfx_name})->c_str();
-        info.model_name         = common::get_string_entry("")->c_str();
-        info.gfx_target_version = parse_gfx_version(gfx_name).value();
+        // gfx_name / gfx_target_version were resolved above (before the topology
+        // fallback, which gates its constants on the gfx family). info.name is the
+        // gfx target string the counter YAML (config.yaml) is keyed by.
+        info.name       = common::get_string_entry(std::string{gfx_name})->c_str();
+        info.model_name = common::get_string_entry("")->c_str();
 
         info.mem_banks_count = 0;
         info.caches_count    = 0;
