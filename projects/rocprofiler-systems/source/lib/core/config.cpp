@@ -2745,14 +2745,24 @@ get_ump_absolute_path()
         return path;
     };
 
-    auto make_absolute = [](std::string path) {
+    auto current_working_directory = [] {
+        const auto* pwd = getenv("PWD");
+        if(pwd != nullptr && pwd[0] != '\0') return std::string{ pwd };
+
+        char* current_dir = getcwd(nullptr, 0);
+        if(current_dir == nullptr) return std::string{ "." };
+
+        auto result = std::string{ current_dir };
+        free(current_dir);
+        return result;
+    };
+
+    auto make_absolute = [&](std::string path) {
         if(path.empty()) return path;
 
         if(path.at(0) != '/')
         {
-            const auto* pwd  = getenv("PWD");
-            const auto* base = (pwd != nullptr) ? pwd : ".";
-            path             = fmt::format("{}/{}", base, path);
+            path = fmt::format("{}/{}", current_working_directory(), path);
         }
 
         return (settings_are_configured())

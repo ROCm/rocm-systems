@@ -462,8 +462,9 @@ TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
 {
     const auto  relative_dir = std::string{ "ump-relative" };
     const auto* pwd          = getenv("PWD");
-    const auto  expected_dir =
-        (test_common::fs::path{ (pwd != nullptr) ? pwd : "." } / relative_dir).string();
+    const auto  base_dir =
+        (pwd != nullptr) ? test_common::fs::path{ pwd } : test_common::fs::current_path();
+    const auto expected_dir = (base_dir / relative_dir).string();
     test_common::fs::remove_all(expected_dir);
     ASSERT_FALSE(test_common::fs::exists(expected_dir));
     ScopedEnv ump_output_path{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH, relative_dir };
