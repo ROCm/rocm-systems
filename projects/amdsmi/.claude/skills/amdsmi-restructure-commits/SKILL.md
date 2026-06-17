@@ -1,5 +1,5 @@
 ---
-name: restructure-commits
+name: amdsmi-restructure-commits
 description: "Use when finishing an amd-smi development branch — consolidating commits into logical groups with clean messages AND deciding how to integrate the work (merge to develop, push and open PR, keep as-is, or discard). Covers commit restructuring plus the merge/PR/cleanup workflow."
 ---
 
@@ -15,6 +15,25 @@ rocm-systems / amd-smi conventions.
 - Commits have tangled dependencies that should be separated
 - Preparing a PR for merge with clean history
 - Reviewer requests commit cleanup
+
+## Scope — Current Worktree/Branch by Default
+
+By default this skill operates on **the branch checked out in the current working
+directory** and nothing else. Confirm the target up front:
+`git rev-parse --show-toplevel` and `git branch --show-current`.
+
+Wandering to other worktrees, sibling checkouts, or other open PRs is allowed
+**only with explicit user approval for that specific scope**:
+
+- Default to the current branch. Do not `cd` into another worktree or restructure
+  another branch/PR unless the user has clearly asked you to.
+- If restructuring would help across several branches/PRs, **propose it and wait
+  for approval** — name each branch/worktree you'd touch — before leaving the
+  current one. Silence is not approval.
+- When approved to span multiple branches, treat it as **one pass per branch**,
+  run from that branch's own worktree, restructuring only that branch's commits.
+- If the current branch isn't the one the user meant, STOP and ask rather than
+  switching to it yourself.
 
 ---
 
@@ -140,38 +159,16 @@ git branch -D backup/BRANCH_NAME   # only after Step 6 passes
 
 ## Commit Message Format
 
-### rocm-systems Convention
+**REQUIRED SUB-SKILL:** Use the `amdsmi-commit-and-pr-conventions` skill for the commit
+title and body format — it is the single source of truth for the `[AMD-SMI]`
+tag, the bulleted body, the no-ticket-in-body rule, and brevity caps. Apply it
+to every commit you create here.
 
-The monorepo uses a **bracketed project/ticket prefix** on the subject line.
-Commits touching amd-smi code should use one of:
+Quick reminder while restaging (see the skill for the full convention):
 
-| Prefix | When to Use |
-|--------|-------------|
-| `[AMD-SMI]` | General amd-smi work with no JIRA ticket |
-| `[ROCM-NNNNN]` | Linked to a ROCM JIRA ticket |
-| `[SWDEV-NNNNNN]` | Linked to a SWDEV JIRA ticket |
-
-#### Template
-
-```
-[AMD-SMI] Short imperative summary
-
-- Bullet describing what changed and why
-- Another bullet for a distinct logical change
-- Keep bullets concise but informative
-
-Signed-off-by: Full Name <email@amd.com>
-```
-
-#### Rules
-
-- **Subject line**: `[PREFIX] imperative summary`, ≤72 chars, no trailing period
-- **Body**: blank line after subject, wrapped at 72 chars
-- Each bullet starts with a verb (Add, Fix, Remove, Refactor, Implement)
-- Include "why" when the change isn't self-evident
-- **Signed-off-by** is required — preserve the original author's sign-off
-- If multiple authors contributed, include `Co-authored-by:` trailers
-
+- Subject: `[AMD-SMI] imperative summary`, ≤72 chars, no trailing period
+- Body: blank line, verb-first bullets, no `ROCM-NNNNN` refs in the body
+- `Signed-off-by` required; preserve original authors and `Co-authored-by:`
 
 ---
 
@@ -377,7 +374,7 @@ WORKTREE_PATH=$(git rev-parse --show-toplevel)
 ```
 
 - If `GIT_DIR == GIT_COMMON` → normal repo, no worktree. Done.
-- If `WORKTREE_PATH` matches the `rocm-systems-*` sibling-dir convention from `using-git-worktrees` (i.e. `$(dirname "$WORKTREE_PATH")/rocm-systems` exists as the main checkout) → we own cleanup:
+- If `WORKTREE_PATH` matches the `rocm-systems-*` sibling-dir convention from `amdsmi-using-git-worktrees` (i.e. `$(dirname "$WORKTREE_PATH")/rocm-systems` exists as the main checkout) → we own cleanup:
 
 ```bash
 MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
@@ -399,6 +396,7 @@ git worktree prune
 
 ## Red Flags — STOP
 
+- `cd`-ing into another worktree/checkout, or restructuring a branch other than the current one, without explicit user approval for that scope
 - Tests failing when presenting options (must be green first)
 - Pushing without explicit user approval (user rule)
 - Force-push without explicit user approval (user rule)

@@ -1,5 +1,5 @@
 ---
-name: using-git-worktrees
+name: amdsmi-using-git-worktrees
 description: "Use when starting amd-smi feature work, executing an implementation plan, or reviewing a PR that needs an isolated workspace away from the main checkout. Sets up a worktree following the rocm-systems-pr<PR#> convention."
 ---
 
@@ -9,15 +9,19 @@ Ensure work happens in an isolated workspace so the main checkout is never distu
 
 **Core principle:** Detect existing isolation first. Then use the project convention. Never fight the harness.
 
-**Announce at start:** "I'm using the `using-git-worktrees` skill to set up an isolated workspace."
+**Announce at start:** "I'm using the `amdsmi-using-git-worktrees` skill to set up an isolated workspace."
 
 ## amd-smi Worktree Convention
 
-Worktrees of `rocm-systems` are created as **sibling directories** of the main checkout, with the parent-directory and naming pattern:
+Worktrees of `rocm-systems` are created as **sibling directories** of the main
+checkout. The prefix is always `rocm-systems-`, lowercase (never `amd-smi-…` or
+uppercase `ROCM-…`). Pick the name by this tiered preference:
 
 ```
-<parent-of-rocm-systems>/rocm-systems-pr<PR#>          # PR-based work
-<parent-of-rocm-systems>/rocm-systems-<branch-name>    # local feature branches
+<parent>/rocm-systems-pr<PR#>                  # 1. preferred — a PR exists
+<parent>/rocm-systems-<ticket#>                # 2. ticket work, no PR yet (e.g. rocm-systems-26211)
+<parent>/rocm-systems-rocm-<ticket#>-<desc>    # 3. ticket + short desc when one name isn't enough
+<parent>/rocm-systems-<branch-name>            # local feature branches with no ticket/PR
 ```
 
 Derive the parent dynamically — do not hard-code it:
@@ -141,8 +145,8 @@ If the build fails on `origin/develop` → report the failure, ask whether to pr
 - Creating a worktree without confirming current isolation status
 - Building feature work on a baseline that doesn't compile
 - Branching from anything other than `origin/develop` (unless explicitly told otherwise)
-- Force-deleting a worktree without consulting `restructure-commits`' finishing flow
+- Force-deleting a worktree without consulting `amdsmi-restructure-commits`' finishing flow
 
 ## Cleanup
 
-Cleanup happens at the end of the workflow — see the `restructure-commits` skill's "Finishing the Branch" section. Don't remove worktrees inline; that's the finishing skill's job.
+Cleanup happens at the end of the workflow — see the `amdsmi-restructure-commits` skill's "Finishing the Branch" section. Don't remove worktrees inline; that's the finishing skill's job.
