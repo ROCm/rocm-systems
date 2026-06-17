@@ -16,7 +16,7 @@ from utils.utils_analysis import (
     build_call_trees,
     build_call_trees_with_kernel_ids,
     build_operator_summary,
-    get_matrix_ops_type,  
+    get_matrix_ops_type,
     process_ml_api_trace_output,
     write_ml_api_trace_consolidated_csv,
 )
