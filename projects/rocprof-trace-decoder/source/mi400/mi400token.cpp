@@ -128,7 +128,6 @@ gfx10::Token TokenGenerator::next()
         auto& info = lookupbits.lookup(current);
         RdnaType type = (RdnaType) info.type;
         bits_toread = info.length;
-        if (byte_ptr * 8 + bits_toread > 8 * BUFFER_SIZE + 64) break;
 
         if (type == RdnaType::NOP || bits_toread == 0)
         {
