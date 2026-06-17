@@ -2833,10 +2833,34 @@ get_mpi_world_size_from_env()
 namespace output_filtering
 {
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
-namespace
-{
+/**
+ * Decide whether the current MPI rank should produce output, given a filter.
+ *
+ * Pure decision core for rank-based output filtering: performs no environment
+ * access so it can be unit tested with explicit inputs. The public entry point
+ * is_rank_in_filter() wraps this, supplying the rank and world size from the
+ * environment.
+ *
+ * Policy is fail-open: every error or ambiguous condition disables filtering
+ * (returns true) so that a misconfiguration never silently suppresses all
+ * output. Specifically, true is returned when the filter is empty or "all",
+ * when the current rank is unknown, when the world size is reported as 0, when
+ * the current rank is outside [0, world_size-1], and when no valid filter
+ * entries remain after validation. "none" returns false; otherwise the result
+ * is whether the current rank is a member of the filter set.
+ *
+ * @param current_rank      Current MPI rank, or std::nullopt if undeterminable.
+ * @param world_size        Total MPI ranks, or std::nullopt if undeterminable.
+ *                          When present, filter entries and the current rank are
+ *                          validated against [0, world_size-1]; when absent, no
+ *                          range validation is performed.
+ * @param enabled_ranks_str Filter spec: "all"/empty, "none", or a numeric range
+ *                          (e.g. "0-3,8,10-15"), case-insensitive.
+ * @return true if the current rank should produce output.
+ */
 bool
-is_rank_in_filter(std::string enabled_ranks_str)
+rank_passes_filter(std::optional<std::uint64_t> current_rank,
+                   std::optional<std::uint64_t> world_size, std::string enabled_ranks_str)
 {
     rocprofsys::utility::trim_str(enabled_ranks_str);
     for(auto& ch : enabled_ranks_str)
@@ -2845,7 +2869,6 @@ is_rank_in_filter(std::string enabled_ranks_str)
     if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
     if(enabled_ranks_str == "none") return false;
 
-    const auto current_rank = get_mpi_rank_from_env();
     if(!current_rank)
     {
         LOG_WARNING("MPI output filtering DISABLED: failed to get MPI rank");
@@ -2856,7 +2879,6 @@ is_rank_in_filter(std::string enabled_ranks_str)
         std::int64_t, std::unordered_set<std::int64_t>>(enabled_ranks_str, "ranks", 1L);
 
     // Check current_rank and enabled_ranks against total number of existing MPI ranks
-    const auto world_size = get_mpi_world_size_from_env();
     if(world_size.has_value())
     {
         if(*world_size == 0)
@@ -2899,6 +2921,15 @@ is_rank_in_filter(std::string enabled_ranks_str)
     LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),
               is_enabled ? "enabled" : "disabled");
     return is_enabled;
+}
+
+namespace
+{
+bool
+is_rank_in_filter(std::string enabled_ranks_str)
+{
+    return rank_passes_filter(get_mpi_rank_from_env(), get_mpi_world_size_from_env(),
+                              std::move(enabled_ranks_str));
 }
 }  // namespace
 #endif

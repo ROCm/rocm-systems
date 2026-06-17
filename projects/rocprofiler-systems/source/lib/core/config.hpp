@@ -14,6 +14,7 @@
 #include <timemory/macros/language.hpp>
 
 #include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -369,6 +370,16 @@ is_file_output_enabled_for_current_mpi_rank();
 
 bool
 is_log_output_enabled_for_current_mpi_rank();
+
+// Pure decision core for MPI rank-based output filtering, exposed for unit
+// testing. Given the current rank and world size (each may be absent if it
+// could not be determined from the environment) and the user-provided filter
+// string, returns whether the current rank should produce output. Performs no
+// environment access.
+bool
+rank_passes_filter(std::optional<std::uint64_t> current_rank,
+                   std::optional<std::uint64_t> world_size,
+                   std::string                  enabled_ranks_str);
 }  // namespace output_filtering
 
 std::string
