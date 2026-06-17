@@ -97,8 +97,6 @@ gfx10::Token TokenGenerator::next()
     // Safe reads when the buffer is not padded. TODO: Avoid duplication.
     while (bufferValid_unsafe())
     {
-        if (bits_toread + bit_ptr > 8 * BUFFER_SIZE) break;
-
         readOne_safe();
 
         if (bIsExt && (current & 1)) // Handle wave_start_ext
@@ -109,13 +107,15 @@ gfx10::Token TokenGenerator::next()
 
         auto& info = lookupbits.lookup(current);
         RdnaType type = (RdnaType) info.type;
+        bits_toread = info.length;
+        if (bit_ptr + bits_toread > 8 * BUFFER_SIZE + 64) break;
+
         if (type == RdnaType::NOP)
         {
             bits_toread = 4;
             continue;
         }
 
-        bits_toread = info.length;
         bIsExt = type == WAVE_START_EXT;
 
         int64_t real = 0;

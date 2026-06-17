@@ -117,8 +117,6 @@ gfx10::Token TokenGenerator::next()
     // Duplicated for performance reasons. Avoiding duplication leads to worse performance.
     while (byte_ptr < BUFFER_SIZE || current)
     {
-        if (bits_toread / 8 + byte_ptr > BUFFER_SIZE) break;
-
         readOne_safe400();
 
         if (bIsExt && (current & 1)) // Handle wave_start_ext
@@ -130,6 +128,8 @@ gfx10::Token TokenGenerator::next()
         auto& info = lookupbits.lookup(current);
         RdnaType type = (RdnaType) info.type;
         bits_toread = info.length;
+        if (byte_ptr * 8 + bits_toread > 8 * BUFFER_SIZE + 64) break;
+
         if (type == RdnaType::NOP || bits_toread == 0)
         {
             bits_toread = 8;
