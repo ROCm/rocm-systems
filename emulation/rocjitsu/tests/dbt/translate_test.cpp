@@ -1152,6 +1152,24 @@ TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
     return kd->compute_pgm_rsrc1;
   };
 
+  const auto cdna3_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(cdna3_rsrc1.has_value());
+  EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 0u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 0u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 0u);
+
+  const auto rdna3_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_TRUE(rdna3_rsrc1.has_value());
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+
+  const auto rdna3_5_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_TRUE(rdna3_5_rsrc1.has_value());
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+
   const auto rdna4_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(rdna4_rsrc1.has_value());
   EXPECT_EQ(AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
