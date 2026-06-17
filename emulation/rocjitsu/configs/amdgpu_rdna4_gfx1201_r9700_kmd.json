@@ -23,6 +23,7 @@
         "wave_front_size": 32,
         "max_slots_scratch_cu": 32,
         "local_mem_size": 32061259776,
+        "vram_type": 9,
         "lds_size_kb": 64,
         "mem_width": 256,
         "mem_clk_max": 1258,

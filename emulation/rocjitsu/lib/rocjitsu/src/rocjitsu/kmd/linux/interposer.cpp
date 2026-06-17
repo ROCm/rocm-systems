@@ -9,6 +9,7 @@
 /// All mutable state is consolidated in InterposerContext.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
@@ -161,6 +162,7 @@ constexpr hipError_t hipErrorInvalidValue = 1;
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 extern "C" rocjitsu::ExecutionPlugin *createKernelLoggingPlugin();
 extern "C" rocjitsu::ExecutionPlugin *createRaceDetectorPlugin();
@@ -648,11 +650,37 @@ void apply_copy_signal(const hsa_amd_memory_copy_op_t &op) {
 }
 
 hsa_status_t rj_hsa_memory_copy(void *dst, const void *src, size_t size) {
+  // The functional simulator treats all copied agent memory as host-accessible.
   if (size == 0)
     return HSA_STATUS_SUCCESS;
   if (!dst || !src)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   std::memcpy(dst, src, size);
+  return HSA_STATUS_SUCCESS;
+}
+
+void *resolve_batch_copy_ptr(void *ptr, bool indirect) {
+  if (!indirect)
+    return ptr;
+  if (!ptr)
+    return nullptr;
+  return *static_cast<void **>(ptr);
+}
+
+hsa_status_t rj_hsa_memory_swap(void *dst, void *src, size_t src_size, size_t dst_size) {
+  if ((src_size != 0 && !src) || (dst_size != 0 && !dst))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  std::vector<unsigned char> src_bytes(src_size);
+  std::vector<unsigned char> dst_bytes(dst_size);
+  if (src_size != 0)
+    std::memcpy(src_bytes.data(), src, src_size);
+  if (dst_size != 0)
+    std::memcpy(dst_bytes.data(), dst, dst_size);
+  if (dst_size != 0)
+    std::memcpy(src, dst_bytes.data(), dst_size);
+  if (src_size != 0)
+    std::memcpy(dst, src_bytes.data(), src_size);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -664,6 +692,14 @@ bool rj_hsa_batch_copy_supported(const hsa_amd_memory_copy_op_t &op) {
            (op.src_u.src_list && op.dst_u.dst_list && op.size_u.list.size_list);
   if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST)
     return op.src_u.src && op.dst_u.dst_list && op.num_entries > 0;
+  if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP)
+    return op.num_entries == 0 ||
+           (op.src_u.src_list && op.dst_u.dst_list && op.size_u.list.size_list);
+  if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC ||
+      op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST ||
+      op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST)
+    return op.num_entries == 0 ||
+           (op.src_u.src_list && op.dst_u.dst_list && op.size_u.list.size_list);
   return false;
 }
 
@@ -686,6 +722,38 @@ hsa_status_t rj_hsa_batch_copy_one(const hsa_amd_memory_copy_op_t &op) {
       status = rj_hsa_memory_copy(op.dst_u.dst_list[i], op.src_u.src, op.size_u.single.size);
       if (status != HSA_STATUS_SUCCESS)
         return status;
+    }
+  } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP && op.num_entries == 0) {
+    status = rj_hsa_memory_swap(op.dst_u.dst, op.src_u.src, op.size_u.swap.src_size,
+                                op.size_u.swap.dst_size);
+    if (status != HSA_STATUS_SUCCESS)
+      return status;
+  } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
+    for (uint16_t i = 0; i < op.num_entries; ++i) {
+      status = rj_hsa_memory_swap(op.dst_u.dst_list[i], op.src_u.src_list[i],
+                                  op.size_u.list.size_list[i], op.size_u.list.size_list[i]);
+      if (status != HSA_STATUS_SUCCESS)
+        return status;
+    }
+  } else {
+    const bool indirect_src = op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC ||
+                              op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST;
+    const bool indirect_dst = op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST ||
+                              op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST;
+    if (op.num_entries == 0) {
+      status = rj_hsa_memory_copy(resolve_batch_copy_ptr(op.dst_u.dst, indirect_dst),
+                                  resolve_batch_copy_ptr(op.src_u.src, indirect_src),
+                                  op.size_u.single.size);
+      if (status != HSA_STATUS_SUCCESS)
+        return status;
+    } else {
+      for (uint16_t i = 0; i < op.num_entries; ++i) {
+        status = rj_hsa_memory_copy(resolve_batch_copy_ptr(op.dst_u.dst_list[i], indirect_dst),
+                                    resolve_batch_copy_ptr(op.src_u.src_list[i], indirect_src),
+                                    op.size_u.list.size_list[i]);
+        if (status != HSA_STATUS_SUCCESS)
+          return status;
+      }
     }
   }
 
@@ -835,24 +903,21 @@ struct amdgpu_gpu_info {
   uint32_t pci_rev_id;
 };
 
-static uint32_t gb_addr_config_for_gfx_target(uint32_t gfx_target_version) {
-  if (gfx_target_version >= 120000 && gfx_target_version < 130000)
-    return 0x8200545;
-  if (gfx_target_version >= 110000 && gfx_target_version < 120000)
-    return 0x545;
-  return 0;
-}
+struct SyntheticDrmOpenResult {
+  bool handled = false;
+  int fd = -1;
+};
 
-static int open_synthetic_drm_fd(const char *path) {
+static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
   if (!path || !std::string_view(path).starts_with("/dev/dri/renderD"))
-    return -1;
+    return {};
 
   if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
       !InterposerContext::ctx.initialized())
     InterposerContext::ctx.get_or_create();
 
   if (InterposerContext::ctx.driver_fd() < 0 && InterposerContext::ctx.remote_kfd_fd() < 0)
-    return -1;
+    return {};
 
   uint32_t render_minor = 128;
   auto minor_str = std::string_view(path).substr(16);
@@ -860,16 +925,20 @@ static int open_synthetic_drm_fd(const char *path) {
     render_minor = static_cast<uint32_t>(std::atoi(minor_str.data()));
 
   auto raw_drm_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", MFD_CLOEXEC));
-  if (raw_drm_fd < 0)
-    return -1;
+  if (raw_drm_fd < 0) {
+    errno = EMFILE;
+    return {true, -1};
+  }
 
   int high_fd = fcntl(raw_drm_fd, F_DUPFD_CLOEXEC, 512);
   InterposerContext::real.close(raw_drm_fd);
-  if (high_fd < 0)
-    return -1;
+  if (high_fd < 0) {
+    errno = EMFILE;
+    return {true, -1};
+  }
 
   InterposerContext::ctx.track_drm(high_fd, render_minor);
-  return high_fd;
+  return {true, high_fd};
 }
 
 int open(const char *path, int flags, ...) {
@@ -886,8 +955,8 @@ int open(const char *path, int flags, ...) {
   if (!p || InterposerContext::in_construction)
     return static_cast<int>(syscall(SYS_openat, AT_FDCWD, path, flags, mode));
 
-  if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd >= 0)
-    return drm_fd;
+  if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
+    return drm_fd.fd;
 
   if (std::strcmp(path, "/dev/kfd") == 0) {
     if (InterposerContext::ctx.get_or_create_remote())
@@ -974,8 +1043,8 @@ int openat(int dirfd, const char *path, int flags, ...) {
     return InterposerContext::real.openat(dirfd, path, flags, mode);
 
   if (path[0] == '/') {
-    if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd >= 0)
-      return drm_fd;
+    if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
+      return drm_fd.fd;
 
     if (std::string_view(path).starts_with("/sys/class/drm") ||
         std::string_view(path).starts_with("/sys/devices/virtual/kfd") ||
@@ -1169,14 +1238,15 @@ int ioctl(int fd, unsigned long request, ...) {
             if (gpu) {
               dev->device_id = gpu->device_id;
               dev->family = gpu->family_id;
-              dev->num_shader_engines = gpu->num_shader_engines;
+              dev->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
+                  gpu->num_shader_engines, gpu->num_shader_arrays_per_engine);
               dev->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
               dev->wave_front_size = gpu->wave_front_size;
               dev->num_cu_per_sh = gpu->num_cu_per_sh;
-              dev->vram_type = 6; // AMDGPU_VRAM_TYPE_HBM
+              dev->vram_type = gpu->vram_type;
               dev->vram_bit_width = gpu->mem_width;
               dev->cu_active_number =
-                  gpu->num_shader_engines * gpu->num_shader_arrays_per_engine * gpu->num_cu_per_sh;
+                  rocjitsu::kmd::drm_cu_active_number(gpu->num_shader_engines, gpu->num_cu_per_sh);
             }
           }
         }
@@ -1464,16 +1534,18 @@ int amdgpu_query_gpu_info(void * /*device_handle*/, amdgpu_gpu_info *info) {
   info->family_id = gpu->family_id;
   info->max_engine_clk = gpu->max_engine_clk_fcompute;
   info->max_memory_clk = gpu->mem_clk_max;
-  info->num_shader_engines = gpu->num_shader_engines;
+  info->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
+      gpu->num_shader_engines, gpu->num_shader_arrays_per_engine);
   info->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
-  info->avail_quad_shader_pipes = gpu->num_shader_engines * gpu->num_shader_arrays_per_engine;
+  info->avail_quad_shader_pipes =
+      rocjitsu::kmd::drm_quad_shader_pipe_count(gpu->num_shader_engines);
   info->max_quad_shader_pipes = info->avail_quad_shader_pipes;
   info->num_hw_gfx_contexts = 1;
   info->gpu_counter_freq = 100000;
-  info->gb_addr_cfg = gb_addr_config_for_gfx_target(gpu->gfx_target_version);
+  info->gb_addr_cfg = rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
   info->cu_active_number =
-      gpu->num_shader_engines * gpu->num_shader_arrays_per_engine * gpu->num_cu_per_sh;
-  info->vram_type = 6; // AMDGPU_VRAM_TYPE_HBM
+      rocjitsu::kmd::drm_cu_active_number(gpu->num_shader_engines, gpu->num_cu_per_sh);
+  info->vram_type = gpu->vram_type;
   info->vram_bit_width = gpu->mem_width;
   info->pci_rev_id = info->chip_rev;
   return 0;

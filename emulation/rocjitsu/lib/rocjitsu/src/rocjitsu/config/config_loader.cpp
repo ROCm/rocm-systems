@@ -721,6 +721,7 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
     dev.wave_front_size = d->wave_front_size();
     dev.max_slots_scratch_cu = d->max_slots_scratch_cu();
     dev.local_mem_size = d->local_mem_size();
+    dev.vram_type = d->vram_type();
     dev.lds_size_kb = d->lds_size_kb();
     dev.mem_width = d->mem_width();
     dev.mem_clk_max = d->mem_clk_max();

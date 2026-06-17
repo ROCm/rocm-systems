@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
@@ -64,18 +65,6 @@ amdgpu::Mtype pte_mtype_for_flags(uint32_t flags) {
   if (flags & KFD_IOC_ALLOC_MEM_FLAGS_COHERENT)
     return amdgpu::Mtype::CC;
   return amdgpu::Mtype::RW;
-}
-
-uint32_t gb_addr_config_for_arch(rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return 0x545;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return 0x8200545;
-  default:
-    return 0;
-  }
 }
 
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -150,6 +139,7 @@ void SimulatedDriver::setup_topology(const config::KfdDeviceConfig &dev, uint32_
   gpu.wave_front_size = dev.wave_front_size;
   gpu.max_slots_scratch_cu = dev.max_slots_scratch_cu;
   gpu.local_mem_size = dev.local_mem_size;
+  gpu.vram_type = dev.vram_type;
   gpu.lds_size_kb = dev.lds_size_kb;
   gpu.mem_width = dev.mem_width;
   gpu.mem_clk_max = dev.mem_clk_max;
@@ -233,6 +223,7 @@ void SimulatedDriver::setup_topology(const std::vector<config::KfdDeviceConfig> 
     gpu.wave_front_size = dev.wave_front_size;
     gpu.max_slots_scratch_cu = dev.max_slots_scratch_cu;
     gpu.local_mem_size = dev.local_mem_size;
+    gpu.vram_type = dev.vram_type;
     gpu.lds_size_kb = dev.lds_size_kb;
     gpu.mem_width = dev.mem_width;
     gpu.mem_clk_max = dev.mem_clk_max;
@@ -1035,7 +1026,7 @@ int SimulatedDriver::get_tile_config_ioctl(void *arg) {
   rj_code_arch_t arch = (gpu && gpu->soc) ? gpu->soc->arch() : ROCJITSU_CODE_ARCH_INVALID;
   args->num_tile_configs = kTileConfigCount;
   args->num_macro_tile_configs = kMacroTileConfigCount;
-  args->gb_addr_config = gb_addr_config_for_arch(arch);
+  args->gb_addr_config = kmd::gb_addr_config_for_arch(arch);
   args->num_banks = 0;
   args->num_ranks = 0;
   return 0;

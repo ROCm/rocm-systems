@@ -169,7 +169,8 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
           (1u << 16) | (1u << 17) | (1u << 18) | (1u << 20) | (1u << 21) | (1u << 26) | (1u << 27) |
           (1u << 28) | (1u << 29) | (1u << 30) | (1u << 31);
   }
-  cap = (cap & ~(0xFu << 22)) | ((gpu.gfx_target_version % 100) << 22);
+  const uint32_t asic_revision = gpu.gfx_target_version % 100u;
+  cap = (cap & ~(0xFu << 22)) | ((asic_revision & 0xFu) << 22);
 
   uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
 

@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "embedded_schema.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "simdojo/sim/simulation.h"
 
 #include <gtest/gtest.h>
@@ -25,6 +26,38 @@ namespace {
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
 constexpr uint32_t kGpuId = 38144;
+
+uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
+  auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+  auto num_xcds = soc->num_xcds();
+
+  loaded.engine_config.max_ticks = 0;
+  loaded.engine_config.await_primaries = true;
+  simdojo::SimulationEngine engine(loaded.engine_config);
+
+  auto root = loaded.take_root();
+  root.release();
+  auto vm = std::make_unique<rocjitsu::VirtualMachine>(std::unique_ptr<rocjitsu::SoC>(soc));
+  auto *driver = vm->driver();
+
+  engine.topology().set_root(std::move(vm));
+  loaded.wire_links(engine.topology());
+  soc->wire_backing(engine.topology());
+  engine.build();
+  engine.register_as_primary();
+
+  driver->setup_topology(loaded.device, num_xcds);
+  int fd = driver->open();
+  if (fd < 0)
+    return 0;
+
+  kfd_ioctl_get_tile_config_args args{};
+  args.gpu_id = gpu_id;
+  int rc = driver->ioctl(AMDKFD_IOC_GET_TILE_CONFIG, &args);
+  driver->close();
+  return rc == 0 ? args.gb_addr_config : 0;
+}
 
 class KfdIoctlTest : public ::testing::Test {
 protected:
@@ -105,6 +138,15 @@ TEST_F(KfdIoctlTest, GetTileConfig) {
     EXPECT_EQ(tile_config[i], 0xdeadbeefu);
   for (uint32_t i = args.num_macro_tile_configs; i < macro_tile_config.size(); ++i)
     EXPECT_EQ(macro_tile_config[i], 0xdeadbeefu);
+}
+
+TEST(KfdIoctlStandaloneTest, GetTileConfigReportsRdnaGbAddrConfig) {
+  EXPECT_EQ(
+      query_gb_addr_config(std::string(CONFIG_DIR) + "/amdgpu_rdna3_gfx1100_w7900_kmd.json", 7019),
+      rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3));
+  EXPECT_EQ(
+      query_gb_addr_config(std::string(CONFIG_DIR) + "/amdgpu_rdna4_gfx1201_r9700_kmd.json", 8716),
+      rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA4));
 }
 
 TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {
