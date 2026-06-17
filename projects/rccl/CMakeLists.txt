@@ -716,6 +716,7 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/net/example)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
+    add_subdirectory(plugins/profiler/proxytrace)
   endif()
   add_subdirectory(test)
 
