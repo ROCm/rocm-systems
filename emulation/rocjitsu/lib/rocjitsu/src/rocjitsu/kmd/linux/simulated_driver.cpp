@@ -15,6 +15,7 @@ RJ_DIAGNOSTIC_POP
 #include "util/except.h"
 #include "util/log.h"
 
+#include "util/dynamic_loader.h"
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
@@ -67,11 +68,34 @@ amdgpu::Mtype pte_mtype_for_flags(uint32_t flags) {
   return amdgpu::Mtype::RW;
 }
 
+struct LibcReal {
+  int (*close_fn)(int) = nullptr;
+  void *(*mmap_fn)(void *, size_t, int, int, int, off_t) = nullptr;
+  int (*munmap_fn)(void *, size_t) = nullptr;
+  int (*mprotect_fn)(void *, size_t, int) = nullptr;
+  int (*madvise_fn)(void *, size_t, int) = nullptr;
+  int (*dup2_fn)(int, int) = nullptr;
+
+  void resolve() {
+    close_fn = util::lookup_symbol<decltype(close_fn)>(RTLD_NEXT, "close");
+    mmap_fn = util::lookup_symbol<decltype(mmap_fn)>(RTLD_NEXT, "mmap");
+    munmap_fn = util::lookup_symbol<decltype(munmap_fn)>(RTLD_NEXT, "munmap");
+    mprotect_fn = util::lookup_symbol<decltype(mprotect_fn)>(RTLD_NEXT, "mprotect");
+    madvise_fn = util::lookup_symbol<decltype(madvise_fn)>(RTLD_NEXT, "madvise");
+    dup2_fn = util::lookup_symbol<decltype(dup2_fn)>(RTLD_NEXT, "dup2");
+  }
+};
+LibcReal &get_libc_real() {
+  static LibcReal instance = [] {
+    LibcReal r;
+    r.resolve();
+    return r;
+  }();
+  return instance;
+}
+
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
-  if (rc < 0)
-    return MAP_FAILED;
-  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
+  return get_libc_real().mmap_fn(addr, length, prot, flags, fd, offset);
 }
 
 } // namespace
@@ -286,8 +310,7 @@ int SimulatedDriver::open() {
     }
   });
 
-  std::call_once(fd_init_flag_,
-                 [this] { fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0)); });
+  std::call_once(fd_init_flag_, [this] { fd_ = memfd_create("rocjitsu_kfd", 0); });
   if (fd_ < 0)
     return -1;
 
@@ -373,8 +396,7 @@ void SimulatedDriver::set_process_client_pid(uint32_t process_id, pid_t client_p
 }
 
 uint32_t SimulatedDriver::open_process(pid_t client_pid) {
-  std::call_once(fd_init_flag_,
-                 [this] { fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0)); });
+  std::call_once(fd_init_flag_, [this] { fd_ = memfd_create("rocjitsu_kfd", 0); });
   if (fd_ < 0)
     return 0;
 
@@ -528,7 +550,7 @@ int SimulatedDriver::close(uint32_t process_id) {
         leaked_handles.push_back(handle);
       if (alloc.host_ptr && alloc.host_ptr_owned) {
         unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
-        syscall(SYS_munmap, alloc.host_ptr, alloc.size);
+        get_libc_real().munmap_fn(alloc.host_ptr, alloc.size);
         alloc.host_ptr = nullptr;
         alloc.host_ptr_owned = false;
       }
@@ -537,7 +559,7 @@ int SimulatedDriver::close(uint32_t process_id) {
           std::lock_guard<std::mutex> flk(owned_fds_mutex_);
           owned_fds_.erase(alloc.memfd);
         }
-        syscall(SYS_close, alloc.memfd);
+        get_libc_real().close_fn(alloc.memfd);
         alloc.memfd = -1;
       }
     }
@@ -554,7 +576,7 @@ int SimulatedDriver::close(uint32_t process_id) {
 
   for (auto &gs : proc.gpu_state_) {
     if (gs.doorbell_page && gs.doorbell_page_size && daemon_mode_)
-      syscall(SYS_munmap, gs.doorbell_page, gs.doorbell_page_size);
+      get_libc_real().munmap_fn(gs.doorbell_page, gs.doorbell_page_size);
   }
 
   leaked_queues = queue_ids.size();
@@ -581,7 +603,7 @@ int SimulatedDriver::close(uint32_t process_id) {
   for (auto &[handle, dmabuf] : proc.imported_dmabufs_) {
     [[maybe_unused]] auto &_ = handle;
     if (dmabuf.fd >= 0)
-      syscall(SYS_close, dmabuf.fd);
+      get_libc_real().close_fn(dmabuf.fd);
   }
 
   return 0;
@@ -821,7 +843,7 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
           safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, doorbell_fd, 0));
       if (init_ptr != MAP_FAILED) {
         std::memset(init_ptr, 0xFF, length);
-        syscall(SYS_munmap, init_ptr, length);
+        get_libc_real().munmap_fn(init_ptr, length);
       }
     }
 
@@ -859,15 +881,14 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
 
   if (type == KFD_MMAP_TYPE_EVENTS) {
     if (proc.event_state_.memfd < 0) {
-      auto raw_events_fd = static_cast<int>(
-          syscall(SYS_memfd_create, "rocjitsu_events", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+      auto raw_events_fd = memfd_create("rocjitsu_events", MFD_CLOEXEC | MFD_ALLOW_SEALING);
       if (raw_events_fd < 0)
         return MAP_FAILED;
       proc.event_state_.memfd = fcntl(raw_events_fd, F_DUPFD_CLOEXEC, 4096);
       if (proc.event_state_.memfd < 0)
         proc.event_state_.memfd = raw_events_fd;
       else
-        syscall(SYS_close, raw_events_fd);
+        get_libc_real().close_fn(raw_events_fd);
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
         owned_fds_.insert(proc.event_state_.memfd);
@@ -877,7 +898,7 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
           std::lock_guard<std::mutex> lk(owned_fds_mutex_);
           owned_fds_.erase(proc.event_state_.memfd);
         }
-        syscall(SYS_close, proc.event_state_.memfd);
+        get_libc_real().close_fn(proc.event_state_.memfd);
         proc.event_state_.memfd = -1;
         return MAP_FAILED;
       }
@@ -886,9 +907,9 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
         auto *init_ptr = static_cast<uint8_t *>(
             safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, proc.event_state_.memfd, 0));
         if (init_ptr != MAP_FAILED) {
-          syscall(SYS_madvise, init_ptr, length, MADV_POPULATE_WRITE);
+          get_libc_real().madvise_fn(init_ptr, length, MADV_POPULATE_WRITE);
           std::memset(init_ptr, 0xFF, length);
-          syscall(SYS_munmap, init_ptr, length);
+          get_libc_real().munmap_fn(init_ptr, length);
         }
       }
       fcntl(proc.event_state_.memfd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW);
@@ -927,12 +948,12 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
       }
     }
     if (alloc.user_va && (flags & MAP_FIXED) && addr != nullptr) {
-      auto prot_rc = syscall(SYS_mprotect, addr, length, PROT_READ | PROT_WRITE);
+      auto prot_rc = get_libc_real().mprotect_fn(addr, length, PROT_READ | PROT_WRITE);
       if (prot_rc == 0) {
         constexpr size_t page_size = 4096;
         size_t num_pages = (length + page_size - 1) / page_size;
         std::vector<uint8_t> page_resident(num_pages);
-        auto mc_rc = syscall(SYS_mincore, addr, length, page_resident.data());
+        auto mc_rc = mincore(addr, length, page_resident.data());
 
         auto *temp_mapping = static_cast<uint8_t *>(
             safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, alloc.memfd, 0));
@@ -947,7 +968,7 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
               }
             }
           }
-          syscall(SYS_munmap, temp_mapping, length);
+          get_libc_real().munmap_fn(temp_mapping, length);
         }
       }
     }
@@ -961,7 +982,7 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
   } else {
     bool reuse_pages = false;
     if (alloc.user_va && (flags & MAP_FIXED) && addr != nullptr) {
-      auto rc = syscall(SYS_mprotect, addr, length, PROT_READ | PROT_WRITE);
+      auto rc = get_libc_real().mprotect_fn(addr, length, PROT_READ | PROT_WRITE);
       reuse_pages = (rc == 0);
     }
     if (reuse_pages) {
@@ -1020,7 +1041,7 @@ int SimulatedDriver::dispatch_munmap(KfdProcess &proc, void *addr, size_t length
         gs.doorbell_page_size = 0;
         if (gpu_va && page_size)
           unmap_from_gpu(proc, gpu_va, page_size);
-        syscall(SYS_munmap, addr, length);
+        get_libc_real().munmap_fn(addr, length);
         return 0;
       }
     }
@@ -1028,14 +1049,14 @@ int SimulatedDriver::dispatch_munmap(KfdProcess &proc, void *addr, size_t length
   if (addr == proc.event_state_.page) {
     proc.event_state_.page = nullptr;
     proc.event_state_.page_size = 0;
-    syscall(SYS_munmap, addr, length);
+    get_libc_real().munmap_fn(addr, length);
     return 0;
   }
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
   for (auto &[handle, alloc] : proc.allocations_) {
     if (alloc.host_ptr == addr) {
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
-      syscall(SYS_munmap, addr, length);
+      get_libc_real().munmap_fn(addr, length);
       alloc.host_ptr = nullptr;
       alloc.host_ptr_owned = false;
       return 0;
@@ -1153,14 +1174,13 @@ int SimulatedDriver::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
     map_to_gpu(proc, va, reinterpret_cast<void *>(va), args->size, alloc_mtype);
   } else if (!is_doorbell || daemon_mode_) {
-    auto raw_fd = static_cast<int>(
-        syscall(SYS_memfd_create, "rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+    auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (raw_fd >= 0) {
       alloc.memfd = fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
       if (alloc.memfd < 0)
         alloc.memfd = raw_fd;
       else
-        syscall(SYS_close, raw_fd);
+        get_libc_real().close_fn(raw_fd);
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
         owned_fds_.insert(alloc.memfd);
@@ -1221,7 +1241,7 @@ bool SimulatedDriver::allocate_scratch_backing(uint32_t process_id, uint64_t gpu
     return false;
 
   size_t aligned_size = (size + 0xFFF) & ~0xFFFULL;
-  auto raw_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_scratch", MFD_CLOEXEC));
+  auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
   if (raw_fd < 0)
     return false;
 
@@ -1229,7 +1249,7 @@ bool SimulatedDriver::allocate_scratch_backing(uint32_t process_id, uint64_t gpu
   if (memfd < 0)
     memfd = raw_fd;
   else
-    syscall(SYS_close, raw_fd);
+    get_libc_real().close_fn(raw_fd);
   {
     std::lock_guard<std::mutex> lk(owned_fds_mutex_);
     owned_fds_.insert(memfd);
@@ -1240,7 +1260,7 @@ bool SimulatedDriver::allocate_scratch_backing(uint32_t process_id, uint64_t gpu
       std::lock_guard<std::mutex> lk(owned_fds_mutex_);
       owned_fds_.erase(memfd);
     }
-    syscall(SYS_close, memfd);
+    get_libc_real().close_fn(memfd);
     return false;
   }
   auto *host_ptr = safe_mmap(nullptr, aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
@@ -1249,14 +1269,14 @@ bool SimulatedDriver::allocate_scratch_backing(uint32_t process_id, uint64_t gpu
       std::lock_guard<std::mutex> lk(owned_fds_mutex_);
       owned_fds_.erase(memfd);
     }
-    syscall(SYS_close, memfd);
+    get_libc_real().close_fn(memfd);
     return false;
   }
   {
     std::lock_guard<std::mutex> lk(owned_fds_mutex_);
     owned_fds_.erase(memfd);
   }
-  syscall(SYS_close, memfd);
+  get_libc_real().close_fn(memfd);
   std::memset(host_ptr, 0, aligned_size);
   proc->map_pages(gpu_va, host_ptr, aligned_size);
 
@@ -1288,7 +1308,7 @@ int SimulatedDriver::free_memory_ioctl(KfdProcess &proc, void *arg) {
   if (it != proc.allocations_.end()) {
     auto &alloc = it->second;
     if (alloc.imported && alloc.dmabuf_fd >= 0) {
-      syscall(SYS_close, alloc.dmabuf_fd);
+      get_libc_real().close_fn(alloc.dmabuf_fd);
       if (auto dmabuf_it = proc.imported_dmabufs_.find(args->handle);
           dmabuf_it != proc.imported_dmabufs_.end()) {
         proc.fd_to_import_handle_.erase(dmabuf_it->second.fd);
@@ -1302,7 +1322,7 @@ int SimulatedDriver::free_memory_ioctl(KfdProcess &proc, void *arg) {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
         owned_fds_.erase(alloc.memfd);
       }
-      syscall(SYS_close, alloc.memfd);
+      get_libc_real().close_fn(alloc.memfd);
     }
 
     uint32_t freed_process_id = proc.process_id();
@@ -1315,7 +1335,7 @@ int SimulatedDriver::free_memory_ioctl(KfdProcess &proc, void *arg) {
         if (ipc_it->second.source_process_id == freed_process_id &&
             ipc_it->second.source_alloc_handle == freed_handle) {
           if (ipc_it->second.backing_memfd >= 0)
-            syscall(SYS_close, ipc_it->second.backing_memfd);
+            get_libc_real().close_fn(ipc_it->second.backing_memfd);
           ipc_it = ipc_store_.erase(ipc_it);
         } else {
           ++ipc_it;
@@ -1565,18 +1585,17 @@ int SimulatedDriver::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
     auto &alloc = it->second;
 
     if (alloc.memfd < 0 && alloc.host_ptr) {
-      int promoted_fd = static_cast<int>(
-          syscall(SYS_memfd_create, "rocjitsu_ipc_promote", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+      int promoted_fd = memfd_create("rocjitsu_ipc_promote", MFD_CLOEXEC | MFD_ALLOW_SEALING);
       if (promoted_fd < 0)
         return -errno;
       if (ftruncate(promoted_fd, static_cast<off_t>(alloc.size)) != 0) {
-        syscall(SYS_close, promoted_fd);
+        get_libc_real().close_fn(promoted_fd);
         return -errno;
       }
       auto *new_host_ptr =
           safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, promoted_fd, 0);
       if (new_host_ptr == MAP_FAILED) {
-        syscall(SYS_close, promoted_fd);
+        get_libc_real().close_fn(promoted_fd);
         return -ENOMEM;
       }
       std::memcpy(new_host_ptr, alloc.host_ptr, alloc.size);
@@ -1599,7 +1618,7 @@ int SimulatedDriver::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
       }
 
       if (alloc.host_ptr_owned)
-        syscall(SYS_munmap, alloc.host_ptr, alloc.size);
+        get_libc_real().munmap_fn(alloc.host_ptr, alloc.size);
 
       alloc.host_ptr = new_host_ptr;
       alloc.host_ptr_owned = true;
@@ -1609,12 +1628,11 @@ int SimulatedDriver::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
         owned_fds_.insert(promoted_fd);
       }
     } else if (alloc.memfd < 0) {
-      int new_fd = static_cast<int>(
-          syscall(SYS_memfd_create, "rocjitsu_ipc_lazy", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+      int new_fd = memfd_create("rocjitsu_ipc_lazy", MFD_CLOEXEC | MFD_ALLOW_SEALING);
       if (new_fd < 0)
         return -errno;
       if (ftruncate(new_fd, static_cast<off_t>(alloc.size)) != 0) {
-        syscall(SYS_close, new_fd);
+        get_libc_real().close_fn(new_fd);
         return -errno;
       }
       alloc.memfd = new_fd;
@@ -1649,7 +1667,7 @@ int SimulatedDriver::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
 
   IpcHandleKey key{};
   if (getrandom(key.words, sizeof(key.words), 0) != sizeof(key.words)) {
-    syscall(SYS_close, dup_fd);
+    get_libc_real().close_fn(dup_fd);
     return -errno;
   }
 
@@ -1715,7 +1733,7 @@ int SimulatedDriver::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
       std::lock_guard<std::mutex> flk(owned_fds_mutex_);
       owned_fds_.erase(dup_fd);
     }
-    syscall(SYS_close, dup_fd);
+    get_libc_real().close_fn(dup_fd);
     return -ENOMEM;
   }
 
@@ -1892,8 +1910,8 @@ int SimulatedDriver::claim_fd(int real_fd) {
     init_reserved_fd_range();
   int vfd = next_reserved_fd_++;
   assert(vfd < reserved_fd_base_ + kReservedFdCount && "reserved fd range exhausted");
-  syscall(SYS_dup2, real_fd, vfd);
-  syscall(SYS_close, real_fd);
+  get_libc_real().dup2_fn(real_fd, vfd);
+  get_libc_real().close_fn(real_fd);
   return vfd;
 }
 
