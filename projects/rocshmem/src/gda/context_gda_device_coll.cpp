@@ -356,6 +356,4 @@ __device__ void GDAContext::internal_broadcastmem_wave(void *dst, const void *sr
   internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
 }
 
-
-
 }  // namespace rocshmem

@@ -524,9 +524,7 @@ __device__ void IPCContext::internal_put_broadcast_wave(T *dst, const T *src, in
   if (my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
-      if (i != my_pe) {
         put_nbi_wave(dst, src, nelems, i);
-      }
     }
   }
 }

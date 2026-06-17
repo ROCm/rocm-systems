@@ -239,18 +239,14 @@ __device__ void IPCContext::internal_put_broadcastmem_wave(
   if (my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
-      if (i != my_pe) {
         putmem_nbi_wave(dst, src, nelems, i);
-      }
     }
   }
 }
 
 __device__ void IPCContext::internal_get_broadcastmem_wave(
   void *dst, const void *src, int nelems, int pe_root) {
-  if (my_pe != pe_root) {
     getmem_wave(dst, src, nelems, pe_root);
-  }
 }
 
 __device__ void IPCContext::internal_broadcastmem_wave(void *dst, const void *src, int nelems,
