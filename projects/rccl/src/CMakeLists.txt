@@ -415,7 +415,6 @@ set(SRC_FILES
   gin/gin_host_rocshmem_gda.cc
   gin/gin_plugin_rocshmem_gda.cc
   gin/gin_qp_factory.cpp
-  transport/net_ib/gdaki/gin_host_gdaki.h
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h
   include/latency_profiler/CollTraceFunc.h
