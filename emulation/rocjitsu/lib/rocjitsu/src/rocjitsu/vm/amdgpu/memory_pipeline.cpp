@@ -378,7 +378,7 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint3
         vmid);
 
     // Invalidate stale L1 line.
-    l1->invalidate(ea);
+    l1->invalidate(ea, vmid);
   }
 }
 

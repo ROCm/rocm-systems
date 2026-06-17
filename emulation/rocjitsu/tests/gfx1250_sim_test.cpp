@@ -644,7 +644,7 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   EXPECT_EQ(cu->config().lds_size_kb, kGfx1250LdsSizeKb);
   EXPECT_EQ(soc->xcd(0)->command_processor()->vgpr_granularity(), kGfx1250VgprEncodingGranule);
   EXPECT_EQ(soc->xcd(0)->command_processor()->sdma_packet_dialect(),
-            amdgpu::SdmaPacketDialect::Gfx11Plus);
+            amdgpu::SdmaPacketDialect::Gfx1250);
 }
 
 TEST(Gfx1250SdmaTest, PollMem64WaitsForFull64BitCondition) {

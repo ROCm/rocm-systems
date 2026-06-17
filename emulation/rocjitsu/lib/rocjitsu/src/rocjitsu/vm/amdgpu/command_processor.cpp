@@ -14,6 +14,7 @@ RJ_DIAGNOSTIC_POP
 
 #include "simdojo/sim/message.h"
 #include "simdojo/sim/simulation.h"
+#include "util/bit.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -84,10 +85,10 @@ void validate_cluster_shape(const DispatchEntry &dp) {
   }
 }
 
-uint32_t read_memory_u32(GpuMemory *memory, uint64_t addr) {
+uint32_t read_memory_u32(GpuMemory *memory, uint64_t addr, uint32_t vmid = 0) {
   uint32_t value = 0;
   for (uint32_t i = 0; i < sizeof(value); ++i)
-    value |= static_cast<uint32_t>(memory->read8(addr + i)) << (i * 8);
+    value |= static_cast<uint32_t>(memory->read8(addr + i, vmid)) << (i * 8);
   return value;
 }
 
@@ -239,7 +240,8 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
 
       uint64_t preload_addr = pkt.kernarg_addr + static_cast<uint64_t>(preload_offset) * 4;
       for (uint32_t i = 0; i < preload_length; ++i)
-        cu->write_sgpr(sbase + idx + i, read_memory_u32(memory_, preload_addr + i * 4));
+        cu->write_sgpr(sbase + idx + i,
+                       read_memory_u32(memory_, preload_addr + i * 4, pkt.process_id));
       util::Logger::vm("CP: init_wf kernarg preload s[", idx, ":", idx + preload_length - 1,
                        "] length=", preload_length, " offset=", preload_offset, " sbase=", sbase);
       idx += preload_length;
@@ -922,9 +924,12 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t wfs_per_wg = (wg_size + wave_size - 1) / wave_size;
 
   uint32_t num_dims = pkt.setup & 0x3;
-  uint32_t grid_wgs_x = pkt.workgroup_size_x > 0 ? pkt.grid_size_x / pkt.workgroup_size_x : 1;
-  uint32_t grid_wgs_y = pkt.workgroup_size_y > 0 ? pkt.grid_size_y / pkt.workgroup_size_y : 1;
-  uint32_t grid_wgs_z = pkt.workgroup_size_z > 0 ? pkt.grid_size_z / pkt.workgroup_size_z : 1;
+  uint32_t grid_wgs_x =
+      util::ceil_div_or_one(pkt.grid_size_x, static_cast<uint32_t>(pkt.workgroup_size_x));
+  uint32_t grid_wgs_y =
+      util::ceil_div_or_one(pkt.grid_size_y, static_cast<uint32_t>(pkt.workgroup_size_y));
+  uint32_t grid_wgs_z =
+      util::ceil_div_or_one(pkt.grid_size_z, static_cast<uint32_t>(pkt.workgroup_size_z));
   uint32_t total_wgs = grid_wgs_x * grid_wgs_y * grid_wgs_z;
 
   DispatchEntry dp{};
@@ -1506,7 +1511,7 @@ constexpr uint32_t ATOMIC_SIZE = 8;
 constexpr uint32_t CONST_FILL_SIZE = 5;
 constexpr uint32_t TIMESTAMP_SIZE = 3;
 constexpr uint32_t GCR_SIZE = 5;
-constexpr uint32_t GCR_GFX11_PLUS_SIZE = 6;
+constexpr uint32_t GCR_GFX1250_SIZE = 6;
 constexpr uint32_t COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE = 19;
 constexpr uint32_t FENCE_64B_GFX11_PLUS_SIZE = 5;
 constexpr uint32_t POLL_MEM_64B_GFX11_PLUS_SIZE = 8;
@@ -1538,6 +1543,13 @@ bool sdma_compare_u64(uint32_t func, uint64_t value, uint64_t reference) {
 }
 
 } // namespace
+
+void CommandProcessor::invalidate_gpu_caches() {
+  for (auto *l2 : l2_caches_)
+    l2->invalidate_all();
+  for (auto *cu : cus_)
+    cu->l1_vector().invalidate_all();
+}
 
 void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx) {
   uint32_t ring_mask = (queue.ring_size / sizeof(uint32_t)) - 1;
@@ -1662,16 +1674,18 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
 
         std::memcpy(dst_ptr, src_ptr, count);
 
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(dst_va, count);
-        for (auto *cu : cus_)
-          cu->l1_vector().invalidate_all();
+        // Emulated SDMA writes straight to the backing store, bypassing the GPU
+        // caches. Real SDMA does not snoop GL2; coherence with the destination
+        // is re-established by the consuming kernel's acquire fence (see the
+        // AGENT-scope GL2 invalidate at dispatch). We model that here with a
+        // coarse, indiscriminate invalidate, matching HW cache-maintenance
+        // granularity rather than a surgical per-range knockout.
+        invalidate_gpu_caches();
 
         if (signal_decrement) {
           std::atomic_ref<int64_t>(*signal_ptr)
               .fetch_sub(static_cast<int64_t>(signal_data), std::memory_order_release);
-          for (auto *l2 : l2_caches_)
-            l2->invalidate_range(signal_addr, sizeof(int64_t));
+          invalidate_gpu_caches();
         }
 
         pkt_dwords = sdma::COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE;
@@ -1704,16 +1718,12 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           return stop_and_retry_current_packet();
         }
         std::memcpy(dst_ptr, src_ptr, count);
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(dst_va, count);
         std::memcpy(dst2_ptr, src_ptr, count);
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(dst2_va, count);
+        invalidate_gpu_caches();
         pkt_dwords = sdma::COPY_LINEAR_BROADCAST_SIZE;
       } else {
         std::memcpy(dst_ptr, src_ptr, count);
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(dst_va, count);
+        invalidate_gpu_caches();
         pkt_dwords = sdma::COPY_LINEAR_SIZE;
       }
       break;
@@ -1731,8 +1741,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         auto *ptr = static_cast<uint64_t *>(resolve(addr_va));
         if (ptr) {
           std::atomic_ref<uint64_t>(*ptr).store(data, std::memory_order_release);
-          for (auto *l2 : l2_caches_)
-            l2->invalidate_range(addr_va, sizeof(uint64_t));
+          invalidate_gpu_caches();
         }
         pkt_dwords = sdma::FENCE_64B_GFX11_PLUS_SIZE;
         break;
@@ -1743,8 +1752,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       auto *ptr = static_cast<uint32_t *>(resolve(addr_va));
       if (ptr) {
         std::atomic_ref<uint32_t>(*ptr).store(data, std::memory_order_release);
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(addr_va, sizeof(uint32_t));
+        invalidate_gpu_caches();
       }
       pkt_dwords = sdma::FENCE_SIZE;
       break;
@@ -1833,8 +1841,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         if (ptr) {
           std::atomic_ref<int64_t>(*ptr).fetch_add(static_cast<int64_t>(src_data),
                                                    std::memory_order_release);
-          for (auto *l2 : l2_caches_)
-            l2->invalidate_range(addr_va, sizeof(int64_t));
+          invalidate_gpu_caches();
           if (static_cast<int64_t>(src_data) < 0 && interrupt_cb_) {
             // Signal layout: addr is at offset 8 (value field) from sig base.
             uint64_t sig_base = addr_va - 8;
@@ -1847,8 +1854,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
               if (mb_dst) {
                 std::atomic_ref<uint64_t>(*mb_dst).store(uint64_t(event_id),
                                                          std::memory_order_release);
-                for (auto *l2 : l2_caches_)
-                  l2->invalidate_range(mailbox_ptr, sizeof(uint64_t));
+                invalidate_gpu_caches();
               }
             }
             interrupt_cb_(queue.process_id, event_id);
@@ -1871,8 +1877,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         } else {
           std::memset(dst, static_cast<int>(data & 0xFF), count);
         }
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(addr_va, count);
+        invalidate_gpu_caches();
       }
       pkt_dwords = sdma::CONST_FILL_SIZE;
       break;
@@ -1891,19 +1896,11 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       break;
     }
     case sdma::OP_GCR: {
-      uint64_t base_va =
-          (static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32)) & ~0xFULL;
-      uint64_t size_field =
-          (static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32)) & ~0xFULL;
-      uint32_t range =
-          size_field > 0 ? static_cast<uint32_t>(std::min(size_field, uint64_t(UINT32_MAX))) : 0;
-      for (auto *l2 : l2_caches_) {
-        if (range > 0)
-          l2->invalidate_range(base_va, range);
-        else
-          l2->invalidate_all();
-      }
-      pkt_dwords = uses_gfx11_plus_sdma_packets() ? sdma::GCR_GFX11_PLUS_SIZE : sdma::GCR_SIZE;
+      // GCR is the real SDMA cache-maintenance packet. It carries a base/size,
+      // but GFX9+ HW services it at coarse (whole-cache) granularity, so we
+      // model it as a full GL2 invalidate regardless of the range fields.
+      invalidate_gpu_caches();
+      pkt_dwords = uses_gfx1250_gcr_packet() ? sdma::GCR_GFX1250_SIZE : sdma::GCR_SIZE;
       break;
     }
     case sdma::OP_HDP_FLUSH:
@@ -1921,8 +1918,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         if (dst) {
           for (uint32_t i = 0; i < count; ++i)
             dst[i] = dw(4 + i);
-          for (auto *l2 : l2_caches_)
-            l2->invalidate_range(addr_va, count * sizeof(uint32_t));
+          invalidate_gpu_caches();
         }
       }
       pkt_dwords = 4 + count;

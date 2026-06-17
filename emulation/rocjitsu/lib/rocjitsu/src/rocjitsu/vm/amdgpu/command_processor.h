@@ -74,6 +74,7 @@ struct HwQueue {
 enum class SdmaPacketDialect {
   Legacy,
   Gfx11Plus,
+  Gfx1250,
 };
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
@@ -180,6 +181,15 @@ private:
   /// @brief Process SDMA packets from an SDMA queue's ring buffer.
   void process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx);
 
+  /// @brief Coarse invalidate of the GPU data caches (L1 V$ + L2/GL2).
+  /// @details Emulated SDMA and CP writes land directly in the backing store,
+  /// bypassing the cache hierarchy. Real SDMA does not snoop GL2, so stale
+  /// cached copies are knocked out the way HW cache-maintenance does it: coarse
+  /// and indiscriminate, not per-range. This is the simulator's stand-in for a
+  /// GL2 invalidate; the consuming kernel's acquire fence at dispatch flushes
+  /// the remaining per-CU caches (including the scalar K$).
+  void invalidate_gpu_caches();
+
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
                           uint64_t pkt_addr, HwQueueState &qs,
@@ -228,7 +238,14 @@ private:
   }
 
   bool uses_gfx11_plus_sdma_packets() const {
-    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx11Plus;
+    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx11Plus ||
+           sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
+  }
+
+  // gfx1250 widens the GCR packet to 6 dwords (SDMA_PKT_GCR_GFX1250); gfx11/12
+  // keep the 5-dword layout.
+  bool uses_gfx1250_gcr_packet() const {
+    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
   }
 
   GpuMemory *memory_ = nullptr;

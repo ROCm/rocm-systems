@@ -17,19 +17,19 @@ namespace rocjitsu {
 namespace amdgpu {
 
 void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
-  if (cache_.lookup(addr))
+  if (cache_.lookup(addr, nullptr, vmid))
     return;
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
   uint8_t evicted_data[LINE_SIZE];
-  cache_.allocate(addr, &evicted, evicted_data);
+  cache_.allocate(addr, vmid, &evicted, evicted_data);
 
   assert(!evicted.dirty && "L1 V$ is write-through; lines should never be dirty");
 
   uint8_t line_buf[LINE_SIZE];
   l2_->fetch_line(line_addr, line_buf, vmid);
-  cache_.fill_line(addr, line_buf);
+  cache_.fill_line(addr, line_buf, vmid);
 }
 
 // Per-line CC invalidation is sufficient: the CP serializes dispatch N's cache
@@ -72,14 +72,14 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype
     }
 
     if (chunk_mtype == Mtype::CC) {
-      cache_.invalidate(ea);
+      cache_.invalidate(ea, vmid);
       l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
       copied += chunk;
       continue;
     }
 
     ensure_line(ea, vmid);
-    cache_.read_line(ea, dst + copied, line_offset, chunk);
+    cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
     copied += chunk;
   }
 }
@@ -123,7 +123,7 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
     }
 
     ensure_line(ea, vmid);
-    cache_.write_line(ea, src + copied, line_offset, chunk);
+    cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
 
     // Write through to L2 for all cacheable stores. This ensures partial writes
     // from different CUs sharing the same L2 are properly merged at byte
@@ -132,7 +132,7 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
     l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
 
     simdojo::CacheTag *tag = nullptr;
-    cache_.lookup(ea, &tag);
+    cache_.lookup(ea, &tag, vmid);
     assert(tag != nullptr && "ensure_line must guarantee hit");
 
     // L1 line stays clean since L2 has the authoritative copy.
