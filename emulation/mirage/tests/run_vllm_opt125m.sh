@@ -36,7 +36,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIRAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PROFILE="${PROFILE:-mi350x}"
-IMAGE="${IMAGE:-vllm/vllm-openai-rocm:latest}"
+IMAGE="${IMAGE:-docker.io/vllm/vllm-openai-rocm:latest}"
 MODEL="${MODEL:-facebook/opt-125m}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 PORT="${PORT:-8000}"
