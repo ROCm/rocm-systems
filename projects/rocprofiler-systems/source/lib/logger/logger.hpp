@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "common/env_vars.hpp"
+
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -63,10 +65,10 @@ parse_boolean_env(const char* env)
 struct logger_settings_t
 {
     logger_settings_t()
-    : m_log_level(log_level_from_env(std::getenv("ROCPROFSYS_LOG_LEVEL")))
-    , m_log_file(std::getenv("ROCPROFSYS_LOG_FILE"))
+    : m_log_level(log_level_from_env(std::getenv(env_vars::LOG_LEVEL)))
+    , m_log_file(std::getenv(env_vars::LOG_FILE))
     {
-        const char* rocprofsys_monochrome_env = std::getenv("ROCPROFSYS_MONOCHROME");
+        const char* rocprofsys_monochrome_env = std::getenv(env_vars::MONOCHROME);
         const char* monochrome_env            = std::getenv("MONOCHROME");
         if(rocprofsys_monochrome_env || monochrome_env)
         {

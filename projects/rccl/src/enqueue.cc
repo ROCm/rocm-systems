@@ -40,7 +40,8 @@
 #include <rocshmem/rocshmem.hpp>
 #endif
 
-#include "nccl_merge_stubs.h"
+#include "compiler.h"
+#include "dev_runtime.h"
 using namespace rccl;
 
 struct ncclKernelMatch {
@@ -530,7 +531,8 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
   int fnOpTyIndices[ncclNumFuncs*ncclNumDevRedOps*ncclNumTypes];
   int fnOpTyCount = 0;
 
-  if (comm->symmetricSupport) {
+  // Skip symmetric kernels for cross-clique
+  if (comm->symmetricSupport && !comm->p2pCrossClique) {
     NCCLCHECK(ncclMakeSymmetricTaskList(comm, task, &planner->collSymTaskQueue, &task));
   }
 
@@ -1493,6 +1495,11 @@ static ncclResult_t waitWorkFifoAvailable(struct ncclComm* comm, uint32_t desire
   int warned = 0;
   if (!hasRoom) {
     while (true) {
+      // Check abort flag to break deadlock when abort is signaled
+      if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire)) {
+        return ncclInternalError;
+      }
+
       NCCLCHECK(ncclCommPollEventCallbacks(comm, /*waitSome=*/true));
       hasRoom = (desiredProduced - comm->workFifoConsumed) <= comm->workFifoBytes;
       if (hasRoom) break;
@@ -1551,8 +1558,9 @@ static ncclResult_t uploadWork(struct ncclComm* comm, struct ncclKernelPlan* pla
     plan->kernelArgs->workBuf = comm->workFifoBufDev;
     break;
   case ncclDevWorkStorageTypePersistent:
-    // We rely on 16-byte alignment
-    #if __cplusplus >= 201103L
+    // We rely on 16-byte alignment. Use aligned alloc when available (C++11+ or MSVC with /std:c++11+).
+    // MSVC keeps __cplusplus at 199711L
+    #if (__cplusplus >= 201103L) || (defined(_MSC_VER) && _MSVC_LANG >= 201103L)
     fifoBufHost = ncclOsAlignedAlloc(16, ROUNDUP(workBytes, 16));
     #else
     static_assert(16 <= alignof(max_align_t), "We rely on 16-byte alignment.");
@@ -2385,7 +2393,7 @@ static ncclResult_t topoGetAlgoInfo(
     if (protoEnv) {
       snprintf(ncclProtoEnvStr, 1023, " NCCL_PROTO was set to %s.", protoEnv);
     }
-    WARN("Error : no algorithm/protocol available for function %s with datatype %s.%s%s", ncclFuncToString(info->func), ncclDatatypeToString(info->datatype), ncclAlgoEnvStr, ncclProtoEnvStr);
+    WARN("No algorithm/protocol available for function %s with datatype %s.%s%s", ncclFuncToString(info->func), ncclDatatypeToString(info->datatype), ncclAlgoEnvStr, ncclProtoEnvStr);
     return (algoEnv || protoEnv) ? ncclInvalidUsage : ncclInternalError;
   }
   // Honor Tuner config if available
@@ -2638,8 +2646,6 @@ void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
 }
 
-NCCL_PARAM(NvlsTreeMaxChunkSize, "NVLSTREE_MAX_CHUNKSIZE", -2);
-
 static ncclResult_t calcCollChunking(
     struct ncclComm* comm, struct ncclTaskColl* info, int nChannels, size_t nBytes,
     /*outputs*/uint32_t* outChunkSize, uint32_t* outDirectFlags, struct ncclProxyOp* proxyOp
@@ -2699,6 +2705,8 @@ static ncclResult_t calcCollChunking(
   int chunkSize = stepSize*chunkSteps;
   if (info->protocol == NCCL_PROTO_LL) chunkSize /= 2;
   if (info->protocol == NCCL_PROTO_LL128) chunkSize = (chunkSize / comm->ll128LineElems) * comm->ll128DataElems;
+  // Buffer-based ceiling; plugins may increase chunk size up to this limit.
+  int bufferMaxChunkSize = chunkSize;
 
   if (info->algorithm == NCCL_ALGO_TREE && info->protocol == NCCL_PROTO_SIMPLE) {
     if (pattern == ncclPatternTreeUpDown) {
@@ -2746,10 +2754,7 @@ static ncclResult_t calcCollChunking(
     // However, nChannels * comm->channels[0].nvls.nHeads should easily fit in 32 bits.
     // coverity[overflow_before_widen]
     uint64_t concurrentOps = nChannels * comm->channels[0].nvls.nHeads;
-    chunkSize = comm->nvlsChunkSize;
-    int maxChunkSize = (int)ncclParamNvlsTreeMaxChunkSize();
-    if (maxChunkSize == -2) maxChunkSize = comm->nNodes >= 4 ? 65536 : chunkSize;
-    chunkSize = std::min(chunkSize, maxChunkSize);
+    chunkSize = std::min(comm->nvlsChunkSize, comm->nvlsTreeMaxChunkSize);
     if ((nBytes < (32 * (concurrentOps * chunkSize))) && (chunkSize > 262144)) chunkSize = 262144;
     if ((nBytes < (16 * (concurrentOps * chunkSize))) && (chunkSize > 131072)) chunkSize = 131072;
     if ((nBytes < (4 * (concurrentOps * chunkSize))) && (chunkSize > 65536)) chunkSize = 65536;
@@ -2774,6 +2779,18 @@ static ncclResult_t calcCollChunking(
     *outDirectFlags = NCCL_P2P_WRITE;
   } else {
     *outDirectFlags = 0;
+  }
+
+  if (comm->tuner != nullptr && comm->tuner->getChunkSize != nullptr) {
+    size_t tunerChunkSize = chunkSize;
+    NCCLCHECK(comm->tuner->getChunkSize(comm->tunerContext, info->func, nBytes,
+                                        info->algorithm, info->protocol, nChannels, &tunerChunkSize));
+    if (tunerChunkSize > (size_t)bufferMaxChunkSize) {
+      INFO(NCCL_TUNING, "%s: tuner chunk size %zu exceeds buffer max %d, clamping",
+           ncclFuncToString(info->func), tunerChunkSize, bufferMaxChunkSize);
+      tunerChunkSize = bufferMaxChunkSize;
+    }
+    chunkSize = (int)tunerChunkSize;
   }
 
   // Compute nSteps for proxies
@@ -3284,7 +3301,7 @@ static ncclResult_t rmaTaskAppend(
     return ncclInvalidArgument;
   }
 
-#if !defined(HIP_PLATFORM_AMD)
+#if !defined(__HIP_PLATFORM_AMD__)
   int driverVersion;
   NCCLCHECK(ncclCudaDriverVersion(&driverVersion));
   if (driverVersion < 12050) {
@@ -3360,8 +3377,11 @@ static ncclResult_t rmaTaskAppend(
       srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
     }
 
-    bool isMultiSegment = ncclDevrWindowIsMultiSegment(srcWinHost) || ncclDevrWindowIsMultiSegment(peerWinHost);
-    bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(srcWinHost) || ncclDevrWindowHasSysmemSegment(peerWinHost);
+    // Relevant for symmetric window only
+    bool isMultiSegment = (comm->symmetricSupport)
+                       && (ncclDevrWindowIsMultiSegment(srcWinHost) || ncclDevrWindowIsMultiSegment(peerWinHost));
+    bool hasSysmemSegment = (comm->symmetricSupport)
+                       && (ncclDevrWindowHasSysmemSegment(srcWinHost) || ncclDevrWindowHasSysmemSegment(peerWinHost));
 
     if (isMultiSegment) {
       WARN("ncclPutSignal currently does not support VAs backed by multiple physical cuMem segments");
@@ -3547,7 +3567,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
       bool ceAvailable = ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
-      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable) {
+      bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+
+      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
       }
       // Append kernel-based collective

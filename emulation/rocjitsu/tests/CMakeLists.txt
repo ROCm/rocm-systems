@@ -184,9 +184,7 @@ set(RJ_KMD_PRELOAD_ENV
 find_program(
     ROCMINFO_EXECUTABLE
     NAMES rocminfo
-    HINTS ${CMAKE_SOURCE_DIR}/.venv
-    ENV ROCM_PATH
-    /opt/rocm
+    HINTS "${ROCM_PATH}"
     PATH_SUFFIXES bin
     DOC "Path to the rocminfo executable"
 )
@@ -248,13 +246,7 @@ endif()
 
 # --- HSA init test (requires ROCm HSA runtime + CLI launcher) ---
 
-find_library(
-    HSA_RUNTIME64
-    hsa-runtime64
-    PATHS /opt/rocm/lib
-    ENV ROCM_PATH
-    PATH_SUFFIXES lib
-)
+find_library(HSA_RUNTIME64 hsa-runtime64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
 if(HSA_RUNTIME64)
     get_filename_component(RJ_HSA_LIBRARY_DIR "${HSA_RUNTIME64}" DIRECTORY)
     get_filename_component(RJ_HSA_ROCM_ROOT "${RJ_HSA_LIBRARY_DIR}" DIRECTORY)
@@ -296,10 +288,7 @@ if(HSA_RUNTIME64)
         find_program(
             ROCM_AGENT_ENUM
             rocm_agent_enumerator
-            HINTS
-            ENV ROCM_PATH
-            ${RJ_HSA_ROCM_ROOT}
-            /opt/rocm
+            HINTS "${ROCM_PATH}"
             PATH_SUFFIXES bin
         )
         set(HAS_DBT_VECTOR_ADD_GPU FALSE)
@@ -546,13 +535,7 @@ endif()
 
 # --- HIP tests (requires hipcc + CLI launcher) ---
 
-find_program(
-    HIPCC_EXECUTABLE
-    hipcc
-    PATHS /opt/rocm/bin
-    ENV ROCM_PATH
-    PATH_SUFFIXES bin
-)
+find_program(HIPCC_EXECUTABLE hipcc PATHS "${ROCM_PATH}" PATH_SUFFIXES bin)
 if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
@@ -627,13 +610,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test(hip_ds_transpose_acc_test)
 
     # --- RCCL collective test ---
-    find_library(
-        RCCL_LIB
-        rccl
-        PATHS /opt/rocm/lib
-        ENV ROCM_PATH
-        PATH_SUFFIXES lib
-    )
+    find_library(RCCL_LIB rccl PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
     if(RCCL_LIB)
         rj_add_hip_test(hip_rccl_test EXTRA_LIBS ${RCCL_LIB})
         message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
@@ -697,13 +674,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     endif()
 
     # --- rocBLAS GEMM test ---
-    find_library(
-        ROCBLAS_LIB
-        rocblas
-        PATHS /opt/rocm/lib
-        ENV ROCM_PATH
-        PATH_SUFFIXES lib
-    )
+    find_library(ROCBLAS_LIB rocblas PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
     if(ROCBLAS_LIB)
         rj_add_hip_test(hip_gemm_test EXTRA_LIBS ${ROCBLAS_LIB})
         rj_add_hip_test(hip_gemm_test_cdna3 ARCH gfx942 SOURCE hip_gemm_test.cpp EXTRA_LIBS ${ROCBLAS_LIB})
