@@ -6628,6 +6628,18 @@ amdsmi_status_t amdsmi_topo_get_numa_node_number(amdsmi_processor_handle process
  *  weight for the connection between the device @p processor_handle_src
  *  and @p processor_handle_dst to the memory pointed to by @p weight.
  *
+ *  The weight is a qualitative cost metric derived from the KFD io_link
+ *  @c weight property (lower values indicate closer or faster connections),
+ *  similar in spirit to the NUMA distances reported by @c numactl. The value
+ *  is computed as follows:
+ *
+ *  - Each physical xGMI hop contributes 15, so an xGMI route traversing
+ *    @em N physical links has a weight of @em 15*N. A single-hop xGMI
+ *    connection has a weight of 15.
+ *  - Each PCIe segment contributes a fixed cost of 20.
+ *  - Multi-segment PCIe routes are summed over all segments
+ *    (GPU→CPU + CPU→CPU + CPU→GPU).
+ *
  *  @param[in] processor_handle_src the source processor handle
  *
  *  @param[in] processor_handle_dst the destination processor handle
@@ -6684,12 +6696,27 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *  between the device @p processor_handle_src and @p processor_handle_dst to the memory
  *  pointed to by @p hops and @p type.
  *
+ *  @note The value written to @p hops is an <b>abstracted topology step count</b>,
+ *  not the number of physical xGMI links traversed. The possible values are:
+ *
+ *  | Value | Meaning |
+ *  |-------|---------|
+ *  | 1 | Endpoints are reachable over xGMI (GPU-to-GPU or GPU-to-CPU), regardless of how many physical xGMI links the route traverses. |
+ *  | 2 | Endpoints communicate over PCIe within the same CPU NUMA node (GPU-to-GPU or GPU-to-CPU). |
+ *  | 3 | Endpoints are on different CPU NUMA nodes; the route crosses both. |
+ *  | 4 | Fallback value used when the inter-CPU io_link weight cannot be read. |
+ *
+ *  Two GPUs on the same xGMI fabric always report a hop count of 1, even when
+ *  the data physically crosses several xGMI links. To obtain the literal number
+ *  of physical xGMI links between two devices, read the value exposed by the
+ *  @c amdgpu driver at @c /sys/class/drm/card*/device/xgmi_num_hops instead.
+ *
  *  @param[in] processor_handle_src the source processor handle
  *
  *  @param[in] processor_handle_dst the destination processor handle
  *
  *  @param[in,out] hops A pointer to an uint64_t to which the
- *  hops for the connection should be written.
+ *  abstracted hop count for the connection should be written.
  *
  *  @param[in,out] type A pointer to an ::amdsmi_link_type_t to which the
  *  type for the connection should be written.

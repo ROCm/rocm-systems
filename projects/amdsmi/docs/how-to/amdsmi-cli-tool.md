@@ -566,6 +566,32 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+#### Interpreting hops and weight
+
+**Hops (`-o, --hops`)** — The hops table reports an *abstracted topology step count*, not
+the number of physical xGMI links between devices. The possible values are:
+
+| Hops | Meaning |
+|------|---------|
+| 1 | Endpoints reachable over xGMI (GPU-to-GPU or GPU-to-CPU), regardless of the number of physical xGMI links on the route. |
+| 2 | Endpoints connected over PCIe within the same CPU NUMA node. |
+| 3 | Endpoints on different CPU NUMA nodes; the route crosses both. |
+| 4 | Fallback when the inter-CPU io_link weight cannot be read. |
+
+Two GPUs on the same xGMI fabric always report `1`, even when data physically crosses
+multiple xGMI links. To determine the literal number of physical xGMI links between two
+devices, read the value from the `amdgpu` driver:
+
+```bash
+cat /sys/class/drm/card*/device/xgmi_num_hops
+```
+
+**Weight (`-w, --weight`)** — The weight table reports a qualitative cost metric derived
+from the KFD io_link `weight` property (lower = closer/faster), analogous to the NUMA
+distances reported by `numactl`. Each physical xGMI hop contributes 15 to the weight
+(for example, a single-hop xGMI connection has weight 15); each PCIe segment contributes
+a fixed 20, and multi-segment PCIe routes are summed across all segments.
+
 (cmd-set)=
 ### amd-smi set
 
