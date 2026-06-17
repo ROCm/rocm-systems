@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "backends/rocprofiler_sdk/backend.hpp"
 #include "core/agent.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
@@ -14,7 +13,6 @@
 #include <cstdint>
 #include <iterator>
 #include <memory>
-#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -72,24 +70,18 @@ private:
             auto supported_ids = query_supported_counters(agent_id);
             LOG_INFO("Agent {} (device {}): {} supported counters", gpu_agent->name,
                      gpu_agent->device_id, supported_ids.size());
-            if(supported_ids.empty())
-            {
-                continue;
-            }
+            if(supported_ids.empty()) continue;
 
             auto [filtered_ids, counter_meta] = filter_and_resolve_counter_details(
                 supported_ids, enabled, gpu_agent->device_type_index);
             LOG_INFO("Agent {}: {} counters after filtering", gpu_agent->handle,
                      filtered_ids.size());
-            if(filtered_ids.empty())
-            {
-                continue;
-            }
+            if(filtered_ids.empty()) continue;
 
             auto profile = typename backend_t::counter_config_id_t{};
             auto status  = m_backend_api->create_counter_config(
                 agent_id, filtered_ids.data(), filtered_ids.size(), &profile);
-            if(status != ROCPROFILER_STATUS_SUCCESS)
+            if(status != backend_t::status_success)
             {
                 LOG_WARNING("Failed to create profile config for agent {} (status={})",
                             gpu_agent->handle, static_cast<int>(status));
@@ -100,7 +92,7 @@ private:
 
             typename backend_t::context_id_t counter_context{};
             status = m_backend_api->create_context(&counter_context);
-            if(status != ROCPROFILER_STATUS_SUCCESS)
+            if(status != backend_t::status_success)
             {
                 LOG_WARNING("Failed to create context for agent {} (status={})",
                             gpu_agent->handle, static_cast<int>(status));
@@ -120,7 +112,7 @@ private:
                     if(iter != configs->end()) set_config(ctx, iter->second);
                 },
                 &m_profile_configs);
-            if(status != ROCPROFILER_STATUS_SUCCESS)
+            if(status != backend_t::status_success)
             {
                 LOG_WARNING(
                     "Failed to configure device counting for agent {} (status={})",
@@ -143,13 +135,13 @@ private:
             auto* out =
                 static_cast<std::vector<typename backend_t::counter_id_t>*>(user_data);
             out->insert(out->end(), counters, counters + num_counters);
-            return ROCPROFILER_STATUS_SUCCESS;
+            return backend_t::status_success;
         };
 
         auto       result = std::vector<typename backend_t::counter_id_t>{};
         const auto status = m_backend_api->iterate_agent_supported_counters(
             agent_id, collect_counters, &result);
-        if(status != ROCPROFILER_STATUS_SUCCESS)
+        if(status != backend_t::status_success)
         {
             LOG_DEBUG("No counters found for agent {} (status={})", agent_id.handle,
                       static_cast<int>(status));
@@ -174,7 +166,9 @@ private:
             auto details = m_backend_api->query_counter_details(counter_id);
             if(details.empty()) continue;
             if(!enabled.is_counter_enabled({ details.front().name, device_index }))
+            {
                 continue;
+            }
             ids.push_back(counter_id);
             meta.insert(meta.end(), std::make_move_iterator(details.begin()),
                         std::make_move_iterator(details.end()));

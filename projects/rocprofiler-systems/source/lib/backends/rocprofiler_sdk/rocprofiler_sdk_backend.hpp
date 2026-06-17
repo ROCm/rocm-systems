@@ -78,7 +78,11 @@ struct backend
     using buffer_tracing_kind   = rocprofiler_buffer_tracing_kind_t;
     using external_correlation_request_kind =
         rocprofiler_external_correlation_id_request_kind_t;
-    using counter_info_version_id_t  = rocprofiler_counter_info_version_id_t;
+    using counter_info_version_id_t = rocprofiler_counter_info_version_id_t;
+    using counter_info_v0_t         = rocprofiler_counter_info_v0_t;
+#if ROCPROFILER_VERSION >= 10000
+    using counter_info_v1_t = rocprofiler_counter_info_v1_t;
+#endif
     using scratch_memory_operation_t = rocprofiler_scratch_memory_operation_t;
     using marker_op_t                = rocprofiler_marker_core_api_id_t;
     using marker_control_op_t        = rocprofiler_marker_control_api_id_t;
@@ -106,6 +110,7 @@ struct backend
         rocprofiler_callback_tracing_operation_args_cb_t;
     using available_counters_cb_t      = rocprofiler_available_counters_cb_t;
     using available_dimensions_cb_t    = rocprofiler_available_dimensions_cb_t;
+    using device_counting_agent_cb_t   = rocprofiler_device_counting_agent_cb_t;
     using device_counting_service_cb_t = rocprofiler_device_counting_service_cb_t;
     using counter_flag_t               = rocprofiler_counter_flag_t;
 
@@ -164,8 +169,13 @@ struct backend
 
     // ─── Status constants ────────────────────────────────────────────────────────
     static constexpr status_t STATUS_SUCCESS = ROCPROFILER_STATUS_SUCCESS;
+    static constexpr status_t STATUS_ERROR   = ROCPROFILER_STATUS_ERROR;
     static constexpr status_t STATUS_ERROR_BUFFER_BUSY =
         ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+    static constexpr status_t STATUS_ERROR_HSA_NOT_LOADED =
+        ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
+    static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
+        ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     // ─── Callback phase constants ────────────────────────────────────────────────
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER =
@@ -277,6 +287,15 @@ struct backend
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
 #endif
+
+    // ─── Counter flag constants ───────────────────────────────────────────────────
+    static constexpr counter_flag_t COUNTER_FLAG_NONE = ROCPROFILER_COUNTER_FLAG_NONE;
+
+    // ─── Counter info version constants ──────────────────────────────────────────
+    static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_0 =
+        ROCPROFILER_COUNTER_INFO_VERSION_0;
+    static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_1 =
+        ROCPROFILER_COUNTER_INFO_VERSION_1;
 
     // ─── Scratch memory operation constants ──────────────────────────────────────
     static constexpr scratch_memory_operation_t SCRATCH_MEMORY_ALLOC =
