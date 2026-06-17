@@ -16,16 +16,15 @@
 # from that wrapper gives /usr, which mixes headers and device libraries from
 # different installs.
 find_program(
-    AMDCLANG
+    AMDCXX
     amdclang++
-    HINTS
-    ENV ROCM_PATH
-    /opt/rocm
-    PATH_SUFFIXES bin
+    PATHS ${ROCM_PATH}
+    PATH_SUFFIXES lib/llvm/bin bin
     DOC "Path to the ROCm amdclang++ compiler"
+    NO_DEFAULT_PATH
 )
 
-if(NOT AMDCLANG)
+if(NOT AMDCXX)
     message(
         STATUS
         "amdclang++ not found - device kernel tests will be disabled"
@@ -41,14 +40,10 @@ if(DEFINED SKIP_DEVICE_KERNELS AND SKIP_DEVICE_KERNELS)
     return()
 endif()
 
-message(STATUS "Found amdclang++: ${AMDCLANG}")
+message(STATUS "Using device compiler: ${AMDCXX}")
 
 set(KERNEL_OUTPUT_DIR ${CMAKE_BINARY_DIR}/kernels)
 file(MAKE_DIRECTORY ${KERNEL_OUTPUT_DIR})
-
-# Locate the ROCm installation root for --rocm-path.
-get_filename_component(ROCM_PATH "${AMDCLANG}" DIRECTORY)
-get_filename_component(ROCM_PATH "${ROCM_PATH}" DIRECTORY)
 
 include(rj_add_device_kernel)
 
@@ -68,7 +63,7 @@ function(rj_add_triton_asm_fixture name target)
     add_custom_command(
         OUTPUT ${asm_obj}
         COMMAND
-            ${AMDCLANG} -x assembler -target amdgcn-amd-amdhsa -mcpu=${target}
+            ${AMDCXX} -x assembler -target amdgcn-amd-amdhsa -mcpu=${target}
             --rocm-path=${ROCM_PATH} -c -o ${asm_obj}
             ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s
@@ -77,7 +72,7 @@ function(rj_add_triton_asm_fixture name target)
     add_custom_command(
         OUTPUT ${hsaco}
         COMMAND
-            ${AMDCLANG} -target amdgcn-amd-amdhsa -mcpu=${target}
+            ${AMDCXX} -target amdgcn-amd-amdhsa -mcpu=${target}
             --rocm-path=${ROCM_PATH} -nostdlib -shared -o ${hsaco} ${asm_obj}
         DEPENDS ${asm_obj}
         COMMENT "Linking Triton fixture: ${name} (${target})"
