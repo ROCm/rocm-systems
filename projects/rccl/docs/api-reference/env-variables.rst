@@ -152,6 +152,13 @@ in the following table.
       - | Integer value (default: ``-1``)
         | See InfiniBand ``show_gids`` command for valid values
 
+    * - | ``NCCL_PXN_C2C``
+        | Allows PXN routing through a C2C link to reach a NIC attached to a
+          peer GPU. The C2C path is NVIDIA-specific and is not currently
+          applicable on AMD hardware.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
       - | Interface prefix string or list
