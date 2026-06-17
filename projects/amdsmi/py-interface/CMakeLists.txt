@@ -149,8 +149,7 @@ if(BUILD_PYTHON_WHEEL)
         # (only the wheel ships this file) so a wheel that is missing its
         # bundled .so fails loudly instead of loading an unrelated system lib.
         COMMAND
-            ${Python3_EXECUTABLE} -c
-            "import pathlib, sys; p = pathlib.Path(sys.argv[1]); t = p.read_text(); k = '_AMDSMI_ALLOW_SYSTEM_FALLBACK = True'; assert t.count(k) == 1, 'fallback flag anchor not found in staged wheel wrapper'; p.write_text(t.replace(k, '_AMDSMI_ALLOW_SYSTEM_FALLBACK = False', 1))"
+            ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/disable_system_fallback.py
             ${PY_PACKAGE_DIR}/amdsmi_wrapper.py
         COMMAND
             ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} ${Python3_EXECUTABLE} -m pip
