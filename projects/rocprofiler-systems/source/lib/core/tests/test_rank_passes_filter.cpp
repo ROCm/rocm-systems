@@ -9,8 +9,7 @@
 #include <optional>
 #include <string>
 
-#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
-    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
 
 namespace
 {

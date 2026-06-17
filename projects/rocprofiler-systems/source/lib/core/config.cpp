@@ -2770,13 +2770,6 @@ get_rank_filter_logs()
     return static_cast<tim::tsettings<std::string>&>(*_v).get();
 }
 
-#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
-    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
-#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 1
-#else
-#    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 0
-#endif
-
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
 // Return the first env var in `env_var_options` that holds an unsigned integer.
 // `label` is used only for logging (e.g. "MPI rank", "MPI world size").
