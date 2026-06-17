@@ -12,7 +12,6 @@
 #include "nccl_common.h"
 #include "rma/rma_ce.h"
 #include "rma/rma_proxy.h"
-#include "nccl_merge_stubs.h"
 
 // Internal signal mode enum
 typedef enum {
