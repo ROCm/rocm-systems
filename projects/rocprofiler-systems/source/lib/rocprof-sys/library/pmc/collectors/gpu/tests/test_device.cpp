@@ -87,10 +87,10 @@ protected:
 
         EXPECT_CALL(*mock_backend, get_hotspot_temperature())
             .Times(AtLeast(1))
-            .WillRepeatedly(Return(75u));
+            .WillRepeatedly(Return(std::int64_t{ 75 }));
         EXPECT_CALL(*mock_backend, get_edge_temperature())
             .Times(AtLeast(1))
-            .WillRepeatedly(Return(70u));
+            .WillRepeatedly(Return(std::int64_t{ 70 }));
 
         SetupSDMAExpectations(mock_backend);
     }
@@ -146,7 +146,7 @@ protected:
 
         EXPECT_CALL(*mock_backend, get_hotspot_temperature())
             .Times(AtLeast(1))
-            .WillRepeatedly(Return(75u));
+            .WillRepeatedly(Return(std::int64_t{ 75 }));
 
         SetupSDMAExpectations(mock_backend);
     }
@@ -479,7 +479,7 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
 
     EXPECT_CALL(*mock_backend, get_hotspot_temperature())
         .Times(AtLeast(1))
-        .WillRepeatedly(Return(75u));
+        .WillRepeatedly(Return(std::int64_t{ 75 }));
 
     SetupSDMAExpectations(mock_backend);
 
@@ -512,7 +512,7 @@ TEST_F(DeviceTest, edge_temperature_collection)
 
     EXPECT_CALL(*mock_backend, get_edge_temperature())
         .Times(AtLeast(1))
-        .WillRepeatedly(Return(70u));
+        .WillRepeatedly(Return(std::int64_t{ 70 }));
 
     SetupSDMAExpectations(mock_backend);
 
@@ -1781,10 +1781,10 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
         .WillRepeatedly(Return(asic_info{ "Test GPU", "AMD" }));
 
     EXPECT_CALL(*mock, get_hotspot_temperature())
-        .WillOnce(Return(70u))
-        .WillOnce(Return(70u))
-        .WillOnce(Return(75u))
-        .WillOnce(Return(73u));
+        .WillOnce(Return(std::int64_t{ 70 }))
+        .WillOnce(Return(std::int64_t{ 70 }))
+        .WillOnce(Return(std::int64_t{ 75 }))
+        .WillOnce(Return(std::int64_t{ 73 }));
     EXPECT_CALL(*mock, get_edge_temperature())
         .Times(AnyNumber())
         .WillRepeatedly(Throw(std::runtime_error("temperature not supported")));
