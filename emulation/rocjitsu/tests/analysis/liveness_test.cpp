@@ -5,6 +5,7 @@
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -517,6 +518,64 @@ TEST(InstDefUse, Predicated) {
   InstDefUse idu(test_inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 4, 1}));
   EXPECT_TRUE(idu.has_predicated_def);
+}
+
+// --- Generated VOP1 SDWA/DPP destination-preserve reads (real decode) ---
+//
+// SDWA dst_unused:PRESERVE and a partial DPP row/bank mask both keep the old
+// vdst value, so the decoded instruction must report vdst as an implicit use.
+// InstDefUse is the per-instruction def/use set LivenessAnalysis consumes (it
+// calls Instruction::implicit_uses), so a use surfacing here is exactly what
+// reaches liveness -- see ImplicitUseIsLiveBeforeInstruction for that step.
+//
+// CDNA4 VOP1 word0: encoding[31:25]=0x3F, vdst[24:17], op[16:9]=1 (v_mov_b32),
+// src0[8:0]=marker (250=SRC_DPP, 249=SRC_SDWA).
+constexpr uint32_t kVop1MovWord0Dpp = (0x3Fu << 25) | (5u << 17) | (1u << 9) | 250u;
+constexpr uint32_t kVop1MovWord0Sdwa = (0x3Fu << 25) | (5u << 17) | (1u << 9) | 249u;
+
+std::unique_ptr<Instruction> decode_cdna4(const std::array<uint32_t, 2> &words) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+}
+
+TEST(GeneratedInstDefUse, DppPartialRowMaskReadsDestination) {
+  // DPP word1: row_mask[31:28]=0x7 (partial), bank_mask[27:24]=0xF, vsrc0[7:0]=2.
+  auto inst = decode_cdna4({kVop1MovWord0Dpp, (0x7u << 28) | (0xFu << 24) | 2u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 9), "v_mov_b32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, DppFullRowMaskDoesNotReadDestination) {
+  // DPP word1: row_mask=0xF and bank_mask=0xF (full) -> every lane written.
+  auto inst = decode_cdna4({kVop1MovWord0Dpp, (0xFu << 28) | (0xFu << 24) | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, SdwaPreserveReadsDestination) {
+  // SDWA word1: vsrc0[7:0]=2, dst_sel[10:8]=0 (BYTE_0, != DWORD),
+  // dst_unused[12:11]=2 (UNUSED_PRESERVE).
+  auto inst = decode_cdna4({kVop1MovWord0Sdwa, (2u << 11) | (0u << 8) | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, SdwaPadDoesNotReadDestination) {
+  // SDWA word1: dst_sel[10:8]=0, dst_unused[12:11]=0 (UNUSED_PAD) -> no read.
+  auto inst = decode_cdna4({kVop1MovWord0Sdwa, (0u << 11) | (0u << 8) | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
 } // namespace
