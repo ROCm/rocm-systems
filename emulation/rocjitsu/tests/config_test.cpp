@@ -46,6 +46,30 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 8u);
 }
 
+TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
+  auto rdna4 = config::load_config(CONFIG_DIR_PATH + "/amdgpu_rdna4_gfx1201_r9700_kmd.json",
+                                   rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(rdna4.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(rdna4.device.gpu_id, 8716u);
+  EXPECT_EQ(rdna4.device.device_id, 0x7551u);
+  EXPECT_EQ(rdna4.device.family_id, 0x98u);
+  EXPECT_EQ(rdna4.device.gfx_target_version, 120001u);
+  EXPECT_EQ(rdna4.soc()->num_xcds(), 1u);
+  EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
+  EXPECT_TRUE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
+
+  auto rdna3 = config::load_config(CONFIG_DIR_PATH + "/amdgpu_rdna3_gfx1100_w7900_kmd.json",
+                                   rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(rdna3.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_EQ(rdna3.device.gpu_id, 7019u);
+  EXPECT_EQ(rdna3.device.device_id, 0x7448u);
+  EXPECT_EQ(rdna3.device.family_id, 0x91u);
+  EXPECT_EQ(rdna3.device.gfx_target_version, 110000u);
+  EXPECT_EQ(rdna3.soc()->num_xcds(), 1u);
+  EXPECT_EQ(rdna3.soc()->xcd(0)->num_shader_engines(), 6u);
+  EXPECT_TRUE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
+}
+
 TEST(ConfigLoaderTest, BuildFromJsonString) {
   const char *json = R"({
     "max_ticks": 5000,

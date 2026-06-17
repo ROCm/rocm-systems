@@ -22,6 +22,118 @@
 #include "util/dynamic_loader.h"
 #include "util/log.h"
 
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/hsa.h"
+RJ_DIAGNOSTIC_POP
+
+typedef enum hsa_amd_sdma_engine_id {
+  HSA_AMD_SDMA_ENGINE_0 = 0x1,
+  HSA_AMD_SDMA_ENGINE_1 = 0x2,
+  HSA_AMD_SDMA_ENGINE_2 = 0x4,
+  HSA_AMD_SDMA_ENGINE_3 = 0x8,
+  HSA_AMD_SDMA_ENGINE_4 = 0x10,
+  HSA_AMD_SDMA_ENGINE_5 = 0x20,
+  HSA_AMD_SDMA_ENGINE_6 = 0x40,
+  HSA_AMD_SDMA_ENGINE_7 = 0x80,
+  HSA_AMD_SDMA_ENGINE_8 = 0x100,
+  HSA_AMD_SDMA_ENGINE_9 = 0x200,
+  HSA_AMD_SDMA_ENGINE_10 = 0x400,
+  HSA_AMD_SDMA_ENGINE_11 = 0x800,
+  HSA_AMD_SDMA_ENGINE_12 = 0x1000,
+  HSA_AMD_SDMA_ENGINE_13 = 0x2000,
+  HSA_AMD_SDMA_ENGINE_14 = 0x4000,
+  HSA_AMD_SDMA_ENGINE_15 = 0x8000,
+} hsa_amd_sdma_engine_id_t;
+
+typedef enum {
+  HSA_AMD_MEMORY_COPY_OP_LINEAR = 0,
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST = 1,
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP = 2,
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC = 3,
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST = 4,
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST = 5,
+} hsa_amd_memory_copy_op_type_t;
+
+typedef enum {
+  HSA_AMD_MEMORY_COPY_WAIT_ALWAYS = 0,
+  HSA_AMD_MEMORY_COPY_WAIT_LT = 1,
+  HSA_AMD_MEMORY_COPY_WAIT_LE = 2,
+  HSA_AMD_MEMORY_COPY_WAIT_EQ = 3,
+  HSA_AMD_MEMORY_COPY_WAIT_NE = 4,
+  HSA_AMD_MEMORY_COPY_WAIT_GE = 5,
+  HSA_AMD_MEMORY_COPY_WAIT_GT = 6,
+} hsa_amd_memory_copy_wait_function_t;
+
+typedef enum {
+  HSA_AMD_MEMORY_COPY_SIGNAL_NONE = 0,
+  HSA_AMD_MEMORY_COPY_SIGNAL_WRITE = 1,
+  HSA_AMD_MEMORY_COPY_SIGNAL_ADD = 2,
+  HSA_AMD_MEMORY_COPY_SIGNAL_SUB = 3,
+} hsa_amd_memory_copy_signal_op_t;
+
+#define HSA_AMD_MEMORY_COPY_OP_VERSION 1
+
+typedef struct hsa_amd_memory_copy_op_s {
+  uint16_t version;
+  uint16_t type;
+  uint16_t num_entries;
+  uint16_t traffic_class;
+  hsa_signal_t completion_signal;
+  union Src {
+    void *src;
+    void **src_list;
+  } src_u;
+  union SrcAgent {
+    hsa_agent_t src_agent;
+    hsa_agent_t *src_agent_list;
+  } src_agent_u;
+  union DstAgent {
+    hsa_agent_t dst_agent;
+    hsa_agent_t *dst_agent_list;
+  } dst_agent_u;
+  union Dst {
+    void *dst;
+    void **dst_list;
+  } dst_u;
+  union Size {
+    struct Single {
+      size_t size;
+      size_t unused_size;
+    } single;
+    struct Swap {
+      size_t src_size;
+      size_t dst_size;
+    } swap;
+    struct List {
+      size_t *size_list;
+      size_t reserved0;
+    } list;
+  } size_u;
+  struct {
+    uint16_t function;
+    uint16_t scope;
+    uint32_t reserved;
+    void *addr;
+    uint64_t value;
+    uint64_t mask;
+  } wait;
+  struct {
+    uint16_t operation;
+    uint16_t scope;
+    uint32_t reserved;
+    void *addr;
+    uint64_t data;
+  } signal;
+  uint64_t reserved1[1];
+} hsa_amd_memory_copy_op_t;
+
+using hipError_t = int;
+using hipMemcpyKind = int;
+constexpr hipError_t hipSuccess = 0;
+constexpr hipError_t hipErrorInvalidValue = 1;
+
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <charconv>
@@ -441,6 +553,147 @@ __attribute__((constructor(101))) static void resolve_real_dlsym() {
 
 __attribute__((constructor)) static void init_interposer() { InterposerContext::init(); }
 
+template <typename T> T lookup_next_symbol(const char *name) {
+  if (!real_dlsym_fn)
+    resolve_real_dlsym();
+  return reinterpret_cast<T>(real_dlsym_fn(RTLD_NEXT, name));
+}
+
+constexpr uint64_t kAmdSignalValueOffset = 8;
+
+bool rj_hsa_copy_active() {
+  return InterposerContext::ctx.driver() != nullptr || InterposerContext::ctx.remote() != nullptr;
+}
+
+int64_t *amd_signal_value_ptr(hsa_signal_t signal) {
+  if (signal.handle == 0)
+    return nullptr;
+  return reinterpret_cast<int64_t *>(static_cast<uintptr_t>(signal.handle + kAmdSignalValueOffset));
+}
+
+void decrement_signal(hsa_signal_t signal) {
+  auto *value = amd_signal_value_ptr(signal);
+  if (!value)
+    return;
+  std::atomic_ref<int64_t>(*value).fetch_sub(1, std::memory_order_release);
+}
+
+bool wait_for_hsa_dependencies(uint32_t num_dep_signals, const hsa_signal_t *dep_signals) {
+  if (num_dep_signals == 0)
+    return true;
+  if (!dep_signals)
+    return false;
+  for (uint32_t i = 0; i < num_dep_signals; ++i) {
+    auto *value = amd_signal_value_ptr(dep_signals[i]);
+    if (!value)
+      return false;
+    while (std::atomic_ref<int64_t>(*value).load(std::memory_order_acquire) > 0)
+      std::this_thread::yield();
+  }
+  return true;
+}
+
+bool copy_wait_satisfied(uint16_t function, uint64_t value, uint64_t reference) {
+  switch (function) {
+  case HSA_AMD_MEMORY_COPY_WAIT_ALWAYS:
+    return true;
+  case HSA_AMD_MEMORY_COPY_WAIT_LT:
+    return value < reference;
+  case HSA_AMD_MEMORY_COPY_WAIT_LE:
+    return value <= reference;
+  case HSA_AMD_MEMORY_COPY_WAIT_EQ:
+    return value == reference;
+  case HSA_AMD_MEMORY_COPY_WAIT_NE:
+    return value != reference;
+  case HSA_AMD_MEMORY_COPY_WAIT_GE:
+    return value >= reference;
+  case HSA_AMD_MEMORY_COPY_WAIT_GT:
+    return value > reference;
+  default:
+    return false;
+  }
+}
+
+bool wait_for_copy_op(const hsa_amd_memory_copy_op_t &op) {
+  if (op.wait.function == HSA_AMD_MEMORY_COPY_WAIT_ALWAYS)
+    return true;
+  if (!op.wait.addr)
+    return false;
+  auto *addr = static_cast<uint64_t *>(op.wait.addr);
+  for (;;) {
+    uint64_t value = std::atomic_ref<uint64_t>(*addr).load(std::memory_order_acquire);
+    if (copy_wait_satisfied(op.wait.function, value & op.wait.mask, op.wait.value))
+      return true;
+    std::this_thread::yield();
+  }
+}
+
+void apply_copy_signal(const hsa_amd_memory_copy_op_t &op) {
+  if (op.signal.operation == HSA_AMD_MEMORY_COPY_SIGNAL_NONE || !op.signal.addr)
+    return;
+  auto *addr = static_cast<uint64_t *>(op.signal.addr);
+  switch (op.signal.operation) {
+  case HSA_AMD_MEMORY_COPY_SIGNAL_WRITE:
+    std::atomic_ref<uint64_t>(*addr).store(op.signal.data, std::memory_order_release);
+    break;
+  case HSA_AMD_MEMORY_COPY_SIGNAL_ADD:
+    std::atomic_ref<uint64_t>(*addr).fetch_add(op.signal.data, std::memory_order_release);
+    break;
+  case HSA_AMD_MEMORY_COPY_SIGNAL_SUB:
+    std::atomic_ref<uint64_t>(*addr).fetch_sub(op.signal.data, std::memory_order_release);
+    break;
+  default:
+    break;
+  }
+}
+
+hsa_status_t rj_hsa_memory_copy(void *dst, const void *src, size_t size) {
+  if (size == 0)
+    return HSA_STATUS_SUCCESS;
+  if (!dst || !src)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  std::memcpy(dst, src, size);
+  return HSA_STATUS_SUCCESS;
+}
+
+bool rj_hsa_batch_copy_supported(const hsa_amd_memory_copy_op_t &op) {
+  if (op.version != HSA_AMD_MEMORY_COPY_OP_VERSION || op.completion_signal.handle == 0)
+    return false;
+  if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR)
+    return op.num_entries == 0 ||
+           (op.src_u.src_list && op.dst_u.dst_list && op.size_u.list.size_list);
+  if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST)
+    return op.src_u.src && op.dst_u.dst_list && op.num_entries > 0;
+  return false;
+}
+
+hsa_status_t rj_hsa_batch_copy_one(const hsa_amd_memory_copy_op_t &op) {
+  if (!wait_for_copy_op(op))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  hsa_status_t status = HSA_STATUS_SUCCESS;
+  if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR && op.num_entries == 0) {
+    status = rj_hsa_memory_copy(op.dst_u.dst, op.src_u.src, op.size_u.single.size);
+  } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR) {
+    for (uint16_t i = 0; i < op.num_entries; ++i) {
+      status = rj_hsa_memory_copy(op.dst_u.dst_list[i], op.src_u.src_list[i],
+                                  op.size_u.list.size_list[i]);
+      if (status != HSA_STATUS_SUCCESS)
+        return status;
+    }
+  } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST) {
+    for (uint16_t i = 0; i < op.num_entries; ++i) {
+      status = rj_hsa_memory_copy(op.dst_u.dst_list[i], op.src_u.src, op.size_u.single.size);
+      if (status != HSA_STATUS_SUCCESS)
+        return status;
+    }
+  }
+
+  apply_copy_signal(op);
+  decrement_signal(op.completion_signal);
+  return status;
+}
+
 } // namespace
 
 extern "C" {
@@ -448,6 +701,176 @@ extern "C" {
 static std::string redirect_sysfs_path(const char *path);
 static std::string redirect_sys_dev_char(const char *path);
 static const Sysfs::GpuInfo *interposer_gpu_info();
+
+hsa_status_t hsa_memory_copy(void *dst, const void *src, size_t size) {
+  if (rj_hsa_copy_active())
+    return rj_hsa_memory_copy(dst, src, size);
+
+  using fn_t = hsa_status_t (*)(void *, const void *, size_t);
+  static fn_t real_fn = lookup_next_symbol<fn_t>("hsa_memory_copy");
+  return real_fn ? real_fn(dst, src, size) : HSA_STATUS_ERROR_NOT_INITIALIZED;
+}
+
+hsa_status_t hsa_amd_memory_async_copy(void *dst, hsa_agent_t dst_agent, const void *src,
+                                       hsa_agent_t src_agent, size_t size, uint32_t num_dep_signals,
+                                       const hsa_signal_t *dep_signals,
+                                       hsa_signal_t completion_signal) {
+  if (rj_hsa_copy_active()) {
+    if (completion_signal.handle == 0)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (!wait_for_hsa_dependencies(num_dep_signals, dep_signals))
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    hsa_status_t status = rj_hsa_memory_copy(dst, src, size);
+    if (status == HSA_STATUS_SUCCESS)
+      decrement_signal(completion_signal);
+    return status;
+  }
+
+  using fn_t = hsa_status_t (*)(void *, hsa_agent_t, const void *, hsa_agent_t, size_t, uint32_t,
+                                const hsa_signal_t *, hsa_signal_t);
+  static fn_t real_fn = lookup_next_symbol<fn_t>("hsa_amd_memory_async_copy");
+  return real_fn ? real_fn(dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals,
+                           completion_signal)
+                 : HSA_STATUS_ERROR_NOT_INITIALIZED;
+}
+
+hsa_status_t
+hsa_amd_memory_async_copy_on_engine(void *dst, hsa_agent_t dst_agent, const void *src,
+                                    hsa_agent_t src_agent, size_t size, uint32_t num_dep_signals,
+                                    const hsa_signal_t *dep_signals, hsa_signal_t completion_signal,
+                                    hsa_amd_sdma_engine_id_t engine_id, bool force_copy_on_sdma) {
+  if (rj_hsa_copy_active()) {
+    if (completion_signal.handle == 0)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (!wait_for_hsa_dependencies(num_dep_signals, dep_signals))
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    hsa_status_t status = rj_hsa_memory_copy(dst, src, size);
+    if (status == HSA_STATUS_SUCCESS)
+      decrement_signal(completion_signal);
+    return status;
+  }
+
+  using fn_t = hsa_status_t (*)(void *, hsa_agent_t, const void *, hsa_agent_t, size_t, uint32_t,
+                                const hsa_signal_t *, hsa_signal_t, hsa_amd_sdma_engine_id_t, bool);
+  static fn_t real_fn = lookup_next_symbol<fn_t>("hsa_amd_memory_async_copy_on_engine");
+  return real_fn ? real_fn(dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals,
+                           completion_signal, engine_id, force_copy_on_sdma)
+                 : HSA_STATUS_ERROR_NOT_INITIALIZED;
+}
+
+hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t *copy_ops,
+                                             uint32_t num_copy_ops, uint32_t num_dep_signals,
+                                             const hsa_signal_t *dep_signals) {
+  if (rj_hsa_copy_active()) {
+    if (!copy_ops || num_copy_ops == 0)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (!wait_for_hsa_dependencies(num_dep_signals, dep_signals))
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    for (uint32_t i = 0; i < num_copy_ops; ++i) {
+      if (!rj_hsa_batch_copy_supported(copy_ops[i]))
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    for (uint32_t i = 0; i < num_copy_ops; ++i) {
+      hsa_status_t status = rj_hsa_batch_copy_one(copy_ops[i]);
+      if (status != HSA_STATUS_SUCCESS)
+        return status;
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
+  using fn_t =
+      hsa_status_t (*)(const hsa_amd_memory_copy_op_t *, uint32_t, uint32_t, const hsa_signal_t *);
+  static fn_t real_fn = lookup_next_symbol<fn_t>("hsa_amd_memory_async_batch_copy");
+  return real_fn ? real_fn(copy_ops, num_copy_ops, num_dep_signals, dep_signals)
+                 : HSA_STATUS_ERROR_NOT_INITIALIZED;
+}
+
+hipError_t hipMemcpy(void *dst, const void *src, size_t size_bytes, hipMemcpyKind kind) {
+  if (rj_hsa_copy_active()) {
+    if (size_bytes == 0)
+      return hipSuccess;
+    if (!dst || !src)
+      return hipErrorInvalidValue;
+    std::memcpy(dst, src, size_bytes);
+    return hipSuccess;
+  }
+
+  using fn_t = hipError_t (*)(void *, const void *, size_t, hipMemcpyKind);
+  static fn_t real_fn = lookup_next_symbol<fn_t>("hipMemcpy");
+  return real_fn ? real_fn(dst, src, size_bytes, kind) : hipErrorInvalidValue;
+}
+
+struct amdgpu_gpu_info {
+  uint32_t asic_id;
+  uint32_t chip_rev;
+  uint32_t chip_external_rev;
+  uint32_t family_id;
+  uint64_t ids_flags;
+  uint64_t max_engine_clk;
+  uint64_t max_memory_clk;
+  uint32_t num_shader_engines;
+  uint32_t num_shader_arrays_per_engine;
+  uint32_t avail_quad_shader_pipes;
+  uint32_t max_quad_shader_pipes;
+  uint32_t cache_entries_per_quad_pipe;
+  uint32_t num_hw_gfx_contexts;
+  uint32_t rb_pipes;
+  uint32_t enabled_rb_pipes_mask;
+  uint32_t gpu_counter_freq;
+  uint32_t backend_disable[4];
+  uint32_t mc_arb_ramcfg;
+  uint32_t gb_addr_cfg;
+  uint32_t gb_tile_mode[32];
+  uint32_t gb_macro_tile_mode[16];
+  uint32_t pa_sc_raster_cfg[4];
+  uint32_t pa_sc_raster_cfg1[4];
+  uint32_t cu_active_number;
+  uint32_t cu_ao_mask;
+  uint32_t cu_bitmap[4][4];
+  uint32_t vram_type;
+  uint32_t vram_bit_width;
+  uint32_t ce_ram_size;
+  uint32_t vce_harvest_config;
+  uint32_t pci_rev_id;
+};
+
+static uint32_t gb_addr_config_for_gfx_target(uint32_t gfx_target_version) {
+  if (gfx_target_version >= 120000 && gfx_target_version < 130000)
+    return 0x8200545;
+  if (gfx_target_version >= 110000 && gfx_target_version < 120000)
+    return 0x545;
+  return 0;
+}
+
+static int open_synthetic_drm_fd(const char *path) {
+  if (!path || !std::string_view(path).starts_with("/dev/dri/renderD"))
+    return -1;
+
+  if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
+      !InterposerContext::ctx.initialized())
+    InterposerContext::ctx.get_or_create();
+
+  if (InterposerContext::ctx.driver_fd() < 0 && InterposerContext::ctx.remote_kfd_fd() < 0)
+    return -1;
+
+  uint32_t render_minor = 128;
+  auto minor_str = std::string_view(path).substr(16);
+  if (!minor_str.empty())
+    render_minor = static_cast<uint32_t>(std::atoi(minor_str.data()));
+
+  auto raw_drm_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", MFD_CLOEXEC));
+  if (raw_drm_fd < 0)
+    return -1;
+
+  int high_fd = fcntl(raw_drm_fd, F_DUPFD_CLOEXEC, 512);
+  InterposerContext::real.close(raw_drm_fd);
+  if (high_fd < 0)
+    return -1;
+
+  InterposerContext::ctx.track_drm(high_fd, render_minor);
+  return high_fd;
+}
 
 int open(const char *path, int flags, ...) {
   mode_t mode = 0;
@@ -463,29 +886,8 @@ int open(const char *path, int flags, ...) {
   if (!p || InterposerContext::in_construction)
     return static_cast<int>(syscall(SYS_openat, AT_FDCWD, path, flags, mode));
 
-  if (std::string_view(path).starts_with("/dev/dri/renderD")) {
-    if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
-        !InterposerContext::ctx.initialized())
-      InterposerContext::ctx.get_or_create();
-  }
-  if (std::string_view(path).starts_with("/dev/dri/renderD") &&
-      (InterposerContext::ctx.driver_fd() >= 0 || InterposerContext::ctx.remote_kfd_fd() >= 0)) {
-    uint32_t render_minor = 128;
-    auto minor_str = std::string_view(path).substr(16);
-    if (!minor_str.empty())
-      render_minor = static_cast<uint32_t>(std::atoi(minor_str.data()));
-    auto raw_drm_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", MFD_CLOEXEC));
-    if (raw_drm_fd >= 0) {
-      int high_fd = fcntl(raw_drm_fd, F_DUPFD_CLOEXEC, 512);
-      InterposerContext::real.close(raw_drm_fd);
-      if (high_fd >= 0) {
-        InterposerContext::ctx.track_drm(high_fd, render_minor);
-        return high_fd;
-      }
-    }
-    errno = EMFILE;
-    return -1;
-  }
+  if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd >= 0)
+    return drm_fd;
 
   if (std::strcmp(path, "/dev/kfd") == 0) {
     if (InterposerContext::ctx.get_or_create_remote())
@@ -572,6 +974,9 @@ int openat(int dirfd, const char *path, int flags, ...) {
     return InterposerContext::real.openat(dirfd, path, flags, mode);
 
   if (path[0] == '/') {
+    if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd >= 0)
+      return drm_fd;
+
     if (std::string_view(path).starts_with("/sys/class/drm") ||
         std::string_view(path).starts_with("/sys/devices/virtual/kfd") ||
         std::string_view(path).starts_with("/sys/class/kfd")) {
@@ -1026,6 +1431,52 @@ int amdgpu_device_deinitialize(void * /*device_handle*/) { return 0; }
 int amdgpu_device_get_fd(void * /*device_handle*/) {
   int fd = InterposerContext::ctx.remote_kfd_fd();
   return fd >= 0 ? fd : InterposerContext::ctx.driver_fd();
+}
+
+const char *amdgpu_get_marketing_name(void * /*device_handle*/) {
+  auto *gpu = interposer_gpu_info();
+  if (!gpu)
+    return nullptr;
+
+  static thread_local std::string name;
+  if (gpu->marketing_name && gpu->marketing_name[0] != '\0') {
+    name = gpu->marketing_name;
+  } else {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "gfx%u", gpu->gfx_target_version / 100);
+    name = buf;
+  }
+  return name.c_str();
+}
+
+int amdgpu_query_gpu_info(void * /*device_handle*/, amdgpu_gpu_info *info) {
+  if (!info)
+    return -EINVAL;
+
+  auto *gpu = interposer_gpu_info();
+  if (!gpu)
+    return -ENODEV;
+
+  std::memset(info, 0, sizeof(*info));
+  info->asic_id = gpu->device_id;
+  info->chip_rev = gpu->gfx_target_version % 100;
+  info->chip_external_rev = info->chip_rev;
+  info->family_id = gpu->family_id;
+  info->max_engine_clk = gpu->max_engine_clk_fcompute;
+  info->max_memory_clk = gpu->mem_clk_max;
+  info->num_shader_engines = gpu->num_shader_engines;
+  info->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
+  info->avail_quad_shader_pipes = gpu->num_shader_engines * gpu->num_shader_arrays_per_engine;
+  info->max_quad_shader_pipes = info->avail_quad_shader_pipes;
+  info->num_hw_gfx_contexts = 1;
+  info->gpu_counter_freq = 100000;
+  info->gb_addr_cfg = gb_addr_config_for_gfx_target(gpu->gfx_target_version);
+  info->cu_active_number =
+      gpu->num_shader_engines * gpu->num_shader_arrays_per_engine * gpu->num_cu_per_sh;
+  info->vram_type = 6; // AMDGPU_VRAM_TYPE_HBM
+  info->vram_bit_width = gpu->mem_width;
+  info->pci_rev_id = info->chip_rev;
+  return 0;
 }
 
 // -- fopen / freopen interposition (sysfs redirect) --
@@ -1512,7 +1963,7 @@ static drmDevice *alloc_drm_device(const Sysfs::GpuInfo &gpu, uint32_t card_idx)
   pci_dev->device_id = static_cast<uint16_t>(gpu.device_id);
   pci_dev->subvendor_id = static_cast<uint16_t>(gpu.vendor_id);
   pci_dev->subdevice_id = static_cast<uint16_t>(gpu.device_id);
-  pci_dev->revision_id = 0;
+  pci_dev->revision_id = static_cast<uint8_t>(gpu.gfx_target_version % 100);
 
   dev->nodes = nodes;
   dev->available_nodes = (1 << DRM_NODE_PRIMARY) | (1 << DRM_NODE_RENDER);
@@ -1600,6 +2051,15 @@ void *dlsym(void *handle, const char *symbol) {
         {"drmGetDevice2", reinterpret_cast<void *>(&drmGetDevice2)},
         {"drmGetDevices", reinterpret_cast<void *>(&drmGetDevices)},
         {"drmGetDevices2", reinterpret_cast<void *>(&drmGetDevices2)},
+        {"amdgpu_get_marketing_name", reinterpret_cast<void *>(&amdgpu_get_marketing_name)},
+        {"amdgpu_query_gpu_info", reinterpret_cast<void *>(&amdgpu_query_gpu_info)},
+        {"hsa_memory_copy", reinterpret_cast<void *>(&hsa_memory_copy)},
+        {"hsa_amd_memory_async_copy", reinterpret_cast<void *>(&hsa_amd_memory_async_copy)},
+        {"hsa_amd_memory_async_copy_on_engine",
+         reinterpret_cast<void *>(&hsa_amd_memory_async_copy_on_engine)},
+        {"hsa_amd_memory_async_batch_copy",
+         reinterpret_cast<void *>(&hsa_amd_memory_async_batch_copy)},
+        {"hipMemcpy", reinterpret_cast<void *>(&hipMemcpy)},
     };
     auto it = overrides.find(symbol);
     if (it != overrides.end())

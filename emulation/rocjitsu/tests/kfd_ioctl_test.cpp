@@ -17,6 +17,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include <array>
 #include <cstring>
 #include <vector>
 
@@ -73,6 +74,37 @@ TEST_F(KfdIoctlTest, SetMemoryPolicy) {
 
   int rc = driver_->ioctl(AMDKFD_IOC_SET_MEMORY_POLICY, &args);
   EXPECT_EQ(rc, 0);
+}
+
+TEST_F(KfdIoctlTest, GetTileConfig) {
+  std::array<uint32_t, 40> tile_config;
+  std::array<uint32_t, 40> macro_tile_config;
+  tile_config.fill(0xdeadbeef);
+  macro_tile_config.fill(0xdeadbeef);
+
+  kfd_ioctl_get_tile_config_args args{};
+  args.gpu_id = kGpuId;
+  args.tile_config_ptr = reinterpret_cast<uint64_t>(tile_config.data());
+  args.macro_tile_config_ptr = reinterpret_cast<uint64_t>(macro_tile_config.data());
+  args.num_tile_configs = static_cast<uint32_t>(tile_config.size());
+  args.num_macro_tile_configs = static_cast<uint32_t>(macro_tile_config.size());
+
+  int rc = driver_->ioctl(AMDKFD_IOC_GET_TILE_CONFIG, &args);
+  EXPECT_EQ(rc, 0);
+  EXPECT_EQ(args.num_tile_configs, 32u);
+  EXPECT_EQ(args.num_macro_tile_configs, 16u);
+  EXPECT_EQ(args.gb_addr_config, 0u);
+  EXPECT_EQ(args.num_banks, 0u);
+  EXPECT_EQ(args.num_ranks, 0u);
+
+  for (uint32_t i = 0; i < args.num_tile_configs; ++i)
+    EXPECT_EQ(tile_config[i], 0u);
+  for (uint32_t i = 0; i < args.num_macro_tile_configs; ++i)
+    EXPECT_EQ(macro_tile_config[i], 0u);
+  for (uint32_t i = args.num_tile_configs; i < tile_config.size(); ++i)
+    EXPECT_EQ(tile_config[i], 0xdeadbeefu);
+  for (uint32_t i = args.num_macro_tile_configs; i < macro_tile_config.size(); ++i)
+    EXPECT_EQ(macro_tile_config[i], 0xdeadbeefu);
 }
 
 TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {

@@ -92,6 +92,7 @@ public:
   void set_vgpr_granularity(uint32_t g) { vgpr_granularity_ = g; }
   uint32_t vgpr_granularity() const { return vgpr_granularity_; }
   void set_packed_tid(bool v) { packed_tid_ = v; }
+  bool packed_tid() const { return packed_tid_; }
   void set_sdma_packet_dialect(SdmaPacketDialect dialect) { sdma_packet_dialect_ = dialect; }
   SdmaPacketDialect sdma_packet_dialect() const { return sdma_packet_dialect_; }
   /// @brief Update doorbell_base for all queues belonging to a process.

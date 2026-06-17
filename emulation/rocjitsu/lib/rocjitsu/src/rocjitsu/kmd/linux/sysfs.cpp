@@ -169,6 +169,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
           (1u << 16) | (1u << 17) | (1u << 18) | (1u << 20) | (1u << 21) | (1u << 26) | (1u << 27) |
           (1u << 28) | (1u << 29) | (1u << 30) | (1u << 31);
   }
+  cap = (cap & ~(0xFu << 22)) | ((gpu.gfx_target_version % 100) << 22);
 
   uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
 
@@ -333,9 +334,11 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
     std::string render_name = "renderD" + std::to_string(render_minor);
     std::string card_name = "card" + std::to_string(i);
 
-    std::ostringstream vendor_hex, device_hex;
+    std::ostringstream vendor_hex, device_hex, revision_hex;
     vendor_hex << "0x" << std::hex << gpu.vendor_id << "\n";
     device_hex << "0x" << std::hex << gpu.device_id << "\n";
+    revision_hex << "0x" << std::hex << std::setw(2) << std::setfill('0')
+                 << (gpu.gfx_target_version % 100) << "\n";
 
     uint32_t bus = (gpu.location_id >> 8) & 0xFF;
     uint32_t dev = (gpu.location_id >> 3) & 0x1F;
@@ -358,7 +361,7 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
       // drmParseSubsystemType does readlink("subsystem") then strncmp for "/pci"
       std::filesystem::create_symlink("../../../bus/pci", device_dir + "/subsystem");
       // drmParsePciDeviceInfo reads all five files; missing any causes -ENODEV
-      write_file(device_dir + "/revision", "0x00\n");
+      write_file(device_dir + "/revision", revision_hex.str());
       write_file(device_dir + "/subsystem_vendor", vendor_hex.str());
       write_file(device_dir + "/subsystem_device", device_hex.str());
     }

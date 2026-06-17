@@ -13,6 +13,16 @@
 namespace rocjitsu {
 namespace rdna4 {
 
+namespace {
+
+bool has_saddr(uint32_t saddr) {
+  // LLVM prints saddr=0x7c as "off" for GFX12 global/flat memory ops.
+  // Keep 0x7f as a no-base sentinel for older generated configs/tests.
+  return saddr != 0x7C && saddr != 0x7F;
+}
+
+} // namespace
+
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
   // GFX12 SMEM: sbase is an aligned SGPR pair, ioffset is a 24-bit signed immediate,
   // soffset is an SGPR index (0x7F = no SGPR offset).
@@ -34,7 +44,7 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
   d.exec_mask = exec;
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   uint64_t saddr_val = 0;
-  if (inst.saddr != 0x7F) {
+  if (has_saddr(inst.saddr)) {
     uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
     saddr_val = (static_cast<uint64_t>(cu.read_sgpr(sb + 1)) << 32) | cu.read_sgpr(sb);
   }
@@ -43,7 +53,7 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
       continue;
     uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
     uint64_t vaddr;
-    if (inst.saddr != 0x7F) {
+    if (has_saddr(inst.saddr)) {
       vaddr = cu.read_vgpr(vbase, lane);
     } else {
       vaddr =
@@ -62,7 +72,7 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
   d.exec_mask = exec;
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   uint64_t saddr_val = 0;
-  if (inst.saddr != 0x7F) {
+  if (has_saddr(inst.saddr)) {
     uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
     saddr_val = (static_cast<uint64_t>(cu.read_sgpr(sb + 1)) << 32) | cu.read_sgpr(sb);
   }
@@ -71,7 +81,7 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
       continue;
     uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
     uint64_t vaddr;
-    if (inst.saddr != 0x7F) {
+    if (has_saddr(inst.saddr)) {
       vaddr = cu.read_vgpr(vbase, lane);
     } else {
       vaddr =
@@ -92,7 +102,7 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   uint64_t scratch_base = wf.scratch_base();
   uint32_t saddr_val = 0;
-  if (inst.saddr != 0x7F) {
+  if (has_saddr(inst.saddr)) {
     uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
     saddr_val = cu.read_sgpr(sb);
   }

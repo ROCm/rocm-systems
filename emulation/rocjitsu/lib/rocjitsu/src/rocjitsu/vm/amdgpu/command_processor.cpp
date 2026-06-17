@@ -219,7 +219,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   //   0 = v0 only (workitem_id_x)
   //   1 = v0 + v1 (workitem_id_x, workitem_id_y)
   //   2 = v0 + v1 + v2 (workitem_id_x, workitem_id_y, workitem_id_z)
-  // On packed-TID targets (CDNA3/4 and gfx1250): v0[9:0]=X,
+  // On packed-TID targets (CDNA3/4, RDNA3/4, and gfx1250): v0[9:0]=X,
   // v0[19:10]=Y, v0[29:20]=Z. v1/v2 are not written. Kernel extracts
   // components via bit masks.
   uint32_t vbase = wf->vgpr_alloc().base;
