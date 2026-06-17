@@ -767,6 +767,8 @@ int main(int argc, char** argv) {
   printf("[HRR] %s\n", ok ? "PASS" : "FAIL");
 
   // Cleanup
+  for (auto& [rec, gexec] : ctx.graph_exec_map) (void)hipGraphExecDestroy(gexec);
+  for (auto& [rec, graph] : ctx.graph_map)      (void)hipGraphDestroy(graph);
   for (auto& [rec, entry] : ctx.alloc_map)   (void)hipFree(entry.live_ptr);
   for (auto& [rec, str]   : ctx.stream_map)  (void)hipStreamDestroy(str);
   for (auto& [rec, ev2]   : ctx.event_map)   (void)hipEventDestroy(ev2);
