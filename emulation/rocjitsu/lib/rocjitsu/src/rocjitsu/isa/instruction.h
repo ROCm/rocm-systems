@@ -46,7 +46,16 @@ enum InstFlags : uint64_t {
   /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
   ACCVGPR = (1ULL << 10),
   /// @brief Destination update is conditional and must not kill the old value.
-  PREDICATED_DEF = (1ULL << 11)
+  PREDICATED_DEF = (1ULL << 11),
+  /// @brief Vector results are masked by EXEC: inactive lanes preserve their
+  /// old values. Derived from the instruction's VECTOR exec-model semantics.
+  EXEC_MASKED = (1ULL << 12),
+  /// @brief Executes regardless of the EXEC mask (e.g. branches).
+  IGNORES_EXEC = (1ULL << 13),
+  /// @brief Writes the EXEC mask.
+  WRITES_EXEC = (1ULL << 14),
+  /// @brief Reads the EXEC mask.
+  READS_EXEC = (1ULL << 15)
 };
 
 class BasicBlock;

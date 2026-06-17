@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
@@ -35,17 +36,42 @@ public:
   explicit TestOperand(RegisterRef ref) : Operand(ref.width * 32, ref.index), ref_(ref) {}
 
   std::optional<RegisterRef> to_register_ref() const override { return ref_; }
+  std::optional<uint64_t> literal64_value() const override { return lit_; }
+  std::optional<uint64_t> const_value() const override {
+    return const_.has_value() ? const_ : literal64_value();
+  }
+
+  // Turn this into a 64-bit literal source operand (no register ref). Models the
+  // literal64 path: both literal64_value() and const_value() report it.
+  void set_literal(uint64_t v) {
+    lit_ = v;
+    size_bits_ = 64;
+  }
+
+  // Turn this into an inline-constant source operand: const_value() reports it
+  // but literal64_value() stays empty (mirrors how inline constants behave).
+  void set_inline_const(uint64_t v) {
+    const_ = v;
+    size_bits_ = 64;
+  }
 
 private:
   std::optional<RegisterRef> ref_;
+  std::optional<uint64_t> lit_;
+  std::optional<uint64_t> const_;
 };
 
 class TestInstruction : public Instruction {
 public:
+  // `literal_src`, when set, appends one literal source operand carrying the
+  // given value via literal64_value() — models an instruction's literal64
+  // (SIMM) immediate, e.g. the all-ones source of `s_mov_b64 exec, <lit>`.
   TestInstruction(std::string_view mnemonic, std::initializer_list<RegisterRef> defs = {},
                   std::initializer_list<RegisterRef> uses = {}, uint64_t flags = 0,
                   std::optional<int64_t> branch_delta = std::nullopt,
-                  std::initializer_list<RegisterRef> implicit_uses = {})
+                  std::initializer_list<RegisterRef> implicit_uses = {},
+                  std::optional<uint64_t> literal_src = std::nullopt,
+                  std::optional<uint64_t> inline_const_src = std::nullopt)
       : Instruction(mnemonic, nullptr), implicit_uses_(implicit_uses), branch_delta_(branch_delta) {
     size_ = 4;
     flags_ = flags;
@@ -57,6 +83,16 @@ public:
     }
     for (RegisterRef ref : uses) {
       src_storage_[num_src_] = TestOperand(ref);
+      src_operands_[num_src_] = &src_storage_[num_src_];
+      ++num_src_;
+    }
+    if (literal_src) {
+      src_storage_[num_src_].set_literal(*literal_src);
+      src_operands_[num_src_] = &src_storage_[num_src_];
+      ++num_src_;
+    }
+    if (inline_const_src) {
+      src_storage_[num_src_].set_inline_const(*inline_const_src);
       src_operands_[num_src_] = &src_storage_[num_src_];
       ++num_src_;
     }
@@ -121,6 +157,9 @@ enum class TestOpcode : uint32_t {
   CBranchToElseAfterTwo = 14,
   IndirectCall = 15,
   IndirectBranch = 16,
+  WriteExecFull = 17,
+  WriteExecNarrow = 18,
+  WriteExecFullInline = 19,
 };
 
 class TestDecoder : public Decoder {
@@ -163,6 +202,19 @@ public:
       return new TestInstruction("test_indirect_call", {}, {}, INDIRECT_CALL);
     case TestOpcode::IndirectBranch:
       return new TestInstruction("test_indirect_branch", {}, {}, INDIRECT_BRANCH);
+    case TestOpcode::WriteExecFull:
+      // exec <- all-ones literal: dst is EXEC (64-bit), single literal source.
+      return new TestInstruction("test_write_exec_full", {{RegClass::EXEC, 0, 2}}, {}, 0,
+                                 std::nullopt, {}, ~0ULL);
+    case TestOpcode::WriteExecNarrow:
+      // exec <- sgpr (non-constant): writes EXEC but not provably all-ones.
+      return new TestInstruction("test_write_exec_narrow", {{RegClass::EXEC, 0, 2}},
+                                 {{RegClass::SGPR, 0, 1}});
+    case TestOpcode::WriteExecFullInline:
+      // exec <- inline-constant all-ones (e.g. `s_mov_b64 exec, -1`): the source
+      // reports const_value() but not literal64_value().
+      return new TestInstruction("test_write_exec_full_inline", {{RegClass::EXEC, 0, 2}}, {}, 0,
+                                 std::nullopt, {}, std::nullopt, ~0ULL);
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
@@ -359,6 +411,93 @@ TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
   auto free_vgpr = liveness.find_free_run(&def, 1);
   ASSERT_TRUE(free_vgpr.has_value());
   EXPECT_NE(*free_vgpr, 0);
+}
+
+// Collect a block's instructions in order for index-based assertions.
+std::vector<const Instruction *> insts_of(BasicBlock &block) {
+  std::vector<const Instruction *> out;
+  for (const auto &inst : block.instructions())
+    out.push_back(&inst);
+  return out;
+}
+
+TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
+  // exec=all-ones; v0=...; exec=narrow; v0=...; end
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::DefVgpr0,
+                                   TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0,
+                                   TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_EQ(insts.size(), 5u);
+  EXPECT_EQ(exec.before(*insts[0]), ExecState::Unknown); // kernel entry
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);    // after exec=all-ones
+  EXPECT_EQ(exec.before(*insts[2]), ExecState::Full);    // narrowing not yet applied
+  EXPECT_EQ(exec.before(*insts[3]), ExecState::Unknown); // after narrowing write
+}
+
+TEST(LivenessAnalysis, ExecFullPromotesVgprDefToKill) {
+  // exec=all-ones; def v0; use v0; end. Under full EXEC the def overwrites every
+  // lane, so v0 is dead immediately before the def.
+  auto blocks = build_test_blocks(
+      {TestOpcode::WriteExecFull, TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &def = *insts_of(*blocks[0])[1];
+  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(liveness.find_free_run(&def, 1), 0u);
+}
+
+TEST(LivenessAnalysis, ExecFullViaInlineConstantPromotesVgprDefToKill) {
+  // The all-ones source here is an inline constant (`s_mov exec, -1` style):
+  // it exposes const_value() but not literal64_value(), so this exercises the
+  // const_value() path the analysis relies on.
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFullInline, TestOpcode::DefVgpr0,
+                                   TestOpcode::UseVgpr0, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &def = *insts_of(*blocks[0])[1];
+  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(liveness.find_free_run(&def, 1), 0u);
+}
+
+TEST(LivenessAnalysis, NarrowingExecWriteDoesNotPromoteVgprDefToKill) {
+  // Same shape but EXEC is only narrowed (unknown), so the def stays a
+  // non-kill and v0 remains live before it.
+  auto blocks = build_test_blocks(
+      {TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &def = *insts_of(*blocks[0])[1];
+  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+
+  auto free_vgpr = liveness.find_free_run(&def, 1);
+  ASSERT_TRUE(free_vgpr.has_value());
+  EXPECT_NE(*free_vgpr, 0u);
+}
+
+TEST(ExecMaskAnalysis, CfgJoinMeetsToUnknownUnlessAllPredecessorsFull) {
+  // Branch byte layout (4 bytes/inst); target = block-end + delta:
+  //   0:  WriteExecFull
+  //   4:  CBranchToElse (delta +4; block ends at 8 -> target 12, skips block@8)
+  //   8:  WriteExecNarrow   (fallthrough block)
+  //   12: DefVgpr0          (join: reached from the Full branch path and the
+  //   16: UseVgpr0           Unknown fallthrough path -> meet is Unknown, so the
+  //   20: End                def must not be promoted to a kill)
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::CBranchToElse,
+                                   TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0,
+                                   TestOpcode::UseVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+
+  BasicBlock *join = block_starting_at(blocks, 12);
+  ASSERT_NE(join, nullptr);
+  const Instruction &def = *join->instructions().begin();
+  EXPECT_EQ(exec.before(def), ExecState::Unknown);
+
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
 }
 
 TEST(LivenessAnalysis, FindsDeadSgprAfterLiveSgpr) {

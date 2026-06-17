@@ -10,32 +10,35 @@ namespace rocjitsu {
 
 namespace {
 
-// TODO: Replace this class-based approximation with instruction metadata that
-// identifies vector defs whose inactive lanes are preserved under EXEC, and pair
-// it with program-point EXEC state so full-EXEC writes can be treated as normal
-// kills.
-[[nodiscard]] bool is_exec_masked_def(RegisterRef ref) {
+// A vector def (VGPR/AccVGPR) normally preserves inactive lanes under EXEC, so
+// it cannot be treated as an unconditional kill. The exception is instructions
+// flagged IGNORES_EXEC (e.g. branch-class ops), whose writes are not EXEC
+// gated. We default to "EXEC masked" when the flag is absent so that
+// instructions without derived semantics — or generated sources predating the
+// EXEC flags — stay conservative (never over-kill). Program-point EXEC state
+// (see analysis/exec_state.h) further promotes these to real kills where EXEC
+// is provably full.
+[[nodiscard]] bool is_vector_def(RegisterRef ref) {
   return ref.cls == RegClass::VGPR || ref.cls == RegClass::ACC_VGPR;
-}
-
-void add_def(InstDefUse &du, RegisterRef ref) {
-  du.defs.expand(ref);
-  if (is_exec_masked_def(ref))
-    du.has_exec_masked_vector_def = true;
 }
 
 } // namespace
 
 InstDefUse::InstDefUse(const Instruction &inst) {
   has_predicated_def = inst.flags() & PREDICATED_DEF;
+  const bool ignores_exec = inst.flags() & IGNORES_EXEC;
+  bool has_vector_def = false;
 
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref())
-      add_def(*this, *ref);
+    if (auto ref = op->to_register_ref()) {
+      defs.expand(*ref);
+      has_vector_def |= is_vector_def(*ref);
+    }
   }
+  has_exec_masked_vector_def = has_vector_def && !ignores_exec;
   inst.implicit_defs(defs);
 
   for (int i = 0; i < inst.num_src_operands(); ++i) {

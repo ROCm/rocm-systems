@@ -4,6 +4,7 @@
 #include "rocjitsu/analysis/liveness.h"
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/exec_state.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -60,14 +61,16 @@ std::vector<const Instruction *> instructions_in_order(BasicBlock &block) {
   return false;
 }
 
-[[nodiscard]] RegisterSet kill_defs(const InstDefUse &du) {
+[[nodiscard]] RegisterSet kill_defs(const InstDefUse &du, ExecState exec_before) {
   RegisterSet kills = du.defs;
-  // Predicated defs and EXEC-masked vector defs preserve old values on at least
-  // one path or lane. Until EXEC state is tracked at each program point, those
-  // writes cannot be treated as unconditional liveness kills.
+  // Predicated defs preserve old values on at least one control-flow path, so
+  // they can never be unconditional kills.
   if (du.has_predicated_def)
     return {};
-  if (du.has_exec_masked_vector_def) {
+  // EXEC-masked vector defs preserve inactive lanes' old values, so they are
+  // kills only where EXEC is provably full (every lane overwritten). Where the
+  // EXEC state is unknown we stay conservative and do not kill.
+  if (du.has_exec_masked_vector_def && exec_before != ExecState::Full) {
     kills.clear_class(RegClass::VGPR);
     kills.clear_class(RegClass::ACC_VGPR);
   }
@@ -108,6 +111,10 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
       block_index_.emplace(blocks[i], i);
   }
 
+  // Program-point EXEC approximation: lets EXEC-masked vector defs count as
+  // kills where EXEC is provably full.
+  const ExecMaskAnalysis exec(blocks);
+
   // Compute each block's local transfer function before iterating across CFG
   // edges. `gen` keeps only uses that occur before a local definition, because
   // later uses are satisfied inside the block. `kill` is every local def.
@@ -118,7 +125,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
     auto &state = liveness_[i];
     for (const auto &inst : block->instructions()) {
       InstDefUse du(inst);
-      RegisterSet kills = kill_defs(du);
+      RegisterSet kills = kill_defs(du, exec.before(inst));
       RegisterSet upward_uses = du.uses;
       upward_uses -= state.kill;
       state.gen |= upward_uses;
@@ -191,7 +198,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
     for (auto it = insts.rbegin(); it != insts.rend(); ++it) {
       const Instruction *inst = *it;
       InstDefUse du(*inst);
-      RegisterSet kills = kill_defs(du);
+      RegisterSet kills = kill_defs(du, exec.before(*inst));
       live -= kills;
       live |= du.uses;
       live_before_.emplace(inst, live);

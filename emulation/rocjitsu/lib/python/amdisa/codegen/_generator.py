@@ -104,6 +104,43 @@ _LITERAL_ENCODING_OPERANDS = {
 }
 
 
+def _exec_mask_flag_stmts(sem) -> list[str]:
+    """Return ``flags_ |= ...;`` statements for EXEC-mask instruction metadata.
+
+    The flags are derived from the instruction's semantic AST so generic
+    liveness/dataflow analyses do not have to know AMDGPU instruction names:
+
+    * ``EXEC_MASKED``  - VECTOR exec-model: inactive lanes preserve old values.
+    * ``IGNORES_EXEC`` - branch-style instructions that run regardless of EXEC.
+    * ``WRITES_EXEC`` / ``READS_EXEC`` - the instruction writes / reads EXEC.
+
+    Returns an empty list when ``sem`` is None or its semantic class has no
+    deriver (``derive_sema_block`` returns None) or derives to an empty stub;
+    those instructions stay flag-free and analyses treat them conservatively.
+    """
+    if sem is None:
+        return []
+    # Lazy import mirrors the execute-body generation path and avoids a
+    # module-load import cycle with the sema_* modules.
+    from amdisa.sema_derive import derive_sema_block
+    from amdisa.sema_properties import InstructionProperty, derive_properties
+
+    block = derive_sema_block(sem)
+    if block is None or block.is_empty:
+        return []
+    props = derive_properties(block)
+    return [
+        f'flags_ |= {name};'
+        for prop, name in (
+            (InstructionProperty.EXEC_MASKED, 'EXEC_MASKED'),
+            (InstructionProperty.IGNORES_EXEC, 'IGNORES_EXEC'),
+            (InstructionProperty.WRITES_EXEC, 'WRITES_EXEC'),
+            (InstructionProperty.READS_EXEC, 'READS_EXEC'),
+        )
+        if prop in props
+    ]
+
+
 @dataclass
 class _SourceImplUnit:
     file_stem: str | None
@@ -5343,6 +5380,11 @@ class CodeGenerator:
                     }:
                         ctor_body_parts.append('flags_ |= ACCVGPR;')
 
+                    # EXEC-mask metadata for liveness/dataflow analyses,
+                    # derived from the instruction's semantic AST (see
+                    # _exec_mask_flag_stmts).
+                    ctor_body_parts.extend(_exec_mask_flag_stmts(_mem_sem))
+
                     # Per-instruction size overrides (e.g., VOP3PX2 128-bit
                     # instructions decoded under 64-bit VOP3P_MFMA).
                     _size_overrides = self.isa_spec.profile.inst_size_overrides
@@ -7063,7 +7105,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             if uses_packed_16bit_sources
             else '  Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
         )
-        literal64_decl = '  std::optional<uint64_t> literal64_value() const override;\n'
+        literal64_decl = (
+            '  std::optional<uint64_t> literal64_value() const override;\n'
+            '  std::optional<uint64_t> const_value() const override;\n'
+        )
         simd_decl = ''
         packed_16bit_field = ''
         if uses_packed_16bit_sources:
@@ -7450,6 +7495,36 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         resolve_code = cgen.Line(
             'namespace {\n'
             '\n'
+            '// Wavefront-free subset of resolve_src_scalar: the value of an inline\n'
+            '// constant (small integers 0..64 / -1..-16 and the inline float\n'
+            '// constants), or nullopt for any other encoding value. Negative inline\n'
+            '// integers are sign-extended to 64 bits so 64-bit consumers see all-ones.\n'
+            'std::optional<uint64_t> resolve_inline_const(int ev) {\n'
+            '  if (ev >= 128 && ev <= 192)\n'
+            '    return static_cast<uint64_t>(ev - 128);\n'
+            '  if (ev >= 193 && ev <= 208)\n'
+            '    return static_cast<uint64_t>(static_cast<int64_t>(-(ev - 192)));\n'
+            '  if (ev == 240)\n'
+            '    return static_cast<uint64_t>(0x3F000000u); // 0.5f\n'
+            '  if (ev == 241)\n'
+            '    return static_cast<uint64_t>(0xBF000000u); // -0.5f\n'
+            '  if (ev == 242)\n'
+            '    return static_cast<uint64_t>(0x3F800000u); // 1.0f\n'
+            '  if (ev == 243)\n'
+            '    return static_cast<uint64_t>(0xBF800000u); // -1.0f\n'
+            '  if (ev == 244)\n'
+            '    return static_cast<uint64_t>(0x40000000u); // 2.0f\n'
+            '  if (ev == 245)\n'
+            '    return static_cast<uint64_t>(0xC0000000u); // -2.0f\n'
+            '  if (ev == 246)\n'
+            '    return static_cast<uint64_t>(0x40800000u); // 4.0f\n'
+            '  if (ev == 247)\n'
+            '    return static_cast<uint64_t>(0xC0800000u); // -4.0f\n'
+            '  if (ev == 248)\n'
+            '    return static_cast<uint64_t>(0x3E22F983u); // 1/(2*pi)\n'
+            '  return std::nullopt;\n'
+            '}\n'
+            '\n'
             'uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {\n'
             '  if (ev == 102)\n'
             '    return static_cast<uint32_t>(wf.scratch_base());\n'
@@ -7712,6 +7787,21 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint32_t>(encoding_value_);\n'
             '  return resolve_src_scalar(wf, encoding_value_);\n'
+            '}\n'
+            '\n'
+            # Wavefront-free constant value: the register-state-free subset of
+            # read_scalar(). Registers (incl. VGPR-index destinations, which
+            # to_register_ref() resolves) are not constants and return nullopt,
+            # which also keeps inline-const resolution from misreading a raw
+            # register index as a small immediate.
+            'std::optional<uint64_t> Operand::const_value() const {\n'
+            '  if (has_literal64_)\n'
+            '    return literal64_value_;\n'
+            '  if (is_immediate_type(opr_type_))\n'
+            '    return static_cast<uint64_t>(static_cast<uint32_t>(encoding_value_));\n'
+            '  if (to_register_ref())\n'
+            '    return std::nullopt;\n'
+            '  return resolve_inline_const(encoding_value_);\n'
             '}\n'
             '\n' + _read_lane_body + '\n\n'
             'void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {\n'
