@@ -32,7 +32,8 @@ from utils.utils_analysis import (
 from utils.utils_common import (
     canonical_config_arch,
     get_uuid,
-    is_only_pc_sampling,
+    is_counters_collected,
+    is_pc_sampling_collected,
     load_panel_configs,
     validate_roofline_csv,
 )
@@ -89,10 +90,71 @@ class OmniAnalyze_Base:
     def get_profiling_config(self) -> dict[str, Any]:
         return self._profiling_config
 
-    def pc_sampling_only(self) -> bool:
-        """True when profiling collected only PC sampling (block 21)."""
+    def pc_sampling_collected(self) -> bool:
+        """True when PC sampling (block 21) was among the collected blocks.
+
+        Stays True for mixed runs that also collect counters, so the PC
+        sampling panel is populated whenever its data was gathered.
+        """
         config = getattr(self, "_profiling_config", {})
-        return is_only_pc_sampling(config.get("filter_blocks", []))
+        return is_pc_sampling_collected(config.get("filter_blocks", []))
+
+    def counters_collected(self) -> bool:
+        """True when any hardware-counter block was collected."""
+        config = getattr(self, "_profiling_config", {})
+        return is_counters_collected(config.get("filter_blocks", []))
+
+    def pc_sampling_only(self) -> bool:
+        """True when PC sampling was collected and no counters were."""
+        return self.pc_sampling_collected() and not self.counters_collected()
+
+    def load_pc_sampling_tool_data(
+        self, workload_path: str
+    ) -> Optional[dict[str, Any]]:
+        """Parse ``ps_file_results.json`` when PC sampling was collected.
+
+        Returns ``None`` when PC sampling was not part of this run, so callers
+        on the counter path stay cheap while mixed runs still get their data.
+        """
+        if not self.pc_sampling_collected():
+            return None
+        return file_io.load_pc_sampling_results(str(workload_path))
+
+    def build_pc_sampling_only_workload(
+        self,
+        workload: schema.Workload,
+        dir_path: str,
+        args: argparse.Namespace,
+        tool_data: Optional[dict[str, Any]],
+        filter_nodes: Optional[list[str]] = None,
+    ) -> None:
+        """Populate a workload that has no hardware counters.
+
+        The dispatch scaffolding is derived from the PC sampling kernel trace
+        (there is no ``pmc_perf`` data), the non-metric tables are loaded, and
+        the metric cells are set to ``N/A`` since ``eval_metric`` is skipped.
+        """
+        workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(tool_data)
+        workload.raw_pmc = workload.raw_pmc.rename(
+            columns={"Dispatch_Id": "Dispatch_ID"}
+        )
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+            df_in=workload.raw_pmc,
+            raw_data_dir=str(dir_path),
+            filter_gpu_ids=workload.filter_gpu_ids,
+            filter_dispatch_ids=workload.filter_dispatch_ids,
+            filter_nodes=(
+                filter_nodes if filter_nodes is not None else workload.filter_nodes
+            ),
+            time_unit=args.time_unit,
+            kernel_verbose=args.kernel_verbose,
+        )
+        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+        parser.load_non_mertrics_table(
+            workload, dir_path, args, pc_sampling_tool_data=tool_data
+        )
+        parser.nullify_unevaluated_metric_values(workload)
 
     def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs

@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import argparse
 import json
 import sqlite3
 from pathlib import Path
@@ -19,8 +20,10 @@ from utils.file_io import (
 )
 from utils.parser import (
     PMC_KERNEL_TOP_TABLE_ID,
+    load_non_mertrics_table,
     load_pc_sampling_data,
     load_pc_sampling_data_per_kernel,
+    load_table_data,
     nullify_unevaluated_metric_values,
 )
 from utils.pc_sampling_analysis import (
@@ -30,7 +33,11 @@ from utils.pc_sampling_analysis import (
     load_aggregated_pc_sampling,
     load_pc_sample_records,
 )
-from utils.utils_common import is_only_pc_sampling
+from utils.utils_common import (
+    is_counters_collected,
+    is_only_pc_sampling,
+    is_pc_sampling_collected,
+)
 
 PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300A_A1"
 
@@ -173,6 +180,38 @@ def write_results_json(path: Path, **kwargs) -> Path:
 def test_is_only_pc_sampling(filter_blocks: list[str], expected: bool) -> None:
     """True only when every requested block is PC sampling (21 / pc_sampling)."""
     assert is_only_pc_sampling(filter_blocks) is expected
+
+
+@pytest.mark.parametrize(
+    "filter_blocks, expected",
+    [
+        ([], False),
+        (["21"], True),
+        (["pc_sampling"], True),
+        (["21", "pc_sampling"], True),
+        (["21", "2"], True),
+        (["2"], False),
+    ],
+)
+def test_is_pc_sampling_collected(filter_blocks: list[str], expected: bool) -> None:
+    """True when ANY requested block is PC sampling, incl. mixed runs."""
+    assert is_pc_sampling_collected(filter_blocks) is expected
+
+
+@pytest.mark.parametrize(
+    "filter_blocks, expected",
+    [
+        ([], False),
+        (["21"], False),
+        (["pc_sampling"], False),
+        (["21", "pc_sampling"], False),
+        (["21", "2"], True),
+        (["2"], True),
+    ],
+)
+def test_is_counters_collected(filter_blocks: list[str], expected: bool) -> None:
+    """True when ANY requested block is a hardware-counter block."""
+    assert is_counters_collected(filter_blocks) is expected
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -659,19 +698,22 @@ def test_load_per_kernel_out_of_range_index_guards(
         pytest.param(["v_mov", "v_add"], None, id="empty_comments"),
     ],
 )
-def test_load_per_kernel_empty_string_table_exits(
+def test_load_per_kernel_empty_string_table_warns_and_skips(
     instructions: list | None,
     comments: list | None,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """An empty instruction/comment table is treated as missing and exits."""
+    """An empty instruction/comment table warns (with kernel name) and returns
+    an empty frame instead of aborting the whole analysis."""
     tool_data = make_per_kernel_guard_data(instructions, comments)
-    with pytest.raises(SystemExit):
-        load_pc_sampling_data_per_kernel(
-            method="host_trap",
-            tool_data=tool_data,
-            kernel_name="vecCopy",
-            sorting_type="offset",
-        )
+    df = load_pc_sampling_data_per_kernel(
+        method="host_trap",
+        tool_data=tool_data,
+        kernel_name="vecCopy",
+        sorting_type="offset",
+    )
+    assert df.empty
+    assert "vecCopy" in caplog.text
 
 
 def assert_none_kind(column: pd.Series, kind: str) -> None:
@@ -754,22 +796,25 @@ def test_load_per_kernel_kernel_not_found() -> None:
     assert df.empty
 
 
-def test_load_per_kernel_no_pc_sample_key() -> None:
+def test_load_per_kernel_no_pc_sample_key_warns_and_skips(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """
-    When the tool data has no populated pc_sample array,
-    the per-kernel loader calls console_error which exits.
+    When the tool data has no populated pc_sample array, the per-kernel loader
+    warns (with kernel name) and returns an empty frame instead of exiting.
     """
     tool_data = make_tool_data(
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    with pytest.raises(SystemExit):
-        load_pc_sampling_data_per_kernel(
-            method="host_trap",
-            tool_data=tool_data,
-            kernel_name="vecCopy",
-            sorting_type="offset",
-        )
+    df = load_pc_sampling_data_per_kernel(
+        method="host_trap",
+        tool_data=tool_data,
+        kernel_name="vecCopy",
+        sorting_type="offset",
+    )
+    assert df.empty
+    assert "vecCopy" in caplog.text
 
 
 def test_load_per_kernel_invalid_sorting_type() -> None:
@@ -1157,6 +1202,100 @@ def make_db_analysis(workload_path: str) -> db_analysis:
     return instance
 
 
+def _make_from_pc_sampling_workload() -> schema.Workload:
+    """A workload holding a single ``from_pc_sampling`` table to be loaded."""
+    workload = schema.Workload()
+    workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": ["ps_file"]})}
+    return workload
+
+
+def _mixed_tool_data_kwargs() -> dict:
+    return {
+        "stochastic": [make_record(5, 0x10, 0, dispatch_id=0, wave_issued=True)],
+        "instructions": ["v_mov"],
+        "comments": ["/s/a.cpp:1"],
+        "kernel_symbols": [make_kernel_symbol(100, 5, "vecCopy")],
+        "kernel_dispatch": [make_dispatch(0, 100)],
+    }
+
+
+def _mixed_tool_data() -> dict:
+    return make_tool_data(**_mixed_tool_data_kwargs())
+
+
+def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
+    """The shared load gate keys on collection, not on PC-sampling-only mode.
+
+    This guards the mixed-run regression: counters + PC sampling must still
+    load the tool data so the block-21 panel is populated.
+    """
+    write_results_json(tmp_path / "ps_file_results.json", **_mixed_tool_data_kwargs())
+    instance = make_db_analysis(str(tmp_path))
+
+    instance._profiling_config = {"filter_blocks": ["21", "2"]}  # mixed
+    assert instance.pc_sampling_collected() is True
+    assert instance.counters_collected() is True
+    assert instance.pc_sampling_only() is False
+    assert instance.load_pc_sampling_tool_data(str(tmp_path)) is not None
+
+    instance._profiling_config = {"filter_blocks": ["21"]}  # pc sampling only
+    assert instance.pc_sampling_only() is True
+    assert instance.load_pc_sampling_tool_data(str(tmp_path)) is not None
+
+    instance._profiling_config = {"filter_blocks": ["2"]}  # counters only
+    assert instance.pc_sampling_collected() is False
+    assert instance.load_pc_sampling_tool_data(str(tmp_path)) is None
+
+
+def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
+    """load_table_data forwards tool data to load_non_mertrics_table.
+
+    Directly guards the line whose omission dropped the PC sampling table on
+    the counter path in mixed runs.
+    """
+    sentinel = {"sentinel": True}
+    args = argparse.Namespace(debug=False)
+    workload = schema.Workload()
+    workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx942"}])
+    with (
+        patch("utils.parser.load_non_mertrics_table") as mock_load_non_metrics,
+        patch("utils.parser.eval_metric"),
+        patch("utils.parser.apply_filters"),
+    ):
+        load_table_data(
+            workload=workload,
+            dir_path="dir",
+            is_gui=False,
+            args=args,
+            dfs_expressions={},
+            pc_sampling_tool_data=sentinel,
+        )
+    mock_load_non_metrics.assert_called_once()
+    assert mock_load_non_metrics.call_args.args[3] is sentinel
+
+
+def test_load_non_mertrics_table_populates_pc_sampling_from_tool_data(
+    tmp_path: Path,
+) -> None:
+    """A ``from_pc_sampling`` table is populated when tool data is provided."""
+    args = argparse.Namespace(pc_sampling_sorting_type="count")
+    workload = _make_from_pc_sampling_workload()
+    load_non_mertrics_table(
+        workload, str(tmp_path), args, pc_sampling_tool_data=_mixed_tool_data()
+    )
+    assert not workload.dfs[2101].empty
+
+
+def test_load_non_mertrics_table_pc_sampling_empty_without_tool_data(
+    tmp_path: Path,
+) -> None:
+    """Without tool data the ``from_pc_sampling`` table stays empty (no crash)."""
+    args = argparse.Namespace(pc_sampling_sorting_type="count")
+    workload = _make_from_pc_sampling_workload()
+    load_non_mertrics_table(workload, str(tmp_path), args)
+    assert workload.dfs[2101].empty
+
+
 def test_calc_pc_sampling_data_missing_file(
     tmp_path: Path,
 ) -> None:
@@ -1414,7 +1553,7 @@ def test_pc_sampling_analyze_db_output(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
-    """Analyze in db mode produces a populated pcsampling table."""
+    """Analyze in db mode produces a populated pc sampling table."""
     workload_dir = Path(common.setup_workload_dir(PC_SAMPLING_WORKLOAD)).resolve()
     db_name = "pc_sampling_db_test"
     db_path = workload_dir / f"{db_name}.db"
