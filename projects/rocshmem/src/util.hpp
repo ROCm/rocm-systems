@@ -425,8 +425,6 @@ __device__ __forceinline__ void copy_bulk(void* dst, void* src,
       Acc::store_buffer(dst, buf_bytes,
           static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize), regs[u]);
     }
-
-    // __builtin_amdgcn_s_barrier();
   }
 
   // Tail: remaining chunks that don't fill a full unrolled batch
