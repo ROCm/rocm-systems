@@ -59,7 +59,7 @@ struct is_unique_pointer<std::unique_ptr<Tp>> : std::true_type
 {};
 
 template <typename Tp>
-concept can_stringify = requires(std::ostream& _os, const Tp& _v) { _os << _v; };
+concept string_like = requires(std::ostream& _os, const Tp& _v) { _os << _v; };
 
 template <size_t N, typename Tp, bool>
 struct tuple_element_impl;
