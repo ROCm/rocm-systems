@@ -56,14 +56,14 @@ def main() -> int:
     # Pin each rank to its own GPU. With one GPU per node this is device 0;
     # when several ranks share a host that exposes multiple GPUs, spread
     # them across distinct devices so each rank owns a different GPU.
-    device_index = rank % device_count if device_count else 0
+    device_index = local_rank % device_count if device_count else 0
     log(f"setting cuda device {device_index} ...")
     torch.cuda.set_device(device_index)
     device = torch.device("cuda", device_index)
     log(f"current device = {torch.cuda.current_device()} ({device})")
 
     log("init_process_group(backend='nccl', init_method='env://') ...")
-    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size, device_id=device_index)
     log("init_process_group returned")
 
     log(f"is_initialized={dist.is_initialized()} "

@@ -74,17 +74,6 @@ PREFIX=/out
 echo "== Toolchain =="
 echo "gcc: $(cc --version 2>/dev/null | head -1 || echo missing)"
 echo "cmake: $(cmake --version 2>/dev/null | head -1 || echo missing)"
-
-# --- Rust toolchain ---------------------------------------------------
-# The manylinux image is a build base and may not ship cargo; install a
-# pinned-channel rustup toolchain into a writable location when absent.
-if ! command -v cargo >/dev/null 2>&1; then
-    echo "== Installing Rust toolchain (cargo not present) =="
-    export RUSTUP_HOME=/tmp/rustup CARGO_HOME=/tmp/cargo
-    curl -fsSL https://sh.rustup.rs \
-        | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null
-    export PATH="$CARGO_HOME/bin:$PATH"
-fi
 echo "cargo: $(cargo --version)"
 
 # --- Build mirage (Rust) ----------------------------------------------

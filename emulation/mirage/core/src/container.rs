@@ -71,6 +71,19 @@ pub const ENV_WORLD_SIZE: &str = "WORLD_SIZE";
 /// `torchrun`.
 pub const ENV_LOCAL_RANK: &str = "LOCAL_RANK";
 
+/// RCCL/NCCL host identifier. Normally NCCL derives this from the real
+/// machine's hostname to group ranks that share a host (so it can use
+/// fast intra-host transports and reject two ranks claiming the same
+/// physical GPU). In mirage's non-containerised multi-node mode every
+/// emulated node runs on the *same* real host and is synthesised from an
+/// identical per-node config, so each rank's GPU reports the same
+/// `location_id`. NCCL then aborts with "Duplicate GPU detected: rank X
+/// and rank Y both on CUDA device …". Setting a distinct `NCCL_HOSTID`
+/// per emulated node makes NCCL treat them as separate hosts, which is
+/// the correct model here (one emulated GPU per node). Ranks sharing a
+/// node keep the same value and disambiguate by local GPU index.
+pub const ENV_NCCL_HOSTID: &str = "NCCL_HOSTID";
+
 /// Deterministic container name for a node of a session.
 ///
 /// Doubles as the container's network hostname, so other nodes can

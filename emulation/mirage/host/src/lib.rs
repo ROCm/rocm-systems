@@ -40,7 +40,7 @@ use chrono::Utc;
 use mirage_core::common::MaybeRef;
 use mirage_core::container::{
     ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_LOCAL_RANK, ENV_MASTER_ADDR,
-    ENV_MASTER_PORT, ENV_RANK, ENV_TORCH_RANK, ENV_WORLD_SIZE, container_name,
+    ENV_MASTER_PORT, ENV_NCCL_HOSTID, ENV_RANK, ENV_TORCH_RANK, ENV_WORLD_SIZE, container_name,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
@@ -734,6 +734,13 @@ fn proc_mirage_env(
         (ENV_MASTER_PORT.to_string(), head_port.to_string()),
         (ENV_WORLD_SIZE.to_string(), world_size.to_string()),
         (ENV_LOCAL_RANK.to_string(), local_rank.to_string()),
+        // A distinct host id per emulated node so RCCL/NCCL does not see
+        // ranks on different nodes (whose identical per-node config gives
+        // the same GPU `location_id`) as duplicate GPUs on one host.
+        (
+            ENV_NCCL_HOSTID.to_string(),
+            format!("mirage-node-{node_rank}"),
+        ),
     ]
 }
 
@@ -1490,6 +1497,9 @@ mod tests {
         // A non-head node reaches the rendezvous via the head's address.
         assert_eq!(env[ENV_MASTER_ADDR], "mirage-sess-node-0");
         assert_eq!(env[ENV_MASTER_PORT], "29500");
+        // NCCL_HOSTID is keyed by node so cross-node ranks (which share an
+        // identical emulated GPU location_id) are not flagged as duplicate.
+        assert_eq!(env[ENV_NCCL_HOSTID], "mirage-node-1");
     }
 
     #[test]
@@ -1505,5 +1515,8 @@ mod tests {
         assert_eq!(env[ENV_TORCH_RANK], "1");
         assert_eq!(env[ENV_LOCAL_RANK], "1");
         assert_eq!(env[ENV_MASTER_ADDR], "localhost");
+        // Both processes share node 0, so they share a host id and
+        // disambiguate by local GPU index instead.
+        assert_eq!(env[ENV_NCCL_HOSTID], "mirage-node-0");
     }
 }
