@@ -79,23 +79,74 @@ static_assert(createCachePolicy(TemporalHint::NT_HT, MemScope::SYS) == 30);
 
 constexpr CachePolicy DEFAULT_CACHE_POLICY = createCachePolicy(TemporalHint::RT, MemScope::SYS);
 
-/* Async load/Store APIs */
-// The b128 async builtins are typed to take a pointer to a signed int4 vector (V4i), so use a
-// matching signed vector type rather than __hip_uint32x4 to avoid an element-signedness mismatch.
-using __hip_int32x4 = int32_t __attribute__((__vector_size__(16)));
+// Used for setting TDM descriptor fields and arguments to the async load/store builtins
+using __rccl_int32x2 = int32_t __attribute__((__vector_size__(8)));
+using __rccl_int32x4 = int32_t __attribute__((__vector_size__(16)));
+using __rccl_int32x8 = int32_t __attribute__((__vector_size__(32)));
 
+// We don't currently support passing in per-lane offsets for addresses, as the pointers for src and dst can
+// be updated per lane, which is what RCCL already does.  Additionally, the API requires the offset to be a
+// compile-time constant, so we always pass in a zero offset.
+namespace {
+  constexpr int32_t ZERO_OFFSET = 0;
+}
+
+// Waits until at most WAIT_CNT outstanding async-to/from-LDS transfers remain in flight.  The count
+// is baked into the hardware instruction, so it must be a compile-time constant.
+template<int WAIT_CNT = 0>
+__device__ void asyncWait(){
+  __builtin_amdgcn_s_wait_asynccnt(WAIT_CNT);
+}
+
+/* Async load/Store APIs */
+// The async-to/from-LDS builtins move sizeof(T) bytes per lane, with the access width selected at
+// compile time from the element size.  Each lane passes its own pointers to LDS and global memory.
+//
+// The hardware only provides b8/b32/b64/b128 variants -- there is no 16-bit per lane instruction.
 template<typename T, CachePolicy cp = DEFAULT_CACHE_POLICY>
-__device__ void asyncLoadToLDS(T* const* src, T* dst){
-  __builtin_amdgcn_global_load_async_to_lds_b128(
-      (__attribute__((address_space(1))) __hip_int32x4*)src,
-      (__attribute__((address_space(3))) __hip_int32x4*)dst, 0, cp);
+__device__ void asyncLoadToLDS(const T* src, T* dst){
+  if constexpr (sizeof(T) == 1) {
+    __builtin_amdgcn_global_load_async_to_lds_b8(
+        (__attribute__((address_space(1))) char*)src,
+        (__attribute__((address_space(3))) char*)dst, ZERO_OFFSET, cp);
+  } else if constexpr (sizeof(T) == 4) {
+    __builtin_amdgcn_global_load_async_to_lds_b32(
+        (__attribute__((address_space(1))) int32_t*)src,
+        (__attribute__((address_space(3))) int32_t*)dst, ZERO_OFFSET, cp);
+  } else if constexpr (sizeof(T) == 8) {
+    __builtin_amdgcn_global_load_async_to_lds_b64(
+        (__attribute__((address_space(1))) __rccl_int32x2*)src,
+        (__attribute__((address_space(3))) __rccl_int32x2*)dst, ZERO_OFFSET, cp);
+  } else if constexpr (sizeof(T) == 16) {
+    __builtin_amdgcn_global_load_async_to_lds_b128(
+        (__attribute__((address_space(1))) __rccl_int32x4*)src,
+        (__attribute__((address_space(3))) __rccl_int32x4*)dst, ZERO_OFFSET, cp);
+  } else {
+    static_assert(sizeof(T) == 0, "asyncLoadToLDS supports only 1, 4, 8, or 16 byte element types");
+  }
 }
 
 template<typename T, CachePolicy cp = DEFAULT_CACHE_POLICY>
-__device__ void asyncStoreFromLDS(T* const* src, T* dst){
-  __builtin_amdgcn_global_store_async_from_lds_b128(
-    (__attribute__((address_space(1))) __hip_int32x4*)dst,
-    (__attribute__((address_space(3))) __hip_int32x4*)src, 0, cp);
+__device__ void asyncStoreFromLDS(const T* src, T* dst){
+  if constexpr (sizeof(T) == 1) {
+    __builtin_amdgcn_global_store_async_from_lds_b8(
+        (__attribute__((address_space(1))) char*)dst,
+        (__attribute__((address_space(3))) char*)src, ZERO_OFFSET, cp);
+  } else if constexpr (sizeof(T) == 4) {
+    __builtin_amdgcn_global_store_async_from_lds_b32(
+        (__attribute__((address_space(1))) int32_t*)dst,
+        (__attribute__((address_space(3))) int32_t*)src, ZERO_OFFSET, cp);
+  } else if constexpr (sizeof(T) == 8) {
+    __builtin_amdgcn_global_store_async_from_lds_b64(
+        (__attribute__((address_space(1))) __rccl_int32x2*)dst,
+        (__attribute__((address_space(3))) __rccl_int32x2*)src, ZERO_OFFSET, cp);
+  } else if constexpr (sizeof(T) == 16) {
+    __builtin_amdgcn_global_store_async_from_lds_b128(
+        (__attribute__((address_space(1))) __rccl_int32x4*)dst,
+        (__attribute__((address_space(3))) __rccl_int32x4*)src, ZERO_OFFSET, cp);
+  } else {
+    static_assert(sizeof(T) == 0, "asyncStoreFromLDS supports only 1, 4, 8, or 16 byte element types");
+  }
 }
 
 
@@ -125,13 +176,13 @@ struct TileMover{
     group0.ldsAddr((uintptr_t)shmemPtr);
     group0.globalAddr((uintptr_t)srcPtr);
     setTransferSize(group1, numElementsToProcess);
-    __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, __hip_uint32x4{}, __hip_uint32x4{}, __hip_uint32x8{}, cp);
+    __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, __rccl_int32x4{}, __rccl_int32x4{}, __rccl_int32x8{}, cp);
   }
 
   // An entire warp makes this call.  The dstPtr should be the same across all lanes in the warp.  Do not pass in per-lane offsets for addresses.
   __device__ void storeTile(T* dstPtr) {
     group0.globalAddr((uintptr_t)dstPtr);
-    __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, __hip_uint32x4{}, __hip_uint32x4{}, __hip_uint32x8{}, cp);
+    __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, __rccl_int32x4{}, __rccl_int32x4{}, __rccl_int32x8{}, cp);
   }
 
   template<int WAIT_CNT = 0> // Needs to be a template parameter because the count is baked into the hardware instruction
