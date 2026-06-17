@@ -3,9 +3,8 @@
 
 """Backend-agnostic core for ROCTX scope tracking.
 
-Maintains the per-thread marker, context, and tier stacks, the Python-tier
-range push and pop callbacks, and an optional native-tier hook for the C++
-RecordFunction backend. Backends interact only through _push_scope,
+Maintains the per-thread marker and context stacks and the Python-tier
+range push and pop callbacks. Backends interact only through _push_scope,
 _pop_scope, and the helpers defined here.
 """
 
@@ -16,13 +15,10 @@ import sys
 import threading
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Callable, Optional
 
-
-class NativeTierHook(Protocol):
-    def active(self) -> bool: ...
-    def push(self, marker: str, context: str, backend: str) -> bool: ...
-    def pop(self) -> None: ...
+# Backends recognized by install_global_wraps and the "api" alias.
+KNOWN_BACKENDS: tuple[str, ...] = ("torch", "triton")
 
 
 def _missing_range_push(_label: str) -> None:
@@ -39,7 +35,6 @@ def _missing_range_pop() -> None:
 
 _range_push: Callable[[str], None] = _missing_range_push
 _range_pop: Callable[[], None] = _missing_range_pop
-_native_tier_hook: Optional[NativeTierHook] = None
 _framework_roots: list[str] = []
 
 # ROCm site directories probed for the roctx module.
@@ -98,15 +93,6 @@ def ensure_python_tier() -> bool:
     return True
 
 
-def set_native_tier_hook(hook: Optional[NativeTierHook]) -> None:
-    global _native_tier_hook
-    _native_tier_hook = hook
-
-
-def get_native_tier_hook() -> Optional[NativeTierHook]:
-    return _native_tier_hook
-
-
 def add_framework_root(path: str) -> None:
     # Store with a trailing separator so prefix matching is exact.
     if not path:
@@ -116,7 +102,7 @@ def add_framework_root(path: str) -> None:
         _framework_roots.append(root)
 
 
-# Per-thread stacks. Source of truth on Python tier; mirror on C++ tier.
+# Per-thread stacks shared by all backends so nested scopes compose correctly.
 _thread_local = threading.local()
 
 
@@ -130,15 +116,6 @@ def get_context_stack() -> list[str]:
     if not hasattr(_thread_local, "context_stack"):
         _thread_local.context_stack = []
     return _thread_local.context_stack
-
-
-def get_tier_stack() -> list[bool]:
-    # Each frame records the tier that handled its push: True for the C++
-    # RecordFunction tier, False for the Python tier. _pop_scope uses this
-    # to route the matching pop.
-    if not hasattr(_thread_local, "tier_stack"):
-        _thread_local.tier_stack = []
-    return _thread_local.tier_stack
 
 
 def resolve_user_caller_location() -> str:
@@ -158,45 +135,33 @@ def resolve_user_caller_location() -> str:
 # "|<backend>" suffix attributes the scope to its backend.
 
 
+def compose_marker(marker: str, context: str, backend: str = "") -> str:
+    """Return the wire-format string for a scope nested under the current
+    marker and context stacks.
+    """
+    marker_stack = get_marker_stack()
+    context_stack = get_context_stack()
+    full = "/".join([*marker_stack, marker]) + ":" + "/".join([*context_stack, context])
+    if backend:
+        full = f"{full}|{backend}"
+    return full
+
+
 def _push_scope(marker: str, context: str, backend: str = "") -> None:
     marker_stack = get_marker_stack()
     context_stack = get_context_stack()
-    tier_stack = get_tier_stack()
 
-    used_native = False
-    hook = _native_tier_hook
-    if hook is not None and hook.active():
-        try:
-            used_native = bool(hook.push(marker, context, backend))
-        except Exception:
-            used_native = False
+    _range_push(compose_marker(marker, context, backend))
 
-    if not used_native:
-        # Compose the marker string for this scope.
-        full = (
-            "/".join([*marker_stack, marker])
-            + ":"
-            + "/".join([*context_stack, context])
-        )
-        if backend:
-            full = f"{full}|{backend}"
-        _range_push(full)
-
-    # On a partial append, restore all three stacks and undo the push.
-    snapshot_len = len(tier_stack)
+    snapshot_len = len(marker_stack)
     try:
-        tier_stack.append(used_native)
         marker_stack.append(marker)
         context_stack.append(context)
     except Exception:
-        del tier_stack[snapshot_len:]
         del marker_stack[snapshot_len:]
         del context_stack[snapshot_len:]
         try:
-            if used_native and _native_tier_hook is not None:
-                _native_tier_hook.pop()
-            else:
-                _range_pop()
+            _range_pop()
         except Exception:
             pass
         raise
@@ -205,18 +170,13 @@ def _push_scope(marker: str, context: str, backend: str = "") -> None:
 def _pop_scope() -> None:
     marker_stack = get_marker_stack()
     context_stack = get_context_stack()
-    tier_stack = get_tier_stack()
 
     # Unmatched pop: no-op.
-    if not tier_stack:
+    if not marker_stack:
         return
 
-    used_native = tier_stack.pop()
     try:
-        if used_native and _native_tier_hook is not None:
-            _native_tier_hook.pop()
-        else:
-            _range_pop()
+        _range_pop()
     finally:
         if marker_stack:
             marker_stack.pop()
@@ -231,10 +191,14 @@ def roctx_wrapper(
     func: Callable[..., Any],
     name: Optional[str] = None,
     backend: str = "",
+    push: Callable[..., None] = _push_scope,
+    pop: Callable[[], None] = _pop_scope,
 ) -> Callable[..., Any]:
     """Wrap func so each call emits a ROCTX range. Idempotent.
 
-    When set, backend attributes the scope to that backend.
+    When set, backend attributes the scope to that backend. push and pop
+    default to the Python tier; a backend may pass its own to route the scope
+    through another tier.
     """
     if getattr(func, "_roctx_wrapped", False):
         return func
@@ -245,32 +209,37 @@ def roctx_wrapper(
     def wrapper(*args: Any, **kwargs: Any) -> object:
         call_counter["count"] += 1
         location = resolve_user_caller_location()
-        _push_scope(func_name, f"#{call_counter['count']}@{location}", backend=backend)
+        push(func_name, f"#{call_counter['count']}@{location}", backend=backend)
         try:
             return func(*args, **kwargs)
         finally:
-            _pop_scope()
+            pop()
 
     wrapper._roctx_wrapped = True
     return wrapper
 
 
-def _marker_only_init_wrapper(name: str, backend: str = "") -> Callable[..., Any]:
+def _marker_only_init_wrapper(
+    name: str,
+    backend: str = "",
+    push: Callable[..., None] = _push_scope,
+    pop: Callable[[], None] = _pop_scope,
+) -> Callable[..., Any]:
     """Build an __init__ that emits a ROCTX range, then calls object.__init__.
 
     Used for classes whose construction occurs in __new__ (e.g. cuda.Event,
-    cuda.Stream).
+    cuda.Stream). push and pop default to the Python tier.
     """
     call_counter = {"count": 0}
 
     def marker_only_init(self: object, *args: Any, **kwargs: Any) -> None:
         call_counter["count"] += 1
         location = resolve_user_caller_location()
-        _push_scope(name, f"#{call_counter['count']}@{location}", backend=backend)
+        push(name, f"#{call_counter['count']}@{location}", backend=backend)
         try:
             return object.__init__(self)
         finally:
-            _pop_scope()
+            pop()
 
     marker_only_init._roctx_wrapped = True
     return marker_only_init

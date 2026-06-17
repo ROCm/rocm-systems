@@ -11,11 +11,11 @@ from collections.abc import Iterable
 from typing import Union
 
 from ._core import (
+    KNOWN_BACKENDS,
     _pop_scope,
     _push_scope,
     resolve_user_caller_location,
 )
-from .constants import KNOWN_BACKENDS
 
 __all__ = [
     "KNOWN_BACKENDS",
