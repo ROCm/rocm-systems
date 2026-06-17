@@ -45,10 +45,6 @@ private:
 
 bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE); }
 
-bool is_executable_section(const Elf64_Shdr &shdr) {
-  return shdr.sh_type == SHT_PROGBITS && (shdr.sh_flags & SHF_EXECINSTR) != 0;
-}
-
 using detail::fits_in_bounds;
 
 rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
