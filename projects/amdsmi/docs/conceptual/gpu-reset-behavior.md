@@ -64,11 +64,16 @@ is driver- and platform-dependent.
 
 ### Why `ROCR_VISIBLE_DEVICES` is not fault isolation
 
+```{tip}
+`ROCR_VISIBLE_DEVICES` is a list of device indices or UUIDs that will be
+exposed to applications using user mode ROCm.
+```
+
 `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` are userspace runtime filters.
 They do not create a kernel-enforced isolation boundary and do not change the
 underlying reset domain managed by the kernel driver.
 
-A process restricted with `HIP_VISIBLE_DEVICES=4,5,6,7` can still be affected by
+A process restricted with `ROCR_VISIBLE_DEVICES=0,1` can still be affected by
 reset recovery outside that visible set, depending on driver behavior and
 platform topology. Use OS-enforced access controls for workload isolation.
 
