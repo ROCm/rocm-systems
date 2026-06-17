@@ -288,11 +288,7 @@ class Kernel : public RuntimeObject {
   const Symbol& symbol_;          //!< The symbol for this kernel.
   std::string name_;              //!< The kernel's name.
   KernelParameters* parameters_;  //!< The parameters.
-  //! True if the kernel's lifetime is owned by a static code object (HIP StatCO).
-  //! Such kernels outlive every launch (and streams are drained at teardown), so
-  //! NDRangeKernelCommand can safely skip the per-launch retain()/release() that
-  //! would otherwise contend on the reference count. Immutable after construction.
-  bool isStatic_;
+  bool isStatic_;                 //!< Is a static code object, so lifetime outlives launch
 
  protected:
   //! Destroy this kernel

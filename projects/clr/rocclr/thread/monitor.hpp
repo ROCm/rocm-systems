@@ -21,10 +21,6 @@ namespace amd {
 class alignas(64) Monitor {
  public:
   explicit Monitor() {
-    // Relaxed: the Monitor is still under construction and cannot be observed by
-    // another thread yet, so no ordering is required. seq_cst (the default)
-    // would emit a locked xchg per store, which shows up in hot construction
-    // paths (e.g. amd::Event has two Monitors built per object).
     waits_.store(0, std::memory_order_relaxed);  // 0 waiting thread initially
     notifyState_.store(notifyState::notNotified,
                        std::memory_order_relaxed);  // initially not notified
@@ -155,13 +151,13 @@ class alignas(64) Monitor {
  private:
   enum class notifyState : uint32_t { notNotified = 0, oneNotified = 1, allNotified = 2 };
 
+  // ======== False sharing behaviour ============
   // The members are split across separate cache lines to avoid false sharing.
   // mutex_ is written on every lock()/unlock(); the spin atomics (waits_ and
   // notifyState_) are read in the spin loop of wait() and written by notify*();
   // cv_ is only touched on the slow path. Keeping the three groups on distinct
   // cache lines stops the spin loop from being invalidated by lock/unlock or
-  // condition-variable traffic. alignas(64) on the class also rounds sizeof up
-  // to a whole number of cache lines, so adjacent Monitors never share a line.
+  // condition-variable traffic.
 
   //! Cache line 0: the mutex (hot, written on every lock/unlock).
   alignas(64) std::mutex mutex_;

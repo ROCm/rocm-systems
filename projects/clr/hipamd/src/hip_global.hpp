@@ -51,10 +51,7 @@ class Function {
   std::vector<amd::Kernel*> dFunc_;  //!< Per-device kernel objects; index matches g_devices
   std::string name_;                 //!< Symbol name for kernel lookup in the program
   FatBinaryInfo** modules_;          //!< Owning fat binary; nullptr for dynamic COs
-  //! True for static code object functions (HIP StatCO). Forwarded to the built
-  //! amd::Kernel so launches can skip the per-launch retain()/release(). Static
-  //! functions outlive every launch and streams are drained at teardown.
-  bool isStatic_;
+  bool isStatic_;                    //!< Performance flag, allows retain on NDRangeKernelCommand to be skipped
 };
 
 class Var {
