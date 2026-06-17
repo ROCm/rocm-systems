@@ -211,6 +211,34 @@ TEST(amdsmitstReadWrite, TestPowerReadWrite) {
   RunGenericTest(&tst);
 }
 
+// New comprehensive power profile tests
+TEST(amdsmitstReadWrite, TestAllAvailableProfiles) {
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestPowerReadWrite tst;
+  RunCustomTestProlog(&tst);
+  tst.TestAllAvailableProfiles();
+  RunCustomTestEpilog(&tst);
+}
+
+TEST(amdsmitstReadWrite, TestSequentialProfileSwitching) {
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestPowerReadWrite tst;
+  RunCustomTestProlog(&tst);
+  tst.TestSequentialProfileSwitching();
+  RunCustomTestEpilog(&tst);
+}
+
+TEST(amdsmitstReadWrite, TestInvalidProfileHandling) {
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestPowerReadWrite tst;
+  RunCustomTestProlog(&tst);
+  tst.TestInvalidProfileHandling();
+  RunCustomTestEpilog(&tst);
+}
+
 TEST(amdsmitstReadWrite, TestPowerCapReadWrite) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");

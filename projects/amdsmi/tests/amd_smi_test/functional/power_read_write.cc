@@ -26,6 +26,8 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <vector>
+#include <unistd.h>
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
@@ -77,6 +79,35 @@ static const char* power_profile_string(amdsmi_power_profile_preset_masks_t prof
     default:
       return "UNKNOWN";
   }
+}
+
+// Helper: Find a profile mask NOT in the available_profiles bitmask.
+// Used for negative testing to validate error handling of unavailable profiles.
+static amdsmi_power_profile_preset_masks_t find_unavailable_profile(
+    uint64_t available_profiles) {
+  uint64_t mask = 1;
+  while (mask <= AMDSMI_PWR_PROF_PRST_LAST) {
+    if (!(available_profiles & mask)) {
+      return (amdsmi_power_profile_preset_masks_t)mask;
+    }
+    mask <<= 1;
+  }
+  return AMDSMI_PWR_PROF_PRST_INVALID;
+}
+
+// Helper: Extract all available profile masks into a vector.
+// Iterates through the available_profiles bitmask and collects each set bit.
+static std::vector<amdsmi_power_profile_preset_masks_t> get_available_profiles(
+    const amdsmi_power_profile_status_t& status) {
+  std::vector<amdsmi_power_profile_preset_masks_t> profiles;
+  uint64_t mask = 1;
+  while (mask <= AMDSMI_PWR_PROF_PRST_LAST) {
+    if (status.available_profiles & mask) {
+      profiles.push_back((amdsmi_power_profile_preset_masks_t)mask);
+    }
+    mask <<= 1;
+  }
+  return profiles;
 }
 
 void TestPowerReadWrite::Run(void) {
@@ -187,3 +218,359 @@ void TestPowerReadWrite::Run(void) {
     CHK_ERR_ASRT(ret);
   }
 }
+
+// TEST CASE 1: Test All Available Profiles
+void TestPowerReadWrite::TestAllAvailableProfiles() {
+  amdsmi_status_t ret;
+  amdsmi_power_profile_status_t status;
+
+  PRINT_VERBOSITY();
+  if (setup_failed_) {
+    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    return;
+  }
+
+  IF_VERB(STANDARD) {
+    std::cout << "\n=== TEST 1: Testing All Available Profiles ===" << std::endl;
+  }
+
+  for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    PrintDeviceHeader(processor_handles_[dv_ind]);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_power_profile_presets", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, &status);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout << "Power profiles not supported on this GPU, skipping" << std::endl;
+      }
+      continue;
+    }
+    CHK_ERR_ASRT(ret);
+
+    amdsmi_power_profile_preset_masks_t orig_profile = status.current;
+    std::vector<amdsmi_power_profile_preset_masks_t> profiles_to_test =
+        get_available_profiles(status);
+
+    ASSERT_FALSE(profiles_to_test.empty())
+        << "At least one profile should be available";
+
+    IF_VERB(STANDARD) {
+      std::cout << "\n>>> Testing " << profiles_to_test.size()
+                << " available profiles (including CUSTOM if available)" << std::endl;
+    }
+
+    // Test switching to EACH profile
+    for (size_t i = 0; i < profiles_to_test.size(); ++i) {
+      auto profile = profiles_to_test[i];
+
+      IF_VERB(STANDARD) {
+        std::cout << "\n[" << (i + 1) << "/" << profiles_to_test.size() << "] "
+                  << "Testing profile: " << power_profile_string(profile) << std::endl;
+      }
+
+      // Set profile
+      DISPLAY_AMDSMI_API("amdsmi_set_gpu_power_profile",
+                         "gpu=" + std::to_string(dv_ind) + ", profile=" + power_profile_string(profile),
+                         VERB(STANDARD));
+      ret = amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0, profile);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+
+      // Skip CUSTOM profile if not supported (Navi 3x quirk: appears in available list but can't be set)
+      if (ret == AMDSMI_STATUS_NOT_SUPPORTED && profile == AMDSMI_PWR_PROF_PRST_CUSTOM_MASK) {
+        IF_VERB(STANDARD) {
+          std::cout << "  CUSTOM profile not supported for setting, skipping" << std::endl;
+        }
+        continue;
+      }
+
+      ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS)
+          << "Failed to set " << power_profile_string(profile);
+
+      // Verify it switched
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_power_profile_presets", "gpu=" + std::to_string(dv_ind),
+                         VERB(STANDARD));
+      ret = amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, &status);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+      CHK_ERR_ASRT(ret);
+      ASSERT_EQ(status.current, profile)
+          << "Profile didn't switch to " << power_profile_string(profile);
+
+      IF_VERB(STANDARD) {
+        std::cout << "  Profile switched successfully" << std::endl;
+      }
+
+      // Verify perf level is MANUAL
+      amdsmi_dev_perf_level_t pfl;
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                         VERB(STANDARD));
+      ret = amdsmi_get_gpu_perf_level(processor_handles_[dv_ind], &pfl);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+      CHK_ERR_ASRT(ret);
+      ASSERT_EQ(pfl, AMDSMI_DEV_PERF_LEVEL_MANUAL);
+
+      IF_VERB(STANDARD) {
+        std::cout << "  Performance level is MANUAL" << std::endl;
+      }
+
+      usleep(100000);  // 100ms - Allow profile to stabilize
+    }
+
+    IF_VERB(STANDARD) {
+      std::cout << "\n>>> Successfully tested all " << profiles_to_test.size()
+                << " profiles!" << std::endl;
+    }
+
+    // Restore original state
+    IF_VERB(STANDARD) {
+      std::cout << "\nRestoring original state..." << std::endl;
+    }
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu=" + std::to_string(dv_ind) + ", level=AUTO",
+                       VERB(STANDARD));
+    ret = amdsmi_set_gpu_perf_level(processor_handles_[dv_ind],
+                                    AMDSMI_DEV_PERF_LEVEL_AUTO);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    CHK_ERR_ASRT(ret);
+
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_power_profile",
+                       "gpu=" + std::to_string(dv_ind) + ", profile=" + power_profile_string(orig_profile),
+                       VERB(STANDARD));
+    ret = amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0, orig_profile);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    CHK_ERR_ASRT(ret);
+
+    IF_VERB(STANDARD) {
+      std::cout << "Restored to: " << power_profile_string(orig_profile) << std::endl;
+    }
+  }
+}
+
+// TEST CASE 2: Sequential Profile Switching
+void TestPowerReadWrite::TestSequentialProfileSwitching() {
+  amdsmi_status_t ret;
+  amdsmi_power_profile_status_t status;
+
+  PRINT_VERBOSITY();
+  if (setup_failed_) {
+    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    return;
+  }
+
+  IF_VERB(STANDARD) {
+    std::cout << "\n=== TEST 2: Sequential Profile Switching ===" << std::endl;
+  }
+
+  for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    PrintDeviceHeader(processor_handles_[dv_ind]);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_power_profile_presets", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, &status);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout << "Power profiles not supported, skipping" << std::endl;
+      }
+      continue;
+    }
+    CHK_ERR_ASRT(ret);
+
+    amdsmi_power_profile_preset_masks_t orig_profile = status.current;
+    const std::vector<amdsmi_power_profile_preset_masks_t> profiles =
+        get_available_profiles(status);
+
+    if (profiles.size() < 2) {
+      IF_VERB(STANDARD) {
+        std::cout << "Only 1 profile available, skipping" << std::endl;
+      }
+      continue;
+    }
+
+    const int num_cycles = 3;
+    IF_VERB(STANDARD) {
+      std::cout << "\n>>> Cycling through " << profiles.size()
+                << " profiles " << num_cycles << " times" << std::endl;
+    }
+
+    for (int cycle = 0; cycle < num_cycles; ++cycle) {
+      IF_VERB(STANDARD) {
+        std::cout << "\n=== Cycle " << (cycle + 1) << "/" << num_cycles
+                  << " ===" << std::endl;
+      }
+
+      for (size_t i = 0; i < profiles.size(); ++i) {
+        auto profile = profiles[i];
+
+        IF_VERB(STANDARD) {
+          std::cout << "  [" << (i + 1) << "/" << profiles.size() << "] "
+                    << "Setting: " << power_profile_string(profile) << std::flush;
+        }
+
+        DISPLAY_AMDSMI_API("amdsmi_set_gpu_power_profile",
+                           "gpu=" + std::to_string(dv_ind) + ", profile=" + power_profile_string(profile),
+                           VERB(STANDARD));
+        ret = amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0, profile);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+
+        // Skip CUSTOM profile if not supported (Navi 3x quirk)
+        if (ret == AMDSMI_STATUS_NOT_SUPPORTED && profile == AMDSMI_PWR_PROF_PRST_CUSTOM_MASK) {
+          IF_VERB(STANDARD) {
+            std::cout << " (skipped - not supported)" << std::endl;
+          }
+          continue;
+        }
+
+        ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
+
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_power_profile_presets", "gpu=" + std::to_string(dv_ind),
+                           VERB(STANDARD));
+        ret = amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, &status);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        CHK_ERR_ASRT(ret);
+        ASSERT_EQ(status.current, profile);
+
+        IF_VERB(STANDARD) {
+          std::cout << std::endl;
+        }
+        usleep(50000);  // 50ms - Prevent rapid switching
+      }
+    }
+
+    IF_VERB(STANDARD) {
+      std::cout << "\n>>> Successfully completed " << num_cycles << " cycles!" << std::endl;
+    }
+
+    // Restore
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu=" + std::to_string(dv_ind) + ", level=AUTO",
+                       VERB(STANDARD));
+    ret = amdsmi_set_gpu_perf_level(processor_handles_[dv_ind],
+                                    AMDSMI_DEV_PERF_LEVEL_AUTO);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    CHK_ERR_ASRT(ret);
+
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_power_profile",
+                       "gpu=" + std::to_string(dv_ind) + ", profile=" + power_profile_string(orig_profile),
+                       VERB(STANDARD));
+    ret = amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0, orig_profile);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    CHK_ERR_ASRT(ret);
+  }
+}
+
+// TEST CASE 3: Invalid Profile Handling
+void TestPowerReadWrite::TestInvalidProfileHandling() {
+  amdsmi_status_t ret;
+  amdsmi_power_profile_status_t status;
+
+  PRINT_VERBOSITY();
+  if (setup_failed_) {
+    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    return;
+  }
+
+  IF_VERB(STANDARD) {
+    std::cout << "\n=== TEST 3: Invalid Profile Handling ===" << std::endl;
+  }
+
+  for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    PrintDeviceHeader(processor_handles_[dv_ind]);
+
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_power_profile_presets", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, &status);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout << "Power profiles not supported, skipping" << std::endl;
+      }
+      continue;
+    }
+    CHK_ERR_ASRT(ret);
+
+    amdsmi_power_profile_preset_masks_t orig_profile = status.current;
+
+    // Test 1: Invalid profile mask
+    IF_VERB(STANDARD) {
+      std::cout << "\n[Test 1] Invalid profile mask (0xFFFFFFFFFFFFFFFF)" << std::endl;
+    }
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_power_profile",
+                       "gpu=" + std::to_string(dv_ind) + ", profile=INVALID",
+                       VERB(STANDARD));
+    ret = amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0,
+                                       AMDSMI_PWR_PROF_PRST_INVALID);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+    ASSERT_NE(ret, AMDSMI_STATUS_SUCCESS)
+        << "Should reject invalid profile mask";
+    IF_VERB(STANDARD) {
+      std::cout << "  Rejected with status: " << ret << std::endl;
+    }
+
+    // Test 2: Zero mask
+    IF_VERB(STANDARD) {
+      std::cout << "\n[Test 2] Zero profile mask" << std::endl;
+    }
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_power_profile",
+                       "gpu=" + std::to_string(dv_ind) + ", profile=0",
+                       VERB(STANDARD));
+    ret = amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0,
+                                       (amdsmi_power_profile_preset_masks_t)0);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+    ASSERT_NE(ret, AMDSMI_STATUS_SUCCESS);
+    IF_VERB(STANDARD) {
+      std::cout << "  Rejected with status: " << ret << std::endl;
+    }
+
+    // Test 3: Multiple bits set
+    if ((status.available_profiles & AMDSMI_PWR_PROF_PRST_COMPUTE_MASK) &&
+        (status.available_profiles & AMDSMI_PWR_PROF_PRST_VIDEO_MASK)) {
+
+      IF_VERB(STANDARD) {
+        std::cout << "\n[Test 3] Multiple profiles (COMPUTE | VIDEO)" << std::endl;
+      }
+      amdsmi_power_profile_preset_masks_t multi =
+          (amdsmi_power_profile_preset_masks_t)(
+              AMDSMI_PWR_PROF_PRST_COMPUTE_MASK | AMDSMI_PWR_PROF_PRST_VIDEO_MASK);
+      DISPLAY_AMDSMI_API("amdsmi_set_gpu_power_profile",
+                         "gpu=" + std::to_string(dv_ind) + ", profile=COMPUTE|VIDEO",
+                         VERB(STANDARD));
+      ret = amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0, multi);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+      ASSERT_NE(ret, AMDSMI_STATUS_SUCCESS);
+      IF_VERB(STANDARD) {
+        std::cout << "  Rejected with status: " << ret << std::endl;
+      }
+    }
+
+    // Test 4: Unavailable profile
+    amdsmi_power_profile_preset_masks_t unavailable =
+        find_unavailable_profile(status.available_profiles);
+
+    if (unavailable != AMDSMI_PWR_PROF_PRST_INVALID) {
+      IF_VERB(STANDARD) {
+        std::cout << "\n[Test 4] Unavailable profile" << std::endl;
+      }
+      DISPLAY_AMDSMI_API("amdsmi_set_gpu_power_profile",
+                         "gpu=" + std::to_string(dv_ind) + ", profile=unavailable",
+                         VERB(STANDARD));
+      ret = amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0, unavailable);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_NOT_SUPPORTED);
+      ASSERT_NE(ret, AMDSMI_STATUS_SUCCESS);
+      IF_VERB(STANDARD) {
+        std::cout << "  Rejected with status: " << ret << std::endl;
+      }
+    }
+
+    // Test 5: Verify profile unchanged
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_power_profile_presets", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, &status);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    CHK_ERR_ASRT(ret);
+    ASSERT_EQ(status.current, orig_profile);
+    IF_VERB(STANDARD) {
+      std::cout << "\n  Profile unchanged after invalid attempts" << std::endl;
+    }
+  }
+}
+

@@ -70,10 +70,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Python unittest scripts now append a GTest-style summary after test output**.  
   - All `*_test.py` and `unit_tests.py` scripts print a colored `[PASSED]`/`[SKIPPED]`/`[FAILED]` block after the standard unittest output. Colors are automatically suppressed when output is not a TTY (e.g. file redirection, CI log capture).
 
-- **Corrected the documented unit of `amdsmi_frequencies_t::frequency`**.  
+- **Corrected the documented unit of `amdsmi_frequencies_t::frequency`**.
   - The struct comment claimed frequencies were in MHz, but `amdsmi_get_clk_freq()` returns them in Hz. The comment now reads "List of frequencies in Hz".
   - Also removed the incorrect "in MHz" note from the `current` field, which is a frequency index, not a frequency value.
   - Updated the Python API reference to state the unit is Hz.
+
+### Tests
+
+- **Added comprehensive power profile tests**.
+  - New test methods: `TestAllAvailableProfiles` (tests all available GPU power profiles), `TestSequentialProfileSwitching` (stress tests sequential profile switching across 3 cycles), and `TestInvalidProfileHandling` (validates error handling for invalid profile inputs).
 
 ## amd_smi_lib for ROCm 7.13.0
 
