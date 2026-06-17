@@ -462,6 +462,12 @@ std::span<const uint8_t> CodeObjectPatcher::text_bytes() const {
 }
 
 bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
+  // Keep fail-closed behavior for callers that assume word-aligned executable
+  // sections; accepting a non-word-aligned replacement can break downstream
+  // PC-relative patching and branch-distance checks.
+  if ((new_text.size() % sizeof(uint32_t)) != 0)
+    return false;
+
   if (text_size_ == 0)
     return false;
   if (new_text.size() < text_size_)

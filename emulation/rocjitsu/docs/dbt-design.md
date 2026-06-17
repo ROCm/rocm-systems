@@ -183,7 +183,7 @@ For each code object:
 3. **Analyze:** Build per-kernel CFG scopes from kernel descriptor entry offsets and compute `LivenessAnalysis` for each scope.
 4. **Per-instruction pass:** For each instruction in each basic block:
    - Call `try_lower_expand(inst, offset, liveness)` — binary search the expand rules table by `(encoding_id, opcode)`. If a rule matches, the `ExpandFn` generates replacement instruction words using the `HazardTracker` for automatic `s_delay_alu` insertion and liveness-based register allocation for temp VGPRs/SGPRs.
-   - If no expand rule matched, look up the legalization table. If Identity or Substitute, call the encoding translator. If Expand with no handler, NOP-fill and emit a warning.
+   - If no expand rule matched, look up the legalization table. If Identity or Substitute, call the encoding translator. If Expand with no handler, report `ExpandMissing` and leave translation unchanged.
    - If the replacement is larger than the source instruction, create a kernel-local code cave in `.text` with a branch stub and return branch.
 5. **Entry prologues:** `BinaryTranslator` places descriptor-provided prologue words in the kernel-local cave and records the redirected descriptor entry.
 6. **Patch:** Replace `.text`, update ELF flags, and write descriptor byte patches.
