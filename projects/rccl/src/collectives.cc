@@ -131,7 +131,7 @@ RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
 // threshold for gfx942; gfx950 uses the user-configurable rcclParamDdaThreshold();
 // all other architectures return false (threshold 0).
 static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0 || comm->nRanks < 8) return false;
+  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0 || comm->nRanks < 8 || comm->symmetricSupport) return false;
   size_t threshold;
   if (IsArchMatch(comm->archName, "gfx942")) {
     threshold = gfx942Default;

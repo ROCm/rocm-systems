@@ -42,52 +42,82 @@ namespace rocshmem {
 
 __device__ __forceinline__ int uncached_load_ubyte([[maybe_unused]] uint8_t* src) {
   int ret = 0;
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx90a__)
+  int16_t val16;
+  asm volatile(
+      "global_load_ubyte %0 %1 off glc slc \n"
+      "s_waitcnt vmcnt(0)"
+      : "=v"(val16)
+      : "v"(src)
+      : "memory");
+  ret = static_cast<int>(val16);
+#endif
+#if defined(__gfx942__) || defined(__gfx950__)
+  int16_t val16;
+  asm volatile(
+      "global_load_ubyte %0 %1 off sc0 sc1 \n"
+      "s_waitcnt vmcnt(0)"
+      : "=v"(val16)
+      : "v"(src)
+      : "memory");
+  ret = static_cast<int>(val16);
+#endif
+#if defined(__gfx1100__)
   asm volatile(
       "global_load_ubyte %0 %1 off glc slc \n"
       "s_waitcnt vmcnt(0)"
       : "=v"(ret)
-      : "v"(src));
-#endif
-#if defined(__gfx942__) || defined(__gfx950__)
-  asm volatile(
-      "global_load_ubyte %0 %1 off sc0 sc1 \n"
-      "s_waitcnt vmcnt(0)"
-      : "=v"(ret)
-      : "v"(src));
+      : "v"(src)
+      : "memory");
 #endif
 #if defined(__gfx1201__) || defined(__gfx1250__)
   asm volatile(
       "global_load_u8 %0 %1 off scope:SCOPE_SYS \n"
       "s_wait_loadcnt 0x0"
       : "=v"(ret)
-      : "v"(src));
+      : "v"(src)
+      : "memory");
 #endif
   return ret;
 }
 
 __device__ __forceinline__ void refresh_volatile_sbyte([[maybe_unused]] volatile int *assigned_value,
                                                        [[maybe_unused]] volatile char *read_value) {
-#if defined(__gfx90a__) || defined(__gfx1100__)
+#if defined(__gfx90a__)
+  int16_t val16;
+  asm volatile(
+    "global_load_sbyte %0 %1 off glc slc\n "
+    "s_waitcnt vmcnt(0)"
+    : "=v"(val16)
+    : "v"(read_value)
+    : "memory");
+  *assigned_value = static_cast<int>(val16);
+#endif
+#if defined(__gfx942__) || defined(__gfx950__)
+  int16_t val16;
+  asm volatile(
+    "global_load_sbyte %0 %1 off sc0 sc1\n "
+    "s_waitcnt vmcnt(0)"
+    : "=v"(val16)
+    : "v"(read_value)
+    : "memory");
+  *assigned_value = static_cast<int>(val16);
+#endif
+#if defined(__gfx1100__)
   asm volatile(
     "global_load_sbyte %0 %1 off glc slc\n "
     "s_waitcnt vmcnt(0)"
     : "=v"(*assigned_value)
-    : "v"(read_value));
-#endif
-#if defined(__gfx942__) || defined(__gfx950__)
-  asm volatile(
-    "global_load_sbyte %0 %1 off sc0 sc1\n "
-    "s_waitcnt vmcnt(0)"
-    : "=v"(*assigned_value)
-    : "v"(read_value));
+    : "v"(read_value)
+    : "memory");
 #endif
 #if defined(__gfx1201__) || defined(__gfx1250__)
   asm volatile(
       "global_load_i8 %0 %1 off scope:SCOPE_SYS \n"
       "s_wait_loadcnt 0x0"
       : "=v"(*assigned_value)
-      : "v"(read_value));
+      : "v"(read_value)
+      : "memory");
 #endif
 }
 
@@ -98,87 +128,203 @@ __device__ __forceinline__ void refresh_volatile_dwordx2([[maybe_unused]] volati
     "global_load_dwordx2 %0 %1 off glc slc\n "
     "s_waitcnt vmcnt(0)"
     : "=v"(*assigned_value)
-    : "v"(read_value));
+    : "v"(read_value)
+    : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
   asm volatile(
     "global_load_dwordx2 %0 %1 off sc0 sc1\n "
     "s_waitcnt vmcnt(0)"
     : "=v"(*assigned_value)
-    : "v"(read_value));
+    : "v"(read_value)
+    : "memory");
 #endif
- #if defined(__gfx1201__) || defined(__gfx1250__)
+#if defined(__gfx1201__) || defined(__gfx1250__)
   asm volatile(
       "global_load_b64 %0 %1 off scope:SCOPE_SYS \n"
       "s_wait_loadcnt 0x0"
       : "=v"(*assigned_value)
-      : "v"(read_value));
+      : "v"(read_value)
+      : "memory");
 #endif
 }
 
-/* Ignore the warning about deprecated volatile.
- * The only usage of volatile is to force the compiler to generate
- * the assembly instruction. If volatile is omitted, the compiler
- * will NOT generate the non-temporal load or the waitcnt.
- */
-// clang-format off
-NOWARN(-Wdeprecated-volatile,
-  template <typename T> __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
-    T ret{};
-    switch (sizeof(T)) {
-      case 4:
-#if defined(__gfx90a__) || defined(__gfx1100__)
-        asm volatile(
-            "global_load_dword %0 %1 off glc slc \n"
-            "s_waitcnt vmcnt(0)"
-            : "=v"(ret)
-            : "v"(src));
+template <typename T>
+__device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
+  static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 ||
+                sizeof(T) == 8 || sizeof(T) == 16,
+                "uncached_load only supports 1/2/4/8/16-byte types");
+  T ret{};
+  switch (sizeof(T)) {
+    case 1: {
+#if defined(__gfx90a__)
+    
+      int16_t val16;
+      asm volatile(
+          "global_load_ubyte %0 %1 off glc slc \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(val16)
+          : "v"(src)
+          : "memory");
+      ret = static_cast<T>(val16);
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-        asm volatile(
-            "global_load_dword %0 %1 off sc0 sc1 \n"
-            "s_waitcnt vmcnt(0)"
-            : "=v"(ret)
-            : "v"(src));
+      int16_t val16;
+      asm volatile(
+          "global_load_ubyte %0 %1 off sc0 sc1 \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(val16)
+          : "v"(src)
+          : "memory");
+      ret = static_cast<T>(val16);
+#endif
+#if defined(__gfx1100__)
+      int32_t val32;
+      asm volatile(
+          "global_load_ubyte %0 %1 off glc slc \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(val32)
+          : "v"(src)
+          : "memory");
+      ret = static_cast<T>(val32);
 #endif
 #if defined(__gfx1201__) || defined(__gfx1250__)
-        asm volatile(
-            "global_load_b32 %0 %1 off scope:SCOPE_SYS \n"
-            "s_wait_loadcnt 0x0"
-            : "=v"(ret)
-            : "v"(src));
+      int32_t val32;
+      asm volatile(
+          "global_load_u8 %0 %1 off scope:SCOPE_SYS \n"
+          "s_wait_loadcnt 0x0"
+          : "=v"(val32)
+          : "v"(src)
+          : "memory");
+      ret = static_cast<T>(val32);
 #endif
-        break;
-      case 8:
-#if defined(__gfx90a__) || defined(__gfx1100__)
-        asm volatile(
-            "global_load_dwordx2 %0 %1 off glc slc \n"
-            "s_waitcnt vmcnt(0)"
-            : "=v"(ret)
-            : "v"(src));
-#endif
-#if defined(__gfx942__) || defined(__gfx950__)
-        asm volatile(
-            "global_load_dwordx2 %0 %1 off sc0 sc1 \n"
-            "s_waitcnt vmcnt(0)"
-            : "=v"(ret)
-            : "v"(src));
-#endif
-#if defined(__gfx1201__) || defined(__gfx1250__)
-        asm volatile(
-            "global_load_b64 %0 %1 off scope:SCOPE_SYS \n"
-            "s_wait_loadcnt 0x0"
-            : "=v"(ret)
-            : "v"(src));
-#endif
-        break;
-      default:
-        break;
+      break;
     }
-    return ret;
+    case 2: {
+#if defined(__gfx90a__)
+      asm volatile(
+          "global_load_ushort %0 %1 off glc slc \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(ret)
+          : "v"(src)
+          : "memory");
+#endif
+#if defined(__gfx1100__)
+      int32_t val32;
+      asm volatile(
+          "global_load_ushort %0 %1 off glc slc \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(val32)
+          : "v"(src)
+          : "memory");
+      ret = static_cast<T>(val32);
+#endif
+#if defined(__gfx942__) || defined(__gfx950__)
+      asm volatile(
+          "global_load_ushort %0 %1 off sc0 sc1 \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(ret)
+          : "v"(src)
+          : "memory");
+#endif
+#if defined(__gfx1201__) || defined(__gfx1250__)
+      int32_t val32;
+      asm volatile(
+          "global_load_u16 %0 %1 off scope:SCOPE_SYS \n"
+          "s_wait_loadcnt 0x0"
+          : "=v"(val32)
+          : "v"(src)
+          : "memory");
+      ret = static_cast<T>(val32);
+#endif
+      break;
+    }
+    case 4: {
+#if defined(__gfx90a__) || defined(__gfx1100__)
+      asm volatile(
+          "global_load_dword %0 %1 off glc slc \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(ret)
+          : "v"(src)
+          : "memory");
+#endif
+#if defined(__gfx942__) || defined(__gfx950__)
+      asm volatile(
+          "global_load_dword %0 %1 off sc0 sc1 \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(ret)
+          : "v"(src)
+          : "memory");
+#endif
+#if defined(__gfx1201__) || defined(__gfx1250__)
+      asm volatile(
+          "global_load_b32 %0 %1 off scope:SCOPE_SYS \n"
+          "s_wait_loadcnt 0x0"
+          : "=v"(ret)
+          : "v"(src)
+          : "memory");
+#endif
+      break;
+    }
+    case 8: {
+#if defined(__gfx90a__) || defined(__gfx1100__)
+      asm volatile(
+          "global_load_dwordx2 %0 %1 off glc slc \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(ret)
+          : "v"(src)
+          : "memory");
+#endif
+#if defined(__gfx942__) || defined(__gfx950__)
+      asm volatile(
+          "global_load_dwordx2 %0 %1 off sc0 sc1 \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(ret)
+          : "v"(src)
+          : "memory");
+#endif
+#if defined(__gfx1201__) || defined(__gfx1250__)
+      asm volatile(
+          "global_load_b64 %0 %1 off scope:SCOPE_SYS \n"
+          "s_wait_loadcnt 0x0"
+          : "=v"(ret)
+          : "v"(src)
+          : "memory");
+#endif
+      break;
+    }
+    case 16: {
+#if defined(__gfx90a__) || defined(__gfx1100__)
+      asm volatile(
+          "global_load_dwordx4 %0 %1 off glc slc \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(ret)
+          : "v"(src)
+          : "memory");
+#endif
+#if defined(__gfx942__) || defined(__gfx950__)
+      asm volatile(
+          "global_load_dwordx4 %0 %1 off sc0 sc1 \n"
+          "s_waitcnt vmcnt(0)"
+          : "=v"(ret)
+          : "v"(src)
+          : "memory");
+#endif
+#if defined(__gfx1201__) || defined(__gfx1250__)
+      asm volatile(
+          "global_load_b128 %0 %1 off scope:SCOPE_SYS \n"
+          "s_wait_loadcnt 0x0"
+          : "=v"(ret)
+          : "v"(src)
+          : "memory");
+#endif
+      break;
+    }
+    default:
+      break;
   }
-)
-// clang-format on
+  return ret;
+}
 
 __device__ __forceinline__ void __roc_flush() {
 #if not defined USE_HDP_FLUSH
@@ -204,7 +350,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 1: [[unlikely]] {
 #if defined(__gfx90a__)
       int16_t val16{static_cast<int16_t>(*src)};
-      asm volatile("flat_store_byte %0, %1, glc"
+      asm volatile("flat_store_byte %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val16)
                    : "memory");
@@ -218,7 +364,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #endif
 #if defined(__gfx1100__)
       int32_t val32{static_cast<int32_t>(*src)};
-      asm volatile("flat_store_byte %0, %1, glc"
+      asm volatile("flat_store_byte %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
@@ -235,7 +381,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 2: [[unlikely]] {
       [[maybe_unused]] int16_t val16{*(reinterpret_cast<int16_t*>(src))};
 #if defined(__gfx90a__)
-      asm volatile("flat_store_short %0, %1, glc"
+      asm volatile("flat_store_short %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val16)
                    : "memory");
@@ -248,7 +394,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #endif
 #if defined(__gfx1100__)
       int32_t val32{static_cast<int32_t>(val16)};
-      asm volatile("flat_store_short %0, %1, glc"
+      asm volatile("flat_store_short %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
@@ -265,7 +411,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 4: [[unlikely]] {
       [[maybe_unused]] int32_t val32{*(reinterpret_cast<int32_t*>(src))};
 #if defined(__gfx90a__) || defined(__gfx1100__)
-      asm volatile("flat_store_dword %0, %1, glc"
+      asm volatile("flat_store_dword %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
@@ -287,7 +433,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 8: [[unlikely]] {
       [[maybe_unused]] int64_t val64{*(reinterpret_cast<int64_t*>(src))};
 #if defined(__gfx90a__) || defined(__gfx1100__)
-      asm volatile("flat_store_dwordx2 %0, %1, glc"
+      asm volatile("flat_store_dwordx2 %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val64)
                    : "memory");
@@ -309,7 +455,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 16: [[likely]] {
       [[maybe_unused]] __int128_t val128{*(reinterpret_cast<__int128_t*>(src))};
 #if defined(__gfx90a__) || defined(__gfx1100__)
-      asm volatile("flat_store_dwordx4 %0, %1, glc"
+      asm volatile("flat_store_dwordx4 %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val128)
                    : "memory");

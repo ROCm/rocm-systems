@@ -237,6 +237,16 @@ class NullDevice : public amd::Device {
     return true;
   }
 
+  cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override {
+    ShouldNotReachHere();
+    return CL_INVALID_OPERATION;
+  }
+
+  cl_int virtualUnmap(void* va, size_t size) override {
+    ShouldNotReachHere();
+    return CL_INVALID_OPERATION;
+  }
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) override {
     ShouldNotReachHere();
@@ -468,6 +478,9 @@ class Device : public NullDevice {
   virtual bool UpdateScratchLimitCurrent(size_t limit) const final;
   virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment) override;
   virtual bool virtualFree(void* addr) override;
+
+  virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override;
+  virtual cl_int virtualUnmap(void* va, size_t size) override;
 
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) override;

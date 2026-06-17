@@ -8,6 +8,10 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_div_scale,
     gen_vector_movrel,
 )
+from amdisa.codegen.execute.vector_cmp import (
+    gen_vector_cmp,
+    gen_vector_cmp_class,
+)
 from amdisa.isa_profile import Gfx1250Profile, Rdna4Profile
 
 
@@ -49,6 +53,42 @@ def test_div_scale_writes_explicit_sdst_mask():
     assert 'sdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in body
     assert 'sdst.write_scalar64(wf, vcc)' in body
     assert 'wf.set_vcc(vcc)' not in body
+
+
+def test_vector_cmp_writes_explicit_sdst_mask():
+    body = gen_vector_cmp(['sdst'], ['src0', 'src1'], 't', 'u32', is_vop3=True)
+
+    assert 'if (wf.wf_size() <= 32)' in body
+    assert 'sdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in body
+    assert 'sdst.write_scalar64(wf, vcc)' in body
+    assert 'wf.set_vcc(vcc)' not in body
+
+
+def test_vector_cmp_omits_redundant_mask_clears():
+    body = gen_vector_cmp(['sdst'], ['src0', 'src1'], 'eq', 'u32', is_vop3=True)
+
+    assert 'uint64_t vcc = 0;' in body
+    assert 'vcc &= ~(1ULL << lane)' not in body
+
+
+def test_vector_cmp_class_writes_explicit_sdst_mask():
+    body = gen_vector_cmp_class(
+        ['sdst'], ['src0', 'src1'], 'f32', is_cmpx=False, is_vop3=True
+    )
+
+    assert 'if (wf.wf_size() <= 32)' in body
+    assert 'sdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in body
+    assert 'sdst.write_scalar64(wf, vcc)' in body
+    assert 'wf.set_vcc(vcc)' not in body
+
+
+def test_vector_cmp_class_omits_redundant_mask_clears():
+    body = gen_vector_cmp_class(
+        ['sdst'], ['src0', 'src1'], 'f32', is_cmpx=False, is_vop3=True
+    )
+
+    assert 'uint64_t vcc = 0;' in body
+    assert 'vcc &= ~(1ULL << lane)' not in body
 
 
 def test_div_scale_uses_signed_tiny_exponent_threshold():
@@ -134,8 +174,8 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
 
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' in cpp
-    fma_start = cpp.index('case 19: {')
-    fma_case = cpp[fma_start : cpp.index('case 20:', fma_start)]
+    fma_start = cpp.index('case kVopdFmaF32: {')
+    fma_case = cpp[fma_start : cpp.index('case kVopdSubNcU32:', fma_start)]
     assert 'std::fma(std::bit_cast<float>(src0),' in fma_case
     assert 'std::bit_cast<float>(src1),' in fma_case
     assert 'std::bit_cast<float>(src2))' in fma_case
