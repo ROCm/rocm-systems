@@ -64,6 +64,9 @@ done
 ## Profiling
 
 ```bash
+# Note: --no-roof is optional and skips the
+# benchmarking that is unrelated to the our purpose
+
 # Profile baseline
 rocprof-compute profile -n <name>_baseline --experimental --membw-analysis --no-roof -- ./<workload>
 

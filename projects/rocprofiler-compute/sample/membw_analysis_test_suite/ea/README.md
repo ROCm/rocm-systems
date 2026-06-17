@@ -61,6 +61,9 @@ hipcc -g ea_hbm_read_bw.hip -o ea_hbm_read_bw
 ## Profiling
 
 ```bash
+# Note: --no-roof is optional and skips the
+# benchmarking that is unrelated to the our purpose
+
 # From the rocprofiler-compute root directory:
 
 # Profile baseline
