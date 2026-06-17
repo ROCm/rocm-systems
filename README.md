@@ -7,41 +7,48 @@ A user-mode library that enables ROCm functionality on Windows Subsystem for Lin
 - The following tools are required to build librocdxg:
   - CMake >= 3.15
   - GCC >= 11.4
-
 ## Quickstart
 
-### 1. Install Windows SDK
+### 1. Install AMD ROCm package
 
-Download and install the Windows SDK from [windows SDK](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/)
-
-### 2. Install AMD ROCm package
-
-please install the ROCm package by following the official ROCm Installation Quick Guide:
+Install the ROCm package by following the official ROCm Installation Quick Guide:
 
 [ROCm Installation Quick Start](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html)
 
 > ***Note***
-> - The ROCm 7.13.0 technology preview release documentation is available at [ROCm Preview documentation](https://rocm.docs.amd.com/en/7.13.0-preview/). For production use, continue to use ROCm 7.2.3 documentation.
+> - The ROCm 7.13.0 technology preview release documentation is available at [ROCm Preview documentation](https://rocm.docs.amd.com/en/7.13.0-preview/). For production use, continue to use ROCm 7.2.4 documentation.
 > - This step may take several minutes, depending on internet connection and system speed.
 > - Follow the quick-start guide for package repository setup and ROCm package installation.
-> - **Important**: Post-installation validation of ROCm (Step 5) must only be performed after the successful completion of **Step 3** and **Step 4**. Executing the validation prior to this will lead to failure.
+> - **Important**: Post-installation validation (Step 3) must only be performed after the successful completion of **Step 2**. Executing the validation prior to this will lead to failure.
 
-### 3. Build librocdxg
-Run the following commands in your WSL console:
+### 2. Install librocdxg
 
-1. Clone librocdxg repository to your local WSL.
+> ***Note***
+> - For legacy ROCm releases, `HSA_ENABLE_DXG_DETECTION=1` MUST be set; this requirement is removed starting with the ROCk release 7.13. It applies to both installation options below.
+>
+>   ```bash
+>   export HSA_ENABLE_DXG_DETECTION=1
+>   ```
+
+#### Option A — Build from source
+
+1. Install Windows SDK
+
+Download and install the Windows SDK from [Windows SDK](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/).
+
+2. Clone the librocdxg repository to your local WSL.
 
 ```bash
 git clone https://github.com/ROCm/librocdxg.git
 cd librocdxg
 ```
 
-2. Build the librocdxg.
+3. Build and install librocdxg.
 
 ```bash
 # Set the Windows SDK path (adjust version number if different)
-export win_sdk='/mnt/c/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/'
- 
+export win_sdk='/mnt/c/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0'
+
 # Build the library
 mkdir -p build
 cd build
@@ -55,15 +62,15 @@ sudo make install
 >   - C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\
 > - Ensure you have the necessary permissions to access the Windows SDK directory from WSL
 
-### 4. Load the AMD ROCDXG libary
+#### Option B — Install pre-built deb package
 
-For legacy ROCm releases, HSA_ENABLE_DXG_DETECTION=1 MUST be set; this requirement is removed starting with the ROCk release 7.13.
+Download the `rocdxg-roct` runtime package from [GitHub Releases](https://github.com/ROCm/librocdxg/releases):
 
 ```bash
-export HSA_ENABLE_DXG_DETECTION=1
+sudo dpkg -i rocdxg-roct_<version>_amd64.deb
 ```
 
-### 5. Post-install verification checks
+### 3. Post-install verification checks
 Run these post-installation checks to verify that the installation is complete.
 
 Check if the GPU is listed as an agent:
@@ -87,7 +94,7 @@ Agent 2
 
 ```
 
-### 6. Container Launch – WSL-Specific Flags
+### 4. Container Launch – WSL-Specific Flags
 
 When you launch the container, add these WSL-specific arguments (they do not replace the native-Linux GPU flags):
 
@@ -129,7 +136,7 @@ docker run -it  \
 >       rocm/pytorch:latest
 >   ```
 
-## 7. Known Issues and Limitations
+## Known Issues and Limitations
 
 - JAX is supported from version 0.9.1 onwards.
 - AMD-SMI currently provides a limited set of features on WSL2. The source code is available in the develop branch, and a formal release plan is under development.
