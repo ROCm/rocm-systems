@@ -427,10 +427,17 @@ pub struct StartArgs {
     /// from the profile (the upstream `rocjitsu --config`).
     #[arg(long, value_name = "PATH")]
     pub config: Option<String>,
-    /// Run the emulator in out-of-process daemon mode instead of the
-    /// default in-process (local) emulation.
-    #[arg(long)]
+    /// Run the emulator in out-of-process daemon mode. This is the
+    /// default; the flag is accepted for explicitness and for the
+    /// `rocjitsu --daemon/--attach` drop-in alias.
+    #[arg(long, conflicts_with = "in_process")]
     pub daemon: bool,
+    /// Run the emulator in-process (local mode) instead of the default
+    /// out-of-process daemon. In-process mode cannot share GPU memory
+    /// across processes, so multi-GPU RCCL collectives require the
+    /// daemon (the default).
+    #[arg(long = "in-process")]
+    pub in_process: bool,
     /// Never prompt; require every field on the command line even on a
     /// terminal.
     #[arg(long)]
@@ -571,10 +578,17 @@ pub struct RunArgs {
     /// from the profile (the upstream `rocjitsu --config`).
     #[arg(long, value_name = "PATH")]
     config: Option<String>,
-    /// Run the emulator in out-of-process daemon mode instead of the
-    /// default in-process (local) emulation.
-    #[arg(long)]
+    /// Run the emulator in out-of-process daemon mode. This is the
+    /// default; the flag is accepted for explicitness and for the
+    /// `rocjitsu --daemon/--attach` drop-in alias.
+    #[arg(long, conflicts_with = "in_process")]
     daemon: bool,
+    /// Run the emulator in-process (local mode) instead of the default
+    /// out-of-process daemon. In-process mode cannot share GPU memory
+    /// across processes, so multi-GPU RCCL collectives require the
+    /// daemon (the default).
+    #[arg(long = "in-process")]
+    in_process: bool,
     /// The command and its arguments.
     #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
     argv: Vec<String>,
@@ -1430,7 +1444,7 @@ async fn session_start<C: MirageCtl>(
         id,
         profile: profile_ref,
         workdir,
-        daemon: args.daemon,
+        daemon: !args.in_process,
     })?;
     if !args.no_host {
         spawn_host_for(&def.id)?;
@@ -1939,7 +1953,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                         .map(|p| p.display().to_string())
                         .unwrap_or("/".to_string())
                 }),
-                daemon: a.daemon,
+                daemon: !a.in_process,
             })?;
             tracing::info!(session = %def.id, "session created; spawning host");
             spawn_host_for(&def.id)?;
