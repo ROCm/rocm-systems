@@ -34,9 +34,9 @@ architectures:
   gfx950:
     same_bucket_priority_metric_ids: {}
 
-  # RDNA3.5 (gfx1151): throughput + cache hit-rate + GRBM utilization metrics
+  # RDNA3.5 (gfx115x): throughput + cache hit-rate + GRBM utilization metrics
   # that benefit from single-pass PMC grouping for stable formulas.
-  gfx1151:
+  gfx115x:
     same_bucket_priority_metric_ids:
       # 2.1.3 = panel 200, table 201 (System Speed-of-Light), metric index 3.
       "2.1.3":

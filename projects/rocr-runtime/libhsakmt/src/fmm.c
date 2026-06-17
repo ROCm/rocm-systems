@@ -4726,22 +4726,35 @@ void hsakmt_fmm_clear_all_aperture(HsaKFDContext *ctx)
 	fmm_clear_aperture(&fmm_ctx->svm.apertures[SVM_COHERENT]);
 
 	if (fmm_ctx->dgpu_shared_aperture_limit) {
-		/* Use the same dgpu range as the parent. If failed, then set
-		 * hsakmt_is_dgpu_mem_init to false. Later on dgpu_mem_init will try
-		 * to get a new range
-		 */
-		map_addr = mmap(fmm_ctx->dgpu_shared_aperture_base,
-			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit)-
-			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1, PROT_NONE,
-			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED, -1, 0);
+		HSAuint64 dgpu_size =
+			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit) -
+			(HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1;
 
-		if (map_addr == MAP_FAILED) {
-			munmap(fmm_ctx->dgpu_shared_aperture_base,
-				   (HSAuint64)(fmm_ctx->dgpu_shared_aperture_limit) -
-				   (HSAuint64)(fmm_ctx->dgpu_shared_aperture_base) + 1);
-
+		if (hsakmt_use_model) {
+			/* In model mode, hsaKmtCloseKFDCtx frees the fmm context
+			 * after this call, so the "remap-and-keep" path used for
+			 * fork() inheritance would leak the SVM reservation and
+			 * make the next hsa_init in the same process fail to
+			 * reserve SVM address space. Release it instead.
+			 */
+			munmap(fmm_ctx->dgpu_shared_aperture_base, dgpu_size);
 			fmm_ctx->dgpu_shared_aperture_base = NULL;
 			fmm_ctx->dgpu_shared_aperture_limit = NULL;
+		} else {
+			/* Use the same dgpu range as the parent. If failed, then set
+			 * hsakmt_is_dgpu_mem_init to false. Later on dgpu_mem_init will try
+			 * to get a new range
+			 */
+			map_addr = mmap(fmm_ctx->dgpu_shared_aperture_base,
+				dgpu_size, PROT_NONE,
+				MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED, -1, 0);
+
+			if (map_addr == MAP_FAILED) {
+				munmap(fmm_ctx->dgpu_shared_aperture_base, dgpu_size);
+
+				fmm_ctx->dgpu_shared_aperture_base = NULL;
+				fmm_ctx->dgpu_shared_aperture_limit = NULL;
+			}
 		}
 	}
 

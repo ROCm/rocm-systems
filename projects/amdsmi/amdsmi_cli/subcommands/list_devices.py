@@ -427,7 +427,7 @@ class ListDevicesCommands:
         self.logger.output = {}
         self.logger.clear_multiple_devices_output()
 
-        if self.helpers.is_brcm_switch_initialized():
+        if self.helpers.is_brcm_switch_initialized() and args.switch:
             self.list_switch(args, False, switch=args.switch)
 
         self.logger.output = {}

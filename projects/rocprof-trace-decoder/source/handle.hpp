@@ -115,7 +115,7 @@ public:
 
     mutable std::condition_variable_any cv;
     mutable std::atomic<int> gfxip = 0;
-    uint64_t gfx9_header = 0;
+    uint64_t trace_header = 0;
     Pipestate pipestate{};
 
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED

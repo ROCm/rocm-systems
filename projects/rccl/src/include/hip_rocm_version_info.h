@@ -55,4 +55,42 @@ THE SOFTWARE.
    #endif
 #endif
 
+// Header-only helpers for runtime version reporting.
+#include <string>
+#include <fmt/format.h>
+
+// A version with `valid` cleared when the originating query failed.
+struct VersionInfo {
+  bool valid;
+  unsigned major;
+  unsigned minor;
+  unsigned patch;
+};
+
+// Decode hipRuntimeGetVersion(): MAJOR*10000000 + MINOR*100000 + PATCH.
+inline VersionInfo decodeHipVer(int v) {
+  return VersionInfo{true, (unsigned)(v / 10000000),
+                     (unsigned)((v / 100000) % 100), (unsigned)(v % 100000)};
+}
+
+inline bool sameVer(const VersionInfo& a, const VersionInfo& b) {
+  return a.major == b.major && a.minor == b.minor && a.patch == b.patch;
+}
+
+// Runtime values appended only when valid and different from compile-time.
+inline std::string fmtExtVer(
+    const std::string& hipBase, const VersionInfo& hipRt, const VersionInfo& hipCt,
+    const std::string& rocmBase, const VersionInfo& rocmRt, const VersionInfo& rocmCt) {
+  // Determine the maximum width of the base strings for alignment.
+  const size_t width = hipBase.size() > rocmBase.size() ? hipBase.size() : rocmBase.size();
+  auto line = [width](const std::string& base, const char* label,
+                      const VersionInfo& rt, const VersionInfo& ct) {
+    if (!rt.valid || sameVer(rt, ct))
+      return base;
+    return fmt::format("{:<{}} / {} : {}.{}.{}", base, width, label, rt.major, rt.minor, rt.patch);
+  };
+  return line(hipBase,  "HIP runtime ", hipRt,  hipCt) + '\n'
+       + line(rocmBase, "ROCm runtime", rocmRt, rocmCt);
+}
+
 #endif

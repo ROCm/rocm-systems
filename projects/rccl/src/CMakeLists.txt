@@ -12,6 +12,9 @@ set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
 # net_ib_cast: populate NET_IB_CAST_SOURCES and NET_IB_CAST_INCLUDE_DIRS
 add_subdirectory(transport/net_ib_cast)
 
+# devcomm: populate DEVCOMM_SOURCES and DEVCOMM_INCLUDE_DIRS
+add_subdirectory(devcomm)
+
 # Collect list of all source files
 #==================================================================================================
 # E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
@@ -76,6 +79,7 @@ set(SRC_FILES
   device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh
   device/symmetric/reduce_scatter_gin.cuh
+  device/symmetric/tma_ptx.cuh
   graph/connect.cc
   graph/paths.cc
   graph/rings.cc
@@ -188,7 +192,6 @@ set(SRC_FILES
   include/ionic/ionicdvcore.h
   include/ionic/ionicdvsymbols.h
   include/ionic/ionicdvwrap.h
-  include/nccl_merge_stubs.h
   include/nccl_device/comm.h
   include/nccl_device/coop.h
   include/nccl_device/core.h
@@ -277,6 +280,7 @@ set(SRC_FILES
   include/plugin/net/net_v9.h
   include/plugin/net/net_v10.h
   include/plugin/net/net_v11.h
+  include/plugin/net/net_v12.h
   include/plugin/profiler/net_ib_v1.h
   include/plugin/profiler/net_ib.h
   include/plugin/profiler/net_socket_v1.h
@@ -291,6 +295,7 @@ set(SRC_FILES
   include/plugin/tuner/tuner_v3.h
   include/plugin/tuner/tuner_v4.h
   include/plugin/tuner/tuner_v5.h
+  include/plugin/tuner/tuner_v6.h
   include/plugin/nccl_gin.h
   include/plugin/gin/gin_v11.h
   include/plugin/gin/gin_v12.h
@@ -304,7 +309,7 @@ set(SRC_FILES
 # misc/gdrwrap.cc
   misc/ibvsymbols.cc
   misc/ibvwrap.cc
-  misc/ipcsocket.cc
+  os/linux_ipcsocket.cc
   misc/mlx5dvsymbols.cc
   misc/mlx5dvwrap.cc
   misc/ionicdvsymbols.cc
@@ -328,6 +333,21 @@ set(SRC_FILES
   nccl_device/lsa_barrier.cc
   os/linux.cc
   include/os.h
+  include/os/linux.h
+  include/os/windows.h
+  param/c_api.cc
+  param/param.cc
+  param/param_registry.cc
+  include/param/common.h
+  include/param/param.h
+  include/param/param_registry.h
+  include/param/parser_bitset.h
+  include/param/parser_common.h
+  include/param/parser_default.h
+  include/param/parser_enum.h
+  include/param/parser_list.h
+  include/param/parsers.h
+  include/param/utils.h
   rma/rma.cc
   rma/rma_ce.cc
   rma/rma_proxy.cc
@@ -336,6 +356,7 @@ set(SRC_FILES
   include/rma/rma.h
   include/rma/rma_ce.h
   include/rma/rma_proxy.h
+  include/rma/rma_proxy_mem.h
   plugin/net.cc
   plugin/env.cc
   plugin/env/env_v1.cc
@@ -348,6 +369,7 @@ set(SRC_FILES
   plugin/net/net_v9.cc
   plugin/net/net_v10.cc
   plugin/net/net_v11.cc
+  plugin/net/net_v12.cc
   plugin/profiler/profiler_v1.cc
   plugin/profiler/profiler_v2.cc
   plugin/profiler/profiler_v3.cc
@@ -358,6 +380,7 @@ set(SRC_FILES
   plugin/tuner/tuner_v3.cc
   plugin/tuner/tuner_v4.cc
   plugin/tuner/tuner_v5.cc
+  plugin/tuner/tuner_v6.cc
   plugin/tuner/csv_tuner.cc
   plugin/gin.cc
   plugin/gin/gin_v11.cc
@@ -391,6 +414,8 @@ set(SRC_FILES
   transport/net_ib/p2p.h
   transport/net_ib/p2p_resiliency.cc
   transport/net_ib/p2p_resiliency.h
+  transport/net_ib/p2p_resiliency_recovery.cc
+  transport/net_ib/p2p_resiliency_recovery.h
   transport/net_ib/reg.cc
   transport/net_ib_cast/net_ib_cast_inspect.h
   transport/net_ib_cast/net_ib_fault_inject.h
@@ -434,6 +459,8 @@ endif()
 list(APPEND SRC_FILES ${SMI_SOURCES})
 # NET_IB_CAST_SOURCES already carry the src/ prefix (set by transport/net_ib_cast/CMakeLists.txt)
 list(APPEND SRC_FILES ${NET_IB_CAST_SOURCES})
+# DEVCOMM_SOURCES already carry the src/ prefix (set by devcomm/CMakeLists.txt)
+list(APPEND SRC_FILES ${DEVCOMM_SOURCES})
 
 # Hipify source files (copy of source generated into hipify directory)
 #==================================================================================================
@@ -504,14 +531,28 @@ add_custom_command(
 list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
 list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
 
-add_custom_command(
-  OUTPUT ${NCCL_DEVICE_HEADER}
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
-  COMMAND ${CMAKE_COMMAND} -E copy "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
-  DEPENDS ${NCCL_DEVICE_HIP_FILES}
-  VERBATIM
-)
+# copy_directory_if_different was added in CMake 3.26.  On older toolchains
+# fall back to the unconditional copy_directory (same behaviour, just causes
+# unnecessary recompilation on no-op rebuilds).
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
+  add_custom_command(
+    OUTPUT ${NCCL_DEVICE_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+    DEPENDS ${NCCL_DEVICE_HIP_FILES}
+    VERBATIM
+  )
+else()
+  add_custom_command(
+    OUTPUT ${NCCL_DEVICE_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
+    COMMAND ${CMAKE_COMMAND} -E copy "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+    DEPENDS ${NCCL_DEVICE_HIP_FILES}
+    VERBATIM
+  )
+endif()
 add_custom_target(copy_nccl_device_headers DEPENDS ${NCCL_DEVICE_HEADER})
 
 # Adding custom target to hipify all the source files
@@ -652,6 +693,7 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/nccl_device)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/plugin)
 target_include_directories(rccl PRIVATE ${NET_IB_CAST_INCLUDE_DIRS})
+target_include_directories(rccl PRIVATE ${DEVCOMM_INCLUDE_DIRS})
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/transport)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/transport/net_ib)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
@@ -988,6 +1030,10 @@ else()
 endif()
 target_link_libraries(rccl PRIVATE   dl)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
+# librocm-core provides getROCmVersion() for reporting the runtime ROCm version.
+if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
+  target_link_libraries(rccl PRIVATE -L${ROCM_PATH}/lib -lrocm-core)
+endif()
 # Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
 # and is omitted from the exported rccl-targets export set. Without this,
 # a FetchContent-built fmt-header-only target leaks into rccl's link

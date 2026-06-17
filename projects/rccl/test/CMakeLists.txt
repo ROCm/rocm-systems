@@ -222,6 +222,7 @@ if(BUILD_TESTS)
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
+      VersionInfoTests.cpp
       device/TestOp128.cpp
       device/GinDeviceTests.cpp
       common/main_fixtures.cpp
@@ -254,8 +255,10 @@ if(BUILD_TESTS)
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
+      TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
+      graph/TopoTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -311,6 +314,7 @@ if(BUILD_TESTS)
       transport/GinMPI/GinMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp
+      WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       RegistrationMPITests.cpp
@@ -320,6 +324,7 @@ if(BUILD_TESTS)
       ce/CeMPITests.cpp
       ce/CeInternalMPITests.cpp
       GrowMPITests.cpp
+      GinNcclTimeoutMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
@@ -329,6 +334,10 @@ if(BUILD_TESTS)
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
+    if(ENABLE_DEVICE_LINKER)
+      # Mirror the rccl library define so device-linker-specific test expectations compile in.
+      target_compile_definitions(${test_executable} PRIVATE RCCL_DEVICE_LINKER)
+    endif()
     target_link_libraries(${test_executable} PRIVATE ${RCCL_COMMON_LINK_LIBS})
     if(BUILD_ADDRESS_SANITIZER)
       target_compile_options(${test_executable} PRIVATE -fsanitize=address)

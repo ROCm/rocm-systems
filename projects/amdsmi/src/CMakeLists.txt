@@ -55,7 +55,9 @@ set(SRC_LIST
     "${NIC_SOURCES}"
 )
 
-file(GLOB IMPL_HEADERS "${INC_DIR}/impl/*.h")
+# CONFIGURE_DEPENDS re-evaluates the glob at build time so adding or removing an
+# impl header triggers a regenerate instead of going unnoticed until a clean build.
+file(GLOB IMPL_HEADERS CONFIGURE_DEPENDS "${INC_DIR}/impl/*.h")
 set(INC_LIST
     "${IMPL_HEADERS}"
     "${INC_DIR}/amdsmi.h"
@@ -228,7 +230,16 @@ install(
     COMPONENT dev
 )
 
-install(FILES ${IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
+# Test-only impl headers (those with "_test" in the name: the CPER read seam and
+# the internal test helpers/flags) are build-only. Production and the unit tests
+# include them from the source tree, but their symbols are hidden from
+# libamd_smi.so by the version script (cper_set_read_fn_for_testing has no
+# amdsmi_ prefix; amdsmi_test_sleep is a C++ symbol the amdsmi_* export glob does
+# not match), so a dev-package consumer that included them would hit a link
+# error. Build them, but keep them out of the installed dev headers.
+set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
+install(FILES ${INSTALL_IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
 
 install(FILES ${NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)
 

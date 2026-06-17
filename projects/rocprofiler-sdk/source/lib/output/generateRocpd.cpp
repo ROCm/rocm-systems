@@ -239,12 +239,13 @@ void
 read_file(rocpd_sql_engine_t                        engine,
           rocpd_sql_schema_kind_t                   kind,
           rocpd_sql_options_t                       options,
+          rocpd_version_triplet_t                   schema_version,
           const rocpd_sql_schema_jinja_variables_t* variables,
           const char*                               schema_path,
           const char*                               schema_content,
           void*                                     user_data)
 {
-    common::consume_args(engine, kind, options, variables, schema_path);
+    common::consume_args(engine, kind, options, schema_version, variables, schema_path);
 
     auto* _db     = static_cast<rocpd_db*>(user_data);
     auto& _schema = _db->schemas[kind];
@@ -256,12 +257,20 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
+    auto _version   = rocpd_version_triplet_t{3, 0, 1};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
 
-    ROCPD_CHECK(rocpd_sql_load_schema(
-        ROCPD_SQL_ENGINE_SQLITE3, schema_kind, _options, &_variables, read_file, nullptr, 0, &db));
+    ROCPD_CHECK(rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
+                                      schema_kind,
+                                      _options,
+                                      _version,
+                                      &_variables,
+                                      read_file,
+                                      nullptr,
+                                      0,
+                                      &db));
 
     return db.schemas.at(schema_kind);
 }
@@ -1072,7 +1081,7 @@ write_rocpd(
 
         for(auto itr : {ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
                         ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
-                        ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
+                        ROCPD_SQL_SCHEMA_ROCPD_METADATA,
                         ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS})
         {
             auto views_schema = read_schema_file(db, itr);

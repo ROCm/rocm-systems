@@ -185,17 +185,20 @@ struct ncclCoopCta {
 #endif
 
 #if NCCL_CHECK_CUDACC
+// NOTE: upstream v2.30 renamed ncclCoopLaneMask -> ncclCoopGetLaneMask; the
+// auto-merged callers (impl/vector__funcs.h, impl/core__funcs.h) use the new
+// name, so adopt it here while keeping RCCL's wave64 ncclCoopMask_t bodies.
 template<int nThreadsPow2>
-NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopLaneMask(ncclCoopTile<nThreadsPow2> coop) {
+NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopGetLaneMask(ncclCoopTile<nThreadsPow2> coop) {
   return coop.laneMask();
 }
-NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopLaneMask(ncclCoopLanes coop) {
+NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopGetLaneMask(ncclCoopLanes coop) {
   return coop.lmask;
 }
-NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopLaneMask(ncclCoopWarpSpan coop) {
+NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopGetLaneMask(ncclCoopWarpSpan coop) {
   return ncclCoopFullMask;
 }
-NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopLaneMask(ncclCoopCta coop) {
+NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopGetLaneMask(ncclCoopCta coop) {
   return ncclCoopFullMask;
 }
 #endif

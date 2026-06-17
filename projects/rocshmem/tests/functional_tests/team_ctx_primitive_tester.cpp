@@ -37,7 +37,8 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
                                      long long int *end_time, char *source,
                                      char *dest, size_t size, TestType type,
                                      ShmemContextType ctx_type, int wf_size,
-                                     rocshmem_team_t team, int batch) {
+                                     rocshmem_team_t team, int batch,
+                                     int *grid_psync) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
   int t_id  = get_flat_block_id();
@@ -75,6 +76,10 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
       }
       __syncthreads();
       if (i == skip) {
+        // Global barrier ensures all WGs have finished their skip-region
+        // puts before any WG starts timing, preventing skip traffic from
+        // contaminating the timed window.
+        grid_barrier(grid_psync, gridDim.x);
         // Capture the start time of each wavefront to identify the earliest one
         wf_start_time[wf_id] = wall_clock64();
       }
@@ -133,6 +138,19 @@ TeamCtxPrimitiveTester::TeamCtxPrimitiveTester(TesterArguments args)
   size_t buff_size = max_msg_size * batch_size * args.wg_size * args.num_wgs;
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
+  CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
+
+  int max_co_resident_wgs_per_cu = 0;
+  CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &max_co_resident_wgs_per_cu, TeamCtxPrimitiveTest, args.wg_size, 0));
+  const int max_sustainable_wgs =
+      max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
+  if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
+    std::cerr << "Error: Requested work-groups (" << args.num_wgs
+              << ") exceeds max co-resident work-groups (" << max_sustainable_wgs
+              << "). Reduce -w to avoid grid_barrier deadlock." << std::endl;
+    exit(-1);
+  }
 
   switch (_type) {
     case TeamCtxPutTestType:
@@ -149,7 +167,8 @@ TeamCtxPrimitiveTester::TeamCtxPrimitiveTester(TesterArguments args)
   }
 
 
-  CHECK_HIP(hipMemset(source, 'a', buff_size));
+  CHECK_HIP(hipMemsetAsync(source, 'a', buff_size, stream));
+  CHECK_HIP(hipStreamSynchronize(stream));
 }
 
 TeamCtxPrimitiveTester::~TeamCtxPrimitiveTester() {
@@ -172,11 +191,14 @@ TeamCtxPrimitiveTester::~TeamCtxPrimitiveTester() {
 
   free_test_buffer(local, args.local_buf_type);
   free_test_buffer(remote);
+  CHECK_HIP(hipFree(grid_psync));
 }
 
 void TeamCtxPrimitiveTester::resetBuffers(size_t size) {
   size_t buff_size = size * batch_size * args.wg_size * args.num_wgs;
-  CHECK_HIP(hipMemset(dest, '1', buff_size));
+  CHECK_HIP(hipMemsetAsync(dest, '1', buff_size, stream));
+  CHECK_HIP(hipMemsetAsync(grid_psync, 0, sizeof(int), stream));
+  CHECK_HIP(hipStreamSynchronize(stream));
 }
 
 void TeamCtxPrimitiveTester::preLaunchKernel() {
@@ -194,7 +216,7 @@ void TeamCtxPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
   hipLaunchKernelGGL(TeamCtxPrimitiveTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time, source,
                      dest, size, _type, _shmem_context, wf_size,
-                     team_primitive_world_dup, batch_size);
+                     team_primitive_world_dup, batch_size, grid_psync);
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;

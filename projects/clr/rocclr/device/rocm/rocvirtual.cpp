@@ -676,14 +676,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   prof_signal->flags_.isPacketDispatch_ = false;
   prof_signal->ResetCachedTiming();
 
-  if (nullptr != cmd) {
-    // Release any existing HwEvent before setting new one for the same command
-    if (cmd->HwEvent() != nullptr) {
-      reinterpret_cast<ProfilingSignal*>(cmd->HwEvent())->release();
-    }
-    cmd->SetHwEvent(prof_signal);
-    prof_signal->retain();
-  }
+  // Release any existing HwEvent before setting new one for the same command
+  VirtualGPU::AttachHwEvent(cmd, prof_signal);
 
   if (ts != nullptr) {
     // Save HSA signal earlier to make sure the possible callback will have a valid
@@ -1859,6 +1853,8 @@ bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
     skippedDispatches_ = 0;
     retainExternalSignals_ = false;
   }
+  // Any fence/flush ends the coalescing window for event records.
+  SetCoalesceWindow(0, nullptr);
 
   // Check if runtime could skip CPU wait
   if (!skip_cpu_wait) {
@@ -1973,6 +1969,12 @@ VirtualGPU::~VirtualGPU() {
     hasPendingDispatch_ |= IS_WINDOWS && !dev().IsPm4Emulation();
     // Release the resources of signal
     releaseGpuMemoryFence();
+  }
+
+  // Release any retained coalescing-window signal not freed via releaseGpuMemoryFence.
+  {
+    std::scoped_lock l(execution());
+    SetCoalesceWindow(0, nullptr);
   }
 
   if (timestamp_ != nullptr) {
@@ -2261,6 +2263,11 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
   // Track the current command
   command_ = &command;
 
+  // Any non-marker command is intervening work that ends the event coalescing window.
+  if (!command.isMarkerCommand()) {
+    SetCoalesceWindow(0, nullptr);
+  }
+
   // Disable profiling when command is being captured to prevent memory leak from created timestamp_
   // which won't get freed, since the command is not being executed until graph launch
   if (!command.getPktCapturingState() && command.profilingInfo().enabled_) {
@@ -2323,10 +2330,12 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
  */
 void VirtualGPU::profilingEnd(bool clearHwEvent) {
   if (!command_->getPktCapturingState() && command_->profilingInfo().enabled_) {
-    if (timestamp_->HwProfiling() == false) {
-      timestamp_->end();
+    if (timestamp_ != nullptr) {
+      if (timestamp_->HwProfiling() == false) {
+        timestamp_->end();
+      }
+      timestamp_ = nullptr;
     }
-    timestamp_ = nullptr;
   }
 
   // Certain commands like map/unmap memory may not need hw_events as its not a
@@ -2341,6 +2350,32 @@ void VirtualGPU::profilingEnd(bool clearHwEvent) {
 
   // Clear the command tracking
   command_ = nullptr;
+}
+
+// ================================================================================================
+void VirtualGPU::SetCoalesceWindow(uint64_t event_id, void* hw_event) {
+  last_barrier_coalesce_event_ = event_id;
+  if (hw_event != last_barrier_hw_event_) {
+    if (hw_event != nullptr) {
+      reinterpret_cast<ProfilingSignal*>(hw_event)->retain();
+    }
+    if (last_barrier_hw_event_ != nullptr) {
+      reinterpret_cast<ProfilingSignal*>(last_barrier_hw_event_)->release();
+    }
+    last_barrier_hw_event_ = hw_event;
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::AttachHwEvent(amd::Command* cmd, void* hw_event) {
+  if (cmd == nullptr || hw_event == nullptr) {
+    return;
+  }
+  if (cmd->HwEvent() != nullptr) {
+    reinterpret_cast<ProfilingSignal*>(cmd->HwEvent())->release();
+  }
+  cmd->SetHwEvent(hw_event);
+  reinterpret_cast<ProfilingSignal*>(hw_event)->retain();
 }
 
 // ================================================================================================
@@ -2720,6 +2755,41 @@ void VirtualGPU::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& 
       profilingEnd();
       return;
     }
+  }
+
+  addSystemScope();
+  profilingEnd();
+}
+
+// ================================================================================================
+void VirtualGPU::SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& command) {
+  std::scoped_lock lock(execution());
+  profilingBegin(command);
+
+  auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
+  hsa_signal_t active = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
+
+  // Collect all pointers and sizes for batch operation
+  std::vector<void*> dev_ptrs_vec;
+  std::vector<size_t> sizes_vec;
+  for (size_t idx = 0; idx < command.Count(); idx++) {
+    dev_ptrs_vec.push_back(const_cast<void*>(command.DevicePointers()[idx]));
+    sizes_vec.push_back(command.Sizes()[idx]);
+  }
+
+  hsa_status_t status = Hsa::svm_discard_batch_async(dev_ptrs_vec.data(), sizes_vec.data(),
+                                                      command.Count(), wait_events.size(),
+                                                      wait_events.data(), active);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+          "HSA discard batch async count=%zu, wait_event=0x%zx, completion_signal=0x%zx",
+          command.Count(), wait_events.empty() ? 0 : wait_events[0].handle, active.handle);
+
+  if (status != HSA_STATUS_SUCCESS) {
+    Barriers().ResetCurrentSignal();
+    LogError("HSA discard batch async failed");
+    command.setStatus(CL_INVALID_OPERATION);
+    profilingEnd();
+    return;
   }
 
   addSystemScope();
@@ -3650,23 +3720,22 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 
   // If Physical address is not set, then it is map command. If set, it is unmap command.
   if (phys_mem_obj != nullptr) {
-    constexpr bool kParent = false;
-    amd::Memory* vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
-        phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
-        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
+    amd::Memory* vaddr_sub_obj =
+        dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
+    if (vaddr_sub_obj == nullptr) {
+      LogError("HSA Command: MapMemObjBookkeeping failed!");
+      profilingEnd();
+      return;
+    }
     // Map the physical to virtual address the hsa api
     hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
     opaque_hsa_handle.handle = phys_mem_obj->getUserData().hsa_handle;
     if ((hsa_status = Hsa::vmem_map(vaddr_sub_obj->getSvmPtr(), vcmd.size(),
                                        vaddr_sub_obj->getOffset(), opaque_hsa_handle, 0)) ==
         HSA_STATUS_SUCCESS) {
-      assert(amd::MemObjMap::FindMemObj(vcmd.ptr()) == nullptr);
-      amd::MemObjMap::AddMemObj(vcmd.ptr(), vaddr_sub_obj);
-      vaddr_sub_obj->getUserData().phys_mem_obj = phys_mem_obj;
-      phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
-      if (phys_mem_obj->getMemFlags() & ROCCLR_MEM_INTERPROCESS) {
-        vaddr_sub_obj->setVmmImported(true);
-      }
+      constexpr bool kImportVmmForInterprocess = true;
+      dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
+                                         kImportVmmForInterprocess);
     } else {
       LogError("HSA Command: hsa_amd_vmem_map failed!");
     }
@@ -3680,16 +3749,10 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     // Unmap the object, since the physical addr is set.
     if ((hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), vcmd.size())) ==
         HSA_STATUS_SUCCESS) {
-      // assert the va is mapped and needs to be removed
-      vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
-      amd::MemObjMap::RemoveMemObj(vcmd.ptr());
-      if (vaddr_sub_obj->getUserData().phys_mem_obj != nullptr) {
-        vaddr_sub_obj->getUserData().phys_mem_obj->getUserData().vaddr_mem_obj = nullptr;
-        vaddr_sub_obj->getUserData().phys_mem_obj = nullptr;
-      }
-      // Release sub_obj now that HW unmap is complete.
-      // ~Memory releases parent va_ via parent_->release().
-      vaddr_sub_obj->release();
+      constexpr bool kDestroyVirtualBuffer = true;
+      constexpr bool kReleaseSubObj = true;
+      dev().UnmapMemObjBookkeeping(vaddr_sub_obj, const_cast<void*>(vcmd.ptr()),
+                                   kDestroyVirtualBuffer, kReleaseSubObj);
     } else {
       LogError("HSA Command: hsa_amd_vmem_unmap failed");
     }
@@ -4574,6 +4637,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
       SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
     }
     flush(vcmd.GetBatchHead());
+    SetCoalesceWindow(0, nullptr);
   } else {
     profilingBegin(vcmd);
     const Settings& settings = dev().settings();
@@ -4588,7 +4652,17 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
       s.handle = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
           vcmd.ipcDepSignal()->getHandle()));
       WaitCompleteSignal(s);
-    } else if (timestamp_ != nullptr || ipc_s.handle != 0) {
+    } else if (timestamp_ != nullptr || vcmd.profilingInfo().marker_ts_ || ipc_s.handle != 0) {
+      // Skip a redundant barrier when this marker records the same client event as
+      // the previous barrier with no intervening work. IPC records always dispatch.
+      if (ipc_s.handle == 0 && ShouldCoalesceMarker(vcmd)) {
+        // Reuse the prior barrier's completion signal so hipEventQuery/Synchronize
+        // observe correct readiness even though no new barrier was dispatched.
+        AttachHwEvent(command_, last_barrier_hw_event_);
+        profilingEnd();
+        force_irq_ = false;
+        return;
+      }
       // IPC event record: if ipc_s is non-zero, first dispatch a NOP barrier with
       // the IPC signal as completion_signal; it fires when prior work completes.
       if (ipc_s.handle != 0) {
@@ -4618,6 +4692,10 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
         hasPendingDispatch_ = false;
       }
     }
+    // A record sets the window to its own event and barrier signal; a wait/other
+    // marker has a zero coalesceEvent() and so clears it, which a wait relies on.
+    uint64_t ev = vcmd.coalesceEvent();
+    SetCoalesceWindow(ev, ev != 0 ? command_->HwEvent() : nullptr);
     profilingEnd();
   }
   force_irq_ = false;

@@ -10,7 +10,6 @@ LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 ARG ROCKY_MAJOR_VERSION
 ARG ROCKY_VERSION
 ARG ROCM_VERSION=7.2.2
-ARG ONETBB_VERSION=2023.0.0
 
 # If the target ROCm Version on the package repository is non-standard, you can forcibly
 # set the ROCm version used in the package repo URL.
@@ -74,25 +73,15 @@ RUN dnf makecache && \
         python3.12-devel \
         rpm-build
 
-# Build and install a fixed oneTBB release.
-RUN curl -L --fail \
-        "https://github.com/uxlfoundation/oneTBB/archive/refs/tags/v${ONETBB_VERSION}.tar.gz" \
-        -o /tmp/oneTBB-${ONETBB_VERSION}.tar.gz && \
-    tar -xzf /tmp/oneTBB-${ONETBB_VERSION}.tar.gz -C /tmp && \
-    cmake -S /tmp/oneTBB-${ONETBB_VERSION} \
-        -B /tmp/oneTBB-${ONETBB_VERSION}-build \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_C_COMPILER=gcc \
-        -DCMAKE_CXX_COMPILER=g++ \
-        -DTBB_TEST=OFF \
-        -DTBB_STRICT=OFF && \
-    cmake --build /tmp/oneTBB-${ONETBB_VERSION}-build --parallel && \
-    cmake --install /tmp/oneTBB-${ONETBB_VERSION}-build && \
-    rm -rf /tmp/oneTBB-${ONETBB_VERSION} \
-        /tmp/oneTBB-${ONETBB_VERSION}-build \
-        /tmp/oneTBB-${ONETBB_VERSION}.tar.gz && \
-    echo /usr/local/lib64 > /etc/ld.so.conf.d/local.conf && \
-    ldconfig
+# Point amdclang++ at the gcc-toolset-13 libstdc++.
+# clang locates its C++ standard library by scanning a fixed set of prefixes
+# (essentially /usr) for the newest GCC; it does NOT consult PATH. The default
+# el9 GCC (11) is older than the GCC 13 used on Ubuntu24/SUSE, and
+# gcc-toolset-13 lives under /opt/rh, which clang's scanner doesn't search on
+# this toolchain. Append --gcc-install-dir to the ROCm config file that
+# amdclang++ auto-loads so it selects the gcc-toolset-13 libstdc++.
+RUN echo '--gcc-install-dir=/opt/rh/gcc-toolset-13/root/usr/lib/gcc/x86_64-redhat-linux/13' \
+        >> /opt/rocm/lib/llvm/bin/rocm.cfg
 
 # Configure system linker for ROCm
 RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf
@@ -111,7 +100,7 @@ ENV ROCM_VERSION="${ROCM_VERSION}"
 # non-interactive shells. Tell Bash to read a minimal .profile
 # when a shell of any type is opened.
 # Uncomment to prefer newer version of GCC.
-# RUN echo 'source /opt/rh/gcc-toolset-13/enable' >> ~/.bashrc
+RUN echo 'source /opt/rh/gcc-toolset-13/enable' >> ~/.bashrc
 RUN echo 'source ~/.bashrc' >> ~/.bash_profile
 ENV BASH_ENV="~/.bashrc"
 
