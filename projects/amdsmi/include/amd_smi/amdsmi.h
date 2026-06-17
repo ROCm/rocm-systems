@@ -4721,7 +4721,7 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[in,out] vcn_busy_percent Direct output from the vcn_busy_percent sysfs file
+ *  @param[out] vcn_busy_percent vcn busy percentage (0-100)
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

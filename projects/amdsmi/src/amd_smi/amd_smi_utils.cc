@@ -800,7 +800,7 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
 amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* device,
                                                 uint32_t* vcn_busy_percent) {
   if (vcn_busy_percent == nullptr) {
-    return AMDSMI_STATUS_API_FAILED;
+    return AMDSMI_STATUS_INVAL;
   }
 
   SMIGPUDEVICE_MUTEX(device->get_mutex())

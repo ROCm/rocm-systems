@@ -1785,6 +1785,11 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.Test_API_Per_GPU(amdsmi_get_gpu_busy_percent=amdsmi.amdsmi_get_gpu_busy_percent)
         return
 
+    def test_get_vcn_busy_percent(self):
+        self.common.print_func_name("")
+        self.common.Test_API_Per_GPU(amdsmi_get_vcn_busy_percent=amdsmi.amdsmi_get_vcn_busy_percent)
+        return
+
     def test_cpu_socket_boostlimit(self):
         self.common.print_func_name("")
 

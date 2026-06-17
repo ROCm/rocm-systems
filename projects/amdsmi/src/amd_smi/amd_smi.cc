@@ -4490,6 +4490,9 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
 
 amdsmi_status_t amdsmi_get_vcn_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* vcn_busy_percent) {
+  if (!vcn_busy_percent) {
+    return AMDSMI_STATUS_INVAL;
+  }
   amd::smi::AMDSmiGPUDevice* gpudevice = nullptr;
   amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpudevice);
   if (status != AMDSMI_STATUS_SUCCESS) {
