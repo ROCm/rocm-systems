@@ -160,12 +160,20 @@ hipError_t ihipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
   }
 
   // Validate each operation's arguments before checking device capability, so
-  // that invalid arguments are reported as hipErrorInvalidValue regardless of
-  // whether the device supports the discard feature. Otherwise a bad argument
-  // would be masked by hipErrorNotSupported on platforms without HMM.
+  // invalid arguments are reported as hipErrorInvalidValue regardless of HMM support.
+  std::vector<size_t> offsets;
+  std::vector<amd::Memory*> mem_objs =
+      getMemoryObjectBatch(hip::getCurrentDevice(), dev_ptrs, count, offsets);
   for (size_t op_idx = 0; op_idx < count; op_idx++) {
     if (dev_ptrs[op_idx] == nullptr || sizes[op_idx] == 0) {
       return hipErrorInvalidValue;
+    }
+    amd::Memory* mem_obj = mem_objs[op_idx];
+    if (mem_obj != nullptr) {
+      size_t offset = offsets[op_idx];
+      if (sizes[op_idx] > (mem_obj->getSize() - offset)) {
+        return hipErrorInvalidValue;
+      }
     }
   }
 
@@ -187,11 +195,6 @@ hipError_t ihipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
     std::vector<void*> dev_ptrs_vec(count);
     std::vector<size_t> sizes_vec(count);
 
-    // Batched memory object lookup with single lock acquisition
-    std::vector<size_t> offsets;
-    std::vector<amd::Memory*> mem_objs =
-        getMemoryObjectBatch(hip::getCurrentDevice(), dev_ptrs, count, offsets);
-
     // Prepare each operation. Null pointers and zero sizes were already
     // rejected above, before the device-capability check.
     for (size_t op_idx = 0; op_idx < count; op_idx++) {
@@ -201,9 +204,6 @@ hipError_t ihipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
       amd::Memory* mem_obj = mem_objs[op_idx];
       size_t offset = offsets[op_idx];
       if (mem_obj != nullptr) {
-        if (size > (mem_obj->getSize() - offset)) {
-          return hipErrorInvalidValue;
-        }
         const bool is_managed_memory =
             (mem_obj->getMemFlags() &
              (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR)) != 0;
