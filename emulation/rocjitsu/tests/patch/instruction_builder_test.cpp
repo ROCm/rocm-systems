@@ -85,6 +85,14 @@ TEST(ComputeSoppBranchSimm16, NonDwordAlignedBranchPcFails) {
   EXPECT_FALSE(compute_sopp_branch_simm16(0x1002, 0x1100).has_value());
 }
 
+// branch_pc and target are misaligned by the same amount, so the delta is
+// dword-aligned (0 and 4 here). A delta-only check would accept these; the
+// branch_pc/target alignment checks must still reject them.
+TEST(ComputeSoppBranchSimm16, EquallyMisalignedPcsFailEvenWhenDeltaAligned) {
+  EXPECT_FALSE(compute_sopp_branch_simm16(0x1002, 0x1006).has_value()); // delta 0
+  EXPECT_FALSE(compute_sopp_branch_simm16(0x1002, 0x100a).has_value()); // delta 4
+}
+
 // C++20 specifies truncated-toward-zero integer division/modulo, so
 // `(-258) % 4 == -2 != 0`. This pins that semantic: a negative delta that
 // is not a multiple of 4 must be rejected (not silently rounded).

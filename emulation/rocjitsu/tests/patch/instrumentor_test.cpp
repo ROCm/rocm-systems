@@ -242,13 +242,31 @@ TEST(Validator, RejectsDenylistedMnemonic) {
   InstrumentationPoint pt;
 
   // PC-relative semantics that may not surface in flags / branch_offset_bytes.
-  for (const char *m : {"s_getpc_b64", "s_call_b64", "s_setpc_b64", "s_swappc_b64", "s_rfe_b64"}) {
+  // Includes gfx1250's renamed _i64 family (s_getpc_b64 -> s_get_pc_i64, etc.);
+  // s_rfe_b64 / s_rfe_i64 exercise the s_rfe_ prefix match.
+  for (const char *m :
+       {"s_getpc_b64", "s_call_b64", "s_setpc_b64", "s_swappc_b64", "s_rfe_b64", "s_get_pc_i64",
+        "s_call_i64", "s_set_pc_i64", "s_swap_pc_i64", "s_rfe_i64"}) {
     TestInstruction anchor(m, 4, /*flags=*/0, std::nullopt, &kRaw);
     std::string err;
     EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
         << "mnemonic " << m << " should be rejected";
     EXPECT_FALSE(err.empty());
   }
+}
+
+// Instruction::size() is a signed int; the `size != 4 && size != 8` check must
+// reject negative sizes (which decoders never emit in practice) rather than let
+// them through to the later cast to unsigned, where they would wrap.
+TEST(Validator, RejectsNegativeInstructionSize) {
+  static constexpr uint32_t kRaw = 0xDEADBEEFu;
+  TestInstruction anchor("v_add_f32_e32", /*size=*/-4, /*flags=*/0, std::nullopt, &kRaw);
+  auto text = dummy_text();
+
+  std::string err;
+  EXPECT_FALSE(
+      is_relocatable_anchor(anchor, /*anchor_offset=*/0, text, ROCJITSU_CODE_ARCH_CDNA4, &err));
+  EXPECT_NE(err.find("size must be 4 or 8"), std::string::npos) << "error was: " << err;
 }
 
 //==============================================================================
@@ -375,9 +393,12 @@ uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // forward-branch overflow test, which needs .text large enough that the
 // trampoline (placed at text_size) is more than INT16_MAX dwords past offset
 // 0.
-std::vector<uint8_t> make_gfx950_elf_with_nop_text(uint64_t text_size) {
-  // Must be a multiple of 4 so the entire section is decodable as s_nop words.
+// Build a minimal gfx950 ELF whose .text holds @p words verbatim. Lets a test
+// embed a real multi-word instruction (e.g. an 8-byte SOP1 + literal) rather
+// than only s_nop fillers.
+std::vector<uint8_t> make_gfx950_elf_with_text_words(const std::vector<uint32_t> &words) {
   const uint64_t text_offset = 0x100;
+  const uint64_t text_size = words.size() * sizeof(uint32_t);
   const uint64_t rodata_size = 4;
 
   std::vector<uint8_t> shstrtab{'\0'};
@@ -407,10 +428,7 @@ std::vector<uint8_t> make_gfx950_elf_with_nop_text(uint64_t text_size) {
   ehdr.e_shstrndx = 3;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
-  for (uint64_t off = 0; off < text_size; off += sizeof(uint32_t)) {
-    const uint32_t nop = 0xBF800000u;
-    std::memcpy(image.data() + text_offset + off, &nop, sizeof(nop));
-  }
+  std::memcpy(image.data() + text_offset, words.data(), text_size);
 
   const uint32_t rodata_word = 0xA5A55A5Au;
   std::memcpy(image.data() + rodata_offset, &rodata_word, sizeof(rodata_word));
@@ -439,6 +457,12 @@ std::vector<uint8_t> make_gfx950_elf_with_nop_text(uint64_t text_size) {
 
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;
+}
+
+std::vector<uint8_t> make_gfx950_elf_with_nop_text(uint64_t text_size) {
+  // Must be a multiple of 4 so the entire section is decodable as s_nop words.
+  return make_gfx950_elf_with_text_words(
+      std::vector<uint32_t>(text_size / sizeof(uint32_t), 0xBF800000u));
 }
 
 // gfx950 ELF with TWO `.text` sections (both SHF_ALLOC | SHF_EXECINSTR, both
@@ -638,6 +662,26 @@ TEST(Instrumentor, RejectsAlignedOffsetPastLastInstruction) {
       << "error was: " << result.errors.front();
 }
 
+TEST(Instrumentor, RejectsOffsetInteriorToMultiWordInstruction) {
+  // .text: [s_mov_b32 s0, 0xDEADBEEF (8 bytes)][s_nop 0]. Offset 4 lands in the
+  // *interior* of the 8-byte instruction at offset 0, so no decoded instruction
+  // starts there -- a distinct miss from the past-the-end case above. The
+  // offset->Instruction map has keys 0 and 8 only.
+  const std::vector<uint32_t> words = {0xBE8000FFu, 0xDEADBEEFu, 0xBF800000u};
+  auto image = make_gfx950_elf_with_text_words(words);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/4);
+
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("no decoded instruction"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
 TEST(Instrumentor, UnsupportedArchReportsErrorInsteadOfCrashing) {
   // Decoder::create returns nullptr for RV32I/RV64I/INVALID. The Instrumentor
   // must surface that as a structured ValidationResult error rather than
@@ -708,6 +752,90 @@ TEST(InstrumentorPatch, EmitsValidElfWithExpectedPatchSummary) {
   // Emitted ELF reparses cleanly.
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   EXPECT_TRUE(patched.is_valid());
+}
+
+// 8-byte anchor end-to-end. .text is [s_nop 0][s_mov_b32 s0, 0xDEADBEEF]; the
+// s_mov_b32 + literal at offset 4 is a real 8-byte instruction. This exercises
+// the orchestrator paths the 4-byte nop fixtures never reach: offset_to_inst_
+// advancing by 8, the 8-byte splice, the s_branch + s_nop 0 tail, and a
+// reparse/decode of the relocated 8-byte original from the trampoline cave.
+TEST(InstrumentorPatch, PatchesEightByteAnchorEndToEnd) {
+  constexpr uint32_t kSMovLitWord0 = 0xBE8000FFu; // s_mov_b32 s0, <literal>
+  constexpr uint32_t kSMovLitWord1 = 0xDEADBEEFu; // the 32-bit literal
+  const std::vector<uint32_t> words = {0xBF800000u, kSMovLitWord0, kSMovLitWord1};
+  auto image = make_gfx950_elf_with_text_words(words);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/4);
+
+  auto result = instrumentor.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
+
+  const auto &p = result.patches[0];
+  // The decoder saw an 8-byte instruction and the orchestrator carried that
+  // width through. Original .text is 3 words (12 bytes), so the trampoline cave
+  // begins at offset 12.
+  EXPECT_EQ(p.original_size, 8u);
+  EXPECT_EQ(p.anchor_offset, 4u);
+  EXPECT_EQ(p.trampoline_offset, 12u);
+  EXPECT_EQ(p.return_target, 12u); // anchor_offset + original_size
+
+  // Original 8 bytes captured verbatim.
+  ASSERT_EQ(p.original_bytes.size(), 8u);
+  std::array<uint32_t, 2> orig_words{};
+  std::memcpy(orig_words.data(), p.original_bytes.data(), orig_words.size() * sizeof(uint32_t));
+  EXPECT_EQ(orig_words[0], kSMovLitWord0);
+  EXPECT_EQ(orig_words[1], kSMovLitWord1);
+
+  // Patched anchor fills the full 8-byte slot: forward s_branch + s_nop 0 tail.
+  // Forward simm16 = (trampoline_offset - (anchor_offset + 4)) / 4 = (12 - 8)/4 = 1.
+  ASSERT_EQ(p.patched_anchor_bytes.size(), 8u);
+  std::array<uint32_t, 2> patched_words{};
+  std::memcpy(patched_words.data(), p.patched_anchor_bytes.data(),
+              patched_words.size() * sizeof(uint32_t));
+  EXPECT_EQ(patched_words[0], build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(patched_words[1], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+
+  // Reparse and decode out of the grown .text. The cave (tail of .text) for an
+  // 8-byte anchor is [s_nop 0][orig word0][orig word1][s_branch return] = 16
+  // bytes, so .text grows from 12 to 28 bytes.
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_FALSE(patched.text_sections().empty());
+  const Section *text = patched.text_sections().front();
+  ASSERT_EQ(text->size(), 28u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  // Copy two words (8 bytes) so an 8-byte instruction has its literal available.
+  auto decode_at = [&](uint64_t off) {
+    std::array<rj_code_binary_inst_t, 2> w{};
+    std::memcpy(w.data(), text->data() + off, w.size() * sizeof(rj_code_binary_inst_t));
+    return std::unique_ptr<Instruction>(decoder->decode(w.data()));
+  };
+
+  // Patched anchor decodes as a forward s_branch.
+  auto anchor = decode_at(4);
+  ASSERT_NE(anchor, nullptr);
+  EXPECT_NE(anchor->mnemonic().find("s_branch"), std::string_view::npos)
+      << "mnemonic was: " << anchor->mnemonic();
+
+  // Cave placeholder decodes as s_nop; the relocated original (cave offset 4 ->
+  // .text offset 16) decodes back to the same 8-byte s_mov_b32.
+  auto placeholder = decode_at(12);
+  ASSERT_NE(placeholder, nullptr);
+  EXPECT_NE(placeholder->mnemonic().find("s_nop"), std::string_view::npos)
+      << "mnemonic was: " << placeholder->mnemonic();
+
+  auto relocated = decode_at(16);
+  ASSERT_NE(relocated, nullptr);
+  EXPECT_EQ(relocated->size(), 8) << "relocated original must decode as an 8-byte instruction";
+  EXPECT_NE(relocated->mnemonic().find("s_mov_b32"), std::string_view::npos)
+      << "mnemonic was: " << relocated->mnemonic();
 }
 
 TEST(InstrumentorPatch, RejectsZeroQueuedPoints) {

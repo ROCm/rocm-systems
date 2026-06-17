@@ -67,9 +67,10 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @brief Compute the SOPP simm16 dword field for a branch from @p branch_pc
 ///        to @p target under SOPP semantics: target = branch_pc + 4 + simm16*4.
 ///
-/// Returns std::nullopt if the delta is not dword-aligned, if it does not fit
-/// in a signed 16-bit dword field, or if @p branch_pc / @p target are large
-/// enough that the signed int64 intermediate would overflow.
+/// Returns std::nullopt if @p branch_pc or @p target is not dword-aligned, if
+/// the resulting delta does not fit in a signed 16-bit dword field, or if
+/// @p branch_pc / @p target are large enough that the signed int64 intermediate
+/// would overflow.
 ///
 /// Shared by DBT cave-entry/return branches and the DBI relocation trampoline
 /// so both paths fail closed on the same range.
@@ -82,11 +83,13 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)
     return std::nullopt;
 
-  const int64_t delta_bytes =
-      static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + kBranchPcBiasBytes);
-  if (delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
+  // The SOPP immediate is a signed *dword* offset, so both the branch base
+  // (branch_pc + 4) and the target must be dword-aligned.
+  if (branch_pc % sizeof(uint32_t) != 0 || target % sizeof(uint32_t) != 0)
     return std::nullopt;
 
+  const int64_t delta_bytes =
+      static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + kBranchPcBiasBytes);
   const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
   if (delta_dwords < std::numeric_limits<int16_t>::min() ||
       delta_dwords > std::numeric_limits<int16_t>::max())
@@ -111,11 +114,12 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 
 /// @brief Get the s_endpgm opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sopp_op_endpgm(rj_code_arch_t arch) {
-  // GFX9 (CDNA1-4): opcode 1; GFX12 (RDNA3/3.5/4): opcode 48
+  // GFX9 (CDNA1-4): opcode 1; GFX12 (RDNA3/3.5/4, gfx1250): opcode 48
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
     return 48;
   default:
     return 1;

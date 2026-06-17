@@ -23,10 +23,10 @@
 ///         v
 ///   InstrumentedCodeObject      -- patched ELF + per-site InstrumentationPatch
 ///
-/// Current pipeline is single-point and all-or-nothing: any per-site failure
-/// aborts the whole patch.
-/// TODOs:: predicate-based anchor selection (Instrumentor walks blocks itself),
-/// multi-site with per-site failure tolerance, probe-call bodies,
+/// Current pipeline is all-or-nothing across all queued points: any per-site
+/// failure aborts the whole patch.
+/// Future work: predicate-based anchor selection (Instrumentor walks blocks
+/// itself), per-site failure tolerance, probe-call bodies,
 /// AfterInst / BlockEntry / BlockExit kinds, EXEC policy management.
 /// As that lands the per-stage types will thicken
 /// (e.g. ResolvedInstrumentationSite probably gains an ordered list of bodies)
@@ -258,9 +258,9 @@ public:
   /// leak a half-built ELF. Thus `elf_bytes` is either fully populated or empty
   /// with diagnostics in `errors`.
   ///
-  /// Current support is single-point: queuing zero or more than one
-  /// InstrumentationPoint is a fatal error. Shares the single-attempt budget
-  /// with patch_with_debug_summaries(); see the class-level note.
+  /// Requires at least one queued InstrumentationPoint; queuing zero is a fatal
+  /// error. Shares the single-attempt budget with patch_with_debug_summaries();
+  /// see the class-level note.
   [[nodiscard]] InstrumentedCodeObject patch();
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.

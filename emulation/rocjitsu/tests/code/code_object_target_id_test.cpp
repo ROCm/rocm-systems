@@ -9,9 +9,10 @@
 ///        basic_block_list_create) accepts each target by exercising the
 ///        create_decoder_for_target switch in rj_code.cpp.
 ///
-/// Covers all supported targets (gfx90a, gfx942, gfx950) plus an unknown-
-/// machine-flag case to guard the INVALID sentinel and prevent a future
-/// edit from silently aliasing one target onto another.
+/// Covers the only currently supported targets (gfx90a, gfx942, gfx950,
+/// gfx1200, gfx1201, gfx1250) plus an unknown-machine-flag case to guard the
+/// INVALID sentinel and prevent a future edit from silently aliasing one target
+/// onto another.
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -189,6 +190,18 @@ TEST(GfxCodeObjectTargets, LoadsGfx950FromMachineFlags) {
   expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950);
 }
 
+TEST(GfxCodeObjectTargets, LoadsGfx1200FromMachineFlags) {
+  expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1200, ROCJITSU_CODE_TARGET_GFX1200);
+}
+
+TEST(GfxCodeObjectTargets, LoadsGfx1201FromMachineFlags) {
+  expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1201, ROCJITSU_CODE_TARGET_GFX1201);
+}
+
+TEST(GfxCodeObjectTargets, LoadsGfx1250FromMachineFlags) {
+  expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250);
+}
+
 // Machine flags outside the supported set must surface as
 // ROCJITSU_CODE_TARGET_INVALID rather than silently aliasing onto a real
 // target (which would happen if someone accidentally made a real target the
@@ -216,6 +229,18 @@ TEST(GfxCodeObjectTargets, CApiAcceptsGfx942ForBasicBlockList) {
 
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx950ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950);
+}
+
+TEST(GfxCodeObjectTargets, CApiAcceptsGfx1200ForBasicBlockList) {
+  expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1200, ROCJITSU_CODE_TARGET_GFX1200);
+}
+
+TEST(GfxCodeObjectTargets, CApiAcceptsGfx1201ForBasicBlockList) {
+  expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1201, ROCJITSU_CODE_TARGET_GFX1201);
+}
+
+TEST(GfxCodeObjectTargets, CApiAcceptsGfx1250ForBasicBlockList) {
+  expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250);
 }
 
 } // namespace

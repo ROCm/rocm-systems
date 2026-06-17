@@ -154,7 +154,7 @@ The intermediate site/plan types are expected to thicken as the framework grows 
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`) [shared with DBT]
 
-Owns ELF-level mutations. The DBI orchestrator uses: `text_bytes()` / `overwrite_text()` for the anchor splice, `set_cave_start()` + `append_cave_body()` + `append_cave_section()` for the appended trampolines, and `emit()` for the final patched ELF buffer. The patcher accepts any well-formed mutation request; layout decisions stay in the orchestrator. The orchestrator establishes the cave coordinate once (`set_cave_start(text_size())`) and reads it back via `cave_start()` rather than recomputing.
+Owns ELF-level mutations. The DBI orchestrator reads the original payload via `text_bytes()`, assembles the new `.text` locally (each anchor spliced in place, then every trampoline appended after the original bytes with `append_words()`), and applies it with a single `replace_text()` before `emit()` returns the patched ELF buffer. The patcher accepts any well-formed mutation request; layout decisions stay in the orchestrator. Trampolines live inside `.text` as a local code cave (the same layout DBT uses) rather than a separate section, so cave offsets are plain `.text`-relative bytes in `[text_size, text_size + cave_bytes)`.
 
 ### Instruction Builder (`code/patch/instruction_builder.h`) [shared with DBT]
 

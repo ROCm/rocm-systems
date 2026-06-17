@@ -555,14 +555,14 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
   // s_nop 0. If this assertion fails, the orchestrator's trampoline layout
   // no longer starts with the placeholder we think it does, and the
   // sabotage premise ("we replaced the no-op with s_endpgm") would be a lie.
-  constexpr uint32_t kSNop0 = 0xBF800000u;
+  constexpr uint32_t kSNop0 = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA2);
   uint32_t pre_overwrite = 0;
   std::memcpy(&pre_overwrite, sabotaged.data() + tramp0_file_off, sizeof(pre_overwrite));
   ASSERT_EQ(pre_overwrite, kSNop0) << "Expected s_nop 0 (0x" << std::hex << kSNop0
                                    << ") at start of the trampoline cave but found 0x"
                                    << pre_overwrite << " - trampoline body layout changed?";
 
-  constexpr uint32_t kSEndpgm0 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr uint32_t kSEndpgm0 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA2);
   std::memcpy(sabotaged.data() + tramp0_file_off, &kSEndpgm0, sizeof(kSEndpgm0));
 
   // Same inputs as the dispatch test so we can compare against its golden.
@@ -615,7 +615,7 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
 
   // Perform same change and test for second trampoline
   int64_t offset_between_anchors = patches_[1].trampoline_offset - patches_[0].trampoline_offset;
-  EXPECT_TRUE(offset_between_anchors)
+  EXPECT_NE(offset_between_anchors, 0)
       << "Both selected trampolines have the same trampoline offset";
   std::memcpy(&pre_overwrite, sabotaged.data() + tramp0_file_off + offset_between_anchors,
               sizeof(pre_overwrite));
