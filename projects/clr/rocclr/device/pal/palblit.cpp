@@ -705,7 +705,7 @@ bool KernelBlitManager::createProgram(Device& device) {
         // Not all blit kernels are needed in some setup, so continue with the rest
         continue;
       }
-      kernels_[i] = new amd::Kernel(*program_, *symbol, BlitName[i]);
+      kernels_[i] = new amd::Kernel(*program_, *symbol, BlitName[i], /*isStatic=*/true);
       if (kernels_[i] == NULL) {
         break;
       }
