@@ -50,7 +50,7 @@ class Rec(object):
 # Edit this region for introducing new algos etc
 
 reductions = ["AllReduce","ReduceScatter"]
-all_reds = ["sum"]
+all_reds = ["sum", "avg"]
 all_tys = ["f32","f16","bf16","f8e4m3","f8e5m2"]
 gin_algos = ["RailA2A_LsaLD", "RailA2A_LsaLDMC", "RailRing_LsaSTMC"]
 
@@ -67,10 +67,12 @@ coll_to_lower = {
 }
 
 red_to_ncclDevRedOp = {
-  "sum": "ncclDevSum"
+  "sum": "ncclDevSum",
+  "avg": "ncclDevSumPostDiv"
 }
 red_to_Func = {
-  "sum": "FuncSum"
+  "sum": "FuncSum",
+  "avg": "FuncSumPostDiv"
 }
 
 ty_to_ncclDataType = {
@@ -94,8 +96,12 @@ def enumerate_kernels():
   for red in all_reds:
     for ty in all_tys:
       for algo in ["AGxLL_R","RSxLD_AGxST"]:
+        # AllReduce implements sum only; skip avg (matches upstream).
+        if red == "avg":
+          continue
         yield Rec(coll="AllReduce", algo=algo, red=red, ty=ty)
       for algo in ["LL","LD"]:
+        # ReduceScatter emits sum and avg for every float type.
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
 
 def required_cuda(k):

@@ -9,9 +9,6 @@
 #define GIN_V13_H_
 #include "nccl_net.h"
 
-//RCCL temporary merge fix
-typedef ncclNetProperties_v11_t ncclNetProperties_v12_t;
-
 typedef struct {
   int nSignals;
   int nCounters;

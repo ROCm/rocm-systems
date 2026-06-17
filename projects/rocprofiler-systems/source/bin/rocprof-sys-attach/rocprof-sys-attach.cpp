@@ -54,10 +54,12 @@ print_usage(const char* prog_name)
 void
 setup_tool_library_env()
 {
-    const auto* attach_tool_library_env_name     = "ROCPROF_ATTACH_TOOL_LIBRARY";
-    const auto* rocp_tool_libraries_env_name     = "ROCP_TOOL_LIBRARIES";
-    const auto* output_use_current_time_env_name = "ROCPROFSYS_OUTPUT_USE_CURRENT_TIME";
-    const auto* reattach_add_session_id_env_name = "ROCPROFSYS_REATTACH_ADD_SESSION_ID";
+    const auto* attach_tool_library_env_name = "ROCPROF_ATTACH_TOOL_LIBRARY";
+    const auto* rocp_tool_libraries_env_name = "ROCP_TOOL_LIBRARIES";
+    const auto* output_use_current_time_env_name =
+        rocprofsys::env_vars::OUTPUT_USE_CURRENT_TIME;
+    const auto* reattach_add_session_id_env_name =
+        rocprofsys::env_vars::REATTACH_ADD_SESSION_ID;
 
     // enable the use of the current time for the output path
     setenv(output_use_current_time_env_name, "true", 1);
@@ -86,7 +88,7 @@ setup_tool_library_env()
 void
 setup_output_env(const std::string& output_path)
 {
-    const auto* existing_output_path = getenv("ROCPROFSYS_OUTPUT_PATH");
+    const auto* existing_output_path = getenv(rocprofsys::env_vars::OUTPUT_PATH);
     if(output_path.empty() && existing_output_path != nullptr)
     {
         LOG_INFO("Output path: {}", existing_output_path);
@@ -97,7 +99,7 @@ setup_output_env(const std::string& output_path)
     const auto        output =
         output_path.empty() ? fmt::format("{}/rocprof-sys-output", pwd) : output_path;
 
-    setenv("ROCPROFSYS_OUTPUT_PATH", output.c_str(), 1);
+    setenv(rocprofsys::env_vars::OUTPUT_PATH, output.c_str(), 1);
     LOG_INFO("Output path: {}", output);
 }
 
@@ -114,8 +116,9 @@ setup_output_format_env(const std::vector<std::string>& formats)
 
     if(has_format("perfetto") || has_format("rocpd"))
     {
-        setenv("ROCPROFSYS_TRACE", has_format("perfetto") ? "true" : "false", 1);
-        setenv("ROCPROFSYS_USE_ROCPD", has_format("rocpd") ? "true" : "false", 1);
+        setenv(rocprofsys::env_vars::TRACE, has_format("perfetto") ? "true" : "false", 1);
+        setenv(rocprofsys::env_vars::USE_ROCPD, has_format("rocpd") ? "true" : "false",
+               1);
     }
 
     LOG_INFO("Output format: {}", fmt::join(formats, " "));

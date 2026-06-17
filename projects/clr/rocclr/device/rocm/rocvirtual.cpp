@@ -3685,23 +3685,22 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 
   // If Physical address is not set, then it is map command. If set, it is unmap command.
   if (phys_mem_obj != nullptr) {
-    constexpr bool kParent = false;
-    amd::Memory* vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
-        phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
-        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
+    amd::Memory* vaddr_sub_obj =
+        dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
+    if (vaddr_sub_obj == nullptr) {
+      LogError("HSA Command: MapMemObjBookkeeping failed!");
+      profilingEnd();
+      return;
+    }
     // Map the physical to virtual address the hsa api
     hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
     opaque_hsa_handle.handle = phys_mem_obj->getUserData().hsa_handle;
     if ((hsa_status = Hsa::vmem_map(vaddr_sub_obj->getSvmPtr(), vcmd.size(),
                                        vaddr_sub_obj->getOffset(), opaque_hsa_handle, 0)) ==
         HSA_STATUS_SUCCESS) {
-      assert(amd::MemObjMap::FindMemObj(vcmd.ptr()) == nullptr);
-      amd::MemObjMap::AddMemObj(vcmd.ptr(), vaddr_sub_obj);
-      vaddr_sub_obj->getUserData().phys_mem_obj = phys_mem_obj;
-      phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
-      if (phys_mem_obj->getMemFlags() & ROCCLR_MEM_INTERPROCESS) {
-        vaddr_sub_obj->setVmmImported(true);
-      }
+      constexpr bool kImportVmmForInterprocess = true;
+      dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
+                                         kImportVmmForInterprocess);
     } else {
       LogError("HSA Command: hsa_amd_vmem_map failed!");
     }
@@ -3715,16 +3714,10 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     // Unmap the object, since the physical addr is set.
     if ((hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), vcmd.size())) ==
         HSA_STATUS_SUCCESS) {
-      // assert the va is mapped and needs to be removed
-      vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
-      amd::MemObjMap::RemoveMemObj(vcmd.ptr());
-      if (vaddr_sub_obj->getUserData().phys_mem_obj != nullptr) {
-        vaddr_sub_obj->getUserData().phys_mem_obj->getUserData().vaddr_mem_obj = nullptr;
-        vaddr_sub_obj->getUserData().phys_mem_obj = nullptr;
-      }
-      // Release sub_obj now that HW unmap is complete.
-      // ~Memory releases parent va_ via parent_->release().
-      vaddr_sub_obj->release();
+      constexpr bool kDestroyVirtualBuffer = true;
+      constexpr bool kReleaseSubObj = true;
+      dev().UnmapMemObjBookkeeping(vaddr_sub_obj, const_cast<void*>(vcmd.ptr()),
+                                   kDestroyVirtualBuffer, kReleaseSubObj);
     } else {
       LogError("HSA Command: hsa_amd_vmem_unmap failed");
     }

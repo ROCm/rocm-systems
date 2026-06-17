@@ -69,8 +69,10 @@ class cli_analysis(OmniAnalyze_Base):
                     " skipped",
                 )
 
+                pc_sampling_data = file_io.load_pc_sampling_results(path_info[0])
+
                 workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
-                    path_info[0]
+                    pc_sampling_data
                 )
                 workload.raw_pmc = workload.raw_pmc.rename(
                     columns={"Dispatch_Id": "Dispatch_ID"}
@@ -88,7 +90,9 @@ class cli_analysis(OmniAnalyze_Base):
                 workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
                 workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
-                parser.load_non_mertrics_table(workload, path_info[0], args)
+                parser.load_non_mertrics_table(
+                    workload, path_info[0], args, pc_sampling_tool_data=pc_sampling_data
+                )
                 parser.nullify_unevaluated_metric_values(workload)
                 continue
 
