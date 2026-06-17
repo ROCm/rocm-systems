@@ -130,7 +130,7 @@ void kernelExecutionFunction(hipModule_t module) {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipModuleGetLoadingMode_DefaultModeCheck") {
+HIP_TEST_CASE("Unit_hipModuleGetLoadingMode_DefaultModeCheck") {
   runTestInFork([]() {
     INFO("Testing default mode (no env var set)");
 
@@ -167,7 +167,7 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_DefaultModeCheck") {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipModuleGetLoadingMode_LazyModeCheck") {
+HIP_TEST_CASE("Unit_hipModuleGetLoadingMode_LazyModeCheck") {
   runTestInFork([]() {
     INFO("Testing LAZY mode with explicit env var set");
 
@@ -220,7 +220,7 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_LazyModeCheck") {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipModuleGetLoadingMode_EagerModeCheck") {
+HIP_TEST_CASE("Unit_hipModuleGetLoadingMode_EagerModeCheck") {
   runTestInFork([]() {
     // Set env var to EAGER
     REQUIRE(setenv("HIP_MODULE_LOADING", "EAGER", 1) == 0);
@@ -266,7 +266,7 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_EagerModeCheck") {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipModuleGetLoadingMode_CaseInsensitive") {
+HIP_TEST_CASE("Unit_hipModuleGetLoadingMode_CaseInsensitive") {
   runTestInFork([]() {
     hipModuleLoadingMode_t mode;
 
@@ -306,7 +306,7 @@ void ChkMode() {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipModuleGetLoadingMode_MultiThread") {
+HIP_TEST_CASE("Unit_hipModuleGetLoadingMode_MultiThread") {
   runTestInFork([]() {
     // Set env var to EAGER first
     setenv("HIP_MODULE_LOADING", "EAGER", 1);
@@ -337,7 +337,7 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_MultiThread") {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipModuleGetLoadingMode_Change") {
+HIP_TEST_CASE("Unit_hipModuleGetLoadingMode_Change") {
   runTestInFork([]() {
     hipModuleLoadingMode_t mode;
 
