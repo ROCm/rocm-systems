@@ -340,6 +340,9 @@ amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char*
     case AMDSMI_STATUS_API_FAILED:
       *status_string = "AMDSMI_STATUS_API_FAILED: API call failed.";
       break;
+    case AMDSMI_STATUS_TIMEOUT:
+      *status_string = "AMDSMI_STATUS_TIMEOUT: Timeout in API call.";
+      break;
     case AMDSMI_STATUS_RETRY:
       *status_string = "AMDSMI_STATUS_RETRY: Retry operation.";
       break;
@@ -403,6 +406,11 @@ amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char*
       break;
     case AMDSMI_STATUS_DRIVER_NOT_LOADED:
       *status_string = "AMDSMI_STATUS_DRIVER_NOT_LOADED: Processor driver not loaded.";
+      break;
+    case AMDSMI_STATUS_MORE_DATA:
+      *status_string =
+          "AMDSMI_STATUS_MORE_DATA: There is more data than the buffer"
+          " size the user passed.";
       break;
     case AMDSMI_STATUS_NO_DATA:
       *status_string = "AMDSMI_STATUS_NO_DATA: No data was found for a given input.";
