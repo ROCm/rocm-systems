@@ -3837,7 +3837,7 @@ def amdsmi_topo_get_numa_node_number(processor_handle: processor_handle_t):
 def amdsmi_topo_get_link_weight(
     processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
 ):
-    """Return the qualitative link weight between two processors.
+    """Return the qualitative link weight between two GPUs.
 
     The weight is a cost metric derived from the KFD io_link weight property
     (lower = closer/faster), analogous to numactl NUMA distances:
@@ -3845,6 +3845,8 @@ def amdsmi_topo_get_link_weight(
     - xGMI: 15 per physical hop (e.g. a single-hop xGMI link has weight 15).
     - PCIe: 20 per segment; multi-segment routes are summed
       (GPU→CPU + CPU→CPU + CPU→GPU).
+
+    Both handles must be GPU processor handles.
 
     Returns:
         int: The link weight.
@@ -3919,15 +3921,15 @@ def amdsmi_get_link_metrics(processor_handle: processor_handle_t):
 def amdsmi_topo_get_link_type(
     processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
 ):
-    """Return the abstracted hop count and link type between two processors.
+    """Return the abstracted hop count and link type between two GPUs.
 
-    The hop count is an abstracted topology step count, not the number of
-    physical xGMI links traversed:
+    Both handles must be GPU processor handles. The hop count is an abstracted
+    topology step count, not the number of physical xGMI links traversed:
 
-    - 1: Reachable over xGMI (GPU-to-GPU or GPU-to-CPU), regardless of the
-         number of physical xGMI links on the route.
-    - 2: Connected over PCIe within the same CPU NUMA node.
-    - 3: Connected over PCIe across different CPU NUMA nodes.
+    - 1: The two GPUs are reachable over xGMI, regardless of the number of
+         physical xGMI links on the route.
+    - 2: The two GPUs communicate over PCIe within the same CPU NUMA node.
+    - 3: The two GPUs communicate over PCIe across different CPU NUMA nodes.
     - 4: Fallback when the inter-CPU io_link weight cannot be read.
 
     Two GPUs on the same xGMI fabric always report 1 even when data physically
@@ -3935,7 +3937,8 @@ def amdsmi_topo_get_link_type(
     ``/sys/class/drm/card*/device/xgmi_num_hops`` from the amdgpu driver.
 
     Returns:
-        dict: ``{"hops": int, "type": amdsmi_link_type_t}``
+        dict: ``{"hops": int, "type": int}`` where ``type`` is a value of
+        :class:`amdsmi_link_type_t`.
     """
     if not isinstance(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle)

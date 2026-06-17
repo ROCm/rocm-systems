@@ -6701,9 +6701,9 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *
  *  | Value | Meaning |
  *  |-------|---------|
- *  | 1 | Endpoints are reachable over xGMI (GPU-to-GPU or GPU-to-CPU), regardless of how many physical xGMI links the route traverses. |
- *  | 2 | Endpoints communicate over PCIe within the same CPU NUMA node (GPU-to-GPU or GPU-to-CPU). |
- *  | 3 | Endpoints are on different CPU NUMA nodes; the route crosses both. |
+ *  | 1 | The two GPUs are reachable over xGMI, regardless of how many physical xGMI links the route traverses. |
+ *  | 2 | The two GPUs communicate over PCIe within the same CPU NUMA node. |
+ *  | 3 | The two GPUs communicate over PCIe across different CPU NUMA nodes. |
  *  | 4 | Fallback value used when the inter-CPU io_link weight cannot be read. |
  *
  *  Two GPUs on the same xGMI fabric always report a hop count of 1, even when

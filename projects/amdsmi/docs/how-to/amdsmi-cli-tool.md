@@ -573,9 +573,9 @@ the number of physical xGMI links between devices. The possible values are:
 
 | Hops | Meaning |
 |------|---------|
-| 1 | Endpoints reachable over xGMI (GPU-to-GPU or GPU-to-CPU), regardless of the number of physical xGMI links on the route. |
-| 2 | Endpoints connected over PCIe within the same CPU NUMA node. |
-| 3 | Endpoints on different CPU NUMA nodes; the route crosses both. |
+| 1 | The two GPUs are reachable over xGMI, regardless of the number of physical xGMI links on the route. |
+| 2 | The two GPUs communicate over PCIe within the same CPU NUMA node. |
+| 3 | The two GPUs communicate over PCIe across different CPU NUMA nodes. |
 | 4 | Fallback when the inter-CPU io_link weight cannot be read. |
 
 Two GPUs on the same xGMI fabric always report `1`, even when data physically crosses
