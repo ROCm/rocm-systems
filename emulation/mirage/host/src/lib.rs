@@ -694,35 +694,61 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
     Ok(())
 }
 
-/// Build the always-present mirage environment for a node of `rank`.
+/// Build the always-present mirage environment for one workload process.
 ///
-/// `MIRAGE_RANK` and `MIRAGE_HEAD_PORT` are set on every node.
-/// `MIRAGE_HEAD_ADDR` is also set on every node: worker nodes get the
-/// head's address, while the head (rank 0) gets `localhost` since it is
-/// itself the head. `MASTER_ADDR`/`MASTER_PORT` mirror the head address
-/// and port, and `RANK`/`WORLD_SIZE`/`LOCAL_RANK` mirror the node's rank,
-/// the session's node count, and `0` (mirage runs one workload process
-/// per node), so `torch.distributed` (and `torchrun`) can rendezvous
-/// without the workload translating mirage's own variables or needing a
-/// launcher. These are injected whether or not the session is
-/// containerised.
+/// A process is identified by three ranks:
+///
+/// * `node_rank` — which node it runs on (`MIRAGE_RANK`). The head node
+///   is rank 0.
+/// * `global_rank` — its index across the whole job (`RANK`, in
+///   `0..world_size`). With `nproc_per_node > 1` several processes share
+///   a node (and thus a `MIRAGE_RANK`) but each gets a unique `RANK`.
+/// * `local_rank` — its index within the node (`LOCAL_RANK`, in
+///   `0..nproc_per_node`), which the workload typically uses to pin a
+///   GPU.
+///
+/// `MASTER_ADDR`/`MASTER_PORT` point at the head node so
+/// `torch.distributed` (and `torchrun`) can rendezvous without the
+/// workload translating mirage's own variables or needing a launcher;
+/// the head's own processes reach it via loopback. These are injected
+/// whether or not the session is containerised. With the default of one
+/// process per node `global_rank == node_rank` and `local_rank == 0`, so
+/// the historical one-process-per-node environment is unchanged.
+fn proc_mirage_env(
+    global_rank: u32,
+    node_rank: u32,
+    local_rank: u32,
+    world_size: u32,
+    head_addr: &str,
+    head_port: u16,
+) -> Vec<(String, String)> {
+    // The head node hosts the rendezvous: processes on it reach it via
+    // loopback, processes on other nodes via the head's address.
+    let head = if node_rank == 0 { "localhost" } else { head_addr };
+    vec![
+        (ENV_RANK.to_string(), node_rank.to_string()),
+        (ENV_TORCH_RANK.to_string(), global_rank.to_string()),
+        (ENV_HEAD_PORT.to_string(), head_port.to_string()),
+        (ENV_HEAD_ADDR.to_string(), head.to_string()),
+        (ENV_MASTER_ADDR.to_string(), head.to_string()),
+        (ENV_MASTER_PORT.to_string(), head_port.to_string()),
+        (ENV_WORLD_SIZE.to_string(), world_size.to_string()),
+        (ENV_LOCAL_RANK.to_string(), local_rank.to_string()),
+    ]
+}
+
+/// Node-level baseline environment for a node of `rank`, used as the
+/// container's env at launch (before any exec, so the process grid isn't
+/// known yet). It is the one-process-per-node case of [`proc_mirage_env`]
+/// (`global_rank == node_rank`, `local_rank == 0`); the authoritative
+/// per-process values are layered on by [`spawn_node`] at exec time.
 fn node_mirage_env(
     rank: u32,
     world_size: u32,
     head_addr: &str,
     head_port: u16,
 ) -> Vec<(String, String)> {
-    let head = if rank == 0 { "localhost" } else { head_addr };
-    vec![
-        (ENV_RANK.to_string(), rank.to_string()),
-        (ENV_TORCH_RANK.to_string(), rank.to_string()),
-        (ENV_HEAD_PORT.to_string(), head_port.to_string()),
-        (ENV_HEAD_ADDR.to_string(), head.to_string()),
-        (ENV_MASTER_ADDR.to_string(), head.to_string()),
-        (ENV_MASTER_PORT.to_string(), head_port.to_string()),
-        (ENV_WORLD_SIZE.to_string(), world_size.to_string()),
-        (ENV_LOCAL_RANK.to_string(), "0".to_string()),
-    ]
+    proc_mirage_env(rank, rank, 0, world_size, head_addr, head_port)
 }
 
 /// Resolve the emulator-level injection for a session by reading its
@@ -836,19 +862,41 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
         }
     };
 
-    // This host runs only the rank(s) it owns: a per-node in-container
+    // This host runs only the node(s) it owns: a per-node in-container
     // host runs just its own rank; the non-containerised orchestrator
     // runs every node.
     let in_container = host_rank.is_some();
-    let ranks: Vec<u32> = match host_rank {
+    let owned_nodes: Vec<u32> = match host_rank {
         Some(r) => vec![r],
         None => (0..node_count).collect(),
     };
 
+    // Expand each owned node into `nproc_per_node` workload processes.
+    // Each process gets a slot keyed by its global rank
+    // (`node * nproc + local`), which is also the directory it streams
+    // through (`node/<global>`) and the key under which its status is
+    // published. With the default `nproc == 1` the global rank equals the
+    // node rank, so the on-disk layout is identical to the historical
+    // one-process-per-node case. `world_size` spans the whole job.
+    let nproc = def.nproc_per_node.max(1);
+    let world_size = node_count * nproc;
+    let procs: Vec<ProcSpec> = owned_nodes
+        .iter()
+        .flat_map(|&n| {
+            (0..nproc).map(move |local| ProcSpec {
+                global: n * nproc + local,
+                node: n,
+                local,
+            })
+        })
+        .collect();
+
     tracing::info!(
         session = %def.session,
         command = %def.exec.command,
-        nodes = ranks.len(),
+        nodes = owned_nodes.len(),
+        procs = procs.len(),
+        world_size,
         "running exec"
     );
 
@@ -860,21 +908,21 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
     // Crucially, this happens *after* the initial `status.json` and node
     // ranks are known: when injection resolution fails (e.g. the
     // emulator's runtime library is missing inside a node container) we
-    // must record a terminal failure for every rank we own. Otherwise the
-    // exec would have no `status.json` reporting `ended`, and an attached
-    // client (`mirage run`) would block forever waiting for an exit that
-    // never comes.
+    // must record a terminal failure for every process we own. Otherwise
+    // the exec would have no `status.json` reporting `ended`, and an
+    // attached client (`mirage run`) would block forever waiting for an
+    // exit that never comes.
     let injection = match resolve_injection(&def.session) {
         Ok(injection) => injection,
         Err(e) => {
             tracing::error!(session = %def.session, "exec setup failed: {e}");
-            for &rank in &ranks {
-                let nlayout = layout.node(rank);
+            for p in &procs {
+                let nlayout = layout.node(p.global);
                 let _ = std::fs::create_dir_all(&nlayout.root);
                 let _ = std::fs::write(nlayout.stdout(), format!("mirage: {e}\n").as_bytes());
                 let _ = write_bytes(&nlayout.exit_code(), b"127");
                 status.nodes.insert(
-                    rank,
+                    p.global,
                     NodeStatus {
                         pid: None,
                         exit_code: Some(127),
@@ -893,16 +941,17 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
     };
 
     let mut handles = Vec::new();
-    for rank in ranks {
-        let nlayout = layout.node(rank);
+    for p in procs {
+        let nlayout = layout.node(p.global);
         std::fs::create_dir_all(&nlayout.root).map_err(|e| MirageError::Io {
             path: nlayout.root.clone(),
             source: e,
         })?;
-        let mirage_env = node_mirage_env(rank, node_count, &head_addr, head_port);
+        let mirage_env =
+            proc_mirage_env(p.global, p.node, p.local, world_size, &head_addr, head_port);
         match spawn_node(
             &def,
-            rank,
+            p.global,
             nlayout.clone(),
             &injection,
             &mirage_env,
@@ -910,29 +959,35 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
         ) {
             Ok(node) => {
                 status.started = true;
-                tracing::debug!(rank, pid = node.pid, "spawned node");
+                tracing::debug!(
+                    global = p.global,
+                    node = p.node,
+                    local = p.local,
+                    pid = node.pid,
+                    "spawned process"
+                );
                 status.nodes.insert(
-                    rank,
+                    p.global,
                     NodeStatus {
                         pid: Some(node.pid),
                         exit_code: None,
                     },
                 );
-                handles.push((rank, node, nlayout));
+                handles.push((p.global, node, nlayout));
             }
             Err(e) => {
-                // Spawning the node failed (e.g. the command doesn't
+                // Spawning the process failed (e.g. the command doesn't
                 // exist). Rather than leaving the exec stuck in a
                 // perpetual "started but never ended" state, surface the
-                // reason on the node's stdout (which attach clients tail)
-                // and record the conventional 127 "command not found"
-                // exit code for this node.
+                // reason on the process's stdout (which attach clients
+                // tail) and record the conventional 127 "command not
+                // found" exit code for this slot.
                 let msg = format!("mirage: {e}\n");
                 let _ = std::fs::write(nlayout.stdout(), msg.as_bytes());
                 let _ = write_bytes(&nlayout.exit_code(), b"127");
                 status.started = true;
                 status.nodes.insert(
-                    rank,
+                    p.global,
                     NodeStatus {
                         pid: None,
                         exit_code: Some(127),
@@ -967,21 +1022,23 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
     }
 
     // Rank 0 of a multi-node containerised session aggregates the other
-    // ranks: each per-node host writes its own `exit_code` file, so we
-    // wait for those to appear and fold them into the exec-wide status.
-    // (For a single-node session or the non-containerised orchestrator
-    // this loop has nothing to wait on.)
+    // ranks' processes: each per-node host writes an `exit_code` file for
+    // every process it owns (keyed by global rank), so we wait for those
+    // to appear and fold them into the exec-wide status. (For a
+    // single-node session or the non-containerised orchestrator this loop
+    // has nothing to wait on, since this host already owns every global
+    // rank in `0..world_size`.)
     if is_aggregator {
-        for rank in 0..node_count {
-            if status.nodes.get(&rank).and_then(|n| n.exit_code).is_some() {
+        for global in 0..world_size {
+            if status.nodes.get(&global).and_then(|n| n.exit_code).is_some() {
                 continue;
             }
-            let nlayout = layout.node(rank);
+            let nlayout = layout.node(global);
             let code = await_node_exit_code(&nlayout).await;
             status.nodes.insert(
-                rank,
+                global,
                 NodeStatus {
-                    pid: status.nodes.get(&rank).and_then(|s| s.pid),
+                    pid: status.nodes.get(&global).and_then(|s| s.pid),
                     exit_code: Some(code),
                 },
             );
@@ -1006,6 +1063,19 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
         let _ = std::fs::remove_dir_all(&layout.root);
     }
     Ok(())
+}
+
+/// One workload process in the exec's process grid.
+///
+/// With `--nproc-per-node N` each node hosts `N` processes; this records
+/// the three ranks that identify one of them: its `global` rank across
+/// the whole job (also the `node/<global>` directory it streams
+/// through), the `node` it runs on, and its `local` index within that
+/// node.
+struct ProcSpec {
+    global: u32,
+    node: u32,
+    local: u32,
 }
 
 struct SpawnedNode {
@@ -1402,5 +1472,38 @@ mod tests {
         assert_eq!(env[ENV_MASTER_PORT], "29500");
         assert_eq!(env[ENV_WORLD_SIZE], "4");
         assert_eq!(env[ENV_LOCAL_RANK], "0");
+    }
+
+    #[test]
+    fn proc_env_distinguishes_local_and_global_rank() {
+        // 2 nodes x 2 procs/node => world size 4. Inspect the second
+        // process on node 1: global rank 3, local rank 1.
+        let env: std::collections::BTreeMap<_, _> =
+            proc_mirage_env(3, 1, 1, 4, "mirage-sess-node-0", 29500)
+                .into_iter()
+                .collect();
+        // MIRAGE_RANK identifies the node; RANK is the global process rank.
+        assert_eq!(env[ENV_RANK], "1");
+        assert_eq!(env[ENV_TORCH_RANK], "3");
+        assert_eq!(env[ENV_LOCAL_RANK], "1");
+        assert_eq!(env[ENV_WORLD_SIZE], "4");
+        // A non-head node reaches the rendezvous via the head's address.
+        assert_eq!(env[ENV_MASTER_ADDR], "mirage-sess-node-0");
+        assert_eq!(env[ENV_MASTER_PORT], "29500");
+    }
+
+    #[test]
+    fn proc_env_head_node_extra_proc_uses_localhost() {
+        // The second process on the head node (node 0, local 1, global 1)
+        // shares the node with the rendezvous, so it reaches it on
+        // loopback even though its global rank is non-zero.
+        let env: std::collections::BTreeMap<_, _> =
+            proc_mirage_env(1, 0, 1, 4, "mirage-sess-node-0", 29500)
+                .into_iter()
+                .collect();
+        assert_eq!(env[ENV_RANK], "0");
+        assert_eq!(env[ENV_TORCH_RANK], "1");
+        assert_eq!(env[ENV_LOCAL_RANK], "1");
+        assert_eq!(env[ENV_MASTER_ADDR], "localhost");
     }
 }

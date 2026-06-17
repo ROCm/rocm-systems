@@ -552,6 +552,7 @@ async fn create_exec(
             workdir: body.workdir,
         },
         worker_exec: None,
+        nproc_per_node: 1,
         keep: body.keep,
     };
     let r = s.ctl.session_exec(&def)?;

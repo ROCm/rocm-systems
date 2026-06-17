@@ -532,6 +532,15 @@ pub struct RunArgs {
     /// Override the profile topology's per-node GPU count for this run.
     #[arg(long)]
     gpus_per_node: Option<u32>,
+    /// Number of workload processes to launch per node (like
+    /// `torchrun --nproc-per-node`). Defaults to `1`. Each process gets a
+    /// distinct `LOCAL_RANK` (`0..nproc_per_node`) and global `RANK`, and
+    /// the job's `WORLD_SIZE` becomes `num_nodes * nproc_per_node`, so
+    /// `torch.distributed` runs without a separate launcher. Give each
+    /// node at least this many GPUs (`--gpus-per-node`) so every process
+    /// can pin its own device.
+    #[arg(long, visible_alias = "nproc_per_node")]
+    nproc_per_node: Option<u32>,
     /// Reuse an existing session by id.
     #[arg(long, conflicts_with_all = ["keep_session"])]
     session: Option<SessionId>,
@@ -1703,6 +1712,7 @@ async fn exec_start<C: MirageCtl + 'static>(
         // when attaching, we always keep the exec until after attach
         // completes; otherwise the host might remove the dir before we
         // finish tailing.
+        nproc_per_node: 1,
         keep: a.keep || !a.detach,
     };
     let r = ctl.session_exec(&def)?;
@@ -1982,6 +1992,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
             workdir: a.workdir.clone(),
         },
         worker_exec: None,
+        nproc_per_node: a.nproc_per_node.unwrap_or(1).max(1),
         // keep until after attach drains; we may still destroy the
         // whole session below.
         keep: true,

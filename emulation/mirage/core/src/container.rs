@@ -30,11 +30,14 @@ use crate::session::SessionId;
 /// Environment variable carrying a node's rank (0 = head). Always set
 /// on every node process, containerised or not.
 pub const ENV_RANK: &str = "MIRAGE_RANK";
-
-/// `torch.distributed` global rank: the rank's index across the whole
-/// job. Aliases [`ENV_RANK`] so PyTorch's `env://` init method (and
-/// `torchrun`) can read the rank under its standard name on every node
-/// without the workload having to translate mirage's own variables.
+/// `torch.distributed` global rank: the process's index across the whole
+/// job, in `0..WORLD_SIZE`. Distinct from [`ENV_RANK`] (`MIRAGE_RANK`),
+/// which identifies the *node*: with `--nproc-per-node > 1` several
+/// processes share a node (and thus a `MIRAGE_RANK`) but each gets a
+/// unique `RANK`. With the default of one process per node it equals
+/// `MIRAGE_RANK`. Set so PyTorch's `env://` init method (and `torchrun`)
+/// can read the rank under its standard name without the workload having
+/// to translate mirage's own variables.
 pub const ENV_TORCH_RANK: &str = "RANK";
 
 /// Environment variable carrying the head node's address. Set on every
@@ -55,15 +58,17 @@ pub const ENV_MASTER_ADDR: &str = "MASTER_ADDR";
 pub const ENV_MASTER_PORT: &str = "MASTER_PORT";
 
 /// `torch.distributed` world size: the total number of ranks in the
-/// job. mirage runs one workload process per node, so this equals the
-/// session's node count. Set on every node so PyTorch's `env://` init
-/// method works without a launcher like `torchrun`.
+/// job, i.e. `num_nodes * nproc_per_node`. With the default of one
+/// workload process per node this is just the session's node count. Set
+/// on every process so PyTorch's `env://` init method works without a
+/// launcher like `torchrun`.
 pub const ENV_WORLD_SIZE: &str = "WORLD_SIZE";
 
-/// `torch.distributed` local rank: the rank's index *within* its node.
-/// mirage runs exactly one workload process per node, so this is always
-/// `0`. Set on every node so PyTorch's `env://` init method works
-/// without a launcher like `torchrun`.
+/// `torch.distributed` local rank: the process's index *within* its
+/// node, in `0..nproc_per_node`. With the default of one workload
+/// process per node this is always `0`. Set on every process so
+/// PyTorch's `env://` init method works without a launcher like
+/// `torchrun`.
 pub const ENV_LOCAL_RANK: &str = "LOCAL_RANK";
 
 /// Deterministic container name for a node of a session.

@@ -64,8 +64,10 @@ Three things make this work:
 
 1. **Multiple emulated GPUs.** `mirage run --gpus-per-node N` tells
    rocjitsu to synthesize `N` KFD device nodes, so inside the workload
-   `torch.cuda.device_count() == N`. Each rank pins itself to GPU
-   `LOCAL_RANK`.
+   `torch.cuda.device_count() == N`. Every rank must pin itself to a
+   *distinct* device — RCCL refuses to run if two ranks land on the same
+   GPU (`Duplicate GPU detected`). The fixture picks
+   `rank % torch.cuda.device_count()`, so each rank owns its own GPU.
 
 2. **`torchrun` rendezvous works out of the box.** mirage exports the
    standard `torch.distributed` variables `MASTER_ADDR` and
@@ -164,21 +166,48 @@ Examples:
 NPROC=4 STEPS=100 SKIP_INSTALL=1 ./tests/run_ddp_mlp_mi350.sh
 ```
 
-## Multi-node DDP
+## Multi-node DDP (no launcher)
 
-mirage emulates each node as its own host process. To run DDP across
-emulated *nodes* (rather than multiple GPUs in one node), give the
-profile more nodes and use a c10d rendezvous pointed at mirage's head:
+mirage emulates each *node* as its own rank process and exports the full
+set of `torch.distributed` `env://` variables — `RANK`, `WORLD_SIZE`,
+`LOCAL_RANK`, `MASTER_ADDR`, `MASTER_PORT` — on every node. That means
+you can run the workload **directly**, with no `torchrun` launcher: each
+node runs `python ddp_mlp.py` once and rendezvouses through `env://`.
 
 ```sh
-mirage run --profile mi350x --num-nodes 2 --gpus-per-node 1 \
-  -- torchrun --nnodes=2 --nproc_per_node=1 \
-     --rdzv-backend=c10d --rdzv-endpoint="$MASTER_ADDR:$MASTER_PORT" \
-     ddp_mlp.py
+mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 \
+  --env NCCL_P2P_DISABLE=1 --env NCCL_SHM_DISABLE=1 --env NCCL_SOCKET_IFNAME=lo \
+  -- .venv-mi350/bin/python3 tests/fixtures/ml/ddp_mlp.py
 ```
 
-`MASTER_ADDR` / `MASTER_PORT` are populated by mirage on every node, so
-the workers find the head without extra configuration.
+- `--num-nodes 2` makes `WORLD_SIZE == 2` and runs the script twice, once
+  per rank, with distinct `RANK`s.
+- `--gpus-per-node 2` exposes two GPUs so each rank can pin to a distinct
+  device (`rank % device_count`).
+- The `NCCL_*` variables force RCCL onto its loopback socket transport,
+  which is what the daemon emulator supports.
+
+### Quick connectivity check
+
+Before the full training run, a minimal smoke test
+([`tests/fixtures/ml/dist_smoke.py`](../tests/fixtures/ml/dist_smoke.py))
+does a single `all_reduce` and prints `dist_smoke_ok`. It is heavily
+logged with timestamps so any stall is easy to localize:
+
+```sh
+mirage run --profile mi350x --num-nodes 2 --gpus-per-node 2 \
+  --env NCCL_P2P_DISABLE=1 --env NCCL_SHM_DISABLE=1 --env NCCL_SOCKET_IFNAME=lo \
+  -- .venv-mi350/bin/python3 tests/fixtures/ml/dist_smoke.py
+```
+
+A successful run shows each rank on its own device and the reduced sum:
+
+```text
+[rank 0] current device = 0 (cuda:0)
+[rank 1] current device = 1 (cuda:1)
+[rank 0] post all_reduce: tensor = 3.0
+dist_smoke_ok
+```
 
 ## Troubleshooting
 
@@ -189,10 +218,16 @@ the workers find the head without extra configuration.
   You are likely in `--in-process` mode, where each rank has its own
   emulator and cannot share GPU memory. Drop `--in-process` so the
   default daemon emulator is used.
+- **`Duplicate GPU detected` / `ncclInvalidUsage` at the first
+  collective.** Two ranks pinned to the same emulated GPU. Give the
+  session at least as many GPUs as ranks (`--gpus-per-node N`) so each
+  rank can own a distinct device (the fixtures use
+  `rank % torch.cuda.device_count()`).
 - **Multi-GPU run hangs / times out after a few steps.** Known
-  limitation: RCCL initializes and runs several collectives over the
-  daemon emulator but a later collective stalls. Single-GPU runs train
-  end to end.
+  limitation: RCCL initializes and a single collective completes (the
+  `dist_smoke.py` smoke test passes), but DDP's repeated, bucketed
+  collectives stall on a later one over the daemon emulator. Single-rank
+  runs train end to end.
 - **`KMD preload library not found`.** You are running an installed
   `mirage` from `PATH` instead of the workspace build. Run via
   `cargo run --` from `emulation/mirage` (see

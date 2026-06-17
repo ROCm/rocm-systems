@@ -818,6 +818,7 @@ mod tests {
                 workdir: None,
             },
             worker_exec: None,
+            nproc_per_node: 1,
             keep: true,
         };
         let r0 = ctl.session_exec(&def).unwrap();
@@ -839,6 +840,7 @@ mod tests {
                 workdir: None,
             },
             worker_exec: None,
+            nproc_per_node: 1,
             keep: true,
         };
         ctl.session_exec(&def).unwrap()
