@@ -18,9 +18,6 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/engine.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/locked_file_append.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/sinks.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
     ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
@@ -53,16 +50,6 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/category_registry.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/counter_track.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/engine.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/engine_impl.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/fwd.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/locked_file_append.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/output_layout.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/packet_framing.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/session_backend.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto/sinks.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
@@ -80,6 +67,7 @@ target_sources(rocprofiler-systems-core-library PRIVATE ${core_sources} ${core_h
 add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
+add_subdirectory(perfetto)
 add_subdirectory(progress)
 add_subdirectory(rocpd)
 add_subdirectory(trace_cache)

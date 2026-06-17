@@ -4,7 +4,7 @@
 #pragma once
 
 #include "fwd.hpp"
-#include "sinks.hpp"
+#include "sinks/trace_sink.hpp"
 
 #include <atomic>
 #include <cstddef>

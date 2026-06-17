@@ -6,7 +6,7 @@
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/timemory.hpp"
-#include "core/trace_cache/cached_perfetto_session.hpp"
+#include "core/perfetto/cached_perfetto_session.hpp"
 #include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/discovery.hpp"
 #include "core/trace_cache/post_processor.hpp"
@@ -73,9 +73,9 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
         LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
         post_processor processor{ _tracker, _output_registry };
 
-        const auto output_layout = config::get_perfetto_output_layout();
+        const auto combine_traces = config::get_perfetto_combined_traces();
 
-        std::unique_ptr<cached_perfetto_session> session;
+        std::unique_ptr<core::cached_perfetto_session> session;
         if(enabled_formats.is_perfetto_enabled())
         {
             std::vector<int> source_pids;
@@ -85,8 +85,8 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
 
             try
             {
-                session = std::make_unique<cached_perfetto_session>(
-                    _output_registry, static_cast<pid_t>(root_pid), output_layout,
+                session = std::make_unique<core::cached_perfetto_session>(
+                    _output_registry, static_cast<pid_t>(root_pid), combine_traces,
                     source_pids, processor);
             } catch(const std::exception& exp)
             {
@@ -100,8 +100,7 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
 
         // Session destruction drives engine.stop() which drains into the
         // sink (per_pid_file_sink writes per-pid files; single_file_sink
-        // and tee_sink finalize() take care of the cross-process append +
-        // flock for the merged file under single_file_only/full layouts).
+        // finalizes the cross-process append + flock for merged output).
         session.reset();
     }
 

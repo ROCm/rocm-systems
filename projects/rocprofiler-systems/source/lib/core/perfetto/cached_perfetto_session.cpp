@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/trace_cache/cached_perfetto_session.hpp"
+#include "core/perfetto/cached_perfetto_session.hpp"
 
 #include "common/environment.hpp"
 #include "core/config.hpp"
@@ -15,16 +15,15 @@
 #include <exception>
 #include <filesystem>
 #include <memory>
-#include <optional>
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys::trace_cache
+namespace rocprofsys::core
 {
 namespace
 {
 
-std::optional<std::uint32_t>
+std::uint32_t
 rank_from_env() noexcept
 {
     for(std::string_view env_name :
@@ -34,71 +33,53 @@ rank_from_env() noexcept
         const auto value = get_env<std::int64_t>(std::string{ env_name }, -1);
         if(value >= 0) return static_cast<std::uint32_t>(value);
     }
-    return std::nullopt;
+    return 0;
 }
 
-core::single_file_sink
+single_file_sink
 make_merged_append_sink(output_file_registry& registry, std::size_t source_count)
 {
     const auto base_filename = config::get_perfetto_output_filename();
     const auto merged_path =
         (std::filesystem::path{ base_filename }.parent_path() / "merged.proto").string();
-    auto       sink     = core::single_file_sink{ registry, merged_path };
+    auto       sink     = single_file_sink{ registry, merged_path };
     const auto env_rank = rank_from_env();
-
-    if(!env_rank)
-    {
-        LOG_ERROR(
-            "cached Perfetto merged output skipped: launcher rank env var is missing");
-        sink.set_append_mode(core::append_mode_config{ .source_count = 0 });
-        return sink;
-    }
-
-    const auto seq_id_base = core::append_seq_id_base_for_rank(*env_rank);
+    const auto seq_id_base = append_seq_id_base_for_rank(env_rank);
     if(!seq_id_base)
     {
         LOG_ERROR("cached Perfetto merged output skipped: launcher rank {} exceeds "
                   "the trusted_packet_sequence_id merge window",
-                  *env_rank);
-        sink.set_append_mode(core::append_mode_config{ .source_count = 0 });
+                  env_rank);
+        sink.set_append_mode(append_mode_config{ .source_count = 0 });
         return sink;
     }
 
-    sink.set_append_mode(core::append_mode_config{ .seq_id_base  = *seq_id_base,
-                                                   .source_count = source_count });
+    sink.set_append_mode(append_mode_config{ .seq_id_base  = *seq_id_base,
+                                            .source_count = source_count });
     return sink;
 }
 
-std::unique_ptr<core::trace_sink>
-make_sink(output_file_registry& registry, pid_t root_pid,
-          core::perfetto_output_layout layout, std::size_t source_count)
+std::unique_ptr<trace_sink>
+make_sink(output_file_registry& registry, pid_t root_pid, bool combine_traces,
+          std::size_t source_count)
 {
-    if(layout == core::perfetto_output_layout::single_file_only)
+    if(combine_traces)
     {
-        return std::make_unique<core::trace_sink>(
+        return std::make_unique<trace_sink>(
             make_merged_append_sink(registry, source_count));
     }
 
-    if(layout == core::perfetto_output_layout::full)
-    {
-        return std::make_unique<core::trace_sink>(
-            core::tee_sink{ core::per_pid_file_sink{ root_pid, registry },
-                            make_merged_append_sink(registry, source_count) });
-    }
-
-    return std::make_unique<core::trace_sink>(
-        core::per_pid_file_sink{ root_pid, registry });
+    return std::make_unique<trace_sink>(
+        per_pid_file_sink{ root_pid, registry });
 }
 }  // namespace
 
-cached_perfetto_session::cached_perfetto_session(output_file_registry&        registry,
-                                                 pid_t                        root_pid,
-                                                 core::perfetto_output_layout layout,
-                                                 const std::vector<int>&      source_pids,
-                                                 post_processor&              processor)
-: m_engine{ std::make_unique<core::cached_perfetto_engine>(
-      core::build_engine_config_from_settings()) }
-, m_sink{ make_sink(registry, root_pid, layout, source_pids.size()) }
+cached_perfetto_session::cached_perfetto_session(output_file_registry& registry,
+                                                 pid_t root_pid, bool combine_traces,
+                                                 const std::vector<int>& source_pids,
+                                                 trace_cache::post_processor& processor)
+: m_engine{ std::make_unique<cached_perfetto_engine>(build_engine_config_from_settings()) }
+, m_sink{ make_sink(registry, root_pid, combine_traces, source_pids.size()) }
 , m_tracks{ std::make_unique<track_registry>() }
 {
     m_engine->init_sdk();
@@ -130,4 +111,4 @@ cached_perfetto_session::~cached_perfetto_session() noexcept
     m_sink.reset();
     m_tracks.reset();
 }
-}  // namespace rocprofsys::trace_cache
+}  // namespace rocprofsys::core

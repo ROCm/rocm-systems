@@ -8,7 +8,7 @@
 #include "core/perfetto/engine_impl.hpp"
 #include "core/perfetto/packet_framing.hpp"
 #include "core/perfetto/session_backend.hpp"
-#include "core/perfetto/sinks.hpp"
+#include "core/perfetto/sinks/trace_sink.hpp"
 
 #include <algorithm>
 #include <cstdint>

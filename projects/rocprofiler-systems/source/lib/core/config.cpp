@@ -2197,14 +2197,6 @@ get_perfetto_fill_policy()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
-core::perfetto_output_layout
-get_perfetto_output_layout()
-{
-    static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT");
-    return core::parse_perfetto_output_layout(
-        static_cast<tim::tsettings<std::string>&>(*_v->second).get());
-}
-
 namespace
 {
 auto
