@@ -12,6 +12,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -223,10 +224,14 @@ RJ_API_EXPORT rj_status_t rj_vm_execute(rj_vm_t *vm, rj_vm_cmd_t *cmd);
 /// @param[in,out] cmd Command descriptor.
 RJ_API_EXPORT rj_status_t rj_vm_execute_as(rj_vm_t *vm, uint32_t process_id, rj_vm_cmd_t *cmd);
 
-/// @brief Open the VM's simulated device and create a new KFD process.
+/// @brief Open the VM's simulated device and create (or reuse) a KFD process.
 /// @param[in] vm VM handle.
-/// @param[out] process_id The new process ID (may be NULL for legacy callers).
-RJ_API_EXPORT rj_status_t rj_vm_device_open(rj_vm_t *vm, uint32_t *process_id);
+/// @param[in] client_pid Connecting client's OS PID for daemon mode (enables
+///   cross-process memory access and process reuse); pass 0 in local mode where
+///   there is no separate client process. If a process already exists for a
+///   nonzero client_pid, it is reused.
+/// @param[out] process_id The simulator's process handle (may be NULL).
+RJ_API_EXPORT rj_status_t rj_vm_device_open(rj_vm_t *vm, pid_t client_pid, uint32_t *process_id);
 
 /// @brief Close a specific KFD process by ID.
 /// @param[in] vm VM handle.

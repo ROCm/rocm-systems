@@ -354,7 +354,19 @@ int SimulatedDriver::open() {
   return fd_;
 }
 
-uint32_t SimulatedDriver::open_process() {
+void SimulatedDriver::set_process_client_pid(uint32_t process_id, pid_t client_pid) {
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  auto it = processes_.find(process_id);
+  if (it != processes_.end()) {
+    it->second->set_client_pid(client_pid);
+    for (auto &g : gpus_) {
+      if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+        mem->set_process_client_pid(process_id, client_pid);
+    }
+  }
+}
+
+uint32_t SimulatedDriver::open_process(pid_t client_pid) {
   if (fd_ < 0) {
     fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0));
     if (fd_ < 0)
@@ -364,12 +376,25 @@ uint32_t SimulatedDriver::open_process() {
   uint32_t pid;
   {
     std::lock_guard<std::mutex> lk(process_mutex_);
+    if (client_pid > 0) {
+      for (auto &[id, proc] : processes_) {
+        if (proc->client_pid() == client_pid) {
+          proc->retain_open();
+          return id;
+        }
+      }
+    }
     pid = next_process_id_++;
     auto proc = std::make_shared<KfdProcess>(pid, static_cast<uint32_t>(gpus_.size()));
+    if (client_pid > 0)
+      proc->set_client_pid(client_pid);
     proc->event_state_.reset();
     for (auto &g : gpus_) {
-      if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+      if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
         mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_);
+        if (client_pid > 0)
+          mem->set_process_client_pid(pid, client_pid);
+      }
     }
     processes_[pid] = proc;
 
@@ -435,6 +460,8 @@ int SimulatedDriver::close(uint32_t process_id) {
     std::lock_guard<std::mutex> lk(process_mutex_);
     auto it = processes_.find(process_id);
     if (it == processes_.end())
+      return 0;
+    if (daemon_mode_ && it->second->client_pid() > 0 && !it->second->release_open())
       return 0;
     extracted = std::move(it->second);
     processes_.erase(it);
@@ -1270,7 +1297,8 @@ int SimulatedDriver::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
     // releases it. Erasing here would leak those fds and make a later FREE a
     // no-op for this handle.
     auto &alloc = it->second;
-    unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+    if (alloc.host_ptr)
+      unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
   }
   args->n_success = args->n_devices;
   return 0;

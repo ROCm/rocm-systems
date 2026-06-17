@@ -100,7 +100,8 @@ public:
   /// @details Unlike open(), which sets local_process_id_ (not thread-safe for
   /// concurrent daemon clients), this method returns the ID directly so the
   /// caller can associate it with a specific client connection.
-  uint32_t open_process();
+  uint32_t open_process(pid_t client_pid = 0);
+  void set_process_client_pid(uint32_t process_id, pid_t client_pid);
 
   int ioctl(uint32_t process_id, unsigned long request, void *arg);
   void *mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags, off_t offset);

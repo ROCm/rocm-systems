@@ -260,13 +260,16 @@ rj_status_t rj_vm_execute_as(rj_vm_t *vm, uint32_t process_id, rj_vm_cmd_t *cmd)
   return execute_impl(vm->vm->driver(), process_id, cmd);
 }
 
-rj_status_t rj_vm_device_open(rj_vm_t *vm, uint32_t *process_id) {
+rj_status_t rj_vm_device_open(rj_vm_t *vm, pid_t client_pid, uint32_t *process_id) {
   if (!vm || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   auto *drv = dynamic_cast<SimulatedDriver *>(vm->vm->driver());
   if (!drv)
     return ROCJITSU_STATUS_ERROR;
-  uint32_t pid = drv->open_process();
+  // client_pid == 0 (local mode) maps to SimulatedDriver::open_process()'s
+  // default; a nonzero client_pid enables daemon-mode process reuse and
+  // cross-process memory access.
+  uint32_t pid = drv->open_process(client_pid);
   if (pid == 0)
     return ROCJITSU_STATUS_ERROR;
   if (process_id)
