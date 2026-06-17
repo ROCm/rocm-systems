@@ -717,12 +717,15 @@ endif()
 #   resolved at runtime from the executable that links librocshmem.a
 if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()
+  # Ensure rocSHMEM is fully built/installed before compiling rccl
   if (TARGET rocshmem_ext)
     add_dependencies(rccl rocshmem_ext)
   endif()
+
   if (ROCSHMEM_INCLUDE_DIR)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
   endif()
+
   if (ROCSHMEM_SOURCE_DIR)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
@@ -734,6 +737,8 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   endif()
 endif()
 if (ENABLE_ROCSHMEM)
+  # Moved to where rocSHMEM target_links
+  ## target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
 endif()
 
@@ -1020,10 +1025,19 @@ target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 # interface and breaks install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM)
-  # Full rocshmem: link librocshmem.a with -fgpu-rdc device linking
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE hsakmt)
   target_link_libraries(rccl PRIVATE ${IBVERBS})
+  # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
+  # The __hip_gpubin_handle_* symbols referenced by __hip_module_ctor in the
+  # librocshmem.a objects are only defined by the RDC device-link step.
+  # --hip-link tells amdclang++ to perform that step as part of the final
+  # librccl.so link; -fgpu-rdc marks the link as RDC-mode.  --offload-arch
+  # flags use RCCL's GPU_TARGETS (stripped of feature suffixes like :xnack-)
+  # so the device-link covers every arch RCCL is built for.
+  # RCCL's own device code (already embedded in device_build/common.o by the
+  # custom device-linker pipeline) is NOT compiled with -fgpu-rdc and is
+  # therefore unaffected by this device-link step.
   set(_rocshmem_offload_arch_flags "")
   foreach(_gpu_raw ${GPU_TARGETS})
     string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
