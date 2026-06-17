@@ -40,11 +40,13 @@ pub mod dbt;
 /// tests run with (`rocjitsu/tests/daemon_test.cpp`): RCCL must avoid
 /// the P2P and shared-memory transports the simulated topology does not
 /// model and stay on a single loopback socket, while ROCr must use SDMA
-/// copies and skip scratch reclaim. Applied as defaults in
+/// copies and skip scratch reclaim. rocprofiler-register is disabled
+/// since the simulated GPU does not back it. Applied as defaults in
 /// [`Rocjitsu::injection_def`]; the per-exec environment overrides any
 /// of them.
 const RCCL_ENV_DEFAULTS: &[(&str, &str)] = &[
     ("HSA_ENABLE_SDMA", "1"),
+    ("ROCPROFILER_REGISTER_ENABLED", "0"),
     ("HSA_NO_SCRATCH_RECLAIM", "1"),
     ("NCCL_P2P_DISABLE", "1"),
     ("NCCL_SHM_DISABLE", "1"),

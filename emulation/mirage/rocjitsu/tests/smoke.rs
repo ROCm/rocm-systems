@@ -133,6 +133,7 @@ fn injection_emits_rccl_env_defaults() {
 
     for (key, value) in [
         ("HSA_ENABLE_SDMA", "1"),
+        ("ROCPROFILER_REGISTER_ENABLED", "0"),
         ("HSA_NO_SCRATCH_RECLAIM", "1"),
         ("NCCL_P2P_DISABLE", "1"),
         ("NCCL_SHM_DISABLE", "1"),
