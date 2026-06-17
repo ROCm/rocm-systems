@@ -237,31 +237,6 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return std::nullopt;
 }
 
-[[nodiscard]] uint64_t executable_code_range_size(uint64_t text_vaddr, uint64_t text_size,
-                                                  const Elf64_Ehdr &ehdr, const Elf64_Shdr *shdr) {
-  constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();
-  if (text_vaddr > max_u64 - text_size)
-    return 0;
-
-  uint64_t code_end = text_vaddr + text_size;
-
-  // DBT places expansion bodies in .rj_translations and addresses them as a
-  // .text-relative continuation. Include executable sections at or after .text
-  // so a redirected kernel descriptor entry can still be parsed.
-  for (int i = 0; i < ehdr.e_shnum; ++i) {
-    constexpr uint64_t executable_load_flags = SHF_ALLOC | SHF_EXECINSTR;
-    if ((shdr[i].sh_flags & executable_load_flags) != executable_load_flags)
-      continue;
-    if (shdr[i].sh_addr < text_vaddr)
-      continue;
-    if (shdr[i].sh_addr > max_u64 - shdr[i].sh_size)
-      continue;
-    code_end = std::max(code_end, shdr[i].sh_addr + shdr[i].sh_size);
-  }
-
-  return code_end - text_vaddr;
-}
-
 using KernelDescriptorVisitor = std::function<void(uint64_t descriptor_file_offset,
                                                    uint64_t entry_text_offset, const KD &desc)>;
 
@@ -278,7 +253,10 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   auto text_vaddr = text_vaddr_for_section(text_offset, text_size, *ehdr, shdr);
   if (!text_vaddr)
     return;
-  const uint64_t code_range_size = executable_code_range_size(*text_vaddr, text_size, *ehdr, shdr);
+  constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();
+  if (*text_vaddr > max_u64 - text_size)
+    return;
+  const uint64_t text_end = *text_vaddr + text_size;
 
   // .symtab and .dynsym may both describe the same descriptor. Translation is
   // keyed by descriptor bytes, so visit each file offset once.
@@ -324,7 +302,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
       if (entry_vaddr_signed < 0)
         continue;
       const uint64_t entry_vaddr = static_cast<uint64_t>(entry_vaddr_signed);
-      if (entry_vaddr < *text_vaddr || entry_vaddr >= *text_vaddr + code_range_size)
+      if (entry_vaddr < *text_vaddr || entry_vaddr >= text_end)
         continue;
 
       const uint64_t entry_text_offset = entry_vaddr - *text_vaddr;
@@ -540,6 +518,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   KdTranslation result;
   result.descriptor_file_offset = descriptor_file_offset;
   result.entry_text_offset = entry_text_offset;
+  result.target_entry_text_offset = entry_text_offset;
+  result.target_body_entry_text_offset = entry_text_offset;
 
   // The source descriptor encodes the guest launch wave size. The target
   // descriptor must request a wave size the host can actually launch. We do not
@@ -565,8 +545,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.target_accvgpr_base = result.accvgpr_base;
 
   // Descriptor ABI fixes that require instructions, not bitfield changes, are
-  // emitted as prologue words. CodeObjectPatcher decides where to place them and
-  // redirects the kernel descriptor entry point if this vector is non-empty.
+  // emitted as prologue words. BinaryTranslator places those words in the
+  // kernel-local .text cave and records the final redirected entry offset.
   result.prologue_words = build_kernel_entry_prologue(src, guest_arch, host_arch);
 
   // VGPR descriptor fields do not store raw register counts. They store
@@ -585,14 +565,22 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
       granulated_count_to_registers(guest_vgpr_granulated, guest_vgpr_granularity);
   if (arch_has_accvgpr(guest_arch) && result.accvgpr_base != 0 &&
       result.guest_vgpr_allocation_count > result.accvgpr_base) {
+    // CDNA encodes a unified VGPR allocation endpoint while ACCUM_OFFSET
+    // carves the trailing AccVGPR window out of that allocation. Liveness and
+    // semantic scratch allocation need the ordinary VGPR floor, not the unified
+    // endpoint, or they will unnecessarily force new scratch above the
+    // accumulator window and move ACCUM_OFFSET. That descriptor growth changed
+    // dynamic Triton matmul results on gfx942 because the translated MFMA/DS
+    // transpose sequence depends on the original ordinary/accumulator split.
     result.guest_agpr_count = result.guest_vgpr_allocation_count - result.accvgpr_base;
   }
   result.guest_vgpr_count = result.guest_vgpr_allocation_count - result.guest_agpr_count;
 
   // Start from the guest's ordinary VGPR count. Keep the descriptor allocation
-  // count separate: CDNA kernels with AccVGPRs encode a unified allocation end
-  // in COMPUTE_PGM_RSRC1, but liveness and scratch allocation need the ordinary
-  // VGPR count only.
+  // count separate for target reporting and descriptor encoding. CDNA
+  // descriptors encode the ordinary VGPRs and AccVGPRs as one allocation range,
+  // but scratch allocation must reason about only the ordinary part so it can
+  // reuse registers that are dead at a given expansion site.
   //
   // - CDNA-to-RDNA unifies AccVGPRs into the ordinary VGPR namespace, so the
   //   target needs enough VGPRs to cover the remapped accumulator window.

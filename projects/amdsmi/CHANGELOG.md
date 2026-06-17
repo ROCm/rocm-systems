@@ -52,6 +52,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 - **Deprecated `amdsmi_get_gpu_vram_vendor()` in favor of `amdsmi_get_gpu_vram_info()`**.  
+  - `amdsmi_get_gpu_vram_vendor` is slated for removal in a future ROCm release. It now emits a `DeprecationWarning` from the Python interface and functions as a wrapper of `amdsmi_get_gpu_vram_info()`.
 
 - **Renamed "AINIC version" to "ionic version" in `amd-smi version` output**.  
   - The label now correctly reflects that it shows the ionic kernel driver version.
@@ -61,6 +62,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Removed the non-functional `--decode` flag from `amd-smi ras`**. Out-of-band CPER decoding is available via `amd-smi ras --afid --cper-file <path>` or `--afid --folder <DIR>`.
 
 ### Resolved Issues
+
+- **Fixed a crash in `amdsmi_get_gpu_vram_vendor()` and made `amdsmi_get_gpu_vram_info()` resilient to DRM failures**.  
+  - `amdsmi_get_gpu_vram_vendor()` now validates the output buffer and only writes it on success, fixing a null-pointer dereference on the not-supported path.
+  - `amdsmi_get_gpu_vram_info()` now reads the VRAM vendor from sysfs first and treats the DRM ioctl (VRAM type/bit width/bandwidth) as best effort, so the vendor is still returned when the DRM path is unavailable.
 
 - **Fixed AMD GPU manufacturer name display in `amd-smi static --board`**.  
   - The CLI now displays the canonical vendor name `Advanced Micro Devices, Inc. [AMD/ATI]` when the board manufacturer name is reported as the raw AMD PCI vendor ID (`0x1002`) because the host `pci.ids` lookup is unavailable. The C and Python APIs continue to return the raw value unchanged.
@@ -102,12 +107,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ## amd_smi_lib for ROCm 7.13.0
 
 ### Added
-
-- **Added `--sort-by-pid` flag and `amdsmi_get_gpu_process_list_by_pid()` API**.  
-  - New C API `amdsmi_get_gpu_process_list_by_pid()` aggregates process info across all GPUs and returns results keyed by PID, with per-GPU breakdowns for memory, engine usage, and occupancy.
-  - New structs: `amdsmi_proc_gpu_entry_t`, `amdsmi_proc_info_by_pid_t`.
-  - New `--sort-by-pid` CLI flag for `amd-smi process` and `amd-smi monitor --process` groups output by PID instead of GPU.
-  - New Python interface function `amdsmi_get_gpu_process_list_by_pid()`.
 
 - **Added APU metrics support (table versions 2.4 and 3.0)**.  
   - New `amdsmi_apu_metrics_t` struct accessible via `amdsmi_gpu_metrics_t.apu_metrics` pointer (non-null when APU-specific metrics are available).

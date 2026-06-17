@@ -31,6 +31,8 @@ from .types import (
     SHT_NOBITS,
     SHT_RELA,
     SHT_REL,
+    SHT_SYMTAB,
+    SHT_DYNSYM,
     SHF_ALLOC,
     R_X86_64_RELATIVE,
     get_section_name,
@@ -692,6 +694,124 @@ class ElfSurgery:
         )
         return offset
 
+    def insert_bytes_at(
+        self, file_offset: int, data: bytes, description: str = ""
+    ) -> None:
+        """Insert bytes at a file offset, shifting all subsequent offsets.
+
+        Unlike append_bytes() which always adds to the end of the file, this
+        method splices bytes mid-file at ``file_offset`` and then fixes up every
+        offset-bearing structure so the binary remains coherent:
+
+          * sh_offset in every section header whose content sits at or past
+            ``file_offset`` (SHT_NOBITS sections are skipped — they occupy no
+            file space)
+          * p_offset in every program header at or past ``file_offset``
+          * e_shoff in the ELF header if the section header table was at or
+            past ``file_offset``
+
+        Virtual addresses (sh_addr, p_vaddr) are never touched — they are
+        load-time concepts unrelated to file layout.
+
+        Primary use case: placing an allocatable section (e.g. .rocm_kpack_ref)
+        before the first non-allocatable section in file offset space, which is
+        required by tools like ``dwz`` that enforce ELF file-offset ordering
+        conventions.  In binaries without non-allocatable sections (the normal
+        non-ASAN case) this method is never called — append_bytes() is used
+        instead.
+
+        Args:
+            file_offset: Position in the file at which to splice the new bytes.
+                         All existing bytes at or after this offset are shifted
+                         right by len(data).
+            data: Bytes to insert.
+            description: Human-readable description for the modification log.
+
+        Raises:
+            ValueError: If file_offset is beyond the current end of file.
+        """
+        if file_offset > len(self._data):
+            raise ValueError(
+                f"insert_bytes_at: offset 0x{file_offset:x} beyond file size 0x{len(self._data):x}"
+            )
+
+        n = len(data)
+
+        # --- Splice bytes into the data buffer ------------------------------
+        self._data[file_offset:file_offset] = data
+
+        # --- Update section header file offsets -----------------------------
+        # sh_offset points to where the section's content lives in the file.
+        # SHT_NOBITS sections (like .bss) consume no file space, so their
+        # sh_offset is a nominal address and must NOT be shifted.
+        for i, shdr in enumerate(self._shdrs):
+            if shdr.sh_type == SHT_NOBITS:
+                continue
+            if shdr.sh_offset >= file_offset:
+                updated = SectionHeader(
+                    sh_name=shdr.sh_name,
+                    sh_type=shdr.sh_type,
+                    sh_flags=shdr.sh_flags,
+                    sh_addr=shdr.sh_addr,
+                    sh_offset=shdr.sh_offset + n,
+                    sh_size=shdr.sh_size,
+                    sh_link=shdr.sh_link,
+                    sh_info=shdr.sh_info,
+                    sh_addralign=shdr.sh_addralign,
+                    sh_entsize=shdr.sh_entsize,
+                )
+                self._shdrs[i] = updated
+
+        # --- Update program header file offsets ----------------------------
+        # p_offset is the file offset where the segment begins.  p_vaddr and
+        # p_paddr are virtual/physical addresses — leave them alone.
+        for i, phdr in enumerate(self._phdrs):
+            if phdr.p_offset >= file_offset:
+                updated = ProgramHeader(
+                    p_type=phdr.p_type,
+                    p_flags=phdr.p_flags,
+                    p_offset=phdr.p_offset + n,
+                    p_vaddr=phdr.p_vaddr,
+                    p_paddr=phdr.p_paddr,
+                    p_filesz=phdr.p_filesz,
+                    p_memsz=phdr.p_memsz,
+                    p_align=phdr.p_align,
+                )
+                self._phdrs[i] = updated
+
+        # --- Update e_shoff and e_phoff in the ELF header -------------------
+        # e_shoff points to the section header table; e_phoff points to the
+        # program header table.  Both are file offsets and must be shifted if
+        # they fall at or after the insertion point.  In practice e_phoff is
+        # always 64 (immediately after the ELF header) and will never be
+        # affected, but we update it for correctness.
+        if self._ehdr.e_shoff >= file_offset:
+            self._ehdr.e_shoff += n
+        if self._ehdr.e_phoff >= file_offset:
+            self._ehdr.e_phoff += n
+
+        # --- Flush all updated headers back to the buffer -------------------
+        # The buffer has already been spliced, so all offsets above are now
+        # correct absolute positions in the new file layout.
+        self._ehdr.write_to(self._data, 0)
+
+        phdr_table_offset = self._ehdr.e_phoff
+        for i, phdr in enumerate(self._phdrs):
+            phdr.write_to(self._data, phdr_table_offset + i * self._ehdr.e_phentsize)
+
+        sht_offset = self._ehdr.e_shoff
+        for i, shdr in enumerate(self._shdrs):
+            shdr.write_to(self._data, sht_offset + i * self._ehdr.e_shentsize)
+
+        self._modifications.append(
+            Modification(
+                operation="insert_bytes_at",
+                file_offset=file_offset,
+                size=n,
+                description=description or f"insert {n} bytes at 0x{file_offset:x}",
+            )
+        )
+
     def save(self, path: Path) -> None:
         """Save modified binary to file.
 
@@ -886,4 +1006,160 @@ class ElfSurgery:
             index=new_section_idx,
             offset=content_offset,
             name_offset=name_offset,
+        )
+
+    def reorder_section_headers_alloc_first(self) -> None:
+        """Reorder the section header table so all SHF_ALLOC sections precede non-ALLOC.
+
+        Background / what this fixes
+        -----------------------------
+        This fixes **section header table index ordering** — specifically the
+        convention that allocatable sections (SHF_ALLOC) appear at lower
+        indices than non-allocatable ones.  When kpack adds .rocm_kpack_ref
+        via ``add_section`` and then ``map_section_to_load`` sets SHF_ALLOC
+        on it, the new section sits at the last index in the table (after all
+        .debug_* entries), violating the index-order convention expected by
+        some tools.
+
+        Note on dwz / dh_dwz
+        ---------------------
+        ``dwz`` (DWARF debuginfo compressor, invoked by ``dh_dwz`` in Debian
+        packaging) checks that allocatable sections have a lower **file
+        offset** than non-allocatable ones — not that their SHT indices are
+        ordered.  The file-offset ordering is fixed separately by
+        ``insert_bytes_at()`` in ``map_section_to_load()`` for ASAN /
+        debug-info builds.  This method addresses the complementary
+        index-order requirement and ensures consistency for other tools that
+        do validate SHT index ordering.
+
+        What this method does
+        ---------------------
+        Only the section header table is reordered; file content is NOT moved.
+        The new order is a stable partition:
+          1. SHT_NULL entry at index 0 (always — required by ELF spec)
+          2. All remaining SHF_ALLOC sections (preserving their relative order)
+          3. All remaining non-ALLOC sections (preserving their relative order)
+
+        After reordering, every cross-reference to section indices is updated:
+          * sh_link / sh_info in every section header (many point to symtab,
+            strtab, or other sections by index)
+          * e_shstrndx in the ELF header (index of the section name strtab)
+          * st_shndx in every Elf64_Sym entry in .symtab and .dynsym (each
+            symbol records which section it is defined in)
+
+        Special symbol index values (SHN_UNDEF=0, SHN_ABS=0xfff1,
+        SHN_COMMON=0xfff2, SHN_XINDEX=0xffff) are not section references and
+        are left unchanged.
+
+        The updated section header table is written back to the same location
+        in the file that ``add_section`` chose (always at the end of the binary
+        after its call).  Internal state (self._shdrs, self._section_names,
+        self._ehdr.e_shstrndx) is kept consistent.
+        """
+        n = len(self._shdrs)
+        if n == 0:
+            return
+
+        # --- Step 1: Build the new ordering ---------------------------------
+        # Index 0 must always be SHT_NULL; keep it in place.
+        # For the remainder, stable-partition: alloc sections first, then non-alloc.
+        null_indices = [0]
+        alloc_indices = [i for i in range(1, n) if self._shdrs[i].sh_flags & SHF_ALLOC]
+        non_alloc_indices = [
+            i for i in range(1, n) if not (self._shdrs[i].sh_flags & SHF_ALLOC)
+        ]
+        new_order = null_indices + alloc_indices + non_alloc_indices
+
+        # If already correctly ordered, nothing to do.
+        if new_order == list(range(n)):
+            return
+
+        # --- Step 2: Build old→new index mapping ----------------------------
+        # old_to_new[old_index] = new_index
+        old_to_new: list[int] = [0] * n
+        for new_idx, old_idx in enumerate(new_order):
+            old_to_new[old_idx] = new_idx
+
+        # --- Step 3: Reorder self._shdrs in memory --------------------------
+        reordered = [self._shdrs[old_idx] for old_idx in new_order]
+
+        # --- Step 4: Update sh_link / sh_info in every section header -------
+        # sh_link and sh_info often carry section indices (e.g. .rela.X has
+        # sh_link = symtab index, sh_info = target section index; .symtab has
+        # sh_link = strtab index).  We remap any value that is a valid section
+        # index (0 < value < n) through old_to_new.  Index 0 (SHT_NULL) maps
+        # to 0 and is harmless to remap.
+        updated_shdrs: list[SectionHeader] = []
+        for shdr in reordered:
+            new_sh_link = old_to_new[shdr.sh_link] if shdr.sh_link < n else shdr.sh_link
+            new_sh_info = old_to_new[shdr.sh_info] if shdr.sh_info < n else shdr.sh_info
+            if new_sh_link != shdr.sh_link or new_sh_info != shdr.sh_info:
+                shdr = SectionHeader(
+                    sh_name=shdr.sh_name,
+                    sh_type=shdr.sh_type,
+                    sh_flags=shdr.sh_flags,
+                    sh_addr=shdr.sh_addr,
+                    sh_offset=shdr.sh_offset,
+                    sh_size=shdr.sh_size,
+                    sh_link=new_sh_link,
+                    sh_info=new_sh_info,
+                    sh_addralign=shdr.sh_addralign,
+                    sh_entsize=shdr.sh_entsize,
+                )
+            updated_shdrs.append(shdr)
+        self._shdrs = updated_shdrs
+
+        # --- Step 5: Update e_shstrndx in the ELF header --------------------
+        self._ehdr.e_shstrndx = old_to_new[self._ehdr.e_shstrndx]
+        self.update_elf_header()
+
+        # --- Step 6: Update st_shndx in .symtab and .dynsym ----------------
+        # Each Elf64_Sym entry is 24 bytes:
+        #   offset 0: st_name  (uint32)
+        #   offset 4: st_info  (uint8)
+        #   offset 5: st_other (uint8)
+        #   offset 6: st_shndx (uint16)  <-- section index, needs remapping
+        #   offset 8: st_value (uint64)
+        #   offset 16: st_size (uint64)
+        #
+        # Values >= 0xff00 are reserved sentinel indices (SHN_UNDEF, SHN_ABS,
+        # SHN_COMMON, SHN_XINDEX, etc.) and must NOT be remapped.
+        SHN_LORESERVE = 0xFF00
+        ELF64_SYM_SIZE = 24
+        ST_SHNDX_OFFSET = 6
+
+        for sym_section in self._shdrs:
+            if sym_section.sh_type not in (SHT_SYMTAB, SHT_DYNSYM):
+                continue
+            entry_size = sym_section.sh_entsize or ELF64_SYM_SIZE
+            offset = sym_section.sh_offset
+            end = offset + sym_section.sh_size
+            while offset + entry_size <= end:
+                shndx_off = offset + ST_SHNDX_OFFSET
+                st_shndx = struct.unpack_from("<H", self._data, shndx_off)[0]
+                if st_shndx < SHN_LORESERVE and st_shndx < n:
+                    new_shndx = old_to_new[st_shndx]
+                    if new_shndx != st_shndx:
+                        struct.pack_into("<H", self._data, shndx_off, new_shndx)
+                offset += entry_size
+
+        # --- Step 7: Rewrite the section header table in place --------------
+        # add_section() placed the SHT at the end of the file; we overwrite it
+        # in the same location with the reordered (and cross-reference-updated)
+        # headers.  No change to e_shoff or e_shnum is needed.
+        sht_offset = self._ehdr.e_shoff
+        for i, shdr in enumerate(self._shdrs):
+            offset = sht_offset + i * self._ehdr.e_shentsize
+            shdr.write_to(self._data, offset)
+
+        # --- Step 8: Re-parse section names so find_section() stays correct -
+        self._section_names = self._parse_section_names()
+
+        self._modifications.append(
+            Modification(
+                operation="reorder_section_headers",
+                file_offset=sht_offset,
+                size=n * self._ehdr.e_shentsize,
+                description="reorder section headers: alloc sections before non-alloc",
+            )
         )
