@@ -62,7 +62,7 @@ report with enough context to answer the usual DBT questions:
 - Did the instruction change, lower, expand, or get copied unchanged?
 - Which source words produced the change?
 - Which target words did the translator emit?
-- Did expanded code stay in `.text`, or move into `.rj_translations`?
+- Did expanded code emit in-place, or into a kernel-local `.text` cave?
 - Did source or translated decode validation fail?
 
 Run it with:

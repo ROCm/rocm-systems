@@ -190,8 +190,12 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     process_info_cache_map.clear();
 
     status_code = rsmi_compute_process_info_get(nullptr, &cache_ptr->num_running_processes);
-    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) ||
-        (cache_ptr->num_running_processes <= 0)) {
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+      return status_code;
+    }
+    if (cache_ptr->num_running_processes <= 0) {
+      compute_process_list.clear();
+      cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
       return status_code;
     }
 
@@ -211,6 +215,8 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     }
 
     if (cache_ptr->num_running_processes <= 0) {
+      compute_process_list.clear();
+      cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
       return rsmi_status_t::RSMI_STATUS_SUCCESS;  // No processes running
     }
 
