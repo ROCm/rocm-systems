@@ -1896,6 +1896,10 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         plan->ceCollArgs->func = task->func;
         plan->ceCollArgs->sendWin = task->sendWin;
         plan->ceCollArgs->recvWin = task->recvWin;
+        plan->ceCollArgs->useDda = task->useDda;
+        plan->ceCollArgs->ddaPeerBases = task->ddaPeerBases;
+        plan->ceCollArgs->ddaUserRecvBuff = task->ddaUserRecvBuff;
+        plan->ceCollArgs->ddaCopyBackBytes = task->ddaCopyBackBytes;
         plan->ceCollArgs->datatype = task->datatype;
         plan->ceCollArgs->redOp = task->opHost;
         plan->ceCollArgs->collApiEventHandle = task->collApiEventHandle;
@@ -3276,6 +3280,8 @@ static ncclResult_t ceCollTaskAppend(
     struct ncclInfo* info,
     struct ncclDevrWindow* sendWin,
     struct ncclDevrWindow* recvWin,
+    void* ddaRecvBase, // non-null -> DDA path: local scratch buffer
+    void** ddaPeerBasesHost, // host [nRanks] peer scartch bases (DDA path)
     struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner *planner = &comm->planner;
 
@@ -3296,7 +3302,14 @@ static ncclResult_t ceCollTaskAppend(
 
   t->func = info->coll;
   t->sendbuff = info->sendbuff;
-  t->recvbuff = info->recvbuff;
+  t->recvbuff = ddaRecvBase != nullptr ? ddaRecvBase : info->recvbuff;
+  t->useDda = ddaRecvBase != nullptr;
+  t->ddaPeerBases = ddaPeerBasesHost;
+  // DDA path stages results in scratch (t->recvbuff); remember the real user
+  // recvbuff. The copy-back size is collective-specific and computed at the copy
+  // site (ncclLaunchCeColl).
+  t->ddaUserRecvBuff  = ddaRecvBase != nullptr ? info->recvbuff : nullptr;
+  t->ddaCopyBackBytes = 0;
   t->count = info->count;
   t->root = info->root;
   t->datatype = info->datatype;
@@ -3555,6 +3568,7 @@ static ncclResult_t rmaTaskAppend(
   return ncclSuccess;
 }
 
+RCCL_PARAM(ForceCe,"FORCE_CE",1);
 // Converts `info` to a task and adds it to `comm->planner`. The exception is with
 // single rank communicators, collectives are issued as `ncclMemcpyAsync`s and
 // thus don't need a task.
@@ -3593,7 +3607,15 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
       bool ceAvailable = ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
-      bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+      if (!ceAvailable && comm->nNodes == 1 && rcclParamForceCe() && ncclCeImplemented(info->coll, info->op, info->datatype)) {
+        size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
+        if (winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes) {
+          INFO(NCCL_INIT, "Using DDA scratch for CE collective");
+          NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
+                                     comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
+        } 
+      }
+        bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
 
       // Trigger CE initialization on the first CE-capable collective.
       // This covers collectives whose user buffers ARE registered (AllGather,
@@ -3630,9 +3652,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       }
 
       if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment && ceAllReduceFits) {
-        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
+        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr, opDev));
       }
-      // Append kernel-based collective
+      // Append kernel-based collective 
       else {
         // currently legacy sendrecv needs src and dst buffers to be registered
         // we cannot allow UB if alltoall/scatter/gather fallback to legacy sendrecv
@@ -3686,7 +3708,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)info->recvbuff, info->count, info->datatype, info->root, allowUB));
         } else if (ceAvailable && comm->symmetricSupport && info->coll == ncclFuncAllGather && info->count > ncclParamSymCeThreshold() && comm->minCompCap >= 100 && comm->isAllDirectNvlink) {
           // Use CE for Allgather on Blackwell with size > 8MB
-          NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
+          NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr, opDev));
         } else {
           NCCLCHECK(collTaskAppend(comm, info, opDev));
         }
