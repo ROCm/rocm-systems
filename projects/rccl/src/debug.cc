@@ -12,14 +12,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
-#include <sys/syscall.h>
 #include <chrono>
 #include "param.h"
 #include "compiler.h"
 #include <mutex>
 #include "os.h"
 #include "env.h"
+#include <cinttypes>
 
 #define NCCL_DEBUG_RESET_TRIGGERED (-2)
 
@@ -136,6 +135,8 @@ static void ncclDebugInit() {
         mask = NCCL_RAS;
       } else if (strcasecmp(subsys, "VERBS") == 0) {
         mask = NCCL_VERBS;
+      } else if (strcasecmp(subsys, "DESTROY") == 0) {
+        mask = NCCL_DESTROY;
       } else if (strcasecmp(subsys, "ALL") == 0) {
         mask = NCCL_ALL;
       }
@@ -284,7 +285,11 @@ static void ncclDebugInit() {
     if (debugFn[0] != '\0') {
       FILE *file = fopen(debugFn, "w");
       if (file != nullptr) {
+#if defined(NCCL_OS_LINUX)
         setlinebuf(file); // disable block buffering
+#elif defined(NCCL_OS_WINDOWS)
+        setvbuf(file, NULL, _IOLBF, 0); // disable block buffering
+#endif
         ncclDebugFile = file;
       }
     }
@@ -363,8 +368,8 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
         memcpy(localTimestampFormat, ncclDebugTimestampFormat, ncclDebugTimestampSubsecondsStart);
         snprintf(localTimestampFormat + ncclDebugTimestampSubsecondsStart,
                  ncclDebugTimestampSubsecondDigits+1,
-                 "%0*ld", ncclDebugTimestampSubsecondDigits,
-                 nowNs / (1000000000L/ncclDebugTimestampMaxSubseconds));
+                 "%0*" PRIu64, ncclDebugTimestampSubsecondDigits,
+                 (uint64_t)(nowNs / (1000000000L/ncclDebugTimestampMaxSubseconds)));
         strcpy(    localTimestampFormat+ncclDebugTimestampSubsecondsStart+ncclDebugTimestampSubsecondDigits,
                ncclDebugTimestampFormat+ncclDebugTimestampSubsecondsStart+ncclDebugTimestampSubsecondDigits);
       }
@@ -394,7 +399,7 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
   // Add level specific formatting.
   if (level == NCCL_LOG_WARN) {
     len += snprintf(buffer+len, sizeof(buffer)-len, "[%d] %s:%d NCCL WARN ", cudaDev, filefunc, line);
-    if (ncclWarnSetDebugInfo) COMPILER_ATOMIC_STORE(&ncclDebugLevel, NCCL_LOG_INFO, std::memory_order_release);
+    if (ncclWarnSetDebugInfo) COMPILER_ATOMIC_STORE(&ncclDebugLevel, static_cast<int>(NCCL_LOG_INFO), std::memory_order_release);
   } else if (level == NCCL_LOG_INFO) {
     len += snprintf(buffer+len, sizeof(buffer)-len, "[%d] NCCL INFO ", cudaDev);
   } else if (level == NCCL_LOG_TRACE && flags == NCCL_CALL) {
@@ -424,15 +429,44 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
   pthread_mutex_unlock(&ncclDebugLock);
 }
 
-NCCL_API(void, ncclResetDebugInit);
-void ncclResetDebugInit() {
+// Non-deprecated version for internal use.
+extern "C"
+#if !defined(NCCL_OS_WINDOWS)
+__attribute__ ((visibility("default")))
+#endif
+void ncclResetDebugInitInternal() {
   // Cleans up from a previous ncclDebugInit() and reruns.
   // Use this after changing NCCL_DEBUG and related parameters in the environment.
   pthread_mutex_lock(&ncclDebugLock);
   // Let ncclDebugInit() know to complete the reset.
-  COMPILER_ATOMIC_STORE(&ncclDebugLevel, NCCL_DEBUG_RESET_TRIGGERED, std::memory_order_release);
+  COMPILER_ATOMIC_STORE(&ncclDebugLevel, static_cast<int>(NCCL_DEBUG_RESET_TRIGGERED), std::memory_order_release);
   pthread_mutex_unlock(&ncclDebugLock);
 }
+
+// In place of: NCCL_API(void, ncclResetDebugInit);
+#ifdef pncclResetDebugInit
+#undef pncclResetDebugInit
+#endif
+#if defined(NCCL_OS_LINUX)
+__attribute__ ((visibility("default")))
+__attribute__ ((alias("ncclResetDebugInit")))
+#endif
+void pncclResetDebugInit();
+extern "C"
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__ ((visibility("default")))
+__attribute__ ((weak))
+__attribute__ ((deprecated("ncclResetDebugInit is not supported as part of the NCCL API and will be removed in the future")))
+#endif
+void ncclResetDebugInit();
+
+extern "C" void ncclResetDebugInit() {
+  // This is now deprecated as part of the NCCL API. It will be removed
+  // from the API in the future. It is still available as an
+  // exported symbol.
+  ncclResetDebugInitInternal();
+}
+
 
 NCCL_PARAM(SetThreadName, "SET_THREAD_NAME", 0);
 
