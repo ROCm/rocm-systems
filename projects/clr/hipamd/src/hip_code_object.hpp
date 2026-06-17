@@ -114,6 +114,7 @@ class DynCO : public CodeObject {
   hip::Var* getVar(const std::string& var_name);
 
   hipError_t getManagedVarPointer(std::string name, void** pointer, size_t* size_ptr) {
+    std::scoped_lock lock(dclock_);
     IHIP_RETURN_ONFAIL(populateDynGlobalVars());
     auto it = vars_.find(name);
     if (it != vars_.end() && it->second->GetVarKind() == Var::DVK_Managed) {
