@@ -652,15 +652,11 @@ impl Engine {
 /// (podman/docker) are stable binaries that never hit this, but the
 /// guard makes provider spawning robust regardless of how the binary
 /// came to exist.
-fn spawn_retrying_etxtbsy<T>(
-    mut run: impl FnMut() -> std::io::Result<T>,
-) -> std::io::Result<T> {
+fn spawn_retrying_etxtbsy<T>(mut run: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
     let mut attempts = 0;
     loop {
         match run() {
-            Err(e)
-                if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 50 =>
-            {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 50 => {
                 attempts += 1;
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }

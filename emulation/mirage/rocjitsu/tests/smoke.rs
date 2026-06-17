@@ -70,8 +70,7 @@ fn gpus_per_node_drives_num_gpus() {
     };
 
     let cfg = kmd_config(&def, None).expect("sim config should materialise");
-    let json: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&cfg).unwrap()).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&std::fs::read(&cfg).unwrap()).unwrap();
     assert_eq!(json["vm"]["gpu"]["num_gpus"], 3);
 }
 

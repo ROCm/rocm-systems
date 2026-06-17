@@ -1064,52 +1064,53 @@ fn build_profile_create(
     };
 
     // ----- containerisation -----
-    let containerize = if image.is_some() || !mounts.is_empty() || !ports.is_empty() || provider.is_some() {
-        // Any explicit container flag: build directly (errors if mounts
-        // or provider were given without an image).
-        build_containerize(image, &mounts, &ports, provider)?
-    } else if interactive
-        && Confirm::with_theme(&theme)
-            .with_prompt("Run each node inside a container?")
-            .default(false)
-            .interact()?
-    {
-        let img: String = Input::with_theme(&theme)
-            .with_prompt("Image")
-            .validate_with(|s: &String| -> Result<(), &str> {
-                if s.trim().is_empty() {
-                    Err("image required")
-                } else {
-                    Ok(())
-                }
-            })
-            .interact_text()?;
-        let prov: String = Input::with_theme(&theme)
-            .with_prompt("Provider (blank to auto-detect)")
-            .allow_empty(true)
-            .interact_text()?;
-        let mut specs: Vec<String> = Vec::new();
-        while Confirm::with_theme(&theme)
-            .with_prompt("Add a bind mount?")
-            .default(false)
-            .interact()?
+    let containerize =
+        if image.is_some() || !mounts.is_empty() || !ports.is_empty() || provider.is_some() {
+            // Any explicit container flag: build directly (errors if mounts
+            // or provider were given without an image).
+            build_containerize(image, &mounts, &ports, provider)?
+        } else if interactive
+            && Confirm::with_theme(&theme)
+                .with_prompt("Run each node inside a container?")
+                .default(false)
+                .interact()?
         {
-            let m: String = Input::with_theme(&theme)
-                .with_prompt("Mount (HOST[:CONTAINER[:ro|rw]])")
+            let img: String = Input::with_theme(&theme)
+                .with_prompt("Image")
+                .validate_with(|s: &String| -> Result<(), &str> {
+                    if s.trim().is_empty() {
+                        Err("image required")
+                    } else {
+                        Ok(())
+                    }
+                })
                 .interact_text()?;
-            if !m.trim().is_empty() {
-                specs.push(m);
+            let prov: String = Input::with_theme(&theme)
+                .with_prompt("Provider (blank to auto-detect)")
+                .allow_empty(true)
+                .interact_text()?;
+            let mut specs: Vec<String> = Vec::new();
+            while Confirm::with_theme(&theme)
+                .with_prompt("Add a bind mount?")
+                .default(false)
+                .interact()?
+            {
+                let m: String = Input::with_theme(&theme)
+                    .with_prompt("Mount (HOST[:CONTAINER[:ro|rw]])")
+                    .interact_text()?;
+                if !m.trim().is_empty() {
+                    specs.push(m);
+                }
             }
-        }
-        build_containerize(
-            Some(img),
-            &specs,
-            &ports,
-            if prov.is_empty() { None } else { Some(prov) },
-        )?
-    } else {
-        None
-    };
+            build_containerize(
+                Some(img),
+                &specs,
+                &ports,
+                if prov.is_empty() { None } else { Some(prov) },
+            )?
+        } else {
+            None
+        };
 
     let topo = mirage_core::topology::TopologyDef {
         num_nodes,
@@ -1280,9 +1281,7 @@ fn apply_profile_overrides(
                 .map(|e| e.name)
                 .collect::<Vec<_>>()
                 .join(", ");
-            anyhow::bail!(
-                "unknown emulator `{name}`; available backends: {available}"
-            );
+            anyhow::bail!("unknown emulator `{name}`; available backends: {available}");
         }
         profile.emulator.emulator = name;
     }
@@ -2139,7 +2138,18 @@ mod tests {
     fn no_overrides_keeps_by_name_ref() {
         let mut p = sample_profile();
         let r = apply_profile_overrides(
-            &mut p, None, &[], &[], None, None, None, &[], None, None, None, "mi450x",
+            &mut p,
+            None,
+            &[],
+            &[],
+            None,
+            None,
+            None,
+            &[],
+            None,
+            None,
+            None,
+            "mi450x",
         )
         .unwrap();
         assert_eq!(r, MaybeRef::Ref("mi450x".to_string()));

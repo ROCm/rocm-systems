@@ -122,9 +122,8 @@ impl PortMapping {
         };
 
         let parse_port = |s: &str| -> Result<u16, String> {
-            s.parse::<u16>().map_err(|_| {
-                format!("invalid port {s:?} in {spec:?} (expected a number 1-65535)")
-            })
+            s.parse::<u16>()
+                .map_err(|_| format!("invalid port {s:?} in {spec:?} (expected a number 1-65535)"))
         };
 
         let (host_port, container_port) = match ports.split_once(':') {

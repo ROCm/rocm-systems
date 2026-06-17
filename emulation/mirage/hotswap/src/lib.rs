@@ -250,9 +250,7 @@ fn build_hotswap_env(
     // mounted read-only (immutable runtime libs/tools).
     let mut mounts: Vec<FileMount> = Vec::new();
     let mut mappings: Vec<(PathBuf, PathBuf)> = Vec::new();
-    if containerized
-        && let Some(home) = host_dir.parent()
-    {
+    if containerized && let Some(home) = host_dir.parent() {
         mounts.push(FileMount {
             host_path: home.display().to_string(),
             container_path: CONTAINER_HOTSWAP_DIR.to_string(),

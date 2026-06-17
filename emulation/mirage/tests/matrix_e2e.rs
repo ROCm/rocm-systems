@@ -289,10 +289,7 @@ fn probe_caps(mirage_bin: &Path) -> Caps {
         }
     }
 
-    Caps {
-        emulators,
-        plugins,
-    }
+    Caps { emulators, plugins }
 }
 
 // ---------------------------------------------------------------------------
