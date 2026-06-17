@@ -274,7 +274,7 @@ union misc_fields
     {
         uint8_t spm_or_pl        : 1; // PL on gfx10, SPM on gfx11
         uint8_t gc_rinse         : 1;
-        uint8_t reserved         : 1;
+        uint8_t reserved         : 1; // Absent in tt >= 5, handled in tt5_shift
         uint8_t save_context     : 1;
         uint8_t tt_stall_start   : 1;
         uint8_t tt_stall_end     : 1;
@@ -282,6 +282,11 @@ union misc_fields
         uint8_t DIDT_stall_end   : 1;
     };
     uint8_t raw;
+
+    void tt5_shift()
+    {
+        raw = (raw & 0x3) | ((raw & 0x7C) << 1);
+    }
 };
 
 union misc_type

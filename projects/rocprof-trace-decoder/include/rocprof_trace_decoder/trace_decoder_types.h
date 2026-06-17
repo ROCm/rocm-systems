@@ -89,7 +89,8 @@ typedef struct rocprofiler_thread_trace_decoder_occupancy_t
     uint32_t pipe_id      : 4;
     uint32_t is_ext       : 1; ///< Is workgroup_id valid?
     uint32_t workgroup_id : 7;
-    uint32_t _rsvd        : 16;
+    uint32_t cluster_id   : 5; ///< 0 = not in a cluster; only valid on wavestart
+    uint32_t _rsvd        : 11;
 } rocprofiler_thread_trace_decoder_occupancy_t;
 
 /**
@@ -168,7 +169,8 @@ typedef struct rocprofiler_thread_trace_decoder_wave_t
 
     uint8_t dispatcher;   ///< [0:3] PIPE_ID, [4:6] ME_ID
     uint8_t workgroup_id; ///< Workgroup ID
-    uint16_t reserved;    ///< Reserved
+    uint8_t cluster_id;  ///< 0 = not in a cluster
+    uint8_t reserved;    ///< Reserved
     uint64_t size;        ///< Size of this struct
 
     int64_t begin_time; ///< Wave begin time. Should match occupancy event wave start.
