@@ -18,14 +18,7 @@ from pathlib import Path as path
 from typing import Any, Optional, TypeVar
 
 import config
-from utils.amdsmi_interface import (
-    amdsmi_ctx,
-    get_amdgpu_driver_version,
-    get_gpu_compute_partition,
-    get_gpu_memory_partition,
-    get_gpu_vbios_part_number,
-    get_gpu_vram_size,
-)
+from utils import amdsmi_interface
 from utils.logger import (
     console_debug,
     console_error,
@@ -33,10 +26,11 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.mi_gpu_spec import mi_gpu_specs
+from utils.mi_gpu_spec import MIGPUSpecs, mi_gpu_specs
 from utils.utils_common import format_table_ascii, get_version
 
 T = TypeVar("T")
+
 
 VERSION_LOC: list[str] = [
     "version",
@@ -48,6 +42,40 @@ VERSION_LOC: list[str] = [
     "version-libs",
     "version-utils",
 ]
+
+
+def run(cmd: list[str]) -> Optional[str]:
+    """Run a command and return stdout, aborting on execution failures."""
+    cmd_str = " ".join(cmd)
+    try:
+        completed = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        console_error(f"Required command not found: {cmd_str} ({exc})")
+        return None
+    except OSError as exc:
+        console_error(f"Failed to execute command: {cmd_str} ({exc})")
+        return None
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        message = f"Command failed with exit code {completed.returncode}: {cmd_str}"
+        if stderr:
+            message += f". stderr: {stderr}"
+        console_error(message)
+        return None
+    return completed.stdout
+
+
+def search(pattern: str, string: str) -> Optional[str]:
+    """Return the first multiline regex capture group, if present."""
+    match = re.search(pattern, string, re.MULTILINE)
+    if match is not None:
+        return match.group(1)
+    return None
 
 
 def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
@@ -125,7 +153,11 @@ def generate_machine_specs(
                     "You need to reprofile to update data."
                 )
 
-            return MachineSpecs(**sysinfo)
+            # Normalize arch aliases to canonical config targets
+            sysinfo_norm = dict(sysinfo)
+            gpu_arch = sysinfo_norm.get("gpu_arch")
+            sysinfo_norm["gpu_arch"] = {"gfx1152": "gfx1151"}.get(gpu_arch, gpu_arch)
+            return MachineSpecs(**sysinfo_norm)
         except KeyError:
             console_error(
                 "Detected mismatch in sysinfo versioning. You need to reprofile "
@@ -160,7 +192,7 @@ def generate_machine_specs(
     gpu_info = extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
 
     # Combine all specifications
-    with amdsmi_ctx():
+    with amdsmi_interface.amdsmi_ctx():
         specs = MachineSpecs(
             version=specs_version,
             timestamp=timestamp,
@@ -169,9 +201,9 @@ def generate_machine_specs(
             cpu_model=machine_info["cpu_model"],
             sbios=machine_info["sbios"],
             linux_kernel_version=machine_info["linux_kernel_version"],
-            amd_gpu_kernel_version=get_amdgpu_driver_version(),
+            amd_gpu_kernel_version=amdsmi_interface.get_amdgpu_driver_version(),
             cpu_memory=machine_info["cpu_memory"],
-            gpu_memory=get_gpu_vram_size(),
+            gpu_memory=amdsmi_interface.get_gpu_vram_size(),
             linux_distro=machine_info["linux_distro"],
             rocm_version=get_rocm_ver().strip(),
             vbios=gpu_info["vbios"],
@@ -194,13 +226,17 @@ def generate_machine_specs(
             f"but couldn't find class implementation {e}."
         )
 
-    # Update arch specific specs
-    specs.gpu_model = (
-        mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id) or ""
-    )
+    # Derive SoC-dependent fields
+    if specs.rocminfo_lines is None:
+        # Yaml-only / no rocminfo: skip get_gpu_model (avoids chip-id warnings).
+        specs.gpu_model = specs.gpu_model or ""
+    else:
+        specs.gpu_model = (
+            mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id) or ""
+        )
     specs.num_xcd = str(
         mi_gpu_specs.get_num_xcds(
-            specs.gpu_arch, specs.gpu_model, specs.compute_partition
+            specs.gpu_arch, specs.gpu_model or None, specs.compute_partition
         )
     )
     specs.total_l2_chan = totall2_banks(
@@ -210,6 +246,12 @@ def generate_machine_specs(
         specs.compute_partition,
     )
     specs.num_hbm_channels = str(specs.get_hbm_channels())
+
+    specs.num_dies = mi_gpu_specs.get_num_dies(specs.gpu_arch, specs.gpu_model)
+
+    specs.cache_sizes = set_cache_sizes(
+        gpu_info["num_compute_units"], gpu_info["gpu_cache_info"], specs.num_dies
+    )
 
     return specs
 
@@ -225,15 +267,15 @@ def extract_machine_info() -> dict[str, Any]:
     }
 
     try:
-        cpuinfo = path("/proc/cpuinfo").read_text()
-        meminfo = path("/proc/meminfo").read_text()
-        version = path("/proc/version").read_text()
-        os_release = path("/etc/os-release").read_text()
+        cpuinfo = path("/proc/cpuinfo").read_text(encoding="utf-8")
+        meminfo = path("/proc/meminfo").read_text(encoding="utf-8")
+        version = path("/proc/version").read_text(encoding="utf-8")
+        os_release = path("/etc/os-release").read_text(encoding="utf-8")
 
         result["cpu_model"] = search(r"^model name\s*: (.*?)$", cpuinfo)
         result["sbios"] = (
-            path("/sys/class/dmi/id/bios_vendor").read_text().strip()
-            + path("/sys/class/dmi/id/bios_version").read_text().strip()
+            path("/sys/class/dmi/id/bios_vendor").read_text(encoding="utf-8").strip()
+            + path("/sys/class/dmi/id/bios_version").read_text(encoding="utf-8").strip()
         )
         result["linux_kernel_version"] = search(r"version (\S*)", version)
         result["cpu_memory"] = search(r"MemTotal:\s*(\S*)", meminfo)
@@ -246,29 +288,29 @@ def extract_machine_info() -> dict[str, Any]:
 
 @demarcate
 def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
-    # Partition is only supported on >= MI 300 series
-    # (gpu_arch should be gfx940 or higher for MI300+)
-    is_partition_supported = False
-    if gpu_arch and gpu_arch.startswith("gfx") and len(gpu_arch) >= 6:
-        try:
-            is_partition_supported = int(gpu_arch[3:6], 16) >= 0x940
-        except ValueError:
-            pass  # Invalid hex string, keep is_partition_supported as False
+    is_partition_supported = gpu_arch and MIGPUSpecs.is_partition_supported(
+        gpu_arch=gpu_arch, gpu_model=None
+    )
 
     result: dict[str, Optional[str]] = {
         "vbios": None,
         "compute_partition": None,
         "memory_partition": None,
+        "num_compute_units": None,
+        "gpu_cache_info": None,
     }
 
-    with amdsmi_ctx():
-        result["vbios"] = get_gpu_vbios_part_number()
+    with amdsmi_interface.amdsmi_ctx():
+        result["vbios"] = amdsmi_interface.get_gpu_vbios_part_number()
         if is_partition_supported:
-            result["compute_partition"] = get_gpu_compute_partition()
-            result["memory_partition"] = get_gpu_memory_partition()
+            result["compute_partition"] = amdsmi_interface.get_gpu_compute_partition()
+            result["memory_partition"] = amdsmi_interface.get_gpu_memory_partition()
         else:
             result["compute_partition"] = "N/A"
             result["memory_partition"] = "N/A"
+
+        result["num_compute_units"] = amdsmi_interface.get_gpu_num_compute_units()
+        result["gpu_cache_info"] = amdsmi_interface.get_gpu_cache_info() or {}
 
     # Apply defaults and warnings
     if is_partition_supported:
@@ -743,6 +785,24 @@ class MachineSpecs:
             "show_in_table": True,
         },
     )
+    num_dies: Optional[int] = field(
+        default=None,
+        metadata={
+            "doc": "Number of logical dies present on the model. For Instinct products "
+            "it refers to the number of logical AID partitions, for Radeon products it "
+            "is the memory die (*dGPU only, otherwise set to 1 partition).",
+            "name": "Number of logical dies",
+            "show_in_table": False,
+        },
+    )
+    cache_sizes: Optional[dict[str, int]] = field(
+        default=None,
+        metadata={
+            "doc": "Size of cache at each level present on the GPU",
+            "name": "Cache sizes",
+            "show_in_table": False,
+        },
+    )
 
     def get_hbm_channels(self) -> Optional[str]:
         if self.memory_partition and self.memory_partition.lower().startswith("nps"):
@@ -860,27 +920,6 @@ def get_rocm_ver() -> str:
     return ""
 
 
-def run(cmd: list[str], exit_on_error: bool = False) -> str:
-    try:
-        p = subprocess.run(cmd, capture_output=True)
-    except FileNotFoundError as e:
-        console_error(
-            f"Unable to parse specs. Can't find ROCm asset: {e.filename}\n"
-            'Try passing a path to an existing workload results in "analyze" mode.'
-        )
-
-    if exit_on_error and p.returncode != 0:  # type: ignore
-        console_error(f"Command {cmd} failed with non-zero exit code")
-    return p.stdout.decode("utf-8")  # type: ignore
-
-
-def search(pattern: str, string: str) -> Optional[str]:
-    m = re.search(pattern, string, re.MULTILINE)
-    if m is not None:
-        return m.group(1)
-    return None
-
-
 def total_sqc(archname: str, num_compute_units: str, num_shader_engines: str) -> int:
     cu_per_se = float(num_compute_units) / float(num_shader_engines)
     sq_per_se = cu_per_se / 2.0
@@ -902,6 +941,39 @@ def totall2_banks(
     if L2banks is not None and xcd_count is not None:
         return str(int(L2banks) * int(xcd_count))
     return None
+
+
+def set_cache_sizes(num_cu: int, cache_info: dict, num_dies: int) -> dict[str, int]:
+    """
+    Extrapolate the cache sizes for AMD-SMI cache info output
+    """
+    if num_cu == 0:
+        console_error("Failed to determine GPU compute unit count from AMD-SMI.")
+    if not cache_info:
+        console_error("Failed to retrieve GPU cache information from AMD-SMI.")
+
+    cache_sizes = {}
+
+    # vL1D is the level-1 data cache with the most instances (one per CU).
+    # Match by instance count, not num_cu, to stay correct on harvested parts.
+    l1_data_caches = [
+        cache_values
+        for cache_values in cache_info["cache"]
+        if cache_values["cache_level"] == 1
+        and "DATA_CACHE" in cache_values["cache_properties"]
+    ]
+    if l1_data_caches:
+        vl1d = max(l1_data_caches, key=lambda cache: cache["num_cache_instance"])
+        cache_sizes["L1"] = vl1d["cache_size"] * 1024
+
+    # L2 and L3/MALL cache sizes
+    for cache_values in cache_info["cache"]:
+        if cache_values["cache_level"] == 2:
+            cache_sizes["L2"] = cache_values["cache_size"] * 1024
+        elif cache_values["cache_level"] == 3 and num_dies > 0:
+            cache_sizes["MALL"] = int(cache_values["cache_size"] * 1024 / num_dies)
+
+    return cache_sizes
 
 
 if __name__ == "__main__":

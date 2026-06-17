@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2015-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -47,13 +47,6 @@ class EventServer;
 }
 class SettingsRpcService;
 }
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 890
-namespace SettingsRpcService
-{
-class SettingsService;
-}
-#endif
 
 #if PAL_BUILD_RDF
 // GpuUtil forward declarations.
@@ -267,6 +260,7 @@ public:
     /// @returns Success if all Devices were successfully enumerated in pDevices[].  Otherwise, one of the following
     ///          error codes may be returned:
     ///          + ErrorInitializationFailed will be returned if PAL is unable to query the available Devices.
+    ///          + ErrorUnavailable will be returned if none of the GPUs in this system are supported.
     virtual Result EnumerateDevices(
         uint32*    pDeviceCount,
         IDevice*   pDevices[MaxDevices]) = 0;
@@ -406,11 +400,6 @@ public:
     ///          enabled, nullptr will be returned.
     virtual DevDriver::DevDriverServer* GetDevDriverServer() = 0;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 890
-    /// Will be replaced by GetSettingsRpcService().
-    virtual SettingsRpcService::SettingsService* GetSettingsService() = 0;
-#endif
-
     /// Client drivers can register their DevDriver based settings components via SettingsRpcService.
     ///
     /// @returns A pointer to a SettingsRpcService object. Could be nullptr if developer driver mode is not enabled.
@@ -435,6 +424,15 @@ public:
     /// @param [in] pQueue The queue on which a new frame has been detected
     virtual void UpdateFrameTraceController(
         IQueue *pQueue) = 0;
+
+    /// Forwards a debug marker string to the marker trace controller.
+    /// This allows triggering trace start/stop based on specific marker strings.
+    ///
+    /// @param [in] pMarkerString The debug marker string to process
+    /// @param [in] pQueue        The queue on which the marker was submitted
+    virtual void ForwardMarkerToTraceController(
+        const char* pMarkerString,
+        IQueue*     pQueue) = 0;
 #endif
 
     /// Gets the GPU ID for a given pal device index.

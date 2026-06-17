@@ -141,8 +141,9 @@ Pre-commit hooks automatically check your code for formatting issues before each
 
 **Setup:**
 
+First, install [development dependencies](README.md#development-dependencies), then enable the hooks:
+
 ```bash
-python3 -m pip install pre-commit
 cd rocprofiler-compute
 pre-commit install
 ```
@@ -182,11 +183,11 @@ For instructions on building and testing changes to files under the `docs/` fold
 
 ## Metrics Management
 
-If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml`, config deltas, or metric descriptions in `docs/data/metrics_description.yaml` — follow the metric management workflow:
+If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml` or metric descriptions in `docs/data/metrics_description.yaml` — follow the metric management workflow:
 
 1. Edit the relevant panel YAMLs.
-2. Where appropriate, generate and apply a config delta using the [workflow script](tools/config_management/master_config_workflow_script.py).
-3. Verify that hashes are updated and CI tests pass.
+2. Validate them with `python tools/config_management/master_config_workflow_script.py --validate-only`.
+3. Refresh the hash DB with `python tools/config_management/hash_manager.py --compute-all src/rocprof_compute_soc/analysis_configs` and confirm CI tests pass.
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
 

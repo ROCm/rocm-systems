@@ -100,7 +100,7 @@ PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3*
         buffer_config->set_fill_policy(
             ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER);
     else
-        ROCP_FATAL << "Unsupport perfetto buffer fill policy: '"
+        ROCP_FATAL << "Unsupported perfetto buffer fill policy: '"
                    << config.perfetto_buffer_fill_policy << "'. Supported: discard, ring_buffer";
 
     auto* ds_cfg = cfg.add_data_sources()->mutable_config();
@@ -114,7 +114,7 @@ PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3*
     else if(config.perfetto_backend == "system")
         args.backends |= ::perfetto::kSystemBackend;
     else
-        ROCP_FATAL << "Unsupport perfetto backend: '" << config.perfetto_backend
+        ROCP_FATAL << "Unsupported perfetto backend: '" << config.perfetto_backend
                    << "'. Supported: inprocess, system";
 
     ::perfetto::Tracing::Initialize(args);
@@ -269,6 +269,15 @@ write_perfetto(
         pmc_info[pmc_id] = _data.at(0);
 
         return &pmc_info.at(pmc_id);
+    };
+
+    auto read_region_args = [&conn, &process, &ocfg](uint64_t region_id) {
+        if(!ocfg.annotate_args) return std::vector<types::region_arg>{};
+
+        return rocpd::read_sql_query<types::region_arg>(
+            conn,
+            fmt::format(
+                "SELECT * FROM region_args WHERE guid='{}' AND id={}", process.guid, region_id));
     };
 
     {
@@ -437,6 +446,7 @@ write_perfetto(
 
                 auto _pmc_events = read_pmc_events(itr.event_id);
                 auto _event      = (ocfg.annotate_kfd) ? read_event(itr.event_id) : types::event{};
+                auto _args       = read_region_args(itr.id);
 
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
                 TRACE_EVENT_BEGIN(
@@ -496,6 +506,11 @@ write_perfetto(
                                     },
                                     _extdata.kfd.value().record);
                             }
+                        }
+
+                        for(const auto& a : _args)
+                        {
+                            rocprofiler::sdk::add_perfetto_annotation(ctx, a.name, a.value);
                         }
                     });
 
@@ -934,7 +949,7 @@ write_perfetto(
                 }
                 else if(itr.type == "FREE")
                 {
-                    // Store free memory operations in seperate vector to pair with agent
+                    // Store free memory operations in separate vector to pair with agent
                     // and allocation size in following loop
                     if(itr.level == "REAL")
                     {

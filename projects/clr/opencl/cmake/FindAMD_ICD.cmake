@@ -22,7 +22,7 @@ else()
 # ocltst cmake uses find_library command to find OpenCL. If find_library can't
 # find ICD built by AMD, find_library command continue to search OpenCL
 # installed in system. For example, find_library can find OpenCL installed by
-# AMD rocm driver, /opt/rocm/lib/libOpenCL.so.
+# AMD rocm driver, ${ROCM_PATH}/lib/libOpenCL.so.
 #
 # Another solution is to build ICD loader first. Then install ICD loader into
 # system. This solution is used by ROCM stack currently.
@@ -38,7 +38,7 @@ else()
       ${CMAKE_CURRENT_BINARY_DIR}/../../../../../OpenCL-ICD-Loader    #for ocltst
       ${CMAKE_CURRENT_BINARY_DIR}/../../../../../../OpenCL-ICD-Loader #for ocltst modules
       # pure cmake method
-      /opt/rocm/lib
+      ${ROCM_PATH}/lib
       # centos/sles
       /usr/lib64
       /usr/lib

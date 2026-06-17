@@ -25,27 +25,28 @@
             ]
         },
         {
-            "name": "regions",
+            "name": "rocpd_sample",
             "required_columns": [
-                "guid",
-                "category",
                 "id",
-                "name"
+                "guid",
+                "track_id",
+                "timestamp",
+                "event_id"
             ],
             "validation_queries": [
                 {
                     "comparison": "greater_than",
-                    "description": "Check that category column contains more than 1000 'timer_sampling' entries",
-                    "error_message": "Less than 1001 'timer_sampling' entries found in category column of regions",
+                    "description": "Check that ROCpd contains more than 1000 timer_sampling samples",
+                    "error_message": "Less than 1001 'timer_sampling' entries found in rocpd_sample",
                     "expected_result": 1000,
-                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'timer_sampling';"
+                    "query": "SELECT COUNT(*) FROM rocpd_sample R INNER JOIN rocpd_event E ON E.id = R.event_id AND E.guid = R.guid INNER JOIN rocpd_string S ON S.id = E.category_id AND S.guid = E.guid WHERE S.string = 'timer_sampling';"
                 },
                 {
                     "comparison": "equals",
                     "description": "Verify no NULL or empty values in guid column",
-                    "error_message": "NULL or empty guid values found in regions",
+                    "error_message": "NULL or empty guid values found in rocpd_sample",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) FROM regions WHERE guid IS NULL OR TRIM(guid) = '';"
+                    "query": "SELECT COUNT(*) FROM rocpd_sample WHERE guid IS NULL OR TRIM(guid) = '';"
                 }
             ]
         }

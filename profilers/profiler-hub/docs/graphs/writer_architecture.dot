@@ -1,0 +1,109 @@
+digraph writer_architecture {
+    rankdir=TB;
+    fontname="Helvetica";
+    node [fontname="Helvetica", fontsize=10, style=filled];
+    edge [fontname="Helvetica", fontsize=9];
+
+    label="Writer Architecture: Layered Design";
+    labelloc=t;
+    fontsize=14;
+
+    subgraph cluster_pimpl {
+        label="Pimpl Layer";
+        style=filled;
+        color="#dce8f5";
+        fillcolor="#f0f6ff";
+
+        writer_t [label="writer_t", shape=box, fillcolor="#c8ddf0"];
+        writer_t_impl [label="writer_t::impl\n(inherits writer_impl_core\<active_policy_t\>)", shape=box, fillcolor="#c8ddf0"];
+        active_policy [label="active_policy_t = writer_policy_v3", shape=note, fillcolor="#ffffc0"];
+    }
+
+    subgraph cluster_dispatch {
+        label="Policy Dispatch Layer";
+        style=filled;
+        color="#d5e8d5";
+        fillcolor="#f0fff0";
+
+        writer_impl_core [label="writer_impl_core\<Policy\>\n\nstatic_assert(is_valid_writer_policy_v\<Policy\>)\n\nDelegates to policy-defined writers", shape=box, fillcolor="#c0e0c0"];
+    }
+
+    subgraph cluster_interfaces {
+        label="CRTP Interface Layer";
+        style=filled;
+        color="#e5ddf0";
+        fillcolor="#f5f0ff";
+
+        api_base [label="api_writer_base\<Derived\>\nself() accessor", shape=box, fillcolor="#ddd0f0"];
+
+        info_iface [label="info_registration_writer_interface\<D\>\nregister_*() → register_*_impl()", shape=box, fillcolor="#ddd0f0"];
+        region_iface [label="region_writer_interface\<D\>\ninsert() → insert_impl()", shape=box, fillcolor="#ddd0f0"];
+        kd_iface [label="kernel_dispatch_writer_interface\<D\>\ninsert() → insert_impl()", shape=box, fillcolor="#ddd0f0"];
+        mc_iface [label="memory_copy_writer_interface\<D\>\ninsert() → insert_impl()", shape=box, fillcolor="#ddd0f0"];
+        ma_iface [label="memory_alloc_writer_interface\<D\>\ninsert() → insert_impl()", shape=box, fillcolor="#ddd0f0"];
+        pmc_iface [label="pmc_event_writer_interface\<D\>\ninsert() → insert_impl()", shape=box, fillcolor="#ddd0f0"];
+    }
+
+    subgraph cluster_schema_v3 {
+        label="Schema v3 Implementations";
+        style=filled;
+        color="#f5e0c0";
+        fillcolor="#fff8f0";
+
+        info_writer [label="info_registration_writer\<schema_v3_tag\>", shape=box, fillcolor="#f0dcc0"];
+        region_writer [label="region_writer\<schema_v3_tag\>", shape=box, fillcolor="#f0dcc0"];
+        kd_writer [label="kernel_dispatch_writer\<schema_v3_tag\>", shape=box, fillcolor="#f0dcc0"];
+        mc_writer [label="memory_copy_writer\<schema_v3_tag\>", shape=box, fillcolor="#f0dcc0"];
+        ma_writer [label="memory_alloc_writer\<schema_v3_tag\>", shape=box, fillcolor="#f0dcc0"];
+        pmc_writer [label="pmc_event_writer\<schema_v3_tag\>", shape=box, fillcolor="#f0dcc0"];
+        common_ops [label="common_insert_operations\<schema_v3_tag\>\n(event, sample, arg, string)", shape=box, fillcolor="#f0dcc0"];
+    }
+
+    subgraph cluster_policy {
+        label="Policy Definition";
+        style=filled;
+        color="#f0e0e0";
+        fillcolor="#fff5f5";
+
+        policy_v3 [label="writer_policy_v3\n\nschema_tag_t\ninsert_statements_t\ncommon_ops_t\ninfo_writer_t\nregion_writer_t\nkernel_dispatch_writer_t\nmemory_copy_writer_t\nmemory_alloc_writer_t\npmc_event_writer_t", shape=box, fillcolor="#f0d0d0"];
+    }
+
+    writer_t -> writer_t_impl [label="  m_impl  "];
+    writer_t_impl -> active_policy [style=dotted, arrowhead=none];
+    writer_t_impl -> writer_impl_core [label="  inherits  ", style=bold];
+    active_policy -> policy_v3 [style=dashed, label="  selects  "];
+
+    writer_impl_core -> info_iface [label="  delegates  "];
+    writer_impl_core -> region_iface [label="  delegates  "];
+    writer_impl_core -> kd_iface [label="  delegates  "];
+    writer_impl_core -> mc_iface [label="  delegates  "];
+    writer_impl_core -> ma_iface [label="  delegates  "];
+    writer_impl_core -> pmc_iface [label="  delegates  "];
+
+    info_iface -> api_base [style=dotted, label="inherits"];
+    region_iface -> api_base [style=dotted, label="inherits"];
+    kd_iface -> api_base [style=dotted];
+    mc_iface -> api_base [style=dotted];
+    ma_iface -> api_base [style=dotted];
+    pmc_iface -> api_base [style=dotted];
+
+    info_iface -> info_writer [label="  CRTP  ", color="#a06020", fontcolor="#a06020"];
+    region_iface -> region_writer [label="  CRTP  ", color="#a06020", fontcolor="#a06020"];
+    kd_iface -> kd_writer [label="  CRTP  ", color="#a06020", fontcolor="#a06020"];
+    mc_iface -> mc_writer [label="  CRTP  ", color="#a06020", fontcolor="#a06020"];
+    ma_iface -> ma_writer [label="  CRTP  ", color="#a06020", fontcolor="#a06020"];
+    pmc_iface -> pmc_writer [label="  CRTP  ", color="#a06020", fontcolor="#a06020"];
+
+    region_writer -> common_ops [style=dashed, label="uses"];
+    kd_writer -> common_ops [style=dashed];
+    mc_writer -> common_ops [style=dashed];
+    ma_writer -> common_ops [style=dashed];
+    pmc_writer -> common_ops [style=dashed];
+
+    policy_v3 -> info_writer [style=dotted, color=gray50];
+    policy_v3 -> region_writer [style=dotted, color=gray50];
+    policy_v3 -> kd_writer [style=dotted, color=gray50];
+    policy_v3 -> mc_writer [style=dotted, color=gray50];
+    policy_v3 -> ma_writer [style=dotted, color=gray50];
+    policy_v3 -> pmc_writer [style=dotted, color=gray50];
+}

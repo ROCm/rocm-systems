@@ -352,7 +352,7 @@ private:
      */
     bool InitElf ();
 
-    // Wraper for creating a section header and Elf_Data
+    // Wrapper for creating a section header and Elf_Data
     bool createShdr (
         oclElfSections id,
         Elf_Scn*&      scn,

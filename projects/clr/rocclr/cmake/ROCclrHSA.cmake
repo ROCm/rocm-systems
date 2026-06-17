@@ -4,19 +4,21 @@
 
 if (AMD_COMPUTE_WIN)
   find_path(AMD_HSA_INCLUDE_DIR hsa.h
-    HINTS
-      ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime
-      /opt/rocm
-      ${ROCM_INSTALL_PATH}
-      ${CMAKE_CURRENT_BINARY_DIR}
     PATHS
-      ${CMAKE_CURRENT_BINARY_DIR}/..
-      ${CMAKE_CURRENT_BINARY_DIR}/../..
+      ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime/inc
+      ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime
+      ${CMAKE_CURRENT_BINARY_DIR}/../../rocr/inc
       ${CMAKE_CURRENT_BINARY_DIR}/../../rocr
+      ${CMAKE_CURRENT_BINARY_DIR}/../..
+      ${CMAKE_CURRENT_BINARY_DIR}/..
+      ${CMAKE_CURRENT_BINARY_DIR}
+      ${ROCM_PATH}
+      ${ROCM_INSTALL_PATH}
     PATH_SUFFIXES
       include
       include/hsa
-      inc)
+      inc
+    NO_DEFAULT_PATH)
   message("Roc CLR: " ${ROCCLR_SRC_DIR} "; HSA headers:" ${AMD_HSA_INCLUDE_DIR})
   target_include_directories(rocclr PUBLIC ${AMD_HSA_INCLUDE_DIR})
   target_include_directories(rocclr PUBLIC ${AMD_HSA_INCLUDE_DIR}/..)
@@ -41,7 +43,7 @@ else()
   if(UNIX)
     find_package(hsa-runtime64 1.11 REQUIRED CONFIG
       PATHS
-        /opt/rocm/
+        ${ROCM_PATH}
         ${ROCM_INSTALL_PATH}
       PATH_SUFFIXES
         cmake/hsa-runtime64
@@ -50,7 +52,7 @@ else()
   else()
     find_package(hsa-runtime64 1.11 REQUIRED CONFIG
       PATHS
-        /opt/rocm/
+        ${ROCM_PATH}
         ${ROCM_INSTALL_PATH}
         ${CMAKE_CURRENT_BINARY_DIR}
         ${CMAKE_INSTALL_PREFIX}
@@ -65,7 +67,7 @@ else()
     # note: Temporarily for PAL backend build
     find_path(AMD_HSA_INCLUDE_DIR hsa.h
       HINTS
-        /opt/rocm
+        ${ROCM_PATH}
         ${ROCM_INSTALL_PATH}
         ${CMAKE_CURRENT_BINARY_DIR}
       PATHS

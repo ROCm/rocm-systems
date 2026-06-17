@@ -1,9 +1,11 @@
 /*************************************************************************
- * Copyright (c) 2023, Google LLC.  All rights reserved.
- * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 Google LLC.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0 and BSD-3
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
 #ifndef NET_DEVICE_UNPACK_H
 #define NET_DEVICE_UNPACK_H
 
@@ -248,7 +250,7 @@ inline __device__ void ncclNetDeviceUnpackInner(
 
     for (int x = 0; x < iter_meta_cnt; x++) {
       int meta_idx = x + w * PPW;
-      
+
       // load page offs
       loadShmem128(shmemCvtPtr((uint64_t*) (s_meta + meta_idx)), meta.r64[0], meta.r64[1]);
 

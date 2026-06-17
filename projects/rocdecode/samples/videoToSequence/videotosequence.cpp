@@ -228,7 +228,7 @@ void ShowHelpAndExit(const char *option = NULL) {
     << "-d GPU device ID (0 for the first device, 1 for the second, etc.); optional; default: 0" << std::endl
     << "-b seq_info.batch_size - specify the number of sequences to be decoded; (default: all sequences till eof)" << std::endl
     << "-step - frame interval between each sequence; (default: sequence length)" << std::endl
-    << "-stride - distance between consective frames in a sequence; (default: 1)" << std::endl
+    << "-stride - distance between consecutive frames in a sequence; (default: 1)" << std::endl
     << "-l - Number of frames in each sequence; (default: 3)" << std::endl
     << "-crop crop rectangle for output (not used when using interopped decoded frame); optional; default: 0" << std::endl
     << "-seek_mode option for seeking (0: no seek 1: seek to prev key frame); optional; default: 0" << std::endl
@@ -392,12 +392,13 @@ int main(int argc, char **argv) {
             return -1;
         }
         if (num_devices < 1) {
-            ROCDEC_ERR("ERROR: didn't find any GPU!");
+            std::cerr << "ERROR: didn't find any GPU!" << std::endl;
             return -1;
         }
 
-        if (hipSuccess != hipGetDeviceProperties(&hip_dev_prop, device_id)) {
-            ROCDEC_ERR("ERROR: hipGetDeviceProperties for device (" +TOSTR(device_id) + " ) failed! (" + hipGetErrorName(hip_status) + ")" );
+        hip_status = hipGetDeviceProperties(&hip_dev_prop, device_id);
+        if (hip_status != hipSuccess) {
+            std::cerr << "ERROR: hipGetDeviceProperties for device (" +ROCVIDEODEC_TOSTR(device_id) + " ) failed! (" + hipGetErrorName(hip_status) + ")"  << std::endl;
             return -1;
         }
 

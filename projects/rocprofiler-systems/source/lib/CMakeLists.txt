@@ -11,9 +11,7 @@
 #
 # ----------------------------------------------------------------------------- #
 
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.20)
-    cmake_policy(SET CMP0115 NEW)
-endif()
+cmake_policy(SET CMP0115 NEW)
 
 set(ROCPROFSYS_LIB_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/${PROJECT_NAME}")
 
@@ -67,6 +65,7 @@ target_link_libraries(
 
 add_subdirectory(common)
 add_subdirectory(core)
+add_subdirectory(backends)
 add_subdirectory(binary)
 add_subdirectory(logger)
 

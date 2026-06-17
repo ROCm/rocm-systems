@@ -1,0 +1,66 @@
+# Environment-variable catalog for ROCm profiling tools.
+# Source: llm-reference-guide.md §"rocprof-sys" (lines 460-490) and
+# §"PC Sampling" (line 335, 921). Each entry is a user-facing env var
+# whose setting affects profiling behavior.
+
+- name: ROCPROFSYS_TRACE
+  description: "Enable rocprof-sys tracing output (Perfetto/OTF2 format)"
+  default: "OFF"
+  values: ["ON", "OFF"]
+  tool: rocprof-sys
+
+- name: ROCPROFSYS_USE_SAMPLING
+  description: "Enable CPU call-stack sampling during tracing"
+  default: "OFF"
+  values: ["ON", "OFF"]
+  tool: rocprof-sys
+
+- name: ROCPROFSYS_SAMPLING_FREQ
+  description: "CPU sampling frequency in Hz"
+  default: 100
+  tool: rocprof-sys
+
+- name: ROCPROFSYS_USE_ROCPROFILER
+  description: "Enable hardware counter collection via rocprofiler"
+  default: "OFF"
+  values: ["ON", "OFF"]
+  tool: rocprof-sys
+
+- name: ROCPROFSYS_ROCM_EVENTS
+  description: "Comma-separated list of hardware counters for rocprof-sys to collect"
+  tool: rocprof-sys
+
+- name: ROCPROFSYS_USE_KOKKOSP
+  description: "Enable Kokkos profiling instrumentation"
+  default: "OFF"
+  values: ["ON", "OFF"]
+  tool: rocprof-sys
+
+- name: ROCPROFSYS_USE_OMPT
+  description: "Enable OpenMP Tools Interface instrumentation"
+  default: "OFF"
+  values: ["ON", "OFF"]
+  tool: rocprof-sys
+
+- name: ROCPROFSYS_NETWORK_INTERFACE
+  description: "Network interface to profile for MPI/RDMA workloads"
+  tool: rocprof-sys
+
+- name: ROCPROFSYS_PAPI_EVENTS
+  description: "PAPI counters for CPU performance events (ROCm 6.4+)"
+  tool: rocprof-sys
+
+- name: ROCPROFILER_PC_SAMPLING_BETA_ENABLED
+  description: "Enable PC sampling (beta feature — stochastic per-instruction profiler)"
+  default: 0
+  values: ["0", "1"]
+  tool: rocprofv3
+  requires_beta: true
+
+- name: ROCM_VISIBLE_DEVICES
+  description: "Restrict process to specific GPU device indices (comma-separated)"
+  tool: rocm
+
+- name: HIP_VISIBLE_DEVICES
+  description: "HIP-equivalent of ROCM_VISIBLE_DEVICES (superset compatible)"
+  tool: hip

@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <vector>
 #include <string>
 #include <fcntl.h>
@@ -45,7 +46,7 @@ THE SOFTWARE.
 #define CHECK_HIP(call) {\
     hipError_t hip_status = call;\
     if (hip_status != hipSuccess) {\
-        CriticalLog(logger_, "HIP failure: " + #call + " failed with 'status: " + STR(hipGetErrorName(hip_status)) + "' at " + __FILE__ + ":" + TOSTR(__LINE__));\
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("HIP failure: ") + #call + " failed with 'status: " + ROCDEC_STR(hipGetErrorName(hip_status)) + "' at " + __FILE__ + ":" + ROCDEC_TOSTR(__LINE__));\
         return ROCDEC_RUNTIME_ERROR;\
     }\
 }
@@ -53,7 +54,7 @@ THE SOFTWARE.
 #define CHECK_VAAPI(call) {\
     VAStatus va_status = call;\
     if (va_status != VA_STATUS_SUCCESS) {\
-        CriticalLog(logger_, "VAAPI failure: " + #call + " failed with 'status: " + TOSTR(va_status) + ": " + vaErrorStr(va_status) + "' at " + __FILE__ + ":" + TOSTR(__LINE__));\
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("VAAPI failure: ") + #call + " failed with 'status: " + ROCDEC_TOSTR(va_status) + ": " + ROCDEC_STR(vaErrorStr(va_status)) + "' at " + __FILE__ + ":" + ROCDEC_TOSTR(__LINE__));\
         return ROCDEC_RUNTIME_ERROR;\
     }\
 }
@@ -116,8 +117,6 @@ private:
     uint32_t num_slices_;
     VABufferID slice_data_buf_id_;
 
-    RocDecLogger logger_;
-
     void SetNativeOutputFormat();
     void ValidateOutputFormat();
     void CheckOutputFormat();
@@ -157,8 +156,6 @@ private:
     VaContext(const VaContext&) = delete;
     VaContext& operator = (const VaContext) = delete;
     ~VaContext();
-
-    RocDecLogger logger_;
 
     rocDecStatus InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop);
     rocDecStatus InitVAAPI(int va_ctx_idx, std::string drm_node);

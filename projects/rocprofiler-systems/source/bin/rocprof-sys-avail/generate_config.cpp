@@ -1,30 +1,15 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "generate_config.hpp"
 #include "common.hpp"
 #include "defines.hpp"
 #include "info_type.hpp"
 
+#include "common/env_vars.hpp"
+#include "common/json_config.hpp"
+
+#include <nlohmann/json.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>
@@ -39,6 +24,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <fstream>
 #include <sstream>
 #include <string>
 
@@ -294,13 +280,39 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
     if(_fmts.count("json") > 0)
     {
-        std::stringstream _ss{};
-        output_archive<cereal::PrettyJSONOutputArchive>::indent_length() = 4;
-        _serialize(output_archive<cereal::PrettyJSONOutputArchive>::get(_ss));
+        // JSON schema output includes all ROCPROFSYS_* settings regardless of
+        // --filter, --categories, or --advanced flags. This is intentional: the
+        // schema has a fixed hierarchical structure and is designed for reuse
+        // with --preset, so partial exports would produce incomplete configs.
+        std::map<std::string, std::string> env_map;
+        for(const auto& itr : *_settings)
+        {
+            if(exclude_setting(itr.second->get_env_name())) continue;
+            if(itr.second->get_hidden()) continue;
+
+            const auto& env_name = itr.second->get_env_name();
+            if(env_name.find("ROCPROFSYS_") != 0) continue;
+
+            // Include all vars, even empty ones — the schema function
+            // handles empty values appropriately (e.g., empty string fields
+            // are still valid and indicate the setting exists).
+            env_map[env_name] = itr.second->as_string();
+        }
+
+        // Convert to hierarchical preset JSON schema (compatible with --preset)
+        auto preset_json = rocprofsys::json_config::env_vars_to_json_schema(env_map);
+
+        // Add metadata
+        auto preset_name = fmt_opts.preset_name;
+        if(preset_name.empty()) preset_name = _config_file;
+        preset_json["metadata"]["name"] = preset_name;
+        if(!fmt_opts.preset_description.empty())
+            preset_json["metadata"]["description"] = fmt_opts.preset_description;
+
         auto _fname = settings::compose_output_filename(_config_file, ".json", false, -1,
                                                         true, _output_dir);
         std::ofstream ofs{};
-        _open(ofs, _fname, "JSON") << _ss.str() << "\n";
+        _open(ofs, _fname, "JSON") << preset_json.dump(4) << "\n";
     }
 
     if(_fmts.count("xml") > 0)
@@ -341,13 +353,13 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                 auto _romni = _rhs->get_categories().count("rocprofsys") > 0;
                 if(_lomni && !_romni) return true;
                 if(_romni && !_lomni) return false;
+                namespace env_vars = rocprofsys::env_vars;
                 for(const auto* itr :
-                    { "ROCPROFSYS_CONFIG", "ROCPROFSYS_MODE", "ROCPROFSYS_TRACE",
-                      "ROCPROFSYS_TRACE_LEGACY", "ROCPROFSYS_PROFILE",
-                      "ROCPROFSYS_USE_SAMPLING", "ROCPROFSYS_USE_PROCESS_SAMPLING",
-                      "ROCPROFSYS_USE_AMD_SMI", "ROCPROFSYS_USE_AINIC",
-                      "ROCPROFSYS_USE_KOKKOSP", "ROCPROFSYS_USE_OMPT", "ROCPROFSYS_USE",
-                      "ROCPROFSYS_OUTPUT" })
+                    { env_vars::CONFIG, env_vars::MODE, env_vars::TRACE,
+                      env_vars::TRACE_LEGACY, env_vars::PROFILE, env_vars::USE_SAMPLING,
+                      env_vars::USE_PROCESS_SAMPLING, env_vars::USE_AMD_SMI,
+                      env_vars::USE_AINIC, env_vars::USE_KOKKOSP, env_vars::USE_OMPT,
+                      "ROCPROFSYS_USE", env_vars::OUTPUT })
                 {
                     if(_lhs->get_env_name().find(itr) == 0 &&
                        _rhs->get_env_name().find(itr) != 0)
@@ -357,7 +369,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                         return false;
                 }
                 for(const auto* itr :
-                    { "ROCPROFSYS_SUPPRESS_PARSING", "ROCPROFSYS_SUPPRESS_CONFIG" })
+                    { env_vars::SUPPRESS_PARSING, env_vars::SUPPRESS_CONFIG })
                 {
                     if(_lhs->get_env_name().find(itr) == 0 &&
                        _rhs->get_env_name().find(itr) != 0)
@@ -412,10 +424,16 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             }
             if((_options[VAL] || fmt_opts.all_info) && !itr->get_choices().empty())
             {
-                _ss << "# choices:\n";
-                for(const auto& iitr : itr->get_choices())
-                    _ss << "#    " << iitr << "\n";
-                _ss << "#\n";
+                auto _choices = itr->get_choices();
+                filter_operations(itr->get_env_name(), _choices);
+
+                if(!_choices.empty())
+                {
+                    _ss << "# choices:\n";
+                    for(const auto& iitr : _choices)
+                        _ss << "#    " << iitr << "\n";
+                    _ss << "#\n";
+                }
             }
             if(_has_info) _ss << "\n";
             _ss << std::left << std::setw(_w + 10) << itr->get_env_name() << " = ";
@@ -472,6 +490,6 @@ update_choices(const std::shared_ptr<settings>& _settings)
     if(_settings->get_verbose() >= 2 || _settings->get_debug())
         printf("[rocprof-sys-avail] # of component choices: %zu\n",
                _component_choices.size());
-    _settings->find("ROCPROFSYS_TIMEMORY_COMPONENTS")
+    _settings->find(std::string{ rocprofsys::env_vars::TIMEMORY_COMPONENTS })
         ->second->set_choices(_component_choices);
 }

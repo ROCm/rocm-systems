@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip.h>
@@ -526,6 +527,15 @@ save(ArchiveT& ar, rocprofiler_dispatch_counting_service_data_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_spm_dispatch_counting_service_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
+    ROCP_SDK_SAVE_DATA_FIELD(dispatch_info);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_dispatch_counting_service_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
@@ -575,6 +585,17 @@ save(ArchiveT& ar, rocprofiler_counter_record_t data)
     ROCP_SDK_SAVE_DATA_FIELD(id);
     ROCP_SDK_SAVE_DATA_FIELD(counter_value);
     ROCP_SDK_SAVE_DATA_FIELD(dispatch_id);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_spm_counter_record_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(dispatch_id);
+    ROCP_SDK_SAVE_DATA_FIELD(id);
+    ROCP_SDK_SAVE_DATA_FIELD(agent_id);
+    ROCP_SDK_SAVE_DATA_FIELD(timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(value);
 }
 
 template <typename ArchiveT>
@@ -1058,6 +1079,9 @@ save(ArchiveT& ar, rocprofiler_pc_sampling_snapshot_v0_t data)
     ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_exp", arb_state_stall_exp);
     ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_misc", arb_state_stall_misc);
     ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_brmsg", arb_state_stall_brmsg);
+
+    // sampling lock error
+    ROCP_SDK_SAVE_DATA_BITFIELD("lck_err", sampling_lock_error);
 }
 
 template <typename ArchiveT>
@@ -1070,6 +1094,9 @@ save(ArchiveT& ar, rocprofiler_pc_sampling_memory_counters_t data)
     ROCP_SDK_SAVE_DATA_BITFIELD("sample_cnt", sample_cnt);
     ROCP_SDK_SAVE_DATA_BITFIELD("ds_cnt", ds_cnt);
     ROCP_SDK_SAVE_DATA_BITFIELD("km_cnt", km_cnt);
+    ROCP_SDK_SAVE_DATA_BITFIELD("async_cnt", async_cnt);
+    ROCP_SDK_SAVE_DATA_BITFIELD("tensor_cnt", tensor_cnt);
+    ROCP_SDK_SAVE_DATA_BITFIELD("xnack_cnt", xnack_cnt);
 }
 
 template <typename ArchiveT>
@@ -1268,6 +1295,7 @@ save(ArchiveT& ar, rocprofiler_counter_info_v1_t data)
     ROCP_SDK_SAVE_VALUE("instances",
                         rocprofiler::sdk::container::make_c_array(data.dimensions_instances,
                                                                   data.dimensions_instances_count));
+    ROCP_SDK_SAVE_DATA_FIELD(spm_support);
 }
 
 template <typename ArchiveT>

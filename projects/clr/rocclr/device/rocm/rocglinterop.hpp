@@ -122,7 +122,8 @@ bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_I
 
 bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext);
 bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext);
-bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle, int* offset);
-
+bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle,
+            hsa_handle_t* resHandle, int* offset, void* image_srd, const unsigned image_srd_size);
+bool Detach(amd::Memory* mem, hsa_handle_t handle);
 } // namespace GlInterop
 }  // namespace amd::roc

@@ -22,13 +22,15 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/fwd.h>
-
+#include "lib/common/container/pool_object.hpp"
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+#include "lib/rocprofiler-sdk/hsa/signal.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
+
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/fwd.h>
 
 #include <unordered_map>
 
@@ -44,27 +46,38 @@ namespace hsa
 {
 class Queue;
 
+// per-packet data
+struct packet_data_t
+{
+    using callback_record_t = rocprofiler_callback_tracing_kernel_dispatch_data_t;
+    using pooled_signal_t   = common::container::pool_object<signal_t>;
+
+    tracing::tracing_data   tracing_data            = {};
+    rocprofiler_packet      kernel_packet           = {};
+    inst_pkt_t              instrumentation_packets = {};
+    hsa_signal_t            completion_signal       = {.handle = 0};
+    hsa_signal_t            interrupt_signal        = {.handle = 0};
+    callback_record_t       callback_record         = {};
+    rocprofiler_user_data_t user_data               = {.value = 0};
+    pooled_signal_t*        pooled_signal           = nullptr;
+    bool                    is_serialized           = false;
+};
+
 // Internal session information that is used by write interceptor
 // to track state of the intercepted kernel.
-struct queue_info_session
+struct queue_info_session_t
 {
     using context_t              = context::context;
-    using user_data_map_t        = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+    using user_data_map_t        = tracing::external_correlation_id_map_t;
     using external_corr_id_map_t = user_data_map_t;
-    using callback_record_t      = rocprofiler_callback_tracing_kernel_dispatch_data_t;
     using context_array_t        = common::container::small_vector<const context_t*>;
+    using packet_data_array_t    = common::container::small_vector<packet_data_t, 8>;
 
     Queue&                   queue;
-    inst_pkt_t               inst_pkt         = {};
-    hsa_signal_t             interrupt_signal = {};
-    rocprofiler_thread_id_t  tid              = common::get_tid();
-    rocprofiler_timestamp_t  enqueue_ts       = 0;
-    rocprofiler_user_data_t  user_data        = {.value = 0};
-    context::correlation_id* correlation_id   = nullptr;
-    rocprofiler_packet       kernel_pkt       = {};
-    callback_record_t        callback_record  = {};
-    tracing::tracing_data    tracing_data     = {};
-    bool                     is_serialized    = false;
+    rocprofiler_thread_id_t  tid            = common::get_tid();
+    rocprofiler_timestamp_t  enqueue_ts     = 0;
+    context::correlation_id* correlation_id = nullptr;
+    packet_data_array_t      packet_data    = {};
 };
 }  // namespace hsa
 }  // namespace rocprofiler

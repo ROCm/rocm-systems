@@ -889,7 +889,7 @@ wave_t::xfer_segment_memory (const address_space_t &address_space,
   dbgapi_assert (!read != !write && "either read or write buffer");
 
   auto [lowered_address_space, lowered_address]
-    = address_space.lower (segment_address);
+    = address_space.lower (agent (), segment_address);
 
   switch (lowered_address_space.kind ())
     {

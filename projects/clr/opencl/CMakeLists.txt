@@ -80,7 +80,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/khronos/headers/opencl2.2/CL"
 # Packaging steps
 #############################
 if(NOT WIN32)
-find_package(ROCM QUIET CONFIG PATHS /opt/rocm)
+find_package(ROCM QUIET CONFIG PATHS ${ROCM_PATH})
 if(ROCM_FOUND)
   include(ROCMSetupVersion)
   rocm_setup_version( VERSION "2.0.0" )
@@ -119,7 +119,7 @@ if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
   message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")
 endif()
 
-set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Package Installation path for OpenCL")
+set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Package Installation path for OpenCL")
 
 configure_file(
   packaging/amdocl64.icd

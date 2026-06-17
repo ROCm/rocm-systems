@@ -31,7 +31,6 @@
 #include <inttypes.h>
 #include <sys/mman.h>
 #include <sys/time.h>
-#include <errno.h>
 
 /* Helper functions for calling KFD SVM ioctl */
 

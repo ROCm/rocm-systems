@@ -630,7 +630,7 @@ stop_all_wavefronts (amd_dbgapi_process_id_t process_id)
   agent_log (log_level_t::info, "all wavefronts are stopped");
 }
 
-std::vector<amd_dbgapi_code_object_id_t>
+std::unordered_set<amd_dbgapi_code_object_id_t>
 print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                   code_object_map_t &code_object_map)
 {
@@ -649,7 +649,7 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
   DBGAPI_CHECK (amd_dbgapi_process_wave_list (process_id, &wave_count,
                                               &wave_ids, nullptr));
 
-  std::vector<amd_dbgapi_code_object_id_t> code_objects_disassembled;
+  std::unordered_set<amd_dbgapi_code_object_id_t> code_objects_reported;
   for (size_t i = 0; i < wave_count; ++i)
     {
       amd_dbgapi_wave_id_t wave_id = wave_ids[i];
@@ -729,6 +729,10 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
               {
                 if (auto symbol = code_object.find_symbol (*kernel_entry))
                   agent_out << " <" << symbol->m_name << ">";
+
+                /* In case the kernel entry point and reported PC are in
+                   different code objects, report both.  */
+                code_objects_reported.emplace (code_object.id ());
                 break;
               }
 
@@ -864,7 +868,7 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
           /* Disassemble instructions around `pc`  */
           code_object_found->disassemble (architecture_id, pc);
 
-          code_objects_disassembled.emplace_back (code_object_found->id ());
+          code_objects_reported.emplace (code_object_found->id ());
         }
       else
         {
@@ -873,7 +877,7 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
     }
 
   free (wave_ids);
-  return code_objects_disassembled;
+  return code_objects_reported;
 }
 
 void

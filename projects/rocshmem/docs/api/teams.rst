@@ -8,6 +8,35 @@
 Team management routines
 -------------------------
 
+Predefined teams
+----------------
+
+.. cpp:var:: rocshmem_team_t ROCSHMEM_TEAM_WORLD
+
+   Handle that corresponds to the world team that contains all PEs in the
+   rocSHMEM program. The default context is tied to the world team.
+   Contexts created without specifying a team, default to the world team.
+   Available on both host and device.
+
+.. cpp:var:: rocshmem_team_t ROCSHMEM_TEAM_SHARED
+
+   Handle that corresponds to a team of PEs that share a memory domain.
+   ``ROCSHMEM_TEAM_SHARED`` refers to the team of all PEs whose symmetric
+   heap objects are directly load/store accessible by all PEs in the team
+   (i.e. co-located on the same node). Available on both host and device.
+   Set to ``ROCSHMEM_TEAM_INVALID`` when IPC is disabled at compile-time
+   or runtime, or when the node-local PE ranks are not uniformly strided
+   in ``ROCSHMEM_TEAM_WORLD``.
+
+.. cpp:var:: rocshmem_team_t ROCSHMEM_TEAM_INVALID
+
+   A value corresponding to an invalid team. This value can be used to
+   initialize or update team handles to indicate that they do not
+   reference a valid team. When managed in this way, applications can use
+   an equality comparison to test whether a given team handle references a
+   valid team. Predefined teams such as ``ROCSHMEM_TEAM_SHARED`` may also
+   hold this value when the required capability (e.g. IPC) is unavailable.
+
 ROCSHMEM_TEAM_MY_PE
 -------------------
 
@@ -77,10 +106,11 @@ ROCSHMEM_TEAM_DESTROY
 
 .. cpp:function:: __host__ void rocshmem_team_destroy(rocshmem_team_t team)
 
-  :param team: The team to destroy. The behavior is undefined if
-               the input team is ``ROCSHMEM_TEAM_WORLD`` or any other
-               invalid team. If the input is ``ROCSHMEM_TEAM_INVALID``,
-               this function will not perform any operation.
+  :param team: The team to destroy.
+               ``ROCSHMEM_TEAM_INVALID``, ``ROCSHMEM_TEAM_WORLD``, and
+               ``ROCSHMEM_TEAM_SHARED`` are silently ignored (no-op).
+               Passing a handle that was already destroyed or
+               never created results in undefined behavior.
 
   :returns:    None
 

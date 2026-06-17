@@ -679,6 +679,78 @@ class TestMIOpenHandler:
         with pytest.raises(ValueError, match="is not under prefix_root"):
             handler.detect(file_path, prefix_root)
 
+    def test_detect_ck_so_gfx942(self, handler, prefix_root):
+        """MIOpen CK per-arch shared library for gfx942."""
+        file_path = prefix_root / "lib/libMIOpenCKGroupedConv_gfx942.so"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_ck_so_gfx90a(self, handler, prefix_root):
+        """MIOpen CK per-arch shared library for gfx90a."""
+        file_path = prefix_root / "lib/libMIOpenCKGroupedConv_gfx90a.so"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx90a"
+
+    def test_detect_ck_so_xnack(self, handler, prefix_root):
+        """MIOpen CK per-arch shared library with xnack variant."""
+        file_path = prefix_root / "lib/libMIOpenCKGroupedConv_gfx942-xnack+.so"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942-xnack+"
+
+    def test_reject_libMIOpen_so(self, handler, prefix_root):
+        """libMIOpen.so (the main library) should not match the CK pattern."""
+        file_path = prefix_root / "lib/libMIOpen.so"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+    def test_reject_ck_so_no_arch(self, handler, prefix_root):
+        """CK shared library without architecture suffix should be rejected."""
+        file_path = prefix_root / "lib/libMIOpenCKGroupedConv.so"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+    def test_detect_ck_dll_gfx942(self, handler, prefix_root):
+        """Windows CK per-arch DLL (no lib prefix) should be detected."""
+        file_path = prefix_root / "lib/MIOpenCKGroupedConv_gfx942.dll"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_ck_dll_xnack(self, handler, prefix_root):
+        """Windows CK per-arch DLL with xnack variant."""
+        file_path = prefix_root / "lib/MIOpenCKGroupedConv_gfx942-xnack+.dll"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942-xnack+"
+
+    def test_reject_MIOpen_dll(self, handler, prefix_root):
+        """MIOpen.dll (the main library, no lib prefix) should not match the CK pattern."""
+        file_path = prefix_root / "lib/MIOpen.dll"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
 
 class TestDatabaseHandlerRegistry:
     """Tests for database handler registry functions."""

@@ -1,0 +1,33 @@
+# Top-down analysis time breakdown + red flags.
+# Ref: llm-reference-guide.md lines 1367-1382.
+
+categories:
+  - name: kernel_exec
+    description: "Time spent executing GPU kernels"
+    healthy_pct: 0.80
+  - name: memcpy
+    description: "Host-device and device-device memory copies"
+    red_flag_pct: 0.20
+  - name: api_overhead
+    description: "HIP/HSA API call overhead"
+    red_flag_pct: 0.10
+  - name: gpu_idle
+    description: "GPU idle time between kernels"
+    red_flag_pct: 0.10
+
+red_flags:
+  memcpy_dominant:
+    metric: memcpy_pct
+    threshold: 0.20
+    priority: high
+    message: "Memory transfer dominates; consider hipMemcpyAsync + streams"
+  api_heavy:
+    metric: api_overhead_pct
+    threshold: 0.10
+    priority: medium
+    message: "API overhead significant; reduce synchronization"
+  idle_heavy:
+    metric: gpu_idle_pct
+    threshold: 0.10
+    priority: medium
+    message: "GPU idle; batch kernel launches or add parallel streams"

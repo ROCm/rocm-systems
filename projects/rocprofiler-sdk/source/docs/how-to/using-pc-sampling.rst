@@ -8,7 +8,7 @@
 Using PC sampling
 ==================
 
-PC (Program Counter) sampling service for GPU profiling is a profiling technique to periodically sample the program counter during GPU kernel execution. PC sampling helps in understanding code execution patterns and identifying hotspot(s).
+PC (Program Counter) sampling is a GPU profiling technique that periodically samples the program counter during GPU kernel execution. PC sampling helps in understanding code execution patterns and identifying hotspots.
 
 Here are the benefits of using PC sampling:
 
@@ -17,10 +17,60 @@ Here are the benefits of using PC sampling:
 - Analyze code coverage
 - Find heavily executed code paths
 
-To try out the PC sampling feature, you can use the command-line tool ``rocprofv3`` or the ROCprofiler-SDK library on `ROCm 6.4` or later.
+To try out the PC sampling feature, you can use the ``rocprofv3`` command-line tool or the ROCprofiler-SDK library on ROCm 6.4 or later.
 
-.. note::
-  PC sampling is ONLY supported on AMD GPUs with architectures gfx90a and later.
+Supported AMD Instinct GPUs
+============================
+
+The following table lists the AMD Instinct™ GPUs supporting PC sampling and shows whether they support stochastic PC sampling and host-trap PC sampling:
+
+.. list-table::
+  :header-rows: 1
+
+  * - AMD Instinct GPU
+    - Architecture
+    - Stochastic PC sampling
+    - Host-trap PC sampling
+
+  * - MI355X
+    - CDNA4
+    - ✅
+    - ✅
+
+  * - MI350X
+    - CDNA4
+    - ✅
+    - ✅
+
+  * - MI325X
+    - CDNA3
+    - ✅
+    - ✅
+
+  * - MI300X
+    - CDNA3
+    - ✅
+    - ✅
+
+  * - MI300A
+    - CDNA3
+    - ✅
+    - ✅
+
+  * - MI250X
+    - CDNA2
+    - ❌
+    - ✅
+
+  * - MI250
+    - CDNA2
+    - ❌
+    - ✅
+
+  * - MI210
+    - CDNA2
+    - ❌
+    - ✅
 
 PC sampling availability and configuration
 ===========================================
@@ -228,10 +278,6 @@ offering more accurate performance insights.
 It is important to note that the skid issue inherent in host-trap PC sampling is not likely to be resolved
 in its current form. Therefore, to achieve more precise performance profiling, it is recommended to adopt stochastic PC sampling starting with the gfx942 architecture.
 
-.. note::
-
-  Host-trap PC sampling is supported on AMD Instinct MI200, MI300, MI325, MI350, and MI355.
-
 Hardware-based (stochastic) PC sampling method
 ===============================================
 
@@ -369,6 +415,4 @@ For example, ``arb_state_issue_`` fields indicate the type of instructions issue
 On the other hand, ``arb_state_stall_`` fields indicate the type of instructions stalled at the time of sampling.
 This information is useful for understanding how many instructions per cycle (IPC) are issued.
 
-.. note::
-
-  The stochastic PC sampling is supported on AMD Instinct MI300, MI325, MI350, and MI355.
+For information about how to analyze stochastic PC sampling data, see :ref:`cdna3-cdna4-pc-sampling`.

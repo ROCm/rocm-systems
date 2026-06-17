@@ -56,24 +56,7 @@ __device__ Context::Context(Backend* handle)
  *****************************************************************************/
 
 __device__ void Context::threadfence_system() {
-  DISPATCH(threadfence_system());
-}
-
-__device__ void Context::ctx_create() {
-  if (is_thread_zero_in_block()) {
-    ctxStats.incStat(NUM_CREATE);
-  }
-
-  DISPATCH(ctx_create());
-}
-
-__device__ void Context::ctx_destroy() {
-  if (is_thread_zero_in_block()) {
-    ctxStats.incStat(NUM_FINALIZE);
-    device_backend_proxy->globalStats.accumulateStats(ctxStats);
-  }
-
-  DISPATCH(ctx_destroy());
+  __threadfence_system();
 }
 
 __device__ void Context::putmem(void* dest, const void* source, size_t nelems,
@@ -339,5 +322,9 @@ __device__ uint64_t Context::signal_fetch##SUFFIX(const uint64_t *sig_addr) \
 CONTEXT_SIGNAL_FETCH_DEF()
 CONTEXT_SIGNAL_FETCH_DEF(_wg)
 CONTEXT_SIGNAL_FETCH_DEF(_wave)
+
+__device__ int Context::tile_collective_wait(rocshmem_team_t team, uint64_t flags) {
+  DISPATCH_RET(tile_collective_wait(team, flags));
+}
 
 }  // namespace rocshmem

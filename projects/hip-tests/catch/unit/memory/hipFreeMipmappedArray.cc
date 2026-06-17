@@ -9,6 +9,7 @@
 #include "hipArrayCommon.hh"
 #include "utils.hh"
 #include <array>
+#include <string>
 
 
 /*

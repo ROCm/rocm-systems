@@ -9,16 +9,16 @@ build:
     python: "mambaforge-22.9"
   jobs:
     post_create_environment:
-      - ./source/scripts/update-doxygen.sh
+      - projects/rocprofiler-sdk/source/scripts/update-doxygen.sh
 
 conda:
-  environment: source/docs/environment.yml
+  environment: projects/rocprofiler-sdk/source/docs/environment.yml
 
 python:
   install:
-  - requirements: source/docs/sphinx/requirements.txt
+  - requirements: projects/rocprofiler-sdk/source/docs/sphinx/requirements.txt
 
 sphinx:
-  configuration: source/docs/conf.py
+  configuration: projects/rocprofiler-sdk/source/docs/conf.py
 
 formats: [htmlzip, pdf, epub]

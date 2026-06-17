@@ -40,8 +40,6 @@
 #include <string_view>
 #include <type_traits>
 
-#include <fmt/ranges.h>
-
 namespace rocpd
 {
 namespace tool = ::rocprofiler::tool;

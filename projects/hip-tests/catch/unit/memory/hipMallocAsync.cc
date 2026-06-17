@@ -11,7 +11,7 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
 static bool thread_results[NUMBER_OF_THREADS];
-static constexpr auto NUM_ELM{1024 * 1024};
+static const auto NUM_ELM = isQuickLevel() ? (64 * 1024) : (1024 * 1024);
 static constexpr int streamPerAsic = 2;
 
 /**

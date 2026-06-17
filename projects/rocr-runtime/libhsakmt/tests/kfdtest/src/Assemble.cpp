@@ -302,15 +302,25 @@ int Assembler::RunAssemble(const char* const AssemblySource) {
     SrcMgr.AddNewSourceBuffer(std::move(BufferPtr), SMLoc());
 
     // Initialize MC interfaces and base class objects
+#if LLVM_VERSION_MAJOR < 22
+    std::unique_ptr<const MCRegisterInfo> MRI(
+            TheTarget->createMCRegInfo(TripleName));
+#else
     std::unique_ptr<const MCRegisterInfo> MRI(
             TheTarget->createMCRegInfo(Triple(TripleName)));
+#endif
     if (!MRI) {
         outs() << "ASM Error: no register info for target " << MCPU << "\n";
         return -1;
     }
 #if LLVM_VERSION_MAJOR > 9
+  #if LLVM_VERSION_MAJOR < 22
+    std::unique_ptr<const MCAsmInfo> MAI(
+           TheTarget->createMCAsmInfo(*MRI, TripleName, MCOptions));
+  #else
     std::unique_ptr<const MCAsmInfo> MAI(
             TheTarget->createMCAsmInfo(*MRI, Triple(TripleName), MCOptions));
+  #endif
 #else
     std::unique_ptr<const MCAsmInfo> MAI(
             TheTarget->createMCAsmInfo(*MRI, TripleName));
@@ -325,8 +335,13 @@ int Assembler::RunAssemble(const char* const AssemblySource) {
         outs() << "ASM Error: no instruction info for target " << MCPU << "\n";
         return -1;
     }
+#if LLVM_VERSION_MAJOR < 22
+    std::unique_ptr<MCSubtargetInfo> STI(
+            TheTarget->createMCSubtargetInfo(TripleName, MCPU, std::string()));
+#else
     std::unique_ptr<MCSubtargetInfo> STI(
             TheTarget->createMCSubtargetInfo(Triple(TripleName), MCPU, std::string()));
+#endif
     if (!STI || !STI->isCPUStringValid(MCPU)) {
         outs() << "ASM Error: no subtarget info for target " << MCPU << "\n";
         return -1;
@@ -334,7 +349,11 @@ int Assembler::RunAssemble(const char* const AssemblySource) {
 
     // Set up the MCContext for creating symbols and MCExpr's
 #if LLVM_VERSION_MAJOR > 12
+#if LLVM_MAIN_REVISION >= 577912 // commit # when createMCAsmParser API changed
+    MCContext Ctx(TheTriple, *MAI, *MRI, *STI, &SrcMgr, &MCOptions);
+#else
     MCContext Ctx(TheTriple, MAI.get(), MRI.get(), STI.get(), &SrcMgr, &MCOptions);
+#endif
 #else
     MCObjectFileInfo MOFI;
     MCContext Ctx(MAI.get(), MRI.get(), &MOFI, &SrcMgr, &MCOptions);
@@ -376,8 +395,13 @@ int Assembler::RunAssemble(const char* const AssemblySource) {
             createMCAsmParser(SrcMgr, Ctx, *Streamer, *MAI));
 
     // Set parser to target parser and run
+#if LLVM_MAIN_REVISION >= 577912 // commit # when createMCAsmParser API changed
+    std::unique_ptr<MCTargetAsmParser> TAP(
+            TheTarget->createMCAsmParser(*STI, *Parser, *MCII));
+#else
     std::unique_ptr<MCTargetAsmParser> TAP(
             TheTarget->createMCAsmParser(*STI, *Parser, *MCII, MCOptions));
+#endif
     if (!TAP) {
         outs() << "ASM Error: no assembly parsing support for target " << MCPU << "\n";
         return -1;

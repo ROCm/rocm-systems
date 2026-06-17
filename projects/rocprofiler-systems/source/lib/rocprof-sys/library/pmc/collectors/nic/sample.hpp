@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -26,8 +26,8 @@ struct sample : trace_cache::cacheable_t
     };
 
     sample() = default;
-    sample(enabled_metrics _settings, uint32_t _device_id, std::string _device_name,
-           uint64_t _timestamp, metrics _metric_values)
+    sample(enabled_metrics _settings, std::uint32_t _device_id, std::string _device_name,
+           std::uint64_t _timestamp, metrics _metric_values)
     : enabled_metric(_settings)
     , device_id(_device_id)
     , device_name(std::move(_device_name))
@@ -36,9 +36,9 @@ struct sample : trace_cache::cacheable_t
     {}
 
     enabled_metrics enabled_metric;
-    uint32_t        device_id;
+    std::uint32_t   device_id;
     std::string     device_name;
-    uint64_t        timestamp;
+    std::uint64_t   timestamp;
     metrics         metric_values;
 };
 
@@ -54,19 +54,22 @@ using ainic_pmc_sample = pmc::collectors::nic::sample;
 
 template <>
 inline void
-serialize(uint8_t* buffer, const pmc::collectors::nic::sample& item)
+serialize(std::uint8_t* buffer, const pmc::collectors::nic::sample& item)
 {
     utility::store_value(
-        buffer, static_cast<uint32_t>(item.enabled_metric.value), item.device_id,
+        buffer, static_cast<std::uint32_t>(item.enabled_metric.value), item.device_id,
         std::string_view(item.device_name), item.timestamp,
         item.metric_values.rx_rdma_ucast_bytes, item.metric_values.tx_rdma_ucast_bytes,
         item.metric_values.rx_rdma_ucast_pkts, item.metric_values.tx_rdma_ucast_pkts,
-        item.metric_values.rx_rdma_cnp_pkts, item.metric_values.tx_rdma_cnp_pkts);
+        item.metric_values.rx_rdma_cnp_pkts, item.metric_values.tx_rdma_cnp_pkts,
+        item.metric_values.tx_rdma_ack_timeout, item.metric_values.resp_tx_pkt_seq_err,
+        item.metric_values.req_rx_pkt_seq_err,
+        item.metric_values.req_rx_impl_nak_seq_err);
 }
 
 template <>
 inline pmc::collectors::nic::sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     pmc::collectors::nic::sample item;
     std::string_view             device_name_view;
@@ -75,7 +78,9 @@ deserialize(uint8_t*& buffer)
         item.timestamp, item.metric_values.rx_rdma_ucast_bytes,
         item.metric_values.tx_rdma_ucast_bytes, item.metric_values.rx_rdma_ucast_pkts,
         item.metric_values.tx_rdma_ucast_pkts, item.metric_values.rx_rdma_cnp_pkts,
-        item.metric_values.tx_rdma_cnp_pkts);
+        item.metric_values.tx_rdma_cnp_pkts, item.metric_values.tx_rdma_ack_timeout,
+        item.metric_values.resp_tx_pkt_seq_err, item.metric_values.req_rx_pkt_seq_err,
+        item.metric_values.req_rx_impl_nak_seq_err);
     item.device_name = std::string(device_name_view);
     return item;
 }
@@ -89,7 +94,9 @@ get_size(const pmc::collectors::nic::sample& item)
         item.timestamp, item.metric_values.rx_rdma_ucast_bytes,
         item.metric_values.tx_rdma_ucast_bytes, item.metric_values.rx_rdma_ucast_pkts,
         item.metric_values.tx_rdma_ucast_pkts, item.metric_values.rx_rdma_cnp_pkts,
-        item.metric_values.tx_rdma_cnp_pkts);
+        item.metric_values.tx_rdma_cnp_pkts, item.metric_values.tx_rdma_ack_timeout,
+        item.metric_values.resp_tx_pkt_seq_err, item.metric_values.req_rx_pkt_seq_err,
+        item.metric_values.req_rx_impl_nak_seq_err);
 }
 
 }  // namespace trace_cache

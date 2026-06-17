@@ -73,7 +73,7 @@ class ThreadTrace : public RuntimeObject {
   const Device& device() const { return device_; }
 
   //! Get the shader engines number for thread trace`s associated device
-  const size_t deviceSeNumThreadTrace() const { return device_.info().numberOfShaderEngines; }
+  const size_t deviceSeNumThreadTrace() const { return device_.info().numberOfShaderEngines_; }
 
   //! Get the device thread trace
   device::ThreadTrace* getDeviceThreadTrace() { return deviceThreadTrace_; }

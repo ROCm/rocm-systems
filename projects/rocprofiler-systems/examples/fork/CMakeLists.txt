@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(rocprofiler-systems-fork LANGUAGES CXX)
 
@@ -23,7 +23,7 @@ endif()
 add_executable(fork-example fork.cpp)
 target_link_libraries(
     fork-example
-    PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems-user-library
+    PRIVATE Threads::Threads pthread rocprofiler-systems::rocprofiler-systems-user-library
 )
 target_compile_options(fork-example PRIVATE ${_FLAGS})
 

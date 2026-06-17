@@ -1,0 +1,37 @@
+# matrix_meter — MFMA vs VALU ratio classification (Phase-10 Feature F).
+# Derived metric: mfma_vs_valu_ratio = SQ_INSTS_VALU_MFMA / SQ_INSTS_VALU.
+# Classifies whether the kernel is actually reaching the matrix-core
+# lane or is stuck in scalar/vector-ALU territory. Consumed by the
+# Compute Specialist via fence/compute_specialist.md::Matrix Meter.
+
+version: 1
+
+# CDNA2+ gate. MFMA ISA is a CDNA-only instruction family and the
+# thresholds below target CDNA2+ wavefront utilization. RDNA parts
+# (gfx10xx, gfx11xx) have no MFMA — skip. Legacy gfx908 (Arcturus, CDNA1)
+# has an older MFMA but the thresholds here are calibrated for CDNA2+.
+applies_to_gfx: [gfx90a, gfx942, gfx950]
+
+description: >
+  Ratio of MFMA-emitted instructions to total VALU instructions. On
+  matmul-heavy workloads this should be >= 0.20 for CDNA2 / >= 0.30 for
+  CDNA3. A persistent <= 0.05 ratio signals the compiler or library is
+  falling back to VALU-fused-multiply-add and missing the matrix unit.
+
+derivation: "SQ_INSTS_VALU_MFMA / SQ_INSTS_VALU"
+
+thresholds:
+  # All thresholds are "ratio >=".
+  healthy: 0.30        # Using MFMA as intended.
+  borderline: 0.10     # Mixed — either small matmul or fallback path.
+  degraded: 0.05       # VALU fallback dominates — investigate.
+
+recommend_when_degraded:
+  - "Enable -O3 -mcumode on matmul hot kernels"
+  - "Check for compile-time fallback (missing rocBLAS / hipBLASLt path)"
+  - "Replace manual FMA loops with rocBLAS / hipBLASLt GEMM calls"
+  - "If custom kernel — use mfma intrinsics (__builtin_amdgcn_mfma_*)"
+
+verify_counters:
+  - SQ_INSTS_VALU
+  - SQ_INSTS_VALU_MFMA

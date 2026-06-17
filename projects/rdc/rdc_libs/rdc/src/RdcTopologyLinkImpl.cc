@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcTopologyLinkImpl.h"
 
 #include <assert.h>
+#include <string.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -49,6 +50,12 @@ RdcTopologyLinkImpl::~RdcTopologyLinkImpl() {}
 
 rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
                                                           rdc_device_topology_t* results) {
+  if (results == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+  // Zero output: inner loop's i==j skip leaves link_infos[i] uninitialized.
+  memset(results, 0, sizeof(*results));
+
   rdc_status_t status = RDC_ST_NOT_FOUND;
   amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
@@ -139,6 +146,12 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
 }
 
 rdc_status_t RdcTopologyLinkImpl::rdc_link_status_get(rdc_link_status_t* results) {
+  if (results == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+  // Zero output: trailing gpus[]/link_states[] entries are otherwise unwritten.
+  memset(results, 0, sizeof(*results));
+
   rdc_status_t status = RDC_ST_NOT_FOUND;
   amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];

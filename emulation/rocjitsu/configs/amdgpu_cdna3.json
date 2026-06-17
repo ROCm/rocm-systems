@@ -1,0 +1,118 @@
+{
+  "max_ticks": 100000,
+  "num_threads": 1,
+  "exec_mode": "functional",
+  "vm": {
+    "arch": "cdna3",
+    "gpu": {
+      "device": {
+        "gpu_id": 50148,
+        "gfx_target_version": 90402,
+        "vendor_id": 4098,
+        "device_id": 29856,
+        "family_id": 146,
+        "unique_id": 0,
+        "marketing_name": "AMD Instinct MI300X",
+        "simd_count": 1216,
+        "max_waves_per_simd": 8,
+        "num_shader_engines": 4,
+        "num_shader_arrays_per_engine": 2,
+        "num_cu_per_sh": 5,
+        "simd_per_cu": 4,
+        "wave_front_size": 64,
+        "local_mem_size": 206158430208,
+        "lds_size_kb": 64,
+        "mem_width": 8192,
+        "mem_clk_max": 1300,
+        "l2_size_kb": 4096,
+        "num_sdma_engines": 4,
+        "num_sdma_xgmi_engines": 6,
+        "num_cp_queues": 128,
+        "max_engine_clk_fcompute": 2100
+      }
+    }
+  },
+  "topology": {
+    "root": {
+      "name": "soc", "type": "soc",
+      "children": [
+        { "name": "vram", "type": "gpu_memory" },
+        {
+          "name": "iod[0:4]", "type": "iod",
+          "config": [{ "key": "num_hbm_stacks", "value": "2" }]
+        },
+        {
+          "name": "xcd[0:8]", "type": "xcd",
+          "children": [
+            { "name": "l2", "type": "l2_cache" },
+            { "name": "cp", "type": "command_processor" },
+            {
+              "name": "se[0:4]", "type": "shader_engine",
+              "children": [{
+                "name": "cu[0:8]", "type": "compute_unit",
+                "config": [
+                  { "key": "num_wf_slots", "value": "32" },
+                  { "key": "sgprs_per_wf", "value": "104" },
+                  { "key": "vgprs_per_wf", "value": "512" },
+                  { "key": "lds_size_kb", "value": "64" }
+                ]
+              }]
+            }
+          ]
+        }
+      ]
+    },
+    "links": [
+      {
+        "pattern": "xcd[i].cp.req_[j*8+k] -> xcd[i].se[j].cu[k].cpl",
+        "for_ranges": [
+          { "var_name": "i", "start": 0, "end": 8 },
+          { "var_name": "j", "start": 0, "end": 4 },
+          { "var_name": "k", "start": 0, "end": 8 }
+        ],
+        "latency": 1, "weight": 2
+      },
+      {
+        "pattern": "xcd[i].se[j].cu[k].req -> xcd[i].l2.cpl_[j*8+k]",
+        "for_ranges": [
+          { "var_name": "i", "start": 0, "end": 8 },
+          { "var_name": "j", "start": 0, "end": 4 },
+          { "var_name": "k", "start": 0, "end": 8 }
+        ],
+        "latency": 1, "weight": 10
+      },
+      {
+        "pattern": "xcd[i].l2.req -> iod[i/2].msc.cpl_[i%2]",
+        "for_ranges": [{ "var_name": "i", "start": 0, "end": 8 }],
+        "latency": 1, "weight": 3
+      },
+      {
+        "pattern": "iod[i].peer_req -> iod[j].peer_cpl",
+        "for_ranges": [
+          { "var_name": "i", "start": 0, "end": 4 },
+          { "var_name": "j", "start": 0, "end": 4 }
+        ],
+        "where_expr": "i != j",
+        "latency": 1, "weight": 1
+      },
+      {
+        "pattern": "xcd[i].se[j].cu[k].adj_req -> xcd[i].se[j].cu[k+1].adj_cpl",
+        "for_ranges": [
+          { "var_name": "i", "start": 0, "end": 8 },
+          { "var_name": "j", "start": 0, "end": 4 },
+          { "var_name": "k", "start": 0, "end": 7 }
+        ],
+        "latency": 1, "weight": 2
+      },
+      {
+        "pattern": "xcd[i].se[j].cu[k+1].adj_req_r -> xcd[i].se[j].cu[k].adj_cpl_r",
+        "for_ranges": [
+          { "var_name": "i", "start": 0, "end": 8 },
+          { "var_name": "j", "start": 0, "end": 4 },
+          { "var_name": "k", "start": 0, "end": 7 }
+        ],
+        "latency": 1, "weight": 2
+      }
+    ]
+  }
+}

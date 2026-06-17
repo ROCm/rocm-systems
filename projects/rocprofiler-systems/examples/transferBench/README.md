@@ -11,7 +11,7 @@ TransferBench is a comprehensive all-to-all transfer benchmark that measures dat
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime and `hipcc` compiler
 - HSA runtime library (headers and library)
 - AMD Instinct GPU (APU-only targets are skipped)
@@ -41,7 +41,7 @@ cmake --build <build_dir> --target transferBench
 TransferBench is primarily configured through environment variables. Key settings:
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | `NUM_ITERATIONS` | Number of benchmark iterations | varies |
 | `BLOCK_BYTES` | Transfer block size in bytes | 256 |
 | `GFX_BLOCK_SIZE` | GPU compute block size | 256 |
@@ -57,7 +57,7 @@ rocprof-sys-run -- ./transferBench
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation` | Trace all GPU memory operations |
 | `ROCPROFSYS_ROCM_EVENTS` | `SQ_WAVES,GRBM_COUNT` | Sample GPU hardware counters |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |

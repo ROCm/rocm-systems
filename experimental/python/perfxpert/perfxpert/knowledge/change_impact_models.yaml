@@ -1,0 +1,91 @@
+# Change-Impact Prediction Models — Phase 10
+#
+# Each entry predicts the *range* of speedups that a single, named
+# optimization technique produces on a kernel that meets the entry's
+# preconditions. The prediction is NOT a promise — it is an upper/lower
+# bracket derived from measured case studies in proven_optimizations.yaml
+# (see `source_citation`).
+#
+# MVP (Phase 10): 5 seeded entries — vgpr_reduction, lds_tiling,
+# mfma_enablement, fast_math_flag, hip_stream_overlap.
+#
+# Explicitly DEFERRED to Phase 11:
+#   - wave64 ↔ wave32 transition (architecture-class change, not an edit)
+#   - kernel fusion (needs interaction model between multiple kernels)
+#
+# Conservative bracket rule: the `hi` field here is the raw catalog hi
+# from proven_optimizations.yaml. The predict_change_impact tool multiplies
+# by 0.85 at emit time to undersell rather than oversell.
+
+- id: vgpr_reduction
+  applies_to:
+    kernel_class: ["compute_bound_valu", "compute_bound_mfma"]
+    regime: ["compute", "balanced"]
+  required_metrics: [vgpr_per_thread, occupancy_pct, kernel_time_pct]
+  model:
+    new_occupancy_ratio: "lookup_waves_per_eu(target_vgpr) / lookup_waves_per_eu(current_vgpr)"
+    speedup_formula: "1 + (new_occupancy_ratio - 1) * 0.55"
+  speedup_bounds: {lo: 1.15, hi: 1.70}
+  confidence: 0.70
+  source_citation: "knowledge/proven_optimizations.yaml#vgpr_reduction_compute_bound"
+  failure_modes:
+    - "register spilling at VGPR<64"
+    - "LDS-bound kernels see 0 gain"
+
+- id: lds_tiling
+  applies_to:
+    kernel_class: ["memory_bound_matmul", "memory_bound_stencil"]
+    regime: ["memory"]
+  required_metrics: [hbm_bw_utilization, lds_usage_bytes, kernel_time_pct]
+  model:
+    tile_reuse_factor: "tile_size ** 2 / distinct_loads"
+    speedup_formula: "min(tile_reuse_factor, peak_compute_ratio)"
+  speedup_bounds: {lo: 2.5, hi: 6.0}
+  confidence: 0.65
+  source_citation: "knowledge/proven_optimizations.yaml#lds_tiling_matmul"
+  failure_modes:
+    - "LDS bank conflicts from bad tile strides (use padded tile dims)"
+    - "Tiles too large reduce occupancy"
+
+- id: mfma_enablement
+  applies_to:
+    kernel_class: ["compute_bound_valu", "matmul_like"]
+    regime: ["compute", "balanced"]
+  required_metrics: [mfma_util_pct, valu_util_pct, kernel_matmul_like]
+  model:
+    speedup_formula: "peak_mfma_flops / peak_valu_flops"
+  speedup_bounds: {lo: 4.0, hi: 10.0}
+  confidence: 0.75
+  source_citation: "knowledge/proven_optimizations.yaml#mfma_enablement"
+  failure_modes:
+    - "Shape mismatch — MFMA requires multiples of 16 or 32 depending on dtype"
+    - "FP32 MFMA much smaller gains than FP16/BF16/FP8"
+
+- id: fast_math_flag
+  applies_to:
+    kernel_class: ["compute_bound_valu", "transcendental_heavy"]
+    regime: ["compute", "balanced"]
+  required_metrics: [transcendental_op_count, valu_util_pct, kernel_time_pct]
+  model:
+    speedup_formula: "1 + transcendental_fraction * (transcendental_speedup - 1)"
+  speedup_bounds: {lo: 2.5, hi: 3.5}
+  confidence: 0.60
+  source_citation: "knowledge/proven_optimizations.yaml#fast_math_compiler_flag"
+  failure_modes:
+    - "Numerical regressions — must gate on correctness bitwise diff"
+    - "Division-heavy kernels gain less than sqrt/exp/log-heavy kernels"
+
+- id: hip_stream_overlap
+  applies_to:
+    kernel_class: ["latency_bound", "memcpy_heavy"]
+    regime: ["memory", "balanced"]
+  required_metrics: [memcpy_pct, num_streams_used, avg_memcpy_size_mb]
+  model:
+    overlap_fraction: "min(0.7, memcpy_pct)"
+    speedup_formula: "1 / (1 - overlap_fraction)"
+  speedup_bounds: {lo: 1.30, hi: 1.70}
+  confidence: 0.70
+  source_citation: "knowledge/proven_optimizations.yaml#hip_stream_overlap"
+  failure_modes:
+    - "Too-many streams — sweet spot is 2-4"
+    - "Pageable host memory blocks overlap; must use hipHostMalloc pinned"

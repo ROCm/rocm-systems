@@ -22,7 +22,7 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Basic) {
 
   SECTION("hipDeviceMallocFinegrained") {
     if (!DeviceAttributesSupport(0, hipDeviceAttributeFineGrainSupport)) {
-      HipTest::HIP_SKIP_TEST("Device does not support fine-grained memory allocations");
+      WARN("Skipping section: " << HipTest::SkipReason::kFineGrainHwUnsupported);
       return;
     }
     const auto alloc_size =
@@ -52,8 +52,7 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Alignment) {
   const auto flag = GENERATE(hipDeviceMallocDefault, hipDeviceMallocFinegrained);
   if (flag == hipDeviceMallocFinegrained &&
       !DeviceAttributesSupport(0, hipDeviceAttributeFineGrainSupport)) {
-    HipTest::HIP_SKIP_TEST("Device does not support fine-grained memory allocations");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
   HIP_CHECK(hipExtMallocWithFlags(&ptr1, 1, flag));
   HIP_CHECK(hipExtMallocWithFlags(&ptr2, 10, flag));

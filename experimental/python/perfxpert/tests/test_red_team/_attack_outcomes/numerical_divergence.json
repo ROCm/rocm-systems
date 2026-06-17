@@ -1,0 +1,8 @@
+{
+  "attack_id": "numerical_divergence",
+  "status": "defeated",
+  "details": {
+    "max_abs_diff": 0.10000000149011612,
+    "verdict_status": "reject"
+  }
+}

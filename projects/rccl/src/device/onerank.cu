@@ -8,7 +8,6 @@
 #include "alloc.h"
 #include "collectives.h"
 #include "common_kernel.h"
-#include "common.h"
 #include <cuda_runtime.h>
 
 #if defined(__gfx950__)
@@ -55,12 +54,12 @@ namespace {
       void* srcs[2] = {srcPtr, accPtr};
       void* dsts[1] = {dstPtr};
       reduceCopy<COLL_UNROLL, 0, RedOp, T, 0,2,2, 0,1,1, /*PreOpSrcs=*/1>
-        (tid, tn, redOpArg, &redOpArg, true, 2, srcs, 1, dsts, i1-i0);
+        (tid, tn, redOpArg, true, 2, srcs, 1, dsts, i1-i0);
     } else {
       src = (T*)src + i0;
       dst = (T*)dst + i0;
       reduceCopy<COLL_UNROLL, 0, RedOp, T, 0,1,1, 0,1,1, /*PreOpSrcs=*/1>
-        (tid, tn, redOpArg, &redOpArg, true, 1, &src, 1, &dst, i1-i0);
+        (tid, tn, redOpArg, true, 1, &src, 1, &dst, i1-i0);
     }
   }
 }

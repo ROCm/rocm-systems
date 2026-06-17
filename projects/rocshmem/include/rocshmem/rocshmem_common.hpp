@@ -145,7 +145,7 @@ void set_internal_ctx(rocshmem_ctx_t *ctx);
  */
 //TODO: this should remain internal?
 enum class BackendType { GDA_BACKEND, RO_BACKEND, IPC_BACKEND };
-BackendType get_backend_type();
+BackendType rocshmem_query_backend_type();
 
 typedef uint64_t *rocshmem_team_t;
 
@@ -153,22 +153,32 @@ namespace device {
     extern "C" {
         extern __constant__ rocshmem_team_t
             __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
+        extern __constant__ rocshmem_team_t
+            __attribute__((visibility("default"))) ROCSHMEM_TEAM_SHARED;
     }
 }
 namespace host {
     extern rocshmem_team_t ROCSHMEM_TEAM_WORLD;
+    extern rocshmem_team_t ROCSHMEM_TEAM_SHARED;
 }
 
 #if __HIP_DEVICE_COMPILE__
 using device::ROCSHMEM_TEAM_WORLD;
+using device::ROCSHMEM_TEAM_SHARED;
 #else
 using host::ROCSHMEM_TEAM_WORLD;
+using host::ROCSHMEM_TEAM_SHARED;
 #endif
 
 /**
  * Used internally to update the ROCSHMEM_TEAM_WORLD constant
  */
 void set_team_world_device(rocshmem_team_t team_world);
+
+/**
+ * Used internally to update the ROCSHMEM_TEAM_SHARED constant
+ */
+void set_team_shared_device(rocshmem_team_t team_shared);
 
 const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;
 

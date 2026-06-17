@@ -85,17 +85,6 @@ target_include_directories(
 set_property(TARGET ${OAM_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}")
 set_property(TARGET ${OAM_TARGET} PROPERTY VERSION "${SO_VERSION_STRING}")
 
-## If the library is a release, strip the target library
-if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    if(${BUILD_SHARED_LIBS}) #striping only for .so
-        add_custom_command(
-            TARGET ${OAM_TARGET}
-            POST_BUILD
-            COMMAND ${CMAKE_STRIP} lib${OAM_TARGET}.so
-        )
-    endif()
-endif()
-
 target_include_directories(
     ${OAM_TARGET}
     PUBLIC

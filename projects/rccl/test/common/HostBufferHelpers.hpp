@@ -146,6 +146,34 @@ bool verifyHostBufferData(const void* buffer,
     return true;
 }
 
+// ============================================================================
+// Standard Test Pattern Factory
+// ============================================================================
+
+/**
+ * @brief Returns a callable that generates the standard sequential byte pattern.
+ *
+ * Produces: static_cast<uint8_t>((seed + index) % 256)
+ *
+ * Intended for use with fillHostBufferWithPattern, verifyHostBufferData,
+ * initializeBufferWithPattern, and verifyBufferData. Centralises the formula
+ * so call sites do not repeat it.
+ *
+ * Example:
+ * @code
+ * fillHostBufferWithPattern<uint8_t>(buf, sz, makeBytePattern(seed));
+ * verifyHostBufferData<uint8_t>(buf, sz, makeBytePattern(seed));
+ * verifyHostBufferData<uint8_t>(buf, sz, makeBytePattern(seed), 0, 0.0, &errIdx, &errExp, &errGot);
+ * @endcode
+ *
+ * @param seed Starting offset for the pattern.
+ * @return Lambda: uint8_t f(size_t index)
+ */
+inline auto makeBytePattern(int seed)
+{
+    return [seed](size_t i) { return static_cast<uint8_t>((seed + i) % 256); };
+}
+
 } // namespace RCCLTestHelpers
 
 #endif // HOST_BUFFER_HELPERS_HPP

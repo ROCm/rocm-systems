@@ -16,6 +16,7 @@ hipMallocArray API test scenarios
 #include <hip_array_common.hh>
 #include <limits>
 #include <numeric>
+#include <string>
 #include "hipArrayCommon.hh"
 
 static constexpr size_t NUM_W{4};
@@ -405,10 +406,12 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocArray_happy, uint, int, int4, ushort, short
       HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayTextureGather));
       testArrayAsTextureWithGather<TestType>(arrayPtr, width, height);
     } else {
-      SUCCEED(
+      std::string const skip_msg = std::string(
           "tex2Dgather is not supported for gfx90a, Hence"
-          "skipping the testcase for this device "
-          << device);
+          "skipping the testcase for this device ") +
+          std::to_string(device);
+      WARN(skip_msg.c_str());
+      return;
     }
   }
 #endif

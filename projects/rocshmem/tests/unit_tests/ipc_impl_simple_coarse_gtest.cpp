@@ -201,3 +201,75 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         std::make_tuple(1,  1,   1048576))
 );
+
+//=============================================================================
+// SDMA variants
+//=============================================================================
+#if defined(USE_SDMA)
+
+class SdmaBlockSimpleCoarse : public IPCImplSimpleCoarse<IpcSdmaTestConfig> {
+  public:
+    void copy(IPCImplSimpleCoarse::TestType test, dim3 grid, dim3 block) override {
+        execute(test, kernel_simple_coarse_copy_block<IpcSdmaImpl>, grid, block);
+    }
+};
+TEST_P(SdmaBlockSimpleCoarse, write) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    write(grid, block, std::get<2>(GetParam()));
+}
+TEST_P(SdmaBlockSimpleCoarse, read) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    read(grid, block, std::get<2>(GetParam()));
+}
+INSTANTIATE_TEST_SUITE_P(SdmaSimpleCoarse, SdmaBlockSimpleCoarse, ::testing::Values(
+    std::make_tuple(1, 1024, 32),
+    std::make_tuple(1, 1,    1048576),
+    std::make_tuple(1, 64,   1048576),
+    std::make_tuple(1, 256,  1048576),
+    std::make_tuple(1, 1024, 1048576)));
+
+class SdmaWarpSimpleCoarse : public IPCImplSimpleCoarse<IpcSdmaTestConfig> {
+  public:
+    void copy(IPCImplSimpleCoarse::TestType test, dim3 grid, dim3 block) override {
+        execute(test, kernel_simple_coarse_copy_warp<IpcSdmaImpl>, grid, block);
+    }
+};
+TEST_P(SdmaWarpSimpleCoarse, write) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    write(grid, block, std::get<2>(GetParam()));
+}
+TEST_P(SdmaWarpSimpleCoarse, read) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    read(grid, block, std::get<2>(GetParam()));
+}
+INSTANTIATE_TEST_SUITE_P(SdmaSimpleCoarse, SdmaWarpSimpleCoarse, ::testing::Values(
+    std::make_tuple(1, 64,  32),
+    std::make_tuple(1, 1,   1048576),
+    std::make_tuple(1, 16,  1048576),
+    std::make_tuple(1, 32,  1048576),
+    std::make_tuple(1, 64,  1048576)));
+
+class SdmaThreadSimpleCoarse : public IPCImplSimpleCoarse<IpcSdmaTestConfig> {
+  public:
+    void copy(IPCImplSimpleCoarse::TestType test, dim3 grid, dim3 block) override {
+        execute(test, kernel_simple_coarse_copy<IpcSdmaImpl>, grid, block);
+    }
+};
+TEST_P(SdmaThreadSimpleCoarse, write) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    write(grid, block, std::get<2>(GetParam()));
+}
+TEST_P(SdmaThreadSimpleCoarse, read) {
+    dim3 grid = dim3(std::get<0>(GetParam()), 1, 1);
+    dim3 block = dim3(std::get<1>(GetParam()), 1, 1);
+    read(grid, block, std::get<2>(GetParam()));
+}
+INSTANTIATE_TEST_SUITE_P(SdmaSimpleCoarse, SdmaThreadSimpleCoarse, ::testing::Values(
+    std::make_tuple(1, 1, 1048576)));
+
+#endif  // USE_SDMA

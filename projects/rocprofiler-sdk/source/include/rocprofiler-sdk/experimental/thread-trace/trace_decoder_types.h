@@ -160,7 +160,7 @@ typedef struct rocprofiler_thread_trace_decoder_wave_t
     uint8_t cu;        ///< CU id (gfx9) or wgp id (gfx10+). This is always the target_cu.
     uint8_t simd;      ///< SIMD ID [0,3].
     uint8_t wave_id;   ///< Wave slot ID within SIMD.
-    uint8_t contexts;  ///< Counts how many CWSR events have occured during the wave lifetime.
+    uint8_t contexts;  ///< Counts how many CWSR events have occurred during the wave lifetime.
 
     uint32_t _rsvd1;
     uint32_t _rsvd2;

@@ -29,6 +29,8 @@ hsaKmtFreeMemory;
 hsaKmtAvailableMemory;
 hsaKmtRegisterMemory;
 hsaKmtRegisterMemoryToNodes;
+hsaKmtImportExternalSemaphore;
+hsaKmtDestroyExternalSemaphore;
 hsaKmtRegisterMemoryWithFlags;
 hsaKmtRegisterGraphicsHandleToNodes;
 hsaKmtShareMemory;
@@ -95,11 +97,14 @@ hsaKmtAisReadWriteFile;
 hsaKmtGetMemoryHandle;
 #endif
 hsaKmtHandleImport;
+hsaKmtHandleExport;
 hsaKmtMemoryVaMap;
 hsaKmtMemoryVaUnmap;
 hsaKmtMemHandleFree;
 hsaKmtMemoryGetCpuAddr;
 hsaKmtMemoryCpuMap;
+hsaKmtSetSigbusDelay;
+hsaKmtGetAmdGPUDeviceFd;
 local: *;
 };
 

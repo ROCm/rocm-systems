@@ -21,5 +21,6 @@ target_link_libraries(
 
 gtest_discover_tests(
     utility_tests
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION "${AQLPROFILE_DEFAULT_FAIL_REGEX}")

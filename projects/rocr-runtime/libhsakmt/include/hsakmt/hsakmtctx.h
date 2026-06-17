@@ -32,8 +32,6 @@
 extern "C" {
 #endif
 
-typedef struct _HsaKFDContext HsaKFDContext;
-
 /**
   The context-aware version for openning the kfd device.
 
@@ -371,6 +369,26 @@ hsaKmtCreateQueueExtCtx(
     HSAuint32           SdmaEngineId,     //IN
     void*               QueueAddress,     //IN
     HSAuint64           QueueSizeInBytes, //IN
+    HsaEvent*           Event,            //IN
+    HsaQueueResource*   QueueResource     //OUT
+    );
+
+/**
+  Creates a GPU queue with user-mode access rights
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtCreateQueueV2Ctx(
+    HsaKFDContext       *ctx,             //IN
+    HSAuint32           NodeId,           //IN
+    HSA_QUEUE_TYPE      Type,             //IN
+    HSAuint32           QueuePercentage,  //IN
+    HSA_QUEUE_PRIORITY  Priority,         //IN
+    HSAuint32           SdmaEngineId,     //IN
+    void*               QueueAddress,     //IN
+    HSAuint64           QueueSizeInBytes, //IN
+    HSAuint64           MetaDataQueueSizeInBytes, //IN
     HsaEvent*           Event,            //IN
     HsaQueueResource*   QueueResource     //OUT
     );

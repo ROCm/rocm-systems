@@ -53,7 +53,7 @@ amdsmi_status_t AMDSmiSocket::get_processor_count(uint32_t* processor_count) con
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t AMDSmiSocket::get_processor_count(processor_type_t type,
+amdsmi_status_t AMDSmiSocket::get_processor_count(amdsmi_processor_type_t type,
                                                   uint32_t* processor_count) const {
   amdsmi_status_t ret = AMDSMI_STATUS_SUCCESS;
   switch (type) {

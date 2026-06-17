@@ -4,13 +4,13 @@
 version: 2
 
 sphinx:
-   configuration: docs/conf.py
+   configuration: projects/rocshmem/docs/conf.py
 
 formats: []
 
 python:
    install:
-   - requirements: docs/sphinx/requirements.txt
+   - requirements: projects/rocshmem/docs/sphinx/requirements.txt
 
 build:
    os: ubuntu-22.04

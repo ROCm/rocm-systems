@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/agent_manager.cpp
@@ -15,6 +15,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
@@ -45,6 +46,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/mpi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.hpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
@@ -63,6 +65,7 @@ target_sources(rocprofiler-systems-core-library PRIVATE ${core_sources} ${core_h
 add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
+add_subdirectory(progress)
 add_subdirectory(rocpd)
 add_subdirectory(trace_cache)
 
@@ -99,6 +102,15 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
+)
+
+# Preserve frame pointers so that libunwind can reliably unwind through
+# this code when the causal profiling sampling signal fires.  Without this,
+# optimized Clang/amdclang++ builds produce code that libunwind cannot
+# unwind past, causing causal experiments to stall.
+target_compile_options(
+    rocprofiler-systems-core-library
+    PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fno-omit-frame-pointer>
 )
 
 set_target_properties(

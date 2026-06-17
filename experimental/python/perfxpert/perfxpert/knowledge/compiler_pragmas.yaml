@@ -1,0 +1,157 @@
+# LLVM loop-hint pragma catalog — Phase 10 advanced specialists.
+#
+# Only the three allowlisted `#pragma clang loop unroll[_count|disable]`
+# variants are suggested by `pragma.suggest_pragmas_for_kernel`. The
+# remaining entries (vectorize, interleave, distribute, pipeline,
+# vectorize_predicate) are kept with `allowlist: false, gpu_applicable:
+# false` so the fence can *see* them and explicitly reject them — the
+# LLVM amdgpu backend ignores these on HIP kernels. Source: LLVM
+# loop-hint reference + ROCm clang docs (clang/lib/CodeGen/CGLoopInfo).
+#
+# Fields:
+#   pragma              short id (used as key in explain_pragma)
+#   syntax              the literal #pragma line authors paste into source
+#   description         one-line human summary
+#   gpu_applicable      bool — true if LLVM amdgpu honours the hint
+#   allowlist           bool — true if perfxpert may ever suggest it
+#   trigger_signal      short name of the decision signal
+#   trigger_threshold   human-readable rule text
+#   factor_sweep        list[int]; empty when no numeric factor
+#   expected_impact     rough speedup band (display only)
+#   risk                low|medium|high
+#   source_citation     where the rule comes from
+#   applies_to_gfx      target GPU families
+
+- pragma: "clang_loop_unroll_full"
+  syntax: "#pragma clang loop unroll(full)"
+  description: "Fully unroll the loop (compile-time-known trip count)."
+  gpu_applicable: true
+  allowlist: true
+  trigger_signal: "literal_trip_count_on_hotspot"
+  trigger_threshold: "Tier-0 source loop with compile-time-known trip count <= 32 on top-3 hotspot (>=10% total time)"
+  factor_sweep: []
+  expected_impact: "1.05x-1.3x"
+  risk: "low"
+  source_citation: "LLVM loop-hint reference + ROCm clang CGLoopInfo"
+  applies_to_gfx: ["gfx90a", "gfx942", "gfx950"]
+
+- pragma: "clang_loop_unroll_count"
+  syntax: "#pragma clang loop unroll_count(N)"
+  description: "Partially unroll the loop by factor N; sweep [2,4,8]."
+  gpu_applicable: true
+  allowlist: true
+  trigger_signal: "valu_stalled_small_body"
+  trigger_threshold: "valu_util_pct > 0.50 AND vgpr_per_thread < 64 AND loop_body_size < 20"
+  factor_sweep: [2, 4, 8]
+  expected_impact: "1.1x-1.5x"
+  risk: "medium"
+  source_citation: "LLVM loop-hint reference + ROCm clang CGLoopInfo"
+  applies_to_gfx: ["gfx90a", "gfx942", "gfx950"]
+
+- pragma: "clang_loop_unroll_disable"
+  syntax: "#pragma clang loop unroll(disable)"
+  description: "Disable loop unrolling to relieve register pressure."
+  gpu_applicable: true
+  allowlist: true
+  trigger_signal: "high_vgpr_pressure"
+  trigger_threshold: "vgpr_per_thread >= 0.80 * arch_max AND (scratch_size > 0 OR waves_per_eu <= 2)"
+  factor_sweep: []
+  expected_impact: "1.05x-1.2x"
+  risk: "low"
+  source_citation: "LLVM loop-hint reference + ROCm clang CGLoopInfo"
+  applies_to_gfx: ["gfx90a", "gfx942", "gfx950"]
+
+# -- explicitly rejected (visible to fence; never suggested) --------------
+# LLVM amdgpu backend ignores these on HIP device code; surfacing them
+# would hallucinate a benefit that never materialises.
+
+- pragma: "clang_loop_vectorize"
+  syntax: "#pragma clang loop vectorize(enable)"
+  description: "CPU vectorizer hint — amdgpu ignores (no effect on HIP kernels)."
+  gpu_applicable: false
+  allowlist: false
+  trigger_signal: "n/a"
+  trigger_threshold: "n/a"
+  factor_sweep: []
+  expected_impact: "0x (no-op on GPU)"
+  risk: "low"
+  source_citation: "LLVM CGLoopInfo (amdgpu skip)"
+  applies_to_gfx: []
+
+- pragma: "clang_loop_vectorize_width"
+  syntax: "#pragma clang loop vectorize_width(N)"
+  description: "CPU vectorizer width — amdgpu ignores."
+  gpu_applicable: false
+  allowlist: false
+  trigger_signal: "n/a"
+  trigger_threshold: "n/a"
+  factor_sweep: []
+  expected_impact: "0x (no-op on GPU)"
+  risk: "low"
+  source_citation: "LLVM CGLoopInfo (amdgpu skip)"
+  applies_to_gfx: []
+
+- pragma: "clang_loop_interleave"
+  syntax: "#pragma clang loop interleave(enable)"
+  description: "CPU vector interleave — amdgpu ignores."
+  gpu_applicable: false
+  allowlist: false
+  trigger_signal: "n/a"
+  trigger_threshold: "n/a"
+  factor_sweep: []
+  expected_impact: "0x (no-op on GPU)"
+  risk: "low"
+  source_citation: "LLVM CGLoopInfo (amdgpu skip)"
+  applies_to_gfx: []
+
+- pragma: "clang_loop_interleave_count"
+  syntax: "#pragma clang loop interleave_count(N)"
+  description: "CPU vector interleave count — amdgpu ignores."
+  gpu_applicable: false
+  allowlist: false
+  trigger_signal: "n/a"
+  trigger_threshold: "n/a"
+  factor_sweep: []
+  expected_impact: "0x (no-op on GPU)"
+  risk: "low"
+  source_citation: "LLVM CGLoopInfo (amdgpu skip)"
+  applies_to_gfx: []
+
+- pragma: "clang_loop_distribute"
+  syntax: "#pragma clang loop distribute(enable)"
+  description: "LoopDistribution pass — not run in the amdgpu pipeline."
+  gpu_applicable: false
+  allowlist: false
+  trigger_signal: "n/a"
+  trigger_threshold: "n/a"
+  factor_sweep: []
+  expected_impact: "0x (no-op on GPU)"
+  risk: "low"
+  source_citation: "LLVM CGLoopInfo"
+  applies_to_gfx: []
+
+- pragma: "clang_loop_pipeline"
+  syntax: "#pragma clang loop pipeline(disable)"
+  description: "Hardware-loop software pipelining — not applicable to amdgpu."
+  gpu_applicable: false
+  allowlist: false
+  trigger_signal: "n/a"
+  trigger_threshold: "n/a"
+  factor_sweep: []
+  expected_impact: "0x (no-op on GPU)"
+  risk: "low"
+  source_citation: "LLVM CGLoopInfo"
+  applies_to_gfx: []
+
+- pragma: "clang_loop_vectorize_predicate"
+  syntax: "#pragma clang loop vectorize_predicate(enable)"
+  description: "Predicated vectorization — CPU-only, amdgpu ignores."
+  gpu_applicable: false
+  allowlist: false
+  trigger_signal: "n/a"
+  trigger_threshold: "n/a"
+  factor_sweep: []
+  expected_impact: "0x (no-op on GPU)"
+  risk: "low"
+  source_citation: "LLVM CGLoopInfo (amdgpu skip)"
+  applies_to_gfx: []

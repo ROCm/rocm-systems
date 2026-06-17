@@ -114,6 +114,24 @@ int main (int argc, char **argv)
 
     std::cout << rank << ": rocshmem_init_attr SUCCESS\n";
 
+    if (world_rank == 0) {
+      int spec_major, spec_minor;
+      rocshmem_info_get_version(&spec_major, &spec_minor);
+
+      char name[ROCSHMEM_MAX_NAME_LEN];
+      rocshmem_info_get_name(name);
+
+      int vendor_major, vendor_minor, vendor_patch;
+      rocshmem_vendor_get_version_info(&vendor_major, &vendor_minor,
+                                       &vendor_patch);
+
+      std::cout << "OpenSHMEM spec version: " << spec_major << "."
+                << spec_minor << "\n";
+      std::cout << "Vendor name: " << name << "\n";
+      std::cout << "Vendor version: " << vendor_major << "."
+                << vendor_minor << "." << vendor_patch << "\n";
+    }
+
     rocshmem_finalize();
     MPI_Comm_free (&newcomm);
     MPI_Finalize();

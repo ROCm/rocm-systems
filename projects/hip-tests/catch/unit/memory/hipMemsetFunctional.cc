@@ -364,8 +364,9 @@ template <typename T> void partialMemsetTest2D(T valA, T valB, size_t width, siz
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_2D) {
 
-  for (auto widthOffset = 8; widthOffset <= 128; widthOffset *= 2) {
-    for (auto heightOffset = 8; heightOffset <= 128; heightOffset *= 2) {
+  const auto maxOffset = isQuickLevel() ? 32 : 128;
+  for (auto widthOffset = 8; widthOffset <= maxOffset; widthOffset *= 2) {
+    for (auto heightOffset = 8; heightOffset <= maxOffset; heightOffset *= 2) {
       SECTION("hipMemset2D - Partial Set") {
         partialMemsetTest2D('a', 'b', 200, 200, widthOffset, heightOffset, false);
       }
@@ -414,15 +415,12 @@ void check_device_data_3D(hipPitchedPtr& devPitchedPtr, T value, hipExtent exten
   }
 }
 
-// Helper function for allocating memory, setting data with the specified 3D memset API and then
-// checking result of operation.
+// Helper function that sets data on a pre-allocated buffer with the specified 3D memset API and
+// then checks the result of the operation.
 template <typename T>
 void checkMemset3D(hipPitchedPtr& devPitchedPtr, T value, hipExtent extent, bool async = false) {
   hipStream_t stream{nullptr};
   HIP_CHECK(hipStreamCreate(&stream));
-  if (devPitchedPtr.ptr == nullptr) {
-    HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
-  }
   if (!async) {
     INFO("Testing hipMemset3D call");
     HIP_CHECK(hipMemset3D(devPitchedPtr, value, extent));
@@ -439,40 +437,32 @@ void checkMemset3D(hipPitchedPtr& devPitchedPtr, T value, hipExtent extent, bool
 
 void check_memset_3D(std::string sectionStr, size_t width, size_t height, size_t depth,
                      char value) {
-  hipPitchedPtr devPitchedPtr;
-  hipExtent fullExtent;
   constexpr char fullVal = 0x21;
   hipExtent extent = make_hipExtent(width, height, depth);
-  // Check if any of the dimensions are zero
+  // Check if any of the dimensions are zero.
   bool anyZero = width * height * depth == 0;
+
+  hipExtent allocExtent = anyZero ? make_hipExtent(FULL_DIM, FULL_DIM, FULL_DIM) : extent;
+  hipPitchedPtr devPitchedPtr{};
+  HIP_CHECK(hipMalloc3D(&devPitchedPtr, allocExtent));
   if (anyZero) {
-    // If they are zero then set a full region with memset value to later check if it's changed.
-    devPitchedPtr.ptr = nullptr;
-    fullExtent = make_hipExtent(FULL_DIM, FULL_DIM, FULL_DIM);
-    checkMemset3D(devPitchedPtr, fullVal, fullExtent, false);
+    checkMemset3D(devPitchedPtr, fullVal, allocExtent, false);
   }
   SECTION("hipMemset3D - " + sectionStr) {
-    if (!anyZero) {
-      devPitchedPtr.ptr = nullptr;
-    }
     checkMemset3D(devPitchedPtr, value, extent, false);
     if (anyZero) {
-      // Check to make sure memsets with a zero dimension did not affect above set region.
-      check_device_data_3D(devPitchedPtr, fullVal, fullExtent);
+      // Check to make sure memsets with a zero dimension did not affect the region set above.
+      check_device_data_3D(devPitchedPtr, fullVal, allocExtent);
     }
-    HIP_CHECK(hipFree(devPitchedPtr.ptr));
   }
   SECTION("hipMemset3DAsync - " + sectionStr) {
-    if (!anyZero) {
-      devPitchedPtr.ptr = nullptr;
-    }
     checkMemset3D(devPitchedPtr, value, extent, true);
     if (anyZero) {
-      // Check to make sure memsets with a zero dimension did not affect above set region.
-      check_device_data_3D(devPitchedPtr, fullVal, fullExtent);
+      // Check to make sure memsets with a zero dimension did not affect the region set above.
+      check_device_data_3D(devPitchedPtr, fullVal, allocExtent);
     }
-    HIP_CHECK(hipFree(devPitchedPtr.ptr));
   }
+  HIP_CHECK(hipFree(devPitchedPtr.ptr));
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroValue_3D) {
@@ -505,10 +495,10 @@ void partialMemsetTest3D(T valA, T valB, size_t width, size_t height, size_t dep
   size_t subWidth{width - widthOffset};
   size_t subHeight{height - heightOffset};
   size_t subDepth{depth - depthOffset};
-  hipPitchedPtr devPitchedPtr;
-  devPitchedPtr.ptr = nullptr;
   hipExtent extent = make_hipExtent(width * sizeof(T), height, depth);
   hipExtent subExtent = make_hipExtent(subWidth * sizeof(T), subHeight, subDepth);
+  hipPitchedPtr devPitchedPtr{};
+  HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
 
   // Set entire region to be first value.
   INFO("Setting full cuboid region");
@@ -542,9 +532,11 @@ void partialMemsetTest3D(T valA, T valB, size_t width, size_t height, size_t dep
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_3D) {
 
-  for (auto widthOffset = 8; widthOffset <= 128; widthOffset *= 2) {
-    for (auto heightOffset = 8; heightOffset <= 128; heightOffset *= 2) {
-      for (auto depthOffset = 2; depthOffset <= 5; depthOffset++) {
+  const auto maxWH = isQuickLevel() ? 32 : 128;
+  const auto maxD = isQuickLevel() ? 3 : 5;
+  for (auto widthOffset = 8; widthOffset <= maxWH; widthOffset *= 2) {
+    for (auto heightOffset = 8; heightOffset <= maxWH; heightOffset *= 2) {
+      for (auto depthOffset = 2; depthOffset <= maxD; depthOffset++) {
         SECTION("hipMemset3D - Partial Set") {
           partialMemsetTest3D('a', 'b', 200, 200, 10, widthOffset, heightOffset, depthOffset,
                               false);

@@ -18,8 +18,12 @@ ENV LIBRARY_PATH="/usr/local/lib:/usr/local/lib64"
 ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64"
 ENV CMAKE_PREFIX_PATH="/usr/local"
 
+# Add git-core repository to get latest versions of git
 RUN apt-get update && \
-    apt-get dist-upgrade -y && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository ppa:git-core/ppa
+
+RUN apt-get dist-upgrade -y && \
     apt-get install -y autoconf autotools-dev bash-completion build-essential bzip2 cmake curl environment-modules git-core gnupg2 gzip libtool locales lsb-release m4 python3-pip unzip wget zip zlib1g-dev && \
     apt-get autoclean && \
     locale -a

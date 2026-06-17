@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: amdsmi
-Source: https://github.com/ROCm/amdsmi.git
+Source: https://github.com/ROCm/rocm-systems.git
 
 Files: *
 Copyright: @CURRENT_YEAR@ Advanced Micro Devices, Inc. All rights reserved.

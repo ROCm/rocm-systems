@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "comm.h"
 #include "core.h"
@@ -10,10 +11,9 @@
 #include "net.h"
 #include "param.h"
 #include "profiler/net_socket.h"
+#include "os.h"
 
-#include <pthread.h>
 #include <stdlib.h>
-#include <poll.h>
 #include <limits.h>
 #include <fcntl.h>
 #include <mutex>
@@ -34,7 +34,7 @@ static ncclResult_t ncclNetSocketGetPciPath(char* devName, char** pciPath) {
   char devicePath[PATH_MAX];
   snprintf(devicePath, PATH_MAX, "/sys/class/net/%s/device", devName);
   // May return NULL if the file doesn't exist.
-  *pciPath = realpath(devicePath, NULL);
+  *pciPath = ncclOsRealpath(devicePath, NULL);
   return ncclSuccess;
 }
 
@@ -88,6 +88,58 @@ ncclResult_t ncclNetSocketDevices(int* ndev) {
 static ncclResult_t ncclNetSocketGetSpeed(char* devName, int* speed) {
   ncclResult_t ret = ncclSuccess;
   *speed = 0;
+
+  #if defined(NCCL_OS_WINDOWS)
+  // On Windows, use GetAdaptersAddresses to get network interface speed
+  ULONG bufferSize = 15000;
+  IP_ADAPTER_ADDRESSES* adapterAddresses = NULL;
+  ULONG result;
+  int attempts = 0;
+
+  do {
+    adapterAddresses = (IP_ADAPTER_ADDRESSES*)malloc(bufferSize);
+    if (adapterAddresses == NULL) {
+      WARN("Failed to allocate memory for adapter addresses");
+      *speed = 10000;
+      return ncclSuccess;
+    }
+
+    result = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_PREFIX, NULL, adapterAddresses, &bufferSize);
+    if (result == ERROR_BUFFER_OVERFLOW) {
+      free(adapterAddresses);
+      adapterAddresses = NULL;
+    }
+    attempts++;
+  } while (result == ERROR_BUFFER_OVERFLOW && attempts < 3);
+
+  if (result == NO_ERROR) {
+    // Iterate through adapters to find the matching one
+    for (IP_ADAPTER_ADDRESSES* adapter = adapterAddresses; adapter != NULL; adapter = adapter->Next) {
+      // Convert adapter friendly name to UTF-8 for comparison
+      char adapterName[MAX_IF_NAME_SIZE];
+      WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, adapterName, sizeof(adapterName), NULL, NULL);
+
+      // Check if this is the adapter we're looking for
+      if (strstr(adapterName, devName) != NULL || strstr(devName, adapterName) != NULL) {
+        // TransmitLinkSpeed is in bits per second, convert to Mbps
+        if (adapter->TransmitLinkSpeed > 0) {
+          *speed = (int)(adapter->TransmitLinkSpeed / 1000000);
+          INFO(NCCL_NET, "Found network interface %s with speed %d Mbps", devName, *speed);
+          break;
+        }
+      }
+    }
+  }
+
+  if (adapterAddresses) {
+    free(adapterAddresses);
+  }
+
+  if (*speed <= 0) {
+    INFO(NCCL_NET, "Could not get speed for interface %s. Defaulting to 10 Gbps.", devName);
+    *speed = 10000;
+  }
+#elif defined(NCCL_OS_LINUX)
   char speedPath[PATH_MAX];
   snprintf(speedPath, sizeof(speedPath), "/sys/class/net/%s/speed", devName);
   int fd = -1;
@@ -106,6 +158,7 @@ static ncclResult_t ncclNetSocketGetSpeed(char* devName, int* speed) {
     *speed = 10000;
   }
   if (fd != -1) SYSCHECK(close(fd), "close");
+#endif
   return ret;
 }
 
@@ -126,6 +179,10 @@ ncclResult_t ncclNetSocketGetProperties(int dev, ncclNetProperties_t* props) {
   props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
   props->maxCollBytes = MAX_COLLNET_SIZE;
   props->maxMultiRequestSize = 1;
+  props->railId = NCCL_NET_ID_UNDEF;
+  props->planeId = NCCL_NET_ID_UNDEF;
+  props->vProps.ndevs = 1;
+  props->vProps.devs[0] = dev;
   return ncclSuccess;
 }
 
@@ -225,7 +282,7 @@ struct ncclNetSocketComm {
   int nextSock;
   void* inlineData;
   struct ncclNetSocketRequest requests[MAX_REQUESTS];
-  pthread_t helperThread[MAX_THREADS];
+  std::thread helperThread[MAX_THREADS];
   struct ncclNetSocketThreadResources threadResources[MAX_THREADS];
 };
 
@@ -251,7 +308,7 @@ void* persistentSocketThread(void *args_) {
             if (!eHandle[i+j]) {
               ncclProfilerNetSockDescr_v1_t data;
               data.type = ncclProfileSocket;
-              data.sock.fd = r->sock->fd;
+              data.sock.fd = r->sock->socketDescriptor;
               data.sock.op = r->op;
               data.sock.length = r->size;
               ncclProfilerFunction(&eHandle[i+j], ncclProfilerNetEventStart, resource->pInfo->pHandle, NCCL_PROFILER_NET_TYPE_SOCK | 1, &data);
@@ -303,7 +360,7 @@ ncclResult_t ncclNetSocketGetNsockNthread(int dev, int* ns, int* nt) {
     snprintf(vendorPath, PATH_MAX, "/sys/class/net/%s/device/vendor", ncclNetSocketDevs[dev].devName);
     // Coverity is wrong.  NULL second argument to realpath() is OK by POSIX.1-2008.
     // coverity[alias_transfer:FALSE]
-    char* rPath = realpath(vendorPath, NULL);
+    char* rPath = ncclOsRealpath(vendorPath, NULL);
     fd = open(rPath, O_RDONLY);
     free(rPath);
     if (fd == -1) {
@@ -508,7 +565,7 @@ ncclResult_t ncclNetSocketGetTask(struct ncclNetSocketComm* comm, struct ncclPro
 #ifdef NCCL_ENABLE_NET_PROFILING
     res->pInfo = pInfo;
 #endif
-    PTHREADCHECK(pthread_create(comm->helperThread+tid, NULL, persistentSocketThread, res), "pthread_create");
+    comm->helperThread[tid] = std::thread(persistentSocketThread, res);
     ncclSetThreadName(comm->helperThread[tid], "NCCL Sock%c%1u%2u%2u", op == NCCL_SOCKET_SEND ? 'S' : 'R', comm->dev, tid, comm->cudaDev);
   }
   struct ncclNetSocketTask* r = queue->tasks+queue->next;
@@ -617,7 +674,7 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
       if (!r->pInfo.eHandle) {
         ncclProfilerNetSockDescr_v1_t data;
         data.type = ncclProfileSocket;
-        data.sock.fd = r->ctrlSock->fd;
+        data.sock.fd = r->ctrlSock->socketDescriptor;
         data.sock.op = r->op;
         data.sock.length = r->size;
         ncclProfilerFunction(&r->pInfo.eHandle, ncclProfilerNetEventStart, r->pInfo.pHandle, NCCL_PROFILER_NET_TYPE_SOCK | 1, &data);
@@ -689,13 +746,13 @@ ncclResult_t ncclNetSocketClose(void* opaqueComm) {
   if (comm) {
     for (int i=0; i<comm->nThreads; i++) {
       struct ncclNetSocketThreadResources* res = comm->threadResources+i;
-      if (comm->helperThread[i]) {
+      if (comm->helperThread[i].joinable()) {
         {
           std::lock_guard<std::mutex> lock(res->threadMutex);
           res->stop = 1;
           res->threadCond.notify_one();
         }
-        PTHREADCHECK(pthread_join(comm->helperThread[i], NULL), "pthread_join");
+        comm->helperThread[i].join();
       }
       free(res->threadTaskQueue.tasks);
     }

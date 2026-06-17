@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2016-2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_SHM_H_
 #define NCCL_SHM_H_
@@ -10,7 +11,7 @@
 #include "comm.h"
 
 struct shmLegacyIpc {
-  char shmSuffix[7];
+  char shmSuffix[32];
   ncclShmHandle_t handle;
   size_t shmSize;
 };

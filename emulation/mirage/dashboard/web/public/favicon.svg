@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none">
+    <defs>
+        <path id="amdArrowOfficial" d="M431.35 416.39L15.28 0L1530 0L1530 1515.66L1113.92 1099.32L1113.92 416.39L431.35 416.39ZM430.87 499.83L2.49 928.44L2.49 1528.41L602.04 1528.41L1030.39 1099.81L430.87 1099.81L430.87 499.83Z" />
+
+        <linearGradient id="mirrorSheen" x1="154" y1="112" x2="372" y2="326" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.92" />
+            <stop offset="42%" stop-color="#FFFFFF" stop-opacity="0.18" />
+            <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+        </linearGradient>
+
+        <filter id="heatRipple" x="-30%" y="-30%" width="160%" height="160%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="2" seed="6" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="10" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+
+        <filter id="redBlur" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="10" />
+        </filter>
+
+        <filter id="whiteBlur" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="5" />
+        </filter>
+    </defs>
+
+    <g opacity="0.22" filter="url(#redBlur)">
+        <use href="#amdArrowOfficial" transform="translate(14 10) scale(0.334)" fill="#ED1C24" />
+    </g>
+
+    <g opacity="0.18" filter="url(#heatRipple)">
+        <use href="#amdArrowOfficial" transform="translate(-9 -5) scale(0.334)" fill="#FFFFFF" />
+    </g>
+
+    <g opacity="0.24" filter="url(#whiteBlur)">
+        <use href="#amdArrowOfficial" transform="translate(-6 -7) scale(0.334)" fill="#FFFFFF" />
+    </g>
+
+    <g>
+        <use href="#amdArrowOfficial" transform="translate(0 0) scale(0.334)" fill="#ED1C24" />
+        <use href="#amdArrowOfficial" transform="translate(0 0) scale(0.334)" fill="url(#mirrorSheen)" opacity="0.28" />
+    </g>
+</svg>

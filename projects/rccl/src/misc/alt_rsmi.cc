@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <vector>
+#include <cstdlib>
 #include <limits>
 #include <thread>
 #include "alt_rsmi.h"
@@ -61,6 +62,7 @@ struct ARSMI_systemNode {
 #endif
 
 ARSMI_LOCAL const char *kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
+ARSMI_LOCAL const char *kDrmClassRoot = "/sys/class/drm";
 static const uint32_t kAmdGpuId = 0x1002;
 
 // Vector containing data about each node, ordered by bdf ID
@@ -369,6 +371,183 @@ int ARSMI_topo_get_link_info(uint32_t dv_ind_src, uint32_t dv_ind_dst,
     return 0;
 }
 
+int ARSMI_get_fw_version(uint32_t /*dv_ind*/, uint64_t *fw_version)
+{
+    if (fw_version == nullptr) return EINVAL;
+    // We assume that all GPUs on the system run the same firmware image.
+    // dv_ind is accepted for API consistency with the amdsmi path but is not
+    // used: MEC firmware is a system-wide property loaded once by the driver.
+    // Search all DRM cards for a readable sysfs entry rather than mapping
+    // dv_ind to a specific card — card0 is not guaranteed to expose it.
+    constexpr uint32_t maxCards = 128;
+    *fw_version = 0;
+    for (uint32_t card = 0; card < maxCards; card++) {
+        char path[256];
+        snprintf(path, sizeof(path),
+                 "%s/card%u/device/fw_version/mec_fw_version", kDrmClassRoot, card);
+        FILE *fp = fopen(path, "r");
+        if (fp != nullptr) {
+            char line[64];
+            if (fgets(line, sizeof(line), fp) != nullptr)
+                *fw_version = strtoull(line, nullptr, 16);
+            fclose(fp);
+            return 0;
+        }
+    }
+    return 0;  // not found is not an error; caller receives 0
+}
+
+// ---------------------------------------------------------------------------
+// Fabric helpers — /sys/class/drm/<card>/device/ualink/
+// ---------------------------------------------------------------------------
+
+// Find the DRM card number whose PCI slot name matches the given BDF.
+// Returns the card number on success, -1 if not found.
+static int findCardForBdf(uint32_t domain, uint8_t bus, uint8_t device, uint8_t function)
+{
+    for (uint32_t card = 0; card < 128; card++) {
+        char path[256];
+        snprintf(path, sizeof(path), "%s/card%u/device/uevent", kDrmClassRoot, card);
+        FILE *fp = fopen(path, "r");
+        if (fp == nullptr) continue;
+
+        char line[256];
+        bool found = false;
+        while (fgets(line, sizeof(line), fp)) {
+            unsigned d, b, dev, fn;
+            if (sscanf(line, "PCI_SLOT_NAME=%x:%x:%x.%x", &d, &b, &dev, &fn) == 4) {
+                found = (d == domain && (uint8_t)b == bus &&
+                         (uint8_t)dev == device && (uint8_t)fn == function);
+                break;
+            }
+        }
+        fclose(fp);
+        if (found) return (int)card;
+    }
+    return -1;
+}
+
+// Read a sysfs attribute as a NUL-terminated, newline-stripped string.
+// Returns 0 on success, -1 if the file cannot be opened or is empty.
+static int readUalinkStr(const char *dir, const char *attr, char *buf, size_t len)
+{
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", dir, attr);
+    FILE *fp = fopen(path, "r");
+    if (fp == nullptr) return -1;
+    size_t n = fread(buf, 1, len - 1, fp);
+    fclose(fp);
+    if (n == 0) return -1;
+    buf[n] = '\0';
+    while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r' || buf[n-1] == ' '))
+        buf[--n] = '\0';
+    return 0;
+}
+
+// Read a sysfs attribute as a uint32_t (decimal). Returns def on failure.
+static uint32_t readUalinkU32(const char *dir, const char *attr, uint32_t def)
+{
+    char buf[64];
+    if (readUalinkStr(dir, attr, buf, sizeof(buf)) != 0) return def;
+    return (uint32_t)strtoul(buf, nullptr, 10);
+}
+
+int ARSMI_get_fabric_info(uint32_t dv_ind, struct ARSMI_fabricInfo *info)
+{
+    if (info == nullptr) return EINVAL;
+    memset(info, 0, sizeof(*info));
+    info->fabric_type = ARSMI_FABRIC_TYPE_UNKNOWN;
+    info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN;
+    info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN;
+
+    if (ARSMI_num_devices < 0) {
+        int res = ARSMI_init();
+        if (res != 0) return res;
+    }
+    if ((int)dv_ind >= ARSMI_num_devices) return EINVAL;
+
+    const ARSMI_systemNode &node = ARSMI_orderedNodes[dv_ind];
+    int card = findCardForBdf((uint32_t)node.s_domain, node.s_bus,
+                               node.s_device, node.s_function);
+    if (card < 0) return ENODEV;
+
+    char dir[256];
+    snprintf(dir, sizeof(dir), "%s/card%d/device/ualink", kDrmClassRoot, card);
+
+    struct stat st;
+    if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) return ENODEV;
+
+    char buf[256];
+
+    // link_type: "UALoE" | "UALLink"
+    if (readUalinkStr(dir, "link_type", buf, sizeof(buf)) == 0) {
+        if      (strcmp(buf, "UALoE")   == 0) info->fabric_type = ARSMI_FABRIC_TYPE_UALOE;
+        else if (strcmp(buf, "UALLink") == 0) info->fabric_type = ARSMI_FABRIC_TYPE_UALLINK;
+        else                                  info->fabric_type = ARSMI_FABRIC_TYPE_UNKNOWN;
+    }
+
+    // accel_state: "unconfigured" | "configured" | "ready" | "active" | "error"
+    if (readUalinkStr(dir, "accel_state", buf, sizeof(buf)) == 0) {
+        if      (strcmp(buf, "active")       == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE;
+        else if (strcmp(buf, "ready")        == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY;
+        else if (strcmp(buf, "configured")   == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED;
+        else if (strcmp(buf, "unconfigured") == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED;
+        else if (strcmp(buf, "error")        == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR;
+        else                                       info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN;
+    }
+
+    info->supported = (info->fabric_type == ARSMI_FABRIC_TYPE_UALOE ||
+                       info->fabric_type == ARSMI_FABRIC_TYPE_UALLINK) &&
+                      (info->accel_state == ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
+                       info->accel_state == ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY);
+
+    info->accel_id  = readUalinkU32(dir, "accel_id",  0);
+    info->ppod_size = readUalinkU32(dir, "ppod_size", 0);
+    info->bandwidth = readUalinkU32(dir, "bandwidth", 0);
+    info->latency   = readUalinkU32(dir, "latency",   0);
+    info->vpod_id   = readUalinkU32(dir, "vpod_id",   0);
+    info->vpod_size = readUalinkU32(dir, "vpod_size", 0);
+
+    // addr_mode: "source-aliasing" | "source-identification"
+    info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN;
+    if (readUalinkStr(dir, "addr_mode", buf, sizeof(buf)) == 0) {
+        if (strcmp(buf, "source-identification") == 0) {
+            info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION;
+        } else if (strcmp(buf, "source-aliasing") == 0) {
+            info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING;
+        }
+    }
+
+    // ppod_id: UUID string "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" → 16 bytes
+    memset(info->ppod_id, 0, sizeof(info->ppod_id));
+    if (readUalinkStr(dir, "ppod_id", buf, sizeof(buf)) == 0) {
+        int parsed = sscanf(buf,
+                            "%02hhx%02hhx%02hhx%02hhx-"
+                            "%02hhx%02hhx-"
+                            "%02hhx%02hhx-"
+                            "%02hhx%02hhx-"
+                            "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
+                            &info->ppod_id[0],  &info->ppod_id[1],
+                            &info->ppod_id[2],  &info->ppod_id[3],
+                            &info->ppod_id[4],  &info->ppod_id[5],
+                            &info->ppod_id[6],  &info->ppod_id[7],
+                            &info->ppod_id[8],  &info->ppod_id[9],
+                            &info->ppod_id[10], &info->ppod_id[11],
+                            &info->ppod_id[12], &info->ppod_id[13],
+                            &info->ppod_id[14], &info->ppod_id[15]);
+        if (parsed != 16) {
+            memset(info->ppod_id, 0, sizeof(info->ppod_id));
+        }
+    }
+
+    return 0;
+}
+
+const char* ARSMI_fabric_telem_id_to_string(uint64_t /*telem_id*/)
+{
+    return "UNKNOWN";
+}
+
 // Internal functions
 static int getNodeIndex(uint32_t node_id)
 {
@@ -557,12 +736,6 @@ static int getPropertyValue(std::string property, uint64_t *value, std::map<std:
 
     *value = properties[property];
     return 0;
-}
-
-static bool fileExists(char const *filename)
-{
-    struct stat buf;
-    return (stat(filename, &buf) == 0);
 }
 
 static int ARSMI_readDeviceProperties(uint32_t node_id, std::map<std::string, uint64_t> &properties)

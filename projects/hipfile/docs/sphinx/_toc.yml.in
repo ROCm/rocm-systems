@@ -1,0 +1,45 @@
+defaults:
+  numbered: false
+root: index
+subtrees:
+
+- entries:
+  - file: introduction.rst
+    title: Introduction
+
+- caption: Build and install
+  entries:
+  - file: config_build.rst
+    title: Configure and build
+  - file: sanitizers.rst
+    title: Sanitizers
+
+- caption: Using hipFile
+  entries:
+  - file: hipify.rst
+    title: hipify
+  - file: nvidia_compat.rst
+    title: cuFile compatibility
+  - file: fio.rst
+    title: fio support
+  - file: stats_collection.rst
+    title: Collecting statistics
+
+- caption: API reference
+  entries:
+  - file: api/errors.rst
+    title: Errors
+  - file: api/core.rst
+    title: Core
+  - file: api/driver.rst
+    title: Drivers
+  - file: api/file.rst
+    title: File operations
+  - file: api/async.rst
+    title: Asynchronous operations
+  - file: api/batch.rst
+    title: Batch operations
+  - file: api/rdma.rst
+    title: RDMA
+  - file: api/misc_api.rst
+    title: Other

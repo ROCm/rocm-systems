@@ -265,7 +265,7 @@ class Device {
   int readDevInfoStr(DevInfoTypes type, std::string* retStr);
   int readDevInfoMultiLineStr(DevInfoTypes type, std::vector<std::string>* retVec);
   int readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_binary_data);
-  int writeDevInfoStr(DevInfoTypes type, std::string valStr, bool returnWriteErr = false);
+  int writeDevInfoStr(DevInfoTypes type, std::string valStr);
   rsmi_status_t run_amdgpu_property_reinforcement_query(
       const AMDGpuPropertyQuery_t& amdgpu_property_query);
 

@@ -36,6 +36,13 @@ typedef struct {
     uint16_t vendor_id;
 } amdcuid_cuid_public_fields_platform;
 
+typedef struct {
+    uint16_t vendor_id;
+    uint16_t device_id;
+    uint16_t pci_class;
+    uint8_t revision_id;
+} amdcuid_cuid_public_fields_npu;
+
 typedef struct amdcuid_cuid_public_fields {
     amdcuid_device_type_t device_type;
     union {
@@ -43,6 +50,7 @@ typedef struct amdcuid_cuid_public_fields {
         amdcuid_cuid_public_fields_gpu gpu;
         amdcuid_cuid_public_fields_nic nic;
         amdcuid_cuid_public_fields_platform platform;
+        amdcuid_cuid_public_fields_npu npu;
     } fields;
 } amdcuid_cuid_public_fields;
 

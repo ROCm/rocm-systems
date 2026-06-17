@@ -864,8 +864,32 @@ inline __HOST_DEVICE__ __half2 __h2div(__half2 x, __half2 y) {
   return __half2{static_cast<__half2_raw>(x).data / static_cast<__half2_raw>(y).data};
 }
 
-// Atomic
+// Device specific functions
 #if defined(__clang__) && defined(__HIP__)
+inline __device__ __half atomicAdd(__half* const address, const __half value) {
+  return __half_raw{__scoped_atomic_fetch_add((_Float16*)address,
+                                              static_cast<__half_raw>(value).data,
+                                              __ATOMIC_ACQ_REL, __MEMORY_SCOPE_DEVICE)};
+}
+
+inline __device__ __half2 atomicAdd(__half2* const address, const __half2 value) {
+  static_assert(sizeof(_Float16_2) == sizeof(unsigned int));
+  union {
+    _Float16_2 vec;
+    unsigned int u32;
+  } expected, desired;
+
+  unsigned int* atomic_ptr = (unsigned int*)address;
+  expected.u32 = __scoped_atomic_load_n(atomic_ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+
+  do {
+    desired.vec = expected.vec + static_cast<_Float16_2>(value);
+  } while (!__scoped_atomic_compare_exchange_n(atomic_ptr, &expected.u32, desired.u32, 0,
+                                               __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE,
+                                               __MEMORY_SCOPE_DEVICE));
+  return static_cast<__half2>(expected.vec);
+}
+
 inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
 #if __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2f16)
   // The api expects an ext_vector_type of half
@@ -894,6 +918,7 @@ inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
   return old_val.h2r;
 #endif
 }
+
 inline __device__ __half unsafeAtomicAdd(__half* address, __half value) {
   static_assert(sizeof(unsigned short int) == sizeof(__half_raw));
   unsigned short int* address_as_short = reinterpret_cast<unsigned short int*>(address);

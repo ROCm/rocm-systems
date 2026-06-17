@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["high_threshold", "low_threshold"],
+  "properties": {
+    "high_threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Amdahl priority: kernels > this fraction of total runtime are HIGH priority"
+    },
+    "low_threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Amdahl priority: kernels < this fraction are LOW priority (not worth optimizing)"
+    }
+  }
+}

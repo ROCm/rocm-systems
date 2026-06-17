@@ -339,6 +339,8 @@ const char* ihipGetErrorString(hipError_t hip_error) {
       return "runtime memory call returned error";
     case hipErrorRuntimeOther:
       return "runtime call other than memory returned error";
+    case hipErrorInvalidClusterSize:
+      return "a kernel launch error has occurred due to cluster misconfiguration";
     case hipErrorUnknown:
     default:
       return "unknown error";

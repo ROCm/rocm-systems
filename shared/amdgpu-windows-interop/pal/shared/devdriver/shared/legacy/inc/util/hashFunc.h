@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -54,7 +54,7 @@ struct DefaultHashFunc<const char*>
         DD_ASSERT(pKey != nullptr);
         if (pKey != nullptr)
         {
-            hash = MetroHash::MetroHash32(reinterpret_cast<const uint8*>(pKey), strlen(pKey));
+            hash = MetroHash::MetroHash32(reinterpret_cast<const uint8*>(pKey), Platform::Strlen_s(pKey, SIZE_MAX));
         }
 
         return hash;

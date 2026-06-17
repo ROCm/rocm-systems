@@ -20,17 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <array>
-#include <cassert>
-#include <chrono>
-#include <cstring>
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <unordered_map>
-
-#include "gfx11parser.h"
 #include "gfx11token.h"
+#include "gfx11parser.h"
 #include "trace_parser.hpp"
 
 typedef gfx10::Token Token;
@@ -38,63 +29,17 @@ typedef gfx10::Token Token;
 namespace gfx11
 {
 
-const std::array<std::pair<int, int>, NAVI_TYPE_LAST> TokenLookupTable::time_bits = []()
+TokenLookupTable::TokenLookupTable()
 {
-    std::array<std::pair<int, int>, NAVI_TYPE_LAST> ret{};
-
-    ret.at(RdnaType::INST) = {4, 7};
-    ret.at(RdnaType::VALU_INST) = {3, 6};
-    ret.at(RdnaType::IMM_ONE) = {4, 7};
-    ret.at(RdnaType::IMMEDIATE) = {5, 8};
-    ret.at(RdnaType::WAVE_READY) = {5, 8};
-    ret.at(RdnaType::NEW_PC_GFX10) = {8, 11};
-    ret.at(RdnaType::WAVE_START) = {5, 7};
-    ret.at(RdnaType::WAVE_START_EXT) = {5, 7};
-    ret.at(RdnaType::WAVE_ALLOC) = {5, 8};
-    ret.at(RdnaType::WAVE_END) = {5, 8};
-    ret.at(RdnaType::SHADER_DATA) = {5, 8};
-    ret.at(RdnaType::SHADER_DATA_SHORT) = {5, 8};
-    ret.at(RdnaType::UTIL_COUNTER_GFX10) = {7, 9};
-    ret.at(RdnaType::UTIL_COUNTER_GFX11) = {7, 9};
-    ret.at(RdnaType::TIME) = {4, 8};
-    ret.at(RdnaType::NOP) = {0, 0};
-    ret.at(RdnaType::MISC_GFX10) = {7, 16};
-    ret.at(RdnaType::EVENT) = {8, 11};
-    ret.at(RdnaType::EVENT_SYNC) = {8, 11};
-    ret.at(RdnaType::REG) = {4, 7};
-    ret.at(RdnaType::REG_INIT) = {7, 10};
-    ret.at(RdnaType::TIMESTAMP) = {12, 48};
-    ret.at(RdnaType::HEADER) = {0, 0};
-
-    return ret;
-}();
-
-static const std::array<uint8_t, 32> TOKEN_LEN = {
-    /*UNKNOWN*/ 8,
-    /*VALU_INST*/ 12,
-    /*IMM_ONE*/ 12,
-    /*IMMEDIATE*/ 24,
-    /*WAVE_READY*/ 24,
-    /*NEW_PC*/ 64,
-    /*WAVE_END*/ 20,
-    /*WAVE_START*/ 32,
-    /*WAVE_START_EXT*/ 48,
-    /*WAVE_ALLOC*/ 20,
-    /*SHADER_DATA*/ 52,
-    /*SHADER_DATA_SHORT*/ 28,
-    /*UTIL_COUNTER*/ 48,
-    /*TIME*/ 8,
-    /*NOP*/ 4,
-    /*MISC_GFX10*/ 24,
-    /*EVENT*/ 24,
-    /*EVENT_SYNC*/ 32,
-    /*REG*/ 64,
-    /*REG_INIT*/ 64,
-    /*TIMESTAMP*/ 48,
-    /*HEADER*/ 64,
-    /*INST*/ 20,
-    /*UTIL_COUNTER*/ 48,
-};
+    // GFX11 overrides on top of the inherited gfx10 table.
+    // TIMESTAMP shrinks from 64 to 48 bits; UTIL_COUNTER uses the gfx11 layout.
+    // clang-format off
+    //                  type             pattern  plen  toklen  time_begin  time_end
+    AddEncoding({MISC_GFX10,         0b1010001, 7, 24,  7, 16});
+    AddEncoding({UTIL_COUNTER_GFX11, 0b0110001, 7, 48,  7,  9});
+    AddEncoding({TIMESTAMP,          0b0000001, 7, 48, 12, 48});
+    // clang-format on
+}
 
 gfx10::Token TokenGenerator::next()
 {
@@ -113,18 +58,18 @@ gfx10::Token TokenGenerator::next()
 
         readOne_unsafe();
 
-        RdnaType type = (RdnaType) lookupbits.lookup(current);
+        auto& info = lookupbits.lookup(current);
+        RdnaType type = (RdnaType) info.type;
         if (type == RdnaType::NOP)
         {
             bits_toread = 4;
             continue;
         }
 
-        int token_len = TOKEN_LEN[type & 0x1F];
-        bits_toread = token_len;
+        bits_toread = info.length;
 
         int64_t real = 0;
-        globaltime = lookupbits.getTime(type, current, globaltime, packetlost, real);
+        globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
@@ -162,18 +107,18 @@ gfx10::Token TokenGenerator::next()
 
         readOne_safe();
 
-        RdnaType type = (RdnaType) lookupbits.lookup(current);
+        auto& info = lookupbits.lookup(current);
+        RdnaType type = (RdnaType) info.type;
         if (type == RdnaType::NOP)
         {
             bits_toread = 4;
             continue;
         }
 
-        int token_len = TOKEN_LEN[type & 0x1F];
-        bits_toread = token_len;
+        bits_toread = info.length;
 
         int64_t real = 0;
-        globaltime = lookupbits.getTime(type, current, globaltime, packetlost, real);
+        globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {

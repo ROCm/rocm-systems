@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,9 +22,11 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <future>
 #include <mutex>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -110,6 +112,83 @@ TEST(consumer, multithreaded)
 
     for(auto& var : *array)
         EXPECT_EQ(var.load(), expected);
+}
+
+// Verifies that a single consumer instance survives multiple
+// start()/exit() cycles. Each cycle adds 1 to every slot, so after
+// CYCLES iterations every slot must equal CYCLES. Exercises the
+// drain-on-exit logic (the `exited` flag + cv wait) followed by a
+// fresh start() that re-arms it.
+TEST(consumer, restart)
+{
+    auto array = std::make_shared<result_array_t>();
+
+    consumer_t    consumer(consume_fn);
+    constexpr int CYCLES = 3;
+
+    for(int cycle = 0; cycle < CYCLES; ++cycle)
+    {
+        consumer.start();
+        for(size_t i = 0; i < NUM_ELEMENTS; ++i)
+            consumer.add(DummyData{i, 1, array});
+        consumer.exit();
+    }
+
+    for(auto& var : *array)
+        EXPECT_EQ(var.load(), static_cast<size_t>(CYCLES));
+}
+
+// Verifies that calling add() after exit() does not lose work: the
+// item must be processed synchronously on the calling thread via the
+// fallback path (`!valid` clause in add()).
+TEST(consumer, add_after_exit)
+{
+    auto array = std::make_shared<result_array_t>();
+
+    consumer_t consumer(consume_fn);
+    consumer.start();
+    consumer.exit();
+
+    consumer.add(DummyData{42, 7, array});
+
+    EXPECT_EQ(array->at(42).load(), 7u);
+    EXPECT_EQ(array->at(0).load(), 0u);
+}
+
+// Verifies the synchronous fallback when the ring buffer overflows.
+// Throttles the consumer so the producer outpaces it; asserts that
+// (a) every item is processed exactly once and (b) at least some
+// items took the fallback path (consumed on the producer thread).
+TEST(consumer, buffer_full_fallback)
+{
+    auto                array = std::make_shared<result_array_t>();
+    std::atomic<size_t> fallback_count{0};
+    std::atomic<size_t> processed{0};
+    constexpr size_t    SLOW_FIRST_N = 256;
+
+    const auto producer_tid = std::this_thread::get_id();
+
+    auto slow_consume = [&, producer_tid](DummyData&& data) {
+        if(std::this_thread::get_id() == producer_tid) fallback_count.fetch_add(1);
+
+        if(processed.fetch_add(1) < SLOW_FIRST_N)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+        data.array->at(data.index).fetch_add(data.increment);
+    };
+
+    consumer_thread_t<DummyData> consumer(slow_consume);
+    consumer.start();
+
+    for(size_t i = 0; i < NUM_ELEMENTS; ++i)
+        consumer.add(DummyData{i, 1, array});
+
+    consumer.exit();
+
+    for(auto& var : *array)
+        EXPECT_EQ(var.load(), 1u);
+
+    EXPECT_GT(fallback_count.load(), 0u);
 }
 
 }  // namespace counters

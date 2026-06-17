@@ -94,6 +94,13 @@ void ReportActivity(const amd::Command& command) {
     case CL_COMMAND_FILL_BUFFER:
       record.bytes = linearSize(static_cast<const amd::FillMemoryCommand&>(command).size());
       break;
+    case ROCCLR_COMMAND_BATCH_COPY_BUFFER: {
+      const auto& ops = static_cast<const amd::BatchCopyMemoryCommand&>(command).copyOps();
+      size_t total = 0;
+      for (const auto& op : ops) total += op.size;
+      record.bytes = total;
+      break;
+    }
     default:
       break;
   }
@@ -102,11 +109,17 @@ void ReportActivity(const amd::Command& command) {
     auto timestamps = static_cast<const amd::AccumulateCommand&>(command).getTimestamps();
     const auto& kernel_names =
         static_cast<const amd::AccumulateCommand&>(command).getKernelNames();
-    for (uint32_t i = 0; i < timestamps.size() && i < kernel_names.size(); i++) {
-      auto it = timestamps[i];
+    // timestamps has one entry per HSA_PACKET_TYPE_KERNEL_DISPATCH packet only.
+    // kernel_names has one entry per AQL packet slot (nullptr for barriers and SDMA/copy nodes
+    // that don't generate timestamps). Walk kernel_names; for each non-null entry consume
+    // the next timestamp.
+    uint32_t ti = 0;
+    for (uint32_t ki = 0; ki < kernel_names.size() && ti < timestamps.size(); ki++) {
+      if (kernel_names[ki] == nullptr) continue;
+      auto it = timestamps[ti++];
       record.begin_ns = it.first;
       record.end_ns = it.second;
-      record.kernel_name = kernel_names[i] != nullptr ? kernel_names[i]->c_str() : "";
+      record.kernel_name = kernel_names[ki]->c_str();
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }
   } else {
@@ -156,6 +169,8 @@ const char* getOclCommandKindString(cl_command_type commandType) {
     CASE_STRING(CL_COMMAND_SVM_UNMAP, SvmUnmap);
     CASE_STRING(ROCCLR_COMMAND_STREAM_WAIT_VALUE, StreamWait);
     CASE_STRING(ROCCLR_COMMAND_STREAM_WRITE_VALUE, StreamWrite);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_STREAM, BatchStreamOp);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_COPY_BUFFER, BatchCopyBuffer);
     default:
       break;
   };

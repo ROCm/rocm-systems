@@ -24,6 +24,7 @@
 
 #include "att_lib_wrapper.hpp"
 
+#include <cstdint>
 #include <map>
 #include <unordered_map>
 #include <vector>
@@ -55,11 +56,13 @@ public:
     CodeFile() = default;
     CodeFile(Fspath dir, std::shared_ptr<AddressTable> table);
     ~CodeFile();
+    void addCodeobj(uint64_t id);
 
     const Fspath                                  dir{};
     std::unordered_map<pcinfo_t, int>             line_numbers{};
     std::map<pcinfo_t, std::unique_ptr<CodeLine>> isa_map{};
     std::map<pcinfo_t, KernelName>                kernel_names{};
+    std::vector<uint64_t>                         codeobj_ids{};
 
     std::shared_ptr<AddressTable> table;
 };

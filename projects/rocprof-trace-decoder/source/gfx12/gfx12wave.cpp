@@ -271,7 +271,7 @@ static const std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
     {(int) EINST::flat_other_simd_6, {WaveInstCategory::FLAT_OTHER_SIMD, 6}}
 };
 
-mapped_inst_t wave_t::map_to_common_type(int einst, int dprate, int derate)
+mapped_inst_t map_to_common_type(int einst, int dprate, int derate)
 {
     {
         auto it = table_map_to_common_type.find(einst);

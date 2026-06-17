@@ -47,7 +47,7 @@ struct reserve_size
     : value{_v}
     {}
 
-    size_t value;
+    size_t value = 0;
 };
 
 template <typename Tp, size_t ChunkSizeV = 64>
@@ -237,7 +237,7 @@ private:
     void        add_chunk();
     chunk_type& last_chunk();
 
-    storage_type m_chunks;
+    storage_type m_chunks = {};
 };
 
 template <typename Tp, size_t ChunkSizeV>

@@ -1,0 +1,43 @@
+# Bottleneck signatures — used by tools/bottleneck.py:classify_from_metrics
+# and tools/bottleneck.py:lookup_signatures.
+#
+# Extracted from llm-reference-guide.md lines 1384-1480.
+# Each signature is an objective rule over profiling metrics.
+
+- name: compute
+  signatures:
+    - {metric: "valu_util_pct", op: ">", threshold: 0.70}
+    - {metric: "mfma_util_pct", op: ">", threshold: 0.50}
+    - {metric: "arithmetic_intensity_above_ridge", op: "==", threshold: 1}
+  priority_hint: high
+  description: "Kernel bottlenecked on VALU or MFMA throughput"
+
+- name: memory_transfer
+  signatures:
+    - {metric: "memcpy_pct", op: ">", threshold: 0.20}
+    - {metric: "hbm_bw_utilization", op: "<", threshold: 0.30, unit: "fraction-of-peak"}
+    - {metric: "arithmetic_intensity_below_ridge", op: "==", threshold: 1}
+  priority_hint: high
+  description: "Workload bottlenecked on host-device transfers or HBM bandwidth"
+
+- name: latency
+  signatures:
+    - {metric: "avg_waves_per_cu", op: "<", threshold: 16}
+    - {metric: "gpu_util_pct", op: "<", threshold: 0.50}
+    - {metric: "occupancy_pct", op: "<", threshold: 0.50}
+  priority_hint: medium
+  description: "GPU underutilized — memory/pipeline latency not hidden by waves"
+
+- name: api_overhead
+  signatures:
+    - {metric: "api_overhead_pct", op: ">", threshold: 0.15}
+    - {metric: "avg_kernel_duration_us", op: "<", threshold: 10}
+    - {metric: "total_kernel_calls", op: ">", threshold: 1000}
+  priority_hint: medium
+  description: "Kernel launch overhead dominates wall-clock time"
+
+- name: mixed
+  signatures:
+    - {metric: "no_dominant_bottleneck", op: "==", threshold: 1}
+  priority_hint: low
+  description: "No single bottleneck dominates — triage recommended before optimization"

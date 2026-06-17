@@ -42,6 +42,14 @@ python3 -m pip install -r requirements.txt
 
 **Note**: When working from source, vendored dependencies (like PyYAML) are included as git submodules. If you see import errors about missing vendored modules, run `git submodule update --init --recursive -- src/vendored/`.
 
+### Development dependencies
+
+To install development tools (linter, pre-commit hooks, YAML utilities), run:
+
+```bash
+python3 -m pip install -r requirements-development.txt
+```
+
 ## Testing
 
 Populate the <usename> variable in `docker/docker-compose.customrocmtest.yml`.
@@ -65,6 +73,8 @@ Common CMake options:
 - `-D ENABLE_COVERAGE=ON` - Enable code coverage reporting
 - `-D TEST_FROM_INSTALL=ON` - Enable testing from installation directory instead of build directory
 - `-D SKIP_NATIVE_TOOL_BUILD=ON` - Skip building the native profiling tool (enables runtime compilation instead), useful when rocprofiler-sdk is not available during build time
+- `-D TORCH_TRACE_PYTHON=/path/to/python3` - Select the Python interpreter for the `roctx_recordfn` build when `ENABLE_TESTS=ON`
+- `-D ENABLE_SANITIZER=ASAN|HOST_ASAN|TSAN` - Build with sanitizer instrumentation for development (default OFF); cannot be combined with `STANDALONEBINARY=ON`
 
 Note that per the above command, build assets will be stored under `build` directory and installed assets will be stored under `install` directory.
 

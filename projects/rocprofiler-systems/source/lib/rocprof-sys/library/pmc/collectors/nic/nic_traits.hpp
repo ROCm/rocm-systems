@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include "backends/amd_smi/device_backend.hpp"
 #include "core/agent_manager.hpp"
 #include "library/pmc/collectors/nic/device.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
@@ -31,17 +32,17 @@ using ::rocprofsys::pmc::nic_device_filter;
  * - Device context storage for NIC-specific API signatures (device_name, product_name)
  * - Agent registration during device enumeration
  *
- * @tparam Driver The AMD SMI driver type (real or mock for testing)
+ * @tparam Backend The AMD SMI backend type (real or mock for testing)
  */
-template <typename DriverProvider>
+template <typename BackendProvider>
 struct nic_traits
 {
     using metrics_t         = pmc::collectors::nic::metrics;
     using enabled_metrics_t = pmc::collectors::nic::enabled_metrics;
-    using device_t          = device<typename DriverProvider::driver_t>;
+    using backend_t         = ::rocprofsys::backends::amd_smi::device_backend;
+    using device_t          = device<backend_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
-    using driver_t          = typename DriverProvider::driver_t;
 
     static constexpr const char* device_name = "NIC";
     struct device_entry
@@ -68,8 +69,8 @@ struct nic_traits
         Cache::initialize_pmc_metadata(device->get_index(), device->get_product_name());
     }
 
-    template <typename Perfetto, typename DeviceEntries>
-    static void init_perfetto_storage(const DeviceEntries& device_entries)
+    template <typename DeviceEntries>
+    static container_t extract_devices(const DeviceEntries& device_entries)
     {
         container_t devices;
         devices.reserve(device_entries.size());
@@ -77,7 +78,13 @@ struct nic_traits
         {
             devices.push_back(entry.device);
         }
-        Perfetto::init_storage(devices);
+        return devices;
+    }
+
+    template <typename Perfetto, typename DeviceEntries>
+    static void init_perfetto_storage(const DeviceEntries& device_entries)
+    {
+        Perfetto::init_storage(extract_devices(device_entries));
     }
 
     template <typename Perfetto>
@@ -91,18 +98,12 @@ struct nic_traits
     static void post_process_perfetto(const DeviceEntries&     device_entries,
                                       const enabled_metrics_t& enabled)
     {
-        container_t devices;
-        devices.reserve(device_entries.size());
-        for(const auto& entry : device_entries)
-        {
-            devices.push_back(entry.device);
-        }
-        Perfetto::post_process(devices, enabled);
+        Perfetto::post_process(extract_devices(device_entries), enabled);
     }
 
-    [[nodiscard]] static metrics_t get_metrics(const device_ptr_t& device,
-                                               const enabled_metrics_t& /*enabled*/,
-                                               uint64_t /*timestamp*/)
+    [[nodiscard]] static metrics_t get_metrics(
+        const device_ptr_t& device, [[maybe_unused]] const enabled_metrics_t& enabled,
+        [[maybe_unused]] std::uint64_t timestamp)
     {
         return device->get_nic_metrics();
     }
@@ -120,7 +121,7 @@ struct nic_traits
             return entries;
         }
 
-        auto devices = provider->template get_devices<device_t>(device_type::NIC);
+        auto devices = provider->template get_nic_devices<device_t, backend_t>();
 
         for(auto& device : devices)
         {
@@ -156,13 +157,16 @@ struct nic_traits
             agent cur_agent{ agent_type::NIC,
                              0,
                              nic_index,
-                             static_cast<uint32_t>(nic_index),
-                             static_cast<int32_t>(nic_index),
-                             static_cast<int32_t>(nic_index),
+                             static_cast<std::uint32_t>(nic_index),
+                             static_cast<std::int32_t>(nic_index),
+                             static_cast<std::int32_t>(nic_index),
                              entry.device->get_product_name().c_str(),
                              entry.device->get_vendor_name().c_str(),
                              "AI NIC",
-                             "AI NIC" };
+                             "AI NIC",
+                             0,
+                             0,
+                             {} };
 
             get_agent_manager_instance().insert_agent(cur_agent);
             nic_index++;

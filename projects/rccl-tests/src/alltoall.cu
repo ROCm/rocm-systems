@@ -9,7 +9,7 @@
 #include "common.h"
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
-#include "vector_types.h"
+#include "rccl_vector_types.h"
 #endif
 
 void AlltoAllGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
@@ -68,6 +68,11 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       }
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,7)
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+#else
+      reqs->ginForceEnable = true;
+#endif
       return testSuccess;
     default:
       return testNotImplemented;
@@ -351,6 +356,7 @@ struct testColl alltoAllTest = {
   AlltoAllInitData,
   AlltoAllGetBw,
   AlltoAllRunColl,
+  NULL,
   NULL
 };
 

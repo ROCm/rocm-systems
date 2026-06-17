@@ -1,0 +1,19 @@
+; Used by CI workflow to test hipfile with fio
+[global]
+ioengine=libhipfile
+rocm_io=hipfile
+gpu_dev_ids=0
+filename=fio.dat
+size=1M
+bs=4K
+verify=md5
+numjobs=1
+
+[write]
+rw=write
+do_verify=0
+
+[read]
+stonewall
+rw=read
+do_verify=1

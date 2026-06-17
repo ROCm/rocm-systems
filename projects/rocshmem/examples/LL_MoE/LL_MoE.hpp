@@ -313,7 +313,7 @@ class LLMoE {
 
     size_t combined_x_bytes = num_tokens * hidden * sizeof(T);
 
-    // Dimemsions: [num_local_experts][num_ranks][num_tokens][hidden]
+    // Dimensions: [num_local_experts][num_ranks][num_tokens][hidden]
     CHECK_HIP(hipMalloc(&packed_recv_x, packed_recv_x_bytes));
     // Dimensions: [num_local_experts][num_ranks][num_tokens]
     CHECK_HIP(hipMalloc(&packed_recv_src_info, packed_recv_src_info_bytes));

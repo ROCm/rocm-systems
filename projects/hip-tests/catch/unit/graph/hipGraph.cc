@@ -16,6 +16,7 @@ Testcase Scenarios :
 
 #define THREADS_PER_BLOCK 512
 #define GRAPH_LAUNCH_ITERATIONS 1000
+#define GRAPH_LAUNCH_ITERS_QUICK 10
 
 static __global__ void reduce(float* d_in, double* d_out) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
@@ -67,7 +68,7 @@ static void hipWithoutGraphs(float* inputVec_h, float* inputVec_d, double* outpu
   HIP_CHECK(hipEventCreate(&memsetEvent1));
   HIP_CHECK(hipEventCreate(&memsetEvent2));
   auto start = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < GRAPH_LAUNCH_ITERATIONS; i++) {
+  for (int i = 0, _iters = isQuickLevel() ? GRAPH_LAUNCH_ITERS_QUICK : GRAPH_LAUNCH_ITERATIONS; i < _iters; i++) {
     HIP_CHECK(hipMemcpyAsync(inputVec_d, inputVec_h, sizeof(float) * inputSize, hipMemcpyDefault,
                              stream1));
     HIP_CHECK(hipMemsetAsync(outputVec_d, 0, sizeof(double) * numOfBlocks, stream2));
@@ -152,7 +153,7 @@ static void hipGraphsUsingStreamCapture(float* inputVec_h, float* inputVec_d, do
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   auto start1 = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < GRAPH_LAUNCH_ITERATIONS; i++) {
+  for (int i = 0, _iters = isQuickLevel() ? GRAPH_LAUNCH_ITERS_QUICK : GRAPH_LAUNCH_ITERATIONS; i < _iters; i++) {
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   }
   HIP_CHECK(hipStreamSynchronize(streamForGraph));
@@ -258,7 +259,7 @@ static void hipGraphsManual(float* inputVec_h, float* inputVec_d, double* output
       << numNodes);
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   auto start1 = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < GRAPH_LAUNCH_ITERATIONS; i++) {
+  for (int i = 0, _iters = isQuickLevel() ? GRAPH_LAUNCH_ITERS_QUICK : GRAPH_LAUNCH_ITERATIONS; i < _iters; i++) {
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   }
   HIP_CHECK(hipStreamSynchronize(streamForGraph));

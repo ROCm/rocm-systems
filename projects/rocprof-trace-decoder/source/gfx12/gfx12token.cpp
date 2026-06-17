@@ -20,17 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <array>
-#include <cassert>
-#include <chrono>
-#include <cstring>
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <unordered_map>
-
-#include "gfx12parser.h"
 #include "gfx12token.h"
+#include "gfx12parser.h"
 #include "trace_parser.hpp"
 
 typedef gfx10::Token Token;
@@ -38,70 +29,24 @@ typedef gfx10::Token Token;
 namespace gfx12
 {
 
-const std::array<std::pair<int, int>, NAVI_TYPE_LAST> TokenLookupTable::time_bits = []()
+TokenLookupTable::TokenLookupTable()
 {
-    std::array<std::pair<int, int>, NAVI_TYPE_LAST> ret{};
-
-    ret.at(RdnaType::INST) = {3, 6};
-    ret.at(RdnaType::INST) = {3, 6};
-    ret.at(RdnaType::INST) = {3, 6};
-    ret.at(RdnaType::VALU_INST) = {3, 6};
-    ret.at(RdnaType::IMM_ONE) = {4, 7};
-    ret.at(RdnaType::IMMEDIATE) = {5, 8};
-    ret.at(RdnaType::WAVE_READY) = {5, 8};
-    ret.at(RdnaType::NEW_PC_GFX12) = {8, 11};
-    ret.at(RdnaType::WAVE_START) = {5, 7};
-    ret.at(RdnaType::WAVE_START_EXT) = {5, 7};
-    ret.at(RdnaType::WAVE_ALLOC) = {5, 8};
-    ret.at(RdnaType::WAVE_END) = {5, 8};
-    ret.at(RdnaType::SHADER_DATA) = {7, 10};
-    ret.at(RdnaType::SHADER_DATA_SHORT) = {7, 10};
-    ret.at(RdnaType::UTIL_COUNTER_GFX10) = {7, 9};
-    ret.at(RdnaType::UTIL_COUNTER_GFX11) = {7, 9};
-    ret.at(RdnaType::TIME) = {4, 8};
-    ret.at(RdnaType::NOP) = {0, 0};
-    ret.at(RdnaType::MISC_GFX10) = {7, 16};
-    ret.at(RdnaType::EVENT) = {8, 11};
-    ret.at(RdnaType::EVENT_SYNC) = {8, 11};
-    ret.at(RdnaType::REG) = {4, 7};
-    ret.at(RdnaType::REG_INIT) = {7, 10};
-    ret.at(RdnaType::TIMESTAMP) = {12, 64};
-    ret.at(RdnaType::HEADER) = {0, 0};
-    ret.at(RdnaType::EXEC_POPCOUNT1) = {7, 10};
-    ret.at(RdnaType::EXEC_POPCOUNT3) = {6, 9};
-
-    return ret;
-}();
-
-static const std::array<uint8_t, 32> TOKEN_LEN = {
-    /*UNKNOWN*/ 8,
-    /*VALU_INST*/ 12,
-    /*IMM_ONE*/ 12,
-    /*IMMEDIATE*/ 24,
-    /*WAVE_READY*/ 24,
-    /*NEW_PC*/ 72,
-    /*WAVE_END*/ 20,
-    /*WAVE_START*/ 32,
-    /*WAVE_START_EXT*/ 40,
-    /*WAVE_ALLOC*/ 24,
-    /*SHADER_DATA*/ 56,
-    /*SHADER_DATA_SHORT*/ 32,
-    /*UTIL_COUNTER*/ 48,
-    /*TIME*/ 8,
-    /*NOP*/ 4,
-    /*MISC_GFX10*/ 24,
-    /*EVENT*/ 24,
-    /*EVENT_SYNC*/ 32,
-    /*REG*/ 64,
-    /*REG_INIT*/ 64,
-    /*TIMESTAMP*/ 64,
-    /*HEADER*/ 64,
-    /*INST*/ 20,
-    /*UTIL_COUNTER*/ 48,
-    /*EXEC_POPCOUNT1*/ 24,
-    /*EXEC_POPCOUNT3*/ 48,
-    /*NEW_PC_GFX12*/ 72,
-};
+    // GFX12 overrides on top of the inherited gfx11 table.
+    // Adds new token types (EXEC_POPCOUNT*, NEW_PC_GFX12) and changes bit lengths for several
+    // existing types (INST time field shifts, SHADER_DATA grows, WAVE_START_EXT shrinks, etc.).
+    // clang-format off
+    //                  type             pattern     plen  toklen  time_begin  time_end
+    AddEncoding({INST,              0b010,      3, 20,  3,  6});
+    AddEncoding({SHADER_DATA,       0b0000110,  7, 56,  7, 10});
+    AddEncoding({SHADER_DATA_SHORT, 0b1000110,  7, 32,  7, 10});
+    AddEncoding({EXEC_POPCOUNT1,    0b1100110,  7, 24,  7, 10});
+    AddEncoding({EXEC_POPCOUNT3,    0b010110,   6, 48,  6,  9});
+    AddEncoding({NEW_PC_GFX12,      0b0100001,  7, 72,  8, 11});
+    AddEncoding({WAVE_START_EXT,    0b11100,    5, 40,  5,  7});
+    AddEncoding({WAVE_ALLOC,        0b00101,    5, 24,  5,  8});
+    AddEncoding({TIMESTAMP,         0b0000001,  7, 64, 12, 64});
+    // clang-format on
+}
 
 gfx10::Token TokenGenerator::next()
 {
@@ -116,18 +61,19 @@ gfx10::Token TokenGenerator::next()
             continue;
         }
 
-        RdnaType type = (RdnaType) lookupbits.lookup(current);
+        auto& info = lookupbits.lookup(current);
+        RdnaType type = (RdnaType) info.type;
         if (type == RdnaType::NOP)
         {
             bits_toread = 4;
             continue;
         }
 
-        bits_toread = TOKEN_LEN[type & 0x1F];
+        bits_toread = info.length;
         bIsExt = type == WAVE_START_EXT;
 
         int64_t real = 0;
-        globaltime = lookupbits.getTime(type, current, globaltime, packetlost, real);
+        globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
@@ -159,18 +105,19 @@ gfx10::Token TokenGenerator::next()
             continue;
         }
 
-        RdnaType type = (RdnaType) lookupbits.lookup(current);
+        auto& info = lookupbits.lookup(current);
+        RdnaType type = (RdnaType) info.type;
         if (type == RdnaType::NOP)
         {
             bits_toread = 4;
             continue;
         }
 
-        bits_toread = TOKEN_LEN[type & 0x1F];
+        bits_toread = info.length;
         bIsExt = type == WAVE_START_EXT;
 
         int64_t real = 0;
-        globaltime = lookupbits.getTime(type, current, globaltime, packetlost, real);
+        globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {

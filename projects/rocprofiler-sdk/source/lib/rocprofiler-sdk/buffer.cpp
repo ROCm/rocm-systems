@@ -90,13 +90,11 @@ get_buffer(rocprofiler_buffer_id_t buffer_id)
 {
     if(is_valid_buffer_id(buffer_id) && get_buffers())
     {
-        for(auto& itr : *get_buffers())
-        {
-            if(itr && itr->buffer_id == buffer_id.handle)
-            {
-                return itr.get();
-            }
-        }
+        // Use direct indexing instead of linear search (same pattern as destroy_buffer)
+        // See allocate_buffer below that the idx is assigned based on the size + address
+        auto  idx = buffer_id.handle - get_buffer_offset();
+        auto& buf = get_buffers()->at(idx);
+        return buf ? buf.get() : nullptr;
     }
     return nullptr;
 }

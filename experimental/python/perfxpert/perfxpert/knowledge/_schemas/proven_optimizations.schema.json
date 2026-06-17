@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "description": "Proven optimization case studies — spec §6.5. Each entry is a reproducible before/after pair citing a published or in-house source.",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "bottleneck_type",
+      "technique",
+      "description",
+      "measured_speedup_range",
+      "source_citation",
+      "preconditions",
+      "failure_modes",
+      "fixture_pair"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]+$",
+        "description": "Stable lowercase snake_case identifier; used as filename stem for fixtures"
+      },
+      "bottleneck_type": {
+        "type": "string",
+        "enum": ["compute", "memory_transfer", "latency", "api_overhead", "mixed"]
+      },
+      "technique": {
+        "type": "string",
+        "description": "Short phrase naming the technique (e.g. 'launch_bounds VGPR reduction')"
+      },
+      "description": {
+        "type": "string",
+        "description": "2-4 sentence description of the problem and fix"
+      },
+      "measured_speedup_range": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": {"type": "number", "minimum": 1.0, "maximum": 20.0},
+        "description": "[low, high] inclusive multiplicative speedup factor (e.g. [1.25, 1.40] for 25-40%)"
+      },
+      "source_citation": {
+        "type": "string",
+        "description": "Publication, AMD doc, or in-house experiment ID"
+      },
+      "preconditions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["metric", "op", "threshold"],
+          "properties": {
+            "metric": {"type": "string"},
+            "op": {"type": "string", "enum": [">", ">=", "<", "<=", "==", "!="]},
+            "threshold": {"type": ["number", "string"]},
+            "unit": {"type": "string"}
+          }
+        },
+        "description": "Structured rules that must hold on the baseline DB for this case to apply"
+      },
+      "failure_modes": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Known ways the optimization backfires (e.g. 'register spilling when VGPR < 64')"
+      },
+      "fixture_pair": {
+        "type": "object",
+        "required": ["baseline_db", "optimized_db", "description_md"],
+        "properties": {
+          "baseline_db":    {"type": "string", "pattern": "\\.baseline\\.db$"},
+          "optimized_db":   {"type": "string", "pattern": "\\.optimized\\.db$"},
+          "description_md": {"type": "string", "pattern": "\\.md$"}
+        }
+      },
+      "applies_to_gfx": {
+        "type": "array",
+        "items": {"type": "string", "pattern": "^gfx[0-9a-f]+$"},
+        "description": "Optional — defaults to all archs if omitted"
+      }
+    }
+  }
+}

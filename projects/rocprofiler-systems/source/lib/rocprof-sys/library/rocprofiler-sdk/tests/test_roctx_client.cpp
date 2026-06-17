@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #include "rocprof-sys/library/rocprofiler-sdk/roctx_client.hpp"
 #include "rocprof-sys/library/rocprofiler-sdk/trace_control.hpp"
@@ -21,22 +21,89 @@
 #include <vector>
 
 // ============================================================================
+// Mock marker policy — shared by all fixtures
+// ============================================================================
+
+namespace
+{
+
+using rocprofsys::rocprofiler_sdk::annotation_entry;
+using rocprofsys::trace_cache::region_sample;
+
+using ::testing::NiceMock;
+
+class mock_api
+{
+public:
+    MOCK_METHOD(void, push_timemory, (std::string_view name));
+    MOCK_METHOD(void, pop_timemory, (std::string_view name));
+    MOCK_METHOD(void, push_perfetto_ts,
+                (const char* name, std::uint64_t ts, std::uint64_t flow_id,
+                 const std::vector<annotation_entry>& annotations));
+    MOCK_METHOD(void, pop_perfetto_ts,
+                (const char* name, std::uint64_t ts,
+                 const std::vector<annotation_entry>& annotations));
+    MOCK_METHOD(void, add_string, (std::string_view string_value));
+    MOCK_METHOD(void, store_region, (const region_sample& sample));
+    MOCK_METHOD(void, add_thread_info,
+                (const rocprofsys::trace_cache::info::thread& thread_info));
+};
+
+struct mock_marker_policy
+{
+    static inline std::unique_ptr<NiceMock<mock_api>> api{};
+
+    static void reset() { api = std::make_unique<NiceMock<mock_api>>(); }
+
+    static void push_timemory(std::string_view name) { api->push_timemory(name); }
+    static void pop_timemory(std::string_view name) { api->pop_timemory(name); }
+
+    static void push_perfetto_ts(const char* name, std::uint64_t ts,
+                                 std::uint64_t                        flow_id,
+                                 const std::vector<annotation_entry>& annotations)
+    {
+        api->push_perfetto_ts(name, ts, flow_id, annotations);
+    }
+
+    static void pop_perfetto_ts(const char* name, std::uint64_t ts,
+                                const std::vector<annotation_entry>& annotations)
+    {
+        api->pop_perfetto_ts(name, ts, annotations);
+    }
+
+    static void add_string(std::string_view string_value)
+    {
+        api->add_string(string_value);
+    }
+    static void store_region(const region_sample& sample) { api->store_region(sample); }
+    static void add_thread_info(const rocprofsys::trace_cache::info::thread& thread_info)
+    {
+        api->add_thread_info(thread_info);
+    }
+};
+
+}  // namespace
+
+class mock_cleanup_base : public ::testing::Test
+{
+protected:
+    void SetUp() override { mock_marker_policy::reset(); }
+    void TearDown() override { mock_marker_policy::api.reset(); }
+};
+
+// ============================================================================
 // roctx_client construction tests
 // ============================================================================
 
-class roctx_client_test : public ::testing::Test
-{
-protected:
-    void SetUp() override {}
-    void TearDown() override {}
-};
+class roctx_client_test : public mock_cleanup_base
+{};
 
 TEST_F(roctx_client_test, constructor_creates_controller)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config config{ true, true, true, false, "TestRegion" };
-    roctx_client<>            client(config);
+    const roctx_client_config        config{ true, true, true, false, "TestRegion" };
+    roctx_client<mock_marker_policy> client(config);
     EXPECT_NE(client.get_controller(), nullptr);
 }
 
@@ -44,8 +111,8 @@ TEST_F(roctx_client_test, constructor_without_region_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config config{ true, true, true, false, "" };
-    roctx_client<>            client(config);
+    const roctx_client_config        config{ true, true, true, false, "" };
+    roctx_client<mock_marker_policy> client(config);
     EXPECT_NE(client.get_controller(), nullptr);
     EXPECT_FALSE(client.get_controller()->region_filter_active());
 }
@@ -54,8 +121,8 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config config{ true, true, true, false, "Region 1" };
-    roctx_client<>            client(config);
+    const roctx_client_config        config{ true, true, true, false, "Region 1" };
+    roctx_client<mock_marker_policy> client(config);
     EXPECT_TRUE(client.get_controller()->region_filter_active());
 }
 
@@ -63,8 +130,8 @@ TEST_F(roctx_client_test, should_write_no_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config config{ true, true, true, false, "" };
-    const roctx_client<>      client(config);
+    const roctx_client_config              config{ true, true, true, false, "" };
+    const roctx_client<mock_marker_policy> client(config);
     EXPECT_TRUE(client.get_controller()->should_write_markers());
 }
 
@@ -72,8 +139,8 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config config{ true, true, true, false, "Region 1" };
-    const roctx_client<>      client(config);
+    const roctx_client_config              config{ true, true, true, false, "Region 1" };
+    const roctx_client<mock_marker_policy> client(config);
     EXPECT_FALSE(client.get_controller()->should_write_markers());
 }
 
@@ -87,10 +154,10 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 // and that start/stop callbacks fire at the right times.
 // ============================================================================
 
-class roctx_client_control_test : public ::testing::Test
+class roctx_client_control_test : public mock_cleanup_base
 {
 protected:
-    using roctx_client_t = rocprofsys::rocprofiler_sdk::roctx_client<>;
+    using roctx_client_t = rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy>;
     using roctx_config_t = rocprofsys::rocprofiler_sdk::roctx_client_config;
 
     int start_count = 0;
@@ -105,8 +172,8 @@ protected:
         auto                 client = std::make_unique<roctx_client_t>(config);
 
         auto ctrl = client->get_controller();
-        ctrl->register_region_pauser_resume_callbacks([this]() { start_count++; },
-                                                      [this]() { stop_count++; });
+        ctrl->register_region_pause_resume_callbacks([this]() { start_count++; },
+                                                     [this]() { stop_count++; });
 
         return client;
     }
@@ -117,16 +184,11 @@ protected:
 // ---------------------------------------------------------------------------
 
 // Scenario (no region filter):
-//   CodeZ            => profiled
 //   CodeA            => profiled
-//   roctx_pause      => stop callback fires (controls main tracing context)
-//   CodeB            => markers still written (no filter => should_write always true)
-//   roctx_resume     => start callback fires
+//   roctx_pause      => stop callback fires; should_write becomes false
+//   CodeB            => NOT profiled (paused)
+//   roctx_resume     => start callback fires; should_write becomes true
 //   CodeC            => profiled
-//   CodeD            => profiled
-//
-// Without a region filter, should_write_markers() always returns true.
-// Pause/resume only affects the main tracing context via callbacks.
 TEST_F(roctx_client_control_test, pause_resume_no_filter)
 {
     auto client = make_client("");
@@ -135,13 +197,13 @@ TEST_F(roctx_client_control_test, pause_resume_no_filter)
     EXPECT_FALSE(ctrl->region_filter_active());
     EXPECT_TRUE(ctrl->should_write_markers());
 
-    // Pause: stop callback fires, but should_write stays true (no filter)
-    ctrl->handle_pause();
+    // Pause: stop callback fires, should_write becomes false
+    ctrl->handle_pause(std::uint64_t{ 1 });
     EXPECT_EQ(stop_count, 1);
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->should_write_markers());
 
-    // Resume: start callback fires
-    ctrl->handle_resume();
+    // Resume: start callback fires, should_write becomes true
+    ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 1);
     EXPECT_TRUE(ctrl->should_write_markers());
 }
@@ -246,12 +308,12 @@ TEST_F(roctx_client_control_test, selective_region_pause_resume_inside)
     EXPECT_TRUE(ctrl->should_write_markers());  // CodeA
 
     // roctx_pause
-    ctrl->handle_pause();
+    ctrl->handle_pause(std::uint64_t{ 1 });
     EXPECT_EQ(stop_count, 1);
     EXPECT_FALSE(ctrl->should_write_markers());  // CodeB: not profiled
 
     // roctx_resume (paused is true, inside region => succeeds)
-    ctrl->handle_resume();
+    ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 2);
     EXPECT_TRUE(ctrl->should_write_markers());  // CodeC
 
@@ -283,7 +345,7 @@ TEST_F(roctx_client_control_test, selective_region_pause_outside_resume_inside)
     auto ctrl   = client->get_controller();
 
     // roctx_pause outside region: ignored (region filter active, no active ranges)
-    ctrl->handle_pause();
+    ctrl->handle_pause(std::uint64_t{ 1 });
     EXPECT_EQ(stop_count, 0);  // no callback fired
 
     // CodeZ: outside region
@@ -298,7 +360,7 @@ TEST_F(roctx_client_control_test, selective_region_pause_outside_resume_inside)
     EXPECT_TRUE(ctrl->should_write_markers());
 
     // roctx_resume: not paused => ignored
-    ctrl->handle_resume();
+    ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 1);  // no new callback
 
     // CodeC: still profiled
@@ -337,20 +399,19 @@ TEST_F(roctx_client_control_test, selective_region_pause_then_region_ends)
     EXPECT_TRUE(ctrl->should_write_markers());  // CodeA
 
     // roctx_pause
-    ctrl->handle_pause();
+    ctrl->handle_pause(std::uint64_t{ 1 });
     EXPECT_EQ(stop_count, 1);
     EXPECT_FALSE(ctrl->should_write_markers());  // CodeC: not profiled
 
     // Pop Region1: region ends while paused.
-    // handle_range_stop sees user_paused=true => logs warning,
-    // resets paused to false. Stop callbacks NOT fired (already fired by pause).
+    // handle_range_stop sees paused threads => logs warning,
+    // clears paused set. Stop callbacks NOT fired (already fired by pause).
     ctrl->handle_range_stop(1);
     EXPECT_EQ(stop_count, 1);                    // no double-stop
     EXPECT_FALSE(ctrl->should_write_markers());  // CodeD: outside region
 
-    // roctx_resume: paused was reset to false by range_stop,
-    // also outside region => ignored
-    ctrl->handle_resume();
+    // roctx_resume: paused set was cleared by range_stop => ignored
+    ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 1);  // no new callback
     EXPECT_FALSE(ctrl->should_write_markers());
 }
@@ -364,15 +425,16 @@ TEST_F(roctx_client_control_test, double_pause_is_ignored)
     auto client = make_client("");
     auto ctrl   = client->get_controller();
 
-    ctrl->handle_pause();
+    const auto tid = std::uint64_t{ 1 };
+    ctrl->handle_pause(tid);
     EXPECT_EQ(stop_count, 1);
 
-    // Second pause is ignored (already paused)
-    ctrl->handle_pause();
+    // Second pause on the same thread is ignored
+    ctrl->handle_pause(tid);
     EXPECT_EQ(stop_count, 1);
 
-    // No region filter => should_write always true; pause only affects callbacks
-    EXPECT_TRUE(ctrl->should_write_markers());
+    // Calling thread is paused, so markers must not be written
+    EXPECT_FALSE(ctrl->should_write_markers());
 }
 
 TEST_F(roctx_client_control_test, resume_without_pause_is_ignored)
@@ -381,7 +443,7 @@ TEST_F(roctx_client_control_test, resume_without_pause_is_ignored)
     auto ctrl   = client->get_controller();
 
     // Resume without prior pause
-    ctrl->handle_resume();
+    ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 0);
     EXPECT_TRUE(ctrl->should_write_markers());
 }
@@ -484,77 +546,26 @@ TEST_F(roctx_client_control_test, start_with_null_message_is_ignored)
 namespace
 {
 
-using rocprofsys::rocprofiler_sdk::annotation_entry;
-using rocprofsys::trace_cache::region_sample;
-
 using ::testing::_;
 using ::testing::AllOf;
 using ::testing::ElementsAre;
 using ::testing::Field;
 using ::testing::IsEmpty;
-using ::testing::NiceMock;
 using ::testing::SizeIs;
 using ::testing::StrEq;
 
 MATCHER_P2(IsAnnotation, key, value, "")
 {
-    return std::string(arg.key) == key && std::holds_alternative<uint64_t>(arg.value) &&
-           std::get<uint64_t>(arg.value) == static_cast<uint64_t>(value);
+    return std::string(arg.key) == key &&
+           std::holds_alternative<std::uint64_t>(arg.value) &&
+           std::get<std::uint64_t>(arg.value) == static_cast<std::uint64_t>(value);
 }
-
-class mock_api
-{
-public:
-    MOCK_METHOD(void, push_timemory, (std::string_view name));
-    MOCK_METHOD(void, pop_timemory, (std::string_view name));
-    MOCK_METHOD(void, push_perfetto_ts,
-                (const char* name, uint64_t ts, uint64_t flow_id,
-                 const std::vector<annotation_entry>& annotations));
-    MOCK_METHOD(void, pop_perfetto_ts,
-                (const char* name, uint64_t ts,
-                 const std::vector<annotation_entry>& annotations));
-    MOCK_METHOD(void, add_string, (std::string_view string_value));
-    MOCK_METHOD(void, store_region, (const region_sample& sample));
-    MOCK_METHOD(void, add_thread_info,
-                (const rocprofsys::trace_cache::info::thread& thread_info));
-};
-
-struct mock_marker_policy
-{
-    static inline std::unique_ptr<NiceMock<mock_api>> api{};
-
-    static void reset() { api = std::make_unique<NiceMock<mock_api>>(); }
-
-    static void push_timemory(std::string_view name) { api->push_timemory(name); }
-    static void pop_timemory(std::string_view name) { api->pop_timemory(name); }
-
-    static void push_perfetto_ts(const char* name, uint64_t ts, uint64_t flow_id,
-                                 const std::vector<annotation_entry>& annotations)
-    {
-        api->push_perfetto_ts(name, ts, flow_id, annotations);
-    }
-
-    static void pop_perfetto_ts(const char* name, uint64_t ts,
-                                const std::vector<annotation_entry>& annotations)
-    {
-        api->pop_perfetto_ts(name, ts, annotations);
-    }
-
-    static void add_string(std::string_view string_value)
-    {
-        api->add_string(string_value);
-    }
-    static void store_region(const region_sample& sample) { api->store_region(sample); }
-    static void add_thread_info(const rocprofsys::trace_cache::info::thread& thread_info)
-    {
-        api->add_thread_info(thread_info);
-    }
-};
 
 using mock_marker_writer = rocprofsys::rocprofiler_sdk::marker_writer<mock_marker_policy>;
 
 rocprofiler_callback_tracing_record_t
-make_record(uint64_t thread_id, uint64_t corr_internal, uint64_t corr_external)
+make_record(std::uint64_t thread_id, std::uint64_t corr_internal,
+            std::uint64_t corr_external)
 {
     rocprofiler_callback_tracing_record_t record{};
     record.thread_id                     = thread_id;
@@ -565,12 +576,8 @@ make_record(uint64_t thread_id, uint64_t corr_internal, uint64_t corr_external)
 
 }  // namespace
 
-class marker_write_test : public ::testing::Test
-{
-protected:
-    void SetUp() override { mock_marker_policy::reset(); }
-    void TearDown() override { mock_marker_policy::api.reset(); }
-};
+class marker_write_test : public mock_cleanup_base
+{};
 
 TEST_F(marker_write_test, all_backends_with_annotations)
 {
@@ -681,4 +688,142 @@ TEST_F(marker_write_test, write_end_with_empty_args)
 
     const mock_marker_writer writer(false, false, false);
     writer.write_end("R", 100, 200, "", record);
+}
+
+// ============================================================================
+// roctxRangePush / roctxRangePop region-filter and pause/resume tests
+//
+// These tests verify the behavioral contract that roctxRangePush/roctxRangePop
+// must deliver: the trace_control region-filter and pause/resume logic must
+// engage for push/pop the same way it does for roctxRangeStartA/roctxRangeStop.
+//
+// They drive trace_control directly — the same pattern used by the existing
+// roctx_client_control_test fixture — using synthetic range IDs from the
+// UINT64_MAX-downward space that roctx_client reserves for push/pop via the
+// s_push_range_id counter in roctx_client.cpp.
+// ============================================================================
+
+class roctx_push_pop_region_test : public mock_cleanup_base
+{
+protected:
+    using roctx_client_t = rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy>;
+    using roctx_config_t = rocprofsys::rocprofiler_sdk::roctx_client_config;
+
+    int start_count = 0;
+    int stop_count  = 0;
+
+    std::unique_ptr<roctx_client_t> make_client(const std::string& regions)
+    {
+        const roctx_config_t config{ true, false, false, false, regions };
+        auto                 client = std::make_unique<roctx_client_t>(config);
+        client->get_controller()->register_region_pause_resume_callbacks(
+            [this]() { start_count++; }, [this]() { stop_count++; });
+        return client;
+    }
+
+    // Synthetic IDs mirror the s_push_range_id counter: starts at UINT64_MAX,
+    // decrements on each roctxRangePush to avoid colliding with SDK-allocated
+    // roctxRangeStart IDs (which count upward from small values).
+    static constexpr std::uint64_t k_push_id = std::numeric_limits<std::uint64_t>::max();
+};
+
+TEST_F(roctx_push_pop_region_test, push_matching_region_activates_controller)
+{
+    auto client = make_client("Region1");
+    auto ctrl   = client->get_controller();
+
+    EXPECT_FALSE(ctrl->should_write_markers());
+
+    ctrl->handle_range_start(k_push_id, "Region1");
+
+    EXPECT_TRUE(ctrl->should_write_markers());
+}
+
+TEST_F(roctx_push_pop_region_test, pop_matching_region_deactivates_controller)
+{
+    auto client = make_client("Region1");
+    auto ctrl   = client->get_controller();
+
+    ctrl->handle_range_start(k_push_id, "Region1");
+    EXPECT_TRUE(ctrl->should_write_markers());
+
+    ctrl->handle_range_stop(k_push_id);
+    EXPECT_FALSE(ctrl->should_write_markers());
+}
+
+TEST_F(roctx_push_pop_region_test, push_non_matching_region_does_not_activate)
+{
+    auto client = make_client("Region1");
+    auto ctrl   = client->get_controller();
+
+    ctrl->handle_range_start(k_push_id, "OtherRegion");
+
+    EXPECT_FALSE(ctrl->should_write_markers());
+    EXPECT_EQ(start_count, 0);
+}
+
+TEST_F(roctx_push_pop_region_test, resume_callback_fires_on_first_push)
+{
+    auto client = make_client("Region1");
+    auto ctrl   = client->get_controller();
+
+    EXPECT_EQ(start_count, 0);
+    ctrl->handle_range_start(k_push_id, "Region1");
+    EXPECT_EQ(start_count, 1);
+}
+
+TEST_F(roctx_push_pop_region_test, pause_callback_fires_on_last_pop)
+{
+    auto client = make_client("Region1");
+    auto ctrl   = client->get_controller();
+
+    ctrl->handle_range_start(k_push_id, "Region1");
+    EXPECT_EQ(stop_count, 0);
+
+    ctrl->handle_range_stop(k_push_id);
+    EXPECT_EQ(stop_count, 1);
+}
+
+// Nested pushes of the same region use distinct synthetic IDs (UINT64_MAX,
+// UINT64_MAX-1, ...). The controller resumes on the first push and pauses
+// only when the last pop removes the final active ID.
+TEST_F(roctx_push_pop_region_test, nested_push_pop_same_region)
+{
+    auto client = make_client("Region1");
+    auto ctrl   = client->get_controller();
+
+    // First push: activates
+    ctrl->handle_range_start(k_push_id, "Region1");
+    EXPECT_EQ(start_count, 1);
+    EXPECT_TRUE(ctrl->should_write_markers());
+
+    // Second push: already active — no extra resume callback
+    ctrl->handle_range_start(k_push_id - 1, "Region1");
+    EXPECT_EQ(start_count, 1);
+    EXPECT_TRUE(ctrl->should_write_markers());
+
+    // First pop (LIFO): removes second ID — first is still active
+    ctrl->handle_range_stop(k_push_id - 1);
+    EXPECT_EQ(stop_count, 0);
+    EXPECT_TRUE(ctrl->should_write_markers());
+
+    // Second pop: removes last ID — pause fires
+    ctrl->handle_range_stop(k_push_id);
+    EXPECT_EQ(stop_count, 1);
+    EXPECT_FALSE(ctrl->should_write_markers());
+}
+
+TEST_F(roctx_push_pop_region_test, push_pop_no_filter_always_active)
+{
+    auto client = make_client("");
+    auto ctrl   = client->get_controller();
+
+    EXPECT_FALSE(ctrl->region_filter_active());
+    EXPECT_TRUE(ctrl->should_write_markers());
+
+    ctrl->handle_range_start(k_push_id, "AnyRegion");
+    EXPECT_TRUE(ctrl->should_write_markers());
+
+    ctrl->handle_range_stop(k_push_id);
+    EXPECT_TRUE(ctrl->should_write_markers());
 }

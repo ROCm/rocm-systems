@@ -22,6 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include "log.hpp"
 #include "numa_wrapper.hpp"
 #include "util.hpp"
 
@@ -44,21 +45,27 @@ NUMAWrapper::NUMAWrapper() {
   numa_handle = dlopen("libnuma.so", RTLD_NOW);
 
   if (!numa_handle) {
-    DPRINTF("Could not open libnuma. Returning\n");
-    exit(1);
+    LOG_ERROR("Could not open libnuma. Returning");
+    return;
   }
 
   err = init_function_table();
   if (err != ROCSHMEM_SUCCESS) {
-    DPRINTF("Could not construct libnuma function table \n");
-    exit(1);
+    LOG_ERROR("Could not construct libnuma function table");
+    return;
   }
+
+  numalib_available = true;
 }
 
 NUMAWrapper::~NUMAWrapper() {
   if (numa_handle != nullptr) {
     dlclose(numa_handle);
   }
+}
+
+bool NUMAWrapper::is_available() {
+  return numalib_available;
 }
 
 int NUMAWrapper::init_function_table() {

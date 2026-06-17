@@ -84,7 +84,7 @@ typedef struct _RocdecPicParamsHost {
 typedef struct _RocDecoderHostCreateInfo {
     uint32_t width;                        /**< IN: Coded sequence width in pixels */
     uint32_t height;                       /**< IN: Coded sequence height in pixels */
-    uint32_t num_decode_threads;           /**< IN: Maximum number of internal decode threads for multi-threading <default value 0: threading will be chosen as appropriate to get the max performace> */
+    uint32_t num_decode_threads;           /**< IN: Maximum number of internal decode threads for multi-threading <default value 0: threading will be chosen as appropriate to get the max performance> */
     rocDecVideoCodec codec_type;           /**< IN: rocDecVideoCodec_XXX */
     rocDecVideoChromaFormat chroma_format; /**< IN: rocDecVideoChromaFormat_XXX */
     uint32_t bit_depth_minus_8;            /**< IN: The value "BitDepth minus 8" */
@@ -171,7 +171,7 @@ extern rocDecStatus ROCDECAPI rocDecReconfigureDecoderHost(rocDecDecoderHandle d
 //!                                           RocdecProcParams *vid_postproc_params);
 //! \ingroup group_amd_rocdecode
 //! Post-process and map video frame corresponding to pic_idx for use in HIP. Returns HIP device pointer and associated
-//! line_size of the video frame. Returns host memory pointers and pitch for each plane (Y, U and V) seperately
+//! line_size of the video frame. Returns host memory pointers and pitch for each plane (Y, U and V) separately
 //! line_size is a pointer to an unsigned 32-bit integer array of size 3.
 /************************************************************************************************************************/
 extern rocDecStatus ROCDECAPI rocDecGetVideoFrameHost(rocDecDecoderHandle decoder_handle, int pic_idx,

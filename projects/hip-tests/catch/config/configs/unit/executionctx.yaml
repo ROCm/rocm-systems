@@ -1,0 +1,68 @@
+---
+executionctx:
+  Unit_hipGreenCtxCreateDestroy_Sanity:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamCreate_Sanity:
+    <<: *level_2
+  Unit_hipGreenCtx_kernelLaunch_Basic:
+    <<: *level_2
+  Unit_hipGreenCtxCreate_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamCreate_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDestroy_Negative:
+    <<: *level_2
+    disabled: [amd_linux, amd_windows, amd_wsl]
+  Unit_hipExecutionCtxRecordWaitEvent_Sanity:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordEventFunctional:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordWait_Blocking:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_Sanity:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_By_Count_Sanity:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_Functional:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_By_Count_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_By_Count_Functional:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_Backfill_Functional:
+    <<: *level_2
+  Unit_hipExecutionCtxResourceSplit_Disjoint_Sets:
+    <<: *level_2
+    disabled: [nvidia_linux]
+  Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource:
+    <<: *level_2
+  Unit_hipExecutionCtxSmAlignment_StreamGetDevResource:
+    <<: *level_2
+  Unit_hipExecutionCtxSmAlignment_PropagatesThroughSplit:
+    <<: *level_2
+  Unit_hipExecutionCtxSmAlignment_GreenCtxPreservesAlignment:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_Sanity:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_Consistent:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_MultiDevice:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_GetDevice_RoundTrip:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_GetId:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_Negative:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_KernelLaunch_Functional:
+    <<: *level_2
+  Unit_hipDeviceGetExecutionCtx_PrimaryCtx_Persistence:
+    <<: *level_2
+  Unit_hipStreamGetDevResource_GreenCtxStream_Functional:
+    <<: *level_2
+  Unit_hipStreamGetDevResource_RegularStream_Functional:
+    <<: *level_2
+  Unit_hipStreamGetDevResource_Negative:
+    <<: *level_2

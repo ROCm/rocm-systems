@@ -254,7 +254,7 @@ PTraceSession::ptrace_signal_handler_func(
 
         // make a non-blocking call to waitpid to check on our tracee process
         retval = waitpid(_pid, &status, WNOHANG);
-        // if retval is 0, no error occured and no state change was observed
+        // if retval is 0, no error occurred and no state change was observed
         if(retval == 0)
         {
             std::this_thread::yield();
@@ -310,8 +310,6 @@ PTraceSession::ptrace_signal_handler_func(
             else
             {
                 // Not our signal, forward the signal to the app using CONT
-                ROCP_TRACE << "[rocprofiler-sdk-rocattach] ptrace call params(PTRACE_CONT(7), "
-                           << _pid << ", 0, " << sig << ")";
                 uint64_t           _retval = 0;
                 int                _errno  = 0;
                 rocattach_status_t _status = ptrace_run(

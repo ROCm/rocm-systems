@@ -62,11 +62,11 @@ class Queue {
 
   void copy_element_to_cache(uint64_t queue_index);
 
-  QueueProxyT queue_proxy_{};
+  QueueProxy queue_proxy_{};
 
   QueueDescProxyT queue_desc_proxy_{};
 
-  QueueElementProxyT queue_element_cache_proxy_{};
+  QueueElementProxy queue_element_cache_proxy_{};
 
   HdpProxy<HIPHostAllocator> hdp_proxy_{};
 

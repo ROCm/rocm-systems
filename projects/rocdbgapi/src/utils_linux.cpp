@@ -120,7 +120,7 @@ pipe_t::close ()
 int
 pipe_t::flush ()
 {
-  int ret;
+  ssize_t ret;
 
   do
     {
@@ -138,7 +138,7 @@ pipe_t::flush ()
 int
 pipe_t::mark ()
 {
-  int ret;
+  ssize_t ret;
 
   /* First, flush the pipe.  */
   flush ();

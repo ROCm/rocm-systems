@@ -25,9 +25,9 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include "common.hpp"
 #include "gfx10/gfx10parser.h"
 #include "gfx10/gfx10token.h"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 
 namespace gfx11
 {

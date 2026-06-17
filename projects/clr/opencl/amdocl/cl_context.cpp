@@ -99,6 +99,7 @@ RUNTIME_ENTRY_RET(cl_context, clCreateContext,
   }
 
   std::vector<amd::Device*> devices_;
+  devices_.reserve(num_devices);
   for (cl_uint i = 0; i < num_devices; ++i) {
     // FIXME_lmoriche: Set errcode_ret to CL_DEVICE_NOT_AVAILABLE if a
     // device in devices is no longer available.

@@ -25,6 +25,7 @@
 #include "gda/queue_pair.hpp"
 #include "gda/endian.hpp"
 #include "util.hpp"
+#include "log.hpp"
 #include "containers/free_list_impl.hpp"
 
 namespace rocshmem {
@@ -32,14 +33,13 @@ namespace rocshmem {
 __device__ uint32_t QueuePair::reserve_sq(ActiveWFInfo &wf_info,
     uint32_t num_wqes) {
   uint32_t my_sq_prod = 0;
-  uint64_t activemask = wf_info.pe_group_mask;
 
   // reserve space for wqes in sq
-  if (wf_info.is_pe_group_leader) {
+  if (wf_info.is_pe_group_first) {
     my_sq_prod = __hip_atomic_fetch_add(&sq_prod, num_wqes, __ATOMIC_RELAXED,
                  __HIP_MEMORY_SCOPE_AGENT);
   }
-  my_sq_prod = __shfl(my_sq_prod, wf_info.pe_group_leader_phys_lane_id);
+  my_sq_prod = __shfl(my_sq_prod, wf_info.pe_group_first_phys_lane_id);
 
   // wait for that space to be available
   ionic_quiet_internal(wf_info, my_sq_prod + num_wqes - sq_mask);
@@ -82,7 +82,7 @@ __device__ uint32_t QueuePair::commit_sq(ActiveWFInfo &wf_info,
 
   spin_lock_acquire_shared(&sq_lock, wf_info.pe_group_mask);
 
-  if (wf_info.is_pe_group_leader && ((sq_dbprod - dbprod) & (1u << 31))) {
+  if (wf_info.is_pe_group_first && ((sq_dbprod - dbprod) & (1u << 31))) {
     sq_dbprod = dbprod;
 
     ionic_ring_doorbell(dbprod);
@@ -94,7 +94,7 @@ __device__ uint32_t QueuePair::commit_sq(ActiveWFInfo &wf_info,
 }
 
 __device__ void QueuePair::poll_wave_cqes(uint64_t activemask) {
-  uint32_t my_logical_lane_id = get_active_lane_num(activemask);
+  int my_logical_lane_id = get_active_lane_num(activemask);
   uint32_t my_cq_pos = cq_pos + my_logical_lane_id;
 
   /* Look at the cqe at the current position in the cq buffer */
@@ -117,7 +117,7 @@ __device__ void QueuePair::poll_wave_cqes(uint64_t activemask) {
 
   /* Report if the completion indicates an error. */
   if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
-#if defined(DEBUG)
+#if defined(BUILD_DEBUG_DEVICE)
     uint32_t qtf = byteswap<uint32_t>(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
@@ -125,8 +125,8 @@ __device__ void QueuePair::poll_wave_cqes(uint64_t activemask) {
     uint32_t status = byteswap<uint32_t>(cqe->status_length);
     uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
 
-    printf("QUIET ERROR: %s qid %u type %u flag %#x status %u msn %u npg %lu\n",
-           dev_name, qid, type, flag, status, msn, npg);
+    LOGD_ERROR("QUIET ERROR: qid %u type %u flag %#x status %u msn %u npg %lu",
+               qid, type, flag, status, msn, npg);
 #endif
     /* No other way to signal an error, so just crash. */
     abort();
@@ -157,7 +157,7 @@ __device__ void QueuePair::poll_wave_cqes(uint64_t activemask) {
 
 __device__ void QueuePair::ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info,
     uint32_t cons) {
-  if (!wf_info.is_pe_group_leader) {
+  if (!wf_info.is_pe_group_first) {
     return;
   }
 
@@ -174,7 +174,7 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info,
   }
 
   if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
-#if defined(DEBUG)
+#if defined(BUILD_DEBUG_DEVICE)
     uint32_t qtf = byteswap<uint32_t>(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
@@ -182,8 +182,8 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info,
     uint32_t status = byteswap<uint32_t>(cqe->status_length);
     uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
 
-    printf("QUIET ERROR (CCQE): %s qid %u type %u flag %#x status %u msn %u npg %lu\n",
-           dev_name, qid, type, flag, status, msn, npg);
+    LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu",
+               qid, type, flag, status, msn, npg);
 #endif
     /* No other way to signal an error, so just crash. */
     abort();
@@ -204,7 +204,7 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe_single(uint32_t cons) {
   }
 
   if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
-#if defined(DEBUG)
+#if defined(BUILD_DEBUG_DEVICE)
     uint32_t qtf = byteswap<uint32_t>(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
@@ -212,8 +212,8 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe_single(uint32_t cons) {
     uint32_t status = byteswap<uint32_t>(cqe->status_length);
     uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
 
-    printf("QUIET ERROR (CCQE): %s qid %u type %u flag %#x status %u msn %u npg %lu\n",
-           dev_name, qid, type, flag, status, msn, npg);
+    LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu",
+               qid, type, flag, status, msn, npg);
 #endif
     /* No other way to signal an error, so just crash. */
     abort();
@@ -260,11 +260,11 @@ __device__ void QueuePair::ionic_quiet_internal(ActiveWFInfo &wf_info, uint32_t 
 __device__ void QueuePair::ionic_ring_doorbell(uint32_t pos) {
   // When threads write at once to the same address, not all writes reach the bus.
   // Take turns and insert a thread fence between writes to the same address.
-  uint32_t activemask = __activemask();
-  uint32_t lane_id    = get_active_lane_num(activemask);
-  uint32_t lane_count = get_active_lane_count(activemask);
+  uint64_t activemask = get_active_lane_mask();
+  int lane_id         = get_active_lane_num(activemask);
+  int lane_count      = get_active_lane_count(activemask);
 
-  for (uint32_t i = 0; i < lane_count; ++i) {
+  for (int i = 0; i < lane_count; i++) {
     if (lane_id == i) {
       __threadfence();
       __atomic_store_n(sq_dbreg, sq_dbval | (sq_mask & pos), __ATOMIC_SEQ_CST);
@@ -291,8 +291,6 @@ __device__ void QueuePair::ionic_quiet_single() {
 __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
     uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
   uint32_t num_wqes = 1;
-  bool is_last_active_lane =
-            wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1;
   if (wf_info.scope == ThreadScope::thread) {
     num_wqes = wf_info.num_pe_group_lanes;
   }
@@ -307,7 +305,7 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_COLOR);
   }
 
-  if (is_last_active_lane) {
+  if (wf_info.is_pe_group_last) {
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
   }
 
@@ -339,7 +337,7 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
       wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(lkey);
+      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(get_lkey(laddr));
     }
   }
 
@@ -391,7 +389,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
       wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(lkey);
+      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(get_lkey(laddr));
     }
   }
 
@@ -404,8 +402,6 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo([[maybe_unused]] int32_t size,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, ActiveWFInfo &wf_info) {
   uint32_t num_wqes = wf_info.num_pe_group_lanes;
-  bool is_last_active_lane =
-            wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1;
   uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
   uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
   struct ionic_v1_wqe *wqe = &ionic_sq_buf[my_sq_pos & sq_mask];
@@ -414,7 +410,7 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo([[maybe_unused]] int32_t size,
 
   uint64_t* wave_fetch_atomic{nullptr};
   if (fetching) {
-    if (wf_info.is_pe_group_leader) {
+    if (wf_info.is_pe_group_first) {
       auto res = fetching_atomic_freelist->pop_front();
       while (!res.success) {
         res = fetching_atomic_freelist->pop_front();
@@ -422,14 +418,14 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo([[maybe_unused]] int32_t size,
       wave_fetch_atomic = res.value;
     }
     wave_fetch_atomic = (uint64_t*)__shfl((uint64_t)wave_fetch_atomic,
-                         wf_info.pe_group_leader_phys_lane_id);
+                         wf_info.pe_group_first_phys_lane_id);
   }
 
   if (!(my_sq_pos & (sq_mask + 1))) {
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_COLOR);
   }
 
-  if (is_last_active_lane) {
+  if (wf_info.is_pe_group_last) {
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
   }
 
@@ -467,7 +463,7 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo([[maybe_unused]] int32_t size,
     ionic_quiet_internal(wf_info, cons);
     ret = wave_fetch_atomic[wf_info.pe_group_logical_lane_id];
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
-    if (wf_info.is_pe_group_leader) {
+    if (wf_info.is_pe_group_first) {
       fetching_atomic_freelist->push_back(wave_fetch_atomic);
     }
   }

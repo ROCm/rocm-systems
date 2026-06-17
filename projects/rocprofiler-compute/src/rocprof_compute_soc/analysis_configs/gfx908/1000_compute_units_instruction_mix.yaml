@@ -14,22 +14,22 @@ Panel Config:
         unit: Unit
       metric:
         LDS:
-          avg: AVG((SQ_INSTS_LDS / $denom))
+          avg: SUM(SQ_INSTS_LDS) / SUM($denom)
           min: MIN((SQ_INSTS_LDS / $denom))
           max: MAX((SQ_INSTS_LDS / $denom))
           unit: (Instructions + $normUnit)
         SALU:
-          avg: AVG((SQ_INSTS_SALU / $denom))
+          avg: SUM(SQ_INSTS_SALU) / SUM($denom)
           min: MIN((SQ_INSTS_SALU / $denom))
           max: MAX((SQ_INSTS_SALU / $denom))
           unit: (Instructions + $normUnit)
         SMEM:
-          avg: AVG((SQ_INSTS_SMEM / $denom))
+          avg: SUM(SQ_INSTS_SMEM) / SUM($denom)
           min: MIN((SQ_INSTS_SMEM / $denom))
           max: MAX((SQ_INSTS_SMEM / $denom))
           unit: (Instructions + $normUnit)
         Branch:
-          avg: AVG((SQ_INSTS_BRANCH / $denom))
+          avg: SUM(SQ_INSTS_BRANCH) / SUM($denom)
           min: MIN((SQ_INSTS_BRANCH / $denom))
           max: MAX((SQ_INSTS_BRANCH / $denom))
           unit: (Instructions + $normUnit)
@@ -54,42 +54,42 @@ Panel Config:
         unit: Unit
       metric:
         Global/Generic Instr:
-          avg: AVG((TA_FLAT_WAVEFRONTS_sum / $denom))
+          avg: SUM(TA_FLAT_WAVEFRONTS_sum) / SUM($denom)
           min: MIN((TA_FLAT_WAVEFRONTS_sum / $denom))
           max: MAX((TA_FLAT_WAVEFRONTS_sum / $denom))
           unit: (Instructions + $normUnit)
         Global/Generic Read:
-          avg: AVG((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
+          avg: SUM(TA_FLAT_READ_WAVEFRONTS_sum) / SUM($denom)
           min: MIN((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
           max: MAX((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
           unit: (Instructions + $normUnit)
         Global/Generic Write:
-          avg: AVG((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
+          avg: SUM(TA_FLAT_WRITE_WAVEFRONTS_sum) / SUM($denom)
           min: MIN((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
           max: MAX((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
           unit: (Instructions + $normUnit)
         Global/Generic Atomic:
-          avg: AVG((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
+          avg: SUM(TA_FLAT_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
           min: MIN((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
           max: MAX((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
           unit: (Instructions + $normUnit)
         Spill/Stack Instr:
-          avg: AVG((TA_BUFFER_WAVEFRONTS_sum / $denom))
+          avg: SUM(TA_BUFFER_WAVEFRONTS_sum) / SUM($denom)
           min: MIN((TA_BUFFER_WAVEFRONTS_sum / $denom))
           max: MAX((TA_BUFFER_WAVEFRONTS_sum / $denom))
           unit: (Instructions + $normUnit)
         Spill/Stack Read:
-          avg: AVG((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
+          avg: SUM(TA_BUFFER_READ_WAVEFRONTS_sum) / SUM($denom)
           min: MIN((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
           max: MAX((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
           unit: (Instructions + $normUnit)
         Spill/Stack Write:
-          avg: AVG((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
+          avg: SUM(TA_BUFFER_WRITE_WAVEFRONTS_sum) / SUM($denom)
           min: MIN((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
           max: MAX((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
           unit: (Instructions + $normUnit)
         Spill/Stack Atomic:
-          avg: AVG((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
+          avg: SUM(TA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
           min: MIN((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
           max: MAX((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
           unit: (Instructions + $normUnit)

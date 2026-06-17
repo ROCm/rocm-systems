@@ -16,6 +16,7 @@ if(rocprofiler-sdk-rocattach_FOUND)
             rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library
             rocprofiler-systems::rocprofiler-systems-headers
             rocprofiler-systems::rocprofiler-systems-common-library
+            rocprofiler-systems::rocprofiler-systems-logger
     )
 
     set_target_properties(

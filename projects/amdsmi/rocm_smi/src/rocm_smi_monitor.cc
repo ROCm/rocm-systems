@@ -458,6 +458,7 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
     std::cout << "Regular expression error:" << std::endl;
     std::cout << e.what() << std::endl;
     std::cout << "Regex error code: " << e.code() << std::endl;
+    closedir(hwmon_dir);
     return -3;
   }
   return 0;

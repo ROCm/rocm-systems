@@ -56,6 +56,7 @@ void CountedQueuesTest::SetUp() {
   }
 
   TestBase::SetUp();
+  if (test_skipped_) return;
 }
 
 void CountedQueuesTest::Run() {

@@ -1,0 +1,24 @@
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+rj_add_object_library(rocjitsu_isa_cdna3
+    addr_calc.cpp
+    decoder.cpp
+    encodings.cpp
+    ds.cpp
+    flat.cpp
+    mtbuf.cpp
+    mubuf.cpp
+    operand.cpp
+    smem.cpp
+    sop1.cpp
+    sop2.cpp
+    sopc.cpp
+    sopk.cpp
+    sopp.cpp
+    vop1.cpp
+    vop2.cpp
+    vop3.cpp
+    vop3p.cpp
+    vopc.cpp
+)

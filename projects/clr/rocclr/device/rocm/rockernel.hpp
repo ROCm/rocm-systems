@@ -40,8 +40,24 @@ class Kernel : public device::Kernel {
     return demangled_name_;
   }
 
+  //! Returns the cached metadata kernel descriptor, or nullptr if lookup failed.
+  const hsa_amd_metadata_kernel_descriptor_t* MetadataKernelDescriptor() const {
+    return metadataKernelDescriptor_;
+  }
+
+  //! Kernarg preload length in DWORDs (from kernel descriptor)
+  uint16_t MetadataPreloadLength() const { return metadata_preload_length_; }
+
+  //! Kernarg preload offset in DWORDs (from kernel descriptor)
+  uint16_t MetadataPreloadOffset() const { return metadata_preload_offset_; }
+
   std::string demangled_name_;  //!< Cache demangled name
   std::once_flag demangle_once_;
+
+ private:
+  const hsa_amd_metadata_kernel_descriptor_t* metadataKernelDescriptor_ = nullptr;
+  uint16_t metadata_preload_length_ = 0;
+  uint16_t metadata_preload_offset_ = 0;
 };
 
 }  // namespace amd::roc

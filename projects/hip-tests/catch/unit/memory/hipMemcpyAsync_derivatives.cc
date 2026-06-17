@@ -12,7 +12,9 @@
 #include <numeric>
 
 HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Positive_Basic) {
-  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type =
+      isQuickLevel() ? Streams::created
+                     : GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
 
   const auto f = [stream = stream_guard.stream()](void* dst, void* src, size_t count) {
@@ -54,7 +56,9 @@ HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Negative_Parameters) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Positive_Basic) {
-  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type =
+      isQuickLevel() ? Streams::created
+                     : GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
 
   const auto f = [stream = stream_guard.stream()](void* dst, void* src, size_t count) {
@@ -67,10 +71,8 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Positive_Synchronization_Behavior) {
   // This behavior differs on NVIDIA and AMD, on AMD the hipMemcpy calls is synchronous with
   // respect to the host
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST(
-      "EXSWCPHIPT-127 - MemcpyAsync from host to device memory behavior differs on AMD and "
-      "Nvidia");
-  return;
+  HIP_SKIP_TEST(
+      "EXSWCPHIPT-127 - MemcpyAsync from host to device memory behavior differs on AMD and Nvidia");
 #endif
   MemcpyHPinnedtoDSyncBehavior(
       [](void* dst, void* src, size_t count) {

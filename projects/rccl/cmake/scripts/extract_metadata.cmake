@@ -18,10 +18,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(EXTRACT_TIMEOUT 5 CACHE STRING "Timeout in seconds for roc-obj-* calls")
+set(EXTRACT_TIMEOUT 5 CACHE STRING "Timeout in seconds for llvm-readobj and llvm-objcopy calls")
 
 ## List the objects for each gfx architecture
-execute_process( COMMAND roc-obj-ls librccl.so
+execute_process( COMMAND llvm-readobj --offloading librccl.so
     RESULT_VARIABLE list_result
     OUTPUT_VARIABLE cmd_output
     ERROR_VARIABLE cmd_error
@@ -48,7 +48,7 @@ if(list_result EQUAL 0)
     ## Extract objects from files
     foreach(file ${file_paths})
         execute_process(
-          COMMAND roc-obj-extract ${file}
+          COMMAND llvm-objcopy --dump-offload-bundle=${file}
           RESULT_VARIABLE extraction_result
           ERROR_VARIABLE extraction_error
           OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -72,10 +72,10 @@ if(list_result EQUAL 0)
 elseif(list_result STREQUAL "TIMEOUT")
   message(
     WARNING
-      "[Timeout] roc-obj-ls did not finish within ${EXTRACT_TIMEOUT}s. stderr: ${cmd_error}.
+      "[Timeout] llvm-readobj/llvm-objcopy did not finish within ${EXTRACT_TIMEOUT}s. stderr: ${cmd_error}.
                      Timeouts have been known to happen as a result of mismatched ROCm versions/executables/etc"
   )
 else()
     ## We don't want to stop building unit-tests if this command fails.
-    message(WARNING "[Error ${list_result}] roc-obj-ls failed. stderr: ${cmd_error}")
+    message(WARNING "[Error ${list_result}] llvm-readobj --offloading failed. stderr: ${cmd_error}")
 endif()

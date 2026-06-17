@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ======================================================================================
 # LibIberty.cmake
 #
@@ -79,20 +82,28 @@ else()
     file(MAKE_DIRECTORY "${_li_root}/lib")
     file(MAKE_DIRECTORY "${_li_root}/include")
 
+    # Build only libiberty (not top-level "all"): full binutils needs bison, etc.
+    # bfd doc rules can invoke makeinfo; use a no-op so Texinfo is not required.
+    find_program(_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP NAMES true)
+    if(NOT _ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP)
+        set(_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP /usr/bin/true)
+    endif()
+
     include(ExternalProject)
     ExternalProject_Add(
         ${_li_project_name}
         PREFIX ${_li_root}
         URL
             ${DYNINST_BINUTILS_DOWNLOAD_URL}
-            http://ftpmirror.gnu.org/gnu/binutils/binutils-2.45.tar.gz
-            http://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.45.tar.gz
+            https://ftpmirror.gnu.org/gnu/binutils/binutils-2.46.0.tar.gz
+            https://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.46.0.tar.gz
         BUILD_IN_SOURCE 1
         CONFIGURE_COMMAND
-            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3
-            CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3 <SOURCE_DIR>/configure
+            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3\ -Wno-error
+            CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3\ -Wno-error
+            MAKEINFO=${_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP} <SOURCE_DIR>/configure
             --prefix=${_li_root}
-        BUILD_COMMAND make
+        BUILD_COMMAND make MAKEINFO=${_ROCPROFSYS_LIBIBERTY_MAKEINFO_NOOP} all-libiberty
         INSTALL_COMMAND ""
     )
 

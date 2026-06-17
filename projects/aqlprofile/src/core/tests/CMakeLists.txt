@@ -38,6 +38,7 @@ target_link_libraries(
             GTest::gtest_main)
 gtest_discover_tests(
     gfx9-memory-manager-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -65,6 +66,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     aqlprofile-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -93,6 +95,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     command-buffer-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -120,6 +123,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     counters-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -144,6 +148,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     pm4-factory-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -164,6 +169,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     logger-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -181,6 +187,7 @@ SET(AQLPROFILE_V2_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../vega20_reg_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../spm_data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx12_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx1250_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx11_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx115x_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx10_factory.cpp
@@ -204,5 +211,27 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     aql-profile-v2-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    PROPERTIES TIMEOUT 45 LABELS "unittests")
+
+add_executable(aql-profile-v2-c-compatibility-test)
+target_sources(aql-profile-v2-c-compatibility-test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/aql_profile_v2_c_test.c)
+set_target_properties(
+    aql-profile-v2-c-compatibility-test
+    PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(aql-profile-v2-c-compatibility-test
+    PRIVATE
+        ${LIB_DIR}/core/include)
+target_link_libraries(
+    aql-profile-v2-c-compatibility-test
+    PRIVATE
+            aqlprofile::headers
+            $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
+            $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}>)
+add_test(NAME aql-profile-v2-c-compatibility-test
+         COMMAND $<TARGET_FILE:aql-profile-v2-c-compatibility-test>)
+set_tests_properties(
+    aql-profile-v2-c-compatibility-test
     PROPERTIES TIMEOUT 45 LABELS "unittests")

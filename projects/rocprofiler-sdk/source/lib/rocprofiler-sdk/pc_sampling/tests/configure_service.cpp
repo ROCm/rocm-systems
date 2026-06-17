@@ -161,7 +161,7 @@ extract_pc_sampling_config_prefer(rocprofiler_pc_sampling_method_t method,
 
     const rocprofiler_pc_sampling_configuration_t* first_preferred_method_config = nullptr;
     const rocprofiler_pc_sampling_configuration_t* first_remained_method_config  = nullptr;
-    // Search until encountering the prefered method configuration, if any.
+    // Search until encountering the preferred method configuration, if any.
     // Otherwise, use what remained.
     for(auto const& cfg : configs)
     {
@@ -361,6 +361,8 @@ test_fail_stochastic_vs_host_trap(const callback_data*                          
 
 TEST(pc_sampling, rocprofiler_configure_pc_sampling_service)
 {
+    // If more than one agent is available, the following test ensures
+    // that the same context with PC sampling can be configured on multiple agents.
     using init_func_t = int (*)(rocprofiler_client_finalize_t, void*);
     using fini_func_t = void (*)(void*);
 
@@ -449,7 +451,7 @@ TEST(pc_sampling, rocprofiler_configure_pc_sampling_service)
                                                                 interval,
                                                                 another_buff,
                                                                 0),
-                      ROCPROFILER_STATUS_ERROR);
+                      ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED);
         }
 
         ROCPROFILER_CALL(rocprofiler_create_callback_thread(&cb_data->client_thread),

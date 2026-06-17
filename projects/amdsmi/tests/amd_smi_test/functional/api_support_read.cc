@@ -56,6 +56,7 @@ void TestAPISupportRead::Close() {
 }
 
 void TestAPISupportRead::Run(void) {
+  PRINT_VERBOSITY();
   TestBase::Run();
   if (setup_failed_) {
     IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }

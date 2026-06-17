@@ -1,15 +1,14 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_DEVICE_PTR_H_
 #define _NCCL_DEVICE_PTR_H_
-#include "core.h"
+#include "core_tmp.h"
 #include <stdint.h>
-
-#define __CUDACC__ 0
 
 #if __cplusplus
 template<typename T>
@@ -37,7 +36,7 @@ struct ncclSymPtr {
   NCCL_HOST_DEVICE_INLINE ncclSymPtr<T>& operator-=(long long d);
   NCCL_HOST_DEVICE_INLINE ncclSymPtr<T>& operator-=(unsigned long long d);
 
-  #if __CUDACC__
+  #if NCCL_CHECK_CUDACC
   NCCL_DEVICE_INLINE T* localPtr() const;
   NCCL_DEVICE_INLINE T* lsaPtr(int peer) const;
   NCCL_DEVICE_INLINE T* peerPtr(int peer) const;

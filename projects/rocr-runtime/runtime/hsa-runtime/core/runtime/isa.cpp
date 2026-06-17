@@ -229,6 +229,20 @@ hsa_round_method_t Isa::GetRoundMethod(
   return HSA_ROUND_METHOD_SINGLE;
 }
 
+
+bool Isa::HasImageSupport() const {
+#ifndef HSA_IMAGE_SUPPORT
+  return false;
+#endif
+
+  if ((GetMajorVersion() == 9 &&
+        (GetMinorVersion() == 4 || GetMinorVersion() == 5)) ||
+      (GetMajorVersion() == 12 && GetMinorVersion() == 5))
+    return false;
+
+  return true;
+}
+
 const Isa *IsaRegistry::GetIsa(const std::string &full_name) {
   auto isareg_iter = GetSupportedIsas().find(full_name);
   return isareg_iter == GetSupportedIsas().end() ?
@@ -273,7 +287,8 @@ IsaRegistry::GetSupportedGenericVersions() {
     {prepend_isa_prefix("gfx10-1-generic:xnack+"), 1},
     {prepend_isa_prefix("gfx10-3-generic"), 1},
     {prepend_isa_prefix("gfx11-generic"), 1},
-    {prepend_isa_prefix("gfx12-generic"), 1}
+    {prepend_isa_prefix("gfx12-generic"), 1},
+    {prepend_isa_prefix("gfx12-5-generic"), 1}
   };
   return *min_gen_versions;
 }
@@ -434,6 +449,8 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   ISAREG_ENTRY_GEN("gfx1153",                11, 5, 3, unsupported, unsupported, 32, "gfx11-generic")
   ISAREG_ENTRY_GEN("gfx1200",                12, 0, 0, unsupported, unsupported, 32, "gfx12-generic")
   ISAREG_ENTRY_GEN("gfx1201",                12, 0, 1, unsupported, unsupported, 32, "gfx12-generic")
+  ISAREG_ENTRY_GEN("gfx1250",                12, 5, 0, any,         any,         32, "gfx12-5-generic")
+  ISAREG_ENTRY_GEN("gfx1251",                12, 5, 1, any,         any,         32, "gfx12-5-generic")
 #undef ISAREG_ENTRY_GEN
 
   return *supported_isas;

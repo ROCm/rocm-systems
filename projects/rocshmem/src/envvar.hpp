@@ -129,6 +129,7 @@ namespace envvar {
       BOOTSTRAP,
       REVERSE_OFFLOAD,
       GDA,
+      SDMA,
     };
 
     // env var string prefixes
@@ -139,6 +140,7 @@ namespace envvar {
     template <> inline constexpr const char* prefix<tag::BOOTSTRAP> = "ROCSHMEM_BOOTSTRAP";
     template <> inline constexpr const char* prefix<tag::REVERSE_OFFLOAD> = "ROCSHMEM_RO";
     template <> inline constexpr const char* prefix<tag::GDA> = "ROCSHMEM_GDA";
+    template <> inline constexpr const char* prefix<tag::SDMA> = "ROCSHMEM_SDMA";
   }  // namespace category
 
   namespace parser {
@@ -292,13 +294,36 @@ namespace envvar {
     inline namespace _debug {
       enum class debug_level {
         NONE,
-        VERSION,
+        ERROR,
         WARN,
+        ENV,
+        VERSION,
         INFO,
+        API,
         TRACE,
       };
       std::istream& operator>>(std::istream& is, debug_level& level);
       std::ostream& operator<<(std::ostream& os, const debug_level& level);
+
+      /**
+       * @brief Per-category suppression flags parsed from ROCSHMEM_DEBUG_LEVEL modifiers.
+       *
+       * Format: ROCSHMEM_DEBUG_LEVEL=<level>[:<modifier>]*
+       * Modifiers: noversion, noenv, noinfo, nowarn, notrace, env:all, env:full
+       */
+      enum class env_print_mode { MODIFIED, ALL, FULL };
+
+      struct debug_flags {
+        const bool show_error;
+        const bool show_version;
+        const bool show_env;
+        const env_print_mode env_mode;
+        const bool show_info;
+        const bool show_api;
+        const bool show_warn;
+        const bool show_trace;
+        const bool show_color;
+      };
     }  // inline namespace _debug
   }  // namespace types
 
@@ -367,6 +392,7 @@ namespace envvar {
       const std::string name;
       const std::string doc;
       const value_type default_value;
+    public:
       value_type value;
       bool value_set;
     };
@@ -461,6 +487,9 @@ namespace envvar {
     _detail::var_list_t::const_iterator var_map_pos;
   };
 
+  /** Per-category suppression flags from ROCSHMEM_DEBUG_LEVEL modifiers */
+  extern const types::debug_flags log_flags;
+
   inline namespace _base {
     extern const var<bool> uniqueid_with_mpi;
     extern const var<types::debug_level> debug_level;
@@ -522,7 +551,75 @@ namespace envvar {
     extern const var<size_t> num_qps_per_pe_default_ctx;
     // Number of QPs to create per PE for each user context
     extern const var<size_t> num_qps_per_pe_usr_ctx;
+    extern const var<bool> merge_nics;
+    extern const var<std::string> net_merge_level;
+    extern const var<std::string> net_force_merge;
+    extern const var<std::string> nic_policy;
+    extern const var<size_t> num_user_buffers;
   }  // namespace gda
+
+  namespace sdma {
+    template <typename T> using var = var<T, category::tag::SDMA>;
+    extern const var<bool> enabled;
+    extern const var<size_t> threshold;
+    extern const var<int32_t> num_channels;
+    extern const var<bool> spread_channels;
+  }  // namespace sdma
+
+  /**
+   * @brief Print mode for environment variables
+   */
+  enum class print_mode {
+    /**
+     * Print only modified variables (name=value)
+     * Example: ROCSHMEM_HEAP_SIZE=2147483648
+     */
+    MODIFIED,
+
+    /**
+     * Print all variables with name and value
+     * Example: ROCSHMEM_HEAP_SIZE=1073741824
+     */
+    ALL_VALUES,
+
+    /**
+     * Print all variables with full documentation (name, description, default, current)
+     * Example:
+     *   ROCSHMEM_HEAP_SIZE
+     *     Description: Size of symmetric heap...
+     *     Default: 1073741824
+     *     Current: 1073741824 (using default)
+     */
+    FULL_DOCUMENTATION
+  };
+
+  /**
+   * @brief Print rocSHMEM environment variables
+   *
+   * This function prints rocSHMEM environment variables in different formats
+   * depending on the mode parameter.
+   *
+   * @param mode Print mode (MODIFIED, ALL_VALUES, or FULL_DOCUMENTATION)
+   * @param os Output stream to write to (defaults to std::cout)
+   *
+   * Example usage:
+   * @code
+   *   // Print only modified variables
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::MODIFIED);
+   *
+   *   // Print all variables with values
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::ALL_VALUES);
+   *
+   *   // Print full documentation
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::FULL_DOCUMENTATION);
+   * @endcode
+   *
+   * @note This function is thread-safe and acquires a lock on the internal
+   *       environment variable map.
+   */
+  void print_envvars(print_mode mode = print_mode::MODIFIED,
+                     std::ostream& os = std::cout);
+
 }  // namespace envvar
 }  // namespace rocshmem
 

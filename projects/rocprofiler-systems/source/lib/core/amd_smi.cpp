@@ -1,6 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "backends/amd_smi/ainic_feature.hpp"
+#include "backends/amd_smi/sdma_feature.hpp"
+
+#include "common/env_vars.hpp"
 #include "core/amd_smi.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
@@ -53,7 +57,8 @@ config_settings(const std::shared_ptr<settings>& _config)
 {
     if(!get_use_amd_smi() || !gpu::initialize_amdsmi()) return;
 
-    std::string default_metrics = "busy, temp, power, mem_usage, sdma_usage";
+    std::string default_metrics =
+        "busy, temp, power, mem_usage, sdma_usage, gfx_clock, mem_clock";
     // No distinction between busy and activity shown in description
     std::string jpeg_activity_support{};
     std::string vcn_activity_support{};
@@ -100,7 +105,7 @@ config_settings(const std::shared_ptr<settings>& _config)
 #endif
 
     ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_AMD_SMI_METRICS",
+        std::string, env_vars::AMD_SMI_METRICS,
         "amd-smi metrics to collect: " + default_metrics + jpeg_activity_support +
             vcn_activity_support + xgmi_support + pcie_support + sdma_support + ". " +
             "An empty value implies 'all' and 'none' suppresses all.",
