@@ -236,3 +236,13 @@ struct formatter<hsa_amd_external_semaphore_handle_descriptor_t>
 };
 }  // namespace fmt
 #endif
+
+#if ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION >= 12500
+namespace fmt
+{
+template <>
+struct formatter<hsa_fabric_handle_t>
+: rocprofiler::hsa::utils::handle_formatter<hsa_fabric_handle_t>
+{};
+}  // namespace fmt
+#endif

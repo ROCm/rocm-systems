@@ -1,10 +1,4 @@
 """Tiny torch fixture used by ml_scenarios.rs.
-
-When run under `LD_PRELOAD=librocjitsu_kmd.so` with `RJ_CONFIG`/
-`RJ_SCHEMA` set, ROCm/HIP calls are routed into the rocjitsu
-simulated GPU. This script asserts the simulated GPU is visible to
-torch and runs a tiny tensor op on it.
-
 Exit codes:
   * 0 + prints `tiny_torch_ok` -> success
   * non-zero on any failure (no silent fallback to CPU)

@@ -167,15 +167,14 @@ finally:
 
 ### amdsmi_get_processor_info
 
-**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
-
-Description: Return processor name. Available regardless of whether the library
-was built with ESMI support.
+Description: Return a string identifier for the processor: its index as a decimal
+string (for example `"0"`, `"1"`, `"2"`), which is its zero-based position in the
+library's processor list, the same order used by `amdsmi_get_processor_handles`.
 
 Input parameters:
 `processor_handle` processor handle
 
-Output: Processor name
+Output: Processor index as a string
 
 Exceptions that can be thrown by `amdsmi_get_processor_info` function:
 
@@ -680,6 +679,13 @@ Field | Description | Units
 `default_power_cap` |  default power capability | uW
 `min_power_cap` | min power capability | uW
 `max_power_cap` | max power capability | uW
+
+**Note:** The `power_cap` reported here is the active, *settable* power limit — adjust it
+with `amdsmi_set_power_cap()`. It is distinct from the read-only `power_limit` field
+returned by `amdsmi_get_power_info()`, which cannot be set. Power capping is enforced at
+two Package Power Tracking (PPT) points: PPT0 (the lower limit, applied to filtered input)
+and PPT1 (the higher limit, applied to raw input). See `amdsmi_get_supported_power_cap`
+for the supported PPT sensor indices.
 
 Exceptions that can be thrown by `amdsmi_get_power_cap_info` function:
 
@@ -1277,6 +1283,13 @@ Field | Description
 `active_low_utilization` | 2D array with Low Utilization Violation Active per XCP/XCC
 `active_gfx_clk_below_host_limit_total` | 2D array with GFX Clk Below Host Limit Violation Active (Total) per XCP/XCC
 
+**Note:** `amdsmi_get_violation_status()` reports time-based throttling metrics (PVIOL/TVIOL
+percentages) and is available only on Instinct MI300 Series and newer GPUs (gpu_metrics
+v1.6+). On Radeon (Navi) and Instinct MI100/MI200 Series GPUs it returns N/A; use the
+`throttle_status` / `indep_throttle_status` bit flags from `amdsmi_get_gpu_metrics_info()`
+instead, which report whether throttling is happening now rather than how much over time.
+See [GPU violations](../conceptual/gpu-violations.md) for details.
+
 Exceptions that can be thrown by `amdsmi_get_violation_status` function:
 
 * `AmdSmiLibraryException`
@@ -1448,6 +1461,12 @@ Field | Description
 `page_address` | Address of bad page
 `page_size` | Size of bad page
 `status` | Status of bad page
+
+**Note:** "Bad pages" are retired/reserved VRAM pages and are the same set returned by
+`amdsmi_get_gpu_memory_reserved_pages()`. The `status` field reflects the page state
+(pending, reserved, or unreservable). The error class that triggered retirement
+(correctable vs uncorrectable) is **not** reported here — use `amdsmi_get_gpu_ecc_count()`
+for CE/UE counts. See [RAS](../conceptual/ras.md) for more information.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_bad_page_info` function:
 
@@ -4998,6 +5017,11 @@ Input parameters:
 
 Output: device id
 
+**Note:** This device id is a device-*type* identifier; it is identical across all cards
+of the same SKU and is **not** a per-card identity. It is also distinct from the CLI "ID"
+shown by `amd-smi list` / `--gpu`, which is an enumeration index (0, 1, 2, …) assigned in
+discovery order. To uniquely identify a specific GPU, use its BDF or UUID.
+
 Exceptions that can be thrown by `amdsmi_get_gpu_id` function:
 
 * `AmdSmiLibraryException`
@@ -5032,7 +5056,7 @@ finally:
 
 ### amdsmi_get_gpu_vram_vendor
 
-Description: Get the vram vendor string of a gpu device.
+Description: **Deprecated** (slated for removal in a future ROCm release; use `amdsmi_get_gpu_vram_info()` instead). Get the vram vendor string of a gpu device.
 
 Input parameters:
 
@@ -5589,6 +5613,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition_mem_alloc_mod
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported on this device or driver version
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_UNEXPECTED_DATA` - Unexpected data read from driver/sysfs
+- `AMDSMI_STATUS_FILE_ERROR` - Problem accessing the sysfs file
 
 Example:
 
@@ -5629,8 +5654,9 @@ Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition_mem_alloc_mod
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported on this device or driver version
-- `AMDSMI_STATUS_PERMISSION` - Permission Denied (requires sudo)
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied (requires sudo)
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_FILE_ERROR` - Problem accessing the sysfs file
 
 Example:
 
@@ -6129,6 +6155,13 @@ Field | Description
 `memory_caps` | List of compatible NPS modes (e.g. `["NPS1", "NPS4"]`)
 `num_resources` | Number of resource entries for this profile
 
+**About accelerator partitions:** An accelerator partition is an umbrella *profile* that
+bundles a compute-partition mode (SPX/DPX/TPX/QPX/CPX), the compatible memory-partition
+(NPS) modes, and the resource layout into a single configuration. Compute partitioning
+(XCC grouping) and memory partitioning (NPS HBM interleaving) are orthogonal sub-dimensions
+selected together by the chosen profile. See `amdsmi_get_gpu_compute_partition()` and
+`amdsmi_get_gpu_memory_partition()` for the individual axes.
+
 Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile` function:
 
 * `AmdSmiLibraryException`
@@ -6305,6 +6338,10 @@ Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blo
 ### amdsmi_get_xgmi_info
 
 Description: Returns XGMI information for the GPU.
+
+**Note:** Here "fabric" / XGMI refers to the GPU-to-GPU scale-up interconnect. This is
+distinct from the on-chip Data Fabric clock (FCLK, `AMDSMI_CLK_TYPE_DF`), which is a
+separate clock domain rather than the interconnect.
 
 Input parameters:
 

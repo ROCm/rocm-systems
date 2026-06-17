@@ -298,9 +298,15 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFDCtx(void)
 			hsakmt_fmm_clear_all_aperture(&hsakmt_primary_kfd_ctx);
 
 			if (hsakmt_use_model && hsakmt_primary_kfd_ctx.fd >= 0) {
-				close(hsakmt_primary_kfd_ctx.fd);
+				/* Don't close the memfd - FFM owns its lifecycle and
+				 * hands the same fd back on the next OpenKFDCtx. Closing
+				 * it here would let the kernel reassign the fd number,
+				 * causing later mmap()s through cached drm_render_fds
+				 * to target the wrong file. Just drop our reference by
+				 * clearing the context so model_init_env_vars's
+				 * assert(fd < 0) holds on re-init.
+				 */
 				hsakmt_kfdcontext_clear_context(&hsakmt_primary_kfd_ctx);
-
 			}
 		}
 

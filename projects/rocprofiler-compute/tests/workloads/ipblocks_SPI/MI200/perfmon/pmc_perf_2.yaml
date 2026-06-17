@@ -1,0 +1,6 @@
+jobs:
+- pmc:
+  - SPI_RA_WAVE_SIMD_FULL_CSN
+  - SPI_RA_WVLIM_STALL_CSN
+  - SPI_SWC_CSC_WR
+  - SPI_VWC_CSC_WR

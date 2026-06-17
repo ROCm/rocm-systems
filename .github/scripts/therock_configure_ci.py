@@ -138,6 +138,7 @@ SKIPPABLE_PATH_PATTERNS = [
     ".github/CODEOWNERS",
     ".github/label*.yml",
     ".github/workflows/labeler.yml",
+    ".github/workflows/amdsmi-manylinux-build.yml",
 ]
 
 
