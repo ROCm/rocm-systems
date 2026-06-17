@@ -502,16 +502,12 @@ enum hip_api_id_t {
   HIP_API_ID_hipExecutionCtxWaitEvent = 477,
   HIP_API_ID_hipLibraryGetGlobal = 478,
   HIP_API_ID_hipLibraryGetManaged = 479,
-<<<<<<< HEAD
-  HIP_API_ID_hipModuleGetLoadingMode = 480,
-  HIP_API_ID_LAST = 480,
-=======
   HIP_API_ID_hipMemDiscardBatchAsync = 480,
   HIP_API_ID_hipDrvMemDiscardBatchAsync = 481,
   HIP_API_ID_hipMemDiscardAndPrefetchBatchAsync = 482,
   HIP_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync = 483,
-  HIP_API_ID_LAST = 483,
->>>>>>> origin/develop
+  HIP_API_ID_hipModuleGetLoadingMode = 484,
+  HIP_API_ID_LAST = 484,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
