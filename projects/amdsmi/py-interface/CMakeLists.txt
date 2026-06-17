@@ -98,12 +98,15 @@ add_custom_command(
         ${PY_PACKAGE_DIR}/__init__.py
         ${PY_PACKAGE_DIR}/amdsmi_exception.py
         ${PY_PACKAGE_DIR}/amdsmi_interface.py
+        ${PY_PACKAGE_DIR}/amdsmi_interface_utils.py
         ${PY_PACKAGE_DIR}/README.md
         ${PY_PACKAGE_DIR}/LICENSE
     DEPENDS python_wrapper
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_exception.py ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_interface.py ${PY_PACKAGE_DIR}/
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_interface_utils.py ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/LICENSE ${PY_PACKAGE_DIR}/
 )
@@ -124,6 +127,7 @@ add_custom_target(
         ${PY_PACKAGE_DIR}/__init__.py
         ${PY_PACKAGE_DIR}/amdsmi_exception.py
         ${PY_PACKAGE_DIR}/amdsmi_interface.py
+        ${PY_PACKAGE_DIR}/amdsmi_interface_utils.py
         ${PY_PACKAGE_DIR}/README.md
         ${PY_PACKAGE_DIR}/LICENSE
         ${PY_PACKAGE_DIR}/${AMDSMI_PYTHON_LIB_NAME}

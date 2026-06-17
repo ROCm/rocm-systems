@@ -113,7 +113,7 @@ main()
     status                           = hsa_signal_create(1, 0, nullptr, &completion_signal_1);
     RET_IF_HSA_ERR(status)
 
-    // First dispath packet on queue 1, Kernel A
+    // First dispatch packet on queue 1, Kernel A
     {
         MQDependencyTest::Aql packet{};
         packet.header.type    = HSA_PACKET_TYPE_KERNEL_DISPATCH;
@@ -164,7 +164,7 @@ main()
         obj.submit_packet(queue1, packet);
     }
 
-    // Second dispath packet on queue 1, Kernel C
+    // Second dispatch packet on queue 1, Kernel C
     {
         MQDependencyTest::Aql packet{};
         packet.header.type    = HSA_PACKET_TYPE_KERNEL_DISPATCH;
@@ -216,7 +216,7 @@ main()
         obj.submit_packet(queue2, packet);
     }
 
-    // Third dispath packet on queue 2, Kernel B
+    // Third dispatch packet on queue 2, Kernel B
     {
         MQDependencyTest::Aql packet{};
         packet.header.type    = HSA_PACKET_TYPE_KERNEL_DISPATCH;

@@ -73,6 +73,16 @@ RUN dnf makecache && \
         python3.12-devel \
         rpm-build
 
+# Point amdclang++ at the gcc-toolset-13 libstdc++.
+# clang locates its C++ standard library by scanning a fixed set of prefixes
+# (essentially /usr) for the newest GCC; it does NOT consult PATH. The default
+# el9 GCC (11) is older than the GCC 13 used on Ubuntu24/SUSE, and
+# gcc-toolset-13 lives under /opt/rh, which clang's scanner doesn't search on
+# this toolchain. Append --gcc-install-dir to the ROCm config file that
+# amdclang++ auto-loads so it selects the gcc-toolset-13 libstdc++.
+RUN echo '--gcc-install-dir=/opt/rh/gcc-toolset-13/root/usr/lib/gcc/x86_64-redhat-linux/13' \
+        >> /opt/rocm/lib/llvm/bin/rocm.cfg
+
 # Configure system linker for ROCm
 RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf
 /opt/rocm/lib
@@ -90,7 +100,7 @@ ENV ROCM_VERSION="${ROCM_VERSION}"
 # non-interactive shells. Tell Bash to read a minimal .profile
 # when a shell of any type is opened.
 # Uncomment to prefer newer version of GCC.
-# RUN echo 'source /opt/rh/gcc-toolset-13/enable' >> ~/.bashrc
+RUN echo 'source /opt/rh/gcc-toolset-13/enable' >> ~/.bashrc
 RUN echo 'source ~/.bashrc' >> ~/.bash_profile
 ENV BASH_ENV="~/.bashrc"
 

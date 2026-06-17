@@ -15,17 +15,37 @@ validation suite.
 
 ## Source Files
 
-- `unified-memory.cpp` - Implements 16 managed-memory test scenarios (basic
+- `unified-memory.cpp` - Implements 19 managed-memory test scenarios (basic
   faulting, ping-pong, prefetch, pressure, concurrent kernels, fine-grain
   access), CLI argument parsing, and a configurable subset runner (defaults to
-  the first 6 tests, which is what the e2e validator expects).
+  the first 9 tests, which is what the e2e validator expects).
 
 ## Prerequisites
 
 - CMake 3.25+
 - HIP runtime and `hipcc` compiler
 - XNACK-capable AMD GPU (for example, MI200/MI300 or newer Instinct accelerators) with `HSA_XNACK=1`
-- ROCProfiler-SDK 1.2.2 or later (only required when running under `rocprof-sys-run`)
+- ROCm 7.13 or later, or ROCProfiler-SDK 1.2.2 or later for standalone SDK installs (only required when running under `rocprof-sys-run`)
+
+## Get the Example Source
+
+If you don't already have a `rocm-systems` checkout, use Git sparse checkout to
+download only this example and the helper files needed for a standalone example
+build:
+
+```bash
+git clone --filter=blob:none --sparse https://github.com/ROCm/rocm-systems.git
+git -C rocm-systems sparse-checkout set \
+    projects/rocprofiler-systems/examples/cmake \
+    projects/rocprofiler-systems/examples/unified-memory \
+    projects/rocprofiler-systems/scripts
+```
+
+Then use the ROCm Systems Profiler project directory as the project root:
+
+```bash
+cd rocm-systems/projects/rocprofiler-systems
+```
 
 ## Building
 
@@ -46,13 +66,13 @@ cmake --build <build_dir> --target unified-memory
 ## Running
 
 ```bash
-# Default: 64 MB per allocation, 512 MB pressure pool, 8 ping-pong iterations, first 6 tests
+# Default: 64 MB per allocation, 512 MB pressure pool, 8 ping-pong iterations, first 9 tests
 ./unified-memory
 
 # Smaller workload matching the e2e validation path
 ./unified-memory -s 32 -p 256 -i 4
 
-# Run the full set of 16 tests
+# Run the full set of 19 tests
 ./unified-memory -a
 ```
 
@@ -64,7 +84,7 @@ cmake --build <build_dir> --target unified-memory
 | `-p, --pressure <MB>` | Managed memory for the pressure test | 512 |
 | `-d, --device <ID>` | GPU device ID | 0 |
 | `-i, --iterations <N>` | Ping-pong iterations | 8 |
-| `-a, --all` | Run all 16 tests (default: first 6 only) | off |
+| `-a, --all` | Run all 19 tests (default: first 9 only) | off |
 
 Running on a host without XNACK support, or without `HSA_XNACK=1`, will not
 crash, but no KFD page-fault / page-migration events will be captured under
@@ -103,13 +123,13 @@ migration-throughput track is not shown.
 | `HSA_XNACK` | `1` | Required runtime prerequisite for any KFD page-fault / migration events. |
 | `ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING` | `ON` | Enable the aggregate `unified_memory.{txt,json}` reports and automatically opt-in to the required KFD tracing domains. |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,kfd_events` | Capture HIP API calls and kernel dispatches alongside the KFD events. `kfd_events` is auto-enabled by the setting above; listing it explicitly is harmless. |
-| `ROCPROFSYS_TRACE` | `true` | Generate the Perfetto trace alongside the unified-memory reports. |
+| `ROCPROFSYS_TRACE` | `ON` | Generate the Perfetto trace alongside the unified-memory reports. |
 
 ```bash
 HSA_XNACK=1 \
 ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
 ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,kfd_events \
-ROCPROFSYS_TRACE=true \
+ROCPROFSYS_TRACE=ON \
 rocprof-sys-run -- ./unified-memory -s 32 -p 256 -i 4
 ```
 

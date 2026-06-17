@@ -5,13 +5,8 @@
 /// @brief Client-side RPC stub for the rocjitsu daemon.
 
 #include "rocjitsu/kmd/linux/remote_driver.h"
+#include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/rpc.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_ioctl.h"
-RJ_DIAGNOSTIC_POP
 
 #include <cassert>
 #include <cerrno>
@@ -38,14 +33,11 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace {
 
-constexpr size_t ioctl_arg_size(unsigned long request) { return _IOC_SIZE(request); }
-
 constexpr bool has_embedded_pointers(unsigned long request) {
   switch (request) {
   case AMDKFD_IOC_WAIT_EVENTS:
   case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
   case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
-  case AMDKFD_IOC_SVM:
   case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
     return true;
   default:
@@ -265,6 +257,17 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   std::lock_guard<std::mutex> lock(rpc_mutex_);
 
   size_t arg_size = ioctl_arg_size(request);
+  if (is_svm_ioctl(request)) {
+    // SVM has a flexible attrs[] tail, so ROCR encodes the actual byte size in
+    // the ioctl request. The attributes are inline payload, not embedded client
+    // pointers, so RPC only needs the larger buffer size validated here.
+    if (arg_size < sizeof(kfd_ioctl_svm_args))
+      return -EINVAL;
+    auto *svm_args = static_cast<const kfd_ioctl_svm_args *>(arg);
+    size_t required_size = 0;
+    if (!svm_ioctl_required_size(svm_args->nattr, required_size) || arg_size < required_size)
+      return -EINVAL;
+  }
 
   // Save original embedded pointers before serialization. The daemon rewrites
   // these to point at its own buffer; we must restore the client-side originals
@@ -316,14 +319,6 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       buf.resize(inline_offset + inline_size);
       std::memcpy(buf.data() + inline_offset,
                   reinterpret_cast<const void *>(map_args->device_ids_array_ptr), inline_size);
-      break;
-    }
-    case AMDKFD_IOC_SVM: {
-      auto *svm_args = reinterpret_cast<kfd_ioctl_svm_args *>(args_base);
-      size_t inline_size = svm_args->nattr * sizeof(kfd_ioctl_svm_attribute);
-      size_t inline_offset = buf.size();
-      buf.resize(inline_offset + inline_size);
-      std::memcpy(buf.data() + inline_offset, svm_args + 1, inline_size);
       break;
     }
     case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW: {

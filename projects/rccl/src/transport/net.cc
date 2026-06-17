@@ -115,6 +115,7 @@ struct sendNetResources {
   int shared;
   int channelId;
   int connIndex;
+  int sameDevice;  // proxy and kernel are on the same CUDA device
   char* buffers[NCCL_NUM_PROTOCOLS];
   int buffSizes[NCCL_NUM_PROTOCOLS];
   void* mhandles[NCCL_NUM_PROTOCOLS];
@@ -142,7 +143,7 @@ struct recvNetResources {
   int netDev;
   enum ncclTopoGdrMode useGdr;
   int useDmaBuf;
-  int needFlush;
+  enum ncclTopoFlushType needFlush;
   int maxRecvs;
   uint64_t* gdcSync;
   uint64_t* gdcFlush;
@@ -150,6 +151,7 @@ struct recvNetResources {
   int shared;
   int channelId;
   int connIndex;
+  int sameDevice;  // proxy and kernel are on the same CUDA device
   char* buffers[NCCL_NUM_PROTOCOLS];
   int buffSizes[NCCL_NUM_PROTOCOLS];
   void* mhandles[NCCL_NUM_PROTOCOLS];
@@ -196,11 +198,12 @@ struct setupReq {
   int shared;
   int netDev;
   enum ncclTopoGdrMode useGdr;
-  int needFlush;
+  enum ncclTopoFlushType needFlush;
   int channelId;
   int connIndex;
   uint32_t* curr_hdp_reg;
   int isP2p;
+  int sameDevice;  // proxy and kernel are on the same CUDA device
 };
 
 NCCL_PARAM(NetOptionalRecvCompletion, "NET_OPTIONAL_RECV_COMPLETION", 1);
@@ -489,6 +492,7 @@ static ncclResult_t sendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
   req.tpLocalRank = comm->topParentLocalRanks[comm->localRank];
   req.tpRank = comm->topParentRanks[myInfo->rank];
   req.tpRemoteRank = comm->topParentRanks[peerInfo->rank];
+  req.sameDevice = (comm->peerInfo[proxyRank].cudaDev == comm->cudaDev);
   NCCLCHECK(ncclProxyCallBlocking(comm, &send->proxyConn, ncclProxyMsgSetup, &req, sizeof(req), NULL, 0));
 
   if (proxyRank == myInfo->rank) {
@@ -524,7 +528,7 @@ static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
   int proxyRank = myInfo->rank;
   int64_t netId;
   if (connIndex == NCCL_CONN_IDX_P2P_NET) NCCLCHECK(ncclTopoGetIntraNetDev(comm->topo, myInfo->rank, graph, channelId, 0, &netId, &req.netDev));
-  if (req.netDev < 0) NCCLCHECK(ncclTopoGetNetDev(comm, myInfo->rank, graph, channelId, myInfo->rank, &netId, &req.netDev, &proxyRank));
+  if (req.netDev < 0) NCCLCHECK(ncclTopoGetNetDev(comm, myInfo->rank, graph, channelId, /*peerRank=*/myInfo->rank, &netId, &req.netDev, &proxyRank));
   NCCLCHECK(ncclTopoCheckGdr(comm->topo, myInfo->rank, netId, 0, &req.useGdr));
   recv->conn.flags |= req.useGdr ? NCCL_DIRECT_NIC : 0;
   if (!req.useGdr && connIndex == 0) comm->useGdr = 0;
@@ -545,6 +549,7 @@ static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
   req.tpLocalRank = comm->topParentLocalRanks[comm->localRank];
   req.tpRank = comm->topParentRanks[myInfo->rank];
   req.tpRemoteRank = comm->topParentRanks[peerInfo->rank];
+  req.sameDevice = (comm->peerInfo[proxyRank].cudaDev == comm->cudaDev);
   NCCLCHECK(ncclProxyCallBlocking(comm, &recv->proxyConn, ncclProxyMsgSetup, &req, sizeof(req), connectInfo, sizeof(ncclNetHandle_t)));
   memcpy((uint8_t*)connectInfo + sizeof(ncclNetHandle_t), &req.useGdr, sizeof(int));
   INFO(NCCL_INIT|NCCL_NET,"Channel %02d/%d : %d[%d] -> %d[%d] [receive] via NET/%s/%d%s%s%s comm %p nRanks %02d", channelId, connIndex, peerInfo->rank, peerInfo->nvmlDev, myInfo->rank, myInfo->nvmlDev, comm->ncclNet->name, req.netDev,
@@ -949,6 +954,7 @@ static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struc
   resources->connIndex = req->connIndex;
   resources->curr_hdp_reg = req->curr_hdp_reg;
   resources->isP2p = req->isP2p;
+  resources->sameDevice = req->sameDevice;
   ncclNetProperties_t props;
   NCCLCHECK(proxyState->ncclNet->getProperties(req->netDev, &props));
   /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem.
@@ -1002,6 +1008,7 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
   resources->channelId = req->channelId;
   resources->connIndex = req->connIndex;
   resources->curr_hdp_reg = req->curr_hdp_reg;
+  resources->sameDevice = req->sameDevice;
   ncclNetProperties_t props;
   NCCLCHECK(proxyState->ncclNet->getProperties(req->netDev, &props));
   /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem.
@@ -1227,7 +1234,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
     memset(sendMem, 0, sizeof(struct ncclSendMem));
     memset(recvMem, 0, sizeof(struct ncclRecvMem));
   }
-  if (ncclGdrCopy && map->sameProcess && ncclParamGdrCopySyncEnable()) {
+  if (ncclGdrCopy && map->sameProcess && ncclParamGdrCopySyncEnable() && resources->sameDevice) {
     uint64_t *cpuPtr, *gpuPtr;
     NCCLCHECK(ncclGdrCudaCalloc(&cpuPtr, &gpuPtr, 1, &resources->gdrDesc, proxyState->memManager));
 
@@ -1443,11 +1450,14 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   }
   NCCLCHECK(ncclCudaHostCalloc(&map->mems[NCCL_NET_MAP_HOSTMEM].cpuPtr, map->mems[NCCL_NET_MAP_HOSTMEM].size));
   map->mems[NCCL_NET_MAP_HOSTMEM].gpuPtr = map->mems[NCCL_NET_MAP_HOSTMEM].cpuPtr;
-  if (ncclGdrCopy && map->sameProcess) {
+  if (ncclGdrCopy && /*1==*/map->sameProcess && resources->sameDevice) {
     uint64_t *cpuPtr, *gpuPtr;
-    NCCLCHECK(ncclGdrCudaCalloc(&cpuPtr, &gpuPtr, 2, &resources->gdrDesc, proxyState->memManager));
+    uint32_t gdcFlag = ncclGdcPinFlag(resources->needFlush);
+    NCCLCHECK(ncclGdrCudaCalloc(&cpuPtr, &gpuPtr, 2, &resources->gdrDesc, proxyState->memManager, gdcFlag));
 
     if (ncclParamGdrCopySyncEnable()) {
+      // No flush needed if control flow is mapped on the PCIe instead of C2C
+      if (gdcFlag == GDR_PIN_FLAG_FORCE_PCIE) resources->needFlush = ncclTopoFlushNone;
       resources->gdcSync = cpuPtr;
       struct connectMapMem* gdcMem = map->mems+NCCL_NET_MAP_GDCMEM;
       gdcMem->cpuPtr = (char*)cpuPtr;
@@ -1906,7 +1916,7 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
                 if (!sub->regBufferReady && connFifo[sub->base % NCCL_STEPS].size == -1) continue;
                 sub->regBufferReady = 1;
                 ptrs[subCount] = sub->recvbuff + sub->posted * NCCL_MAX_NET_SIZE;
-                sizes[subCount] = std::min(NCCL_MAX_NET_SIZE, (ssize_t)(sub->nbytes - sub->posted * NCCL_MAX_NET_SIZE));
+                sizes[subCount] = std::min((ssize_t)NCCL_MAX_NET_SIZE, (ssize_t)(sub->nbytes - sub->posted * NCCL_MAX_NET_SIZE));
               } else {
                 int sharedBuffSlot = sub->posted % maxDepth;
                 int offset;

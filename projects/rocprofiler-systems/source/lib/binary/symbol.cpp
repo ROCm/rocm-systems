@@ -12,6 +12,15 @@
 #define PACKAGE     "rocprofiler-systems"
 #define L_LNNO_SIZE 4
 
+#include <elf.h>
+// The RELR (relative-relocation) types were added to glibc's <elf.h> in glibc 2.36.
+// Older glibc versions (e.g. RHEL 8/9) lack them, but they are referenced by the
+// binutils headers below, so define the typedefs here to avoid compile errors.
+#ifndef SHT_RELR
+typedef Elf32_Word  Elf32_Relr;
+typedef Elf64_Xword Elf64_Relr;
+#endif
+
 #include <bfd.h>
 #include <coff/external.h>
 #include <coff/internal.h>

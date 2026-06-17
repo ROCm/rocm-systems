@@ -935,13 +935,13 @@ For attachment profiling of running processes:
         When --process-sync is set to true,
         and rocprofv3 tool will force process to wait for its peer processes finishing write the trace data,
         then they proceed.
-        Note: some workloads will teminate the process group when one of the process is finished""",
+        Note: some workloads will terminate the process group when one of the processes is finished""",
     )
 
     advanced_options.add_argument(
         "--minimum-output-data",
         help="""Output files are generated only if output data size > minimum output data".
-        It can be used for controlling the generation of output files so that user don't recieve empty files.
+        It can be used for controlling the generation of output files so that user don't receive empty files.
         The input is in KB units.""",
         default=None,
         type=int,
