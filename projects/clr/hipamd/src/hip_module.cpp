@@ -1391,6 +1391,8 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   }
   CHECK_STREAM_DETACHED_API(hStream);
 
+  STREAM_CAPTURE(hipDrvLaunchKernelEx, hStream, config, f, kernelParams, extra);
+
   int drvDeviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* drvDevice = g_devices[drvDeviceId]->devices()[0];
   amd::HIPLaunchParams launch_params(config->gridDimX, config->gridDimY, config->gridDimZ,
@@ -1402,7 +1404,6 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   }
 
   if (config->numAttrs == 0) {
-    STREAM_CAPTURE(hipDrvLaunchKernelEx, hStream, config, f, kernelParams, extra);
     HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, nullptr,
                                       nullptr, nullptr, 0));
   }
@@ -1415,7 +1416,6 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
     switch (attr.id) {
       case hipLaunchAttributeCooperative: {
         if (attr.value.cooperative != 0) {
-          STREAM_CAPTURE(hipDrvLaunchKernelEx, hStream, config, f, kernelParams, extra);
           HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams,
                                             nullptr, nullptr, nullptr, 0,
                                             amd::NDRangeKernelCommand::CooperativeGroups));
@@ -1449,8 +1449,6 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   if (clusterDim.x == 0 || clusterDim.y == 0 || clusterDim.z == 0) {
     HIP_RETURN(hipErrorInvalidConfiguration);
   }
-
-  STREAM_CAPTURE(hipDrvLaunchKernelEx, hStream, config, f, kernelParams, extra, clusterDim);
 
   amd::HIPLaunchParams launch_params_cluster(config->gridDimX, config->gridDimY, config->gridDimZ,
                                           config->blockDimX, config->blockDimY, config->blockDimZ,
