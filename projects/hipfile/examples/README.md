@@ -1,12 +1,12 @@
 # hipFile examples
 
-Worked examples of the hipFile API, grouped by what they demonstrate. The
+This directory contains working examples of the hipFile API, grouped by what they demonstrate. The
 programs verify their results with an FNV-1a hash and print `OK …` on success.
 This top-level README consolidates the full program lists, build, and run
 instructions for every example directory.
 
 Most examples move data through the GPU on hipFile's fast path, which opens
-files with `O_DIRECT`; running them as written therefore wants an AMD GPU
+files with `O_DIRECT`; running them as written therefore requires an AMD GPU
 supported by ROCm and source/destination paths on an `O_DIRECT`-capable local
 filesystem (ext4 mounted `data=ordered`, or xfs). `O_DIRECT` is not a hipFile
 requirement, though — files can be registered without it and routed through the
@@ -23,7 +23,6 @@ query the library and need neither a GPU nor an `O_DIRECT` filesystem.
 | [`async`](async) | Examples of the asynchronous, stream-based API (`hipFileReadAsync` / `hipFileWriteAsync`), including single-stream, non-blocking-stream, and concurrent multi-stream round trips. |
 | [`aiscp`](aiscp) | A standalone `cp`-like utility built on hipFile (`aiscp SOURCE DEST`). |
 | [`common`](common) | Not an example — a small static library (`examples_common`) of helpers shared by `basics` and `async` (alignment math, pattern fill, hashing, file open/register). |
-| `out` | Scratch directory for example output files. |
 
 ## Building
 
@@ -66,7 +65,6 @@ Minimal examples of the non-I/O parts of the hipFile API — calls that query or
 configure the library rather than move data through the GPU. These do **not**
 require an `O_DIRECT`-capable filesystem or even file arguments.
 
-### The examples
 
 | Program | What it shows | Args |
 | --- | --- | --- |
@@ -111,7 +109,6 @@ helpers in [`common`](common) (`open_file`, `hash_file_range`, `align_up`,
 `fill_pattern`, …). Every example verifies its result with an FNV-1a hash and
 prints `OK …` on success.
 
-### The examples
 
 | Program | What it shows | Args |
 | --- | --- | --- |
@@ -182,7 +179,6 @@ deterministic pattern, issues a GPU-mediated read+write round trip on one or
 more HIP streams, synchronizes, and verifies the output by FNV-1a hash. They
 share the helpers in [`common`](common) and print `OK …` on success.
 
-### The examples
 
 | Program | What it shows |
 | --- | --- |
@@ -276,19 +272,4 @@ dependency whenever the examples are built (`AIS_INSTALL_EXAMPLES=ON`).
 ### What's in it
 
 See [`examples_common.h`](common/examples_common.h) for the full, documented
-API. In brief:
-
-| Helper | Purpose |
-| --- | --- |
-| `BLOCK_ALIGN`, `is_power_of_two`, `align_up` | `O_DIRECT` alignment math — round transfer sizes up to a power-of-two block size. |
-| `fill_pattern` | Fill a buffer with a deterministic test pattern (byte `i` = `i & 0xFF`). |
-| `hash_buffer` | FNV-1a 64-bit hash of a memory buffer. |
-| `hash_file_range` | Read a byte range of a file via plain POSIX I/O and hash it (host-side reference path). |
-| `seed_read_file` | Create/truncate a file and write `fill_pattern` bytes to it (no `O_DIRECT`). |
-| `verify_files_match` | Hash the first N bytes of two files and compare. |
-| `open_file` | `open(2)` a file (caller controls flags) and register it with `hipFileHandleRegister`. |
-| `close_file` | Deregister and close a handle opened with `open_file`. |
-
-`open_file` deliberately does **not** add `O_DIRECT` for you: pass it to take
-the GPU-direct fast path, or omit it to route through the POSIX compat path
-(see `basics/no-odirect-write`).
+API.
