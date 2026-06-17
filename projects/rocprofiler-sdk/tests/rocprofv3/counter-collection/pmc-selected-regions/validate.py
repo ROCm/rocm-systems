@@ -29,20 +29,31 @@ import sys
 
 import pytest
 
-# Kernels launched only between roctxProfilerResume / roctxProfilerPause in
-# tests/bin/roctx-pause-resume/roctx-pause-resume.cpp (not kernel_add/kernel_mult
-# outside that window, and not nested_kernel after mismatched resume/pause).
-target_kernel_regex = re.compile(r"target_kernel|pc_sampling_kernel")
+# Kernels that run inside a roctxProfilerResume / roctxProfilerPause window.
+INCLUDED_KERNEL_REGEX = re.compile(r"target_kernel|pc_sampling_kernel")
+
+# Kernels that are only ever dispatched while profiling is paused.
+EXCLUDED_KERNELS = ("kernel_add", "kernel_mult", "nested_kernel")
+
+# Each of the 4 resume windows launches target_kernel and pc_sampling_kernel once.
+EXPECTED_KERNEL_COUNTS = {
+    "target_kernel": 4,
+    "pc_sampling_kernel": 4,
+}
 
 
 def test_counter_collection_only_inside_selected_regions(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
     def get_kernel_name(kernel_id):
         return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
 
-    data = json_data["rocprofiler-sdk-tool"]
     counter_collection_data = data["callback_records"]["counter_collection"]
-    assert len(counter_collection_data) > 0
 
+    # (b) counter collection actually happened inside the resume window.
+    assert len(counter_collection_data) > 0, "no counter records were collected"
+
+    observed_kernel_names = []
     for counter in counter_collection_data:
         dispatch_data = counter["dispatch_data"]["dispatch_info"]
 
@@ -50,10 +61,29 @@ def test_counter_collection_only_inside_selected_regions(json_data):
         assert dispatch_data["agent_id"]["handle"] > 0
         assert dispatch_data["queue_id"]["handle"] > 0
 
-        kernel_name = get_kernel_name(dispatch_data["kernel_id"])
-        assert target_kernel_regex.search(kernel_name) is not None, (
+        observed_kernel_names.append(get_kernel_name(dispatch_data["kernel_id"]))
+
+    # every counter record corresponds to a kernel inside the resume window.
+    for kernel_name in observed_kernel_names:
+        assert INCLUDED_KERNEL_REGEX.search(kernel_name) is not None, (
             f"counter record for kernel '{kernel_name}' is outside the resume window "
-            f"(expected match for '{target_kernel_regex.pattern}')"
+            f"(expected match for '{INCLUDED_KERNEL_REGEX.pattern}')"
+        )
+
+    # kernels dispatched while profiling was paused must be excluded entirely.
+    for excluded in EXCLUDED_KERNELS:
+        leaked = [name for name in observed_kernel_names if excluded in name]
+        assert not leaked, (
+            f"kernel '{excluded}' runs only while profiling is paused but produced "
+            f"counter record(s): {leaked}"
+        )
+
+    # exactly the dispatches from the 4 resume windows were counted.
+    for kernel, expected_count in EXPECTED_KERNEL_COUNTS.items():
+        actual_count = sum(1 for name in observed_kernel_names if kernel in name)
+        assert actual_count == expected_count, (
+            f"expected {expected_count} counter record(s) for '{kernel}' "
+            f"(one per resume window) but found {actual_count}"
         )
 
 
