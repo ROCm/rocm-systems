@@ -589,8 +589,10 @@ cat /sys/class/drm/card*/device/xgmi_num_hops
 **Weight (`-w, --weight`)** — The weight table reports a qualitative cost metric derived
 from the KFD io_link `weight` property (lower = closer/faster), analogous to the NUMA
 distances reported by `numactl`. Each physical xGMI hop contributes 15 to the weight
-(for example, a single-hop xGMI connection has weight 15); each PCIe segment contributes
-a fixed 20, and multi-segment PCIe routes are summed across all segments.
+(for example, a single-hop xGMI connection has weight 15). PCIe routes are summed across
+segments (GPU→CPU + CPU→CPU + CPU→GPU); each GPU-to-CPU segment is typically 20, while
+the CPU-to-CPU segment uses the actual io_link weight, or a fallback of 10 if that weight
+cannot be read.
 
 (cmd-set)=
 ### amd-smi set

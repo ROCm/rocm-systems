@@ -3843,8 +3843,10 @@ def amdsmi_topo_get_link_weight(
     (lower = closer/faster), analogous to numactl NUMA distances:
 
     - xGMI: 15 per physical hop (e.g. a single-hop xGMI link has weight 15).
-    - PCIe: 20 per segment; multi-segment routes are summed
-      (GPU→CPU + CPU→CPU + CPU→GPU).
+    - PCIe: segments are summed (GPU→CPU + CPU→CPU + CPU→GPU). Each
+      GPU-to-CPU segment is typically 20. The CPU-to-CPU segment uses the
+      actual io_link weight when available; if that weight cannot be read, a
+      fallback of 10 is used for that segment.
 
     Both handles must be GPU processor handles.
 

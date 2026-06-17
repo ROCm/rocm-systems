@@ -6636,9 +6636,10 @@ amdsmi_status_t amdsmi_topo_get_numa_node_number(amdsmi_processor_handle process
  *  - Each physical xGMI hop contributes 15, so an xGMI route traversing
  *    @em N physical links has a weight of @em 15*N. A single-hop xGMI
  *    connection has a weight of 15.
- *  - Each PCIe segment contributes a fixed cost of 20.
- *  - Multi-segment PCIe routes are summed over all segments
- *    (GPU→CPU + CPU→CPU + CPU→GPU).
+ *  - PCIe segments are summed over all segments (GPU→CPU + CPU→CPU + CPU→GPU).
+ *    Each GPU-to-CPU segment typically contributes 20. The CPU-to-CPU segment
+ *    uses the actual io_link weight when available; if that weight cannot be
+ *    read, a fallback value of 10 is used for that segment.
  *
  *  @param[in] processor_handle_src the source processor handle
  *
