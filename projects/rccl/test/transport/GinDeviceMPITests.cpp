@@ -2015,10 +2015,6 @@ __global__ void multiContextConsumerKernel(
 // slot + per-context signal. Confirms every contextId has a working
 // proxy ring + IB QP and that there's no cross-context contamination.
 TEST_F(GinMPIDeviceTests, MultiContext_AllFourRoute) {
-  // Needs >1 GIN context; the bundled v12 IB-proxy plugin is single-context
-  // (rejects contextId != 0, gin_v12.cc), so this can't pass on it.
-  GTEST_SKIP() << "Multi-context GIN unsupported by single-context v12 IB-proxy plugin";
-
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
@@ -2164,10 +2160,6 @@ __global__ void multiContextNpo2ConsumerKernel(
 }
 
 TEST_F(GinMPIDeviceTests, MultiContext_NonPowerOf2) {
-  // Needs >1 GIN context; the bundled v12 IB-proxy plugin is single-context
-  // (rejects contextId != 0, gin_v12.cc), so this can't pass on it.
-  GTEST_SKIP() << "Multi-context GIN unsupported by single-context v12 IB-proxy plugin";
-
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
@@ -2965,6 +2957,12 @@ TEST_F(GinMPIDeviceTests, RailConnection_Create) {
     GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  // ginIsRailed reflects the communicator's connection mode (RAIL only when the
+  // system cannot cross NICs). Opt in by disabling cross-NIC: NCCL_CROSS_NIC=0.
+  const char* crossNic = std::getenv("NCCL_CROSS_NIC");
+  if (!crossNic || std::strcmp(crossNic, "0") != 0)
+    GTEST_SKIP() << "RAIL connection requires NCCL_CROSS_NIC=0 (rail-only mode)";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   ncclComm_t comm = getActiveCommunicator();

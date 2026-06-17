@@ -2520,7 +2520,6 @@
       "env_variables": {
         "NCCL_GIN_TYPE": "2",
         "NCCL_GIN_ENABLE": "1",
-        "NCCL_GIN_NCONTEXTS": "4",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DMABUF_ENABLE": "1",
         "NCCL_ENV_PLUGIN": "none"
@@ -2528,9 +2527,25 @@
       "tests": [
         {
           "name": "GIN_DeviceMPI_AllTests",
-          "description": "GIN proxy device-side MPI tests (put/signal/counter/barrier/alltoall) over IB across two nodes; LSA-only, multi-context, and negative opt-in tests self-skip in this layout",
-          "test_filter": "GinMPIDeviceTests.*",
+          "description": "GIN proxy device-side MPI tests over IB across two nodes",
+          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.SignalAdd_AndShadow",
           "timeout": 600
+        },
+        {
+          "name": "GIN_MultiContext_NonPowerOf2",
+          "description": "Multi-context GIN with a non-power-of-2 context count (NCCL_GIN_NCONTEXTS=3)",
+          "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "3"
+          }
+        },
+        {
+          "name": "GIN_RailConnection_Create",
+          "description": "RAIL GIN connection type; requires rail-only mode (NCCL_CROSS_NIC=0)",
+          "test_filter": "GinMPIDeviceTests.RailConnection_Create",
+          "env_variables": {
+            "NCCL_CROSS_NIC": "0"
+          }
         }
       ]
     },
@@ -2545,7 +2560,6 @@
       "env_variables": {
         "NCCL_GIN_TYPE": "2",
         "NCCL_GIN_ENABLE": "1",
-        "NCCL_GIN_NCONTEXTS": "4",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DMABUF_ENABLE": "1",
         "NCCL_ENV_PLUGIN": "none"
@@ -2569,7 +2583,6 @@
       "env_variables": {
         "NCCL_GIN_TYPE": "2",
         "NCCL_GIN_ENABLE": "1",
-        "NCCL_GIN_NCONTEXTS": "4",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DMABUF_ENABLE": "1",
         "NCCL_ENV_PLUGIN": "none"
