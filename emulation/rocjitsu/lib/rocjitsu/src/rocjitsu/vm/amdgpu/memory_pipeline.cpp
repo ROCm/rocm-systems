@@ -388,7 +388,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
         const bool has_decrement = d.store_data.size() >= lane * src_stride + 8;
         if (has_decrement)
           std::memcpy(&decrement, &d.store_data[lane * src_stride], 8);
-        new_val = lds_barrier_cell::update_arrive(old_val, has_decrement ? decrement : 1);
+        new_val = lds_barrier_cell_update_arrive(old_val, has_decrement ? decrement : 1);
       } else if (is_fp) {
         double old_f = std::bit_cast<double>(old_val);
         double src_f;

@@ -310,7 +310,7 @@ inline void copy_tensor(const TensorDmaDescriptor &desc, Wavefront &wf, bool sto
 inline void arrive_atomic_barrier(const TensorDmaDescriptor &desc, Wavefront &wf) {
   const uint32_t addr = wf.lds_base() + desc.atomic_barrier_addr;
   const uint64_t state = wf.cu().lds().read64(addr);
-  wf.cu().lds().write64(addr, lds_barrier_cell::update_arrive(state));
+  wf.cu().lds().write64(addr, lds_barrier_cell_update_arrive(state));
 }
 
 class ScopedWaitCounter {
