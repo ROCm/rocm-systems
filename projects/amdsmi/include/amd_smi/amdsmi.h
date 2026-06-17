@@ -6709,7 +6709,7 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *  Two GPUs on the same xGMI fabric always report a hop count of 1, even when
  *  the data physically crosses several xGMI links. To obtain the literal number
  *  of physical xGMI links between two devices, read the value exposed by the
- *  @c amdgpu driver at @c /sys/class/drm/card*/device/xgmi_num_hops instead.
+ *  @c amdgpu driver at @c `/sys/class/drm/card{0,1,…}/device/xgmi_num_hops` instead.
  *
  *  @param[in] processor_handle_src the source processor handle
  *
