@@ -103,6 +103,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             options.update({
                 "ROCPROF_ATTACH_LIBRARY": rocprofiler_attach_library_path,
                 "ROCPROF_ATTACH_PID": args.attach_pid,
+                "ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC": "1",
             })
 
             if args.attach_duration_msec:

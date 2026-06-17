@@ -135,6 +135,8 @@ class PCSamplingProfile:
             "ROCPROF_PC_SAMPLING_INTERVAL": str(interval),
             "ROCPROF_PC_SAMPLING_METHOD": method,
         })
+        if is_live_attach(profiler_options):
+            options["ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC"] = "1"
         app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
         new_env = os.environ.copy()
         for key, value in options.items():
@@ -187,6 +189,7 @@ class PCSamplingProfile:
         ]
 
         if is_live_attach(profiler_options):
+            options.append("--attach-sync-output")
             try:
                 pid_idx = profiler_options.index("--pid")
                 options += ["--pid", profiler_options[pid_idx + 1]]

@@ -45,6 +45,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if args.attach_pid:
             profiling_options.append("--pid")
             profiling_options.append(args.attach_pid)
+            profiling_options.append("--attach-sync-output")
 
             if args.attach_duration_msec:
                 profiling_options.append("--attach-duration-msec")
