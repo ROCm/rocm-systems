@@ -8,7 +8,11 @@
 #ifndef _NCCL_DEVICE_GIN_BARRIER_H_
 #define _NCCL_DEVICE_GIN_BARRIER_H_
 #include "core_tmp.h"
+#if defined(NCCL_OS_WINDOWS)
+#include "gin_win_stub.h"
+#else
 #include "gin_tmp.h"
+#endif
 
 struct ncclGinBarrierHandle;
 
@@ -26,12 +30,14 @@ template<typename Coop>
 struct ncclGinBarrierSession: ncclGinBarrierSession_internal<Coop> {
   NCCL_DEVICE_INLINE ncclGinBarrierSession(Coop, ncclGin, ncclTeam, ncclGinBarrierHandle, uint32_t index);
   NCCL_DEVICE_INLINE ncclGinBarrierSession(Coop, ncclGin, ncclTeamTagRail, uint32_t index);
+  NCCL_DEVICE_INLINE ncclGinBarrierSession(Coop, ncclGin, ncclTeamTagWorld, uint32_t index);
 
   NCCL_DEVICE_INLINE ~ncclGinBarrierSession();
 
   ncclGinBarrierSession(ncclGinBarrierSession const&) = delete; // Sessions are not copyable
 
   NCCL_DEVICE_INLINE void sync(Coop, cuda::memory_order, ncclGinFenceLevel);
+  NCCL_DEVICE_INLINE ncclResult_t sync(Coop, cuda::memory_order, ncclGinFenceLevel, uint64_t timeoutCycles);
 };
 #endif
 
