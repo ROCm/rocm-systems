@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/rocprofiler-sdk.hpp"
+#include "backends/rocprofiler_sdk/rocprofiler_sdk_backend.hpp"
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "timemory.hpp"
@@ -20,21 +21,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <set>
-#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
-
-#define ROCPROFILER_CALL(result)                                                         \
-    {                                                                                    \
-        rocprofiler_status_t CHECKSTATUS = (result);                                     \
-        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                    \
-        {                                                                                \
-            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);         \
-            LOG_WARNING("rocprofiler-sdk call [{}] failed with error code {} :: {}",     \
-                        #result, static_cast<int>(CHECKSTATUS), status_msg);             \
-        }                                                                                \
-    }
 
 namespace rocprofsys
 {
@@ -80,21 +69,22 @@ to_lower(const Tp& _val)
     return _v;
 }
 
-struct operation_options
-{
-    std::string operations_include            = {};
-    std::string operations_exclude            = {};
-    std::string operations_annotate_backtrace = {};
-};
+}  // namespace
 
-auto callback_operation_option_names =
-    std::unordered_map<rocprofiler_callback_tracing_kind_t, operation_options>{};
-auto buffered_operation_option_names =
-    std::unordered_map<rocprofiler_buffer_tracing_kind_t, operation_options>{};
+template <typename Backend>
+std::unordered_map<typename Backend::callback_tracing_kind,
+                   typename sdk_core<Backend>::operation_options>
+    sdk_core<Backend>::callback_operation_option_names{};
 
+template <typename Backend>
+std::unordered_map<typename Backend::buffer_tracing_kind,
+                   typename sdk_core<Backend>::operation_options>
+    sdk_core<Backend>::buffered_operation_option_names{};
+
+template <typename Backend>
 std::unordered_set<std::int32_t>
-get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
-                    const std::string&                  optname = {})
+sdk_core<Backend>::get_operations_impl(Backend::callback_tracing_kind kindv,
+                                       const std::string&             optname)
 {
     static const auto callback_tracing_info =
         rocprofiler::sdk::get_callback_tracing_names();
@@ -118,7 +108,7 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
         std::abort();
     }
 
-    if(_val->empty()) return std::unordered_set<std::int32_t>{};
+    if(_val->empty()) return {};
 
     auto _ret = std::unordered_set<std::int32_t>{};
     for(const auto& itr : tim::delimit(*_val, " ,;:\n\t"))
@@ -137,9 +127,10 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
     return _ret;
 }
 
+template <typename Backend>
 std::unordered_set<std::int32_t>
-get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
-                    const std::string&                optname = {})
+sdk_core<Backend>::get_operations_impl(Backend::buffer_tracing_kind kindv,
+                                       const std::string&           optname)
 {
     static const auto buffered_tracing_info =
         rocprofiler::sdk::get_buffer_tracing_names();
@@ -163,7 +154,7 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
         std::abort();
     }
 
-    if(_val->empty()) return std::unordered_set<std::int32_t>{};
+    if(_val->empty()) return {};
 
     auto _ret = std::unordered_set<std::int32_t>{};
     for(const auto& itr : tim::delimit(*_val, " ,;:\n\t"))
@@ -181,17 +172,18 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
     return _ret;
 }
 
+template <typename Backend>
 std::vector<std::int32_t>
-get_operations_impl(const std::unordered_set<std::int32_t>& _complete,
-                    const std::unordered_set<std::int32_t>& _include,
-                    const std::unordered_set<std::int32_t>& _exclude)
+sdk_core<Backend>::get_operations_impl(const std::unordered_set<std::int32_t>& _complete,
+                                       const std::unordered_set<std::int32_t>& _include,
+                                       const std::unordered_set<std::int32_t>& _exclude)
 {
     auto _convert = [](const auto& _dset) {
         auto _dret = std::vector<std::int32_t>{};
         _dret.reserve(_dset.size());
         for(auto itr : _dset)
             _dret.emplace_back(itr);
-        std::sort(_dret.begin(), _dret.end());
+        std::ranges::sort(_dret);
         return _dret;
     };
 
@@ -204,12 +196,11 @@ get_operations_impl(const std::unordered_set<std::int32_t>& _complete,
     return _convert(_ret);
 }
 
-}  // namespace
-
 /// @brief Return the version of the rocprofiler-sdk
 /// @return The version of the rocprofiler-sdk or 0 if not initialized
+template <typename Backend>
 version_info&
-get_version()
+sdk_core<Backend>::get_version()
 {
     static auto _version = version_info{ 0 };
 
@@ -219,7 +210,7 @@ get_version()
         std::uint32_t _minor = 0;
         std::uint32_t _patch = 0;
 
-        ROCPROFILER_CALL(rocprofiler_get_version(&_major, &_minor, &_patch));
+        Backend::get_version(&_major, &_minor, &_patch);
 
         _version.major     = _major;
         _version.minor     = _minor;
@@ -230,8 +221,9 @@ get_version()
     return _version;
 }
 
+template <typename Backend>
 void
-config_settings(const std::shared_ptr<settings>& _config)
+sdk_core<Backend>::config_settings(const std::shared_ptr<settings>& _config)
 {
     // const auto agents                = std::vector<rocprofiler_agent_t>{};
     const auto buffered_tracing_info = rocprofiler::sdk::get_buffer_tracing_names();
@@ -317,9 +309,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     _add_domain("hsa_api");
     _add_domain("marker_api");
     _add_domain("roctx");
-#if(ROCPROFILER_VERSION >= 10000)
-    _add_domain("kfd_events");
-#endif
+    if constexpr(Backend::compile_time_version >= 10000) _add_domain("kfd_events");
 
     for(const auto& itr : buffered_tracing_info)
         _add_domain(itr.name);
@@ -335,9 +325,8 @@ config_settings(const std::shared_ptr<settings>& _config)
     auto _domain_defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
                                          "memory_copy,scratch_memory" };
 
-#if(ROCPROFILER_VERSION < 10000)
-    _domain_defaults.append(",page_migration");
-#endif
+    if constexpr(Backend::compile_time_version < 10000)
+        _domain_defaults.append(",page_migration");
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_DOMAINS, _domain_description,
                               _domain_defaults, "rocm", "rocprofiler-sdk")
@@ -354,7 +343,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     _skip_domains.emplace("page_migration");
 
     _add_operation_settings(
-        "MARKER_API", callback_tracing_info[ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API],
+        "MARKER_API", callback_tracing_info[Backend::CALLBACK_TRACING_MARKER_CORE_API],
         callback_operation_option_names);
 
     for(const auto& itr : callback_tracing_info)
@@ -380,104 +369,92 @@ config_settings(const std::shared_ptr<settings>& _config)
     }
 }
 
-std::unordered_set<rocprofiler_callback_tracing_kind_t>
-get_callback_domains()
+template <typename Backend>
+std::unordered_set<typename Backend::callback_tracing_kind>
+sdk_core<Backend>::get_callback_domains()
 {
-    const auto callback_tracing_info = rocprofiler::sdk::get_callback_tracing_names();
-    auto       supported = std::unordered_set<rocprofiler_callback_tracing_kind_t>{
-        ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
-        ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-        ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-        ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-        ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-        ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
-        ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
-        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+    using kind_t             = typename Backend::callback_tracing_kind;
+    const auto callback_info = rocprofiler::sdk::get_callback_tracing_names();
+    auto       supported     = std::unordered_set<kind_t>{
+        Backend::CALLBACK_TRACING_HSA_CORE_API,
+        Backend::CALLBACK_TRACING_HSA_AMD_EXT_API,
+        Backend::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+        Backend::CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+        Backend::CALLBACK_TRACING_HIP_RUNTIME_API,
+        Backend::CALLBACK_TRACING_HIP_COMPILER_API,
+        Backend::CALLBACK_TRACING_MARKER_CORE_API,
+        Backend::CALLBACK_TRACING_CODE_OBJECT,
     };
 
     auto _version = get_version();
-    if(_version.formatted == 0)
+    if(_version.formatted == 0) LOG_WARNING("rocprofiler-sdk version not initialized");
+
+    if constexpr(Backend::compile_time_version >= 600)
     {
-        LOG_WARNING("rocprofiler-sdk version not initialized");
+        if(_version.formatted >= 600)
+        {
+            supported.emplace(Backend::CALLBACK_TRACING_RCCL_API);
+            supported.emplace(Backend::CALLBACK_TRACING_OMPT);
+            supported.emplace(Backend::CALLBACK_TRACING_ROCDECODE_API);
+        }
+    }
+    if constexpr(Backend::compile_time_version >= 700)
+    {
+        if(_version.formatted >= 700)
+            supported.emplace(Backend::CALLBACK_TRACING_ROCJPEG_API);
     }
 
-#if(ROCPROFILER_VERSION >= 600)
-    if(_version.formatted >= 600)
-    {
-        // Argument tracing is supported in rocprofiler-sdk 0.6.0 and later
-        supported.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
-        supported.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
-        supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
-    }
-#endif
-#if(ROCPROFILER_VERSION >= 700)
-    if(_version.formatted >= 700)
-    {
-        supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
-    }
-#endif
-
-    auto _data    = std::unordered_set<rocprofiler_callback_tracing_kind_t>{};
+    auto _data    = std::unordered_set<kind_t>{};
     auto _domains = tim::delimit(
         config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
             .value_or(std::string{}),
         " ,;:\t\n");
 
-    if(config::get_use_rcclp() && _version.formatted >= 600)
+    if constexpr(Backend::compile_time_version >= 600)
     {
-        // Translate ROCPROFSYS_USE_RCCLP to entry in ROCPROFSYS_ROCM_DOMAINS
-        _data.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
+        if(config::get_use_rcclp() && _version.formatted >= 600)
+            _data.emplace(Backend::CALLBACK_TRACING_RCCL_API);
+        if(config::get_use_ompt() && _version.formatted >= 600)
+            _data.emplace(Backend::CALLBACK_TRACING_OMPT);
     }
 
-#if ROCPROFILER_VERSION >= 600
-    if(config::get_use_ompt() && _version.formatted >= 600)
-    {
-        // Translate some configuration settings to rocprofiler domains
-        _data.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
-    }
-#endif
-
-    // Check that the domains are valid
     const auto valid_choices =
         settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS })->get_choices();
-
     auto invalid_domain = [&valid_choices](const auto& domainv) {
-        return !std::any_of(valid_choices.begin(), valid_choices.end(),
-                            [&domainv](const auto& aitr) { return (aitr == domainv); });
+        return !std::ranges::any_of(valid_choices,
+                                    [&domainv](const auto& c) { return c == domainv; });
     };
 
     for(const auto& itr : _domains)
     {
         if(invalid_domain(itr))
-        {
             throw std::runtime_error(
                 fmt::format("unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", itr));
-        }
 
         if(itr == "hsa_api")
         {
-            for(auto eitr : { ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
-                              ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-                              ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-                              ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API })
+            for(auto eitr : { Backend::CALLBACK_TRACING_HSA_CORE_API,
+                              Backend::CALLBACK_TRACING_HSA_AMD_EXT_API,
+                              Backend::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+                              Backend::CALLBACK_TRACING_HSA_FINALIZE_EXT_API })
                 _data.emplace(eitr);
         }
         else if(itr == "hip_api")
         {
-            for(auto eitr : { ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-                              ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API })
+            for(auto eitr : { Backend::CALLBACK_TRACING_HIP_RUNTIME_API,
+                              Backend::CALLBACK_TRACING_HIP_COMPILER_API })
                 _data.emplace(eitr);
         }
         else if(itr == "marker_api" || itr == "roctx")
         {
-            _data.emplace(ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API);
+            _data.emplace(Backend::CALLBACK_TRACING_MARKER_CORE_API);
         }
         else
         {
-            for(size_t idx = 0; idx < callback_tracing_info.size(); ++idx)
+            for(size_t idx = 0; idx < callback_info.size(); ++idx)
             {
-                auto ditr = callback_tracing_info[idx];
-                auto dval = static_cast<rocprofiler_callback_tracing_kind_t>(idx);
+                const auto& ditr = callback_info[idx];
+                auto        dval = static_cast<kind_t>(idx);
                 if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
                 {
                     _data.emplace(dval);
@@ -490,137 +467,138 @@ get_callback_domains()
     return _data;
 }
 
-std::unordered_set<rocprofiler_buffer_tracing_kind_t>
-get_buffered_domains()
+template <typename Backend>
+std::unordered_set<typename Backend::buffer_tracing_kind>
+sdk_core<Backend>::get_buffered_domains()
 {
-    const auto buffer_tracing_info = rocprofiler::sdk::get_buffer_tracing_names();
-    const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
-        ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-#if(ROCPROFILER_VERSION >= 600)
-        ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
-#endif
-#if(ROCPROFILER_VERSION < 10000)
-        ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
-#endif
-        ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
-#if(ROCPROFILER_VERSION >= 10000)
-        ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
-        ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
-        ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
-        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
-        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
-#endif
+    using kind_t           = typename Backend::buffer_tracing_kind;
+    const auto buffer_info = rocprofiler::sdk::get_buffer_tracing_names();
+    auto       supported   = std::unordered_set<kind_t>{
+        Backend::BUFFER_TRACING_KERNEL_DISPATCH,
+        Backend::BUFFER_TRACING_MEMORY_COPY,
+        Backend::BUFFER_TRACING_SCRATCH_MEMORY,
     };
+    if constexpr(Backend::compile_time_version >= 600)
+        supported.emplace(Backend::BUFFER_TRACING_MEMORY_ALLOCATION);
+    if constexpr(Backend::compile_time_version < 10000)
+        supported.emplace(Backend::BUFFER_TRACING_PAGE_MIGRATION);
+    if constexpr(Backend::compile_time_version >= 10000)
+    {
+        supported.emplace(Backend::BUFFER_TRACING_KFD_PAGE_FAULT);
+        supported.emplace(Backend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+        supported.emplace(Backend::BUFFER_TRACING_KFD_QUEUE);
+        supported.emplace(Backend::BUFFER_TRACING_KFD_EVENT_QUEUE);
+        supported.emplace(Backend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
+        supported.emplace(Backend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
+    }
 
-    auto _data    = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
+    // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with
+    // undefined node IDs (0xFFFFFFFF). Guard at runtime to avoid abort().
+    version_info kfd_version{};
+    bool         kfd_supported_by_runtime = false;
+    if constexpr(Backend::compile_time_version >= 10000)
+    {
+        constexpr std::uint32_t kfd_min_version = 10202;  // 1.2.2
+        kfd_version                             = get_version();
+        kfd_supported_by_runtime = (kfd_version.formatted >= kfd_min_version);
+    }
+
+    auto _data    = std::unordered_set<kind_t>{};
     auto _domains = tim::delimit(
         config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
             .value_or(std::string{}),
         " ,;:\t\n");
     const auto valid_choices =
         settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS })->get_choices();
-
     auto invalid_domain = [&valid_choices](const auto& domainv) {
-        return !std::any_of(valid_choices.begin(), valid_choices.end(),
-                            [&domainv](const auto& aitr) { return (aitr == domainv); });
+        return !std::ranges::any_of(valid_choices,
+                                    [&domainv](const auto& c) { return c == domainv; });
     };
-
-#if(ROCPROFILER_VERSION >= 10000)  // KFD tracing APIs available in headers
-    // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with
-    // undefined node IDs (0xFFFFFFFF). Guard at runtime to avoid abort().
-    constexpr std::uint32_t kfd_min_version = 10202;  // 1.2.2
-    const auto              kfd_version     = get_version();
-    const bool kfd_supported_by_runtime     = (kfd_version.formatted >= kfd_min_version);
-#endif
 
     for(const auto& itr : _domains)
     {
         if(invalid_domain(itr))
-        {
             throw std::runtime_error(
                 fmt::format("unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", itr));
-        }
 
         if(itr == "hsa_api")
         {
-            for(auto eitr : { ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
-                              ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
-                              ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
-                              ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API })
+            for(auto eitr : { Backend::BUFFER_TRACING_HSA_CORE_API,
+                              Backend::BUFFER_TRACING_HSA_AMD_EXT_API,
+                              Backend::BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                              Backend::BUFFER_TRACING_HSA_FINALIZE_EXT_API })
                 _data.emplace(eitr);
         }
         else if(itr == "hip_api")
         {
-            for(auto eitr : { ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
-                              ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API })
+            for(auto eitr : { Backend::BUFFER_TRACING_HIP_COMPILER_API,
+                              Backend::BUFFER_TRACING_HIP_RUNTIME_API })
                 _data.emplace(eitr);
         }
         else if(itr == "marker_api" || itr == "roctx")
         {
-            _data.emplace(ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API);
+            _data.emplace(Backend::BUFFER_TRACING_MARKER_CORE_API);
         }
-#if(ROCPROFILER_VERSION >= 600)
         else if(itr == "memory_allocation")
         {
-            _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
+            if constexpr(Backend::compile_time_version >= 600)
+                _data.emplace(Backend::BUFFER_TRACING_MEMORY_ALLOCATION);
         }
-#endif
         else if(itr == "memory_copy")
         {
-            _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY);
+            _data.emplace(Backend::BUFFER_TRACING_MEMORY_COPY);
         }
-#if(ROCPROFILER_VERSION >= 10000)
         else if(itr == "kfd_events" || itr == "kfd_page_fault" ||
                 itr == "kfd_page_migrate" || itr == "kfd_queue" ||
                 itr == "kfd_event_queue" || itr == "kfd_event_unmap_from_gpu" ||
                 itr == "kfd_event_dropped_events")
         {
-            if(!kfd_supported_by_runtime)
+            if constexpr(Backend::compile_time_version >= 10000)
             {
-                static bool _warned = false;
-                if(!_warned)
+                if(!kfd_supported_by_runtime)
                 {
-                    LOG_WARNING("KFD tracing domain '{}' disabled: rocprofiler-sdk "
-                                "{}.{}.{} has a "
-                                "bug with undefined KFD node IDs (fixed in >= 1.2.2)",
-                                itr, kfd_version.major, kfd_version.minor,
-                                kfd_version.patch);
-                    _warned = true;
+                    static bool _warned = false;
+                    if(!_warned)
+                    {
+                        LOG_WARNING(
+                            "KFD tracing domain '{}' disabled: rocprofiler-sdk "
+                            "{}.{}.{} has a bug with undefined KFD node IDs (fixed in "
+                            ">= 1.2.2)",
+                            itr, kfd_version.major, kfd_version.minor, kfd_version.patch);
+                        _warned = true;
+                    }
+                    continue;
                 }
-                continue;
+                if(itr == "kfd_events")
+                {
+                    for(auto eitr : { Backend::BUFFER_TRACING_KFD_PAGE_FAULT,
+                                      Backend::BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                                      Backend::BUFFER_TRACING_KFD_QUEUE,
+                                      Backend::BUFFER_TRACING_KFD_EVENT_QUEUE,
+                                      Backend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                                      Backend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS })
+                        _data.emplace(eitr);
+                }
+                else if(itr == "kfd_page_fault")
+                    _data.emplace(Backend::BUFFER_TRACING_KFD_PAGE_FAULT);
+                else if(itr == "kfd_page_migrate")
+                    _data.emplace(Backend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+                else if(itr == "kfd_queue")
+                    _data.emplace(Backend::BUFFER_TRACING_KFD_QUEUE);
+                else if(itr == "kfd_event_queue")
+                    _data.emplace(Backend::BUFFER_TRACING_KFD_EVENT_QUEUE);
+                else if(itr == "kfd_event_unmap_from_gpu")
+                    _data.emplace(Backend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
+                else if(itr == "kfd_event_dropped_events")
+                    _data.emplace(Backend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
             }
-            if(itr == "kfd_events")
-            {
-                for(auto eitr : { ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
-                                  ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
-                                  ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
-                                  ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
-                                  ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-                                  ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS })
-                    _data.emplace(eitr);
-            }
-            else if(itr == "kfd_page_fault")
-                _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT);
-            else if(itr == "kfd_page_migrate")
-                _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE);
-            else if(itr == "kfd_queue")
-                _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE);
-            else if(itr == "kfd_event_queue")
-                _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE);
-            else if(itr == "kfd_event_unmap_from_gpu")
-                _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
-            else if(itr == "kfd_event_dropped_events")
-                _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
         }
-#endif
         else
         {
-            for(size_t idx = 0; idx < buffer_tracing_info.size(); ++idx)
+            for(size_t idx = 0; idx < buffer_info.size(); ++idx)
             {
-                auto ditr = buffer_tracing_info[idx];
-                auto dval = static_cast<rocprofiler_buffer_tracing_kind_t>(idx);
+                const auto& ditr = buffer_info[idx];
+                auto        dval = static_cast<kind_t>(idx);
                 if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
                 {
                     _data.emplace(dval);
@@ -630,32 +608,34 @@ get_buffered_domains()
         }
     }
 
-#if(ROCPROFILER_VERSION >= 10000)
-    // Automatically enable KFD domains when unified memory profiling is enabled
-    if(config::get_use_unified_memory_profiling())
+    if constexpr(Backend::compile_time_version >= 10000)
     {
-        if(kfd_supported_by_runtime)
+        if(config::get_use_unified_memory_profiling())
         {
-            LOG_INFO("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON: implicitly enabling "
-                     "KFD page_fault and page_migrate buffered tracing domains");
-            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT);
-            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE);
-        }
-        else
-        {
-            LOG_WARNING("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON requested KFD "
-                        "page_fault/page_migrate tracing, but rocprofiler-sdk "
-                        "{}.{}.{} is too old (requires >= 1.2.2)",
-                        kfd_version.major, kfd_version.minor, kfd_version.patch);
+            if(kfd_supported_by_runtime)
+            {
+                LOG_INFO(
+                    "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON: implicitly enabling "
+                    "KFD page_fault and page_migrate buffered tracing domains");
+                _data.emplace(Backend::BUFFER_TRACING_KFD_PAGE_FAULT);
+                _data.emplace(Backend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+            }
+            else
+            {
+                LOG_WARNING("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON requested KFD "
+                            "page_fault/page_migrate tracing, but rocprofiler-sdk "
+                            "{}.{}.{} is too old (requires >= 1.2.2)",
+                            kfd_version.major, kfd_version.minor, kfd_version.patch);
+            }
         }
     }
-#endif
 
     return _data;
 }
 
+template <typename Backend>
 std::vector<std::string>
-get_rocm_events()
+sdk_core<Backend>::get_rocm_events()
 {
     return tim::delimit(
         get_setting_value<std::string>(std::string{ env_vars::ROCM_EVENTS })
@@ -663,8 +643,9 @@ get_rocm_events()
         " ,;\t\n");
 }
 
+template <typename Backend>
 std::vector<std::int32_t>
-get_operations(rocprofiler_callback_tracing_kind_t kindv)
+sdk_core<Backend>::get_operations(Backend::callback_tracing_kind kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
@@ -683,8 +664,9 @@ get_operations(rocprofiler_callback_tracing_kind_t kindv)
     return get_operations_impl(_complete, _include, _exclude);
 }
 
+template <typename Backend>
 std::vector<std::int32_t>
-get_operations(rocprofiler_buffer_tracing_kind_t kindv)
+sdk_core<Backend>::get_operations(Backend::buffer_tracing_kind kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {
@@ -703,8 +685,9 @@ get_operations(rocprofiler_buffer_tracing_kind_t kindv)
     return get_operations_impl(_complete, _include, _exclude);
 }
 
+template <typename Backend>
 std::unordered_set<std::int32_t>
-get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
+sdk_core<Backend>::get_backtrace_operations(Backend::callback_tracing_kind kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
@@ -723,8 +706,9 @@ get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
     return _ret;
 }
 
+template <typename Backend>
 std::unordered_set<std::int32_t>
-get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
+sdk_core<Backend>::get_backtrace_operations(Backend::buffer_tracing_kind kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {
@@ -742,5 +726,8 @@ get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
         _ret.emplace(itr);
     return _ret;
 }
+
+template class sdk_core<backend>;
+
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

@@ -256,6 +256,20 @@ struct backend
 #endif
 
     // ─── Buffer tracing kind constants ───────────────────────────────────────────
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API =
+        ROCPROFILER_BUFFER_TRACING_HSA_CORE_API;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_AMD_EXT_API =
+        ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_IMAGE_EXT_API =
+        ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_FINALIZE_EXT_API =
+        ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HIP_RUNTIME_API =
+        ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HIP_COMPILER_API =
+        ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_MARKER_CORE_API =
+        ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API;
     static constexpr buffer_tracing_kind BUFFER_TRACING_KERNEL_DISPATCH =
         ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH;
     static constexpr buffer_tracing_kind BUFFER_TRACING_MEMORY_COPY =

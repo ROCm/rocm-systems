@@ -318,7 +318,13 @@ struct backend
         sdk_check<Sdk>(Sdk::query_counter_info(id, version, info));
     }
 
-    // ─── Timestamp and status — noexcept, never throw ────────────────────────────
+    // ─── Version / timestamp / status — noexcept, never throw ───────────────────
+
+    static status_t get_version(std::uint32_t* major, std::uint32_t* minor,
+                                std::uint32_t* patch) noexcept
+    {
+        return Sdk::get_version(major, minor, patch);
+    }
 
     static timestamp_t get_timestamp() noexcept
     {

@@ -2424,10 +2424,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         _domains_ss << "- " << itr << "\n";
     LOG_DEBUG("Available ROCm Domains: \n {}", _domains_ss.str());
 
-    auto _callback_domains = rocprofiler_sdk::get_callback_domains();
-    auto _buffered_domain  = rocprofiler_sdk::get_buffered_domains();
-    auto _counter_events   = rocprofiler_sdk::get_rocm_events();
-    auto _version          = rocprofiler_sdk::get_version();
+    auto _callback_domains = core_sdk::get_callback_domains();
+    auto _buffered_domain  = core_sdk::get_buffered_domains();
+    auto _counter_events   = core_sdk::get_rocm_events();
+    auto _version          = core_sdk::get_version();
     if(_version.formatted == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
@@ -2486,9 +2486,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         if(_callback_domains.count(itr) > 0)
         {
-            auto _ops = rocprofiler_sdk::get_operations(itr);
-            _data->backtrace_operations.emplace(
-                itr, rocprofiler_sdk::get_backtrace_operations(itr));
+            auto _ops = core_sdk::get_operations(itr);
+            _data->backtrace_operations.emplace(itr,
+                                                core_sdk::get_backtrace_operations(itr));
             ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                 _data->primary_ctx, itr, _ops.data(), _ops.size(), tool_tracing_callback,
                 _data));
@@ -2568,7 +2568,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             ::std::abort();
         }
         auto _ops =
-            rocprofiler_sdk::get_operations(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
+            core_sdk::get_operations(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
 
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
             _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION, nullptr, 0,

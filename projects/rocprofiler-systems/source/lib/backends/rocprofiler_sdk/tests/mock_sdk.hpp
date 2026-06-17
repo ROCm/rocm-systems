@@ -222,6 +222,8 @@ public:
     MOCK_METHOD(status_t, iterate_counter_dimensions,
                 (counter_id id, available_dimensions_cb_t cb, void* user_data));
 
+    MOCK_METHOD(status_t, get_version,
+                (std::uint32_t * major, std::uint32_t* minor, std::uint32_t* patch));
     MOCK_METHOD(status_t, get_timestamp, (timestamp * ts));
     MOCK_METHOD(const char*, get_status_string, (status_t s));
 };
@@ -441,6 +443,12 @@ struct mock_sdk
                                                void*                     user_data)
     {
         return g_mock_sdk->iterate_counter_dimensions(id, cb, user_data);
+    }
+
+    static status_t get_version(std::uint32_t* major, std::uint32_t* minor,
+                                std::uint32_t* patch) noexcept
+    {
+        return g_mock_sdk->get_version(major, minor, patch);
     }
 
     static status_t get_timestamp(timestamp_t* ts) noexcept
