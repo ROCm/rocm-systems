@@ -67,8 +67,9 @@ if [ -e "${DIR}/build/CMakeCache.txt" ]; then
     echo "ENABLE_ESMI_LIB: [$ENABLE_ESMI_LIB]"
 fi
 
-DOCKER_TTY_FLAGS=$( [ -t 0 ] && echo "-ti" || echo "-i" )
-docker run --rm $DOCKER_TTY_FLAGS --volume "$DIR":/src:rw "$IMAGE_REF" bash -c "
+DOCKER_TTY_FLAGS=(-i)
+if [ -t 0 ]; then DOCKER_TTY_FLAGS=(-t -i); fi
+docker run --rm "${DOCKER_TTY_FLAGS[@]}" --volume "$DIR":/src:rw "$IMAGE_REF" bash -c "
 cp -r /src /tmp/src \
     && cd /tmp/src \
     && rm -rf build .cache \

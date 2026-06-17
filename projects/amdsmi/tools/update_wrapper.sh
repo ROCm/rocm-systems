@@ -61,13 +61,15 @@ build_docker_image
 
 ENABLE_ESMI_LIB=""
 # source ENABLE_ESMI_LIB variable from the previous build if it exists
-if [ -e 'build/CMakeCache.txt' ]; then
+if [ -e "${DIR}/build/CMakeCache.txt" ]; then
     GREP_RESULT=$(grep "ENABLE_ESMI_LIB.*=" "${DIR}/build/CMakeCache.txt" | tail -n 1 | cut -d = -f 2)
     ENABLE_ESMI_LIB="-DENABLE_ESMI_LIB=$GREP_RESULT"
     echo "ENABLE_ESMI_LIB: [$ENABLE_ESMI_LIB]"
 fi
 
-docker run --rm -ti --volume "$DIR":/src:rw "$IMAGE_REF" bash -c "
+DOCKER_TTY_FLAGS=(-i)
+if [ -t 0 ]; then DOCKER_TTY_FLAGS=(-t -i); fi
+docker run --rm "${DOCKER_TTY_FLAGS[@]}" --volume "$DIR":/src:rw "$IMAGE_REF" bash -c "
 cp -r /src /tmp/src \
     && cd /tmp/src \
     && rm -rf build .cache \
