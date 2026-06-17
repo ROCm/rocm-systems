@@ -1,6 +1,6 @@
 .. meta::
    :description: ROCm Compute Profiler - RDNA3.5 shader engine overview and navigation
-   :keywords: ROCm Compute Profiler, RDNA, gfx1151, shader engine
+   :keywords: ROCm Compute Profiler, RDNA, gfx115x, shader engine
 
 .. _rdna-shader-engine:
 
@@ -13,7 +13,7 @@ Within each SE, the **Workgroup Manager (SPI)** accepts dispatched kernels and s
 Each WGP maps to **two Compute Units (CUs)** that share execution resources and execute the scheduled waves.
 **GL0** and **GL1** implement the per-SE vector cache hierarchy feeding those CUs.
 
-Follow the nested chapters under **Shader engine** in the navigation for gfx1151 metric tables:
+Follow the nested chapters under **Shader engine** in the navigation for gfx115x metric tables:
 
 * :doc:`spi` - SPI / Workgroup Manager: utilization and wave dispatch statistics that sit between the command processor and WGP execution.
 

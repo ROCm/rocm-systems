@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "tools/dbt_translate.h"
+#include "dbt_translate.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -60,7 +60,7 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
   if (!decoder) {
     if (include_disassembly)
       os << "decoder unavailable\n";
-    for (const auto *section : obj.code_sections()) {
+    for (const auto *section : obj.text_sections()) {
       CodeSectionReport section_report;
       section_report.name = section->name();
       section_report.size_bytes = section->size();
@@ -70,7 +70,7 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
     return inspection;
   }
 
-  for (const auto *section : obj.code_sections()) {
+  for (const auto *section : obj.text_sections()) {
     CodeSectionReport section_report;
     section_report.name = section->name();
     section_report.size_bytes = section->size();
@@ -180,9 +180,9 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
   if (text_sections.empty())
     return "<source section unavailable>";
 
-  // BinaryTranslator trace offsets are relative to the original .text section.
-  // Use text_sections() instead of code_sections() so the DBT cave never shifts
-  // source locations when a translated object is inspected again.
+  // BinaryTranslator source offsets are relative to the original .text section.
+  // Use the primary .text section so relocated local-cave bytes are not treated
+  // as source instructions when a translated object is inspected again.
   const auto *text = text_sections.front();
   if (offset % sizeof(uint32_t) != 0)
     return "<source offset unaligned>";

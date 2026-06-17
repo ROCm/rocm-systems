@@ -27,6 +27,7 @@
 #include <hip/hip_runtime.h>
 
 #include "backend_gda.hpp"
+#include "constmem.hpp"
 #include "constants.hpp"
 #include "util.hpp"
 
@@ -100,7 +101,6 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
     assert(false /* invalid nic provider */);
   }
   gda_provider_ = gda_provider;
-
   /* Setup User Buffer Registration Mechanism */
   pd_ = pd;
   num_user_buffers = envvar::gda::num_user_buffers;
@@ -143,7 +143,7 @@ __device__ uint64_t QueuePair::get_same_qp_lane_mask() {
  *****************************************************************************/
 __device__ void QueuePair::post_wqe_rma([[maybe_unused]] int pe, int32_t size, uintptr_t laddr,
     uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
-  switch (gda_provider_) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     ionic_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
@@ -161,12 +161,13 @@ __device__ void QueuePair::post_wqe_rma([[maybe_unused]] int pe, int32_t size, u
 #endif
   default:
     assert(false /* invalid nic provider */);
+    __builtin_unreachable();
   }
 }
 
 __device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, uintptr_t laddr,
     uintptr_t raddr, uint8_t opcode, [[maybe_unused]] bool ring_db) {
-  switch (gda_provider_) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     ionic_post_wqe_rma_single(size, laddr, raddr, opcode);
@@ -184,13 +185,14 @@ __device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, ui
 #endif
   default:
     assert(false /* invalid nic provider */);
+    __builtin_unreachable();
   }
 }
 
 __device__ uint64_t QueuePair::post_wqe_amo([[maybe_unused]] int32_t size, uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, ActiveWFInfo &wf_info) {
-  switch (gda_provider_) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return ionic_post_wqe_amo(size, raddr, opcode, atomic_data, atomic_cmp,
@@ -208,13 +210,13 @@ __device__ uint64_t QueuePair::post_wqe_amo([[maybe_unused]] int32_t size, uintp
 #endif
   default:
     assert(false /* invalid nic provider */);
-    return 0;
+    __builtin_unreachable();
   }
 }
 
 __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
-  switch (gda_provider_) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return ionic_post_wqe_amo_single(8 /*size_bytes (only 8-byte atomics implemented)*/, raddr, opcode, atomic_data, atomic_cmp, fetching);
@@ -230,13 +232,13 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
 #endif
   default:
     assert(false /* invalid nic provider */);
-    return 0;
+    __builtin_unreachable();
   }
 }
 
-__device__ void QueuePair::quiet([[maybe_unused]] ActiveWFInfo &wf_info) {
+__device__ void QueuePair::quiet(ActiveWFInfo &wf_info) {
   if(wf_info.is_pe_group_first) {
-      switch (gda_provider_) {
+      switch (constmem.gda_provider) {
     #if defined(GDA_IONIC)
       case GDAProvider::IONIC:
         ionic_quiet(wf_info);
@@ -254,12 +256,13 @@ __device__ void QueuePair::quiet([[maybe_unused]] ActiveWFInfo &wf_info) {
     #endif
       default:
         assert(false /* invalid nic provider */);
+        __builtin_unreachable();
       }
   }
 }
 
 __device__ void QueuePair::quiet_single() {
-  switch (gda_provider_) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     ionic_quiet_single();
@@ -277,6 +280,7 @@ __device__ void QueuePair::quiet_single() {
 #endif
   default:
     assert(false /* invalid nic provider */);
+    __builtin_unreachable();
   }
 }
 

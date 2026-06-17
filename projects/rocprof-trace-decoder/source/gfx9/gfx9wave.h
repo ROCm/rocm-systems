@@ -47,7 +47,7 @@ struct wave_t : public WaveDataInternal
 
     void complete_wave(int64_t token_time);
     void apply_inst(Token& token, int64_t& start_phase);
-    void apply_pc(Token& token, CodeobjTableTranslator& table);
+    void apply_pc(Token& token, const CachedTable& table);
     int64_t apply_issue(uint64_t wave_status, int64_t token_time);
 };
 

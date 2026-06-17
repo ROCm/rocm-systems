@@ -113,18 +113,14 @@ crate then embeds whatever SPA assets were produced by a previous build.
 mirage works without rocjitsu (the `noop` emulator runs commands
 directly). To get real GPU emulation you need the rocjitsu libraries.
 
-### Option A — let mirage build/find them
+### Option A — let mirage find them
 
-`mirage_rocjitsu`'s `build.rs` discovers the rocjitsu assets in this
-order:
+mirage discovers the rocjitsu assets in this order:
 
-1. explicit paths in `ROCJITSU_KMD_LIB`, `ROCJITSU_LIB`,
-   `ROCJITSU_SCHEMA_FBS`;
+1. explicit paths in `ROCJITSU_KMD_LIB`
 2. the rocjitsu source tree at `$ROCJITSU_ROOT` or the sibling checkout
    [`../../rocjitsu`](../../rocjitsu) (relative to the `rocjitsu` crate),
    using prebuilt artifacts under `<root>/build/`;
-3. as a last resort, invoking `cmake` to build the libraries on demand
-   (only when `cmake` is on `PATH` and `MIRAGE_ROCJITSU_BUILD != 0`).
 
 If nothing is found, empty placeholders are staged and mirage still
 compiles; rocjitsu is simply reported as not installed.
@@ -137,14 +133,7 @@ From the rocjitsu source tree
 ```sh
 cd emulation/rocjitsu
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j"$(nproc)"
-```
-
-Then build mirage pointing at that checkout:
-
-```sh
-cd ../mirage
-ROCJITSU_ROOT=$PWD/../rocjitsu cargo build
+cmake --build build
 ```
 
 ### Verifying rocjitsu is wired up
@@ -153,24 +142,14 @@ ROCJITSU_ROOT=$PWD/../rocjitsu cargo build
 ./target/debug/mirage state builtins        # extract agents/topologies/assets
 ./target/debug/mirage profile create gpu --emulator rocjitsu
 ./target/debug/mirage run --profile gpu -- \
-  sh -c 'echo LD=$LD_PRELOAD RJ_CONFIG=$RJ_CONFIG'
+  sh -c 'echo LD=$LD_PRELOAD ROCJITSU_RUNTIME_DIR=$ROCJITSU_RUNTIME_DIR'
 ```
 
-If the profile is created successfully and `LD_PRELOAD` / `RJ_CONFIG`
-are populated in the run, rocjitsu is integrated. Profile creation
+If the profile is created successfully and `LD_PRELOAD` /
+`ROCJITSU_RUNTIME_DIR` are populated in the run, rocjitsu is integrated.
+Profile creation
 validates against the emulator, so an unusable rocjitsu setup is
 reported at `profile create` time with the reason.
-
-## Useful environment variables
-
-| Variable | Effect |
-|----------|--------|
-| `MIRAGE_DASHBOARD_SKIP_NPM_CI` | Skip the Node check, `npm ci`, and `npm run build`. |
-| `NODE` / `NPM` | Override the `node` / `npm` executables used by the dashboard build. |
-| `ROCJITSU_ROOT` | Path to the rocjitsu source/build tree. |
-| `ROCJITSU_KMD_LIB`, `ROCJITSU_LIB`, `ROCJITSU_SCHEMA_FBS` | Explicit paths to individual rocjitsu assets. |
-| `MIRAGE_ROCJITSU_BUILD=0` | Disable the on-demand `cmake` build fallback. |
-| `MIRAGE_LOG` | Log filter (e.g. `debug`); also `-v` / `-vv` on the CLI. |
 
 ## Testing
 

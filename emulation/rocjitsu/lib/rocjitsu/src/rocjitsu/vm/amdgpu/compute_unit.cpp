@@ -125,7 +125,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   // values from previous kernel runs.
   std::fill(&sgpr_file_[sgpr_base], &sgpr_file_[sgpr_base] + config_.sgprs_per_wf, 0u);
   std::memset(vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
-              config_.vgprs_per_wf * wf_size_ * sizeof(uint32_t));
+              vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
 
   // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
   // arguments from L2/memory rather than stale lines from a prior kernel.
@@ -149,7 +149,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   wf->trace_inst_count_ = 0;
 
   std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + sgprs, wf);
-  fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgprs, wf);
+  fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
 
   util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", slot,
                    " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());

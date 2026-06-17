@@ -14,7 +14,7 @@ message "Source directory is ${SOURCE_DIR}"
 message "Changing directory to ${SOURCE_DIR}"
 cd ${SOURCE_DIR}
 
-message "Configurating cmake..."
+message "Configuring CMake..."
 cmake -B build-docs ${SOURCE_DIR} -DROCPROFILER_INTERNAL_BUILD_DOCS=ON
 
 message "Changing directory to ${WORK_DIR}"

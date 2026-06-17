@@ -5,7 +5,10 @@ include(rj_configure_target)
 
 add_executable(rocjitsu_bin main.cpp)
 
-target_include_directories(rocjitsu_bin PRIVATE ${GENERATED_DIR})
+target_include_directories(
+    rocjitsu_bin
+    PRIVATE ${GENERATED_DIR} ${RJ_VERSION_INCLUDE_DIR}
+)
 
 target_link_libraries(
     rocjitsu_bin

@@ -6,7 +6,7 @@
 
 .DEFAULT_GOAL: build
 PLUGIN_SO:=libnccl-tuner-example.so
-include ../../makefiles/common.mk
+include ../../../makefiles/common.mk
 SRCDIR   ?= $(abspath ../..)
 BUILDDIR ?= .
 NCCLDIR  := $(BUILDDIR)

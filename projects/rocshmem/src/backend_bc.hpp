@@ -298,7 +298,7 @@ class Backend {
    */
   TeamTracker team_tracker{};
 
-  BackendType get_backend_type() { return type; }
+  BackendType get_type() { return type; }
 
   /**
    * Fine grained memory allocator for buffers used in collectives Routines

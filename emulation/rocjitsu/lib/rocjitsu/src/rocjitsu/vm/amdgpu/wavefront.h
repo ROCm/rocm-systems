@@ -206,6 +206,11 @@ public:
   /// @param val New M0 value.
   void set_m0(uint32_t val) { m0_ = val; }
 
+  static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
+  bool gpr_idx_en() const { return mode_raw_ & GPR_IDX_EN_BIT; }
+  uint32_t gpr_idx_offset() const { return m0_ & 0xFF; }
+  uint32_t gpr_idx_mode() const { return (m0_ >> 8) & 0xF; }
+
   /// @brief Return the per-wavefront scratch (private segment) base address.
   /// @returns Byte address in GPU memory where this wavefront's scratch starts.
   uint64_t scratch_base() const { return scratch_base_; }
@@ -513,6 +518,13 @@ private:
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
 };
+
+inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, bool is_dst) {
+  uint32_t mode = wf.gpr_idx_mode();
+  if ((!is_dst && (mode & 0x7)) || (is_dst && (mode & 0x8)))
+    return vgpr_off + wf.gpr_idx_offset();
+  return vgpr_off;
+}
 
 /// @brief ISA-parameterized concrete wavefront with ISA-specific status register.
 ///

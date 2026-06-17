@@ -57,6 +57,8 @@ add_executable(
     decode_execute_benchmark.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
+    mfma_simd_benchmark.cpp
+    wmma_simd_benchmark.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -86,11 +88,13 @@ add_executable(
     simd_correctness/vop3_carry_simd_correctness_test.cpp
     simd_correctness/vop_alias_rdna_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_simd_correctness_test.cpp
+    simd_correctness/vop3_shift64_scalar_correctness_test.cpp
     simd_correctness/vop3_fp16_unary_simd_correctness_test.cpp
     simd_correctness/vop3_fp16_transcendental_simd_correctness_test.cpp
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
     simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
     simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp
+    simd_correctness/vop3_cvt_pk_f32_rdna_correctness_test.cpp
     simd_correctness/vop3_ternary_fp_simd_correctness_test.cpp
     simd_correctness/vop3_fmac_simd_correctness_test.cpp
     simd_correctness/vop3_ldexp_simd_correctness_test.cpp
@@ -102,7 +106,17 @@ add_executable(
     execution_plugin_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
+    data_types_test.cpp
+    drm_info_layout_test.cpp
 )
+if(RJ_ENABLE_EXPENSIVE_CHECKS)
+    target_sources(
+        rocjitsu_tests
+        PRIVATE
+            simd_correctness/mfma_simd_exact_test.cpp
+            simd_correctness/wmma_simd_exact_test.cpp
+    )
+endif()
 target_link_libraries(
     rocjitsu_tests
     PRIVATE
@@ -116,7 +130,10 @@ target_link_libraries(
 rj_configure_target(rocjitsu_tests TEST)
 
 include(GoogleTest)
-gtest_discover_tests(rocjitsu_tests)
+# Benchmarks are timing tools, not correctness tests; keep them out of the
+# default ctest run (invoke them directly via
+# ./rocjitsu_tests --gtest_filter='*Benchmark*').
+gtest_discover_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
 
 add_executable(
     rj_dbt_translate_smoke_test
@@ -167,9 +184,7 @@ set(RJ_KMD_PRELOAD_ENV
 find_program(
     ROCMINFO_EXECUTABLE
     NAMES rocminfo
-    HINTS ${CMAKE_SOURCE_DIR}/.venv
-    ENV ROCM_PATH
-    /opt/rocm
+    HINTS "${ROCM_PATH}"
     PATH_SUFFIXES bin
     DOC "Path to the rocminfo executable"
 )
@@ -231,13 +246,7 @@ endif()
 
 # --- HSA init test (requires ROCm HSA runtime + CLI launcher) ---
 
-find_library(
-    HSA_RUNTIME64
-    hsa-runtime64
-    PATHS /opt/rocm/lib
-    ENV ROCM_PATH
-    PATH_SUFFIXES lib
-)
+find_library(HSA_RUNTIME64 hsa-runtime64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
 if(HSA_RUNTIME64)
     get_filename_component(RJ_HSA_LIBRARY_DIR "${HSA_RUNTIME64}" DIRECTORY)
     get_filename_component(RJ_HSA_ROCM_ROOT "${RJ_HSA_LIBRARY_DIR}" DIRECTORY)
@@ -279,15 +288,13 @@ if(HSA_RUNTIME64)
         find_program(
             ROCM_AGENT_ENUM
             rocm_agent_enumerator
-            HINTS
-            ENV ROCM_PATH
-            ${RJ_HSA_ROCM_ROOT}
-            /opt/rocm
+            HINTS "${ROCM_PATH}"
             PATH_SUFFIXES bin
         )
         set(HAS_DBT_VECTOR_ADD_GPU FALSE)
         set(HAS_CDNA3_GPU FALSE)
         set(HAS_RDNA4_GPU FALSE)
+        set(HAS_GFX1201_GPU FALSE)
         if(ROCM_AGENT_ENUM)
             execute_process(
                 COMMAND ${ROCM_AGENT_ENUM}
@@ -307,6 +314,9 @@ if(HSA_RUNTIME64)
             endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx120[01]")
                 set(HAS_RDNA4_GPU TRUE)
+            endif()
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx1201")
+                set(HAS_GFX1201_GPU TRUE)
             endif()
         endif()
 
@@ -339,12 +349,60 @@ if(HSA_RUNTIME64)
         add_dependencies(hsa_translate_test device_kernels)
         rj_configure_target(hsa_translate_test TEST)
 
+        add_executable(hsa_hooks_test dbt/hsa_hooks_test.cpp)
+        target_include_directories(
+            hsa_hooks_test
+            PRIVATE
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+                ${CMAKE_SOURCE_DIR}/lib/util/include
+                ${RJ_HSA_INCLUDE_DIR}
+        )
+        target_link_libraries(
+            hsa_hooks_test
+            PRIVATE
+                ${RJ_OBJECT_LIBS}
+                ${HSA_RUNTIME64}
+                GTest::gtest
+                GTest::gtest_main
+        )
+        target_link_options(
+            hsa_hooks_test
+            PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+        )
+        target_compile_definitions(
+            hsa_hooks_test
+            PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
+        )
+        add_dependencies(hsa_hooks_test device_kernels rocjitsu_hooks)
+        rj_configure_target(hsa_hooks_test TEST)
+
         if(HAS_RDNA4_GPU)
             add_test(
                 NAME "HsaTranslateTest.TranslateAndDispatchVectorAdd"
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
+        endif()
+
+        if(HAS_GFX1201_GPU)
+            add_test(
+                NAME "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
+                COMMAND
+                    hsa_hooks_test
+                    --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            set_tests_properties(
+                "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
+                PROPERTIES
+                    TIMEOUT 60
+                    ENVIRONMENT
+                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_hooks>;RJ_DBT_TARGET_ISA=gfx1201;RJ_DBT_LOG=1"
+            )
+        endif()
+
+        if(HAS_RDNA4_GPU)
             add_test(
                 NAME "HsaTranslateTest.TranslateAndDispatchMfma16x16"
                 COMMAND hsa_translate_test --gtest_filter=*Mfma16x16*
@@ -477,13 +535,7 @@ endif()
 
 # --- HIP tests (requires hipcc + CLI launcher) ---
 
-find_program(
-    HIPCC_EXECUTABLE
-    hipcc
-    PATHS /opt/rocm/bin
-    ENV ROCM_PATH
-    PATH_SUFFIXES bin
-)
+find_program(HIPCC_EXECUTABLE hipcc PATHS "${ROCM_PATH}" PATH_SUFFIXES bin)
 if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
@@ -558,13 +610,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test(hip_ds_transpose_acc_test)
 
     # --- RCCL collective test ---
-    find_library(
-        RCCL_LIB
-        rccl
-        PATHS /opt/rocm/lib
-        ENV ROCM_PATH
-        PATH_SUFFIXES lib
-    )
+    find_library(RCCL_LIB rccl PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
     if(RCCL_LIB)
         rj_add_hip_test(hip_rccl_test EXTRA_LIBS ${RCCL_LIB})
         message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
@@ -628,13 +674,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     endif()
 
     # --- rocBLAS GEMM test ---
-    find_library(
-        ROCBLAS_LIB
-        rocblas
-        PATHS /opt/rocm/lib
-        ENV ROCM_PATH
-        PATH_SUFFIXES lib
-    )
+    find_library(ROCBLAS_LIB rocblas PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
     if(ROCBLAS_LIB)
         rj_add_hip_test(hip_gemm_test EXTRA_LIBS ${ROCBLAS_LIB})
         rj_add_hip_test(hip_gemm_test_cdna3 ARCH gfx942 SOURCE hip_gemm_test.cpp EXTRA_LIBS ${ROCBLAS_LIB})
@@ -725,4 +765,28 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
 else()
     message(STATUS "HIP tests disabled (hipcc or libhsa-runtime64 not found)")
+endif()
+
+# --- Narrow conversion HIP CTS tests ---
+# Uses hipcc (rocjitsu emulator does not yet support amdclang++ -x hip binaries).
+if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
+    set(CVT_NARROW_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_cvt_narrow_test)
+    add_custom_command(
+        OUTPUT ${CVT_NARROW_BIN}
+        COMMAND
+            ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20
+            -I${CMAKE_SOURCE_DIR}/lib/util/include -o ${CVT_NARROW_BIN}
+            ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
+        COMMENT "Building hip_cvt_narrow_test with hipcc (gfx950)"
+        VERBATIM
+    )
+    add_custom_target(hip_cvt_narrow_test_target ALL DEPENDS ${CVT_NARROW_BIN})
+    add_dependencies(hip_cvt_narrow_test_target rocjitsu_bin rocjitsu_kmd_shim)
+
+    add_test(
+        NAME "CvtNarrow.AllTests"
+        COMMAND ${RJ_CLI} --config ${RJ_CDNA4_KMD_CONFIG} -- ${CVT_NARROW_BIN}
+    )
+    set_tests_properties("CvtNarrow.AllTests" PROPERTIES TIMEOUT 300)
 endif()

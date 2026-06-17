@@ -134,30 +134,45 @@ set(TEST_tile_get_colmajor 115)
 set(TEST_tile_get_arbitrary 116)
 set(TEST_reduce_on_stream 117)
 set(TEST_host_ctx_create 118)
+set(TEST_teamsplit2d 119)
+set(TEST_host_putmem 120)
+set(TEST_host_getmem 121)
+set(TEST_host_amo_fadd 122)
+set(TEST_host_amo_fcswap 123)
+set(TEST_host_ctx_putmem 124)
+set(TEST_host_ctx_getmem 125)
+set(TEST_host_int_amo_fadd 126)
+set(TEST_host_int_amo_fcswap 127)
+set(TEST_host_amo_all_pes 128)
+set(TEST_host_amo_self 129)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
+# If MPI is not found, automatically fall back to SLR (Simple Local Runtime)
 if(NOT MPIEXEC_EXECUTABLE)
-    message(WARNING "MPIEXEC_EXECUTABLE not found - functional tests will not be added")
-    return()
-endif()
+    message(STATUS "MPI not found - using SLR (Simple Local Runtime) for functional tests")
+    set(USE_SLR_LAUNCHER ON CACHE BOOL "Use SLR launcher instead of MPI" FORCE)
+else()
+    message(STATUS "MPI found - using MPI launcher for functional tests")
+    set(USE_SLR_LAUNCHER OFF CACHE BOOL "Use SLR launcher instead of MPI" FORCE)
 
-# MCA parameters can be overridden via environment variables at CMake configure time
-# or via CMake cache variables. Defaults to ucx for both.
-set(OMPI_MCA_PML "$ENV{OMPI_MCA_pml}" CACHE STRING "OpenMPI MCA pml parameter")
-set(OMPI_MCA_OSC "$ENV{OMPI_MCA_osc}" CACHE STRING "OpenMPI MCA osc parameter")
+    # MCA parameters can be overridden via environment variables at CMake configure time
+    # or via CMake cache variables. Defaults to ucx for both.
+    set(OMPI_MCA_PML "$ENV{OMPI_MCA_pml}" CACHE STRING "OpenMPI MCA pml parameter")
+    set(OMPI_MCA_OSC "$ENV{OMPI_MCA_osc}" CACHE STRING "OpenMPI MCA osc parameter")
 
-# Use ucx as default if not specified
-if(NOT OMPI_MCA_PML)
-    set(OMPI_MCA_PML "ucx")
-endif()
-if(NOT OMPI_MCA_OSC)
-    set(OMPI_MCA_OSC "ucx")
-endif()
+    # Use ucx as default if not specified
+    if(NOT OMPI_MCA_PML)
+        set(OMPI_MCA_PML "ucx")
+    endif()
+    if(NOT OMPI_MCA_OSC)
+        set(OMPI_MCA_OSC "ucx")
+    endif()
 
-message(STATUS "MPI executable: ${MPIEXEC_EXECUTABLE}")
-message(STATUS "MPI numproc flag: ${MPIEXEC_NUMPROC_FLAG}")
-message(STATUS "MPI MCA parameters: pml=${OMPI_MCA_PML}, osc=${OMPI_MCA_OSC}")
+    message(STATUS "MPI executable: ${MPIEXEC_EXECUTABLE}")
+    message(STATUS "MPI numproc flag: ${MPIEXEC_NUMPROC_FLAG}")
+    message(STATUS "MPI MCA parameters: pml=${OMPI_MCA_PML}, osc=${OMPI_MCA_OSC}")
+endif()
 
 ###############################################################################
 # Install-Time CTest Generation Support
@@ -483,25 +498,50 @@ function(add_rocshmem_functional_test)
         list(APPEND all_labels ${BACKEND_LABELS})
         list(APPEND all_labels ${GPU_LABELS})
         list(APPEND all_labels ${variant_labels})
+
+        # Add launcher label
+        if(USE_SLR_LAUNCHER)
+            list(APPEND all_labels "launcher_slr")
+        else()
+            list(APPEND all_labels "launcher_mpi")
+        endif()
+
         if(DEFINED TEST_EXTRA_LABELS)
             list(APPEND all_labels ${TEST_EXTRA_LABELS})
         endif()
 
         # Call internal function to create actual CTest test
-        _add_single_rocshmem_test(
-            NAME ${TEST_NAME}
-            RANKS ${TEST_RANKS}
-            WORKGROUPS ${TEST_WORKGROUPS}
-            THREADS ${TEST_THREADS}
-            MAX_MSG_SIZE ${TEST_MAX_MSG_SIZE}
-            VOLUME_SIZE ${TEST_VOLUME_SIZE}
-            LOCALBUFTYPE ${TEST_LOCALBUFTYPE}
-            TIMEOUT ${TEST_TIMEOUT}
-            SUFFIX "${variant_suffix}"
-            ENV_VARS ${combined_env_vars}
-            LABELS "${all_labels}"
-            NO_VERIFY ${TEST_NO_VERIFY}
-        )
+        # Only pass NO_VERIFY flag if it was explicitly set
+        if(TEST_NO_VERIFY)
+            _add_single_rocshmem_test(
+                NAME ${TEST_NAME}
+                RANKS ${TEST_RANKS}
+                WORKGROUPS ${TEST_WORKGROUPS}
+                THREADS ${TEST_THREADS}
+                MAX_MSG_SIZE ${TEST_MAX_MSG_SIZE}
+                VOLUME_SIZE ${TEST_VOLUME_SIZE}
+                LOCALBUFTYPE ${TEST_LOCALBUFTYPE}
+                TIMEOUT ${TEST_TIMEOUT}
+                SUFFIX "${variant_suffix}"
+                ENV_VARS ${combined_env_vars}
+                LABELS "${all_labels}"
+                NO_VERIFY
+            )
+        else()
+            _add_single_rocshmem_test(
+                NAME ${TEST_NAME}
+                RANKS ${TEST_RANKS}
+                WORKGROUPS ${TEST_WORKGROUPS}
+                THREADS ${TEST_THREADS}
+                MAX_MSG_SIZE ${TEST_MAX_MSG_SIZE}
+                VOLUME_SIZE ${TEST_VOLUME_SIZE}
+                LOCALBUFTYPE ${TEST_LOCALBUFTYPE}
+                TIMEOUT ${TEST_TIMEOUT}
+                SUFFIX "${variant_suffix}"
+                ENV_VARS ${combined_env_vars}
+                LABELS "${all_labels}"
+            )
+        endif()
     endforeach()
 endfunction()
 
@@ -562,49 +602,78 @@ function(_add_single_rocshmem_test)
         set(TEST_TIMEOUT 300)  # 5 minutes
     endif()
 
-    # Build test command using standard CMake MPI variables
-    set(TEST_COMMAND
-        ${CMAKE_CURRENT_SOURCE_DIR}/test_wrapper.sh
-        ${FULL_TEST_NAME}
-        ${MPIEXEC_EXECUTABLE}
-        ${MPIEXEC_NUMPROC_FLAG} ${TEST_RANKS}
-        ${MPIEXEC_PREFLAGS}
-        -mca pml ${OMPI_MCA_PML}
-        -mca osc ${OMPI_MCA_OSC}
-    )
+    # Build test command - choose launcher based on MPI availability
+    if(USE_SLR_LAUNCHER)
+        # SLR mode: Direct execution with ROCSHMEM_SLR_NP environment variable
+        set(TEST_COMMAND
+            ${CMAKE_COMMAND} -E env "ROCSHMEM_SLR_NP=${TEST_RANKS}"
+            "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
+            "ROCSHMEM_HEAP_SIZE=6442450944"
+        )
 
-    # Export environment variables to MPI ranks via -x flags
+        # Add LOCALBUFTYPE if specified
+        if(DEFINED TEST_LOCALBUFTYPE)
+            list(APPEND TEST_COMMAND "LOCALBUFTYPE=${TEST_LOCALBUFTYPE}")
+        endif()
+
+        # Add variant-specific and user-specified environment variables
+        foreach(ENV_VAR ${TEST_ENV_VARS})
+            list(APPEND TEST_COMMAND "${ENV_VAR}")
+        endforeach()
+
+        # Add wrapper script and test executable
+        list(APPEND TEST_COMMAND
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_wrapper.sh
+            ${FULL_TEST_NAME}
+            $<TARGET_FILE:rocshmem_functional_tests>
+        )
+    else()
+        # MPI mode: Build test command using standard CMake MPI variables
+        set(TEST_COMMAND
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_wrapper.sh
+            ${FULL_TEST_NAME}
+            ${MPIEXEC_EXECUTABLE}
+            ${MPIEXEC_NUMPROC_FLAG} ${TEST_RANKS}
+            ${MPIEXEC_PREFLAGS}
+            -mca pml ${OMPI_MCA_PML}
+            -mca osc ${OMPI_MCA_OSC}
+        )
+
+        # Export environment variables to MPI ranks via -x flags
+        list(APPEND TEST_COMMAND
+            -x "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
+            -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
+            -x "ROCSHMEM_HEAP_SIZE=6442450944"
+        )
+
+        # Export LOCALBUFTYPE if specified
+        if(DEFINED TEST_LOCALBUFTYPE)
+            list(APPEND TEST_COMMAND -x "LOCALBUFTYPE=${TEST_LOCALBUFTYPE}")
+        endif()
+
+        # Export variant-specific and user-specified environment variables
+        foreach(ENV_VAR ${TEST_ENV_VARS})
+            list(APPEND TEST_COMMAND -x "${ENV_VAR}")
+        endforeach()
+
+        # Add timeout if non-zero
+        if(TEST_TIMEOUT GREATER 0)
+            list(APPEND TEST_COMMAND --timeout ${TEST_TIMEOUT})
+        endif()
+
+        list(APPEND TEST_COMMAND --map-by numa)
+
+        # Add hostfile if provided via environment
+        if(DEFINED ENV{HOSTFILE})
+            list(APPEND TEST_COMMAND --hostfile $ENV{HOSTFILE})
+        endif()
+
+        # Add the actual test executable
+        list(APPEND TEST_COMMAND $<TARGET_FILE:rocshmem_functional_tests>)
+    endif()
+
+    # Add test arguments (common to both MPI and SLR)
     list(APPEND TEST_COMMAND
-        -x "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
-        -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
-        -x "ROCSHMEM_HEAP_SIZE=6442450944"
-    )
-
-    # Export LOCALBUFTYPE if specified
-    if(DEFINED TEST_LOCALBUFTYPE)
-        list(APPEND TEST_COMMAND -x "LOCALBUFTYPE=${TEST_LOCALBUFTYPE}")
-    endif()
-
-    # Export variant-specific and user-specified environment variables
-    foreach(ENV_VAR ${TEST_ENV_VARS})
-        list(APPEND TEST_COMMAND -x "${ENV_VAR}")
-    endforeach()
-
-    # Add timeout if non-zero
-    if(TEST_TIMEOUT GREATER 0)
-        list(APPEND TEST_COMMAND --timeout ${TEST_TIMEOUT})
-    endif()
-
-    list(APPEND TEST_COMMAND --map-by numa)
-
-    # Add hostfile if provided via environment
-    if(DEFINED ENV{HOSTFILE})
-        list(APPEND TEST_COMMAND --hostfile $ENV{HOSTFILE})
-    endif()
-
-    # Add the actual test executable and arguments
-    list(APPEND TEST_COMMAND
-        $<TARGET_FILE:rocshmem_functional_tests>
         -a ${TEST_NUM}
         -w ${TEST_WORKGROUPS}
         -z ${TEST_THREADS}
@@ -1163,6 +1232,47 @@ function(add_tile_tests)
 endfunction()
 
 ###############################################################################
+# Host RMA/AMO Tests (non-MPI IPC TcpBootstrap path, AIROCSHMEM-419)
+###############################################################################
+
+function(add_host_tests)
+    # Default-context put/get and AMOs - IPC only, always use UUID path
+    begin_test_group(CATEGORY "HOST;RMA" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME host_putmem     RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 65536
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_getmem     RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 65536
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+    end_test_group()
+
+    begin_test_group(CATEGORY "HOST;AMO" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME host_amo_fadd   RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_amo_fcswap RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_int_amo_fadd   RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_int_amo_fcswap RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+    end_test_group()
+
+    # Explicit-context put/get - need slot 1 available for the explicit ctx
+    begin_test_group(CATEGORY "HOST;RMA;CTX" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME host_ctx_putmem RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 65536
+            ENV_VARS "ROCSHMEM_TEST_UUID=1;ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2")
+        add_rocshmem_functional_test(NAME host_ctx_getmem RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 65536
+            ENV_VARS "ROCSHMEM_TEST_UUID=1;ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2")
+    end_test_group()
+
+    # Multi-PE concurrency tests (default 4 ranks, mirrors IPC_HOST_NPES=4 in driver.sh)
+    begin_test_group(CATEGORY "HOST;AMO" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME host_amo_all_pes RANKS 4 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_amo_self    RANKS 4 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+    end_test_group()
+endfunction()
+
+###############################################################################
 # Register all tests
 ###############################################################################
 
@@ -1176,4 +1286,5 @@ function(register_all_functional_tests)
     add_other_tests()
     add_heatmap_tests()
     add_tile_tests()
+    add_host_tests()
 endfunction()

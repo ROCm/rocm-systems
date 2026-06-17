@@ -811,6 +811,7 @@ struct ncclIbQpSchedParmsCB {
   struct ncclIbQpSchedParms parms;
 };
 
+bool rcclUseIbCastQpSched();
 ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms *parms);
 void IbCastLogSched(struct ncclIbSendComm *comm);
 void IbCastUpdateSchedParmsTry(struct ncclIbNetCommBase *base, int nreqs, int size);
