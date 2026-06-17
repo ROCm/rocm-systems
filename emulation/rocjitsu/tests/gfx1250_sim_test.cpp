@@ -414,6 +414,25 @@ uint32_t read_global_u32(amdgpu::GpuMemory &memory, uint64_t addr) {
   return value;
 }
 
+std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 3> &words,
+                                            std::string_view expected_mnemonic) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  if (!decoder) {
+    ADD_FAILURE() << "Decoder::create() returned nullptr for gfx1250";
+    return nullptr;
+  }
+
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  if (!inst) {
+    ADD_FAILURE() << "decode() returned nullptr for gfx1250 instruction";
+    return nullptr;
+  }
+
+  EXPECT_EQ(inst->mnemonic(), expected_mnemonic);
+  EXPECT_EQ(inst->size(), static_cast<int>(words.size() * sizeof(words[0])));
+  return inst;
+}
+
 template <typename T> void append_bytes(std::vector<uint8_t> &bytes, const T &value) {
   auto *src = reinterpret_cast<const uint8_t *>(&value);
   bytes.insert(bytes.end(), src, src + sizeof(T));
@@ -1072,6 +1091,148 @@ TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {
   for (uint32_t i = 0; i < kElements; ++i) {
     const uint32_t actual = read_global_u32(*sim.memory, kStoreGlobal + i * 4);
     EXPECT_EQ(actual, 0x22000000u + i * 0x303u);
+  }
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaDecodeExecuteCoversLoadStoreD2D4Forms) {
+  constexpr uint32_t kNullSgpr = 124;
+  constexpr std::array<uint32_t, 3> kLoadD2 = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  constexpr std::array<uint32_t, 3> kStoreD2 = {0xd0714001u, 0x7c000000u, 0x7c7c0c08u};
+  constexpr std::array<uint32_t, 3> kLoadD4 = {0xd0710001u, 0x7c000000u, 0x18140c00u};
+  constexpr std::array<uint32_t, 3> kStoreD4 = {0xd0714001u, 0x7c000000u, 0x18140c08u};
+
+  {
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_lds_base(cu->allocate_lds(256));
+
+    constexpr uint32_t kElements = 4;
+    constexpr uint64_t kLoadGlobal = 0x1a0000;
+    constexpr uint64_t kStoreGlobal = 0x1b0000;
+
+    write_tensor_dma_d0(*cu, *wf, 0, kLoadGlobal);
+    write_tensor_dma_d0(*cu, *wf, 8, kStoreGlobal);
+    write_wave_sgpr(*cu, *wf, 12, 2u << 16);        // i32 elements.
+    write_wave_sgpr(*cu, *wf, 13, kElements << 16); // Tensor dim0.
+    write_wave_sgpr(*cu, *wf, 14, 0);
+    write_wave_sgpr(*cu, *wf, 15, kElements << 16); // Tile dim0.
+    write_wave_sgpr(*cu, *wf, 16, 0);
+    write_wave_sgpr(*cu, *wf, 17, 0);
+    write_wave_sgpr(*cu, *wf, 18, 0);
+    write_wave_sgpr(*cu, *wf, 19, 0);
+
+    for (uint32_t i = 0; i < kElements; ++i)
+      write_global_u32(*sim.memory, kLoadGlobal + i * 4, 0x71000000u + i);
+
+    auto load = decode_gfx1250(kLoadD2, "tensor_load_to_lds");
+    ASSERT_NE(load, nullptr);
+    ASSERT_EQ(load->num_src_operands(), 4);
+    EXPECT_EQ(load->src_operand(2)->encoding_value(), static_cast<int>(kNullSgpr));
+    EXPECT_EQ(load->src_operand(3)->encoding_value(), static_cast<int>(kNullSgpr));
+    load->execute(*load, wf);
+
+    for (uint32_t i = 0; i < kElements; ++i)
+      EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * 4), 0x71000000u + i);
+
+    for (uint32_t i = 0; i < kElements; ++i)
+      cu->lds().write32(wf->lds_base() + i * 4, 0x72000000u + i);
+
+    auto store = decode_gfx1250(kStoreD2, "tensor_store_from_lds");
+    ASSERT_NE(store, nullptr);
+    ASSERT_EQ(store->num_src_operands(), 4);
+    EXPECT_EQ(store->src_operand(2)->encoding_value(), static_cast<int>(kNullSgpr));
+    EXPECT_EQ(store->src_operand(3)->encoding_value(), static_cast<int>(kNullSgpr));
+    store->execute(*store, wf);
+
+    for (uint32_t i = 0; i < kElements; ++i)
+      EXPECT_EQ(read_global_u32(*sim.memory, kStoreGlobal + i * 4), 0x72000000u + i);
+  }
+
+  {
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_lds_base(cu->allocate_lds(256));
+
+    constexpr uint32_t kCols = 2;
+    constexpr uint32_t kRows = 2;
+    constexpr uint32_t kTileRows = 3;
+    constexpr uint32_t kDepth = 2;
+    constexpr uint32_t kPlaneStride = kTileRows * kCols;
+    constexpr uint64_t kLoadGlobal = 0x1c0000;
+    constexpr uint64_t kStoreGlobal = 0x1d0000;
+    constexpr uint32_t kSentinel = 0x7e7e7e7eu;
+
+    write_tensor_dma_d0(*cu, *wf, 0, kLoadGlobal);
+    write_tensor_dma_d0(*cu, *wf, 8, kStoreGlobal);
+    write_wave_sgpr(*cu, *wf, 12, 2u << 16);    // i32 elements.
+    write_wave_sgpr(*cu, *wf, 13, kCols << 16); // Tensor dim0.
+    write_wave_sgpr(*cu, *wf, 14, kRows << 16); // Tensor dim1.
+    write_wave_sgpr(*cu, *wf, 15, kCols << 16); // Tile dim0.
+    write_wave_sgpr(*cu, *wf, 16, kTileRows | (kDepth << 16));
+    write_wave_sgpr(*cu, *wf, 17, kCols); // Tensor dim0 stride.
+    write_wave_sgpr(*cu, *wf, 18, kPlaneStride << 16);
+    write_wave_sgpr(*cu, *wf, 19, 0);
+    write_wave_sgpr(*cu, *wf, 20, kDepth); // Tensor dim2, from D2.
+    write_wave_sgpr(*cu, *wf, 21, 0);
+    write_wave_sgpr(*cu, *wf, 22, 0);
+    write_wave_sgpr(*cu, *wf, 23, 0);
+    write_wave_sgpr(*cu, *wf, 24, 0);
+    write_wave_sgpr(*cu, *wf, 25, 0);
+    write_wave_sgpr(*cu, *wf, 26, 0);
+    write_wave_sgpr(*cu, *wf, 27, 0);
+
+    for (uint32_t z = 0; z < kDepth; ++z) {
+      for (uint32_t y = 0; y < kTileRows; ++y) {
+        for (uint32_t x = 0; x < kCols; ++x) {
+          const uint64_t offset = static_cast<uint64_t>(z * kPlaneStride + y * kCols + x) * 4;
+          const uint32_t value = 0x73000000u + z * 0x100u + y * 0x10u + x;
+          write_global_u32(*sim.memory, kLoadGlobal + offset, value);
+          write_global_u32(*sim.memory, kStoreGlobal + offset, kSentinel);
+        }
+      }
+    }
+
+    auto load = decode_gfx1250(kLoadD4, "tensor_load_to_lds");
+    ASSERT_NE(load, nullptr);
+    ASSERT_EQ(load->num_src_operands(), 4);
+    EXPECT_EQ(load->src_operand(2)->encoding_value(), 20);
+    EXPECT_EQ(load->src_operand(3)->encoding_value(), 24);
+    load->execute(*load, wf);
+
+    for (uint32_t z = 0; z < kDepth; ++z) {
+      for (uint32_t y = 0; y < kTileRows; ++y) {
+        for (uint32_t x = 0; x < kCols; ++x) {
+          const uint32_t lds_index = z * kTileRows * kCols + y * kCols + x;
+          const uint32_t expected = (y < kRows) ? (0x73000000u + z * 0x100u + y * 0x10u + x) : 0u;
+          EXPECT_EQ(cu->lds().read32(wf->lds_base() + lds_index * 4), expected);
+        }
+      }
+    }
+
+    for (uint32_t i = 0; i < kDepth * kTileRows * kCols; ++i)
+      cu->lds().write32(wf->lds_base() + i * 4, 0x74000000u + i);
+
+    auto store = decode_gfx1250(kStoreD4, "tensor_store_from_lds");
+    ASSERT_NE(store, nullptr);
+    ASSERT_EQ(store->num_src_operands(), 4);
+    EXPECT_EQ(store->src_operand(2)->encoding_value(), 20);
+    EXPECT_EQ(store->src_operand(3)->encoding_value(), 24);
+    store->execute(*store, wf);
+
+    for (uint32_t z = 0; z < kDepth; ++z) {
+      for (uint32_t y = 0; y < kTileRows; ++y) {
+        for (uint32_t x = 0; x < kCols; ++x) {
+          const uint64_t offset = static_cast<uint64_t>(z * kPlaneStride + y * kCols + x) * 4;
+          const uint32_t lds_index = z * kTileRows * kCols + y * kCols + x;
+          const uint32_t expected = (y < kRows) ? (0x74000000u + lds_index) : kSentinel;
+          EXPECT_EQ(read_global_u32(*sim.memory, kStoreGlobal + offset), expected);
+        }
+      }
+    }
   }
 }
 
