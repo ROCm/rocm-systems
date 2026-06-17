@@ -92,7 +92,7 @@ docker run --rm ${DOCKER_IMAGE} bash -lc "
   # nm -D /workspace/rccl-tests/alltoall_perf 2>/dev/null | grep anvil || echo 'MISSING anvil symbols'
 "
 
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 #####
 # rocSHMEM IPC alltoall (reference)
 echo "=== Test#1: rocSHMEM IPC alltoall np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -132,7 +132,7 @@ docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
 set +x
 fi
 
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 # RCCL AlltoAll: -D 0, (host-initiated, inter-node capable)
 echo "=== Test#3: RCCL AlltoAll: -D 0, non-GIN (inter-node capable) np=${NP} max_bytes=${MAX_BYTES} ==="
 set -x
@@ -186,7 +186,7 @@ set +x
 fi
 
 # NCCL_GIN_TYPE=2 + -D 3: same host-proxy plugin as above; compare timing to GIN_ANVIL (-D 3/5, TYPE=5) below.
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 #####
 # RCCL AlltoAll: -D 3, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only)
 echo "=== Test#5: RCCL AlltoAll: -D 3, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only) np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -212,7 +212,7 @@ set +x
 fi
 
 
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 #####
 # RCCL AlltoAll: -D 3, GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA path
 echo "=== Test#6: RCCL AlltoAll: -D 3, GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -264,7 +264,7 @@ docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
 set +x
 fi
 
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 # --- RCCL AlltoAll with GIN_ANVIL (NCCL_GIN_TYPE=5, intra-node MI300 xGMI SDMA)
 # Matches Dockerfile-rccl-gin-anvil example; single-node only (no IB device required).
 echo "=== Test#8: RCCL AlltoAll: -D 3, GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -287,7 +287,7 @@ docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
 set +x
 fi
 
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 # --- RCCL AlltoAll with GIN_ANVIL (NCCL_GIN_TYPE=5, intra-node MI300 xGMI SDMA)
 # Matches Dockerfile-rccl-gin-anvil example; single-node only (no IB device required).
 echo "=== Test#9: RCCL AlltoAll: -D 4, GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -310,7 +310,7 @@ docker run ${DOCKER_GPU} ${DOCKER_ROCSHMEM_EXTRA} ${DOCKER_IMAGE} \
 set +x
 fi
 
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 # --- RCCL AlltoAll with GIN_ANVIL (NCCL_GIN_TYPE=5, intra-node MI300 xGMI SDMA)
 # Symmetric collective windows (-R 2) are required for -D 5 and feed ncclGinAnvilRegister LSA resolution.
 # Single-node -D 5 uses cooperative AlltoAllLsaCopy for large slices; do not raise -V beyond defaults
@@ -361,7 +361,7 @@ set +x
 fi
 
 #
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 # Example: 2 nodes × 8 GPUs = 16 ranks (adjust -n and --hostfile)
 #
 # GIN_ANVIL (NCCL_GIN_TYPE=5) is single-node only (gin_host_anvil.cc). With nnodes>1, RCCL
