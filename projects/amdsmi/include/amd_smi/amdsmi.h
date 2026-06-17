@@ -6682,6 +6682,7 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
     amdsmi_processor_handle processor_handle_src, amdsmi_processor_handle processor_handle_dst,
     uint64_t* min_bandwidth, uint64_t* max_bandwidth);
 
+// clang-format off
 /**
  *  @brief Retrieve the hops and the connection type between 2 GPUs
  *
@@ -6723,6 +6724,7 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
+// clang-format on
 amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
                                           amdsmi_processor_handle processor_handle_dst,
                                           uint64_t* hops, amdsmi_link_type_t* type);
