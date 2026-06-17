@@ -1,7 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/env_vars.hpp"
 #include "common/rocm_spm.hpp"
+#include "core/config.hpp"
+#include "core/rocprofiler-sdk.hpp"
 #include "rocprof-sys/library/rocprofiler-sdk/spm.hpp"
 
 #include <gtest/gtest.h>
@@ -12,6 +15,7 @@
 namespace
 {
 using rocprofsys::rocprofiler_sdk::spm::beta_request;
+using rocprofsys::rocprofiler_sdk::spm::get_request;
 using rocprofsys::rocprofiler_sdk::spm::validate_beta_request;
 
 beta_request
@@ -22,6 +26,40 @@ make_valid_requested_spm_request()
     return beta_request{ true, { "SQ_WAVES" }, 4200, unit };
 }
 }  // namespace
+
+TEST(spm_beta_request, get_request_reflects_configured_spm_settings)
+{
+    const auto unit =
+        std::string{ rocprofsys::common::rocm_spm_sample_interval_unit_sclk_cycles };
+    auto settings = rocprofsys::settings::shared_instance();
+    rocprofsys::rocprofiler_sdk::config_settings(settings);
+
+    ASSERT_TRUE(rocprofsys::config::set_setting_value(
+        std::string{ rocprofsys::env_vars::ROCM_SPM_ENABLED }, true));
+    ASSERT_TRUE(rocprofsys::config::set_setting_value(
+        std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS },
+        std::string{ "SQ_WAVES,TD_TD_BUSY" }));
+    ASSERT_TRUE(rocprofsys::config::set_setting_value(
+        std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
+        std::uint64_t{ 4200 }));
+
+    const auto request = get_request();
+
+    EXPECT_TRUE(request.enabled);
+    ASSERT_EQ(request.events.size(), 2);
+    EXPECT_EQ(request.events.at(0), "SQ_WAVES");
+    EXPECT_EQ(request.events.at(1), "TD_TD_BUSY");
+    EXPECT_EQ(request.sample_interval, 4200);
+    EXPECT_EQ(request.sample_interval_unit, unit);
+
+    EXPECT_TRUE(rocprofsys::config::set_setting_value(
+        std::string{ rocprofsys::env_vars::ROCM_SPM_ENABLED }, false));
+    EXPECT_TRUE(rocprofsys::config::set_setting_value(
+        std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS }, std::string{}));
+    EXPECT_TRUE(rocprofsys::config::set_setting_value(
+        std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
+        std::uint64_t{ 0 }));
+}
 
 TEST(spm_beta_request, requested_reflects_enabled_flag_or_events)
 {

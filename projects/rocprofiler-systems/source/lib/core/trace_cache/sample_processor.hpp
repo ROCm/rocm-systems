@@ -65,6 +65,8 @@ struct processor_t
         static_cast<T*>(this)->handle(sample);
     }
 
+    void handle(const spm_sample& sample) { static_cast<T*>(this)->handle(sample); }
+
     void handle(const backtrace_region_sample& sample)
     {
         static_cast<T*>(this)->handle(sample);
@@ -96,6 +98,7 @@ struct processor_view_t
     using cpu_pmc_sample_fn_t   = void (*)(void*, const cpu_pmc_sample&) noexcept;
     using gpu_perf_counter_sample_fn_t =
         void (*)(void*, const gpu_perf_counter_sample&) noexcept;
+    using spm_sample_fn_t             = void (*)(void*, const spm_sample&) noexcept;
     using backtrace_region_fn_t       = void (*)(void*,
                                            const backtrace_region_sample&) noexcept;
     using kfd_sample_fn_t             = void (*)(void*, const kfd_sample&) noexcept;
@@ -117,6 +120,7 @@ struct processor_view_t
         ainic_pmc_sample_fn_t        handle_ainic_pmc_sample;
         cpu_pmc_sample_fn_t          handle_cpu_pmc_sample;
         gpu_perf_counter_sample_fn_t handle_gpu_perf_counter_sample;
+        spm_sample_fn_t              handle_spm_sample;
         backtrace_region_fn_t        handle_backtrace_region;
         kfd_sample_fn_t              handle_kfd_sample;
         prepare_for_processing_fn_t  prepare_for_processing;
@@ -186,6 +190,11 @@ struct processor_view_t
         m_vtable->handle_gpu_perf_counter_sample(m_object, sample);
     }
 
+    ROCPROFSYS_INLINE void handle(const spm_sample& sample) const noexcept
+    {
+        m_vtable->handle_spm_sample(m_object, sample);
+    }
+
     ROCPROFSYS_INLINE void handle(const cpu_pmc_sample& sample) const noexcept
     {
         m_vtable->handle_cpu_pmc_sample(m_object, sample);
@@ -249,6 +258,9 @@ private:
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const gpu_perf_counter_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const spm_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const backtrace_region_sample& sample) noexcept {
@@ -340,6 +352,9 @@ struct sample_processor_t
                 break;
             case type_identifier_t::gpu_perf_counter_sample:
                 handle_sample(static_cast<const gpu_perf_counter_sample&>(sample));
+                break;
+            case type_identifier_t::spm_sample:
+                handle_sample(static_cast<const spm_sample&>(sample));
                 break;
             case type_identifier_t::backtrace_region_sample:
                 handle_sample(static_cast<const backtrace_region_sample&>(sample));

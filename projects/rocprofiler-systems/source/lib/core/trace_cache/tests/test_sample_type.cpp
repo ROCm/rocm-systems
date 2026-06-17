@@ -476,6 +476,12 @@ TEST_F(sample_type_test, type_identifier_enum_values)
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::cpu_pmc_sample), 0x0007);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::backtrace_region_sample),
               0x0008);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::scratch_memory), 0x0009);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::ainic_pmc_sample), 0x000A);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::kfd_sample), 0x000B);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::gpu_perf_counter_sample),
+              0x000C);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::spm_sample), 0x000D);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::fragmented_space), 0xFFFF);
 }
 
@@ -515,10 +521,90 @@ TEST_F(sample_type_test, pmc_event_with_sample_default_constructor)
     EXPECT_EQ(sample.type_identifier, type_identifier_t::pmc_event_with_sample);
 }
 
+TEST_F(sample_type_test, spm_sample_default_constructor)
+{
+    spm_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::spm_sample);
+}
+
 TEST_F(sample_type_test, backtrace_region_sample_default_constructor)
 {
     backtrace_region_sample sample;
     EXPECT_EQ(sample.type_identifier, type_identifier_t::backtrace_region_sample);
+}
+
+TEST_F(sample_type_test, spm_sample_serialize_deserialize)
+{
+    auto samples = std::vector<spm_counter_sample>{
+        spm_counter_sample{ 1000, 123.5, 11, 111, 0, 1, 2 },
+        spm_counter_sample{ 1200, 456.75, 12, 222, 1, 2, 3 },
+    };
+    spm_sample original(7, 42, 99, 1234, 5678, 9876, 55, true, samples);
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<spm_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.agent_id_handle, original.agent_id_handle);
+    EXPECT_EQ(deserialized.dispatch_id, original.dispatch_id);
+    EXPECT_EQ(deserialized.kernel_id, original.kernel_id);
+    EXPECT_EQ(deserialized.queue_id_handle, original.queue_id_handle);
+    EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
+    EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
+    EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
+    EXPECT_EQ(deserialized.data_loss, original.data_loss);
+    ASSERT_EQ(deserialized.samples.size(), original.samples.size());
+
+    for(size_t i = 0; i < original.samples.size(); ++i)
+    {
+        EXPECT_EQ(deserialized.samples.at(i).timestamp, original.samples.at(i).timestamp);
+        EXPECT_DOUBLE_EQ(deserialized.samples.at(i).value, original.samples.at(i).value);
+        EXPECT_EQ(deserialized.samples.at(i).counter_id,
+                  original.samples.at(i).counter_id);
+        EXPECT_EQ(deserialized.samples.at(i).counter_instance_id,
+                  original.samples.at(i).counter_instance_id);
+        EXPECT_EQ(deserialized.samples.at(i).xcc, original.samples.at(i).xcc);
+        EXPECT_EQ(deserialized.samples.at(i).shader_engine,
+                  original.samples.at(i).shader_engine);
+        EXPECT_EQ(deserialized.samples.at(i).instance, original.samples.at(i).instance);
+    }
+}
+
+TEST_F(sample_type_test, spm_sample_get_size)
+{
+    auto samples = std::vector<spm_counter_sample>{
+        spm_counter_sample{ 1000, 123.5, 11, 111, 0, 1, 2 },
+        spm_counter_sample{ 1200, 456.75, 12, 222, 1, 2, 3 },
+    };
+    spm_sample sample(7, 42, 99, 1234, 5678, 9876, 55, true, samples);
+
+    const auto expected_size =
+        sizeof(std::uint64_t) * 7 + sizeof(bool) + sizeof(std::uint32_t) +
+        samples.size() *
+            (sizeof(std::uint64_t) * 3 + sizeof(double) + sizeof(std::uint32_t) * 3);
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
+TEST_F(sample_type_test, spm_sample_empty_samples_and_no_data_loss)
+{
+    spm_sample original(7, 42, 99, 1234, 5678, 9876, 55, false, {});
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<spm_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.agent_id_handle, original.agent_id_handle);
+    EXPECT_EQ(deserialized.dispatch_id, original.dispatch_id);
+    EXPECT_EQ(deserialized.kernel_id, original.kernel_id);
+    EXPECT_EQ(deserialized.queue_id_handle, original.queue_id_handle);
+    EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
+    EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
+    EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
+    EXPECT_FALSE(deserialized.data_loss);
+    EXPECT_TRUE(deserialized.samples.empty());
 }
 
 TEST_F(sample_type_test, kernel_dispatch_sample_large_values)

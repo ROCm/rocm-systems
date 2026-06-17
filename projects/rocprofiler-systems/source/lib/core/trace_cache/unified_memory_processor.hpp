@@ -171,6 +171,7 @@ public:
     void handle(const ainic_pmc_sample&) {}
     void handle(const cpu_pmc_sample&) {}
     void handle(const gpu_perf_counter_sample&) {}
+    void handle(const spm_sample&) {}
     void handle(const backtrace_region_sample&) {}
 
 private:

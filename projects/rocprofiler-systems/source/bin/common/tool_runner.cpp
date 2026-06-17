@@ -109,12 +109,12 @@ lookup_env_value(const std::vector<std::string>& envs, std::string_view key)
 [[nodiscard]] bool
 spm_runtime_requested(const std::vector<std::string>& envs)
 {
-    if(auto events = lookup_env_value(envs, env::ROCM_SPM_EVENTS);
+    if(auto events = lookup_env_value(envs, env_vars::ROCM_SPM_EVENTS);
        events && !events->empty())
         return true;
 
-    if(auto enabled = lookup_env_value(envs, env::ROCM_SPM_ENABLED);
-       enabled && env::is_truthy(*enabled))
+    if(auto enabled = lookup_env_value(envs, env_vars::ROCM_SPM_ENABLED);
+       enabled && env_vars::is_truthy(*enabled))
         return true;
 
     return false;
