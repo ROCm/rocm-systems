@@ -302,9 +302,8 @@ def test_pc_sampling_with_sol_block(
     monkeypatch,
 ):
     """
-    Test that PC sampling works with --block 21 and --block 2
-    (PC sampling with counter collection), and that analyze renders both the
-    counter panels and a populated PC sampling panel for the mixed run.
+    PC sampling with counter collection (--block 21 2): profiling produces the
+    expected artifacts and analyze renders both counter and PC sampling panels.
     """
     common.require_pc_sampling_gpu()
     monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
@@ -340,10 +339,7 @@ def test_pc_sampling_with_sol_block(
     assert common.check_file_pattern("- '21'", f"{workload_dir}/profiling_config.yaml")
     assert common.check_file_pattern("- '2'", f"{workload_dir}/profiling_config.yaml")
 
-    # Analyze the mixed run: a single kernel is required to render the detailed
-    # PC sampling table (21.x). Both the counter SoL panel and the PC sampling
-    # panel must appear, and the PC sampling table must contain instruction rows
-    # (an empty table would still print the header, so assert on row content).
+    # Analyze with a single kernel so the detailed PC sampling table renders.
     code = binary_handler_analyze_rocprof_compute(
         [
             "analyze",
@@ -358,8 +354,7 @@ def test_pc_sampling_with_sol_block(
     captured = capsys.readouterr()
     assert "2.1 System Speed-of-Light" in captured.out
     assert "21. PC Sampling" in captured.out
-    # The detailed PC sampling table only renders the "instruction" column when
-    # it has rows; an empty table (the mixed-run regression) would not.
+    # The "instruction" column header only renders when the table has rows.
     assert "instruction" in captured.out
 
     common.clean_output_dir(config["cleanup"], workload_dir)

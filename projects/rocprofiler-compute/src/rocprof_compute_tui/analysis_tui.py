@@ -45,7 +45,7 @@ class tui_analysis(OmniAnalyze_Base):
 
         # No counters collected -- derive scaffolding from the PC sampling
         # kernel trace and skip metrics calculation.
-        if not self.counters_collected():
+        if self.pc_sampling_only():
             console_log(
                 "analysis",
                 "Only PC sampling and kernel tracing data"

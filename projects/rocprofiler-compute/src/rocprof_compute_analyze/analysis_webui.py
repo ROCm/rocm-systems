@@ -122,7 +122,7 @@ class webui_analysis(OmniAnalyze_Base):
 
             pc_sampling_data = self.load_pc_sampling_tool_data(str(self.dest_dir))
 
-            if not self.counters_collected():
+            if self.pc_sampling_only():
                 self.build_pc_sampling_only_workload(
                     run_workload,
                     self.dest_dir,
@@ -408,7 +408,7 @@ class webui_analysis(OmniAnalyze_Base):
 
         pc_sampling_data = self.load_pc_sampling_tool_data(str(self.dest_dir))
 
-        if not self.counters_collected():
+        if self.pc_sampling_only():
             console_log(
                 "analysis",
                 "PC sampling only -- skipping counter collection data loading",

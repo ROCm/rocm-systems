@@ -630,23 +630,6 @@ def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
     )
 
 
-def is_pc_sampling_collected(filter_blocks: list[str]) -> bool:
-    """Return True if any requested block is PC sampling (block 21 or the
-    ``pc_sampling`` alias).
-
-    Unlike :func:`is_only_pc_sampling`, this stays True for mixed runs that
-    also collect hardware counters, so the PC sampling panel is populated
-    whenever PC sampling data was gathered.
-    """
-    return any(block in PC_SAMPLING_BLOCK_IDS for block in filter_blocks)
-
-
-def is_counters_collected(filter_blocks: list[str]) -> bool:
-    """Return True if any requested block is a hardware-counter block (i.e.
-    anything other than PC sampling)."""
-    return any(block not in PC_SAMPLING_BLOCK_IDS for block in filter_blocks)
-
-
 def format_time(seconds: float) -> str:
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
