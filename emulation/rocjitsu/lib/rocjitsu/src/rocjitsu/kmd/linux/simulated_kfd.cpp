@@ -4,6 +4,7 @@
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -16,6 +17,7 @@ RJ_DIAGNOSTIC_POP
 #include "util/log.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
@@ -28,7 +30,6 @@ RJ_DIAGNOSTIC_POP
 #include <sys/random.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
 #endif
@@ -61,11 +62,12 @@ amdgpu::Mtype pte_mtype_for_flags(uint32_t flags) {
   return amdgpu::Mtype::RW;
 }
 
+/// @brief mmap via the real libc, bypassing the interposer.
+/// @details Routes through the process-wide libc_passthrough() table so the
+/// driver's own mappings never re-enter the interposer's mmap hook. The table is
+/// resolved once in the SimulatedKfd constructor.
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
-  if (rc < 0)
-    return MAP_FAILED;
-  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
+  return libc_passthrough().mmap(addr, length, prot, flags, fd, offset);
 }
 
 } // namespace
@@ -124,11 +126,16 @@ void SimulatedKfd::setup_topology(const config::KfdDeviceConfig &dev, uint32_t n
 }
 
 SimulatedKfd::SimulatedKfd(SoC &soc, bool daemon_mode) : daemon_mode_(daemon_mode) {
+  // Resolve the real libc entry points once, up front and single-threaded, so no
+  // passthrough call site ever triggers a first-time dlsym under a per-process
+  // lock. Idempotent: a no-op if the interposer already resolved the table.
+  libc_passthrough().resolve();
   gpus_.push_back({&soc, 0, false, {}});
 }
 
 SimulatedKfd::SimulatedKfd(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode)
     : daemon_mode_(daemon_mode) {
+  libc_passthrough().resolve();
   for (size_t i = 0; i < socs.size(); ++i)
     gpus_.push_back({socs[i], i < gpu_ids.size() ? gpu_ids[i] : socs[i]->gpu_id(), false, {}});
 }
@@ -217,7 +224,7 @@ bool SimulatedKfd::is_doorbell_range(const void *addr, size_t length) const {
 bool SimulatedKfd::ensure_fd_created() {
   if (fd_.load(std::memory_order_acquire) >= 0)
     return true;
-  int new_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0));
+  int new_fd = memfd_create("rocjitsu_kfd", 0);
   if (new_fd < 0)
     return false;
   int expected = -1;
@@ -225,7 +232,7 @@ bool SimulatedKfd::ensure_fd_created() {
   // its own memfd and adopts the winner's, avoiding a double create / fd leak.
   if (!fd_.compare_exchange_strong(expected, new_fd, std::memory_order_acq_rel,
                                    std::memory_order_acquire))
-    syscall(SYS_close, new_fd);
+    libc_passthrough().close(new_fd);
   return true;
 }
 
@@ -499,7 +506,7 @@ int SimulatedKfd::close(uint32_t process_id) {
         leaked_handles.push_back(handle);
       if (alloc.host_ptr && alloc.host_ptr_owned) {
         unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
-        syscall(SYS_munmap, alloc.host_ptr, alloc.size);
+        libc_passthrough().munmap(alloc.host_ptr, alloc.size);
         alloc.host_ptr = nullptr;
         alloc.host_ptr_owned = false;
       }
@@ -508,7 +515,7 @@ int SimulatedKfd::close(uint32_t process_id) {
           std::lock_guard<std::mutex> flk(owned_fds_mutex_);
           owned_fds_.erase(alloc.memfd);
         }
-        syscall(SYS_close, alloc.memfd);
+        libc_passthrough().close(alloc.memfd);
         alloc.memfd = -1;
       }
     }
@@ -544,7 +551,7 @@ int SimulatedKfd::close(uint32_t process_id) {
       gs.doorbell_page_size = 0;
     }
     if (doorbell_page && doorbell_page_size)
-      syscall(SYS_munmap, doorbell_page, doorbell_page_size);
+      libc_passthrough().munmap(doorbell_page, doorbell_page_size);
   }
 
   leaked_queues = queue_ids.size();
@@ -578,7 +585,7 @@ int SimulatedKfd::close(uint32_t process_id) {
     for (auto &[handle, dmabuf] : proc.imported_dmabufs_) {
       [[maybe_unused]] auto &_ = handle;
       if (dmabuf.fd >= 0)
-        syscall(SYS_close, dmabuf.fd);
+        libc_passthrough().close(dmabuf.fd);
     }
     proc.imported_dmabufs_.clear();
     // Clear the reverse fd->handle map too, so it stays consistent with
@@ -777,7 +784,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
           safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, doorbell_fd, 0));
       if (init_ptr != MAP_FAILED) {
         std::memset(init_ptr, 0xFF, length);
-        syscall(SYS_munmap, init_ptr, length);
+        libc_passthrough().munmap(init_ptr, length);
       }
     }
 
@@ -815,7 +822,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         // set by close() under op_mutex_, which we now hold, so this check is
         // race-free against teardown.
         if (proc.event_state_.is_closing()) {
-          syscall(SYS_munmap, ptr, length);
+          libc_passthrough().munmap(ptr, length);
           errno = ENODEV;
           return MAP_FAILED;
         }
@@ -836,15 +843,14 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
 
   if (type == KFD_MMAP_TYPE_EVENTS) {
     if (proc.event_state_.memfd < 0) {
-      auto raw_events_fd = static_cast<int>(
-          syscall(SYS_memfd_create, "rocjitsu_events", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+      auto raw_events_fd = memfd_create("rocjitsu_events", MFD_CLOEXEC | MFD_ALLOW_SEALING);
       if (raw_events_fd < 0)
         return MAP_FAILED;
       proc.event_state_.memfd = fcntl(raw_events_fd, F_DUPFD_CLOEXEC, 4096);
       if (proc.event_state_.memfd < 0)
         proc.event_state_.memfd = raw_events_fd;
       else
-        syscall(SYS_close, raw_events_fd);
+        libc_passthrough().close(raw_events_fd);
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
         owned_fds_.insert(proc.event_state_.memfd);
@@ -854,7 +860,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
           std::lock_guard<std::mutex> lk(owned_fds_mutex_);
           owned_fds_.erase(proc.event_state_.memfd);
         }
-        syscall(SYS_close, proc.event_state_.memfd);
+        libc_passthrough().close(proc.event_state_.memfd);
         proc.event_state_.memfd = -1;
         return MAP_FAILED;
       }
@@ -863,9 +869,9 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         auto *init_ptr = static_cast<uint8_t *>(
             safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, proc.event_state_.memfd, 0));
         if (init_ptr != MAP_FAILED) {
-          syscall(SYS_madvise, init_ptr, length, MADV_POPULATE_WRITE);
+          libc_passthrough().madvise(init_ptr, length, MADV_POPULATE_WRITE);
           std::memset(init_ptr, 0xFF, length);
-          syscall(SYS_munmap, init_ptr, length);
+          libc_passthrough().munmap(init_ptr, length);
         }
       }
       fcntl(proc.event_state_.memfd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW);
@@ -904,12 +910,12 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       }
     }
     if (alloc.user_va && (flags & MAP_FIXED) && addr != nullptr) {
-      auto prot_rc = syscall(SYS_mprotect, addr, length, PROT_READ | PROT_WRITE);
+      auto prot_rc = libc_passthrough().mprotect(addr, length, PROT_READ | PROT_WRITE);
       if (prot_rc == 0) {
         constexpr size_t page_size = 4096;
         size_t num_pages = (length + page_size - 1) / page_size;
         std::vector<uint8_t> page_resident(num_pages);
-        auto mc_rc = syscall(SYS_mincore, addr, length, page_resident.data());
+        auto mc_rc = mincore(addr, length, page_resident.data());
 
         auto *temp_mapping = static_cast<uint8_t *>(
             safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, alloc.memfd, 0));
@@ -924,7 +930,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
               }
             }
           }
-          syscall(SYS_munmap, temp_mapping, length);
+          libc_passthrough().munmap(temp_mapping, length);
         }
       }
     }
@@ -938,7 +944,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
   } else {
     bool reuse_pages = false;
     if (alloc.user_va && (flags & MAP_FIXED) && addr != nullptr) {
-      auto rc = syscall(SYS_mprotect, addr, length, PROT_READ | PROT_WRITE);
+      auto rc = libc_passthrough().mprotect(addr, length, PROT_READ | PROT_WRITE);
       reuse_pages = (rc == 0);
     }
     if (reuse_pages) {
@@ -1001,7 +1007,7 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
         // not the caller-provided length. A length that differs from the tracked
         // mapping would otherwise partially unmap the CPU page and leave it
         // inconsistent with the GPU page-table unmap above.
-        syscall(SYS_munmap, addr, page_size ? page_size : length);
+        libc_passthrough().munmap(addr, page_size ? page_size : length);
         return 0;
       }
     }
@@ -1010,14 +1016,14 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
   // the CP interrupt thread holds when reading them in signal_interrupt, so the
   // munmap below cannot race a concurrent signal writing into the mapping.
   if (proc.event_state_.release_page(addr)) {
-    syscall(SYS_munmap, addr, length);
+    libc_passthrough().munmap(addr, length);
     return 0;
   }
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
   for (auto &[handle, alloc] : proc.allocations_) {
     if (alloc.host_ptr == addr) {
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
-      syscall(SYS_munmap, addr, length);
+      libc_passthrough().munmap(addr, length);
       alloc.host_ptr = nullptr;
       alloc.host_ptr_owned = false;
       return 0;
@@ -1159,14 +1165,13 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
     map_to_gpu(proc, va, reinterpret_cast<void *>(va), args->size, alloc_mtype);
   } else if (daemon_mode_ || !user_provided_va) {
-    auto raw_fd = static_cast<int>(
-        syscall(SYS_memfd_create, "rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+    auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (raw_fd >= 0) {
       alloc.memfd = fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
       if (alloc.memfd < 0)
         alloc.memfd = raw_fd;
       else
-        syscall(SYS_close, raw_fd);
+        libc_passthrough().close(raw_fd);
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
         owned_fds_.insert(alloc.memfd);
@@ -1227,7 +1232,7 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
     return false;
 
   size_t aligned_size = (size + 0xFFF) & ~0xFFFULL;
-  auto raw_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_scratch", MFD_CLOEXEC));
+  auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
   if (raw_fd < 0)
     return false;
 
@@ -1235,7 +1240,7 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
   if (memfd < 0)
     memfd = raw_fd;
   else
-    syscall(SYS_close, raw_fd);
+    libc_passthrough().close(raw_fd);
   {
     std::lock_guard<std::mutex> lk(owned_fds_mutex_);
     owned_fds_.insert(memfd);
@@ -1246,7 +1251,7 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
       std::lock_guard<std::mutex> lk(owned_fds_mutex_);
       owned_fds_.erase(memfd);
     }
-    syscall(SYS_close, memfd);
+    libc_passthrough().close(memfd);
     return false;
   }
   auto *host_ptr = safe_mmap(nullptr, aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
@@ -1255,14 +1260,14 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
       std::lock_guard<std::mutex> lk(owned_fds_mutex_);
       owned_fds_.erase(memfd);
     }
-    syscall(SYS_close, memfd);
+    libc_passthrough().close(memfd);
     return false;
   }
   {
     std::lock_guard<std::mutex> lk(owned_fds_mutex_);
     owned_fds_.erase(memfd);
   }
-  syscall(SYS_close, memfd);
+  libc_passthrough().close(memfd);
   std::memset(host_ptr, 0, aligned_size);
   proc->map_pages(gpu_va, host_ptr, aligned_size);
 
@@ -1294,7 +1299,7 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
   if (it != proc.allocations_.end()) {
     auto &alloc = it->second;
     if (alloc.imported && alloc.dmabuf_fd >= 0) {
-      syscall(SYS_close, alloc.dmabuf_fd);
+      libc_passthrough().close(alloc.dmabuf_fd);
       if (auto dmabuf_it = proc.imported_dmabufs_.find(args->handle);
           dmabuf_it != proc.imported_dmabufs_.end()) {
         proc.fd_to_import_handle_.erase(dmabuf_it->second.fd);
@@ -1308,7 +1313,7 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
         owned_fds_.erase(alloc.memfd);
       }
-      syscall(SYS_close, alloc.memfd);
+      libc_passthrough().close(alloc.memfd);
     }
 
     uint32_t freed_process_id = proc.process_id();
@@ -1321,7 +1326,7 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
         if (ipc_it->second.source_process_id == freed_process_id &&
             ipc_it->second.source_alloc_handle == freed_handle) {
           if (ipc_it->second.backing_memfd >= 0)
-            syscall(SYS_close, ipc_it->second.backing_memfd);
+            libc_passthrough().close(ipc_it->second.backing_memfd);
           ipc_it = ipc_store_.erase(ipc_it);
         } else {
           ++ipc_it;
@@ -1591,18 +1596,17 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
     auto &alloc = it->second;
 
     if (alloc.memfd < 0 && alloc.host_ptr) {
-      int promoted_fd = static_cast<int>(
-          syscall(SYS_memfd_create, "rocjitsu_ipc_promote", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+      int promoted_fd = memfd_create("rocjitsu_ipc_promote", MFD_CLOEXEC | MFD_ALLOW_SEALING);
       if (promoted_fd < 0)
         return -errno;
       if (ftruncate(promoted_fd, static_cast<off_t>(alloc.size)) != 0) {
-        syscall(SYS_close, promoted_fd);
+        libc_passthrough().close(promoted_fd);
         return -errno;
       }
       auto *new_host_ptr =
           safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, promoted_fd, 0);
       if (new_host_ptr == MAP_FAILED) {
-        syscall(SYS_close, promoted_fd);
+        libc_passthrough().close(promoted_fd);
         return -ENOMEM;
       }
       std::memcpy(new_host_ptr, alloc.host_ptr, alloc.size);
@@ -1625,7 +1629,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
       }
 
       if (alloc.host_ptr_owned)
-        syscall(SYS_munmap, alloc.host_ptr, alloc.size);
+        libc_passthrough().munmap(alloc.host_ptr, alloc.size);
 
       alloc.host_ptr = new_host_ptr;
       alloc.host_ptr_owned = true;
@@ -1635,12 +1639,11 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
         owned_fds_.insert(promoted_fd);
       }
     } else if (alloc.memfd < 0) {
-      int new_fd = static_cast<int>(
-          syscall(SYS_memfd_create, "rocjitsu_ipc_lazy", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+      int new_fd = memfd_create("rocjitsu_ipc_lazy", MFD_CLOEXEC | MFD_ALLOW_SEALING);
       if (new_fd < 0)
         return -errno;
       if (ftruncate(new_fd, static_cast<off_t>(alloc.size)) != 0) {
-        syscall(SYS_close, new_fd);
+        libc_passthrough().close(new_fd);
         return -errno;
       }
       alloc.memfd = new_fd;
@@ -1675,7 +1678,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
 
   IpcHandleKey key{};
   if (getrandom(key.words, sizeof(key.words), 0) != sizeof(key.words)) {
-    syscall(SYS_close, dup_fd);
+    libc_passthrough().close(dup_fd);
     return -errno;
   }
 
@@ -1741,7 +1744,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
       std::lock_guard<std::mutex> flk(owned_fds_mutex_);
       owned_fds_.erase(dup_fd);
     }
-    syscall(SYS_close, dup_fd);
+    libc_passthrough().close(dup_fd);
     return -ENOMEM;
   }
 
@@ -2082,8 +2085,8 @@ int SimulatedKfd::claim_fd(int real_fd) {
     init_reserved_fd_range();
   int vfd = next_reserved_fd_++;
   assert(vfd < reserved_fd_base_ + kReservedFdCount && "reserved fd range exhausted");
-  syscall(SYS_dup2, real_fd, vfd);
-  syscall(SYS_close, real_fd);
+  libc_passthrough().dup2(real_fd, vfd);
+  libc_passthrough().close(real_fd);
   return vfd;
 }
 
