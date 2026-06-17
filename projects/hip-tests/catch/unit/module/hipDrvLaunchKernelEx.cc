@@ -439,8 +439,8 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_MaxBlockDims) {
  * Test Description
  * ------------------------
  *  - Verifies that hipDrvLaunchKernelEx with hipLaunchAttributeClusterDimension
- *  - is correctly captured during stream capture and replays with the correct
- *  - cluster dimensions in the AQL ext dispatch packet.
+ *  - is correctly captured during stream capture and that the replayed kernel
+ *  - produces the expected output (captures >=1 graph node and writes correct values).
  *  - Only runs on gfx1250/gfx1251 where cluster launches are supported.
  * Test source
  * ------------------------
@@ -502,7 +502,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
     cfg.gridDimX = GRID; cfg.gridDimY = 1; cfg.gridDimZ = 1;
     cfg.blockDimX = BLOCK; cfg.blockDimY = 1; cfg.blockDimZ = 1;
     cfg.hStream = stream;
-    hipLaunchAttribute attr;
+    hipLaunchAttribute attr{};
     attr.id = hipLaunchAttributeClusterDimension;
     attr.value.clusterDim = {CLUSTER, 1, 1};
     cfg.attrs = &attr;
@@ -522,7 +522,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
     cfg.gridDimX = GRID; cfg.gridDimY = 1; cfg.gridDimZ = 1;
     cfg.blockDimX = BLOCK; cfg.blockDimY = 1; cfg.blockDimZ = 1;
     cfg.hStream = stream;
-    hipLaunchAttribute attr;
+    hipLaunchAttribute attr{};
     attr.id = hipLaunchAttributeClusterDimension;
     attr.value.clusterDim = {CLUSTER, 1, 1};
     cfg.attrs = &attr;

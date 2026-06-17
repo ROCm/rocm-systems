@@ -372,8 +372,8 @@ hipError_t capturehipModuleLaunchKernel(hipStream_t& stream, hipFunction_t& f, u
 hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CONFIG*& config,
                                        hipFunction_t& f, void**& kernelParams, void**& extra,
                                        dim3 clusterDim) {
-  ClPrint(amd::LOG_INFO, amd::LOG_ALWAYS,
-          "[hipGraph] DrvLaunchKernelEx capture on stream : %p"
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
+          "[hipGraph] capturehipDrvLaunchKernelEx on stream : %p"
           " grid=[%u,%u,%u] block=[%u,%u,%u] cluster=[%u,%u,%u] sharedMem=%u",
           stream,
           config->gridDimX, config->gridDimY, config->gridDimZ,
