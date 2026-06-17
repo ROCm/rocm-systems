@@ -696,18 +696,19 @@ def test_load_per_kernel_out_of_range_index_guards(
 def test_load_per_kernel_empty_string_table_warns_and_skips(
     instructions: list | None,
     comments: list | None,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Empty instruction/comment table warns with the kernel name, no exit."""
     tool_data = make_per_kernel_guard_data(instructions, comments)
-    df = load_pc_sampling_data_per_kernel(
-        method="host_trap",
-        tool_data=tool_data,
-        kernel_name="vecCopy",
-        sorting_type="offset",
-    )
+    with patch("utils.parser.console_warning") as console_warning_mock:
+        df = load_pc_sampling_data_per_kernel(
+            method="host_trap",
+            tool_data=tool_data,
+            kernel_name="vecCopy",
+            sorting_type="offset",
+        )
     assert df.empty
-    assert "vecCopy" in caplog.text
+    console_warning_mock.assert_called_once()
+    assert "vecCopy" in console_warning_mock.call_args.args[0]
 
 
 def assert_none_kind(column: pd.Series, kind: str) -> None:
@@ -790,22 +791,22 @@ def test_load_per_kernel_kernel_not_found() -> None:
     assert df.empty
 
 
-def test_load_per_kernel_no_pc_sample_key_warns_and_skips(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_load_per_kernel_no_pc_sample_key_warns_and_skips() -> None:
     """Missing pc_sample array warns with the kernel name, no exit."""
     tool_data = make_tool_data(
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    df = load_pc_sampling_data_per_kernel(
-        method="host_trap",
-        tool_data=tool_data,
-        kernel_name="vecCopy",
-        sorting_type="offset",
-    )
+    with patch("utils.parser.console_warning") as console_warning_mock:
+        df = load_pc_sampling_data_per_kernel(
+            method="host_trap",
+            tool_data=tool_data,
+            kernel_name="vecCopy",
+            sorting_type="offset",
+        )
     assert df.empty
-    assert "vecCopy" in caplog.text
+    console_warning_mock.assert_called_once()
+    assert "vecCopy" in console_warning_mock.call_args.args[0]
 
 
 def test_load_per_kernel_invalid_sorting_type() -> None:
