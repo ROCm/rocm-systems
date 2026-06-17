@@ -76,6 +76,94 @@ impl FileMount {
     }
 }
 
+/// A single host→container published port (docker `-p` / podman
+/// `--publish`).
+///
+/// Ports are applied when a node's container is created (`-p
+/// HOST:CONTAINER[/PROTO]`). Like [`FileMount`]s they are part of a
+/// [`ContainerizedDef`] and therefore live on the profile, so a profile
+/// fully describes which container ports it exposes on the host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortMapping {
+    /// Port published on the host.
+    pub host_port: u16,
+
+    /// Port the container listens on.
+    pub container_port: u16,
+
+    /// Optional protocol (`tcp` or `udp`). `None` lets the provider
+    /// default (tcp).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
+}
+
+impl PortMapping {
+    /// Parse a CLI `--port` spec.
+    ///
+    /// Accepted forms:
+    /// * `PORT` — publish the same port on host and container.
+    /// * `HOST:CONTAINER` — publish container port `CONTAINER` as host
+    ///   port `HOST`.
+    /// * either form with a `/tcp` or `/udp` suffix to pin the protocol.
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        let (ports, protocol) = match spec.split_once('/') {
+            Some((ports, proto)) => {
+                let proto = match proto {
+                    "tcp" | "udp" => proto.to_string(),
+                    other => {
+                        return Err(format!(
+                            "invalid port protocol {other:?} in {spec:?} (expected `tcp` or `udp`)"
+                        ));
+                    }
+                };
+                (ports, Some(proto))
+            }
+            None => (spec, None),
+        };
+
+        let parse_port = |s: &str| -> Result<u16, String> {
+            s.parse::<u16>().map_err(|_| {
+                format!("invalid port {s:?} in {spec:?} (expected a number 1-65535)")
+            })
+        };
+
+        let (host_port, container_port) = match ports.split_once(':') {
+            Some((host, container)) if !host.is_empty() && !container.is_empty() => {
+                (parse_port(host)?, parse_port(container)?)
+            }
+            Some(_) => {
+                return Err(format!(
+                    "invalid port spec {spec:?} (expected HOST_PORT[:CONTAINER_PORT][/tcp|/udp])"
+                ));
+            }
+            None if !ports.is_empty() => {
+                let p = parse_port(ports)?;
+                (p, p)
+            }
+            None => {
+                return Err(format!(
+                    "invalid port spec {spec:?} (expected HOST_PORT[:CONTAINER_PORT][/tcp|/udp])"
+                ));
+            }
+        };
+
+        Ok(PortMapping {
+            host_port,
+            container_port,
+            protocol,
+        })
+    }
+
+    /// Render the `-p` argument value (`HOST:CONTAINER[/PROTO]`) used by
+    /// the container provider.
+    pub fn to_publish_arg(&self) -> String {
+        match &self.protocol {
+            Some(proto) => format!("{}:{}/{proto}", self.host_port, self.container_port),
+            None => format!("{}:{}", self.host_port, self.container_port),
+        }
+    }
+}
+
 /// Containerisation settings for a profile.
 ///
 /// When a profile carries a `ContainerizedDef`, every node of a session
@@ -97,6 +185,11 @@ pub struct ContainerizedDef {
     /// Extra bind mounts applied to every node container.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mounts: Vec<FileMount>,
+
+    /// Ports published from every node container to the host (`-p
+    /// HOST:CONTAINER[/PROTO]`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<PortMapping>,
 
     /// Host device nodes to expose to every node container (`--device`),
     /// e.g. `/dev/kfd` and `/dev/dri` for AMD GPU access.
@@ -162,5 +255,40 @@ mod tests {
     fn mount_parse_rejects_bad_mode() {
         assert!(FileMount::parse("/h:/c:xx").is_err());
         assert!(FileMount::parse("").is_err());
+    }
+
+    #[test]
+    fn port_parse_host_container() {
+        let p = PortMapping::parse("8080:8000").unwrap();
+        assert_eq!(p.host_port, 8080);
+        assert_eq!(p.container_port, 8000);
+        assert_eq!(p.protocol, None);
+        assert_eq!(p.to_publish_arg(), "8080:8000");
+    }
+
+    #[test]
+    fn port_parse_single() {
+        let p = PortMapping::parse("8000").unwrap();
+        assert_eq!(p.host_port, 8000);
+        assert_eq!(p.container_port, 8000);
+        assert_eq!(p.to_publish_arg(), "8000:8000");
+    }
+
+    #[test]
+    fn port_parse_with_protocol() {
+        let p = PortMapping::parse("53:53/udp").unwrap();
+        assert_eq!(p.host_port, 53);
+        assert_eq!(p.container_port, 53);
+        assert_eq!(p.protocol.as_deref(), Some("udp"));
+        assert_eq!(p.to_publish_arg(), "53:53/udp");
+    }
+
+    #[test]
+    fn port_parse_rejects_bad_specs() {
+        assert!(PortMapping::parse("").is_err());
+        assert!(PortMapping::parse("notaport").is_err());
+        assert!(PortMapping::parse("8080:").is_err());
+        assert!(PortMapping::parse("99999:8000").is_err());
+        assert!(PortMapping::parse("8080:8000/sctp").is_err());
     }
 }

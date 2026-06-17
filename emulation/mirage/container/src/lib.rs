@@ -22,7 +22,7 @@
 use std::process::{Command, Stdio};
 
 use mirage_core::container::{ContainerState, NodeContainer};
-use mirage_core::profile::{ContainerizedDef, FileMount};
+use mirage_core::profile::{ContainerizedDef, FileMount, PortMapping};
 
 /// Errors raised while driving a container provider.
 #[derive(Debug, thiserror::Error)]
@@ -226,6 +226,7 @@ impl Engine {
         network: Option<&str>,
         host_gpus: bool,
         mounts: &[FileMount],
+        ports: &[PortMapping],
         devices: &[String],
         groups: &[String],
         env: &[(String, String)],
@@ -272,6 +273,10 @@ impl Engine {
         for m in mounts {
             argv.push("-v".to_string());
             argv.push(m.to_volume_arg());
+        }
+        for p in ports {
+            argv.push("-p".to_string());
+            argv.push(p.to_publish_arg());
         }
         for d in devices {
             argv.push("--device".to_string());
@@ -381,6 +386,7 @@ impl Engine {
         network: Option<&str>,
         host_gpus: bool,
         mounts: &[FileMount],
+        ports: &[PortMapping],
         devices: &[String],
         groups: &[String],
         env: &[(String, String)],
@@ -393,6 +399,7 @@ impl Engine {
             network,
             host_gpus,
             mounts,
+            ports,
             devices,
             groups,
             env,
@@ -536,6 +543,7 @@ impl Engine {
                 Some(&network),
                 host_gpus,
                 &def.mounts,
+                &def.ports,
                 &devices,
                 &groups,
                 &env,
@@ -671,6 +679,10 @@ mod tests {
         FileMount::parse(spec).unwrap()
     }
 
+    fn port(spec: &str) -> PortMapping {
+        PortMapping::parse(spec).unwrap()
+    }
+
     /// Mock provider: logs every invocation to `log`, exits non-zero for
     /// `network inspect` (so `ensure_network` takes the create path) and
     /// `image inspect` (so callers think the image is absent), and prints
@@ -696,6 +708,7 @@ mod tests {
             ("MIRAGE_HEAD_PORT".to_string(), "5000".to_string()),
         ];
         let mounts = vec![mount("/data:/data:ro"), mount("/h:/c")];
+        let ports = vec![port("8080:8000"), port("53:53/udp")];
         let devices = vec!["/dev/kfd".to_string(), "/dev/dri".to_string()];
         let groups = vec!["video".to_string(), "render".to_string()];
         let command = vec![
@@ -713,6 +726,7 @@ mod tests {
             Some("mirage-s"),
             true,
             &mounts,
+            &ports,
             &devices,
             &groups,
             &env,
@@ -728,6 +742,8 @@ mod tests {
         assert!(joined.contains("-e MIRAGE_HEAD_PORT=5000"));
         assert!(joined.contains("-v /data:/data:ro"));
         assert!(joined.contains("-v /h:/c"));
+        assert!(joined.contains("-p 8080:8000"));
+        assert!(joined.contains("-p 53:53/udp"));
         assert!(joined.contains("--device /dev/kfd"));
         assert!(joined.contains("--device /dev/dri"));
         // On podman the named groups are dropped: `--group-add
@@ -749,6 +765,7 @@ mod tests {
             "img",
             None,
             true,
+            &[],
             &[],
             &[],
             &groups,
@@ -775,6 +792,7 @@ mod tests {
             false,
             &[],
             &[],
+            &[],
             &groups,
             &[],
             &[],
@@ -794,6 +812,7 @@ mod tests {
             "img",
             None,
             false,
+            &[],
             &[],
             &[],
             &[],
@@ -844,6 +863,7 @@ mod tests {
             provider: Some("docker".to_string()),
             image: "img".to_string(),
             mounts: vec![],
+            ports: vec![],
             devices: vec![],
             groups: vec![],
         };
@@ -905,6 +925,7 @@ mod tests {
                 &[],
                 &[],
                 &[],
+                &[],
                 &["sleep".to_string(), "infinity".to_string()],
             )
             .unwrap();
@@ -928,6 +949,7 @@ mod tests {
             provider: Some(provider.to_string_lossy().to_string()),
             image: "img:latest".to_string(),
             mounts: vec![],
+            ports: vec![],
             devices: vec![],
             groups: vec![],
         };

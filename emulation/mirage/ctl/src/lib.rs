@@ -22,7 +22,7 @@ use mirage_core::common::{MaybeRef, SimpleValue};
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
 use mirage_core::emulator::ExecMode;
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
-use mirage_core::profile::{ContainerizedDef, FileMount, ProfileDef};
+use mirage_core::profile::{ContainerizedDef, FileMount, PortMapping, ProfileDef};
 use mirage_core::registry::EmulatorInfo;
 use mirage_core::session::SessionId;
 use tokio_stream::StreamExt;
@@ -281,6 +281,11 @@ pub enum ProfileCmd {
         /// `--image`.
         #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
         mounts: Vec<String>,
+        /// Port published from every node container to the host, as
+        /// `HOST_PORT[:CONTAINER_PORT][/tcp|/udp]` (like docker `-p`).
+        /// May be repeated. Requires `--image`.
+        #[arg(long = "port", value_name = "HOST_PORT[:CONTAINER_PORT][/tcp|/udp]")]
+        ports: Vec<String>,
         /// Container provider to use (`podman`, `docker`, or a path).
         /// Autodetected (podman, then docker) when omitted. Requires
         /// `--image`.
@@ -540,6 +545,11 @@ pub struct RunArgs {
     /// Extra bind mount (`HOST[:CONTAINER[:ro|rw]]`). May be repeated.
     #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
     mounts: Vec<String>,
+    /// Publish a container port on the host
+    /// (`HOST_PORT[:CONTAINER_PORT][/tcp|/udp]`, like docker `-p`). May
+    /// be repeated. Requires a containerised profile or `--image`.
+    #[arg(long = "port", value_name = "HOST_PORT[:CONTAINER_PORT][/tcp|/udp]")]
+    ports: Vec<String>,
     /// Container provider (`podman`, `docker`, or a path). Autodetected
     /// when omitted. The `MIRAGE_CONTAINER_PROVIDER` environment variable
     /// has the same effect.
@@ -663,6 +673,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             description,
             image,
             mounts,
+            ports,
             provider,
             no_input,
         } => {
@@ -676,6 +687,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 description,
                 image,
                 mounts,
+                ports,
                 provider,
                 interactive,
             )?;
@@ -904,6 +916,7 @@ async fn session_cmd<C: MirageCtl>(
 fn build_containerize(
     image: Option<String>,
     mounts: &[String],
+    ports: &[String],
     provider: Option<String>,
 ) -> anyhow::Result<Option<ContainerizedDef>> {
     match image {
@@ -911,12 +924,13 @@ fn build_containerize(
             provider,
             image,
             mounts: parse_mounts(mounts)?,
+            ports: parse_ports(ports)?,
             devices: Vec::new(),
             groups: Vec::new(),
         })),
         None => {
-            if !mounts.is_empty() || provider.is_some() {
-                anyhow::bail!("--mount/--container-provider require --image");
+            if !mounts.is_empty() || !ports.is_empty() || provider.is_some() {
+                anyhow::bail!("--mount/--port/--container-provider require --image");
             }
             Ok(None)
         }
@@ -940,6 +954,7 @@ fn build_profile_create(
     description: Option<String>,
     image: Option<String>,
     mounts: Vec<String>,
+    ports: Vec<String>,
     provider: Option<String>,
     interactive: bool,
 ) -> anyhow::Result<ProfileDef> {
@@ -1049,10 +1064,10 @@ fn build_profile_create(
     };
 
     // ----- containerisation -----
-    let containerize = if image.is_some() || !mounts.is_empty() || provider.is_some() {
+    let containerize = if image.is_some() || !mounts.is_empty() || !ports.is_empty() || provider.is_some() {
         // Any explicit container flag: build directly (errors if mounts
         // or provider were given without an image).
-        build_containerize(image, &mounts, provider)?
+        build_containerize(image, &mounts, &ports, provider)?
     } else if interactive
         && Confirm::with_theme(&theme)
             .with_prompt("Run each node inside a container?")
@@ -1089,6 +1104,7 @@ fn build_profile_create(
         build_containerize(
             Some(img),
             &specs,
+            &ports,
             if prov.is_empty() { None } else { Some(prov) },
         )?
     } else {
@@ -1130,6 +1146,14 @@ fn parse_mounts(mounts: &[String]) -> anyhow::Result<Vec<FileMount>> {
     mounts
         .iter()
         .map(|m| FileMount::parse(m).map_err(|e| anyhow::anyhow!(e)))
+        .collect()
+}
+
+/// Parse CLI `--port` specs into [`PortMapping`]s.
+fn parse_ports(ports: &[String]) -> anyhow::Result<Vec<PortMapping>> {
+    ports
+        .iter()
+        .map(|p| PortMapping::parse(p).map_err(|e| anyhow::anyhow!(e)))
         .collect()
 }
 
@@ -1192,6 +1216,7 @@ fn apply_profile_overrides(
     profile: &mut ProfileDef,
     image: Option<String>,
     mounts: &[String],
+    ports: &[String],
     provider: Option<String>,
     emulator: Option<String>,
     exec_mode: Option<ExecModeArg>,
@@ -1203,6 +1228,7 @@ fn apply_profile_overrides(
 ) -> anyhow::Result<MaybeRef<ProfileDef>> {
     if image.is_none()
         && mounts.is_empty()
+        && ports.is_empty()
         && provider.is_none()
         && emulator.is_none()
         && exec_mode.is_none()
@@ -1216,8 +1242,9 @@ fn apply_profile_overrides(
     }
 
     // Container overrides.
-    if image.is_some() || !mounts.is_empty() || provider.is_some() {
+    if image.is_some() || !mounts.is_empty() || !ports.is_empty() || provider.is_some() {
         let parsed = parse_mounts(mounts)?;
+        let parsed_ports = parse_ports(ports)?;
         match &mut profile.containerize {
             Some(c) => {
                 if let Some(img) = image {
@@ -1227,15 +1254,17 @@ fn apply_profile_overrides(
                     c.provider = Some(p);
                 }
                 c.mounts.extend(parsed);
+                c.ports.extend(parsed_ports);
             }
             None => {
                 let image = image.ok_or_else(|| {
-                    anyhow::anyhow!("--mount/--container-provider require a containerised profile or --image")
+                    anyhow::anyhow!("--mount/--port/--container-provider require a containerised profile or --image")
                 })?;
                 profile.containerize = Some(ContainerizedDef {
                     provider,
                     image,
                     mounts: parsed,
+                    ports: parsed_ports,
                     devices: Vec::new(),
                     groups: Vec::new(),
                 });
@@ -1347,6 +1376,7 @@ async fn session_start<C: MirageCtl>(
         &mut profile,
         args.image,
         &args.mounts,
+        &[],
         args.provider,
         None,
         args.exec_mode,
@@ -1849,6 +1879,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                 &mut profile,
                 a.image.clone(),
                 &a.mounts,
+                &a.ports,
                 a.container_provider.clone(),
                 a.emulator.clone(),
                 a.exec_mode,
@@ -2108,7 +2139,7 @@ mod tests {
     fn no_overrides_keeps_by_name_ref() {
         let mut p = sample_profile();
         let r = apply_profile_overrides(
-            &mut p, None, &[], None, None, None, &[], None, None, None, "mi450x",
+            &mut p, None, &[], &[], None, None, None, &[], None, None, None, "mi450x",
         )
         .unwrap();
         assert_eq!(r, MaybeRef::Ref("mi450x".to_string()));
@@ -2120,6 +2151,7 @@ mod tests {
         let r = apply_profile_overrides(
             &mut p,
             None,
+            &[],
             &[],
             None,
             None,
@@ -2153,6 +2185,7 @@ mod tests {
         let r = apply_profile_overrides(
             &mut p,
             None,
+            &[],
             &[],
             None,
             None,

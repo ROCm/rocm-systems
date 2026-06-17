@@ -444,6 +444,7 @@ async fn create_session(
                     provider: body.provider,
                     image,
                     mounts,
+                    ports: Vec::new(),
                     devices: Vec::new(),
                     groups: Vec::new(),
                 });
