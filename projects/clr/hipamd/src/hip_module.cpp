@@ -77,7 +77,7 @@ hipError_t hipModuleGetFunction(hipFunction_t* hfunc, hipModule_t hmod, const ch
   }
 
   if (hipSuccess != PlatformState::Instance().GetDynFunc(hfunc, hmod, name)) {
-    LogPrintfError("Cannot find the function: %s for module: 0x%x", name, hmod);
+    LogPrintfInfo("Cannot find the function: %s for module: 0x%x", name, hmod);
     hip::tls.last_command_error_ = hipErrorNotFound;
     return hipErrorNotFound;
   }
@@ -173,10 +173,10 @@ hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func) {
   HIP_INIT_API(hipFuncGetAttributes, attr, func);
 
   if (attr == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   if (func == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
+    return hipErrorInvalidDeviceFunction;
   }
 
   HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().GetFuncAttr(attr, func, ihipGetDevice()));
@@ -271,7 +271,7 @@ hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig) {
     HIP_RETURN(status);
   }
   d_kernel->workGroupInfo()->groupMemCarveout_ =
-      d_kernel->device().GetGroupMemCarveout(static_cast<amd::FuncCache>(cacheConfig));
+      amd::funcCacheToCarveoutPercent(static_cast<uint32_t>(cacheConfig));
 
   HIP_RETURN(hipSuccess);
 }

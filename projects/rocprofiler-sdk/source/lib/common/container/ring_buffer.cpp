@@ -112,7 +112,7 @@ ring_buffer::destroy()
 {
     if(m_ptr && m_init)
     {
-        // Unmap the mapped virtual memmory.
+        // Unmap the mapped virtual memory.
         auto ret = munmap(m_ptr, m_size);
         if(ret != 0) perror("ring_buffer: munmap failed");
     }

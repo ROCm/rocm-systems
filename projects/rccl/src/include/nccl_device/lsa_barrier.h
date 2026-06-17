@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_DEVICE_MEM_BARRIER_H_
 #define _NCCL_DEVICE_MEM_BARRIER_H_
@@ -14,7 +15,7 @@ struct ncclLsaBarrierHandle;
 
 NCCL_EXTERN_C __host__ ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int nBarriers, ncclLsaBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq);
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 struct ncclLsaBarrierSession_internal;
 
@@ -31,6 +32,8 @@ struct ncclLsaBarrierSession: ncclLsaBarrierSession_internal<Coop> {
   NCCL_DEVICE_INLINE void arrive(Coop, cuda::memory_order);
   NCCL_DEVICE_INLINE void wait(Coop, cuda::memory_order);
   NCCL_DEVICE_INLINE void sync(Coop, cuda::memory_order);
+  NCCL_DEVICE_INLINE ncclResult_t wait(Coop, cuda::memory_order, uint64_t timeoutCycles);
+  NCCL_DEVICE_INLINE ncclResult_t sync(Coop, cuda::memory_order, uint64_t timeoutCycles);
 };
 #endif
 

@@ -5,6 +5,8 @@ callback:
   Unit_hipGetStreamDeviceId_Positive_Threaded_Basic: *level_2
   Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: []
   Unit_hipGetStreamDeviceId_Negative_Parameters: *level_2
   Unit_hipKernelNameRef_Positive_Basic:

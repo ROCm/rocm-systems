@@ -1,6 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+if(ROCPROFSYS_DISABLE_EXAMPLES)
+    if("openmp" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
+        return()
+    endif()
+endif()
+
 cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(rocprofiler-systems-openmp LANGUAGES CXX)
@@ -14,93 +20,16 @@ file(GLOB common_source ${CMAKE_CURRENT_SOURCE_DIR}/common/*.cpp)
 add_library(openmp-common OBJECT ${common_source})
 target_include_directories(openmp-common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/common)
 
-add_executable(
-    openmp-cg
-    ${CMAKE_CURRENT_SOURCE_DIR}/CG/cg.cpp
-    $<TARGET_OBJECTS:openmp-common>
-)
-add_executable(
-    openmp-lu
-    ${CMAKE_CURRENT_SOURCE_DIR}/LU/lu.cpp
-    $<TARGET_OBJECTS:openmp-common>
+include(${CMAKE_CURRENT_LIST_DIR}/openmp-helper.cmake)
+
+target_compile_options(openmp-common PUBLIC -fopenmp)
+target_link_options(openmp-common PUBLIC -fopenmp)
+rocprofiler_systems_custom_compilation(
+    COMPILER ${amdclangpp_EXECUTABLE}
+    TARGET openmp-common
 )
 
-option(USE_CLANG_OMP "Use the clang OpenMP if available" ON)
-
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(OpenMP_C_FLAGS "-fopenmp=libomp")
-    set(OpenMP_CXX_FLAGS "-fopenmp=libomp")
-
-    find_package(OpenMP REQUIRED)
-    target_link_libraries(openmp-common PUBLIC OpenMP::OpenMP_CXX)
-    set(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY
-        ON
-        CACHE INTERNAL
-        "Used by rocprofiler-systems testing"
-        FORCE
-    )
-else()
-    find_program(CLANGXX_EXECUTABLE NAMES clang++)
-    find_library(
-        LIBOMP_LIBRARY
-        NAMES omp omp5 ${CMAKE_SHARED_LIBRARY_PREFIX}omp${CMAKE_SHARED_LIBRARY_SUFFIX}.5
-    )
-    if(
-        CLANGXX_EXECUTABLE
-        AND LIBOMP_LIBRARY
-        AND COMMAND rocprofiler_systems_custom_compilation
-        AND USE_CLANG_OMP
-    )
-        target_compile_options(openmp-common PUBLIC -W -Wall -fopenmp=libomp)
-        target_link_libraries(openmp-common PUBLIC ${LIBOMP_LIBRARY})
-        rocprofiler_systems_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE}
-            TARGET openmp-common
-        )
-        rocprofiler_systems_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE}
-            TARGET openmp-cg
-        )
-        rocprofiler_systems_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE}
-            TARGET openmp-lu
-        )
-        set(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY
-            ON
-            CACHE INTERNAL
-            "Used by rocprofiler-systems testing"
-            FORCE
-        )
-    else()
-        find_package(OpenMP REQUIRED)
-        target_link_libraries(openmp-common PUBLIC OpenMP::OpenMP_CXX)
-        set(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY
-            OFF
-            CACHE INTERNAL
-            "Used by rocprofiler-systems testing"
-            FORCE
-        )
-    endif()
-endif()
-
-target_link_libraries(openmp-cg PRIVATE openmp-common)
-target_link_libraries(openmp-lu PRIVATE openmp-common)
-
-set(OPENMP_EXAMPLES openmp-cg openmp-lu)
-
-foreach(OPENMP_EXAMPLE IN LISTS OPENMP_EXAMPLES)
-    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET ${OPENMP_EXAMPLE})
-        install(
-            TARGETS ${OPENMP_EXAMPLE}
-            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
-            COMPONENT rocprofiler-systems-examples
-        )
-    endif()
-endforeach()
-
+add_subdirectory(CG)
+add_subdirectory(LU)
 add_subdirectory(fortran)
-
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    if(NOT "openmp-target" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-        add_subdirectory(target)
-    endif()
-else()
-    add_subdirectory(target)
-endif()
+add_subdirectory(target)

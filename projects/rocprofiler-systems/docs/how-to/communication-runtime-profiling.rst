@@ -149,15 +149,30 @@ Supported rank specification syntax (same for both filters):
 - **Combined**: Mix of individual ranks and ranges (e.g., ``0-3,8,10-15``)
 - **Empty value**: Enables output for all ranks (the default).
 
+When the total number of MPI ranks (world size) can be determined from the launcher environment
+(``OMPI_COMM_WORLD_SIZE``, ``MV2_COMM_WORLD_SIZE``, ``PMI_SIZE``, ``SLURM_NTASKS``, or ``SLURM_NPROCS``),
+any filter value outside the valid range ``[0, world_size - 1]`` triggers a warning and is ignored.
+If every value in the filter is out of range, filtering is disabled and output is produced for all ranks.
+When the world size cannot be determined, no such validation is performed and specifying correct
+rank values is the user's responsibility.
+
+.. code-block:: bash
+
+    # Rank 100 is out of range for a 16-rank job: it is reported and ignored,
+    # so only rank 1 produces output
+    mpirun -n 16 rocprof-sys-sample --rank-filter-output "1,100" -- <application_path>
+
 Supported rank identification variables:
 
-- **MPI_RANK**
-- **MPI_LOCALRANKID**
 - **MPI_RANKID**
+- **PMI_RANK**
 - **MV2_COMM_WORLD_RANK**
 - **OMPI_COMM_WORLD_RANK**
+- **SLURM_PROCID**
 
 If rank detection fails, both filters are disabled and output is produced for all ranks.
+The same applies if the detected rank is itself outside ``[0, world_size - 1]``:
+filtering is disabled for that rank and it produces output.
 
 .. note::
 

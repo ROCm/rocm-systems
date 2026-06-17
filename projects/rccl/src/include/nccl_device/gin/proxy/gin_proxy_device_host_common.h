@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 #ifndef GIN_PROXY_DEFS_H
 #define GIN_PROXY_DEFS_H
 
@@ -10,6 +11,7 @@
 #include <stddef.h>
 
 #define NCCL_GIN_PROXY_VERSION 100
+#define NCCL_GIN_PROXY_GFD_VERSION 1
 
 typedef enum {
   ncclGinProxyOpPut = 1 << 0,
@@ -18,7 +20,9 @@ typedef enum {
   ncclGinProxyOpWithCounter = 1 << 2,
   ncclGinProxyOpWithSignalInc = 1 << 3,
   ncclGinProxyOpWithSignalAdd = 1 << 4,
-  ncclGinProxyOpComplMask = ~ncclGinProxyOpPut,
+  ncclGinProxyOpVASignal = 1 << 5, // VA signals do not include put.
+  ncclGinProxyOpGet = 1 << 6,
+  ncclGinProxyOpFlush = 1 << 7,
 } ncclGinProxyOp_t;
 
 static_assert(sizeof(void *) == sizeof(uint64_t) && sizeof(size_t) == sizeof(uint64_t),
@@ -33,7 +37,8 @@ typedef union {
   } __attribute__((packed)) flag;
   struct {
     uint64_t flag : 1;
-    uint64_t op : 6;
+    uint64_t version : 4;
+    uint64_t resv : 2;
     uint64_t size : 57;
   } __attribute__((packed)) header;
   struct {
@@ -46,6 +51,16 @@ typedef union {
     uint64_t flag : 1;
     uint64_t srcHandle : 63;
   } __attribute__((packed)) srcHandle;
+  struct {
+    // the last bit is the flag, so we support 63 bit VAs
+    uint64_t flag : 1;
+    uint64_t vaSignalOff : 63;
+  } __attribute__((packed)) vaSignalOff;
+  struct {
+    // the last bit is the flag, so we support 63 bit VAs
+    uint64_t flag : 1;
+    uint64_t vaSignalHandle : 63;
+  } __attribute__((packed)) vaSignalHandle;
   struct {
     uint8_t flag : 1;
     uint8_t resv : 7;
@@ -72,13 +87,14 @@ typedef union {
   } __attribute__((packed)) dstHandle;
   struct {
     uint8_t flag : 1;
-    uint8_t resv1 : 7;
+    // We need to keep the size of counterId and signalId in sync with the
+    // NCCL_GIN_COUNTER_POOL_SIZE / NCCL_GIN_SIGNAL_POOL_SIZE upper limits
+    // in gin_host.cc.
     // must be non-zero if WITH_COUNTER is set
-    uint16_t counterId;
+    uint32_t counterId : 23;
     // must be non-zero if WITH_SIGNAL_INC, WITH_SIGNAL_ADD, or WITH_SIGNAL_SET is set
-    uint16_t signalId;
+    uint32_t signalId : 24;
     uint16_t signalValLow;
-    uint8_t resv2;
   } __attribute__((packed)) completion;
   struct {
     uint8_t flag : 1;
@@ -86,29 +102,40 @@ typedef union {
     uint16_t signalValLow2;
     uint32_t signalValHigh;
   } __attribute__((packed)) signalVal;
+  struct {
+    uint8_t flag : 1;
+    uint8_t resv : 7;
+    uint16_t op;
+    uint8_t resv2;
+    uint32_t resv3;
+  } __attribute__((packed)) headerExt;
 } ncclGinProxyQword_t;
 static_assert(sizeof(ncclGinProxyQword_t) == sizeof(uint64_t),
               "sizeof(ncclGinProxyQword_t) != sizeof(uint64_t)");
+static_assert(NCCL_GIN_PROXY_GFD_VERSION < (1 << 4),
+              "NCCL_GIN_PROXY_GFD_VERSION must be less than 2^4");
 
 typedef enum {
   ncclGinProxyGfdHeader = 0,
   ncclGinProxyGfdInlineLow = 1,
   ncclGinProxyGfdInlineHigh = 2,
-  ncclGinProxyGfdSrcOff = 1,
-  ncclGinProxyGfdSrcHandle = 2,
+  ncclGinProxyGfdSrcOff = 1, // re-uses the inline word
+  ncclGinProxyGfdSrcHandle = 2, // re-uses the inline word
+  ncclGinProxyGfdVASignalOff = 1, // re-uses the inline word, VA signals with PUT must be split into two GFDs
+  ncclGinProxyGfdVASignalHandle = 2, // re-uses the inline word, VA signals with PUT must be split into two GFDs
   ncclGinProxyGfdDstOff = 3,
   ncclGinProxyGfdDstHandle = 4,
   ncclGinProxyGfdCompletion = 5,
   ncclGinProxyGfdSignalVal = 6,
-  ncclGinProxyGfdReserved = 7,
-  ncclGinProxyGfdQwords = 8,
+  ncclGinProxyGfdHeaderExt = 7,
+  ncclGinProxyGfdQwords = 16,
 } ncclGinProxyGfdQwordIdx_t;
 
 typedef struct __attribute__((packed)) {
   ncclGinProxyQword_t qword[ncclGinProxyGfdQwords];
 } ncclGinProxyGfd_t;
-static_assert(sizeof(ncclGinProxyGfd_t) == 64,
-              "sizeof(ncclGinProxyGfd_t) != 64 - it is crucial the GFD is 64 bytes!");
+static_assert(sizeof(ncclGinProxyGfd_t) == 128,
+              "sizeof(ncclGinProxyGfd_t) != 128 - Backwards compat requires ncclGinProxyGfd to be 128 bytes!");
 
 typedef struct {
   int nranks;

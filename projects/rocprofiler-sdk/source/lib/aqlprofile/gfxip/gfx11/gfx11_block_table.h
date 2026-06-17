@@ -468,6 +468,20 @@ static const CounterRegInfo TaCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regTA_PER
                                                    REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER1_HI),
                                                    REG_32B_NULL}};
 
+/*
+ * TD
+ */
+static const CounterRegInfo TdCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regTD_PERFCOUNTER0_SELECT),
+                                                   REG_32B_NULL,
+                                                   REG_32B_ADDR(GC, 0, regTD_PERFCOUNTER0_LO),
+                                                   REG_32B_ADDR(GC, 0, regTD_PERFCOUNTER0_HI),
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regTD_PERFCOUNTER1_SELECT),
+                                                   REG_32B_NULL,
+                                                   REG_32B_ADDR(GC, 0, regTD_PERFCOUNTER1_LO),
+                                                   REG_32B_ADDR(GC, 0, regTD_PERFCOUNTER1_HI),
+                                                   REG_32B_NULL}};
+
 // Counter block CPC
 static const GpuBlockInfo CpcCounterBlockInfo = {
     "CPC",
@@ -664,6 +678,17 @@ static const GpuBlockInfo TaCounterBlockInfo = {
     TaCounterRegAddr,
     gfx11_cntx_prim::select_value_TA_PERFCOUNTER0_SELECT,
     CounterBlockSeAttr | CounterBlockTcAttr,
+    BLOCK_DELAY_NONE};
+// Counter block TD
+static const GpuBlockInfo TdCounterBlockInfo = {
+    "TD",
+    TdCounterBlockId,
+    TdCounterBlockNumInstances,
+    TdCounterBlockMaxEvent,
+    TdCounterBlockNumCounters,
+    TdCounterRegAddr,
+    gfx11_cntx_prim::select_value_TD_PERFCOUNTER0_SELECT,
+    CounterBlockSeAttr | CounterBlockSaAttr | CounterBlockWgpAttr | CounterBlockTcAttr,
     BLOCK_DELAY_NONE};
 
 }  // namespace gfx11

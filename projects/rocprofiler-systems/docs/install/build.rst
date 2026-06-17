@@ -45,7 +45,7 @@ The relevant fields are ``ID`` and the ``VERSION_ID``.
 Build ROCm Systems Profiler from source
 =======================================
 
-ROCm Systems Profiler needs a GCC compiler with full support for C++17 and CMake v3.25 or higher.
+ROCm Systems Profiler needs a GCC compiler with full support for C++20 and CMake v3.25 or higher.
 The Clang compiler may be used instead of the GCC compiler if `Dyninst <https://github.com/dyninst/dyninst>`_
 is already installed.
 

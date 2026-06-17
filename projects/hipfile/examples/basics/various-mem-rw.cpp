@@ -135,6 +135,12 @@ zero_buf(mem_mode_t mode, void *buf, size_t size)
         fprintf(stderr, "Could not zero buffer (%s, hip err %d)\n", mode_name(mode), hip_err);
         return 1;
     }
+    /* hipMemset is async w.r.t. the host; block until it completes (testing). */
+    hip_err = hipDeviceSynchronize();
+    if (hipSuccess != hip_err) {
+        fprintf(stderr, "Could not synchronize after memset (%s, hip err %d)\n", mode_name(mode), hip_err);
+        return 1;
+    }
     return 0;
 }
 

@@ -2,6 +2,16 @@
 
 Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html)
 
+## Unreleased
+
+### Added
+
+### Changed
+- Bump rocpd schema to version 3.0.1 which supports NIC agent types.
+
+### Removed
+
+
 ## ROCprofiler-SDK 1.3.0 for ROCm release 7.2.4
 
 ### Optimized

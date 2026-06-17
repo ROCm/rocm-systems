@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{common::MaybeRef, session::SessionId};
+use crate::{common::MaybeRef, profile::FileMount, session::SessionId};
 
 /// Concrete process arguments for one program invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +159,24 @@ pub struct InjectionDef {
     pub ld_preload: Option<String>,
     pub files: BTreeMap<String, MaybeRef<Vec<u8>>>,
     pub env: BTreeMap<String, String>,
+
+    /// Host paths the emulator needs bind-mounted into each node's
+    /// container so that the injected `LD_PRELOAD`/env paths resolve
+    /// inside it. Empty for non-containerised sessions (where the
+    /// injected paths are already host paths the workload can see). By
+    /// convention these target locations live under `/mnt/mirage`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mounts: Vec<FileMount>,
+
+    /// Whether the emulator needs the host's GPUs exposed to each node's
+    /// container. When set, every node container is launched with the
+    /// host's GPU device nodes (`/dev/kfd`, `/dev/dri`) and the
+    /// supplementary groups needed to open them; the group mechanism is
+    /// provider-specific (podman inherits the launching user's groups
+    /// via `--group-add keep-groups`, docker is given the named GPU
+    /// groups explicitly). Only meaningful for containerised sessions.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host_gpus: bool,
 }
 
 #[cfg(test)]

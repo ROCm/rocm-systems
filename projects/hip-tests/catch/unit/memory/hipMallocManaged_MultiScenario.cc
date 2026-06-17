@@ -20,7 +20,7 @@
 #include <atomic>
 
 const size_t MAX_GPU{256};
-static size_t N{4 * 1024 * 1024};
+static size_t N = isQuickLevel() ? (256 * 1024) : (4 * 1024 * 1024);
 static unsigned blocksPerCU{6};
 static unsigned threadsPerBlock{256};
 #define INIT_VAL 123

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "common.hpp"
+#include "common/env_vars.hpp"
+#include "common/environment.hpp"
 #include <cstdint>
 
 #include <timemory/mpl/apply.hpp>
@@ -26,14 +28,15 @@ str_vec_t         category_regex_keys = {};
 str_set_t         category_view       = {};
 std::stringstream lerr{};
 
-bool         debug_msg = tim::get_env<bool>("ROCPROFSYS_DEBUG_AVAIL", settings::debug());
+bool debug_msg =
+    rocprofsys::get_env(rocprofsys::env_vars::DEBUG_AVAIL, settings::debug());
 std::int32_t verbose_level =
-    tim::get_env<std::int32_t>("ROCPROFSYS_VERBOSE_AVAIL", settings::verbose());
+    rocprofsys::get_env(rocprofsys::env_vars::VERBOSE_AVAIL, settings::verbose());
 
 // explicit setting names to exclude
 std::set<std::string> settings_exclude = {
-    "ROCPROFSYS_ENVIRONMENT",
-    "ROCPROFSYS_COMMAND_LINE",
+    std::string{ rocprofsys::env_vars::ENVIRONMENT },
+    std::string{ rocprofsys::env_vars::COMMAND_LINE },
     "cereal_class_version",
     "settings",
 };

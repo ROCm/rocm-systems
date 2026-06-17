@@ -36,7 +36,7 @@ These can be set in the shell before running your application:
 ```
 
 ```{seealso}
-Refer to the [C++ library API reference](../reference/amdsmi-cpp-api.md).
+Refer to the [C/C++ library API reference](../reference/amdsmi-cpp-api/index.md).
 ```
 
 (device_socket_handle)=

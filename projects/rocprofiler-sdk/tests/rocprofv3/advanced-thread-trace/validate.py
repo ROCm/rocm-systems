@@ -110,7 +110,7 @@ def test_realtime_clock(output_path):
 
         # Sort by shader_clock (index 0)
         timestamps_sorted = sorted(timestamps, key=lambda ts: ts[0])
-        # Ensure realtime clock is non descreasing
+        # Ensure realtime clock is non-decreasing
         assert all(
             curr[1] >= prev[1]
             for prev, curr in zip(timestamps_sorted, timestamps_sorted[1:])

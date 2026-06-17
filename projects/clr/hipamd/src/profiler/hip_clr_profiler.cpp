@@ -137,16 +137,28 @@ static std::atomic<bool>        g_chunk_thread_stop{false};
 
 // ================================================================================================
 hipApiRecordExt* AllocChunk() {
-  void* raw = ::operator new[](kChunkSize * sizeof(hipApiRecordExt));
-  hipApiRecordExt* chunk = static_cast<hipApiRecordExt*>(raw);
-  std::memset(chunk, 0, kChunkSize * sizeof(hipApiRecordExt));
-  return chunk;
+  // The slab is intentionally left uninitialised.  Zeroing the whole ~2.5 MB
+  // slab here (a single memset) stalls the launching thread for ~0.5-0.7 ms at
+  // every chunk boundary, which shows up as periodic gaps in the CPU *and* GPU
+  // timelines.  Instead each record is cleared individually when its slot is
+  // handed out in HipGetActiveRecordExt (~0.07 us/record), spreading that cost
+  // evenly across execution.  Only records that are actually handed out get
+  // cleared, so the finalizer must free exactly that many (see
+  // HipClrProfilerFinalizer) — the uninitialised tail of the last chunk is
+  // never walked for owned pointers.
+  return static_cast<hipApiRecordExt*>(
+      ::operator new[](kChunkSize * sizeof(hipApiRecordExt)));
 }
 
 // ================================================================================================
-void FreeChunk(hipApiRecordExt* chunk) {
+// Frees the owned resources (spill list + kernel_args blobs) of the first
+// `count` records, then releases the slab.  `count` must be the number of
+// records actually handed out for this chunk: records past that point were
+// never cleared by HipGetActiveRecordExt and hold uninitialised pointers that
+// must not be dereferenced.
+void FreeChunk(hipApiRecordExt* chunk, size_t count = kChunkSize) {
   if (!chunk) return;
-  for (size_t i = 0; i < kChunkSize; ++i) {
+  for (size_t i = 0; i < count; ++i) {
     // Free spill node kernel_args blobs and the nodes themselves.
     // All kernel_args blobs are owned: single launches by HipCaptureKernelArgsExt,
     // graph launches by a copy made in fill_dispatch_info.
@@ -2405,7 +2417,15 @@ static void ProfilerAtExit() {
 
 struct HipClrProfilerFinalizer {
   ~HipClrProfilerFinalizer() {
-    for (auto* chunk : g_records) FreeChunk(chunk);
+    // Records are cleared on hand-out (not at chunk alloc), so only the records
+    // that were actually allocated are initialised.  Free exactly those; the
+    // uninitialised tail of the final chunk must not be walked for owned ptrs.
+    size_t total = g_rec_counter.load(std::memory_order_acquire);
+    for (size_t c = 0; c < g_records.size(); ++c) {
+      size_t base  = c * kChunkSize;
+      size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
+      FreeChunk(g_records[c], valid);
+    }
   }
 } g_finalizer;
 
@@ -2584,6 +2604,12 @@ hipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
   }
 
   hipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
+  // Clear the record on actual allocation. AllocChunk no longer zeroes the slab
+  // (that batched memset stalled the hot path); doing it per-record here spreads
+  // the cost (~0.07 us) and leaves every field — including the gpu sub-struct
+  // and owned pointers — in the same zero-initialised state the GPU callback and
+  // trace writers expect. Reserved fields are cleared too; not worth special-casing.
+  std::memset(rec, 0, sizeof(*rec));
   rec->api_name    = (api_id < kHipApiNamesCountExt) ? kHipApiNamesExt[api_id] : "unknown";
   rec->_flags_u64  = 0;
   rec->chunk_id    = g_next_chunk_id.fetch_add(1, std::memory_order_relaxed);

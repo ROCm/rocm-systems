@@ -151,6 +151,9 @@ int64_t EventDD::time(bool getStartTs) const {
 }
 // ================================================================================================
 hipError_t Event::streamWaitCommand(amd::Command*& command, hip::Stream* stream) {
+  // Guard event_ against concurrent record/sync. Graph stream-wait nodes call
+  // this directly (not via the locked streamWait path); lock_ is recursive.
+  std::scoped_lock lock(lock_);
   const amd::Command::EventWaitList eventWaitList =
       (event_ != nullptr) ? amd::Command::EventWaitList{event_} : amd::Command::EventWaitList{};
 
@@ -186,6 +189,9 @@ hipError_t Event::streamWait(hip::Stream* stream, uint flags) {
 // ================================================================================================
 hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, uint32_t ext_flags,
                                 bool batch_flush) {
+  // Guard event state against concurrent access. Graph event-record nodes call
+  // this directly (not via the locked addMarker path); lock_ is recursive.
+  std::scoped_lock lock(lock_);
   if (command != nullptr) {
     return hipSuccess;
   }
@@ -207,6 +213,9 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
 
 // ================================================================================================
 hipError_t Event::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+  // Guard event_ release/replace against concurrent access. Graph event-record
+  // nodes call this directly (not via locked addMarker); lock_ is recursive.
+  std::scoped_lock lock(lock_);
   command->enqueue();
 
   amd::Event& new_event = command->event();
@@ -339,7 +348,7 @@ hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
   HIP_INIT_API(hipEventCreateWithFlags, event, flags);
 
   if (event == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, flags), *event);
@@ -350,7 +359,7 @@ hipError_t hipEventCreate(hipEvent_t* event) {
   HIP_INIT_API(hipEventCreate, event);
 
   if (event == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, 0), *event);
@@ -366,7 +375,7 @@ hipError_t hipEventDestroy(hipEvent_t event) {
 
   std::unique_lock lock(hip::eventSetLock);
   if (hip::eventSet.erase(event) == 0) {
-    HIP_RETURN(hipErrorContextIsDestroyed);
+    return hipErrorContextIsDestroyed;
   }
 
   auto* e = reinterpret_cast<hip::Event*>(event);

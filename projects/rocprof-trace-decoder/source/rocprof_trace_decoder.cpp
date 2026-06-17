@@ -41,8 +41,7 @@
 #    include "rocprof_trace_decoder/cxx/code_printing.hpp"
 #endif
 
-#define PUBLIC_API __attribute__((visibility("default")))
-#define RADT(x)    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_##x
+#define RADT(x) ROCPROFILER_THREAD_TRACE_DECODER_RECORD_##x
 
 // ============================================================================
 // ISA service adapter for the internal parser
@@ -72,6 +71,11 @@ public:
 
         if (status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
             throw std::invalid_argument("ISA Callback returned error " + std::to_string(status));
+
+        // A callback that can't determine the instruction length may report 0,
+        // which would make isa.next == isa.addr and spin the stitcher's PC walk
+        // forever. Clamp to the minimum encodable instruction size (4 bytes).
+        if (memsize < 4) memsize = 4;
 
         assemblyLine isa;
         isa.addr = pc;
@@ -257,7 +261,7 @@ rocprofiler_thread_trace_decoder_status_t parse_isa_adapter(
 
 extern "C"
 {
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
 rocprof_trace_decoder_create_handle(rocprof_trace_decoder_handle_t* handle)
 {
     if (!handle) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -277,7 +281,7 @@ rocprof_trace_decoder_create_handle(rocprof_trace_decoder_handle_t* handle)
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
 rocprof_trace_decoder_destroy_handle(rocprof_trace_decoder_handle_t handle)
 {
     std::lock_guard<std::mutex> lock(HandleData::get_map_mutex());
@@ -286,7 +290,7 @@ rocprof_trace_decoder_destroy_handle(rocprof_trace_decoder_handle_t handle)
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_isa_callback(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_isa_callback(
     rocprof_trace_decoder_handle_t handle, rocprof_trace_decoder_isa_callback_t callback, void* userdata
 )
 {
@@ -299,7 +303,7 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_i
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_se_data_callback(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_se_data_callback(
     rocprof_trace_decoder_handle_t handle, rocprof_trace_decoder_se_data_callback_t callback, void* userdata
 )
 {
@@ -315,13 +319,16 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_s
 // COMGR-dependent functions
 
 // V1 API: stateless 4-arg parse, no handle management
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse_data(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse_data(
     rocprof_trace_decoder_se_data_callback_t se_data_callback,
     rocprof_trace_decoder_trace_callback_t trace_callback,
     rocprof_trace_decoder_isa_callback_t isa_callback,
     void* userdata
 )
 {
+    if (!se_data_callback || !trace_callback || !isa_callback)
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
     return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
 }
 
@@ -329,7 +336,7 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse
 
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_codeobj_load(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_codeobj_load(
     rocprof_trace_decoder_handle_t handle,
     uint64_t load_id,
     uint64_t load_addr,
@@ -355,7 +362,7 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_codeo
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
 rocprof_trace_decoder_codeobj_unload(rocprof_trace_decoder_handle_t handle, uint64_t load_id)
 {
     auto hd = HandleData::get_write_handle(handle);
@@ -375,7 +382,7 @@ rocprof_trace_decoder_codeobj_unload(rocprof_trace_decoder_handle_t handle, uint
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
 }
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
     rocprof_trace_decoder_handle_t handle,
     const void* data,
     uint64_t data_size,
@@ -385,6 +392,8 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse
 {
     auto hd = HandleData::get_read_handle(handle);
     if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (!trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
     parse_ctx_t ctx{};
     ctx.trace_cb = trace_callback;
@@ -429,19 +438,19 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse
 
 #else // ROCPROF_TRACE_DECODER_COMGR_DISABLED
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
 rocprof_trace_decoder_codeobj_load(rocprof_trace_decoder_handle_t, uint64_t, uint64_t, uint64_t, const void*, uint64_t)
 {
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
 rocprof_trace_decoder_codeobj_unload(rocprof_trace_decoder_handle_t, uint64_t)
 {
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
     rocprof_trace_decoder_handle_t handle,
     const void* data,
     uint64_t data_size,
@@ -451,6 +460,8 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse
 {
     auto hd = HandleData::get_read_handle(handle);
     if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (!trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
     parse_ctx_t ctx{};
     ctx.trace_cb = trace_callback;
@@ -489,7 +500,8 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse
 
 #endif // ROCPROF_TRACE_DECODER_COMGR_DISABLED
 
-PUBLIC_API const char* rocprof_trace_decoder_get_info_string(rocprofiler_thread_trace_decoder_info_t info)
+ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_info_string(rocprofiler_thread_trace_decoder_info_t info
+)
 {
     static const char* stitch =
         "Stitch Incomplete: The parser could not fully match a trace token to the underlying disassembly.";
@@ -514,7 +526,9 @@ PUBLIC_API const char* rocprof_trace_decoder_get_info_string(rocprofiler_thread_
     }
 }
 
-PUBLIC_API const char* rocprof_trace_decoder_get_status_string(rocprofiler_thread_trace_decoder_status_t status)
+ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_status_string(
+    rocprofiler_thread_trace_decoder_status_t status
+)
 {
     const std::map<int, const char*> map = {
         {ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS,                   "ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS"},

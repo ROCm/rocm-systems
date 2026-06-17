@@ -168,7 +168,8 @@ counter_info(uint64_t     counter_handle,
              const char** counter_name,
              const char** counter_description,
              uint8_t*     is_derived,
-             uint8_t*     is_hw_constant)
+             uint8_t*     is_hw_constant,
+             uint8_t*     is_spm)
 {
     const auto* counter_info = get_counter_info(rocprofiler_counter_id_t{counter_handle});
 
@@ -176,6 +177,7 @@ counter_info(uint64_t     counter_handle,
     *counter_description = counter_info->description;
     *is_derived          = counter_info->is_derived;
     *is_hw_constant      = counter_info->is_constant;
+    *is_spm              = counter_info->spm_support;
 }
 
 void
@@ -239,6 +241,28 @@ get_number_of_pc_sample_configs(uint64_t agent_handle)
         get_metadata().get_pc_sample_config_info(rocprofiler_agent_id_t{agent_handle});
 
     return pc_sampling_config.size();
+}
+
+size_t
+get_number_of_spm_configs(uint64_t agent_handle)
+{
+    auto spm_config = get_metadata().get_spm_config_info(rocprofiler_agent_id_t{agent_handle});
+
+    return spm_config.size();
+}
+
+void
+spm_sample_interval_config(uint64_t  agent_handle,
+                           uint64_t  config_idx,
+                           uint64_t* type,
+                           uint64_t* min_interval,
+                           uint64_t* max_interval)
+{
+    auto spm_config = get_metadata().get_spm_config_info(rocprofiler_agent_id_t{agent_handle});
+    if(config_idx >= spm_config.size()) ROCP_FATAL << "Invalid config idx";
+    *type         = spm_config.at(config_idx).type;
+    *min_interval = spm_config.at(config_idx).interval.min_interval;
+    *max_interval = spm_config.at(config_idx).interval.max_interval;
 }
 
 void

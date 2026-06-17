@@ -30,10 +30,7 @@ namespace comp      = ::tim::component;  // NOLINT
 namespace dmp       = ::tim::dmp;        // NOLINT
 namespace operation = ::tim::operation;  // NOLINT
 namespace quirk     = ::tim::quirk;      // NOLINT
-namespace units     = ::tim::units;      // NOLINT
 
 using settings = ::tim::settings;  // NOLINT
 
-using ::tim::get_env;  // NOLINT
-using ::tim::set_env;  // NOLINT
 }  // namespace rocprofsys

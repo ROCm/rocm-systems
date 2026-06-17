@@ -24,7 +24,7 @@ Mirage is split into a small set of crates with clear responsibilities:
 │  • paths: XDG resolution                                        │
 │  • state: atomic JSON read/write                                │
 │  • ctl::FileCtl: file-backed MirageCtl                          │
-│  • attach: streaming tail-f over stdout/stderr/exit_code        │
+│  • attach: streaming tail-f over stdout/exit_code               │
 └────────────┬────────────────────────────────────────────────────┘
              │ reads/writes
              ▼
@@ -74,7 +74,7 @@ network or socket — only through the session directory.
 Within the CLI:
 
 * `attach` uses `tokio_stream::wrappers::ReceiverStream` over a tail
-  task that polls `<node>/stdout`, `<node>/stderr`, and
+  task that polls `<node>/stdout` and
   `<node>/exit_code` on a 50ms tick.
 * All other ops are blocking filesystem calls wrapped in async fns
   for uniformity. The runtime is single-threaded by default.

@@ -69,6 +69,15 @@ struct HostArgs {
     /// `$XDG_RUNTIME_DIR/mirage/session/<id>`).
     #[arg(long)]
     session: SessionId,
+
+    /// Node rank this host serves. Set internally when a containerised
+    /// session launches a per-node host *inside* its container: that
+    /// host runs only its own node's execs and never manages
+    /// containers. Omitted for the orchestrator host on the real host,
+    /// which brings up the containers and (for non-containerised
+    /// sessions) runs every node directly.
+    #[arg(long)]
+    rank: Option<u32>,
 }
 
 fn main() -> ExitCode {
@@ -92,6 +101,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
                 host_run(
                     HostConfig {
                         session: args.session,
+                        rank: args.rank,
                     },
                     shutdown,
                 )

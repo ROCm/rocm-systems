@@ -8,6 +8,8 @@ add_executable(
     test_rocprofiler_compute_tool.cpp
     test_sdk_callbacks.h
     test_sdk_callbacks.cpp
+    test_environ_cache.h
+    test_environ_cache.cpp
     mocks.h
     mocks.cpp
     main.cpp

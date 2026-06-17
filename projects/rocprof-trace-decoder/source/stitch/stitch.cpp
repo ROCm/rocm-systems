@@ -223,7 +223,7 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
         }
         else if (gfxip == 12 && line->cat == InstCategory::V_MOV_B64 && inst.category == WaveInstCategory::VALU)
         {
-            inst.duration = std::max(inst.duration, inst.stall + 2);
+            inst.duration = std::max<int32_t>(inst.duration, inst.stall + 2);
         }
         else if (gfxip == 9 && line->cat == InstCategory::MFMA_SCALE && inst.category == WaveInstCategory::VALU)
         {
@@ -243,7 +243,7 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
             }
             else if (inst.time + inst.duration > next_min_time)
             {
-                // If we cant fit in the trace, then dont increase duration
+                // If we can't fit in the trace, then don't increase duration
                 inst.duration -= 4;
             }
         }
@@ -343,7 +343,7 @@ void insert_gfx12_barrier_wait(WaveDataInternal& wave, const barrier_list_t& bar
             timeline_index++;
         }
 
-        if (wave.timeline.size() && wstates.back().duration >= current_time - inst.time && current_time >= current.time)
+        if (!wstates.empty() && wstates.back().duration >= current_time - inst.time && current_time >= current.time)
         {
             wstates.back().duration -= clamp_to_int32(current_time - inst.time);
             int type = wstates.back().type;

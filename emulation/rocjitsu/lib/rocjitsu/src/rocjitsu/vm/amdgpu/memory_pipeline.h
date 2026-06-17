@@ -8,6 +8,7 @@
 #define ROCJITSU_VM_AMDGPU_MEMORY_PIPELINE_H_
 
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
@@ -52,10 +53,24 @@ public:
   /// ALU instructions to read destination VGPRs between issue and
   /// writeback — a hazard that real hardware prevents via scoreboarding.
   void issue(Instruction *inst, Wavefront &wf) {
-    wf.wait_counters().increment(counter_type_);
+    WaitCounterType issue_counter = counter_type_;
+    if (auto *state = inst->data()) {
+      switch (state->tag()) {
+      case SCALAR_MEM:
+        issue_counter = inst->data_as<ScalarMemState>()->wait_counter_type;
+        break;
+      case GLOBAL_MEM:
+      case LOCAL_MEM:
+        issue_counter = inst->data_as<VectorMemState>()->wait_counter_type;
+        break;
+      default:
+        break;
+      }
+    }
+    wf.wait_counters().increment(issue_counter);
     initiate_access(*inst, wf);
     complete_access(*inst, wf);
-    wf.wait_counters().decrement(counter_type_);
+    wf.wait_counters().decrement(issue_counter);
     if (wf.state() == WfState::WAITCNT && wf.wait_satisfied())
       wf.set_state(WfState::RUNNING);
     if (wf.state() == WfState::ENDING && wf.wait_counters().empty())

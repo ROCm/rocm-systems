@@ -12,13 +12,16 @@ const DEFAULT_NEW_PROFILE = {
   topology_mode: "new" as "new" | "existing",
   topology_pick: "",
   topology_save_as: "",
-  racks: 1,
-  nodes_per_rack: 1,
+  num_nodes: 1,
   gpus_per_node: 1,
   agent: "MI350X",
   exec_mode: "Functional" as "Functional" | "Clocked",
   plugins: [] as string[],
   description: "",
+  containerize: false,
+  image: "",
+  provider: "" as "" | "podman" | "docker",
+  mounts: [] as { host: string; container: string; read_only: boolean }[],
 };
 
 export function ProfilesPage() {
@@ -89,8 +92,7 @@ export function ProfilesPage() {
         topology = form.topology_pick;
       } else {
         const inline = {
-          racks: form.racks,
-          nodes_per_rack: form.nodes_per_rack,
+          num_nodes: form.num_nodes,
           gpus_per_node: form.gpus_per_node,
           agent: form.agent,
         };
@@ -103,6 +105,28 @@ export function ProfilesPage() {
         }
       }
 
+      let containerize: import("../api/types").ContainerizedDef | undefined;
+      if (form.containerize) {
+        const image = form.image.trim();
+        if (!image) {
+          setError("Image is required when containerization is enabled");
+          setBusy(false);
+          return;
+        }
+        const mounts = form.mounts
+          .filter((m) => m.host.trim())
+          .map((m) => ({
+            host_path: m.host.trim(),
+            container_path: (m.container.trim() || m.host.trim()),
+            read_only: m.read_only,
+          }));
+        containerize = {
+          image,
+          ...(form.provider ? { provider: form.provider } : {}),
+          ...(mounts.length ? { mounts } : {}),
+        };
+      }
+
       await api.putProfile({
         name,
         description: form.description || undefined,
@@ -113,6 +137,7 @@ export function ProfilesPage() {
           options: {},
           topology,
         },
+        ...(containerize ? { containerize } : {}),
       });
       toast.success(`Profile "${name}" created`);
       setForm(DEFAULT_NEW_PROFILE);
@@ -196,40 +221,6 @@ export function ProfilesPage() {
           </tbody>
         </table>
       )}
-
-      {/* Quick-create row: a real, supported shortcut for power
-          users / scripts that already know which backend they want.
-          Carries the legacy test-ids so historical e2e flows still
-          work; the wizard above is the friendly path. */}
-      <form
-        onSubmit={onCreate}
-        className="quick-create"
-        data-testid="create-profile"
-      >
-        <span className="quick-create-label">Quick create</span>
-        <input
-          aria-label="Quick profile name"
-          placeholder="profile name"
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          data-testid="new-profile-name"
-        />
-        <input
-          aria-label="Quick profile emulator"
-          placeholder="emulator"
-          value={form.emulator}
-          onChange={(e) => setForm({ ...form, emulator: e.target.value })}
-          data-testid="new-profile-emulator"
-        />
-        <button
-          type="submit"
-          className="btn-primary-sm"
-          data-testid="submit-profile"
-          disabled={busy}
-        >
-          Create
-        </button>
-      </form>
 
       <Modal
         open={wizardOpen}
@@ -368,29 +359,16 @@ export function ProfilesPage() {
           ) : (
             <>
               <label className="form-field">
-                <span>Racks</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={form.racks}
-                  data-testid="wizard-racks"
-                  onChange={(e) =>
-                    setForm({ ...form, racks: Math.max(1, +e.target.value || 1) })
-                  }
-                />
-              </label>
-
-              <label className="form-field">
                 <span>Nodes per rack</span>
                 <input
                   type="number"
                   min={1}
-                  value={form.nodes_per_rack}
+                  value={form.num_nodes}
                   data-testid="wizard-nodes"
                   onChange={(e) =>
                     setForm({
                       ...form,
-                      nodes_per_rack: Math.max(1, +e.target.value || 1),
+                      num_nodes: Math.max(1, +e.target.value || 1),
                     })
                   }
                 />
@@ -476,6 +454,142 @@ export function ProfilesPage() {
               placeholder="What is this profile for?"
             />
           </label>
+
+          <div className="form-field span-2">
+            <span>Containerization</span>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={form.containerize}
+                data-testid="wizard-containerize"
+                onChange={(e) =>
+                  setForm({ ...form, containerize: e.target.checked })
+                }
+              />
+              <span>Run every node inside a container</span>
+            </label>
+            <span className="form-help">
+              When enabled, each node of a session runs in its own
+              container on a shared virtual network.
+            </span>
+          </div>
+
+          {form.containerize && (
+            <>
+              <label className="form-field span-2">
+                <span>Image</span>
+                <input
+                  required
+                  value={form.image}
+                  data-testid="wizard-image"
+                  placeholder="e.g. rocm/dev-ubuntu-22.04:latest"
+                  onChange={(e) =>
+                    setForm({ ...form, image: e.target.value })
+                  }
+                />
+              </label>
+
+              <div className="form-field">
+                <span>Provider</span>
+                <Dropdown
+                  testId="wizard-provider"
+                  ariaLabel="Container provider"
+                  value={form.provider}
+                  onChange={(v) =>
+                    setForm({ ...form, provider: v as "" | "podman" | "docker" })
+                  }
+                  options={[
+                    { value: "", label: "Auto-detect" },
+                    { value: "podman", label: "podman" },
+                    { value: "docker", label: "docker" },
+                  ]}
+                />
+              </div>
+
+              <div className="form-field span-2">
+                <span>Bind mounts</span>
+                {form.mounts.length === 0 && (
+                  <span className="form-help">
+                    No mounts. Add one to share a host directory with every
+                    node container.
+                  </span>
+                )}
+                {form.mounts.map((m, i) => (
+                  <div className="mount-row" key={i} data-testid={`wizard-mount-${i}`}>
+                    <input
+                      aria-label={`Mount ${i} host path`}
+                      placeholder="host path"
+                      value={m.host}
+                      data-testid={`wizard-mount-host-${i}`}
+                      onChange={(e) => {
+                        const mounts = [...form.mounts];
+                        mounts[i] = { ...mounts[i], host: e.target.value };
+                        setForm({ ...form, mounts });
+                      }}
+                    />
+                    <input
+                      aria-label={`Mount ${i} container path`}
+                      placeholder="container path (defaults to host)"
+                      value={m.container}
+                      data-testid={`wizard-mount-container-${i}`}
+                      onChange={(e) => {
+                        const mounts = [...form.mounts];
+                        mounts[i] = { ...mounts[i], container: e.target.value };
+                        setForm({ ...form, mounts });
+                      }}
+                    />
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={m.read_only}
+                        aria-label={`Mount ${i} read-only`}
+                        data-testid={`wizard-mount-ro-${i}`}
+                        onChange={(e) => {
+                          const mounts = [...form.mounts];
+                          mounts[i] = {
+                            ...mounts[i],
+                            read_only: e.target.checked,
+                          };
+                          setForm({ ...form, mounts });
+                        }}
+                      />
+                      <span>ro</span>
+                    </label>
+                    <button
+                      type="button"
+                      className="btn-danger-sm"
+                      aria-label={`Remove mount ${i}`}
+                      data-testid={`wizard-mount-remove-${i}`}
+                      onClick={() =>
+                        setForm({
+                          ...form,
+                          mounts: form.mounts.filter((_, j) => j !== i),
+                        })
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="btn-secondary-sm"
+                  data-testid="wizard-mount-add"
+                  onClick={() =>
+                    setForm({
+                      ...form,
+                      mounts: [
+                        ...form.mounts,
+                        { host: "", container: "", read_only: false },
+                      ],
+                    })
+                  }
+                >
+                  + Add mount
+                </button>
+              </div>
+            </>
+          )}
         </form>
       </Modal>
 

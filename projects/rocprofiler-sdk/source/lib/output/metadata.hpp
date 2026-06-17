@@ -154,6 +154,7 @@ struct metadata
     agent_info_map_t                  agents_map                  = {};
     agent_counter_info_map_t          agent_counter_info          = {};
     agent_pc_sample_config_info_map_t agent_pc_sample_config_info = {};
+    agent_spm_config_info_map_t       agent_spm_config_info       = {};
 
     sdk::buffer_name_info                    buffer_names               = {};
     sdk::callback_name_info                  callback_names             = {};
@@ -204,6 +205,7 @@ struct metadata
     agent_info_ptr_vec_t     get_gpu_agents() const;
     counter_info_vec_t       get_counter_info() const;
     counter_dimension_vec_t  get_counter_dimension_info() const;
+    spm_config_vec_t         get_spm_config_info(rocprofiler_agent_id_t _val) const;
     pc_sample_config_vec_t   get_pc_sample_config_info(rocprofiler_agent_id_t _val) const;
     std::vector<std::string> get_pc_sample_instructions() const { return instruction_decoder; }
     std::vector<std::string> get_pc_sample_comments() const { return instruction_comment; }

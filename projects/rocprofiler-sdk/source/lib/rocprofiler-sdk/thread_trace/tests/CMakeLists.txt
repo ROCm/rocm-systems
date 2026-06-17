@@ -31,7 +31,7 @@ rocprofiler_add_unit_test(
     LABELS "unittests"
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
-        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 set(ROCPROFILER_THREAD_TRACE_PRODUCER_CONSUMER_TEST_SOURCES "producer_consumer.cpp")
@@ -51,12 +51,20 @@ target_link_libraries(
             GTest::gtest_main
             rocprofiler-sdk::counter-test-constants)
 
+# The producer/consumer harness exercises the AQL profile thread-trace path with triple
+# buffering enabled, which is not supported by aqlprofile on GFX11
+# (aqlprofile_att_create_packets() throws "Not supported"). Reuse the shared SQTT
+# triple-buffer architecture gate to skip this suite on unsupported GPUs.
+include(rocprofiler-sdk-utilities)
+rocprofiler_sdk_sqtt_triple_buffer_disabled(THREAD_TRACE_PC_TEST_DISABLED)
+
 rocprofiler_add_unit_test(
     TARGET thread-trace-producer-consumer-test
     SOURCES ${ROCPROFILER_THREAD_TRACE_PRODUCER_CONSUMER_TEST_SOURCES}
     TEST_LIST thread-trace-test_TESTS
     TIMEOUT 100
     LABELS "unittests"
+    DISABLED ${THREAD_TRACE_PC_TEST_DISABLED}
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
         "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
