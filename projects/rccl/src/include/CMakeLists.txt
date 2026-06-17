@@ -147,9 +147,6 @@ set(INCLUDE_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl_device/impl/vector__funcs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl_device/impl/vector__types.h
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl_device/reduce_copy.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/npkit/npkit.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/npkit/npkit_event.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/npkit/npkit_struct.h
     ${CMAKE_CURRENT_SOURCE_DIR}/nvtx3/nvToolsExt.h
     ${CMAKE_CURRENT_SOURCE_DIR}/nvtx3/nvToolsExtCounters.h
     ${CMAKE_CURRENT_SOURCE_DIR}/nvtx3/nvToolsExtCuda.h
