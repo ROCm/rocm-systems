@@ -205,7 +205,13 @@ class BaseRunner(ABC):
         )
         # LD_LIBRARY_PATH default on the test layer; the test's own env (applied
         # next) may override it (e.g. Julia adds extra lib dirs).
-        self.environment.set_test_environment({"LD_LIBRARY_PATH": config.library_path})
+        self.environment.set_test_environment(
+            {"LD_LIBRARY_PATH": config.get_library_path()}
+        )
+        # LD_PRELOAD default (sanitizer builds prepend the asan runtime).
+        preload = config.get_preload_path()
+        if preload:
+            self.environment.set_test_environment({"LD_PRELOAD": preload})
         if env:
             self.environment.set_test_environment(env)
         # ROCPROFSYS_OUTPUT_PATH is framework-controlled (user can change it via

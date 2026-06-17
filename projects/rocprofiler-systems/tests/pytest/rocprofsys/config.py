@@ -67,7 +67,6 @@ class RocprofsysConfig:
     _capabilities: Optional[SystemCapabilities] = field(
         default=None, init=False, repr=False
     )
-    _library_path: Optional[str] = field(default=None, init=False, repr=False)
 
     @property
     def capabilities(self) -> SystemCapabilities:
@@ -76,39 +75,63 @@ class RocprofsysConfig:
             self._capabilities = SystemCapabilities.from_config(self)
         return self._capabilities
 
-    @property
-    def library_path(self) -> str:
-        """LD_LIBRARY_PATH for test execution (computed once, cached).
+    def get_llvm_lib_paths(self) -> list[Path]:
+        """Get list of found ROCm LLVM lib paths.
 
-        Composed, in order, of:
-          1. the rocprofiler-systems lib dir,
-          2. the examples lib dir (installed configs only),
-          3. the inherited shell ``LD_LIBRARY_PATH``, and
-          4. the ROCm LLVM lib dirs (appended as an OMPT fallback).
+        Returns:
+            List of existing LLVM lib paths found, empty list if none found.
         """
-        if self._library_path is None:
-            paths = [str(self.rocprofsys_lib_dir.resolve())]
+        found_paths = []
+        if self.rocm_path:
+            # Match discover_llvm_libdir_for_ompt() logic
+            candidates = [
+                self.rocm_path / "llvm" / "lib",
+                self.rocm_path / "lib" / "llvm" / "lib",
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    found_paths.append(candidate)
+        return found_paths
 
-            if self.is_installed:
-                examples_lib = self.rocprofsys_examples_dir / "lib"
-                if examples_lib.is_dir():
-                    paths.append(str(examples_lib.resolve()))
+    def get_library_path(self) -> str:
+        """Get LD_LIBRARY_PATH including rocprofiler-systems libraries.
 
-            existing = os.environ.get("LD_LIBRARY_PATH", "")
-            if existing:
-                paths.append(existing)
+        Returns:
+            LD_LIBRARY_PATH string with rocprofiler-systems libraries
+        """
+        paths = [str(self.rocprofsys_lib_dir.resolve())]
 
-            if self.rocm_path:
-                # Match discover_llvm_libdir_for_ompt() logic
-                for candidate in (
-                    self.rocm_path / "llvm" / "lib",
-                    self.rocm_path / "lib" / "llvm" / "lib",
-                ):
-                    if candidate.exists():
-                        paths.append(str(candidate.resolve()))
+        # Where libraries for the examples live
+        if self.is_installed:
+            examples_lib = self.rocprofsys_examples_dir / "lib"
+            if examples_lib.is_dir():
+                paths.append(str(examples_lib.resolve()))
 
-            self._library_path = ":".join(paths)
-        return self._library_path
+        existing = os.environ.get("LD_LIBRARY_PATH", "")
+        if existing:
+            paths.append(existing)
+
+        # Add ROCm LLVM lib as fallback
+        for llvm_path in self.get_llvm_lib_paths():
+            paths.append(str(llvm_path))
+
+        return ":".join(paths)
+
+    def get_preload_path(self) -> Optional[str]:
+        """Get LD_PRELOAD for sanitizer builds, or None when not applicable.
+
+        When $ASAN_LIBRARY is set (exported by the sanitizer CI) it is prepended
+        to the shell's LD_PRELOAD so the asan runtime stays first in the link
+        order once rocprof-sys-run appends librocprof-sys-dl.so.
+
+        Returns:
+            LD_PRELOAD string, or None when not building with the sanitizer.
+        """
+        asan_library = os.environ.get("ASAN_LIBRARY")
+        if not asan_library:
+            return None
+        existing = os.environ.get("LD_PRELOAD", "")
+        return f"{asan_library}:{existing}" if existing else asan_library
 
     def get_target_executable(self, name: str) -> Path:
         """Get path to a test target executable.

@@ -8,16 +8,11 @@ The environment handed to a runner is composed of three layers, ordered from
 lowest to highest precedence:
 
 - ``base``: framework defaults for the test type (the ``*_environment``
-  presets). These are NOT inherited verbatim from the shell.
-- ``test``: settings supplied by the test itself (and per-test markers),
-  plus framework-injected per-test values such as the CI timeout/monochrome
-  flags and ``LD_LIBRARY_PATH`` (a test may set its own, otherwise it defaults
-  to the computed ``config.library_path``: rocprofsys libs + shell
-  ``LD_LIBRARY_PATH`` + appended ROCm LLVM libs).
-- ``user``: the environment inherited from the invoking shell (the full
-  ``os.environ``, minus ``LD_LIBRARY_PATH`` which is owned by the test layer).
-  The user layer wins, so anything exported in the shell overrides the base and
-  test layers.
+  presets), NOT inherited verbatim from the shell.
+- ``test``: settings from the test itself plus framework-injected values,
+  including ``LD_LIBRARY_PATH`` and (for sanitizer builds) ``LD_PRELOAD``.
+- ``user``: the inherited shell environment (``os.environ``). The user layer
+  wins, so anything exported in the shell overrides the base and test layers.
 
 Separately, a handful of variables are read directly by config discovery
 (``RocprofsysConfig``) rather than flowing through these layers:
@@ -25,6 +20,12 @@ Separately, a handful of variables are read directly by config discovery
 ``ROCPROFSYS_PYTHON_HINTS``. They can be overridden by the user via the shell,
 but they are tightly coupled with config discovery (they locate the install,
 build, ROCm, and Python trees).
+
+``LD_LIBRARY_PATH`` and ``LD_PRELOAD`` are excluded from the user layer
+entirely; the test layer owns them so an inherited value cannot override the
+framework-computed ordering. The shell's values are still folded in -
+``LD_LIBRARY_PATH`` via ``config.get_library_path()`` and ``LD_PRELOAD`` via
+the runner for sanitizer builds.
 """
 
 from __future__ import annotations
@@ -149,12 +150,11 @@ class TestEnvironment:
     def set_user_environment(self) -> None:
         """Capture the invoking shell environment as the user layer.
 
-        LD_LIBRARY_PATH is intentionally left out: the shell's value is already
-        folded into config.library_path, and LD_LIBRARY_PATH is owned by the
-        test layer (a default is injected there, and certain tests, e.g. Julia,
-        append their own paths).
+        LD_LIBRARY_PATH and LD_PRELOAD are excluded (see
+        the module docstring).
         """
-        self.user.update({k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"})
+        owned = ("LD_LIBRARY_PATH", "LD_PRELOAD")
+        self.user.update({k: v for k, v in os.environ.items() if k not in owned})
 
 
 def base_environment() -> dict[str, str]:

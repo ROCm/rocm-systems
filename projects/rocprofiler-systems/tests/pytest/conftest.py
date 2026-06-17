@@ -1600,7 +1600,7 @@ def _cleanup_temp_patterns() -> list[str]:
 @pytest.fixture(scope="session")
 def library_path(rocprof_config) -> str:
     """Computed LD_LIBRARY_PATH (rocprofsys libs + user override + ROCm LLVM libs)."""
-    return rocprof_config.library_path
+    return rocprof_config.get_library_path()
 
 
 @pytest.fixture
