@@ -5,7 +5,7 @@
 #
 # The -c flag produces a relocatable object with a .hip_fatbin section
 # that contains the Clang offload bundle with the device code object for
-# the specified GPU target. AMDCLANG, ROCM_PATH, and KERNEL_OUTPUT_DIR
+# the specified GPU target. AMDCXX, ROCM_PATH, and KERNEL_OUTPUT_DIR
 # must be set before including this module.
 #
 # Usage: rj_add_device_kernel(<name> <offload_arch>)
@@ -18,7 +18,7 @@ function(rj_add_device_kernel name offload_arch)
     add_custom_command(
         OUTPUT ${out}
         COMMAND
-            ${AMDCLANG} -x hip --offload-arch=${offload_arch}
+            ${AMDCXX} -x hip --offload-arch=${offload_arch}
             --rocm-path=${ROCM_PATH} -fPIC -c -O2 -o ${out} ${src}
         DEPENDS ${src}
         COMMENT "Compiling device kernel: ${name} (${offload_arch})"
