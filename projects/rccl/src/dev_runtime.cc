@@ -1229,10 +1229,27 @@ struct ncclCommProperties_v22902 {
   ncclGinType_t_v22902 ginType;
 };
 
+// Fill full ncclCommProperties_t from a ready communicator. Used by the public API and by the
+// 2.29.2–2.29.3 ABI shim below. Must not recurse through ncclCommQueryProperties (version gate).
+static ncclResult_t ncclCommQueryPropertiesFill(ncclComm_t comm, ncclCommProperties_t* props) {
+  props->rank = comm->rank;
+  props->nRanks = comm->nRanks;
+  props->cudaDev = comm->cudaDev;
+  props->nvmlDev = comm->nvmlDev;
+  props->deviceApiSupport = comm->symmetricSupport;
+  props->multimemSupport = comm->nvlsSupport;
+  props->hostRmaSupport = comm->hostRmaSupport;
+  NCCLCHECK(getGlobalGinType(comm, &props->ginType));
+  NCCLCHECK(getGlobalRailedGinType(comm, &props->railedGinType));
+  NCCLCHECK(ncclDevrInitOnce(comm));
+  props->nLsaTeams = comm->devrState.nLsaTeams;
+  return ncclSuccess;
+}
+
 static ncclResult_t ncclCommQueryProperties_v22902(ncclComm_t comm, struct ncclCommProperties_v22902* props) {
   ncclCommProperties_t newProps = NCCL_COMM_PROPERTIES_INITIALIZER;
 
-  NCCLCHECK(ncclCommQueryProperties(comm, &newProps));
+  NCCLCHECK(ncclCommQueryPropertiesFill(comm, &newProps));
 
   props->rank = newProps.rank;
   props->nRanks = newProps.nRanks;
@@ -1241,7 +1258,9 @@ static ncclResult_t ncclCommQueryProperties_v22902(ncclComm_t comm, struct ncclC
   // We don't provide backwards compatibility for GIN with 2.29.2.  If a communicator needs it, we disable Device API.
   props->deviceApiSupport = (newProps.deviceApiSupport && ncclTeamLsa(comm).nRanks == comm->nRanks);
   props->multimemSupport = newProps.multimemSupport;
-  props->ginType = NCCL_GIN_TYPE_NONE_v22902;
+  // Report the active GIN type (incl. railed single-node); do not force NONE or rccl-tests cannot
+  // build devComm requirements for GIN kernels when the app was compiled with NCCL 2.29.2/2.29.3.
+  props->ginType = (ncclGinType_t_v22902)newProps.ginType;
 
   return ncclSuccess;
 }
@@ -1265,21 +1284,7 @@ ncclResult_t ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* prop
     return ncclSuccess;
   }
 
-  props->rank = comm->rank;
-  props->nRanks = comm->nRanks;
-  props->cudaDev = comm->cudaDev;
-  props->nvmlDev = comm->nvmlDev;
-  props->deviceApiSupport = comm->symmetricSupport;
-  props->multimemSupport = comm->nvlsSupport;
-  props->hostRmaSupport = comm->hostRmaSupport;
-  NCCLCHECK(getGlobalGinType(comm, &props->ginType));
-  NCCLCHECK(getGlobalRailedGinType(comm, &props->railedGinType));
-
-  // Preferring to call ncclDevrInitOnce directly instead to calling ncclTeam* functions because
-  // we can propagate the result of ncclDevrInitOnce back to the caller.
-  NCCLCHECK(ncclDevrInitOnce(comm));
-  props->nLsaTeams = comm->devrState.nLsaTeams;
-
+  NCCLCHECK(ncclCommQueryPropertiesFill(comm, props));
   return ncclSuccess;
 }
 
