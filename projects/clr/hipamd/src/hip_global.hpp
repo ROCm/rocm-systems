@@ -51,7 +51,7 @@ class Function {
   std::vector<amd::Kernel*> dFunc_;  //!< Per-device kernel objects; index matches g_devices
   std::string name_;                 //!< Symbol name for kernel lookup in the program
   FatBinaryInfo** modules_;          //!< Owning fat binary; nullptr for dynamic COs
-  bool isStatic_;                    //!< Performance flag, allows retain on NDRangeKernelCommand to be skipped
+  bool isStatic_;  //!< Performance flag, allows retain on NDRangeKernelCommand to be skipped
 };
 
 class Var {
