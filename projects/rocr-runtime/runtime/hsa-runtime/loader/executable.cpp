@@ -187,7 +187,7 @@ static const char *LOADER_DUMP_PREFIX = "amdcode";
 //
 // The jump is absolute (the pool is not within S_BRANCH range of the code), so
 // the stub loads the 64-bit entry address into a scratch SGPR pair and sets PC.
-// s[32:33] is a safe fixed scratch: RDNA gives every wave 128 physical SGPRs and
+// s[100:101] is a safe fixed scratch: RDNA gives every wave 128 physical SGPRs and
 // these indices are well above the preloaded user+system SGPRs (<= ~20), so they
 // are never a live kernel input -- the kernel writes them before it reads them.
 //
