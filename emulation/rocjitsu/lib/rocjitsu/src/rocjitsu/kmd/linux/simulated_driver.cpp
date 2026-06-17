@@ -526,10 +526,11 @@ int SimulatedDriver::close(uint32_t process_id) {
       leaked_bytes += alloc.size;
       if (trace_enabled)
         leaked_handles.push_back(handle);
-      if (alloc.host_ptr && !(alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)) {
+      if (alloc.host_ptr && alloc.host_ptr_owned) {
         unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
         syscall(SYS_munmap, alloc.host_ptr, alloc.size);
         alloc.host_ptr = nullptr;
+        alloc.host_ptr_owned = false;
       }
       if (alloc.memfd >= 0) {
         {
@@ -552,7 +553,7 @@ int SimulatedDriver::close(uint32_t process_id) {
   }
 
   for (auto &gs : proc.gpu_state_) {
-    if (gs.doorbell_page && gs.doorbell_page_size)
+    if (gs.doorbell_page && gs.doorbell_page_size && daemon_mode_)
       syscall(SYS_munmap, gs.doorbell_page, gs.doorbell_page_size);
   }
 
@@ -916,6 +917,7 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
     return alloc.host_ptr;
 
   void *host_ptr;
+  bool host_ptr_owned = true;
 
   if (alloc.memfd >= 0) {
     if (length > alloc.size) {
@@ -964,6 +966,7 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
     }
     if (reuse_pages) {
       host_ptr = addr;
+      host_ptr_owned = false;
     } else {
       int mflags = MAP_ANONYMOUS;
       mflags |= (flags & MAP_SHARED) ? MAP_SHARED : MAP_PRIVATE;
@@ -976,6 +979,7 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
   }
 
   alloc.host_ptr = host_ptr;
+  alloc.host_ptr_owned = host_ptr_owned;
 
   util::Logger::vm([&](auto &os) {
     os << std::format("mmap: gpu_va={:#x} host_ptr={:#x} size={} flags={:#x}"
@@ -1033,6 +1037,7 @@ int SimulatedDriver::dispatch_munmap(KfdProcess &proc, void *addr, size_t length
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
       syscall(SYS_munmap, addr, length);
       alloc.host_ptr = nullptr;
+      alloc.host_ptr_owned = false;
       return 0;
     }
   }
@@ -1142,10 +1147,12 @@ int SimulatedDriver::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   alloc.user_va = user_provided_va;
 
   auto alloc_mtype = pte_mtype_for_flags(args->flags);
-  if ((args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) && !daemon_mode_) {
+  bool is_userptr = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) != 0;
+  bool is_doorbell = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
+  if (is_userptr && !daemon_mode_) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
     map_to_gpu(proc, va, reinterpret_cast<void *>(va), args->size, alloc_mtype);
-  } else if (daemon_mode_ || !user_provided_va) {
+  } else if (!is_doorbell || daemon_mode_) {
     auto raw_fd = static_cast<int>(
         syscall(SYS_memfd_create, "rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING));
     if (raw_fd >= 0) {
@@ -1163,11 +1170,12 @@ int SimulatedDriver::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
         fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
         fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
 
-        if (daemon_mode_ && !(args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL)) {
+        if (daemon_mode_ && !is_doorbell) {
           auto *mapped =
               safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
           if (mapped != MAP_FAILED) {
             alloc.host_ptr = mapped;
+            alloc.host_ptr_owned = true;
             map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype);
           }
         }
@@ -1258,6 +1266,7 @@ bool SimulatedDriver::allocate_scratch_backing(uint32_t process_id, uint64_t gpu
     alloc.gpu_va = gpu_va;
     alloc.size = aligned_size;
     alloc.host_ptr = host_ptr;
+    alloc.host_ptr_owned = true;
     alloc.handle = proc->next_handle_++;
     alloc.memfd = -1;
     proc->allocations_[alloc.handle] = alloc;
@@ -1589,10 +1598,11 @@ int SimulatedDriver::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
         }
       }
 
-      if (!(alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR))
+      if (alloc.host_ptr_owned)
         syscall(SYS_munmap, alloc.host_ptr, alloc.size);
 
       alloc.host_ptr = new_host_ptr;
+      alloc.host_ptr_owned = true;
       alloc.memfd = promoted_fd;
       {
         std::lock_guard<std::mutex> flk(owned_fds_mutex_);
@@ -1727,6 +1737,7 @@ int SimulatedDriver::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     alloc.flags = alloc_flags;
     alloc.handle = handle;
     alloc.host_ptr = host_ptr;
+    alloc.host_ptr_owned = true;
     alloc.memfd = dup_fd;
     alloc.gpu_id = source_gpu_id;
     alloc.imported = true;
