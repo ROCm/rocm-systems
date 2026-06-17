@@ -1583,7 +1583,7 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_boolean, int, unsigned int, 
   }
 }
 
-void __global__ binaryPartition(int* out, int* ranks)
+void __global__ binaryPartitionCoalesced(int* out, int* ranks)
 {
    if (threadIdx.x >= warpSize / 2) {
      // this group will contain the upper part of the threads
@@ -1600,7 +1600,23 @@ void __global__ binaryPartition(int* out, int* ranks)
    }
 }
 
-TEST_CASE(Unit_Thread_Block_Coalesced_Scan_partition)
+template <unsigned int WarpSize>
+void __global__ binaryPartitionTiled(int* out, int* ranks)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto tile = cg::tiled_partition<WarpSize / 2>(mygroup);
+
+  if (tile.meta_group_rank() == 1) {
+    auto partitioned = cg::binary_partition(tile, threadIdx.x % 2);
+    ranks[threadIdx.x] = partitioned.thread_rank();
+    out[threadIdx.x] = cg::inclusive_scan(partitioned, threadIdx.x);
+  } else {
+    ranks[threadIdx.x] = -1;
+    out[threadIdx.x] = -1;
+  }
+}
+
+TEST_CASE(Unit_Thread_Block_Scan_partition)
 {
   int wavefrontSize = getWarpSize();
   LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int) * wavefrontSize);
@@ -1612,38 +1628,64 @@ TEST_CASE(Unit_Thread_Block_Coalesced_Scan_partition)
   void* resultsPtr = d_result.ptr();
   void* ranksPtr = d_ranks.ptr();
   void* args[] = { &resultsPtr, &ranksPtr };
-  int accumEven = 0;
-  int accumOdd = 0;
+  auto checkResults = [&]() {
+    int accumEven = 0;
+    int accumOdd = 0;
 
-  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(binaryPartition),
-                                       gridDim,
-                                       blockDim,
-                                       args,
-                                       0,
-                                       nullptr));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(h_ranks.host_ptr(), d_ranks.ptr(),
-                      h_ranks.size_bytes(), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
-                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+    for (int laneId = 0; laneId < getWarpSize(); laneId++) {
+      if (laneId >= wavefrontSize / 2) {
+        if (laneId % 2 == 0) {
+          accumEven += laneId;
+        } else {
+          accumOdd += laneId;
+        }
 
-  for (int laneId = 0; laneId < getWarpSize(); laneId++) {
-    if (laneId >= wavefrontSize / 2) {
-      if (laneId % 2 == 0) {
-        accumEven += laneId;
+        INFO("laneId: " << laneId);
+        REQUIRE(h_ranks.host_ptr()[laneId] == (laneId - wavefrontSize / 2) / 2);
+        REQUIRE(h_result.host_ptr()[laneId] == (laneId % 2 ? accumOdd : accumEven));
       } else {
-        accumOdd += laneId;
+        INFO("laneId: " << laneId);
+        REQUIRE(h_ranks.host_ptr()[laneId] == -1);
+        REQUIRE(h_result.host_ptr()[laneId] == -1);
       }
-
-      INFO("laneId: " << laneId);
-      REQUIRE(h_ranks.host_ptr()[laneId] == (laneId - wavefrontSize / 2) / 2);
-      REQUIRE(h_result.host_ptr()[laneId] == (laneId % 2 ? accumOdd : accumEven));
-    } else {
-      INFO("laneId: " << laneId);
-      REQUIRE(h_ranks.host_ptr()[laneId] == -1);
-      REQUIRE(h_result.host_ptr()[laneId] == -1);
     }
+  };
+
+  // the result of both sections must be the same; in one we use coalesced_threads to sub-divide
+  // into higher-order and lower-order threads, in another we just use cg::tiled_partition to do the
+  // equivalent
+  SECTION("coalesced") {
+    HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(binaryPartitionCoalesced),
+                                        gridDim,
+                                        blockDim,
+                                        args,
+                                        0,
+                                        nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(h_ranks.host_ptr(), d_ranks.ptr(),
+                        h_ranks.size_bytes(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                        h_result.size_bytes(), hipMemcpyDeviceToHost));
+    checkResults();
+  }
+
+  SECTION("tiled") {
+    void* kernelPtr = reinterpret_cast<void*>(wavefrontSize == 32?
+                                              binaryPartitionTiled<32> : binaryPartitionTiled<64>);
+    HIP_CHECK(hipLaunchCooperativeKernel(kernelPtr,
+                                         gridDim,
+                                         blockDim,
+                                         args,
+                                         0,
+                                         nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(h_ranks.host_ptr(), d_ranks.ptr(),
+                        h_ranks.size_bytes(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                        h_result.size_bytes(), hipMemcpyDeviceToHost));
+    checkResults();
   }
 }
 
