@@ -388,7 +388,17 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   // is freed before a later import/ack cleanup path occurs.
   {
     std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
-    ipc_sock_server_conns_.erase(reinterpret_cast<uint64_t>(ptr));
+    auto it = ipc_sock_server_conns_.find(reinterpret_cast<uint64_t>(ptr));
+    if (it != ipc_sock_server_conns_.end()) {
+      // Warn if freeing memory that was exported for IPC. Importers that have
+      // not yet attached will fail. This is not a bug - it's the expected IPC
+      // contract that exporters must keep memory alive until importers are done.
+      // However, this warning helps catch accidental early-free bugs.
+      debug_warning(false &&
+                    "Freeing memory with active IPC export. "
+                    "Pending importers will fail to attach.");
+      ipc_sock_server_conns_.erase(it);
+    }
   }
 
   // Notifiers can't run while holding the lock or the callback won't be able to manage memory.
