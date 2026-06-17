@@ -209,6 +209,14 @@ _libraries = {{}}
 # Versioned SONAME the system package ships; matches src/CMakeLists.txt SOVERSION.
 _AMDSMI_LIB_SONAME = "{library_name}.26"
 
+# Whether the loader may fall back to the system SONAME after the bundled
+# wheel-library check. The committed wrapper and the system rpm/deb keep this
+# True. The pip wheel build flips it to False at package time so a wheel never
+# loads a system libamd_smi.so -- a wheel missing its bundled
+# libamd_smi_python.so fails loudly instead of silently importing an unrelated
+# system library (which would risk symbol conflicts inside PyTorch / JAX).
+_AMDSMI_ALLOW_SYSTEM_FALLBACK = True
+
 
 def _load_library():
     \"\"\"Load the AMD SMI shared library.
@@ -216,7 +224,8 @@ def _load_library():
     Order:
       1. ``AMDSMI_LIB_OVERRIDE`` env var (ABI-test escape hatch).
       2. ``libamd_smi_python.so`` next to this file (pip wheel).
-      3. SONAME via the dynamic linker (system rpm / deb).
+      3. SONAME via the dynamic linker (system rpm / deb); skipped when
+         _AMDSMI_ALLOW_SYSTEM_FALLBACK is False (pip wheel).
     \"\"\"
     mode = getattr(ctypes, "RTLD_LOCAL", 0)
 
@@ -227,6 +236,12 @@ def _load_library():
     bundled = Path(__file__).resolve().parent / "libamd_smi_python.so"
     if bundled.exists():
         return ctypes.CDLL(str(bundled), mode=mode), str(bundled)
+
+    if not _AMDSMI_ALLOW_SYSTEM_FALLBACK:
+        raise OSError(
+            "bundled libamd_smi_python.so is missing from this amdsmi wheel; "
+            "refusing to fall back to a system libamd_smi.so"
+        )
 
     return ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode), _AMDSMI_LIB_SONAME
 

@@ -140,6 +140,14 @@ if(BUILD_PYTHON_WHEEL)
         python_wheel
         ALL
         DEPENDS python_package
+        # The wheel bundles libamd_smi_python.so, so it must never fall back
+        # to a system libamd_smi.so. Flip the loader flag in the staged copy
+        # (only the wheel ships this file) so a wheel that is missing its
+        # bundled .so fails loudly instead of loading an unrelated system lib.
+        COMMAND
+            ${Python3_EXECUTABLE} -c
+            "import pathlib, sys; p = pathlib.Path(sys.argv[1]); t = p.read_text(); k = '_AMDSMI_ALLOW_SYSTEM_FALLBACK = True'; assert t.count(k) == 1, 'fallback flag anchor not found in staged wheel wrapper'; p.write_text(t.replace(k, '_AMDSMI_ALLOW_SYSTEM_FALLBACK = False', 1))"
+            ${PY_PACKAGE_DIR}/amdsmi_wrapper.py
         COMMAND
             ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} ${Python3_EXECUTABLE} -m pip
             wheel --no-deps -w ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
