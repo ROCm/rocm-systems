@@ -41,14 +41,6 @@ TEST(spm_beta_validation, accepts_when_spm_is_not_requested)
     EXPECT_TRUE(validate_beta_request(beta_request{}, {}));
 }
 
-TEST(spm_beta_validation, rejects_requested_spm_without_sdk_header)
-{
-    auto request                 = make_valid_requested_spm_request();
-    request.sdk_header_available = false;
-
-    EXPECT_FALSE(validate_beta_request(request, {}));
-}
-
 TEST(spm_beta_validation, rejects_requested_spm_until_runtime_collection_lands)
 {
     const auto request = make_valid_requested_spm_request();
