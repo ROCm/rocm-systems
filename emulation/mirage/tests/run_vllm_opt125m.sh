@@ -13,13 +13,19 @@
 #   * `--mount $HF_CACHE:/root/.cache/huggingface`  -> becomes the
 #     container `-v $HF_CACHE:/root/.cache/huggingface` bind mount, so the
 #     model weights are cached on the host and reused across runs.
+#   * `--port $PORT:$PORT`  -> publishes the container port on the host
+#     (docker `-p`), so the server is reachable at `localhost:$PORT`.
 #   * `--daemon`  -> run the rocjitsu emulator in out-of-process daemon
 #     mode (as requested).
-#   * mirage has no host port-publish flag. Each node container joins a
-#     per-session bridge network (`mirage-<session>`), so the server is
-#     reached over that network via the container's IP. If the host
-#     cannot route to the bridge (e.g. rootless podman), the script
-#     falls back to running the request from inside the container.
+#
+# This uses the manylinux-built mirage from
+# `scripts/mirage-docker-build.sh` rather than `cargo run`. mirage
+# bind-mounts its own binary (and the rocjitsu KMD interposer) into the
+# vLLM workload container; a binary built on a modern host links a newer
+# glibc than the vLLM image carries and fails with `GLIBC_2.39 not
+# found`. The manylinux build links an old, broadly-compatible glibc so
+# it runs inside the vLLM container without the `--hack` workaround. The
+# script builds it on demand when missing.
 #
 # Env knobs:
 #   PROFILE     mirage profile (default: mi350x)
@@ -29,6 +35,8 @@
 #   PORT        in-container server port (default: 8000)
 #   PROVIDER    container provider binary (default: autodetect docker/podman)
 #   READY_TIMEOUT  seconds to wait for the server (default: 600)
+#   MIRAGE_BIN  manylinux mirage binary (default: <mirage>/build/manylinux/bin/mirage)
+#   SKIP_BUILD  set to 1 to reuse an existing MIRAGE_BIN without rebuilding
 #
 set -euo pipefail
 
@@ -41,9 +49,19 @@ MODEL="${MODEL:-facebook/opt-125m}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 PORT="${PORT:-8000}"
 READY_TIMEOUT="${READY_TIMEOUT:-600}"
+MIRAGE_BIN="${MIRAGE_BIN:-$MIRAGE_DIR/build/manylinux/bin/mirage}"
 
 log()  { printf '==> %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+
+# Build the glibc-compatible mirage binary in the manylinux container
+# unless it already exists (or SKIP_BUILD=1 forces reuse).
+if [[ "${SKIP_BUILD:-0}" != "1" && ! -x "$MIRAGE_BIN" ]]; then
+  log "building manylinux mirage via scripts/mirage-docker-build.sh"
+  "$MIRAGE_DIR/scripts/mirage-docker-build.sh" "$MIRAGE_DIR/build/manylinux"
+fi
+[[ -x "$MIRAGE_BIN" ]] || fail "mirage binary not found: $MIRAGE_BIN (run scripts/mirage-docker-build.sh)"
+log "using mirage binary: $MIRAGE_BIN"
 
 # Pick a container provider so we can inspect the launched node container.
 if [[ -n "${PROVIDER:-}" ]]; then
@@ -71,11 +89,12 @@ log "caching model weights in $HF_CACHE"
 RUN_LOG="$(mktemp -t mirage-vllm.XXXXXX.log)"
 log "starting vLLM (model=$MODEL) via mirage run --daemon"
 cd "$MIRAGE_DIR"
-cargo run --quiet -- run \
+"$MIRAGE_BIN" run \
   --daemon \
   --profile "$PROFILE" \
   --image "$IMAGE" \
   --container-provider "$PROVIDER" \
+  --port "$PORT:$PORT" \
   --mount "$HF_CACHE:/root/.cache/huggingface" \
   -- vllm serve "$MODEL" --host 0.0.0.0 --port "$PORT" \
   >"$RUN_LOG" 2>&1 &
@@ -121,11 +140,14 @@ CONTAINER_IP="$("$PROVIDER" inspect -f \
   '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
 log "container IP on session network: ${CONTAINER_IP:-<unknown>}"
 
-# Helper: run curl against the server. Prefer reaching the exposed port
-# from the host via the container IP; fall back to running curl inside
-# the container if the host cannot route to the session network.
+# Helper: run curl against the server. The `--port` publish makes the
+# server reachable at `localhost:$PORT` on the host; fall back to the
+# container IP, then to running curl inside the container.
 api_curl() {
   local path="$1"; shift
+  if curl -fsS --max-time 5 "http://localhost:$PORT$path" "$@" 2>/dev/null; then
+    return 0
+  fi
   if [[ -n "$CONTAINER_IP" ]] && \
      curl -fsS --max-time 5 "http://$CONTAINER_IP:$PORT$path" "$@" 2>/dev/null; then
     return 0
