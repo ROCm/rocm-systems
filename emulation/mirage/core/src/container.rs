@@ -31,6 +31,12 @@ use crate::session::SessionId;
 /// on every node process, containerised or not.
 pub const ENV_RANK: &str = "MIRAGE_RANK";
 
+/// `torch.distributed` global rank: the rank's index across the whole
+/// job. Aliases [`ENV_RANK`] so PyTorch's `env://` init method (and
+/// `torchrun`) can read the rank under its standard name on every node
+/// without the workload having to translate mirage's own variables.
+pub const ENV_TORCH_RANK: &str = "RANK";
+
 /// Environment variable carrying the head node's address. Set on every
 /// node, including the head (rank 0), which gets `localhost`.
 pub const ENV_HEAD_ADDR: &str = "MIRAGE_HEAD_ADDR";

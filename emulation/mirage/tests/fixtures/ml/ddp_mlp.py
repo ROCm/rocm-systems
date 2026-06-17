@@ -65,9 +65,13 @@ def main() -> int:
     world_size = env_int("WORLD_SIZE", 1)
     local_rank = env_int("LOCAL_RANK", 0)
 
-    # Pin this rank to its GPU and join the NCCL process group.
-    torch.cuda.set_device(local_rank)
-    device = torch.device("cuda", local_rank)
+    # Pin this rank to its GPU and join the NCCL process group. With one
+    # GPU per node this is device 0; when several ranks share a host that
+    # exposes multiple GPUs, spread them so each rank owns a distinct GPU.
+    device_count = torch.cuda.device_count()
+    device_index = rank % device_count if device_count else local_rank
+    torch.cuda.set_device(device_index)
+    device = torch.device("cuda", device_index)
     dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
     log(
         f"joined process group: world_size={world_size} device={device} "
@@ -79,7 +83,7 @@ def main() -> int:
         # broadcast-on-construction has matching replicas to align.
         torch.manual_seed(seed)
         model = MLP().to(device)
-        ddp_model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+        ddp_model = DDP(model, device_ids=[device_index], output_device=device_index)
 
         # A fixed linear target so the loss is deterministic and must drop.
         torch.manual_seed(1234)

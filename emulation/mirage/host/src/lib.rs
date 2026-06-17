@@ -40,7 +40,7 @@ use chrono::Utc;
 use mirage_core::common::MaybeRef;
 use mirage_core::container::{
     ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_LOCAL_RANK, ENV_MASTER_ADDR,
-    ENV_MASTER_PORT, ENV_RANK, ENV_WORLD_SIZE, container_name,
+    ENV_MASTER_PORT, ENV_RANK, ENV_TORCH_RANK, ENV_WORLD_SIZE, container_name,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
@@ -715,6 +715,7 @@ fn node_mirage_env(
     let head = if rank == 0 { "localhost" } else { head_addr };
     vec![
         (ENV_RANK.to_string(), rank.to_string()),
+        (ENV_TORCH_RANK.to_string(), rank.to_string()),
         (ENV_HEAD_PORT.to_string(), head_port.to_string()),
         (ENV_HEAD_ADDR.to_string(), head.to_string()),
         (ENV_MASTER_ADDR.to_string(), head.to_string()),
@@ -1373,6 +1374,8 @@ mod tests {
                 .into_iter()
                 .collect();
         assert_eq!(env[ENV_RANK], "0");
+        // torch.distributed reads the global rank under its standard name.
+        assert_eq!(env[ENV_TORCH_RANK], "0");
         assert_eq!(env[ENV_HEAD_ADDR], "localhost");
         assert_eq!(env[ENV_HEAD_PORT], "29500");
         // torch.distributed rendezvous vars alias the head addr/port.
@@ -1391,6 +1394,8 @@ mod tests {
                 .into_iter()
                 .collect();
         assert_eq!(env[ENV_RANK], "2");
+        // torch.distributed reads the global rank under its standard name.
+        assert_eq!(env[ENV_TORCH_RANK], "2");
         // Workers see the head's address, not localhost.
         assert_eq!(env[ENV_HEAD_ADDR], "mirage-sess-node-0");
         assert_eq!(env[ENV_MASTER_ADDR], "mirage-sess-node-0");
