@@ -30,7 +30,7 @@ This document describes the DBI subsystem as currently implemented. The first en
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────────┐│
 │  │  CodeObjectPatcher                                           ││
-│  │  ELF mutation: splice .text, append .rj_trampolines, emit    ││
+│  │  ELF mutation: splice + grow .text with trampoline cave, emit││
 │  └──────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -56,7 +56,7 @@ ResolvedInstrumentationSite -- one validated anchor + snapshot of the
       |  make_trampoline_plan() + TrampolineBuilder::build()
       v
 (preflight: per-site plan + built bytes, accumulated locally)
-      |  splice anchors + append .rj_trampolines + emit()
+      |  splice anchors + append trampoline caves into .text + emit()
       v
 InstrumentedCodeObject      -- patched ELF + diagnostics
 ```
@@ -65,7 +65,7 @@ InstrumentedCodeObject      -- patched ELF + diagnostics
 
 - Lazy CFG construction: blocks are decoded on the first call that needs them via `Decoder::create(arch)` + `BasicBlock::build(obj, *decoder)`. Decoder creation failure (RV32I/RV64I/INVALID) surfaces as a structured `ValidationResult` / `InstrumentedCodeObject` error, not a crash.
 - `validate_points()` looks up the decoded `Instruction` at each requested `anchor_offset` and runs `validate_anchor()`. All-or-nothing today: any per-site failure empties `sites` and reports diagnostics in `errors`.
-- `patch()` runs validation, then per-site `make_trampoline_plan()` + `TrampolineBuilder::build()` as preflight. Only after every site succeeds does it splice patched anchor bytes into a local `.text` copy, `overwrite_text()`, accumulate trampoline words via `append_cave_body()`, and materialize the section with `append_cave_section(".rj_trampolines")`. Returns `InstrumentedCodeObject{elf_bytes, errors, warnings}`.
+- `patch()` runs validation, then per-site `make_trampoline_plan()` + `TrampolineBuilder::build()` as preflight. Only after every site succeeds does it splice patched anchor bytes into a local `.text` copy, `append_words()` each trampoline after the original bytes as a local code cave, and grow the section in one `replace_text()` call. Returns `InstrumentedCodeObject{elf_bytes, errors, warnings}`.
 - `patch_with_debug_summaries()` is a test/debug entry point returning `InstrumentedCodeObjectDebug` (extends `InstrumentedCodeObject` with per-site `InstrumentationPatch` summaries — schema unstable; production callers should prefer `patch()` and recover per-site info from a fresh disassembly).
 - Single-attempt: both entry points share one budget. After `patched_ = true`, subsequent calls return a fatal error. Recoverable errors require constructing a new Instrumentor.
 
@@ -233,21 +233,24 @@ For a code object with one queued `InstrumentationPoint` at `anchor_offset`:
 
 1. **Lazy block decode:** On the first stage that needs the CFG, `Decoder::create(arch)` + `BasicBlock::build(obj, *decoder)` populates `blocks_`. Unsupported arch surfaces as a fatal error here.
 2. **Validate:** `validate_points()` walks `points_`; for each, `find_instruction_at_offset()` locates the decoded `Instruction`, then `validate_anchor()` runs milestone-scoped + structural checks and produces a `ResolvedInstrumentationSite` capturing the original bytes.
-3. **Plan + build (preflight):** For each site, `make_trampoline_plan(site, arch, trampoline_offset)` produces a canonical inline-nop plan (`before_items = {{ s_nop 0 }}`, `emit_original = true`); `validate_inline_nop_plan()` rechecks shape; `TrampolineBuilder::build(plan)` lowers it to `TrampolineBytes`. Trampoline cursor is derived from `patcher.cave_start()`. Nothing is written to the patcher yet.
-4. **Splice:** Once every site preflighted, copy `.text` into a local buffer, `memcpy` each `patched_anchor_bytes` into its `anchor_offset`, then `patcher.overwrite_text()`.
-5. **Append:** For each site, `patcher.append_cave_body(trampoline_words)`; then `patcher.append_cave_section(".rj_trampolines")` materializes the new executable section immediately after `.text`.
-6. **Emit:** `patcher.emit()` returns the patched ELF.
+3. **Plan + build (preflight):** For each site, `make_trampoline_plan(site, arch, trampoline_offset)` produces a canonical inline-nop plan (`before_items = {{ s_nop 0 }}`, `emit_original = true`); `validate_inline_nop_plan()` rechecks shape; `TrampolineBuilder::build(plan)` lowers it to `TrampolineBytes`. The trampoline cursor begins at `patcher.text_size()` (the first byte of the local cave) and advances by each built trampoline's size. Nothing is written to the patcher yet.
+4. **Assemble + replace:** Once every site preflighted, copy `.text` into a local buffer, `memcpy` each `patched_anchor_bytes` into its `anchor_offset`, then `append_words()` every trampoline after the original bytes as a local code cave. A single `patcher.replace_text()` grows `.text` in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries).
+5. **Emit:** `patcher.emit()` returns the patched ELF.
 
-The trampoline body for one site lays out as:
+The trampolines live inside `.text`, immediately after the original kernel bytes (like what DBT currently does). Keeping a single executable `.text` section avoids loaders that only treat `.text` as executable, and keeps cave offsets expressible as `.text`-relative bytes. Because the original bytes do not move, no branch offsets in the original code are relocated — only the in-place `s_branch` at each anchor is rewritten. One site lays out as:
 
 ```
-.rj_trampolines:
-  s_nop 0                     <-- inline-nop placeholder (becomes probe call later)
-  <relocated original word(s)> <-- 4 or 8 bytes, same encoding as the anchor
-  s_branch <return>           <-- back to anchor_offset + original_size
-
-.text @ anchor_offset:
-  s_branch <trampoline>       <-- forward branch into .rj_trampolines
+.text:
+  [original kernel bytes]
+  ...
+  @ anchor_offset:
+    s_branch <trampoline>       <-- forward branch into the local cave
+  ...
+  [local cave, after the original bytes]
+  @ trampoline_offset:
+    s_nop 0                     <-- inline-nop placeholder (becomes probe call later)
+    <relocated original word(s)> <-- 4 or 8 bytes, same encoding as the anchor
+    s_branch <return>           <-- back to anchor_offset + original_size
 ```
 
 Branch offsets are computed in SOPP `simm16` units; the trampoline must lie within `±32768 * 4` bytes of the anchor. For unusually large kernels this would require trampoline islands, which remain future work (same constraint as DBT code caves).
@@ -259,6 +262,6 @@ Branch offsets are computed in SOPP `simm16` units; the trampoline must lie with
 - **Unit (`tests/patch/instrumentor_test.cpp`):** Validator coverage (each rejection path on synthetic anchors, including the bounds-overflow regression for `is_relocatable_anchor`), inline-nop plan guardrail, `make_trampoline_plan`, end-to-end `patch()` on a synthetic ELF (expected anchor splice + trampoline layout + reparse), and a decoded round-trip of every word in the emitted trampoline.
 - **Unit (`tests/patch/trampoline_builder_test.cpp`):** Builder byte-layout contract, branch math, arch-honoring opcode selection, INT16 limit boundary cases.
 - **Unit (`tests/patch/instruction_builder_test.cpp`):** `compute_sopp_branch_simm16` boundary / alignment / overflow / negative-unaligned-delta.
-- **Static DBI smoke (`tests/dbi/hsa_dbi_smoke_test.cpp`, `HsaDbiSmokeStatic`):** Loads a real compiled gfx90a `vector_add` ELF, runs `Instrumentor::patch()`, asserts the patched ELF differs from the original, decodes the anchor as `s_branch`, and confirms `.rj_trampolines` exists. No GPU required.
+- **Static DBI smoke (`tests/dbi/hsa_dbi_smoke_test.cpp`, `HsaDbiSmokeStatic`):** Loads a real compiled gfx90a `vector_add` ELF, runs `Instrumentor::patch()`, asserts the patched ELF differs from the original, decodes the anchor as `s_branch`, and confirms `.text` grew to hold the appended trampoline cave. No GPU required.
 - **Hardware DBI smoke (`HsaDbiSmokeHardware`, gated on `HAS_CDNA2_GPU`):** Three tests on a real gfx90a GPU — patched ELF loads + validates via HSA; dispatched kernel produces bit-identical output to the original (the inline-nop placeholder is a no-op); a *sabotage* test overwrites the trampoline's `s_nop 0` with `s_endpgm 0` and asserts the kernel actually fails, proving the GPU genuinely executes the trampoline path rather than silently bypassing the splice. `hsa_init` / `hsa_shut_down` and gfx90a agent enumeration run once per suite via `SetUpTestSuite` / `TearDownTestSuite`.
 - Run with `build/tests/rocjitsu_tests` and `build/tests/hsa_dbi_smoke_test`.

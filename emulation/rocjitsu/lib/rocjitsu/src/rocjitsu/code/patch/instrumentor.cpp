@@ -9,6 +9,7 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -311,18 +312,16 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   const auto &sites = validation.sites;
 
   // Construct the patcher and preflight builder output before mutating it.
-  // TODO: The "cave" terminology is inherited from the patcher API (originally
-  // added for DBT). For DBI the appended section is not really "unused space".
-  // Rename the patcher API to something like `appended_section_*` so DBI
-  // reads naturally too.
+  // Each trampoline is appended directly after the original .text bytes as a
+  // local code cave (as in the current DBT design).
   CodeObjectPatcher patcher(obj_);
-  patcher.set_cave_start(patcher.text_size());
+  const uint64_t cave_start = patcher.text_size();
 
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
-  // Derive the trampoline cursor from the patcher's recorded cave_start so
-  // the cave coordinate is established in exactly one place.
-  uint64_t cave_cursor = patcher.cave_start();
+  // The trampoline cursor advances through the local cave that begins at the
+  // first byte after the original .text.
+  uint64_t cave_cursor = cave_start;
   for (const auto &site : sites) {
     const uint64_t trampoline_offset = cave_cursor;
     TrampolinePlan plan = make_trampoline_plan(site, arch_, trampoline_offset);
@@ -349,23 +348,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     return result;
 
   // Every per-site validation, branch-range check, and trampoline-byte
-  // construction has succeeded up to this point. Now time to patch.
-  // `append_cave_section` below could theoretically fail if the `.text`
-  // section is missing, but that should have been caught earlier.
-  // Splice patched anchors into a local copy of .text, then overwrite once.
+  // construction has succeeded up to this point. Assemble the new .text in one
+  // buffer: the original bytes with each anchor spliced to its forward branch,
+  // followed by every trampoline appended as the local cave. replace_text()
+  // grows .text in place and fixes up the surrounding ELF (section/segment
+  // sizes, moved symbols, descriptor entries).
   const auto text_span = patcher.text_bytes();
-  std::vector<uint8_t> local_text(text_span.begin(), text_span.end());
+  std::vector<uint8_t> new_text(text_span.begin(), text_span.end());
   for (const auto &a : applied) {
-    std::memcpy(local_text.data() + a.site->anchor_offset, a.bytes.patched_anchor_bytes.data(),
+    std::memcpy(new_text.data() + a.site->anchor_offset, a.bytes.patched_anchor_bytes.data(),
                 a.site->original_size);
   }
-  patcher.overwrite_text(local_text);
-
-  // Append trampoline words and materialize the section.
   for (const auto &a : applied)
-    patcher.append_cave_body(a.bytes.trampoline_words);
-  if (!patcher.append_cave_section(".rj_trampolines")) {
-    result.errors.emplace_back("failed to append .rj_trampolines section");
+    append_words(new_text, a.bytes.trampoline_words);
+  if (!patcher.replace_text(new_text)) {
+    result.errors.emplace_back("failed to replace .text with the instrumented code");
     return result;
   }
 

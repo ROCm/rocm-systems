@@ -19,7 +19,7 @@
 ///         |  make_trampoline_plan() + TrampolineBuilder::build()
 ///         v
 ///   (preflight: per-site plan + built bytes, accumulated locally)
-///         |  splice anchors + append .rj_trampolines + emit()
+///         |  splice anchors + append trampoline caves into .text + emit()
 ///         v
 ///   InstrumentedCodeObject      -- patched ELF + per-site InstrumentationPatch
 ///

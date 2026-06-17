@@ -377,7 +377,7 @@ protected:
 //   - patcher silently produced the original bytes (e.g. Instrumentor::patch
 //     short-circuited without applying the patch)
 //   - patch landed at a different offset than anchor_offset_ records
-//   - .rj_trampolines section is missing from the patched ELF
+//   - the trampoline cave was not appended to .text
 TEST_F(HsaDbiSmokeStatic, PatchedElfActuallyContainsInstrumentation) {
   // (a) Patcher produced different bytes from the original.
   ASSERT_NE(patched_elf_bytes_, original_elf_bytes_)
@@ -406,15 +406,12 @@ TEST_F(HsaDbiSmokeStatic, PatchedElfActuallyContainsInstrumentation) {
         << ") - was the patch applied?";
   }
 
-  // (c) Patched ELF has a .rj_trampolines section.
-  bool found_tramp = false;
-  for (const Section *s : patched.code_sections()) {
-    if (s->name() == ".rj_trampolines") {
-      found_tramp = true;
-      break;
-    }
-  }
-  EXPECT_TRUE(found_tramp) << ".rj_trampolines section missing from patched ELF";
+  // (c) The trampoline cave was appended to .text
+  AmdGpuCodeObject original(original_elf_bytes_.data(), original_elf_bytes_.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_FALSE(original.text_sections().empty());
+  EXPECT_GT(text->size(), original.text_sections().front()->size())
+      << ".text must grow to hold the appended trampoline cave";
 }
 
 // Load patched ELF into an HSA executable and validate. No dispatch.
@@ -522,7 +519,7 @@ TEST_F(HsaDbiSmokeHardware, PatchedKernelDispatchMatchesOriginal) {
 }
 
 // "Sabotage" verification: overwrite the s_nop 0 placeholders in the patched
-// trampolines with s_endpgm 0 one at a time. If the GPU genuinely takes the trampoline
+// trampolines with s_endpgm one at a time. If the GPU genuinely takes the trampoline
 // path, every wave terminates before reaching the relocated instruction and
 // the output stays at the pre-dispatch zero pattern. If that trampoline is
 // somehow bypassed (e.g., the forward s_branch didn't take effect), the
@@ -540,37 +537,33 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
   hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u);
 
-  // Find .rj_trampolines in the patched ELF and overwrite its first 4 bytes
-  // (the s_nop 0 placeholder) with s_endpgm 0.
+  // The trampolines live inside .text at .text-relative offset
+  // patches_[i].trampoline_offset. Overwrite the first 4 bytes of each
+  // trampoline (the s_nop 0 placeholder) with s_endpgm.
   std::vector<uint8_t> sabotaged = patched_elf_bytes_;
   AmdGpuCodeObject parsed(sabotaged.data(), sabotaged.size());
   ASSERT_TRUE(parsed.is_valid());
-  const Section *tramp = nullptr;
-  for (const Section *s : parsed.code_sections()) {
-    if (s->name() == ".rj_trampolines") {
-      tramp = s;
-      break;
-    }
-  }
-  ASSERT_NE(tramp, nullptr);
-  ASSERT_GE(tramp->size(), 4u);
+  ASSERT_FALSE(parsed.text_sections().empty());
+  const Section *text = parsed.text_sections().front();
 
   ASSERT_EQ(anchor_count_, 2u);
   ASSERT_EQ(patches_.size(), 2u);
+  ASSERT_GE(text->size(), patches_[1].trampoline_offset + 4);
+  // File offset of the first trampoline's placeholder word.
+  const uint64_t tramp0_file_off = text->sectionOffset() + patches_[0].trampoline_offset;
   // Before sabotaging: verify the bytes we're about to overwrite are indeed
   // s_nop 0. If this assertion fails, the orchestrator's trampoline layout
   // no longer starts with the placeholder we think it does, and the
   // sabotage premise ("we replaced the no-op with s_endpgm") would be a lie.
   constexpr uint32_t kSNop0 = 0xBF800000u;
   uint32_t pre_overwrite = 0;
-  std::memcpy(&pre_overwrite, sabotaged.data() + tramp->sectionOffset(), sizeof(pre_overwrite));
+  std::memcpy(&pre_overwrite, sabotaged.data() + tramp0_file_off, sizeof(pre_overwrite));
   ASSERT_EQ(pre_overwrite, kSNop0) << "Expected s_nop 0 (0x" << std::hex << kSNop0
-                                   << ") at start of .rj_trampolines but found 0x" << pre_overwrite
-                                   << " - trampoline body layout changed?";
+                                   << ") at start of the trampoline cave but found 0x"
+                                   << pre_overwrite << " - trampoline body layout changed?";
 
-  // s_endpgm 0 on CDNA: SOPP prefix (0x17F) << 23 | opcode 1 << 16 | simm16 0.
   constexpr uint32_t kSEndpgm0 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
-  std::memcpy(sabotaged.data() + tramp->sectionOffset(), &kSEndpgm0, sizeof(kSEndpgm0));
+  std::memcpy(sabotaged.data() + tramp0_file_off, &kSEndpgm0, sizeof(kSEndpgm0));
 
   // Same inputs as the dispatch test so we can compare against its golden.
   constexpr uint32_t N = 1024;
@@ -611,7 +604,7 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
                                  << "/" << N << " elements - trampoline appears bypassed";
 
   // Revert first trampoline in sabotaged
-  std::memcpy(sabotaged.data() + tramp->sectionOffset(), &kSNop0, sizeof(kSNop0));
+  std::memcpy(sabotaged.data() + tramp0_file_off, &kSNop0, sizeof(kSNop0));
   auto unsabotaged_out = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);
   ASSERT_EQ(unsabotaged_out.size(), N) << "HSA error before unsabotaged run could finish";
 
@@ -624,14 +617,13 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
   int64_t offset_between_anchors = patches_[1].trampoline_offset - patches_[0].trampoline_offset;
   EXPECT_TRUE(offset_between_anchors)
       << "Both selected trampolines have the same trampoline offset";
-  std::memcpy(&pre_overwrite, sabotaged.data() + tramp->sectionOffset() + offset_between_anchors,
+  std::memcpy(&pre_overwrite, sabotaged.data() + tramp0_file_off + offset_between_anchors,
               sizeof(pre_overwrite));
   ASSERT_EQ(pre_overwrite, kSNop0) << "Expected s_nop 0 (0x" << std::hex << kSNop0
-                                   << ") at start of .rj_trampolines but found 0x" << pre_overwrite
-                                   << " - trampoline body layout changed?";
+                                   << ") at start of the trampoline cave but found 0x"
+                                   << pre_overwrite << " - trampoline body layout changed?";
 
-  // s_endpgm 0 on CDNA: SOPP prefix (0x17F) << 23 | opcode 1 << 16 | simm16 0.
-  std::memcpy(sabotaged.data() + tramp->sectionOffset() + offset_between_anchors, &kSEndpgm0,
+  std::memcpy(sabotaged.data() + tramp0_file_off + offset_between_anchors, &kSEndpgm0,
               sizeof(kSEndpgm0));
 
   auto sabotaged_out_2 = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);

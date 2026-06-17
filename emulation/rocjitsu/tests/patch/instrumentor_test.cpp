@@ -817,6 +817,8 @@ protected:
   void Init(uint64_t num_elf_nops, uint64_t num_instrumentation_points) {
     // leaving anchor_offset = 0 empty, so will fail on num_elf_nops == num_instrumentation_points
     ASSERT_TRUE(num_elf_nops > num_instrumentation_points);
+    num_elf_nops_ = num_elf_nops;
+    num_points_ = num_instrumentation_points;
 
     image_ = make_gfx950_elf_with_nop_text(num_elf_nops * 4);
     AmdGpuCodeObject obj(image_.data(), image_.size());
@@ -837,73 +839,74 @@ protected:
   }
 
   const Section *find_section(std::string_view name) const {
-    for (const Section *s : patched_->code_sections())
+    for (const auto &s : patched_->all_sections())
       if (s->name() == name)
-        return s;
+        return s.get();
     return nullptr;
   }
 
+  // Byte size of the original .text before instrumentation.
+  uint64_t original_text_size() const { return num_elf_nops_ * sizeof(uint32_t); }
+  // Byte size of the appended trampoline cave: 3 words per inline-nop site.
+  uint64_t cave_size() const { return num_points_ * 3 * sizeof(uint32_t); }
+
+  // The trampoline cave lives at the tail of .text, immediately after the
+  // original bytes. Reads it back as decoded words.
+  std::vector<uint32_t> cave_words() const {
+    const Section *text = find_section(".text");
+    EXPECT_NE(text, nullptr);
+    std::vector<uint32_t> words(cave_size() / sizeof(uint32_t));
+    if (text != nullptr)
+      std::memcpy(words.data(), text->data() + original_text_size(), cave_size());
+    return words;
+  }
+
+  uint64_t num_elf_nops_ = 0;
+  uint64_t num_points_ = 0;
   std::vector<uint8_t> image_;
   InstrumentedCodeObject result_;
   std::unique_ptr<AmdGpuCodeObject> patched_;
 };
 
-TEST_F(InstrumentorPatchElfShape, RjTrampolinesSectionExists) {
-  Init(2, 1);
-  ASSERT_NE(find_section(".rj_trampolines"), nullptr)
-      << ".rj_trampolines must appear in code_sections()";
-}
-
-TEST_F(InstrumentorPatchElfShape, RjTrampolinesMultipleSectionExists) {
-  Init(100, 50);
-  ASSERT_NE(find_section(".rj_trampolines"), nullptr)
-      << ".rj_trampolines must appear in code_sections()";
-}
-
-TEST_F(InstrumentorPatchElfShape, RjTrampolinesIsExecutable) {
-  Init(2, 1);
-  const Section *tramp = find_section(".rj_trampolines");
-  ASSERT_NE(tramp, nullptr);
-  EXPECT_NE(tramp->flags() & SHF_EXECINSTR, 0u) << ".rj_trampolines must have SHF_EXECINSTR";
-}
-
-TEST_F(InstrumentorPatchElfShape, RjTrampolinesMultipleIsExecutable) {
-  Init(100, 50);
-  const Section *tramp = find_section(".rj_trampolines");
-  ASSERT_NE(tramp, nullptr);
-  EXPECT_NE(tramp->flags() & SHF_EXECINSTR, 0u) << ".rj_trampolines must have SHF_EXECINSTR";
-}
-
-TEST_F(InstrumentorPatchElfShape, RjTrampolinesPlacedImmediatelyAfterText) {
+TEST_F(InstrumentorPatchElfShape, TrampolineCaveAppendedToText) {
   Init(2, 1);
   const Section *text = find_section(".text");
-  const Section *tramp = find_section(".rj_trampolines");
   ASSERT_NE(text, nullptr);
-  ASSERT_NE(tramp, nullptr);
-  EXPECT_EQ(tramp->sectionOffset(), text->sectionOffset() + text->size())
-      << ".rj_trampolines must start at the byte immediately after .text";
+  EXPECT_EQ(text->size(), original_text_size() + cave_size())
+      << ".text must grow by exactly the appended trampoline cave";
 }
 
-TEST_F(InstrumentorPatchElfShape, RjTrampolinesMultiplePlacedImmediatelyAfterText) {
+TEST_F(InstrumentorPatchElfShape, TrampolineCaveAppendedToTextMultiple) {
   Init(100, 50);
   const Section *text = find_section(".text");
-  const Section *tramp = find_section(".rj_trampolines");
   ASSERT_NE(text, nullptr);
-  ASSERT_NE(tramp, nullptr);
-  EXPECT_EQ(tramp->sectionOffset(), text->sectionOffset() + text->size())
-      << ".rj_trampolines must start at the byte immediately after .text";
+  EXPECT_EQ(text->size(), original_text_size() + cave_size())
+      << ".text must grow by exactly the appended trampoline cave";
 }
 
-TEST_F(InstrumentorPatchElfShape, RjTrampolinesContentsMatchExpectedWords) {
+TEST_F(InstrumentorPatchElfShape, TextRemainsExecutable) {
   Init(2, 1);
-  const Section *tramp = find_section(".rj_trampolines");
-  ASSERT_NE(tramp, nullptr);
+  // The cave is part of .text, so it inherits .text's executable flag
+  const Section *text = find_section(".text");
+  ASSERT_NE(text, nullptr);
+  EXPECT_NE(text->flags() & SHF_EXECINSTR, 0u) << ".text must have SHF_EXECINSTR";
+}
 
+TEST_F(InstrumentorPatchElfShape, TextRemainsExecutableMultiple) {
+  Init(100, 50);
+  const Section *text = find_section(".text");
+  ASSERT_NE(text, nullptr);
+  EXPECT_NE(text->flags() & SHF_EXECINSTR, 0u) << ".text must have SHF_EXECINSTR";
+}
+
+TEST_F(InstrumentorPatchElfShape, TrampolineCaveContentsMatchExpectedWords) {
+  Init(2, 1);
   // Body for the inline-nop smoke build with a 4-byte anchor:
   //   [placeholder s_nop 0, relocated original s_nop 0, return s_branch(-3)].
-  ASSERT_EQ(tramp->size(), 12u);
-  std::array<uint32_t, 3> words{};
-  std::memcpy(words.data(), tramp->data(), tramp->size());
+  // The cave's absolute offset is unchanged from the old separate-section
+  // layout (still text_size()), so the branch math is identical.
+  const std::vector<uint32_t> words = cave_words();
+  ASSERT_EQ(words.size(), 3u);
 
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   EXPECT_EQ(words[0], build_s_nop(0, kArch))
@@ -914,16 +917,10 @@ TEST_F(InstrumentorPatchElfShape, RjTrampolinesContentsMatchExpectedWords) {
       << "trampoline must end with s_branch back to anchor + original_size";
 }
 
-TEST_F(InstrumentorPatchElfShape, RjTrampolinesMultipleContentsMatchExpectedWords) {
+TEST_F(InstrumentorPatchElfShape, TrampolineCaveContentsMatchExpectedWordsMultiple) {
   Init(100, 50);
-  const Section *tramp = find_section(".rj_trampolines");
-  ASSERT_NE(tramp, nullptr);
-
-  // Body for the inline-nop smoke build with a 4-byte anchor:
-  //   [placeholder s_nop 0, relocated original s_nop 0, return s_branch(-3)].
-  ASSERT_EQ(tramp->size(), 600u);
-  std::array<uint32_t, 150> words{};
-  std::memcpy(words.data(), tramp->data(), tramp->size());
+  const std::vector<uint32_t> words = cave_words();
+  ASSERT_EQ(words.size(), 150u);
 
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   for (uint64_t point = 0; point < 50; ++point) {
@@ -934,20 +931,6 @@ TEST_F(InstrumentorPatchElfShape, RjTrampolinesMultipleContentsMatchExpectedWord
     EXPECT_EQ(words[point * 3 + 2], build_s_branch(-101 - 2 * point, kArch))
         << "trampoline must end with s_branch back to anchor + original_size";
   }
-}
-
-TEST_F(InstrumentorPatchElfShape, CodeSectionsIncludesTextAndTrampoline) {
-  Init(2, 1);
-  bool saw_text = false;
-  bool saw_tramp = false;
-  for (const Section *s : patched_->code_sections()) {
-    if (s->name() == ".text")
-      saw_text = true;
-    if (s->name() == ".rj_trampolines")
-      saw_tramp = true;
-  }
-  EXPECT_TRUE(saw_text) << "code_sections() must include .text";
-  EXPECT_TRUE(saw_tramp) << "code_sections() must include .rj_trampolines";
 }
 
 //==============================================================================
@@ -965,6 +948,8 @@ protected:
   void Init(uint64_t num_elf_nops, uint64_t num_instrumentation_points) {
     // leaving anchor_offset = 0 empty, so will fail on num_elf_nops == num_instrumentation_points
     ASSERT_TRUE(num_elf_nops > num_instrumentation_points);
+    num_elf_nops_ = num_elf_nops;
+    num_points_ = num_instrumentation_points;
 
     image_ = make_gfx950_elf_with_nop_text(num_elf_nops * 4);
     AmdGpuCodeObject obj(image_.data(), image_.size());
@@ -987,9 +972,9 @@ protected:
   }
 
   const Section *find_section(std::string_view name) const {
-    for (const Section *s : patched_->code_sections())
+    for (const auto &s : patched_->all_sections())
       if (s->name() == name)
-        return s;
+        return s.get();
     return nullptr;
   }
 
@@ -999,6 +984,20 @@ protected:
     return std::unique_ptr<Instruction>(decoder_->decode(&word));
   }
 
+  // Byte size of the original .text before instrumentation. The trampoline cave
+  // begins here, at the tail of the grown .text
+  uint64_t original_text_size() const { return num_elf_nops_ * sizeof(uint32_t); }
+
+  // Decode a word from the trampoline cave. @p cave_byte_offset is relative to
+  // the start of the cave (== the old .rj_trampolines-relative offset).
+  std::unique_ptr<Instruction> decode_cave_word(size_t cave_byte_offset) {
+    const Section *text = find_section(".text");
+    EXPECT_NE(text, nullptr);
+    return decode_word(text, original_text_size() + cave_byte_offset);
+  }
+
+  uint64_t num_elf_nops_ = 0;
+  uint64_t num_points_ = 0;
   std::vector<uint8_t> image_;
   InstrumentedCodeObject result_;
   std::unique_ptr<AmdGpuCodeObject> patched_;
@@ -1077,9 +1076,7 @@ TEST_F(InstrumentorPatchDecoded, UnpatchedMultipleTextInstructionIsUnchanged) {
 
 TEST_F(InstrumentorPatchDecoded, TrampolinePlaceholderDecodesAsSNop) {
   Init(2, 1);
-  const Section *tramp = find_section(".rj_trampolines");
-  ASSERT_NE(tramp, nullptr);
-  auto inst = decode_word(tramp, /*byte_offset=*/0);
+  auto inst = decode_cave_word(/*cave_byte_offset=*/0);
   ASSERT_NE(inst, nullptr);
 
   EXPECT_NE(inst->mnemonic().find("s_nop"), std::string_view::npos)
@@ -1091,10 +1088,8 @@ TEST_F(InstrumentorPatchDecoded, TrampolinePlaceholderDecodesAsSNop) {
 
 TEST_F(InstrumentorPatchDecoded, TrampolinePlaceholderMultipleDecodesAsSNop) {
   Init(100, 50);
-  const Section *tramp = find_section(".rj_trampolines");
-  ASSERT_NE(tramp, nullptr);
   for (uint64_t trampoline_count = 0; trampoline_count < 50; ++trampoline_count) {
-    auto inst = decode_word(tramp, /*byte_offset=*/trampoline_count * 12);
+    auto inst = decode_cave_word(/*cave_byte_offset=*/trampoline_count * 12);
     ASSERT_NE(inst, nullptr);
 
     EXPECT_NE(inst->mnemonic().find("s_nop"), std::string_view::npos)
@@ -1108,10 +1103,8 @@ TEST_F(InstrumentorPatchDecoded, TrampolinePlaceholderMultipleDecodesAsSNop) {
 TEST_F(InstrumentorPatchDecoded, RelocatedOriginalPreservesMnemonic) {
   Init(2, 1);
   // The original instruction at .text[4..8] was s_nop 0. After relocation it
-  // lives in the trampoline body at offset 4. Decoded bytes must agree.
-  const Section *tramp = find_section(".rj_trampolines");
-  ASSERT_NE(tramp, nullptr);
-  auto relocated = decode_word(tramp, /*byte_offset=*/4);
+  // lives in the trampoline body at cave offset 4. Decoded bytes must agree.
+  auto relocated = decode_cave_word(/*cave_byte_offset=*/4);
   ASSERT_NE(relocated, nullptr);
   EXPECT_NE(relocated->mnemonic().find("s_nop"), std::string_view::npos)
       << "relocated original must decode to the same mnemonic as the source; got "
@@ -1121,12 +1114,9 @@ TEST_F(InstrumentorPatchDecoded, RelocatedOriginalPreservesMnemonic) {
 TEST_F(InstrumentorPatchDecoded, RelocatedMultipleOriginalPreservesMnemonic) {
   Init(100, 50);
   // The original instruction at .text[4..8] was s_nop 0. After relocation it
-  // lives in the trampoline body at offset 4. Decoded bytes must agree.
-  const Section *tramp = find_section(".rj_trampolines");
-  ASSERT_NE(tramp, nullptr);
-
+  // lives in the trampoline body at cave offset 4. Decoded bytes must agree.
   for (uint64_t trampoline_count = 0; trampoline_count < 50; ++trampoline_count) {
-    auto relocated = decode_word(tramp, /*byte_offset=*/trampoline_count * 12 + 4);
+    auto relocated = decode_cave_word(/*cave_byte_offset=*/trampoline_count * 12 + 4);
     ASSERT_NE(relocated, nullptr);
     EXPECT_NE(relocated->mnemonic().find("s_nop"), std::string_view::npos)
         << "relocated original must decode to the same mnemonic as the source; got "
@@ -1136,9 +1126,7 @@ TEST_F(InstrumentorPatchDecoded, RelocatedMultipleOriginalPreservesMnemonic) {
 
 TEST_F(InstrumentorPatchDecoded, TrampolineReturnDecodesAsBackwardSBranch) {
   Init(2, 1);
-  const Section *tramp = find_section(".rj_trampolines");
-  ASSERT_NE(tramp, nullptr);
-  auto inst = decode_word(tramp, /*byte_offset=*/8);
+  auto inst = decode_cave_word(/*cave_byte_offset=*/8);
   ASSERT_NE(inst, nullptr);
 
   EXPECT_NE(inst->mnemonic().find("s_branch"), std::string_view::npos)
@@ -1152,10 +1140,8 @@ TEST_F(InstrumentorPatchDecoded, TrampolineReturnDecodesAsBackwardSBranch) {
 
 TEST_F(InstrumentorPatchDecoded, TrampolineMultipleReturnDecodesAsBackwardSBranch) {
   Init(100, 50);
-  const Section *tramp = find_section(".rj_trampolines");
-  ASSERT_NE(tramp, nullptr);
   for (uint64_t trampoline_count = 0; trampoline_count < 50; ++trampoline_count) {
-    auto inst = decode_word(tramp, /*byte_offset=*/trampoline_count * 12 + 8);
+    auto inst = decode_cave_word(/*cave_byte_offset=*/trampoline_count * 12 + 8);
     ASSERT_NE(inst, nullptr);
 
     EXPECT_NE(inst->mnemonic().find("s_branch"), std::string_view::npos)
@@ -1178,31 +1164,29 @@ TEST_F(InstrumentorPatchDecoded, TrampolineMultipleReturnDecodesAsBackwardSBranc
 TEST_F(InstrumentorPatchDecoded, BranchesLandAtTheirIntendedTargets) {
   Init(2, 1);
   const Section *text = find_section(".text");
-  const Section *tramp = find_section(".rj_trampolines");
   ASSERT_NE(text, nullptr);
-  ASSERT_NE(tramp, nullptr);
 
   auto sopp_target = [](uint64_t branch_pc, const uint32_t *word) -> uint64_t {
     const int16_t simm16 = static_cast<int16_t>(*word & 0xFFFFu);
     return branch_pc + 4 + static_cast<int64_t>(simm16) * 4;
   };
 
-  // Forward branch lives at .text-relative offset 4 (the patched anchor).
-  // It should land at trampoline_offset == text->size() (== 8 in this fixture).
+  // Forward branch lives at .text-relative offset 4 (the patched anchor). It
+  // should land at the cave start == original_text_size() (== 8 in this fixture).
   auto fwd = decode_word(text, /*byte_offset=*/4);
   ASSERT_NE(fwd, nullptr);
   ASSERT_NE(fwd->raw_encoding(), nullptr);
   const uint64_t fwd_target = sopp_target(/*branch_pc=*/4, fwd->raw_encoding());
-  EXPECT_EQ(fwd_target, text->size())
-      << "forward branch must land at trampoline_offset (= text->size())";
+  EXPECT_EQ(fwd_target, original_text_size())
+      << "forward branch must land at the trampoline cave start (= original_text_size())";
 
-  // Return branch lives at trampoline-section-relative offset 8. In
-  // .text-relative coordinates that is text->size() + 8 (= 16 in this fixture).
-  // It should land at anchor_offset + original_size = 4 + 4 = 8.
-  auto ret = decode_word(tramp, /*byte_offset=*/8);
+  // Return branch lives at cave-relative offset 8. In .text-relative coordinates
+  // that is original_text_size() + 8 (= 16 in this fixture). It should land at
+  // anchor_offset + original_size = 4 + 4 = 8.
+  auto ret = decode_cave_word(/*cave_byte_offset=*/8);
   ASSERT_NE(ret, nullptr);
   ASSERT_NE(ret->raw_encoding(), nullptr);
-  const uint64_t ret_pc = text->size() + 8;
+  const uint64_t ret_pc = original_text_size() + 8;
   const uint64_t ret_target = sopp_target(ret_pc, ret->raw_encoding());
   EXPECT_EQ(ret_target, 8u) << "return branch must land at anchor + original_size";
 }
@@ -1210,9 +1194,7 @@ TEST_F(InstrumentorPatchDecoded, BranchesLandAtTheirIntendedTargets) {
 TEST_F(InstrumentorPatchDecoded, BranchesMultipleLandAtTheirIntendedTargets) {
   Init(100, 50);
   const Section *text = find_section(".text");
-  const Section *tramp = find_section(".rj_trampolines");
   ASSERT_NE(text, nullptr);
-  ASSERT_NE(tramp, nullptr);
 
   auto sopp_target = [](uint64_t branch_pc, const uint32_t *word) -> uint64_t {
     const int16_t simm16 = static_cast<int16_t>(*word & 0xFFFFu);
@@ -1224,15 +1206,15 @@ TEST_F(InstrumentorPatchDecoded, BranchesMultipleLandAtTheirIntendedTargets) {
     ASSERT_NE(fwd, nullptr);
     ASSERT_NE(fwd->raw_encoding(), nullptr);
     const uint64_t fwd_target = sopp_target(/*branch_pc=*/(point + 1) * 4, fwd->raw_encoding());
-    EXPECT_EQ(fwd_target, text->size() + point * 12)
-        << "forward branch must land at trampoline_offset (= text->size())";
+    EXPECT_EQ(fwd_target, original_text_size() + point * 12)
+        << "forward branch must land at its trampoline cave offset";
   }
 
   for (uint64_t point = 0; point < 50; ++point) {
-    auto ret = decode_word(tramp, /*byte_offset=*/point * 12 + 8);
+    auto ret = decode_cave_word(/*cave_byte_offset=*/point * 12 + 8);
     ASSERT_NE(ret, nullptr);
     ASSERT_NE(ret->raw_encoding(), nullptr);
-    const uint64_t ret_pc = text->size() + point * 12 + 8;
+    const uint64_t ret_pc = original_text_size() + point * 12 + 8;
     const uint64_t ret_target = sopp_target(ret_pc, ret->raw_encoding());
     EXPECT_EQ(ret_target, (point + 2) * 4) << "return branch must land at anchor + original_size";
   }
