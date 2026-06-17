@@ -1,13 +1,14 @@
 /*************************************************************************
- * Copyright (c) 2022-2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "comm.h"
 #include "nccl_profiler.h"
 #include "checks.h"
-#include <dlfcn.h>
+#include "os.h"
 
 static ncclProfiler_v4_t* ncclProfiler_v4;
 static ncclProfiler_t ncclProfiler;
@@ -108,7 +109,7 @@ static ncclResult_t ncclProfiler_init(void** ctx, uint64_t commId, int* eActivat
 }
 
 ncclProfiler_t* getNcclProfiler_v4(void* lib) {
-  ncclProfiler_v4 = (ncclProfiler_v4_t*)dlsym(lib, "ncclProfiler_v4");
+  ncclProfiler_v4 = (ncclProfiler_v4_t*)ncclOsDlsym(lib, "ncclProfiler_v4");
   if (ncclProfiler_v4) {
     ncclProfiler.name = ncclProfiler_v4->name;
     ncclProfiler.init = ncclProfiler_init;

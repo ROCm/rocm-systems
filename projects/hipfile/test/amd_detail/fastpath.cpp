@@ -81,7 +81,8 @@ public:
     shared_ptr<StrictMock<MFile>>   mfile{make_shared<StrictMock<MFile>>()};
     shared_ptr<StrictMock<MBuffer>> mbuffer{make_shared<StrictMock<MBuffer>>()};
 
-    StrictMock<MConfiguration> mcfg{};
+    StrictMock<MConfiguration>   mcfg{};
+    StrictMock<MStatsCollection> mstats{};
 };
 
 class FastpathScoreExpectations;
@@ -91,6 +92,7 @@ public:
     StrictMock<MConfiguration>     &m_mcfg;
     shared_ptr<StrictMock<MFile>>   m_mfile;
     shared_ptr<StrictMock<MBuffer>> m_mbuffer;
+    StrictMock<MStatsCollection>   &m_stats;
 
     optional<bool>          m_fastpath_enabled;
     optional<void *>        m_buffer_addr;
@@ -101,10 +103,12 @@ public:
     optional<bool>          m_on_ext4_ordered;
     optional<bool>          m_on_xfs;
     optional<bool>          m_unsupported_file_systems;
+    optional<bool>          m_count_rejection;
 
     FastpathScoreExpectationsBuilder(StrictMock<MConfiguration> &mcfg, shared_ptr<StrictMock<MFile>> mfile,
-                                     shared_ptr<StrictMock<MBuffer>> mbuffer)
-        : m_mcfg(mcfg), m_mfile(std::move(mfile)), m_mbuffer(std::move(mbuffer))
+                                     shared_ptr<StrictMock<MBuffer>> mbuffer,
+                                     StrictMock<MStatsCollection>   &stats)
+        : m_mcfg(mcfg), m_mfile(std::move(mfile)), m_mbuffer(std::move(mbuffer)), m_stats(stats)
     {
     }
 
@@ -162,6 +166,12 @@ public:
         return *this;
     }
 
+    FastpathScoreExpectationsBuilder &countRejection(bool count_rejection)
+    {
+        m_count_rejection = count_rejection;
+        return *this;
+    }
+
     FastpathScoreExpectations build();
 };
 
@@ -191,6 +201,8 @@ public:
             .WillOnce(Return(builder.m_buffer_addr.value_or(
                 reinterpret_cast<void *>(FastpathTestBase::DEFAULT_BUFFER_ADDR))));
         EXPECT_CALL(*builder.m_mfile, dioMemAlign).WillOnce(Return(DEFAULT_MEM_ALIGN));
+        EXPECT_CALL(builder.m_stats, fastpathRejection)
+            .Times(builder.m_count_rejection.value_or(false) ? 1 : 0);
     }
 };
 
@@ -221,7 +233,7 @@ TEST_F(FastpathTest, TestDefaults)
 
 TEST_F(FastpathTest, ScoreAcceptsIoWithDefaults)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
               SCORE_ACCEPT);
@@ -229,7 +241,10 @@ TEST_F(FastpathTest, ScoreAcceptsIoWithDefaults)
 
 TEST_F(FastpathTest, ScoreRejectsIoIfFastpathIsDisabled)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).fastpathEnabled(false).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
+        .fastpathEnabled(false)
+        .countRejection(true)
+        .build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
               SCORE_REJECT);
@@ -237,7 +252,10 @@ TEST_F(FastpathTest, ScoreRejectsIoIfFastpathIsDisabled)
 
 TEST_F(FastpathTest, ScoreRejectsIoIfUnbufferedFdNotAvailable)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).unbufferedFd(nullopt).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
+        .unbufferedFd(nullopt)
+        .countRejection(true)
+        .build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
               SCORE_REJECT);
@@ -245,7 +263,7 @@ TEST_F(FastpathTest, ScoreRejectsIoIfUnbufferedFdNotAvailable)
 
 TEST_F(FastpathTest, ScoreRejectsIoWithNegativeAlignedFileOffset)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).countRejection(true).build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, -static_cast<hoff_t>(DEFAULT_OFFSET_ALIGN),
                                DEFAULT_BUFFER_OFFSET),
@@ -254,7 +272,7 @@ TEST_F(FastpathTest, ScoreRejectsIoWithNegativeAlignedFileOffset)
 
 TEST_F(FastpathTest, ScoreRejectsIoWithNegativeAlignedBufferOffset)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).countRejection(true).build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET,
                                -static_cast<hoff_t>(DEFAULT_MEM_ALIGN)),
@@ -265,8 +283,9 @@ TEST_F(FastpathTest, ScoreRejectsIoIfBufferAddressPlusBufferOffsetIsUnaligned)
 {
     // The DEFAULT_BUFFER_ADDR is DEFAULT_MEM_ALIGN aligned. Ensure that this
     // test's buffer is not DEFAULT_MEM_ALIGN aligned.
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer)
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
         .bufferAddr(reinterpret_cast<void *>(DEFAULT_BUFFER_ADDR + (DEFAULT_MEM_ALIGN >> 1)))
+        .countRejection(true)
         .build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET,
@@ -276,7 +295,10 @@ TEST_F(FastpathTest, ScoreRejectsIoIfBufferAddressPlusBufferOffsetIsUnaligned)
 
 TEST_F(FastpathTest, ScoreAcceptsIoIfFileIsRegularAndOnExt4Ordered)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).isRegularFile(true).onExt4Ordered(true).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
+        .isRegularFile(true)
+        .onExt4Ordered(true)
+        .build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
               SCORE_ACCEPT);
@@ -284,7 +306,7 @@ TEST_F(FastpathTest, ScoreAcceptsIoIfFileIsRegularAndOnExt4Ordered)
 
 TEST_F(FastpathTest, ScoreAcceptsIoIfFileIsRegularAndOnXfs)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).isRegularFile(true).onXfs(true).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).isRegularFile(true).onXfs(true).build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
               SCORE_ACCEPT);
@@ -292,10 +314,11 @@ TEST_F(FastpathTest, ScoreAcceptsIoIfFileIsRegularAndOnXfs)
 
 TEST_F(FastpathTest, ScoreRejectsIoIfFileIsRegularAndNotOnExt4OrderedNorXfs)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer)
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
         .isRegularFile(true)
         .onExt4Ordered(false)
         .onXfs(false)
+        .countRejection(true)
         .build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
@@ -304,7 +327,7 @@ TEST_F(FastpathTest, ScoreRejectsIoIfFileIsRegularAndNotOnExt4OrderedNorXfs)
 
 TEST_F(FastpathTest, ScoreAcceptsIoIfFileIsRegularNotOnExt4OrderedNorXfsIfUnsupportedFileSystemsIsTrue)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer)
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
         .isRegularFile(true)
         .onExt4Ordered(false)
         .onXfs(false)
@@ -317,7 +340,10 @@ TEST_F(FastpathTest, ScoreAcceptsIoIfFileIsRegularNotOnExt4OrderedNorXfsIfUnsupp
 
 TEST_F(FastpathTest, ScoreAcceptsIoIfFileIsBlockDevice)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).isRegularFile(false).isBlockDevice(true).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
+        .isRegularFile(false)
+        .isBlockDevice(true)
+        .build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
               SCORE_ACCEPT);
@@ -325,7 +351,11 @@ TEST_F(FastpathTest, ScoreAcceptsIoIfFileIsBlockDevice)
 
 TEST_F(FastpathTest, ScoreRejectsIoIfFileIsNotRegularFileOrBlockDevice)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).isRegularFile(false).isBlockDevice(false).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
+        .isRegularFile(false)
+        .isBlockDevice(false)
+        .countRejection(true)
+        .build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
               SCORE_REJECT);
@@ -335,7 +365,7 @@ struct FastpathSupportedHipMemoryParam : public FastpathTestBase, public TestWit
 
 TEST_P(FastpathSupportedHipMemoryParam, Score)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).bufferType(GetParam()).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).bufferType(GetParam()).build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
               SCORE_ACCEPT);
@@ -347,7 +377,10 @@ struct FastpathUnsupportedHipMemoryParam : public FastpathTestBase, public TestW
 
 TEST_P(FastpathUnsupportedHipMemoryParam, Score)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).bufferType(GetParam()).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
+        .bufferType(GetParam())
+        .countRejection(true)
+        .build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
               SCORE_REJECT);
@@ -360,7 +393,7 @@ struct FastpathAlignedIoSizesParam : public FastpathTestBase, public TestWithPar
 
 TEST_P(FastpathAlignedIoSizesParam, Score)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, GetParam(), DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
               SCORE_ACCEPT);
@@ -374,7 +407,7 @@ struct FastpathUnalignedIoSizesParam : public FastpathTestBase, public TestWithP
 
 TEST_P(FastpathUnalignedIoSizesParam, Score)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).countRejection(true).build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, GetParam(), DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
               SCORE_REJECT);
@@ -388,7 +421,7 @@ struct FastpathAlignedFileOffsetsParam : public FastpathTestBase, public TestWit
 
 TEST_P(FastpathAlignedFileOffsetsParam, Score)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).countRejection(GetParam() < 0).build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, GetParam(), DEFAULT_BUFFER_OFFSET),
               GetParam() >= 0 ? SCORE_ACCEPT : SCORE_REJECT);
@@ -404,7 +437,7 @@ struct FastpathUnalignedFileOffsetsParam : public FastpathTestBase, public TestW
 
 TEST_P(FastpathUnalignedFileOffsetsParam, Score)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).countRejection(true).build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, GetParam(), DEFAULT_BUFFER_OFFSET),
               SCORE_REJECT);
@@ -422,7 +455,7 @@ struct FastpathAlignedBufferOffsetsParam : public FastpathTestBase, public TestW
 
 TEST_P(FastpathAlignedBufferOffsetsParam, Score)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).countRejection(GetParam() < 0).build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, GetParam()),
               GetParam() >= 0 ? SCORE_ACCEPT : SCORE_REJECT);
@@ -439,7 +472,7 @@ struct FastpathUnalignedBufferOffsetsParam : public FastpathTestBase, public Tes
 
 TEST_P(FastpathUnalignedBufferOffsetsParam, Score)
 {
-    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer).build();
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats).countRejection(true).build();
 
     ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, GetParam()),
               SCORE_REJECT);
@@ -455,8 +488,7 @@ INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathUnalignedBufferOffsetsParam,
 
 struct FastpathIoParam : public FastpathTestBase, public TestWithParam<IoType> {
 
-    StrictMock<MHip>             mhip;
-    StrictMock<MStatsCollection> mstats;
+    StrictMock<MHip> mhip;
 
     // Setup expectations on the mocks called to validate IO arguments
     void expect_validate()

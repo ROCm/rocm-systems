@@ -256,6 +256,17 @@ transaction breakdown table:
       .. jinja:: l2-detailed-metrics-gfx950
          :file: _templates/metrics_table.j2
 
+.. note::
+
+   On CDNA 4 (MI350 series) accelerators, the per-destination bandwidth metrics in
+   the table above ("Read/Write/Atomic Bandwidth - HBM, - Infinity Fabric™, and
+   - PCIe") are measured at the L2-Fabric interface and attribute traffic to a
+   destination by request type, not by where the request was ultimately serviced. A
+   request attributed to HBM may instead be served by the last level cache; a request
+   attributed to Infinity Fabric may be served by the remote accelerator's last level
+   cache rather than its HBM; and a request attributed to PCIe may be served by
+   host-side cache rather than host memory.
+
 .. _l2-fabric-stalls:
 
 L2-Fabric interface stalls

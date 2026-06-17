@@ -42,6 +42,11 @@ else()
     message(STATUS "Using system GoogleTest")
 endif()
 
+if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
+    ais_add_sanitizers(GTest::gtest)
+    ais_add_sanitizers(GTest::gmock)
+endif()
+
 include(GoogleTest)
 
 function(ais_gtest_discover_tests target)

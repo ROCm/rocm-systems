@@ -127,8 +127,8 @@ jobs:
 
   therock-test-linux-multi-node:
     name: "Test multi-node"
-    # TODO: Re-enable gfx94X-dcgpu multi-node tests once the cluster is stable again.
-    if: ${{ inputs.amdgpu_families == 'gfx950-dcgpu' }}
+    # TODO: Re-enable gfx94X-dcgpu and gfx950-dcgpu multi-node tests once the clusters are stable again.
+    if: false
     permissions:
       contents: read
       id-token: write

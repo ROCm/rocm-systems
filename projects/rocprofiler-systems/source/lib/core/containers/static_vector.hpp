@@ -7,8 +7,6 @@
 #include "core/containers/c_array.hpp"
 #include "core/exception.hpp"
 
-#include <timemory/utility/demangle.hpp>
-
 #include <array>
 #include <atomic>
 #include <cstdlib>

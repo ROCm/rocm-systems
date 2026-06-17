@@ -36,12 +36,12 @@ Panel Config:
             value: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM( $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu )
             unit: Percent
             peak: 100
-            pop: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD*$cu_per_gpu)
+            pop: false
           METRIC02:
             value: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM( $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
             unit: Percent
             peak: 100
-            pop: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD*$cu_per_gpu)
+            pop: false
     # CSV table sample
     - raw_csv_table:
         id: 802

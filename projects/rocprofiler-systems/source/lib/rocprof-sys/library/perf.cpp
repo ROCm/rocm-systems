@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/perf.hpp"
+#include "common/units.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -11,7 +12,6 @@
 
 #include <timemory/log/logger.hpp>
 #include <timemory/log/macros.hpp>
-#include <timemory/units.hpp>
 
 #include "logger/debug.hpp"
 

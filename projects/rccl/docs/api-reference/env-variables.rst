@@ -34,6 +34,13 @@ in the following table.
       - | String value for host identification
         | Used for host hash generation
 
+    * - | ``NCCL_BOOTSTRAP_BIDIR_ALLGATHER``
+        | Enables the bidirectional ring AllGather (N/2 steps) on the socket OOB path
+          during bootstrap. The unidirectional ring (N-1 steps) is kept as a fallback.
+          Has no effect when net OOB is in use.
+      - | ``0``: Force unidirectional ring.
+        | ``1``: Force bidirectional ring (default).
+
 Logging and debugging
 =====================
 

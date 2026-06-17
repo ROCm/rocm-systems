@@ -95,14 +95,13 @@ class SingleHeap {
   void* realloc(void* ptr, size_t size);
 
   /**
-   * @brief
+   * @brief Allocates aligned memory from the heap
    *
-   * @param[in]
-   * @param[in]
-   *
-   * @return
+   * @param[in,out] ptr        Address of raw pointer (&pointer_to_void)
+   * @param[in]     alignment  Required pointer alignment in bytes (power of 2)
+   * @param[in]     size       Size in bytes of memory allocation
    */
-  void* malign(size_t alignment, size_t size);
+  void malign(void** ptr, size_t alignment, size_t size);
 
   /**
    * @brief Accessor for heap base ptr

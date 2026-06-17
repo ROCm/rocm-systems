@@ -98,7 +98,7 @@ class TestROCTx(RocprofsysTest):
     def roctx_cached_depth(self) -> list[int]:
         return [1, 1, 1, 0, 0, 1, 1, 1]
 
-    REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
+    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
     @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
@@ -120,7 +120,7 @@ class TestROCTx(RocprofsysTest):
             mode,
             "roctx",
             env=roctx_env,
-            rewrite_args=self.REWRITE_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
             check_target_arch=True,
         )
         self.assert_regex(result)

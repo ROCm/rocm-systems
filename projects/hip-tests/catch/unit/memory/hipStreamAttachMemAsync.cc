@@ -11,9 +11,7 @@
 #include <utils.hh>
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Basic) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   StreamGuard stream(Streams::created);
   LinearAllocGuard<hipDeviceptr_t> managed(LinearAllocs::hipMallocManaged, kPageSize,
@@ -24,9 +22,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   if (!DeviceAttributesSupport(0, hipDeviceAttributePageableMemoryAccess)) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
@@ -43,9 +39,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
 // If the cudaMemAttachGlobal flag is specified, the memory can be accessed by any stream on any
 // device.
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachGlobal) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   const auto device_count = HipTest::getDeviceCount();
   const auto stream_count = device_count < 2 ? 8 : device_count;
@@ -87,9 +81,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachGlobal) {
 // the memory on the device from any stream on a device that has a zero value for the device
 // attribute cudaDevAttrConcurrentManagedAccess.
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachHost) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   if (DeviceAttributesSupport(0, hipDeviceAttributeConcurrentManagedAccess)) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
@@ -116,9 +108,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachHost) {
 // zero value for the device attribute cudaDevAttrConcurrentManagedAccess, the program makes a
 // guarantee that it will only access the memory on the device from stream.
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachSingle) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   if (DeviceAttributesSupport(0, hipDeviceAttributeConcurrentManagedAccess)) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
@@ -151,9 +141,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachSingle) {
 }
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative_Parameters) {
-  if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   StreamGuard stream(Streams::created);
   LinearAllocGuard<hipDeviceptr_t> managed(LinearAllocs::hipMallocManaged, kPageSize,

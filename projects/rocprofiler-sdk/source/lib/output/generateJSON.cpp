@@ -200,7 +200,8 @@ write_json(
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen,
     const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>&  pc_sampling_host_trap_gen,
-    const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen)
+    const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen,
+    const generator<tool_spm_counter_record_t>&                        spm_gen)
 {
     // summary
     {
@@ -226,6 +227,7 @@ write_json(
         json_ar.setNextName("callback_records");
         json_ar.startNode();
         json_ar(cereal::make_nvp("counter_collection", counter_collection_gen));
+        json_ar(cereal::make_nvp("spm_counter_collection", spm_gen));
         json_ar.finishNode();
     }
 

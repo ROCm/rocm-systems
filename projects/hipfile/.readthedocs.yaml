@@ -10,7 +10,7 @@ formats: []
 
 python:
   install:
-    - requirements: projects/hipfile/docs/sphinx/requirements.txt
+    - requirements: projects/hipfile/docs/sphinx/requirements.in
 
 build:
   os: ubuntu-24.04

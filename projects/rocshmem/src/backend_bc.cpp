@@ -215,6 +215,7 @@ void Backend::dump_stats() {
   printf("Sync %llu\n", device_stats.getStat(NUM_SYNC));
   printf("WAVE_Sync %llu\n", device_stats.getStat(NUM_SYNC_WAVE));
   printf("WG_Sync %llu\n", device_stats.getStat(NUM_SYNC_WG));
+  printf("Reduce %llu\n", device_stats.getStat(NUM_REDUCE));
 
   const auto& host_stats{globalHostStats};
   printf("HOST STATS\n");
@@ -251,6 +252,7 @@ void Backend::dump_stats() {
   printf("Tests %llu\n", host_stats.getStat(NUM_HOST_TEST));
   printf("SHMEM_PTR %llu\n", host_stats.getStat(NUM_HOST_SHMEM_PTR));
   printf("SyncAll %llu\n", host_stats.getStat(NUM_HOST_SYNC_ALL));
+  printf("Reduce %llu\n", host_stats.getStat(NUM_HOST_REDUCE));
 
   dump_backend_stats();
 }
@@ -324,6 +326,10 @@ int Backend::buffer_unregister(void *addr) {
   }
 
   return ROCSHMEM_ERROR;
+}
+
+void Backend::buffer_unregister_all() {
+  user_buffer_regions.clear();
 }
 
 }  // namespace rocshmem

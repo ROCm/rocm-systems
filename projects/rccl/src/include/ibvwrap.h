@@ -1,13 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2004, 2005 Topspin Communications.  All rights reserved.
- * Copyright (c) 2004, 2011-2012 Intel Corporation.  All rights reserved.
- * Copyright (c) 2005, 2006, 2007 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2005 PathScale, Inc.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
- *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_IBVWRAP_H_
 #define NCCL_IBVWRAP_H_
@@ -101,8 +97,13 @@ static inline const char* ibvGetGidStr(union ibv_gid* gid, char* gidStr, size_t 
   return inet_ntop(AF_INET6, gid->raw, gidStr, strLen);
 }
 
+// Helper function to convert IB work completion status to string
 const char* ibvWcStatusStr(enum ibv_wc_status status);
+
+// Helper function to convert IB work completion opcode to string
 const char* ibvWcOpcodeStr(enum ibv_wc_opcode opcode);
+
+// Helper function to convert IB work request opcode to string
 const char* ibvWrOpcodeStr(enum ibv_wr_opcode opcode);
 
 #endif //End include guard

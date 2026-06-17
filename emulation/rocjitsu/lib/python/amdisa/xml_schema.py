@@ -62,6 +62,7 @@ _VERSIONED_FIELDS: dict[str, dict[SchemaVersion, str]] = {
 
 # Top-level structure.
 ARCH = 'Architecture'
+ARCH_ID = 'ArchitectureId'
 ARCH_NAME = 'ArchitectureName'
 DOCUMENT = 'Document'
 ISA = 'ISA'

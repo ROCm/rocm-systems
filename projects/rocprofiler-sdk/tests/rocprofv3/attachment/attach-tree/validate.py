@@ -26,143 +26,138 @@ import sys
 import pytest
 
 
-def test_attachment_kernel_trace(kernel_input_data):
-    """Verify that kernel traces were captured during attachment."""
+def test_agent_info(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
 
-    # We should have captured some kernel dispatches
-    assert len(kernel_input_data) > 0, "No kernel dispatches captured during attachment"
+    gpu_count = 0
+    for agent in data["agents"]:
+        # type 1 = CPU, type 2 = GPU
+        assert agent["type"] in (1, 2)
+        if agent["type"] == 1:
+            assert agent["cpu_cores_count"] > 0
+            assert agent["simd_count"] == 0
+            assert agent["max_waves_per_simd"] == 0
+        else:
+            gpu_count += 1
+            assert agent["cpu_cores_count"] == 0
+            assert agent["simd_count"] > 0
+            assert agent["max_waves_per_simd"] > 0
 
-    # The test app launches a kernel called "simple_kernel"
-    kernel_names = [row["Kernel_Name"] for row in kernel_input_data]
+    assert gpu_count > 0, "No GPU agents found"
 
-    # Check that we captured the simple_kernel
-    simple_kernel_found = any("simple_kernel" in name for name in kernel_names)
+
+def test_kernel_trace(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
+    def get_kind_name(kind_id):
+        return data["strings"]["buffer_records"][kind_id]["kind"]
+
+    def get_kernel_name(kernel_id):
+        return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
+
+    kernel_dispatch_data = data["buffer_records"]["kernel_dispatch"]
     assert (
-        simple_kernel_found
-    ), f"Expected 'simple_kernel' not found in kernel names: {kernel_names}"
+        len(kernel_dispatch_data) > 0
+    ), "No kernel dispatches captured during attachment"
 
+    simple_kernel_found = False
     kernel_threads = set()
-    kernel_streams = set()
-    NUM_KERNEL_THREADS = 8
-    expected_stream_ids = set([i for i in range(1, 9)])
 
-    # Verify basic kernel properties
-    for row in kernel_input_data:
-        if "simple_kernel" in row["Kernel_Name"]:
-            assert "Stream_Id" in row
-            assert "Thread_Id" in row
-            assert row["Kind"] == "KERNEL_DISPATCH"
-            assert int(row["Queue_Id"]) > 0
-            assert int(row["Kernel_Id"]) > 0
-            assert int(row["Correlation_Id"]) > 0
-            assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
+    for dispatch in kernel_dispatch_data:
+        dispatch_info = dispatch["dispatch_info"]
+        kernel_name = get_kernel_name(dispatch_info["kernel_id"])
 
-            # Verify kernel dimensions (from the test app)
-            assert int(row["Workgroup_Size_X"]) == 256  # threads_per_block
-            assert int(row["Workgroup_Size_Y"]) == 1
-            assert int(row["Workgroup_Size_Z"]) == 1
+        assert get_kind_name(dispatch["kind"]) == "KERNEL_DISPATCH"
+        assert dispatch["correlation_id"]["internal"] > 0
+        assert dispatch["end_timestamp"] >= dispatch["start_timestamp"]
+        assert dispatch_info["queue_id"]["handle"] > 0
 
-            assert int(row["Grid_Size_X"]) >= 1
-            assert int(row["Grid_Size_Y"]) >= 1
-            assert int(row["Grid_Size_Z"]) >= 1
+        if "simple_kernel" in kernel_name:
+            simple_kernel_found = True
+            assert dispatch_info["workgroup_size"]["x"] == 256
+            assert dispatch_info["workgroup_size"]["y"] == 1
+            assert dispatch_info["workgroup_size"]["z"] == 1
+            assert dispatch_info["grid_size"]["x"] >= 1
+            assert dispatch_info["grid_size"]["y"] >= 1
+            assert dispatch_info["grid_size"]["z"] >= 1
+            kernel_threads.add(dispatch["thread_id"])
 
-            thread_id = int(row["Thread_Id"])
-            stream_id = int(row["Stream_Id"])
-            kernel_threads.add(thread_id)
-            kernel_streams.add(stream_id)
-
-    # Exactly 8 streams and 8 threads
-    assert len(kernel_threads) == NUM_KERNEL_THREADS
-    # Readd when JSON conversion is redone
-    # assert kernel_streams == expected_stream_ids
-
-
-def test_attachment_memory_copy_trace(memory_copy_input_data):
-    """Verify that memory copy operations were captured during attachment."""
-
-    # We should have captured memory copies (HtoD and DtoH)
+    assert simple_kernel_found, "Expected 'simple_kernel' not found in kernel dispatches"
     assert (
-        len(memory_copy_input_data) > 0
+        len(kernel_threads) == 8
+    ), f"Expected 8 unique threads, got {len(kernel_threads)}"
+
+
+def test_memory_copy_trace(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
+    def get_kind_name(kind_id):
+        return data["strings"]["buffer_records"][kind_id]["kind"]
+
+    def get_agent(agent_id):
+        for agent in data["agents"]:
+            if agent["id"]["handle"] == agent_id["handle"]:
+                return agent
+        return None
+
+    memory_copy_data = data["buffer_records"]["memory_copy"]
+    assert (
+        len(memory_copy_data) > 0
     ), "No memory copy operations captured during attachment"
 
     host_to_device_count = 0
     device_to_host_count = 0
-    memory_copy_streams = set()
-    expected_stream_ids = set([i for i in range(1, 9)])
 
-    for row in memory_copy_input_data:
-        assert "Stream_Id" in row
-        assert row["Kind"] == "MEMORY_COPY"
-        assert int(row["Correlation_Id"]) > 0
-        assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
+    for record in memory_copy_data:
+        assert get_kind_name(record["kind"]) == "MEMORY_COPY"
+        assert record["correlation_id"]["internal"] > 0
+        assert record["end_timestamp"] >= record["start_timestamp"]
 
-        # Count the direction of memory copies
-        if "MEMORY_COPY_HOST_TO_DEVICE" in row["Direction"] or "H2D" in row["Direction"]:
+        src_agent = get_agent(record["src_agent_id"])
+        dst_agent = get_agent(record["dst_agent_id"])
+        assert src_agent is not None, f"src agent not found: {record['src_agent_id']}"
+        assert dst_agent is not None, f"dst agent not found: {record['dst_agent_id']}"
+
+        # type 1 = CPU, type 2 = GPU
+        if src_agent["type"] == 1 and dst_agent["type"] == 2:
             host_to_device_count += 1
-        elif (
-            "MEMORY_COPY_DEVICE_TO_HOST" in row["Direction"] or "D2H" in row["Direction"]
-        ):
+        elif src_agent["type"] == 2 and dst_agent["type"] == 1:
             device_to_host_count += 1
 
-        stream_id = int(row["Stream_Id"])
-        memory_copy_streams.add(stream_id)
-
-    # We should have both H2D and D2H copies
     assert host_to_device_count > 0, "No host-to-device memory copies captured"
     assert device_to_host_count > 0, "No device-to-host memory copies captured"
-    # Exactly 8 streams
-    memory_copy_streams == expected_stream_ids
 
 
-def test_attachment_hsa_api_trace(hsa_input_data):
-    """Verify that HSA API calls were captured during attachment."""
+def test_hsa_api_trace(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
 
-    # Should have some HSA API calls
-    assert len(hsa_input_data) > 0, "No HSA API calls captured during attachment"
+    def get_kind_name(kind_id):
+        return data["strings"]["buffer_records"][kind_id]["kind"]
+
+    def get_operation_name(kind_id, op_id):
+        return data["strings"]["buffer_records"][kind_id]["operations"][op_id]
+
+    valid_domains = (
+        "HSA_CORE_API",
+        "HSA_AMD_EXT_API",
+        "HSA_IMAGE_EXT_API",
+        "HSA_FINALIZE_EXT_API",
+    )
+
+    hsa_api_data = data["buffer_records"]["hsa_api"]
+    assert len(hsa_api_data) > 0, "No HSA API calls captured during attachment"
 
     functions = []
-    for row in hsa_input_data:
-        assert row["Domain"] in (
-            "HSA_CORE_API",
-            "HSA_AMD_EXT_API",
-            "HSA_IMAGE_EXT_API",
-            "HSA_FINALIZE_EXT_API",
-        )
-        assert int(row["Process_Id"]) > 0
-        assert int(row["Thread_Id"]) > 0
-        assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
-        functions.append(row["Function"])
+    for record in hsa_api_data:
+        kind = get_kind_name(record["kind"])
+        assert kind in valid_domains, f"Unexpected HSA domain: {kind}"
+        assert record["thread_id"] > 0
+        assert record["end_timestamp"] >= record["start_timestamp"]
+        functions.append(get_operation_name(record["kind"], record["operation"]))
 
     assert any(
-        "memory" in func.lower() for func in functions
+        "memory" in f.lower() for f in functions
     ), "No memory-related HSA functions captured"
-
-
-def test_agent_info(agent_info_input_data):
-    """Verify agent information is captured correctly."""
-
-    assert len(agent_info_input_data) > 0, "No agent information captured"
-
-    cpu_count = 0
-    gpu_count = 0
-
-    for row in agent_info_input_data:
-        agent_type = row["Agent_Type"]
-        assert agent_type in ("CPU", "GPU")
-
-        if agent_type == "CPU":
-            cpu_count += 1
-            assert int(row["Cpu_Cores_Count"]) > 0
-            assert int(row["Simd_Count"]) == 0
-            assert int(row["Max_Waves_Per_Simd"]) == 0
-        else:
-            gpu_count += 1
-            assert int(row["Cpu_Cores_Count"]) == 0
-            assert int(row["Simd_Count"]) > 0
-            assert int(row["Max_Waves_Per_Simd"]) > 0
-
-    # Should have at least one GPU for the test
-    assert gpu_count > 0, "No GPU agents found"
 
 
 if __name__ == "__main__":

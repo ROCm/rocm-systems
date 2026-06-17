@@ -170,6 +170,15 @@ bool GpuCoreDumpTest::CheckPrerequisites() {
 void GpuCoreDumpTest::SetUp(void) {
   if (!checkPlatformFiltering()) return;
 
+#ifdef ROCRTST_ASAN
+  // Under ASAN, these tests fork children (unsupported in ASAN) that trigger
+  // GPU faults and are killed after timeout, leaving leaked GPU queues/signals
+  // that corrupt kernel-level state for subsequent tests.
+  std::cout << "SKIPPED: GpuCoreDump tests disabled under ASan (fork+SIGKILL leaks KFD resources)" << std::endl;
+  prerequisites_met_ = false;
+  return;
+#endif
+
   // Don't call TestBase::SetUp() - we don't want hsa_init() in parent
 
   // Check prerequisites first

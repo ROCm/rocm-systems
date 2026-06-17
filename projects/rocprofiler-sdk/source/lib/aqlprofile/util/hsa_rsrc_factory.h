@@ -171,7 +171,7 @@ public:
         sysclock_factor_ = (freq_t) 1000000000 / (freq_t) sysclock_hz;
     }
 
-    // Methids for system-clock/ns conversion
+    // Methods for system-clock/ns conversion
     timestamp_t sysclock_to_ns(const timestamp_t& sysclock) const
     {
         return timestamp_t((freq_t) sysclock * sysclock_factor_);
@@ -272,14 +272,14 @@ public:
     uint8_t* AllocateLocalMemory(const AgentInfo* agent_info, size_t size);
 
     // Allocate memory tp pass kernel parameters
-    // Memory is alocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
+    // Memory is allocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
     // @param agent_info Agent from whose memory region to allocate
     // @param size Size of memory in terms of bytes
     // @return uint8_t* Pointer to buffer, null if allocation fails.
     uint8_t* AllocateKernArgMemory(const AgentInfo* agent_info, size_t size);
 
     // Allocate system memory accessible from both CPU and GPU
-    // Memory is alocated accessible to all CPU agents and AgentInfo parameter is ignored.
+    // Memory is allocated accessible to all CPU agents and AgentInfo parameter is ignored.
     // @param agent_info Agent from whose memory region to allocate
     // @param size Size of memory in terms of bytes
     // @return uint8_t* Pointer to buffer, null if allocation fails.

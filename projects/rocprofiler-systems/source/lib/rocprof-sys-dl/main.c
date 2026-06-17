@@ -65,6 +65,9 @@ extern void
 rocprofsys_push_trace(const char* name);
 
 extern void
+rocprofsys_push_trace_with_args(const char* name, const char* args);
+
+extern void
 rocprofsys_pop_trace(const char* name);
 
 extern void

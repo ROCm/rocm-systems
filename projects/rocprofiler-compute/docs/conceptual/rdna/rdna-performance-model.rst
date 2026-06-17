@@ -1,6 +1,6 @@
 .. meta::
    :description: Understand the AMD RDNA architectures and hardware blocks with ROCm Compute Profiler to analyze and optimize performance on AMD Ryzen APUs.
-   :keywords: ROCm Compute Profiler, RDNA, RDNA3, gfx1151, Radeon, ROCm, Ryzen
+   :keywords: ROCm Compute Profiler, RDNA, RDNA3, gfx115x, Radeon, ROCm, Ryzen
 
 .. _rdna-performance-model:
 
@@ -8,7 +8,7 @@
 RDNA3
 ********
 
-ROCm Compute Profiler makes available an extensive list of metrics to better understand achieved application performance on RDNA3.5 architecture based AMD Ryzen™ APUs like AMD Ryzen™ AI Max / Ryzen™ AI Max+ 300 Series(gfx1151).
+ROCm Compute Profiler makes available an extensive list of metrics to better understand achieved application performance on RDNA3.5 architecture based AMD Ryzen™ APUs like AMD Ryzen™ AI Max / Ryzen™ AI Max+ 300 Series (gfx115x).
 
 To best use profiling data, it’s important to understand the role of various hardware blocks of AMD RDNA3 architecture. Refer to the following top-level block diagram to understand the hardware blocks of RDNA3 architecture.
 
@@ -27,31 +27,31 @@ For more details on AMD RDNA3 architecture, see page 5 of `RDNA3 shader instruct
    * For details on packaging, SIMD width, and generational differences between RDNA3, RDNA3.5, and later APUs, refer to :doc:`GPU hardware specifications <rocm:reference/gpu-arch-specs>` and the public architecture summaries.
 
 ROCm Compute Profiler includes analysis panels targeting RDNA3.5 parts reporting as
-gfx1151 - for example, integrated graphics on AMD Ryzen AI Max Series processors.
+gfx115x - for example, integrated graphics on AMD Ryzen AI Max Series processors.
 
 Memory hierarchy in the tool
 ==============================
 
-For gfx1151, the Memory Chart panel walks the path from instruction and scalar
+For gfx115x, the Memory Chart panel walks the path from instruction and scalar
 paths, GL0 (TCP), LDS, interfaces to GL1 Cache, GL2 Cache, and GCEA toward
 system memory.
 
 Workgroups and execution
 ==============================
 
-RDNA3 architecture-based APUs organize compute around **Workgroup Processors (WGPs)** and **Compute Units (CUs)**-on gfx1151 each WGP pairs two CUs that share resources.
+RDNA3 architecture-based APUs organize compute around **Workgroup Processors (WGPs)** and **Compute Units (CUs)**. On gfx115x, each WGP pairs two CUs that share resources.
 Wavefronts are typically wave32-oriented in this configuration.
-The Workgroup processor (WGP), Shader Processor Input (SPI), and Command Processor Compute (CPC) panels in gfx1151 expose dispatch, occupancy, and command-processor metrics for this RDNA execution model (see the nested chapters under :doc:`shader-engine` and :doc:`command-processor`).
+The Workgroup processor (WGP), Shader Processor Input (SPI), and Command Processor Compute (CPC) panels in gfx115x expose dispatch, occupancy, and command-processor metrics for this RDNA execution model (see the nested chapters under :doc:`shader-engine` and :doc:`command-processor`).
 
 Hardware block chapters
 ========================
 
-Profiler chapters follow the RDNA3 gfx1151 block hierarchy below (roofline and Memory Chart walkthroughs live elsewhere in this manual).
+Profiler chapters follow the RDNA3 gfx115x block hierarchy below (roofline and Memory Chart walkthroughs live elsewhere in this manual).
 
 Shader engine
 -------------
 
-Within each shader engine, gfx1151 metric tables group under:
+Within each shader engine, gfx115x metric tables group under:
 
 * :doc:`spi` - **Workgroup Manager (SPI).** Schedules wavefronts onto WGPs after the command processor dispatches work; SPI utilization and wave-dispatch statistics.
 
@@ -80,10 +80,10 @@ Host-side control and coarse utilization
 Additional reference material
 -----------------------------
 
-* :doc:`system-speed-of-light` - System Speed-of-Light table using the same gfx1151 metric keys as the analysis panel.
+* :doc:`system-speed-of-light` - System Speed-of-Light table using the same gfx115x metric keys as the analysis panel.
 
 * :doc:`references` - Public references and links to complementary Instinct documentation.
 
 .. Note::
 
-   ROCm Compute Profiler currently has limited support for WMMA on gfx1151.
+   ROCm Compute Profiler currently has limited support for WMMA on gfx115x.

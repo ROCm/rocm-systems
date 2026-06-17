@@ -290,50 +290,43 @@ HIP_TEST_CASE(Unit_hipStreamPerThreadTst_StrmQuery) {
 
 /* Testing hipStreamPerThread stream object with hipMallocManaged() memory*/
 HIP_TEST_CASE(Unit_hipStreamPerThread_MangdMem) {
-  int managed = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-  if (managed == 1) {
-    int *Hmm = nullptr, NumElms = 4096, CONST_NUM = 123, blockSize = 32;
-    SECTION("Using Managed memory") {
-      HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)));
-      for (int i = 0; i < NumElms; ++i) {
-        Hmm[i] = CONST_NUM;
-      }
-    }
-    SECTION("Prefetching Managed memory to device") {
-      HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)));
-      for (int i = 0; i < NumElms; ++i) {
-        Hmm[i] = CONST_NUM;
-      }
-      HIP_CHECK(hipMemPrefetchAsync(Hmm, NumElms * sizeof(int), 0, hipStreamPerThread));
-    }
-    int peak_clk;
-    dim3 dimBlock(blockSize, 1, 1);
-    dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
-    if (IsGfx11()) {
-      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
-      StreamPerThrd_gfx11<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Hmm, NULL, NumElms,
-                                                                        peak_clk, 0);
-    } else {
-      HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
-      StreamPerThrd<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Hmm, NULL, NumElms, peak_clk, 0);
-    }
-    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-    // Validating the result
-    int MisMatch = 0;
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  int *Hmm = nullptr, NumElms = 4096, CONST_NUM = 123, blockSize = 32;
+  SECTION("Using Managed memory") {
+    HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)));
     for (int i = 0; i < NumElms; ++i) {
-      if (Hmm[i] != (CONST_NUM + 10)) {
-        MisMatch++;
-      }
+      Hmm[i] = CONST_NUM;
     }
-    HIP_CHECK(hipFree(Hmm));
-    if (MisMatch) {
-      WARN("Data mismatch observed!!\n");
-      REQUIRE(false);
-    }
-  } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
+  SECTION("Prefetching Managed memory to device") {
+    HIP_CHECK(hipMallocManaged(&Hmm, NumElms * sizeof(int)));
+    for (int i = 0; i < NumElms; ++i) {
+      Hmm[i] = CONST_NUM;
+    }
+    HIP_CHECK(hipMemPrefetchAsync(Hmm, NumElms * sizeof(int), 0, hipStreamPerThread));
+  }
+  int peak_clk;
+  dim3 dimBlock(blockSize, 1, 1);
+  dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
+  if (IsGfx11()) {
+    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
+    StreamPerThrd_gfx11<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Hmm, NULL, NumElms, peak_clk,
+                                                                      0);
+  } else {
+    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
+    StreamPerThrd<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Hmm, NULL, NumElms, peak_clk, 0);
+  }
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  // Validating the result
+  int MisMatch = 0;
+  for (int i = 0; i < NumElms; ++i) {
+    if (Hmm[i] != (CONST_NUM + 10)) {
+      MisMatch++;
+    }
+  }
+  HIP_CHECK(hipFree(Hmm));
+  REQUIRE(MisMatch == 0);
 }
 
 /*  To check the working of hipStreamPerThread in forked process*/

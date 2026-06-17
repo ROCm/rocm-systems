@@ -204,7 +204,7 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,     ///< @see ::rocprofiler_marker_name_api_id_t
     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,         ///< @see ::rocprofiler_memory_copy_operation_t
     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,     ///< Buffer kernel dispatch info
-    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,      ///< Buffer scratch memory reclaimation info
+    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,      ///< Buffer scratch memory reclamation info
     ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,  ///< Correlation ID in no longer in use
     ROCPROFILER_BUFFER_TRACING_RCCL_API,                   ///< RCCL tracing
     ROCPROFILER_BUFFER_TRACING_OMPT,                       ///< @see ::rocprofiler_ompt_operation_t
@@ -327,7 +327,7 @@ typedef enum rocprofiler_kernel_dispatch_operation_t  // NOLINT(performance-enum
     /// captured and it is safe to disable those contexts without affecting the delivery of the
     /// requested data when the kernel completes. It is important to note that, even if the context
     /// associated with the kernel dispatch callback tracing service is disabled in between the
-    /// enter and exit phase, the exit phase callback is still delievered but that context will not
+    /// enter and exit phase, the exit phase callback is still delivered but that context will not
     /// be captured when the kernel is enqueued and therefore will not provide a
     /// ::ROCPROFILER_KERNEL_DISPATCH_COMPLETE callback. Furthermore, it should be
     /// noted that if a tool encodes information into the `::rocprofiler_user_data_t` output
@@ -516,7 +516,7 @@ typedef uint64_t rocprofiler_thread_id_t;
  * @brief Tracing Operation ID. Depending on the kind, operations can be determined.
  * If the value is equal to zero that means all operations will be considered
  * for tracing. Detailed API tracing operations can be found at associated header file
- * for that partiular operation. i.e: For ROCProfiler enumeration of HSA AMD Extended API tracing
+ * for that particular operation. i.e: For ROCProfiler enumeration of HSA AMD Extended API tracing
  * operations, look at source/include/rocprofiler-sdk/hsa/amd_ext_api_id.h
  */
 typedef int32_t rocprofiler_tracing_operation_t;
@@ -542,7 +542,7 @@ typedef uint64_t rocprofiler_counter_instance_id_t;
 /**
  * @brief A dimension for counter instances. Some example
  *        dimensions include XCC, SM (Shader), etc. This
- *        value represents the dimension beind described
+ *        value represents the dimension behind described
  *        or queried about.
  */
 typedef uint64_t rocprofiler_counter_dimension_id_t;
@@ -569,7 +569,7 @@ typedef union rocprofiler_user_data_t
  */
 typedef union rocprofiler_address_t
 {
-    uint64_t    handle;  ///< compatability
+    uint64_t    handle;  ///< compatibility
     uint64_t    value;   ///< usage example: store address in uint64_t format
     const void* ptr;     ///< usage example: generic form of address
 } rocprofiler_address_t;

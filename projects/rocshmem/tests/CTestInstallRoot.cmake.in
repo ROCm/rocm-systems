@@ -1,0 +1,51 @@
+# CMake generated Testfile for ROCshmem installation
+# Source directory: @CMAKE_SOURCE_DIR@/tests
+# Install directory: ${CMAKE_CURRENT_LIST_DIR}
+#
+# This file enables CTest execution from the installation directory.
+# Usage: cd <install>/bin/rocshmem && ctest -L quick
+
+# Note: Test commands use relative paths from the working directory
+# Working directory is automatically set to the subdirectory containing each CTestTestfile.cmake
+# Tests reference files relative to their working directory:
+#   - Executables: ../../../../share/rocshmem/rocshmem_*_tests
+#   - Wrapper scripts: ../../../../share/rocshmem/test_wrapper.sh
+
+# Find MPI (required for all tests)
+find_program(MPIEXEC_EXECUTABLE NAMES mpiexec mpirun)
+if(NOT MPIEXEC_EXECUTABLE)
+    message(WARNING "MPI executable not found. Tests cannot run without MPI.")
+    message(WARNING "Set MPIEXEC_EXECUTABLE or ensure mpiexec/mpirun is in PATH")
+    return()
+endif()
+
+# MPI parameters (can be overridden via CMake variables or environment)
+if(NOT DEFINED MPIEXEC_NUMPROC_FLAG)
+    set(MPIEXEC_NUMPROC_FLAG "-n")
+endif()
+
+# MCA parameters - read from environment or use defaults
+if(DEFINED ENV{OMPI_MCA_pml})
+    set(OMPI_MCA_PML "$ENV{OMPI_MCA_pml}")
+elseif(NOT DEFINED OMPI_MCA_PML)
+    set(OMPI_MCA_PML "ucx")
+endif()
+
+if(DEFINED ENV{OMPI_MCA_osc})
+    set(OMPI_MCA_OSC "$ENV{OMPI_MCA_osc}")
+elseif(NOT DEFINED OMPI_MCA_OSC)
+    set(OMPI_MCA_OSC "ucx")
+endif()
+
+message(STATUS "MPI executable: ${MPIEXEC_EXECUTABLE}")
+message(STATUS "MPI MCA parameters: pml=${OMPI_MCA_PML}, osc=${OMPI_MCA_OSC}")
+
+# Subdirectories containing test definitions
+@BUILD_FUNCTIONAL_TESTS_SUBDIRS@
+@BUILD_UNIT_TESTS_SUBDIRS@
+
+# Tier labels are available for monorepo CI filtering:
+#   ctest -L quick           # Quick smoke tests
+#   ctest -L standard        # Standard test suite
+#   ctest -L comprehensive   # Comprehensive test suite
+#   ctest -L full            # Full test suite

@@ -63,6 +63,7 @@
 # Emulation
 /emulation/                                                           @atgutier
 /emulation/mirage/                                                    @atgutier @amd-arosa
+/emulation/rocjitsu/                                                  @atgutier @ROCm/rocjitsu-core-team
 
 # Profilers
 /profilers/profiler-hub                                               @ROCm/rocm-profiler-hub

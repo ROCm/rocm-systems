@@ -15,33 +15,44 @@ ARG ROCM_VERSION=7.2.2
 # Ex. Package 7.0_alpha installs 7.0.0
 ARG ROCM_PKG_REPO_OVERRIDE
 
+# Nightly ROCm build id (YYYYMMDD-<gha_run_id>). When set, ROCm is installed from
+# the unsigned nightly repo at rocm.nightlies.amd.com/packages-multi-arch/deb/<ROCM_NIGHTLY_BUILD>
+# and ROCM_VERSION is expected to be the clean MAJOR.MINOR.PATCH that build pins.
+ARG ROCM_NIGHTLY_BUILD
+
 RUN apt update && \
     apt install -y \
         curl \
         gpg
 
-# Cache MAJOR/MINOR and a 'use new repo' flag for use by later RUN steps.
+# Cache MAJOR/MINOR and the ROCm build type for use by later RUN steps.
 # Threshold: ROCm 7.11+ ships from repo.amd.com to /opt/rocm/core-<MAJOR>.<MINOR>;
 # earlier releases ship from repo.radeon.com to /opt/rocm (legacy symlink).
+# A non-empty ROCM_NIGHTLY_BUILD selects the nightly repo and shares the 7.11+
+# install layout (ROCM_VERSION must be the clean version that build pins).
 RUN ROCM_MAJOR=$(echo "${ROCM_VERSION}" | cut -d. -f1); \
     ROCM_MINOR=$(echo "${ROCM_VERSION}" | cut -d. -f2); \
-    if [ "${ROCM_MAJOR}" -gt 7 ] || { [ "${ROCM_MAJOR}" -eq 7 ] && [ "${ROCM_MINOR}" -ge 11 ]; }; then \
-        ROCM_USE_NEW_REPO=1; \
+    if [ -n "${ROCM_NIGHTLY_BUILD}" ]; then \
+        ROCM_BUILD_TYPE=nightly; \
+        ROCM_INSTALL_PATH="/opt/rocm/core-${ROCM_MAJOR}.${ROCM_MINOR}"; \
+    elif [ "${ROCM_MAJOR}" -gt 7 ] || { [ "${ROCM_MAJOR}" -eq 7 ] && [ "${ROCM_MINOR}" -ge 11 ]; }; then \
+        ROCM_BUILD_TYPE=new; \
         ROCM_INSTALL_PATH="/opt/rocm/core-${ROCM_MAJOR}.${ROCM_MINOR}"; \
     else \
-        ROCM_USE_NEW_REPO=0; \
+        ROCM_BUILD_TYPE=legacy; \
         ROCM_INSTALL_PATH="/opt/rocm"; \
     fi; \
-    printf 'ROCM_MAJOR=%s\nROCM_MINOR=%s\nROCM_USE_NEW_REPO=%s\nROCM_INSTALL_PATH=%s\n' \
-        "${ROCM_MAJOR}" "${ROCM_MINOR}" "${ROCM_USE_NEW_REPO}" "${ROCM_INSTALL_PATH}" \
+    printf 'ROCM_MAJOR=%s\nROCM_MINOR=%s\nROCM_BUILD_TYPE=%s\nROCM_INSTALL_PATH=%s\nROCM_NIGHTLY_BUILD=%s\n' \
+        "${ROCM_MAJOR}" "${ROCM_MINOR}" "${ROCM_BUILD_TYPE}" "${ROCM_INSTALL_PATH}" "${ROCM_NIGHTLY_BUILD}" \
         > /etc/rocm-build.env
 
-# Retrieve ROCm GPG key
+# Retrieve ROCm GPG key. The nightly repo is unsigned, so no key is fetched
+# (the nightly sources.list entry uses [trusted=yes]).
 RUN . /etc/rocm-build.env && \
-    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
+    if [ "${ROCM_BUILD_TYPE}" = "new" ]; then \
         curl https://repo.amd.com/rocm/packages/gpg/rocm.gpg | \
             gpg --dearmor >> /etc/apt/keyrings/amdrocm.gpg; \
-    else \
+    elif [ "${ROCM_BUILD_TYPE}" = "legacy" ]; then \
         curl https://repo.radeon.com/rocm/rocm.gpg.key | \
             gpg --dearmor >> /etc/apt/keyrings/rocm.gpg; \
     fi
@@ -51,9 +62,12 @@ RUN . /etc/rocm-build.env && \
 # If the PATCH component is 0, the PATCH of the version is dropped. Otherwise no
 # modification is made.
 RUN . /etc/rocm-build.env && \
-    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
+    if [ "${ROCM_BUILD_TYPE}" = "new" ]; then \
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages/ubuntu${UBUNTU_MAJOR_VERSION}${UBUNTU_MINOR_VERSION} stable main" \
             > /etc/apt/sources.list.d/amdrocm.list; \
+    elif [ "${ROCM_BUILD_TYPE}" = "nightly" ]; then \
+        echo "deb [arch=amd64 trusted=yes] https://rocm.nightlies.amd.com/packages-multi-arch/deb/${ROCM_NIGHTLY_BUILD} stable main" \
+            > /etc/apt/sources.list.d/amdrocm-nightly.list; \
     else \
         ROCM_PKG_REPO_VERSION="$(echo ${ROCM_PKG_REPO_OVERRIDE:-$ROCM_VERSION} | sed -E 's|([^.]+\.[^.]+)\.0$|\1|')"; \
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_PKG_REPO_VERSION} ${UBUNTU_CODENAME} main" \
@@ -64,7 +78,7 @@ RUN . /etc/rocm-build.env && \
 # Outer EOT is a Dockerfile-level heredoc delimiter, kept distinct from the inner shell EOF.
 RUN <<"EOT"
 . /etc/rocm-build.env
-if [ "${ROCM_USE_NEW_REPO}" = "0" ]; then
+if [ "${ROCM_BUILD_TYPE}" = "legacy" ]; then
     cat <<EOF > /etc/apt/preferences.d/rocm-pin-600
 Package: *
 Pin: release o=repo.radeon.com
@@ -81,15 +95,15 @@ RUN apt update && \
         doxygen \
         gdb \
         git \
-        libboost-program-options-dev \
         libmount-dev \
         llvm-dev \
         python3.12-dev \
         python3.12-venv
 
-# ROCm dev packages
+# ROCm dev packages. The new and nightly repos both ship the runtime + dev as a
+# single amdrocm-runtime-dev<MAJOR>.<MINOR> meta-package.
 RUN . /etc/rocm-build.env && \
-    if [ "${ROCM_USE_NEW_REPO}" = "1" ]; then \
+    if [ "${ROCM_BUILD_TYPE}" = "new" ] || [ "${ROCM_BUILD_TYPE}" = "nightly" ]; then \
         apt install -y \
             amdrocm-runtime-dev${ROCM_MAJOR}.${ROCM_MINOR}; \
     else \

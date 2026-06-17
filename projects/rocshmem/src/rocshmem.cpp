@@ -59,6 +59,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <functional>
 #include <random>
 #include <cassert>
@@ -84,7 +85,7 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
  * Begin Host Code
  **/
 
-BackendType get_backend_type() { return backend->get_backend_type(); }
+BackendType rocshmem_query_backend_type() { return backend->get_type(); }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
@@ -505,8 +506,89 @@ static void setFilesLimit() {
 [[maybe_unused]] __host__ void *rocshmem_malloc(size_t size) {
   VERIFY_BACKEND();
 
-  void *ptr;
+  void *ptr{nullptr};
   backend->heap.malloc(&ptr, size);
+  rocshmem_barrier_all();
+
+  return ptr;
+}
+
+[[maybe_unused]] __host__ void *rocshmem_align(size_t alignment, size_t size) {
+  VERIFY_BACKEND();
+
+  /*
+   * Validate alignment per OpenSHMEM semantics:
+   *   - must be non-zero,
+   *   - must be a power of two,
+   *   - must be a multiple of sizeof(void *).
+   *
+   * The three conditions map directly onto the three && operands below:
+   * the non-zero guard also prevents `(0 & -1) == 0` from spoofing the
+   * power-of-two test, and the explicit modulo check is what rejects the
+   * small powers of two (1, 2, and on 64-bit also 4) that are otherwise
+   * valid powers of two but too small to hold a pointer.
+   */
+  bool valid_alignment = (alignment != 0) &&
+                         ((alignment & (alignment - 1)) == 0) &&
+                         (alignment % sizeof(void *) == 0);
+
+  void *ptr{nullptr};
+  if (valid_alignment) {
+    backend->heap.malign(&ptr, alignment, size);
+  } else {
+    LOG_WARN("rocshmem_align: invalid alignment %zu (must be a power of two "
+             "and a multiple of sizeof(void *) = %zu); returning NULL",
+             alignment, sizeof(void *));
+  }
+
+  /*
+   * rocshmem_align is collective: every PE must reach this barrier. We do
+   * not early-return on invalid alignment, otherwise the failing PE would
+   * leave the others blocked here forever.
+   */
+  rocshmem_barrier_all();
+
+  return ptr;
+}
+
+[[maybe_unused]] __host__ void *rocshmem_calloc(size_t count, size_t size) {
+  VERIFY_BACKEND();
+
+  /*
+   * OpenSHMEM shmem_calloc returns NULL when either argument is 0. We also
+   * have to guard the count * size multiplication against size_t overflow,
+   * otherwise we would silently allocate a much smaller (wrapped) buffer.
+   *
+   * The overflow check `count > SIZE_MAX / size` is only safe once we know
+   * size != 0, so it sits behind the zero guards.
+   */
+  bool valid_args = (count != 0) && (size != 0) &&
+                    (count <= SIZE_MAX / size);
+
+  void *ptr{nullptr};
+  if (valid_args) {
+    size_t bytes = count * size;
+    backend->heap.malloc(&ptr, bytes);
+    if (ptr) {
+      /*
+       * The symmetric heap is HIP-allocated and may be backed by VMM or
+       * device-only memory depending on the build configuration (see
+       * memory/default_allocator.hpp). hipMemset works for every supported
+       * backing; a host memset would not.
+       */
+      CHECK_HIP(hipMemset(ptr, 0, bytes));
+    }
+  } else if (count != 0 && size != 0) {
+    LOG_WARN("rocshmem_calloc: count * size overflows size_t "
+             "(count=%zu, size=%zu); returning NULL",
+             count, size);
+  }
+
+  /*
+   * Collective: every PE must reach this barrier, even on the NULL-return
+   * paths, mirroring rocshmem_align. Otherwise a PE that hit invalid
+   * arguments would leave the others blocked here forever.
+   */
   rocshmem_barrier_all();
 
   return ptr;
@@ -520,6 +602,11 @@ __host__ int rocshmem_buffer_register(void *addr, size_t length) {
 __host__ int rocshmem_buffer_unregister(void *addr) {
   VERIFY_BACKEND();
   return backend->buffer_unregister(addr);
+}
+
+__host__ void rocshmem_buffer_unregister_all() {
+  VERIFY_BACKEND();
+  backend->buffer_unregister_all();
 }
 
 [[maybe_unused]] __host__ void rocshmem_free(void *ptr) {
@@ -707,6 +794,79 @@ __host__ int rocshmem_team_split_strided(
     mpilib_ftable_.Comm_free (&team_comm);
   }
   return 0;
+}
+
+__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, const 
+                                    rocshmem_team_config_t *xaxis_config, long xaxis_mask, 
+                                    rocshmem_team_t *xaxis_team, 
+                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask, 
+                                    rocshmem_team_t *yaxis_team)
+{
+  VERIFY_BACKEND();
+  *yaxis_team = ROCSHMEM_TEAM_INVALID;
+  *xaxis_team = ROCSHMEM_TEAM_INVALID;
+
+  if (parent_team == ROCSHMEM_TEAM_INVALID) {
+    LOG_ERROR("Parent team is invaid");
+    return ROCSHMEM_ERROR;
+  }
+  if (xrange < 1) {
+    LOG_ERROR("xrange must be >= 1 (got %d)", xrange);
+    return ROCSHMEM_ERROR;
+  }
+
+  Team *parent_team_obj = get_internal_team(parent_team);
+  const int parent_size = parent_team_obj->num_pes;
+
+  const int _xrange = (xrange > parent_size) ? parent_size : xrange;
+  const int yrange = parent_size / _xrange;
+
+  const int num_xteams = (parent_size + _xrange - 1) / _xrange;
+  const int num_yteams = _xrange;
+  const int remainder = parent_size % _xrange;
+
+  int start = 0;
+  int ret = 0;
+
+  for (int i = 0; i < num_xteams; ++i) {
+    rocshmem_team_t my_xteam;
+    int xsize = (i == num_xteams - 1 && remainder) ? remainder : _xrange;
+
+    ret = rocshmem_team_split_strided(parent_team, start, 1, xsize, xaxis_config, xaxis_mask,
+                                      &my_xteam);
+
+    if (ret) {
+      LOG_ERROR("Unable to make xteam %d out of %d", i + 1, num_xteams);
+      return ROCSHMEM_ERROR;
+    }
+    
+    start += _xrange;
+
+    if (my_xteam != ROCSHMEM_TEAM_INVALID) 
+      *xaxis_team = my_xteam;
+  }
+
+  start = 0;
+
+  for (int i = 0; i < num_yteams; ++i) {
+    rocshmem_team_t my_yteam;
+    int ysize = yrange;
+    if (remainder && i < remainder) ysize += 1;
+    
+    ret = rocshmem_team_split_strided(parent_team, start, _xrange, ysize, yaxis_config,
+                                      yaxis_mask, &my_yteam);
+
+    if (ret) {
+      LOG_ERROR("Unable to make yteam %d out of %d", i + 1, num_yteams);
+      return ROCSHMEM_ERROR;
+    }
+
+    start += 1;
+
+    if (my_yteam != ROCSHMEM_TEAM_INVALID) 
+      *yaxis_team = my_yteam;
+  }
+  return ROCSHMEM_SUCCESS;
 }
 
 __host__ void rocshmem_team_destroy(rocshmem_team_t team) {
@@ -1102,11 +1262,24 @@ __host__ void rocshmem_barrier_all() {
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_all();
 }
 
+__host__ void rocshmem_barrier(rocshmem_team_t team) {
+  LOG_API("host::barrier (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier(team);
+}
+
 
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream) {
   LOG_API("host::barrier_all_on_stream ()");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_all_on_stream(stream);
+}
+
+__host__ void rocshmem_barrier_on_stream(rocshmem_team_t team,
+                                         hipStream_t stream) {
+  LOG_API("host::barrier_on_stream (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_on_stream(team, stream);
 }
 
 __host__ void rocshmem_quiet_on_stream(hipStream_t stream) {
@@ -1119,6 +1292,13 @@ __host__ void rocshmem_sync_all_on_stream(hipStream_t stream) {
   LOG_API("rocshmem_sync_all_on_stream");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_all_on_stream(stream);
+}
+
+__host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
+                                           hipStream_t stream) {
+  LOG_API("host::team_sync_on_stream (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_on_stream(team, stream);
 }
 
 __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,
@@ -1182,6 +1362,12 @@ __host__ void rocshmem_sync_all() {
   LOG_API("host::sync_all");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_all();
+}
+
+__host__ void rocshmem_team_sync(rocshmem_team_t team) {
+  LOG_API("host::team_sync (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync(team);
 }
 
 template <typename T>
@@ -1701,6 +1887,29 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
     return rocshmem_test<T>(ivars, cmp, val);                                 \
   }
 
+#define REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, Op, Op_API) \
+    int rocshmem_ctx_##TNAME##_##Op##_reduce_on_stream(rocshmem_ctx_t ctx, rocshmem_team_t team, \
+      T *dest, const T *source, int nreduce, hipStream_t stream){                             \
+      return get_internal_ctx(ctx)->reduce_on_stream<T, Op_API>(team, dest, source,              \
+        nreduce, stream);                                                      \
+   }
+#define REDUCTION_ON_STREAM_IMP_GEN_ARITH(T, TNAME) \
+    REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, sum, ROCSHMEM_SUM) \
+    REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, min, ROCSHMEM_MIN) \
+    REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, max, ROCSHMEM_MAX) \
+    REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, prod, ROCSHMEM_PROD)
+
+#define REDUCTION_ON_STREAM_IMP_GEN_BITWISE(T, TNAME)  \
+  REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, or, ROCSHMEM_OR)  \
+  REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, and, ROCSHMEM_AND) \
+  REDUCTION_ON_STREAM_IMP_GEN(T, TNAME, xor, ROCSHMEM_XOR)
+
+#define INT_REDUCTION_ON_STREAM_GEN_IMP(T, TNAME) \
+  REDUCTION_ON_STREAM_IMP_GEN_ARITH(T, TNAME)     \
+  REDUCTION_ON_STREAM_IMP_GEN_BITWISE(T, TNAME)
+
+#define FLOAT_REDUCTION_ON_STREAM_GEN_IMP(T, TNAME) REDUCTION_ON_STREAM_IMP_GEN_ARITH(T, TNAME)
+
 /******************************************************************************
  ************************* Macro Invocation Per Type **************************
  *****************************************************************************/
@@ -1853,6 +2062,14 @@ WAIT_DEF_GEN(unsigned int, uint)
 WAIT_DEF_GEN(unsigned long, ulong)
 WAIT_DEF_GEN(unsigned long long, ulonglong)
 WAIT_DEF_GEN(uint64_t, uint64)
+
+INT_REDUCTION_ON_STREAM_GEN_IMP(int, int)
+INT_REDUCTION_ON_STREAM_GEN_IMP(long, long)
+INT_REDUCTION_ON_STREAM_GEN_IMP(long long, longlong)
+INT_REDUCTION_ON_STREAM_GEN_IMP(short, short)
+
+FLOAT_REDUCTION_ON_STREAM_GEN_IMP(float, float)
+FLOAT_REDUCTION_ON_STREAM_GEN_IMP(double, double)
 // clang-format on
 
 }  // namespace rocshmem
