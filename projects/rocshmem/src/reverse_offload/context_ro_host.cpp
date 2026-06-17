@@ -120,6 +120,10 @@ __host__ void ROHostContext::sync_all() {
   host_interface->sync_all(context_window_info);
 }
 
+__host__ void ROHostContext::sync(rocshmem_team_t team) {
+  host_interface->sync(team, context_window_info);
+}
+
 __host__ void ROHostContext::barrier_all() {
 
   host_interface->fence(context_window_info);
@@ -127,9 +131,18 @@ __host__ void ROHostContext::barrier_all() {
   host_interface->barrier_for_sync();
 }
 
+__host__ void ROHostContext::barrier(rocshmem_team_t team) {
+  host_interface->barrier(team, context_window_info);
+}
+
 __host__ void ROHostContext::barrier_all_on_stream(hipStream_t stream) {
 
   host_interface->barrier_all_on_stream(stream);
+}
+
+__host__ void ROHostContext::barrier_on_stream(rocshmem_team_t team,
+                                               hipStream_t stream) {
+  host_interface->barrier_on_stream(team, stream);
 }
 
 __host__ void ROHostContext::quiet_on_stream(hipStream_t stream) {
@@ -142,6 +155,13 @@ __host__ void ROHostContext::sync_all_on_stream(hipStream_t stream) {
   LOG_TRACE("ro_net_host_sync_all_on_stream");
 
   host_interface->sync_all_on_stream(stream);
+}
+
+__host__ void ROHostContext::sync_on_stream(rocshmem_team_t team,
+                                            hipStream_t stream) {
+  LOG_TRACE("ro_net_host_sync_on_stream");
+
+  host_interface->sync_on_stream(team, stream);
 }
 
 __host__ void ROHostContext::alltoallmem_on_stream(rocshmem_team_t team,

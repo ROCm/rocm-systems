@@ -18,7 +18,7 @@ THE SOFTWARE.
 */
 
 /*
- * File is intended to C and CPP compliant hence any CPP specic changes
+ * File is intended to C and CPP compliant hence any CPP specific changes
  * should be added into CPP section
  *
  */
@@ -248,7 +248,7 @@ checkArray(T hData, T hOutputData, size_t width, size_t height, size_t depth)
                 {
                     std::cerr << '[' << i << ',' << j << ',' << k << "]:" << hData[offset] << "----"
                               << hOutputData[offset] << "  ";
-                    failed("mistmatch at:%d %d %d", i, j, k);
+                    failed("mismatch at:%d %d %d", i, j, k);
                 }
             }
         }
@@ -268,7 +268,7 @@ checkArray(T input, T output, size_t height, size_t width)
             {
                 std::cerr << '[' << i << ',' << j << ',' << "]:" << input[offset] << "----"
                           << output[offset] << "  ";
-                failed("mistmatch at:%d %d", i, j);
+                failed("mismatch at:%d %d", i, j);
             }
         }
     }

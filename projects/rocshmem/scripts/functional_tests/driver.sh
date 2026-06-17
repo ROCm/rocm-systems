@@ -134,6 +134,17 @@ declare -A TEST_NUMBERS=(
   ["reduce_on_stream"]="117"
   ["host_ctx_create"]="118"
   ["teamsplit2d"]="119"
+  ["hostteamsyncbarrier"]="120"
+  ["host_putmem"]="121"
+  ["host_getmem"]="122"
+  ["host_amo_fadd"]="123"
+  ["host_amo_fcswap"]="124"
+  ["host_ctx_putmem"]="125"
+  ["host_ctx_getmem"]="126"
+  ["host_int_amo_fadd"]="127"
+  ["host_int_amo_fcswap"]="128"
+  ["host_amo_all_pes"]="129"
+  ["host_amo_self"]="130"
 )
 
 # Detect which runtime to use
@@ -411,6 +422,7 @@ ExecTest_MPI() {
   fi
 
   unset ROCSHMEM_MAX_NUM_CONTEXTS
+  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 }
 
 TestRMAPut() {
@@ -720,6 +732,37 @@ TestOnStream() {
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 }
 
+TestHostRma() { #AIROCSHMEM-419
+  ##############################################################################
+  #       | Name                    | Ranks | WGs | Threads | Max Msg Size    #
+  # These tests exercise the non-MPI TcpBootstrap IPC host path.              #
+  # ROCSHMEM_TEST_UUID=1 is set automatically so tests always use that path.  #
+  # IPC_HOST_NPES controls the PE count for the multi-PE concurrency tests.   #
+  # Default: 4. Override: IPC_HOST_NPES=8 ./driver.sh ...                     #
+  ##############################################################################
+  local npes=${IPC_HOST_NPES:-4}
+  local saved_uuid=$ROCSHMEM_TEST_UUID
+  ROCSHMEM_TEST_UUID=1
+
+  # Default-context: rocshmem_fence / rocshmem_quiet
+  ExecTest  "host_putmem"         2        1      1        65536
+  ExecTest  "host_getmem"         2        1      1        65536
+  # Long (64-bit) AMOs: rocshmem_long_atomic_fetch_add/cas
+  ExecTest  "host_amo_fadd"       2        1      1
+  ExecTest  "host_amo_fcswap"     2        1      1
+  # Explicit-context: rocshmem_ctx_fence / rocshmem_ctx_quiet
+  # ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2: default context takes slot 0, explicit ctx needs slot 1
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 && ExecTest "host_ctx_putmem"  2 1 1 65536
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 && ExecTest "host_ctx_getmem"  2 1 1 65536
+  # Int (32-bit) AMOs: rocshmem_int_atomic_fetch_add/cas (exercises 32-bit kernel path)
+  ExecTest  "host_int_amo_fadd"   2        1      1
+  ExecTest  "host_int_amo_fcswap" 2        1      1
+  # Concurrency tests — configurable PE count (IPC_HOST_NPES, default 4)
+  ExecTest  "host_amo_all_pes"    $npes    1      1
+  ExecTest  "host_amo_self"       $npes    1      1
+  ROCSHMEM_TEST_UUID=$saved_uuid
+}
+
 TestOther() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
@@ -774,6 +817,11 @@ TestOther() {
   ExecTest  "teamctxsubsetparentinfra" 5  1            1
   export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
   ExecTest  "host_ctx_create"          2       1            1
+  if [[ $TEST != ro* ]]; then # host team sync/barrier hangs on RO
+  ExecTest  "hostteamsyncbarrier"      2  1            1
+  ExecTest  "hostteamsyncbarrier"      4  1            1
+  ExecTest  "hostteamsyncbarrier"      8  1            1
+  else echo "Skip:   hostteamsyncbarrier (host team sync/barrier hangs on RO)"; fi
   unset ROCSHMEM_MAX_NUM_CONTEXTS
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
   
@@ -1033,6 +1081,17 @@ case $TEST in
     # Tile tests are only supported on IPC backend
     if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
       TestTiles
+    fi
+    # Host non-MPI IPC tests are only supported on IPC backend
+    if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
+      TestHostRma
+    fi
+    ;;
+  *"host")
+    if [ -x "$ROCSHMEM_INFO" ] && "$ROCSHMEM_INFO" | grep -q "USE_IPC.*: ON"; then
+      TestHostRma
+    else
+      echo "Skip: host tests require IPC backend (USE_IPC=OFF in this build)"
     fi
     ;;
   *"rma")

@@ -243,7 +243,7 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
             }
             else if (inst.time + inst.duration > next_min_time)
             {
-                // If we cant fit in the trace, then dont increase duration
+                // If we can't fit in the trace, then don't increase duration
                 inst.duration -= 4;
             }
         }

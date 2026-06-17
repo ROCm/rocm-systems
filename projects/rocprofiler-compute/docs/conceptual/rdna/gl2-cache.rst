@@ -1,6 +1,6 @@
 .. meta::
-   :description: Learn about GL2 Cache metrics in ROCm Compute Profiler, including cache performance, bandwidth, and request statistics on RDNA 3.5 (gfx1151).
-   :keywords: ROCm Compute Profiler, RDNA, gfx1151, GL2, GL2 Cache, GL2C
+   :description: Learn about GL2 Cache metrics in ROCm Compute Profiler, including cache performance, bandwidth, and request statistics on RDNA 3.5 (gfx115x).
+   :keywords: ROCm Compute Profiler, RDNA, gfx115x, GL2, GL2 Cache, GL2C
 
 .. _rdna-gl2:
 
@@ -8,7 +8,7 @@
 GL2
 ===
 
-On gfx1151, **GL2 Cache** (RDNA naming for what Instinct documentation refers to as
+On gfx115x, **GL2 Cache** (RDNA naming for what Instinct documentation refers to as
 L2/TCC) is the last-level GFX on-chip cache for most clients before traffic reaches the memory system.
 
 After GL2, traffic proceeds toward DRAM through **GCEA** and related interfaces; those panels are documented under :doc:`gcea`.
@@ -30,10 +30,10 @@ GL2 Cache performance
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA 3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-gl2-cache-performance-gfx1151
+      .. jinja:: rdna115x-gl2-cache-performance-gfx115x
          :file: _templates/metrics_table.j2
 
 GL2 Cache request statistics
@@ -41,10 +41,10 @@ GL2 Cache request statistics
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA 3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-gl2-cache-request-statistics-gfx1151
+      .. jinja:: rdna115x-gl2-cache-request-statistics-gfx115x
          :file: _templates/metrics_table.j2
 
 GL2 Cache bandwidth
@@ -52,10 +52,10 @@ GL2 Cache bandwidth
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA 3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-gl2-cache-bandwidth-gfx1151
+      .. jinja:: rdna115x-gl2-cache-bandwidth-gfx115x
          :file: _templates/metrics_table.j2
 
 Memory chart: GL2 cache
@@ -68,8 +68,8 @@ Memory chart - GL2 cache
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA 3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-memory-chart-gl2-cache-gfx1151
+      .. jinja:: rdna115x-memory-chart-gl2-cache-gfx115x
          :file: _templates/metrics_table.j2

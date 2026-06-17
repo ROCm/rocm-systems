@@ -790,12 +790,20 @@ __global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel(){
   rocshmem_barrier_all();
 }
 
+__global__ ATTR_NO_INLINE void rocshmem_barrier_kernel(rocshmem_team_t team){
+  rocshmem_ctx_barrier(ROCSHMEM_CTX_DEFAULT, team);
+}
+
 __global__ ATTR_NO_INLINE void rocshmem_quiet_kernel(){
   rocshmem_quiet();
 }
 
 __global__ ATTR_NO_INLINE void rocshmem_sync_all_kernel(){
   rocshmem_sync_all();
+}
+
+__global__ ATTR_NO_INLINE void rocshmem_team_sync_kernel(rocshmem_team_t team){
+  rocshmem_ctx_sync(ROCSHMEM_CTX_DEFAULT, team);
 }
 
 __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
