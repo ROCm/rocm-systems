@@ -108,7 +108,7 @@ public:
         return { raw.market_name, raw.vendor_name };
     }
 
-    [[nodiscard]] metrics get_gpu_metrics() const
+    [[nodiscard]] metrics get_metrics() const
     {
         typename Backend::gpu_metrics_t raw{};
         m_session->get_metrics_info(m_handle, &raw);

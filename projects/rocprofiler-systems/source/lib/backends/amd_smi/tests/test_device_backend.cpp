@@ -93,9 +93,9 @@ TEST_F(DeviceBackendTest, get_gpu_asic_info_error_message_contains_function_name
         std::runtime_error);
 }
 
-// ── get_gpu_metrics — power ───────────────────────────────────────────────────
+// ── get_metrics — power ───────────────────────────────────────────────────
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_maps_power_fields)
+TEST_F(DeviceBackendTest, get_metrics_maps_power_fields)
 {
     testing::mock_gpu_metrics_t raw{};
     raw.current_socket_power = 150;
@@ -105,14 +105,14 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_maps_power_fields)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.current_socket_power, 150U);
     EXPECT_EQ(m.average_socket_power, 120U);
 }
 
-// ── get_gpu_metrics — temperature ────────────────────────────────────────────
+// ── get_metrics — temperature ────────────────────────────────────────────
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_maps_temperature_fields)
+TEST_F(DeviceBackendTest, get_metrics_maps_temperature_fields)
 {
     testing::mock_gpu_metrics_t raw{};
     raw.temperature_hotspot = 85;
@@ -122,14 +122,14 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_maps_temperature_fields)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.hotspot_temperature, 85U);
     EXPECT_EQ(m.edge_temperature, 72U);
 }
 
-// ── get_gpu_metrics — activity ────────────────────────────────────────────────
+// ── get_metrics — activity ────────────────────────────────────────────────
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_maps_activity_fields)
+TEST_F(DeviceBackendTest, get_metrics_maps_activity_fields)
 {
     testing::mock_gpu_metrics_t raw{};
     raw.average_gfx_activity = 80;
@@ -140,15 +140,15 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_maps_activity_fields)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.gfx_activity, 80U);
     EXPECT_EQ(m.umc_activity, 40U);
     EXPECT_EQ(m.mm_activity, 60U);
 }
 
-// ── get_gpu_metrics — PCIe ────────────────────────────────────────────────────
+// ── get_metrics — PCIe ────────────────────────────────────────────────────
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_pcie_fields_zeroed_when_sentinel)
+TEST_F(DeviceBackendTest, get_metrics_pcie_fields_zeroed_when_sentinel)
 {
     // mock_gpu_metrics_t default-initialises all pcie fields to sentinel values
     const testing::mock_gpu_metrics_t raw{};
@@ -157,14 +157,14 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_pcie_fields_zeroed_when_sentinel)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.pcie.link.width, 0U);
     EXPECT_EQ(m.pcie.link.speed, 0U);
     EXPECT_EQ(m.pcie.bandwidth.acc, 0U);
     EXPECT_EQ(m.pcie.bandwidth.inst, 0U);
 }
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_pcie_fields_populated_when_supported)
+TEST_F(DeviceBackendTest, get_metrics_pcie_fields_populated_when_supported)
 {
     testing::mock_gpu_metrics_t raw{};
     raw.pcie_link_width     = 16;
@@ -176,16 +176,16 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_pcie_fields_populated_when_supported)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.pcie.link.width, 16U);
     EXPECT_EQ(m.pcie.link.speed, 32U);
     EXPECT_EQ(m.pcie.bandwidth.acc, 10000U);
     EXPECT_EQ(m.pcie.bandwidth.inst, 9000U);
 }
 
-// ── get_gpu_metrics — XGMI ───────────────────────────────────────────────────
+// ── get_metrics — XGMI ───────────────────────────────────────────────────
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_xgmi_link_zeroed_when_sentinel)
+TEST_F(DeviceBackendTest, get_metrics_xgmi_link_zeroed_when_sentinel)
 {
     // xgmi_link_width and xgmi_link_speed default to 0xFFFF in mock_gpu_metrics_t
     const testing::mock_gpu_metrics_t raw{};
@@ -194,12 +194,12 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_xgmi_link_zeroed_when_sentinel)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.xgmi.link.width, 0U);
     EXPECT_EQ(m.xgmi.link.speed, 0U);
 }
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_xgmi_link_populated_when_supported)
+TEST_F(DeviceBackendTest, get_metrics_xgmi_link_populated_when_supported)
 {
     testing::mock_gpu_metrics_t raw{};
     raw.xgmi_link_width = 2;
@@ -209,12 +209,12 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_xgmi_link_populated_when_supported)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.xgmi.link.width, 2U);
     EXPECT_EQ(m.xgmi.link.speed, 25U);
 }
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_xgmi_data_acc_populated_when_supported)
+TEST_F(DeviceBackendTest, get_metrics_xgmi_data_acc_populated_when_supported)
 {
     testing::mock_gpu_metrics_t raw{};
     raw.xgmi_read_data_acc[0]  = 1000;
@@ -224,14 +224,14 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_xgmi_data_acc_populated_when_supported
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.xgmi.data_acc.read[0], 1000U);
     EXPECT_EQ(m.xgmi.data_acc.write[0], 2000U);
 }
 
-// ── get_gpu_metrics — clocks ─────────────────────────────────────────────────
+// ── get_metrics — clocks ─────────────────────────────────────────────────
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_clocks_zeroed_when_sentinel)
+TEST_F(DeviceBackendTest, get_metrics_clocks_zeroed_when_sentinel)
 {
     // current_gfxclk and current_uclk default to 0xFFFF in mock_gpu_metrics_t
     const testing::mock_gpu_metrics_t raw{};
@@ -240,12 +240,12 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_clocks_zeroed_when_sentinel)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.gfx_clock_mhz, 0U);
     EXPECT_EQ(m.mem_clock_mhz, 0U);
 }
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_clocks_populated_when_supported)
+TEST_F(DeviceBackendTest, get_metrics_clocks_populated_when_supported)
 {
     testing::mock_gpu_metrics_t raw{};
     raw.current_gfxclk = 2100;
@@ -255,14 +255,14 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_clocks_populated_when_supported)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.gfx_clock_mhz, 2100U);
     EXPECT_EQ(m.mem_clock_mhz, 1200U);
 }
 
-// ── get_gpu_metrics — VCN / JPEG activity ────────────────────────────────────
+// ── get_metrics — VCN / JPEG activity ────────────────────────────────────
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_vcn_activity_is_copied)
+TEST_F(DeviceBackendTest, get_metrics_vcn_activity_is_copied)
 {
     testing::mock_gpu_metrics_t raw{};
     raw.vcn_activity[0] = 55;
@@ -272,12 +272,12 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_vcn_activity_is_copied)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.vcn_activity[0], 55U);
     EXPECT_EQ(m.vcn_activity[1], 77U);
 }
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_jpeg_activity_is_copied)
+TEST_F(DeviceBackendTest, get_metrics_jpeg_activity_is_copied)
 {
     testing::mock_gpu_metrics_t raw{};
     raw.jpeg_activity[0]  = 11;
@@ -287,12 +287,12 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_jpeg_activity_is_copied)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.jpeg_activity[0], 11U);
     EXPECT_EQ(m.jpeg_activity[31], 22U);
 }
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_xcp_vcn_busy_is_copied)
+TEST_F(DeviceBackendTest, get_metrics_xcp_vcn_busy_is_copied)
 {
     testing::mock_gpu_metrics_t raw{};
     raw.xcp_stats[0].vcn_busy[0] = 33;
@@ -302,12 +302,12 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_xcp_vcn_busy_is_copied)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.xcp_stats[0].vcn_busy[0], 33U);
     EXPECT_EQ(m.xcp_stats[0].vcn_busy[3], 44U);
 }
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_xcp_jpeg_busy_is_copied)
+TEST_F(DeviceBackendTest, get_metrics_xcp_jpeg_busy_is_copied)
 {
     testing::mock_gpu_metrics_t raw{};
     raw.xcp_stats[0].jpeg_busy[0]  = 55;
@@ -317,23 +317,23 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_xcp_jpeg_busy_is_copied)
         .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
 
     DeviceSut  sut{ m_session, k_handle };
-    const auto m = sut.get_gpu_metrics();
+    const auto m = sut.get_metrics();
     EXPECT_EQ(m.xcp_stats[0].jpeg_busy[0], 55U);
     EXPECT_EQ(m.xcp_stats[0].jpeg_busy[39], 66U);
 }
 
-// ── get_gpu_metrics — error handling ─────────────────────────────────────────
+// ── get_metrics — error handling ─────────────────────────────────────────
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_throws_on_backend_error)
+TEST_F(DeviceBackendTest, get_metrics_throws_on_backend_error)
 {
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, _))
         .WillOnce(Return(k_err));
 
     DeviceSut sut{ m_session, k_handle };
-    EXPECT_THROW(static_cast<void>(sut.get_gpu_metrics()), std::runtime_error);
+    EXPECT_THROW(static_cast<void>(sut.get_metrics()), std::runtime_error);
 }
 
-TEST_F(DeviceBackendTest, get_gpu_metrics_error_message_contains_function_name)
+TEST_F(DeviceBackendTest, get_metrics_error_message_contains_function_name)
 {
     EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, _))
         .WillOnce(Return(k_err));
@@ -343,10 +343,10 @@ TEST_F(DeviceBackendTest, get_gpu_metrics_error_message_contains_function_name)
         {
             try
             {
-                static_cast<void>(sut.get_gpu_metrics());
+                static_cast<void>(sut.get_metrics());
             } catch(const std::runtime_error& ex)
             {
-                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_metrics_info"));
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_metrics_info"));
                 throw;
             }
         },

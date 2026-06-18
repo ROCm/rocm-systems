@@ -111,7 +111,7 @@ struct gpu_traits
                                                const enabled_metrics_t& enabled,
                                                std::uint64_t            timestamp)
     {
-        return device->get_gpu_metrics(enabled, timestamp);
+        return device->get_metrics(enabled, timestamp);
     }
 
     // Device enumeration
