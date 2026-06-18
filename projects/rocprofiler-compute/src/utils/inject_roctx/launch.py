@@ -4,14 +4,21 @@
 """Internal entry point used by rocprof-compute to launch a workload under
 ROCTX injection.
 
-Invoked as ``python -m utils.inject_roctx --frameworks <names> -- <target.py>
-[args...]``. Backends are given as a comma-separated list; when omitted the
-workload runs uninstrumented.
+Invoked by absolute path as ``python <path>/launch.py --frameworks <names> --
+<target.py> [args...]``. Backends are given as a comma-separated list; when
+omitted the workload runs uninstrumented.
 """
 
-import importlib
 import runpy
 import sys
+from pathlib import Path
+
+# Make the inject_roctx package importable when run by absolute path.
+_PACKAGE_PARENT = str(Path(__file__).resolve().parents[2])
+if _PACKAGE_PARENT not in sys.path:
+    sys.path.insert(0, _PACKAGE_PARENT)
+
+from utils.inject_roctx.core import install_global_wraps  # noqa: E402
 
 
 def _report_recordfn_callback_errors() -> None:
@@ -46,7 +53,7 @@ if args and args[0] == "--":
 
 if not args:
     print(
-        "usage: python -m utils.inject_roctx [--frameworks <names>] -- "
+        "usage: python <path>/launch.py [--frameworks <names>] -- "
         "<target.py> [args...]",
         file=sys.stderr,
     )
@@ -55,7 +62,7 @@ if not args:
 target_script = args[0]
 script_args = args[1:]
 
-importlib.import_module("utils.inject_roctx.core").install_global_wraps(frameworks)
+install_global_wraps(frameworks)
 
 sys.argv = [target_script] + script_args
 # Execute the workload as the top-level program (__name__ == "__main__").
