@@ -98,6 +98,7 @@ constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize =
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
 NCCL_PARAM(SymCeThreshold, "SYM_CE_THRESHOLD", 8 * 1024 * 1024);
+NCCL_PARAM(AllgathervEnable, "ALLGATHERV_ENABLE", 1);
 
 // Returns maximum kernel stack size of all CUDA kernels
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
@@ -3334,6 +3335,28 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
   NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
 
+  if (info->coll == ncclFuncBroadcast && ncclParamAllgathervEnable() && !comm->ccEnable) {
+    // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
+    struct ncclTaskBcast* t = ncclMemoryPoolAlloc<struct ncclTaskBcast>(&comm->memPool_ncclTaskBcast, &comm->memPermanent);
+    t->func = ncclFuncAllGatherV;
+    t->sendbuff = info->sendbuff;
+    t->recvbuff = info->recvbuff;
+    t->count = info->count * ncclTypeSize(info->datatype);
+    t->datatype = ncclInt8;
+    t->root = info->root;
+
+    // update bcast min/max peer
+    planner->bcast_info.minBcastPeer = std::min(planner->bcast_info.minBcastPeer, info->root);
+    planner->bcast_info.maxBcastPeer = std::max(planner->bcast_info.maxBcastPeer, info->root);
+    if (ncclIntruQueueEmpty(&planner->peers[info->root].bcastQueue)) {
+      planner->bcast_info.BcastPeers += 1;
+    }
+
+    // enqueue to peer's bcast queue instead of collSorter
+    ncclIntruQueueEnqueue(&planner->peers[info->root].bcastQueue, t);
+    planner->nTasksBcast += 1;
+  }
+  else {
   struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
   // RCCL: ncclMemoryPoolAlloc does not zero-initialize; default to 0 so
   // scheduleCollTasksToPlan overwrites with the correct value and the inspector plugin
@@ -3375,6 +3398,7 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
 
   planner->nTasksColl += 1;
   ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);
+  }
   ncclProfilerStopCollApiEvent();
   return ncclSuccess;
 }

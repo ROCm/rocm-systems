@@ -82,19 +82,35 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
     nChannels = tcoll.nMaxChannels;
     chunkSize = chunkSize / grainSize * grainSize;
 
-    // Determine thread count per block
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // Cap fused works so batchTasks*stepsPerWork <= NCCL_STEPS; excess spills to a
+    // follow-up kernel. Prevents FIFO overrun and cross-root data corruption.
+    {
+      size_t partBytes = divUp(maxBcastBytes, (size_t)nChannels);
+      int stepsPerWork = (partBytes > (size_t)chunkSize) ? 2 : 1;
+      int maxFusedTasks = std::max(1, NCCL_STEPS / stepsPerWork);
+      if ((int)batchTasks > maxFusedTasks) batchTasks = maxFusedTasks;
+    }
+#endif
+
+    // Determine thread count per block.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    int threadPerBlock = tcoll.nWarps * comm->WarpSize;
+#else
     int threadPerBlock =
       (int)std::max((int)(tcoll.nWarps * WARP_SIZE), (int)(64 * sizeof(ncclDevWorkBcast) / 16 + 3 * WARP_SIZE));
+#endif
     plan->threadPerBlock = threadPerBlock;
 
     // Choose kernel for plan. Based on proto, algo=ring
     int funcIndex = ncclDevFuncId(ncclFuncAllGatherV, /*devRedOp,type=*/0, 0, NCCL_ALGO_RING, proto);
     if (!plan->kernelSpecialized) {
-      // RCCL doesn't expose the upstream ncclDevKernelForFunc[] lookup. The
-      // unroll-indexed ncclKerns table (file-local in enqueue.cc) is the
-      // canonical RCCL pattern (see enqueue.cc:1010-1011, :1413-1414); we go
-      // through a wrapper because the table is static.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
       ncclPlanSetDefaultKernel(comm, plan);
+#else
+      plan->kernelFn = ncclDevKernelForFunc[funcIndex];
+      plan->kernelSpecialized = ncclDevKernelForFuncIsSpecialized[funcIndex];
+#endif
     }
 
     // Compute opCount for proxy work.
