@@ -20,10 +20,13 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 
 #include "rocjitsu/code/rj_code.h"
 
 namespace rocjitsu {
+
+class Instruction;
 
 /// @brief SOPP encoding prefix, consistent across all AMDGPU ISA generations.
 inline constexpr uint32_t kSoppEncodingPrefix = 0x17F;
@@ -118,6 +121,18 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 [[nodiscard]] inline constexpr uint32_t build_s_branch(int16_t offset_dwords, rj_code_arch_t arch) {
   return pack_sopp(sopp_op_branch(arch), static_cast<uint16_t>(offset_dwords));
 }
+
+/// @brief Patch an emitted direct PC-relative branch instruction in-place.
+///
+/// @details @p words points into the translated output buffer. @p delta_bytes is
+/// relative to the instruction's branch base. For AMDGPU SOPP direct branches,
+/// the base is the next instruction and the immediate is a signed dword offset.
+/// The function handles unconditional and conditional SOPP direct branches by
+/// replacing bits [15:0] of word 0. It returns false when @p inst is not a
+/// decoded direct branch, the buffer is empty, or the delta is not representable
+/// by SOPP's signed 16-bit dword immediate.
+[[nodiscard]] bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> words,
+                                             int64_t delta_bytes, rj_code_arch_t arch);
 
 /// @brief Encode an s_nop instruction for the given target ISA.
 ///

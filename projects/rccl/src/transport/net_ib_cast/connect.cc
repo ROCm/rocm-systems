@@ -16,7 +16,7 @@ NCCL_PARAM(IbCastTimeout, "IB_TIMEOUT", 20);
 NCCL_PARAM(IbCastRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbCastPkey, "IB_PKEY", 0);
 NCCL_PARAM(IbCastUseInline, "IB_USE_INLINE", 0);
-NCCL_PARAM(IbCastGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
+NCCL_PARAM(IbCastGdrFlushDisable, "GDR_FLUSH_DISABLE", 1);
 NCCL_PARAM(IbCastSl, "IB_SL", -1);
 NCCL_PARAM(IbCastTc, "IB_TC", -1);
 NCCL_PARAM(IbCastFifoTc, "IB_FIFO_TC", -1);

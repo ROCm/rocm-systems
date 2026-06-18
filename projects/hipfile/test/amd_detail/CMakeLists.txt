@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 include(AISAddExecutable)
-include(AISUseGTest)
 find_package(Threads REQUIRED)
 
 set(SHARED_SOURCE_FILES
@@ -31,7 +30,6 @@ set(TEST_SOURCE_FILES
     mountinfo.cpp
     stats.cpp
     stream.cpp
-    thread-pool.cpp
 )
 
 set(TEST_SYSINCLS

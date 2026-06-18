@@ -397,7 +397,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;thread-trace"
     WILL_FAIL
     DISABLED ${IS_DISABLED}
-    FAIL_REGULAR_EXPRESSION "att-consecutive-kernels options are mutually exclusive")
+    FAIL_REGULAR_EXPRESSION
+        "--selected-regions and --att-consecutive-kernels are mutually exclusive")
 
 set(SHADERDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-shaderdata")
 

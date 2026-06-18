@@ -145,7 +145,8 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
 
-  if (gfxipMajor == 9 && gfxipMinor >= 4) {
+  if ((gfxipMajor == 9 && gfxipMinor >= 4) ||
+      (gfxipMajor == 12 && gfxipMinor >= 5)) {
     sdma_swap_supported_ = true;
   }
 

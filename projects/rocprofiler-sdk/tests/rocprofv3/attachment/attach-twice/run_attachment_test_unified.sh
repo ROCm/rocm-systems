@@ -198,9 +198,9 @@ else
 fi
 
 # Locate the process's output files. With default naming the files are under a
-# subdirectory named after the hostname and contain the PID in the filename,
-# e.g. attachment-output/<hostname>/<pid>_results.json
-APP_JSON=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "${APP_PID}_results.json" | head -1)
+# subdirectory named after the hostname. Reattach adds a session ID after the
+# PID in the basename, e.g. <pid>_1_results.json
+APP_JSON=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ \( -name "${APP_PID}_results.json" -o -name "${APP_PID}_*_results.json" \) | head -1)
 if [ -z "$APP_JSON" ]; then
     echo "Error: Could not find app (PID ${APP_PID}) JSON output after second attachment"
     exit 1
@@ -213,7 +213,8 @@ APP_OUTPUT_DIR=$(dirname "$APP_JSON")
 # without knowing the hostname or PID at configure time.
 for src in "${APP_OUTPUT_DIR}/${APP_PID}"_*.json "${APP_OUTPUT_DIR}/${APP_PID}"_*.db; do
     [ -f "$src" ] || continue
-    dst_name=$(basename "$src" | sed "s/^${APP_PID}_/${OUTPUT_FILENAME}_/")
+    dst_name=$(basename "$src" | sed "s/^${APP_PID}_/${OUTPUT_FILENAME}_/" |
+        sed -E "s/^${OUTPUT_FILENAME}_[0-9]+_/${OUTPUT_FILENAME}_/")
     cp "$src" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${dst_name}"
     echo "Copied $(basename $src) -> ${dst_name}"
 done

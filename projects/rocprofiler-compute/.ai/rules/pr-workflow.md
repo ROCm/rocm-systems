@@ -100,7 +100,7 @@ review it.
 ## What NOT to do
 
 - Do not create a PR without user confirmation of title and body.
-- Do not create a PR to the wrong base branch (default: `develop`).
+- Do not create a PR to the wrong base branch (default: `rocprofiler-compute-develop`).
 - Do not create a PR on the wrong repository.
 - Do not use escaped `\n` in PR body strings passed to MCP tools.
 - Do not hardcode the PR template — always infer it from recent PRs.

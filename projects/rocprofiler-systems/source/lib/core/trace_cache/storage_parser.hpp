@@ -6,6 +6,7 @@
 #include "common/defines.h"
 
 #include "core/progress/callback.hpp"
+#include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/type_registry.hpp"
 
@@ -38,15 +39,11 @@ public:
     {}
 
     template <typename TypeProcessing>
+        requires type_traits::sample_processor<TypeProcessing, TypeIdentifierEnum,
+                                               cacheable_t>
     void load(std::shared_ptr<TypeProcessing> _type_processing,
               progress::progress_callback     _progress_cb = {})
     {
-        static_assert(
-            type_traits::has_execute_processing<TypeProcessing, TypeIdentifierEnum,
-                                                cacheable_t>::value,
-            "TypeProcessing must have member function "
-            "execute_sample_processing(TypeIdentifierEnum, const cacheable_t&)");
-
         if(_type_processing == nullptr)
         {
             throw std::runtime_error("TypeProcessing is nullptr");

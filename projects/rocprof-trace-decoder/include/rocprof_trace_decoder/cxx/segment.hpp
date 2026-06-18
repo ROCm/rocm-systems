@@ -59,7 +59,7 @@ struct address_range_t
 /**
  * @brief Maps virtual address ranges to code object IDs.
  *
- * Supports safe insertion (evicts overlapping ranges), cached lookup,
+ * Supports safe insertion (evicts overlapping ranges), lookup,
  * and removal by address or range.
  */
 class CodeobjTableTranslator
@@ -69,8 +69,6 @@ public:
     std::pair<std::set<address_range_t>::iterator, bool> insert(const address_range_t& value)
     {
         if (value.size == 0) return {ranges_.end(), false};
-
-        clear_cache();
 
         // Erase all existing ranges that overlap with the new one
         auto it = ranges_.lower_bound(address_range_t{value.addr, 0, 0});
@@ -90,32 +88,21 @@ public:
      * @param[out] out   Populated with the matching range on success.
      * @return true if a matching range was found, false otherwise.
      */
-    bool find_codeobj_in_range(uint64_t addr, address_range_t& out)
+    bool find_codeobj_in_range(uint64_t addr, address_range_t& out) const
     {
-        if (!cached_segment.inrange(addr))
-        {
-            auto it = ranges_.find(address_range_t{addr, 0, 0});
-            if (it == ranges_.end()) return false;
-            cached_segment = *it;
-        }
-        out = cached_segment;
+        auto it = ranges_.find(address_range_t{addr, 0, 0});
+        if (it == ranges_.end()) return false;
+        out = *it;
         return true;
     }
 
-    void clear_cache() { cached_segment = {}; }
-
-    bool remove(const address_range_t& range)
-    {
-        clear_cache();
-        return ranges_.erase(range) != 0;
-    }
+    bool remove(const address_range_t& range) { return ranges_.erase(range) != 0; }
     bool remove(uint64_t addr) { return remove(address_range_t{addr, 0, 0}); }
 
     const std::set<address_range_t>& ranges() const { return ranges_; }
 
 private:
     std::set<address_range_t> ranges_;
-    address_range_t cached_segment{};
 };
 
 } // namespace codeobj

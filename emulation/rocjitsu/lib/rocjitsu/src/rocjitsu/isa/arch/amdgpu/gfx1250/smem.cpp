@@ -50,7 +50,7 @@ void SLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -76,7 +76,7 @@ void SLoadB64Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -103,7 +103,7 @@ void SLoadB128Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -130,7 +130,7 @@ void SLoadB256Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -157,7 +157,7 @@ void SLoadB512Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -183,7 +183,7 @@ void SLoadB96Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -209,7 +209,7 @@ void SLoadI8Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -235,7 +235,7 @@ void SLoadU8Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -261,7 +261,7 @@ void SLoadI16Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -287,7 +287,7 @@ void SLoadU16Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -314,7 +314,7 @@ void SBufferLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -341,7 +341,7 @@ void SBufferLoadB64Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -368,7 +368,7 @@ void SBufferLoadB128Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -395,7 +395,7 @@ void SBufferLoadB256Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -422,7 +422,7 @@ void SBufferLoadB512Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -449,7 +449,7 @@ void SBufferLoadB96Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -476,7 +476,7 @@ void SBufferLoadI8Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -503,7 +503,7 @@ void SBufferLoadU8Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -530,7 +530,7 @@ void SBufferLoadI16Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 
@@ -557,7 +557,7 @@ void SBufferLoadU16Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->addr = smem_calculate_address(inst_, wf);
+  d->addr = smem_calculate_address(inst_, wf, d->elem_size * d->num_dwords);
   set_data(std::move(d));
 }
 

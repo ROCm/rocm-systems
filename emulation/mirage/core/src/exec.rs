@@ -168,18 +168,15 @@ pub struct InjectionDef {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mounts: Vec<FileMount>,
 
-    /// Host device nodes the emulator needs exposed to each node's
-    /// container (`--device`), e.g. `/dev/kfd` and `/dev/dri` for AMD
-    /// GPU access. Empty for non-containerised sessions and emulators
-    /// that need no device passthrough.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub devices: Vec<String>,
-
-    /// Supplementary groups the emulator needs added inside each node's
-    /// container (`--group-add`), e.g. `video`/`render` so the workload
-    /// may open the passed-through GPU device nodes.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub groups: Vec<String>,
+    /// Whether the emulator needs the host's GPUs exposed to each node's
+    /// container. When set, every node container is launched with the
+    /// host's GPU device nodes (`/dev/kfd`, `/dev/dri`) and the
+    /// supplementary groups needed to open them; the group mechanism is
+    /// provider-specific (podman inherits the launching user's groups
+    /// via `--group-add keep-groups`, docker is given the named GPU
+    /// groups explicitly). Only meaningful for containerised sessions.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host_gpus: bool,
 }
 
 #[cfg(test)]

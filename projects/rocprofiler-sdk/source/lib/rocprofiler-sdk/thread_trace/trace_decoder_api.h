@@ -60,7 +60,7 @@ typedef rocprofiler_thread_trace_decoder_status_t (*rocprof_trace_decoder_trace_
  * If call returns _SUCCESS, isa_size and source_size must be written with bytes used.
  * @param[out] instruction Where to copy the ISA line to.
  * @param[out] memory_size (Auto) The number of bytes to next instruction. 0 for custom ISA.
- * @param[inout] size Size of returned ISA string.
+ * @param[in,out] size Size of returned ISA string.
  * @param[in] address The code object ID and offset from base vaddr.
  * If marker_id == 0, this parameter is raw virtual address with no codeobj ID information.
  * @param[in] userdata Arbitrary data pointer to be sent back to the user via callback.

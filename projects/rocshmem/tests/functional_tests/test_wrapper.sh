@@ -16,8 +16,18 @@ SKIP_CODE=125
 TEST_NAME=$1
 shift
 
+# Detect launcher mode: MPI or SLR
+# - If ROCSHMEM_SLR_NP is set, we're in SLR mode (direct execution)
+# - Otherwise, we're in MPI mode (command contains mpirun/mpiexec)
+if [[ -n "${ROCSHMEM_SLR_NP}" ]]; then
+    LAUNCHER_MODE="SLR"
+else
+    LAUNCHER_MODE="MPI"
+fi
+
 # Find the test executable path from remaining arguments
-# The command is: mpirun/mpiexec [mpi_args] <executable> [test_args]
+# For MPI: The command is: mpirun/mpiexec [mpi_args] <executable> [test_args]
+# For SLR: The command is: <executable> [test_args]
 # We need to find the rocshmem test executable (not mpirun)
 TEST_EXECUTABLE=""
 SKIP_NEXT=false
@@ -117,11 +127,21 @@ else
     fi
 fi
 
-echo "Test: $TEST_NAME (Backend: $BACKEND, Executable: ${TEST_EXECUTABLE:-<not found>})"
+echo "Test: $TEST_NAME (Launcher: $LAUNCHER_MODE, Backend: $BACKEND, Executable: ${TEST_EXECUTABLE:-<not found>})"
 
 # Apply skip conditions based on backend type and known issues
 # These match the skip logic from driver.sh
 # Note: Skip logic only applies when backend is known (not "multi" or "unknown")
+
+# Host non-MPI IPC tests require IPC backend
+if [[ "$BACKEND" == "ro" || "$BACKEND" == "gda" ]]; then
+    case "$TEST_NAME" in
+        host_putmem_*|host_getmem_*|host_amo_*|host_ctx_*|host_int_*)
+            echo "Skip: $TEST_NAME (host non-MPI IPC tests require IPC backend)"
+            exit $SKIP_CODE
+            ;;
+    esac
+fi
 
 # AIROCSHMEM-120: RO get tests abort
 if [[ "$BACKEND" == "ro" ]]; then
@@ -194,11 +214,22 @@ fi
 NUM_GPUS=$((NUM_GPUS > 0 ? NUM_GPUS : 8))
 
 # Extract number of ranks from test name (format: testname_n<ranks>_w<wg>_z<threads>)
-if [[ "$TEST_NAME" =~ _n([0-9]+)_ ]]; then
+# Or from ROCSHMEM_SLR_NP if in SLR mode
+if [[ "$LAUNCHER_MODE" == "SLR" ]]; then
+    NUM_RANKS=${ROCSHMEM_SLR_NP}
+elif [[ "$TEST_NAME" =~ _n([0-9]+)_ ]]; then
     NUM_RANKS=${BASH_REMATCH[1]}
+fi
 
-    # Skip if not enough GPUs (unless using hostfile)
-    if [[ -z "$HOSTFILE" ]] && [[ $NUM_GPUS -lt $NUM_RANKS ]]; then
+# Skip if not enough GPUs
+if [[ -n "$NUM_RANKS" ]]; then
+    # For SLR mode, always check GPU availability (no hostfile support)
+    if [[ "$LAUNCHER_MODE" == "SLR" ]] && [[ $NUM_GPUS -lt $NUM_RANKS ]]; then
+        echo "Skip: $TEST_NAME (SLR requires $NUM_RANKS GPUs, only $NUM_GPUS available)"
+        exit $SKIP_CODE
+    fi
+    # For MPI mode, skip only if no hostfile and insufficient GPUs
+    if [[ "$LAUNCHER_MODE" == "MPI" ]] && [[ -z "$HOSTFILE" ]] && [[ $NUM_GPUS -lt $NUM_RANKS ]]; then
         echo "Skip: $TEST_NAME ($NUM_RANKS ranks required but only $NUM_GPUS GPUs available)"
         exit $SKIP_CODE
     fi

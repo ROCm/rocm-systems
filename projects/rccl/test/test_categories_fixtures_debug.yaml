@@ -24,6 +24,7 @@ test_categories:
       - "Ipcsocket.*"
       - "XmlTest.*"
       - "NetDevsPolicyP2pNetTests.*"
+      - "TopoTest.*"
     exclude_windows:
       - "*"
     labels:

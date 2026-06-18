@@ -70,7 +70,19 @@ assemblyLinePtr PCTranslator::getcode(pcinfo_t addr)
 
 pcinfo_t PCTranslator::getjump_loc(const assemblyLine& line)
 {
-    int64_t delta = std::stoi(splitv(line.line, ' ').back().data());
+    // The branch displacement is the last whitespace-separated token. A custom
+    // ISA callback (or a disassembler that emits symbolic/hex targets) can make
+    // this non-decimal, which would throw out of std::stoi across the C ABI.
+    // Treat an unparseable operand as a zero displacement (fall through).
+    int64_t delta = 0;
+    try
+    {
+        delta = std::stoi(splitv(line.line, ' ').back().data());
+    }
+    catch (...)
+    {
+        delta = 0;
+    }
     if (delta >= 32768) delta -= 65536;
     return {line.addr.address + 4 + 4 * delta, line.addr.code_object_id};
 }

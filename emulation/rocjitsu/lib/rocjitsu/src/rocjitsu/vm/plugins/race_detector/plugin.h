@@ -111,8 +111,8 @@ public:
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
 
-  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id, uint32_t vgpr_count,
-                                   uint32_t sgpr_count,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
+                                   uint32_t physical_vgpr_count, uint32_t sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) override;
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override;

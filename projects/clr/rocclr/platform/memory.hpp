@@ -132,6 +132,15 @@ class Memory : public amd::RuntimeObject {
     kArenaMemoryPtr = 0x100,
   };
 
+  //<! Enum for Handle type for vmm
+  enum HandleType : uint32_t {
+      kHandleNone      = 0x0,
+      kHandlePosixFD   = 0x1,
+      kHandleWin32     = 0x2,
+      kHandleWin32Kmt  = 0x4,
+      kHandleFabric    = 0x8
+  };
+
   struct UserData {
     int deviceId = 0;  //!< Device ID memory is allocated on
     int locationType =
@@ -140,6 +149,7 @@ class Memory : public amd::RuntimeObject {
     amd::Memory* phys_mem_obj = nullptr;   //<! Physical mem obj, only set on virtual mem
     amd::Memory* vaddr_mem_obj = nullptr;  //<! Virtual address mem obj, only set on virtual mem
     uint64_t hsa_handle = 0;               //!< Opaque hsa handle saved for Virtual memories
+    HandleType hsa_handle_type = kHandleNone; //!<Handle type for VMM
     unsigned int flags = 0;                //!< HIP memory flags
     //! hipMallocPitch allocates buffer using width & height and returns pitch & device pointer.
     //! Since device pointer is void*, It looses the values of width & height used for allocation.

@@ -61,6 +61,29 @@ constexpr void vop3_bin_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32
   w1 = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((omod & 0x3) << 27) | ((neg & 0x7) << 29);
 }
 
+// CDNA4 VOP3 ternary encoding (src0/src1/src2, no modifiers). Same word0 as
+// vop3_bin_encode; word1 adds src2 in [26:18].
+constexpr void vop3_tern_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1,
+                                uint32_t src2, uint32_t &w0, uint32_t &w1) {
+  w0 = (vdst & 0xFF) | ((op & 0x3FF) << 16) | (0x34u << 26);
+  w1 = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18);
+}
+
+// CDNA4 VOP3P encoding (matches Vop3pMachineInst bitfields). word0 = vdst[7:0] |
+// neg_hi[10:8] | op_sel[13:11] | op_sel_hi_2[14] | clamp[15] | op[22:16] |
+// 0x1A7<<23; word1 = src0[8:0] | src1[17:9] | src2[26:18] | op_sel_hi[28:27] |
+// neg[31:29]. Default packing for the f32 pk fast path is op_sel = 0,
+// op_sel_hi = 3 (the binary-f32 probe bails to scalar otherwise).
+constexpr void vop3p_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1, uint32_t src2,
+                            uint32_t op_sel, uint32_t op_sel_hi, uint32_t op_sel_hi_2, uint32_t neg,
+                            uint32_t neg_hi, uint32_t clamp, uint32_t &w0, uint32_t &w1) {
+  w0 = (vdst & 0xFFu) | ((neg_hi & 0x7u) << 8) | ((op_sel & 0x7u) << 11) |
+       ((op_sel_hi_2 & 0x1u) << 14) | ((clamp & 0x1u) << 15) | ((op & 0x7Fu) << 16) |
+       (0x1A7u << 23);
+  w1 = (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18) |
+       ((op_sel_hi & 0x3u) << 27) | ((neg & 0x7u) << 29);
+}
+
 struct BenchFixture {
   amdgpu::GpuMemory gpu_mem;
   amdgpu::L2Cache l2;
@@ -106,6 +129,23 @@ struct BenchFixture {
       cu->write_vgpr(vbase + 0, lane, r0);
       cu->write_vgpr(vbase + 1, lane, r1);
       cu->write_vgpr(vbase + 2, lane, 0u); // dst
+      // Extra inputs for the ternary / 64-bit-pair / VOP3P cases below
+      // (v2..v5). Seeded with the same deterministic stream so the f64 / pk
+      // forms read finite (sanitized when requested) values, not stale VGPRs.
+      uint32_t r2 = static_cast<uint32_t>(rng());
+      uint32_t r3 = static_cast<uint32_t>(rng());
+      uint32_t r4 = static_cast<uint32_t>(rng());
+      uint32_t r5 = static_cast<uint32_t>(rng());
+      if (sanitize_finite) {
+        r2 = sanitize(r2);
+        r3 = sanitize(r3);
+        r4 = sanitize(r4);
+        r5 = sanitize(r5);
+      }
+      cu->write_vgpr(vbase + 2, lane, r2);
+      cu->write_vgpr(vbase + 3, lane, r3);
+      cu->write_vgpr(vbase + 4, lane, r4);
+      cu->write_vgpr(vbase + 5, lane, r5);
     }
     wf->set_exec(~0ULL); // All lanes active.
   }
@@ -378,7 +418,7 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpClassF32_Vop3) {
     return;
   }
   uint32_t w0 = (106u & 0xFF) | ((16u & 0x3FF) << 16) | (0x34u << 26); // vdst=VCC, op=16
-  uint32_t w1 = 256u | (1u << 9);                                      // src0=v0, src1=v1
+  uint32_t w1 = 256u | (257u << 9);                                    // src0=v0, src1=v1
   run_words("v_cmp_class_f32_e64 v0, v1 -> vcc", w0, w1, /*sanitize_finite=*/false);
 }
 
@@ -570,7 +610,7 @@ TEST(VAddSimdBenchmark, Cdna4_VAdd3U32_Vop3) {
   }
   // VOP3: word0 = vdst|op<<16|0x34<<26; word1 = src0|src1<<9|src2<<18.
   uint32_t w0 = (2u) | ((511u & 0x3FF) << 16) | (0x34u << 26);
-  uint32_t w1 = 256u | (1u << 9) | (3u << 18); // src0=v0 src1=v1 src2=v3
+  uint32_t w1 = 256u | (257u << 9) | (259u << 18); // src0=v0 src1=v1 src2=v3
   run_words("v_add3_u32_e64 v2, v0, v1, v3", w0, w1, /*sanitize_finite=*/false);
 }
 
@@ -632,7 +672,7 @@ TEST(VAddSimdBenchmark, Cdna4_VDivFmasF32_Vop3) {
     return;
   }
   uint32_t w0 = (6u) | ((482u & 0x3FF) << 16) | (0x34u << 26);
-  uint32_t w1 = 256u | (1u << 9) | (2u << 18); // src0=v0 src1=v1 src2=v2
+  uint32_t w1 = 256u | (257u << 9) | (258u << 18); // src0=v0 src1=v1 src2=v2
   run_words("v_div_fmas_f32_e64 v6, v0, v1, v2", w0, w1, /*sanitize_finite=*/true);
 }
 
@@ -647,7 +687,7 @@ TEST(VAddSimdBenchmark, Cdna4_VCndmaskB32_Vop3) {
   // VOP3 ternary encoding: word0 = vdst|op<<16|0x34<<26; word1 = src0|src1<<9|
   // src2<<18. src2=VCC=106. Selector pattern is set by seed_inputs (vcc init).
   uint32_t w0 = (2u) | ((256u & 0x3FF) << 16) | (0x34u << 26);
-  uint32_t w1 = 256u | (1u << 9) | (106u << 18);
+  uint32_t w1 = 256u | (257u << 9) | (106u << 18);
   run_words("v_cndmask_b32_e64 v2, v0, v1, vcc", w0, w1, /*sanitize_finite=*/false);
 }
 
@@ -676,8 +716,99 @@ TEST(VAddSimdBenchmark, Cdna4_VFmaF32_Vop3) {
   }
   // VOP3 ternary: word0 vdst|op<<16|0x34<<26; word1 src0|src1<<9|src2<<18.
   uint32_t w0 = (6u) | ((459u & 0x3FF) << 16) | (0x34u << 26);
-  uint32_t w1 = 256u | (1u << 9) | (2u << 18); // src0=v0 src1=v1 src2=v2
+  uint32_t w1 = 256u | (257u << 9) | (258u << 18); // src0=v0 src1=v1 src2=v2
   run_words("v_fma_f32_e64 v6, v0, v1, v2", w0, w1, /*sanitize_finite=*/true);
+}
+
+// === SIMD gap-family representatives (this session) ===
+//
+// One TEST per representative op from the newly-SIMD'd families, timed in
+// whichever mode the process runs (RJ_FORCE_SCALAR). All CDNA4-decodable;
+// opcodes verified against cdna4/decoder.cpp's sub_decode_vop3 / sub_decode_vop3p
+// tables (and cdna4/test_encodings.h). NOTE: v_cvt_pk_i16_f32 was DROPPED — it
+// does not exist on CDNA4 (only v_cvt_pk_i16_i32 / v_cvt_pknorm_i16_f32 are
+// present), so it is not decodable by this fixture.
+
+// v_cvt_pknorm_u16_f32_e64 v2, v0, v1  (CDNA4 VOP3 opcode 661) — binary f32 ->
+// packed normalized u16 (two clamped/scaled lanes into one 32-bit dst). Inputs
+// sanitized to finite normals for the SIMD fast path.
+TEST(VAddSimdBenchmark, Cdna4_VCvtPknormU16F32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(661, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
+  run_words("v_cvt_pknorm_u16_f32_e64 v2, v0, v1", w0, w1, /*sanitize_finite=*/true);
+}
+
+// v_cubema_f32_e64 v3, v0, v1, v2  (CDNA4 VOP3 opcode 455) — cubemap major-axis
+// ternary: 2*max(|x|,|y|,|z|). src0/src1/src2 = v0/v1/v2; finite-sanitized.
+TEST(VAddSimdBenchmark, Cdna4_VCubemaF32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_tern_encode(455, /*vdst=*/3, /*src0=*/256, /*src1=*/257, /*src2=*/258, w0, w1);
+  run_words("v_cubema_f32_e64 v3, v0, v1, v2", w0, w1, /*sanitize_finite=*/true);
+}
+
+// v_dot4c_i32_i8_e64 v2, v0, v1  (CDNA4 VOP3 opcode 313) — dst-accumulate 4xi8
+// dot: vdst += sum(i8(v0)*i8(v1)). The accumulator is vdst (v2), so looping the
+// SAME instruction creates a loop-carried RAW dependency on v2 in BOTH modes —
+// the measured ratio reflects store->load latency, not the dot fast path (which
+// does engage; bit-equivalence is checked by Vop3pDotSimdCorrectness's "c"
+// forms). Reported for family coverage; read the speedup as a lower bound.
+TEST(VAddSimdBenchmark, Cdna4_VDot4cI32I8_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(313, /*vdst=*/2, /*src0=*/256, /*src1=*/257, 0, 0, 0, 0, w0, w1);
+  run_words("v_dot4c_i32_i8_e64 v2, v0, v1 (acc)", w0, w1, /*sanitize_finite=*/false);
+}
+
+// v_add_f64_e64 v2:v3, v0:v1, v4:v5  (CDNA4 VOP3 opcode 640) — f64 binary on
+// 64-bit VGPR pairs. (This duplicates Cdna4_VAddF64_Vop3 above; included here so
+// the gap-family table has the f64 binary representative in one place.) src0 =
+// v0:v1, src1 = v4:v5, dst = v2:v3.
+TEST(VAddSimdBenchmark, Cdna4_VAddF64Pair_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(640, /*vdst=*/2, /*src0=*/256, /*src1=*/260, 0, 0, 0, 0, w0, w1);
+  run_words("v_add_f64_e64 v2:v3, v0:v1, v4:v5", w0, w1, /*sanitize_finite=*/false);
+}
+
+// v_pk_add_f32 v2:v3, v0:v1, v4:v5  (CDNA4 VOP3P opcode 50) — packed f32 add on
+// 64-bit VGPR pairs (two f32 lanes per pair). Default packing op_sel = 0,
+// op_sel_hi = 3 (required for the f32 pk fast path; non-default bails to
+// scalar). src0 = v0:v1, src1 = v4:v5, dst = v2:v3; finite-sanitized.
+TEST(VAddSimdBenchmark, Cdna4_VPkAddF32_Vop3p) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3p_encode(/*op=*/50, /*vdst=*/2, /*src0=*/256, /*src1=*/260, /*src2=*/0, /*op_sel=*/0,
+               /*op_sel_hi=*/3, /*op_sel_hi_2=*/0, /*neg=*/0, /*neg_hi=*/0, /*clamp=*/0, w0, w1);
+  run_words("v_pk_add_f32 v2:v3, v0:v1, v4:v5", w0, w1, /*sanitize_finite=*/true);
+}
+
+// v_frexp_exp_i32_f32_e64 v2, v0  (CDNA4 VOP3 opcode 371) — f32 -> i32 frexp
+// exponent (unary). Raw finite inputs (the exponent extraction is bit-exact).
+TEST(VAddSimdBenchmark, Cdna4_VFrexpExpI32F32_Vop3) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t w0, w1;
+  vop3_bin_encode(371, /*vdst=*/2, /*src0=*/256, /*src1=*/0, 0, 0, 0, 0, w0, w1);
+  run_words("v_frexp_exp_i32_f32_e64 v2, v0", w0, w1, /*sanitize_finite=*/true);
 }
 
 // Diagnostic: report whether the SIMD fast path is compiled in.

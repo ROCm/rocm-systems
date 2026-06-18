@@ -8,6 +8,8 @@
 #include "binary/scope_filter.hpp"
 #include "binary/symbol.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
+#include "common/environment.hpp"
 #include "core/demangler.hpp"
 #include "core/utility.hpp"
 #include "fwd.hpp"
@@ -31,8 +33,8 @@
 namespace
 {
 namespace filepath = ::tim::filepath;
+using rocprofsys::get_env;
 using ::tim::delimit;
-using ::tim::get_env;
 using ::timemory::join::join;
 using strview_init_t   = std::initializer_list<std::string_view>;
 using strview_set_t    = std::set<std::string_view>;
@@ -177,10 +179,10 @@ get_library_search_paths_impl()
     };
 
     // search paths from environment variables
-    for(const auto& itr : delimit(get_env("LD_LIBRARY_PATH", std::string{}, false), ":"))
+    for(const auto& itr : delimit(get_env("LD_LIBRARY_PATH", std::string{}), ":"))
         _emplace_if_exists(itr);
 
-    for(const auto& itr : { get_env<std::string>("ROCPROFSYS_ROCM_PATH", ""),
+    for(const auto& itr : { get_env<std::string>(rocprofsys::env_vars::ROCM_PATH, ""),
                             get_env<std::string>("ROCM_PATH", ""),
                             std::string{ ROCPROFSYS_DEFAULT_ROCM_PATH } })
     {

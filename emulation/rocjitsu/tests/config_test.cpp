@@ -6,8 +6,12 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/vm/virtual_machine.h"
 
 #include "simdojo/sim/simulation.h"
 
@@ -41,6 +45,84 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   auto *xcd = soc->xcd(0);
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 8u);
+}
+
+TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
+  auto rdna4 = config::load_config(CONFIG_DIR_PATH + "/amdgpu_rdna4_gfx1201_r9700_kmd.json",
+                                   rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(rdna4.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(rdna4.device.gpu_id, 8716u);
+  EXPECT_EQ(rdna4.device.device_id, 0x7551u);
+  EXPECT_EQ(rdna4.device.family_id, 0x98u);
+  EXPECT_EQ(rdna4.device.gfx_target_version, 120001u);
+  EXPECT_EQ(rdna4.device.revision_id, 1u);
+  EXPECT_EQ(rdna4.device.pci_revision_id, 192u);
+  EXPECT_EQ(rdna4.device.simd_count, 128u);
+  EXPECT_EQ(rdna4.device.num_shader_engines, 8u);
+  EXPECT_EQ(rdna4.device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(rdna4.device.num_cu_per_sh, 8u);
+  EXPECT_EQ(rdna4.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna4.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
+  EXPECT_EQ(rdna4.device.simd_count, rdna4.device.num_shader_engines * rdna4.device.num_cu_per_sh *
+                                         rdna4.device.simd_per_cu);
+  EXPECT_EQ(kmd::drm_shader_engine_count(rdna4.device.num_shader_engines,
+                                         rdna4.device.num_shader_arrays_per_engine),
+            4u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna4.device.num_shader_engines, rdna4.device.num_cu_per_sh),
+            64u);
+  EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna4.device.gfx_target_version,
+                                                        rdna4.device.revision_id),
+            0x51u);
+  EXPECT_EQ(kmd::gfx_target_name(rdna4.device.gfx_target_version), "gfx1201");
+  EXPECT_EQ(kmd::gfx_target_name(90010), "gfx90a");
+  EXPECT_EQ(kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3_5), 0u);
+  EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(110500), 0u);
+  EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(120500), 0u);
+  EXPECT_EQ(kmd::drm_shader_engine_count(0, 2), 0u);
+  EXPECT_EQ(kmd::drm_shader_engine_count(1, 2), 1u);
+  EXPECT_EQ(kmd::drm_shader_engine_count(3, 2), 2u);
+  EXPECT_EQ(kmd::drm_shader_engine_count(3, 0), 3u);
+  EXPECT_EQ(kmd::num_hw_gfx_contexts_for_gfx_target_version(rdna4.device.gfx_target_version), 8u);
+  EXPECT_EQ(rdna4.soc()->num_xcds(), 1u);
+  EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
+  EXPECT_EQ(rdna4.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
+  EXPECT_FALSE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_EQ(rdna4.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+            amdgpu::SdmaPacketDialect::Gfx11Plus);
+
+  auto rdna3 = config::load_config(CONFIG_DIR_PATH + "/amdgpu_rdna3_gfx1100_w7900_kmd.json",
+                                   rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(rdna3.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_EQ(rdna3.device.gpu_id, 7019u);
+  EXPECT_EQ(rdna3.device.device_id, 0x7448u);
+  EXPECT_EQ(rdna3.device.family_id, 0x91u);
+  EXPECT_EQ(rdna3.device.gfx_target_version, 110000u);
+  EXPECT_EQ(rdna3.device.revision_id, 0u);
+  EXPECT_EQ(rdna3.device.pci_revision_id, 0u);
+  EXPECT_EQ(rdna3.device.simd_count, 192u);
+  EXPECT_EQ(rdna3.device.num_shader_engines, 12u);
+  EXPECT_EQ(rdna3.device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(rdna3.device.num_cu_per_sh, 8u);
+  EXPECT_EQ(rdna3.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna3.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
+  EXPECT_EQ(rdna3.device.simd_count, rdna3.device.num_shader_engines * rdna3.device.num_cu_per_sh *
+                                         rdna3.device.simd_per_cu);
+  EXPECT_EQ(kmd::drm_shader_engine_count(rdna3.device.num_shader_engines,
+                                         rdna3.device.num_shader_arrays_per_engine),
+            6u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna3.device.num_shader_engines, rdna3.device.num_cu_per_sh),
+            96u);
+  EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna3.device.gfx_target_version,
+                                                        rdna3.device.revision_id),
+            0x1u);
+  EXPECT_EQ(kmd::gfx_target_name(rdna3.device.gfx_target_version), "gfx1100");
+  EXPECT_EQ(kmd::num_hw_gfx_contexts_for_gfx_target_version(rdna3.device.gfx_target_version), 8u);
+  EXPECT_EQ(rdna3.soc()->num_xcds(), 1u);
+  EXPECT_EQ(rdna3.soc()->xcd(0)->num_shader_engines(), 6u);
+  EXPECT_EQ(rdna3.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
+  EXPECT_FALSE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_EQ(rdna3.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+            amdgpu::SdmaPacketDialect::Gfx11Plus);
 }
 
 TEST(ConfigLoaderTest, BuildFromJsonString) {
@@ -250,6 +332,67 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
   auto restored = config::restore_checkpoint(path);
   EXPECT_EQ(restored.memory()->read32(0x1000), 0xDEADBEEFu);
   EXPECT_EQ(restored.memory()->read64(0x2000), 0x0123456789ABCDEFULL);
+
+  std::filesystem::remove(path);
+}
+
+TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"cdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  const uint32_t acc0 = wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
+  const uint32_t acc_last = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1;
+  cu->write_vgpr(acc0, 0, 0xA55A0001u);
+  cu->write_vgpr(acc_last, 0, 0xDEADBEEFu);
+
+  const char *path = "/tmp/rocjitsu_test_checkpoint_accvgpr.bin";
+  config::save_checkpoint(path, *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(path));
+
+  auto restored = config::restore_checkpoint(path);
+  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
+  ASSERT_NE(restored_vm, nullptr);
+  auto *restored_cu = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(restored_cu, nullptr);
+  auto *restored_wf = restored_cu->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 0),
+            0xA55A0001u);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
+                                       cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1,
+                                   0),
+            0xDEADBEEFu);
 
   std::filesystem::remove(path);
 }

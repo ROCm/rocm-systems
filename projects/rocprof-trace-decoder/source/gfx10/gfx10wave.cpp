@@ -232,9 +232,10 @@ wave_t::wave_t(
     bool exbarw,
     uint8_t me,
     uint8_t pipe,
-    uint8_t wg
+    uint8_t wg,
+    uint8_t cluster
 ) :
-WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw, me, pipe, wg)
+WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw, me, pipe, wg, cluster)
 {
     this->last_state_cycle = token.time;
     this->cur_state = WaveslotState::WS_IDLE;
@@ -273,7 +274,7 @@ void wave_t::update_state(WaveslotState new_state, int64_t time)
     this->cur_state = new_state;
 }
 
-void wave_t::new_pc(int64_t time, int64_t pc, CodeobjTableTranslator& table)
+void wave_t::new_pc(int64_t time, int64_t pc, const CachedTable& table)
 {
     update_barrier_gfx11(time);
     if (pc_infos.empty() || trap_status != WaveTrapStatus::TRAP_RESTORED) return;
