@@ -32,8 +32,8 @@
 // buffer/callback shared across all devices, with no convenient per-sample
 // "which agent emitted this" field. On a mixed system (e.g. gfx950 + gfx1250),
 // every sample therefore runs through the gate. The cost is bounded:
-//   - A process-wide flag (any_gfx1250_agent_pc_sampled) short-circuits the
-//     entire path when no gfx1250 agent is being sampled.
+//   - PCCorrectionManager::enabled() short-circuits the entire path when
+//     correction is disabled (env-var toggle) or no gfx1250 agent is configured.
 //   - Classifications are built ONLY for code objects on gfx1250 agents, so a
 //     non-gfx1250 sample misses the classification map and passes through.
 // A per-device-buffer refactor would remove this overhead but is a separate,
@@ -84,7 +84,7 @@ build_classification(code_obj_decoder_t& decoder, rocprofiler_code_object_id_t c
     // sample's pc.code_object_offset and the offset add_symbol records.
     std::map<uint64_t, SymbolInfo> symbols = decoder.getSymbolMap(co_id);
 
-    for(const auto& [vaddr, sym] : symbols)
+    for(const auto& [_, sym] : symbols)
     {
         classification->add_symbol(sym.vaddr, sym.mem_size, [&](uint64_t voffset) {
             return decoder.get(co_id, voffset);
