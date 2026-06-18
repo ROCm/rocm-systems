@@ -789,3 +789,44 @@ operators. Operator hierarchies are ``/``-separated (e.g.
 
    $ rocprof-compute --experimental analyze --path ./workload \
        --torch-operator "*relu,*conv*,*linear"
+
+
+Triton Operator Analysis
+========================
+
+.. warning::
+
+   Triton operator analysis is currently available only in CLI mode and
+   requires ``--experimental``. After profiling with
+   ``--experimental --triton-trace`` (see :ref:`triton-trace`), use
+   ``rocprof-compute --experimental analyze ...`` with
+   ``--list-triton-operators`` or ``--triton-operator`` as needed.
+
+Triton kernels are analyzed like PyTorch operators, using the
+``--list-triton-operators`` and ``--triton-operator`` options. These read the
+same ``api_trace/consolidated.csv`` and select rows whose ``Backend`` column is
+``triton``, so Triton kernels are reported independently of any PyTorch
+operators in the same run.
+
+List all captured Triton kernels:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute --experimental analyze --path ./workload --list-triton-operators
+
+Filter Triton kernels with shell-style glob patterns (``fnmatch``); the syntax
+matches ``--torch-operator`` (``*``, ``?``, ``[seq]``; match all with no
+arguments, ``all``, ``*``, or ``**``):
+
+.. code-block:: shell-session
+
+   # Wildcard match
+   $ rocprof-compute --experimental analyze --path ./workload --triton-operator "*matmul*"
+
+   # Filter multiple kernels (space or comma separated)
+   $ rocprof-compute --experimental analyze --path ./workload \
+       --triton-operator "*matmul*,*softmax*"
+
+``--torch-operator`` and ``--triton-operator`` are **mutually exclusive**: apply
+one operator filter per analysis run, and run the analysis separately for each
+framework.

@@ -211,7 +211,7 @@ def test_analyze_torch_trace_invalid_operator_MI300X_A1(
     assert code == 0
 
     output = capsys.readouterr().out
-    assert "No operators matched" in output
+    assert "No PyTorch operators matched" in output
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 

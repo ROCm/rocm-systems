@@ -126,7 +126,9 @@ void maybe_capture(const std::string& s)
     }
 }
 
-// Renders the stack as "marker1/.../markerN:context1/.../contextN".
+// Renders the stack as "marker1/.../markerN:context1/.../contextN". Marker names
+// can contain '/' (e.g. torch.compile's "Torch-Compiled Region: 0/0"), so they
+// are percent-encoded to keep '/' as the frame separator.
 std::string build_marker_string(const std::vector<StackEntry>& stack)
 {
     std::size_t marker_len = 0;
@@ -144,7 +146,15 @@ std::string build_marker_string(const std::vector<StackEntry>& stack)
     {
         if (!first)
             out += '/';
-        out += e.marker;
+        for (char c : e.marker)
+        {
+            if (c == '%')
+                out += "%25";
+            else if (c == '/')
+                out += "%2F";
+            else
+                out += c;
+        }
         first = false;
     }
     out += ':';
