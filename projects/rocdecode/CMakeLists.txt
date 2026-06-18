@@ -202,7 +202,11 @@ if(_deps_met)
 
   if(WIN32)
     # Copy vaon12 DLLs to output directory so the library can find the VA driver at runtime
-    set(VAON12_BIN_DIR "${VAON12_ROOT}/build/native/x64/bin")
+    if(VAON12_ROOT STREQUAL "C:/vaon12")
+      set(VAON12_BIN_DIR "${VAON12_ROOT}/build/native/x64/bin")
+    else()
+      set(VAON12_BIN_DIR "${VAON12_ROOT}/bin")
+    endif()
     if(EXISTS "${VAON12_BIN_DIR}")
       file(GLOB VAON12_DLLS "${VAON12_BIN_DIR}/*.dll")
       foreach(dll ${VAON12_DLLS})
