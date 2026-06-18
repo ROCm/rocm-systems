@@ -565,7 +565,23 @@ Defined in cooperative_groups/hip_scan.h. Performs an exclusive scan using the o
 
 The parameters are described here: :ref:`scan_operations`
 
-The value returned for the first active lane is platform dependant, and the programmer should not depend on one value or another being returned. e.g. on AMD currently the "identity" value is returned, according to the operation (e.g. 0 for cg::plus). But this might be different on Nvidia platforms and could change in the future.
+The value returned for the first active lane is platform-dependent, and the programmer should not depend on one value or another being returned as it might change in the future; but as a reference, given a ``val`` of type ``T``, the returned value is:
+
+* On AMD:
+  Currently the "identity" value is returned, according to the operation:
+  * ``plus``: always 0
+  * ``less``:
+    * for integer types: the maximum value for the type, i.e. ``std::numeric_limits<T>::max()``
+    * for floating point types: ``inf``
+  * ``greater``:
+    * for integer types: the minimum value for the type, i.e. ``std::numeric_limits<T>::lowest()``
+    * for floating point types: ``-inf``
+  * ``bit_and``: a value with all the bits set to 1
+  * ``bit_or``: always 0
+  * ``bit_xor``: always 0
+
+* On NVIDIA:
+  * Returns T {} (i.e. 0)
 
 **Performance**
 On AMD, when ``group`` is of the same size as the warp size and ``T`` primitive type, DPP instructions will be used, which means the operation would be significantly faster than with other group sizes. The primitive types are:
