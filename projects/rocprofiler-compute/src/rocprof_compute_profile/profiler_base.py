@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-import os
 import re
 import shlex
 import shutil
@@ -51,20 +50,6 @@ def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
     return selected
 
 
-def _build_inject_env(pkg_parent: Path) -> dict[str, str]:
-    """Build the environment overrides for the workload subprocess.
-
-    Returns a dict suitable for run_prof's extra_env, extending PYTHONPATH so
-    the launcher can import the inject_roctx package.
-    """
-    env: dict[str, str] = {}
-    parent_str = str(pkg_parent)
-    existing = os.environ.get("PYTHONPATH", "")
-    if parent_str not in existing.split(os.pathsep):
-        env["PYTHONPATH"] = parent_str + (os.pathsep + existing if existing else "")
-    return env
-
-
 def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[str]]:
     """Locate the script argument in a Python command, skipping interpreter flags.
 
@@ -88,9 +73,6 @@ def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[
     return None, None
 
 
-_INJECT_MODULE = "utils.inject_roctx"
-
-
 def _prepare_ml_api_trace_injection(
     remaining: list[str],
     resolved_exec_path: Path,
@@ -98,28 +80,28 @@ def _prepare_ml_api_trace_injection(
     script_index: Optional[int],
     skip_flag: Optional[str],
     frameworks: set[str],
-) -> Path:
-    """Insert the inject_roctx entry point into the workload command.
+) -> None:
+    """Insert the inject_roctx launcher into the workload command.
 
-    Modifies remaining in place. The selected frameworks are passed to the
-    launcher as ``--frameworks <names>``, followed by ``--`` and the workload
-    command. The rewrite depends on the workload type:
+    Modifies the ``remaining`` command list in place. The launcher is run by
+    absolute path, with the selected frameworks passed as ``--frameworks
+    <names>`` followed by ``--`` and the workload command. The rewrite depends
+    on the workload type:
       1. Python interpreter — insert the launcher before the script.
       2. Direct .py script  — prepend ``sys.executable`` and the launcher.
       3. Other executables  — leave the command unchanged and emit a warning.
-
-    Returns the package's parent directory for the subprocess PYTHONPATH.
     """
-    inject_pkg_parent = Path(__file__).parent.parent
-    if not (inject_pkg_parent / "utils" / "inject_roctx" / "__main__.py").exists():
+    launch_script = (
+        Path(__file__).parent.parent / "utils" / "inject_roctx" / "launch.py"
+    )
+    if not launch_script.is_file():
         console_error(
-            f"Cannot find inject_roctx package under {inject_pkg_parent}. "
+            f"Cannot find inject_roctx launcher at {launch_script}. "
             "Please verify your installation."
         )
 
     launcher = [
-        "-m",
-        _INJECT_MODULE,
+        str(launch_script),
         "--frameworks",
         ",".join(sorted(frameworks)),
         "--",
@@ -154,8 +136,6 @@ def _prepare_ml_api_trace_injection(
             "Rebuild without packaging libhsa/libhip or "
             "adjust LD_LIBRARY_PATH to /opt/rocm before profiling."
         )
-
-    return inject_pkg_parent
 
 
 class RocProfCompute_Base:
@@ -278,7 +258,7 @@ class RocProfCompute_Base:
                     raise NoScriptInCommandError(args.remaining)
 
             if selected_frameworks:
-                inject_pkg_parent = _prepare_ml_api_trace_injection(
+                _prepare_ml_api_trace_injection(
                     args.remaining,
                     resolved_exec_path,
                     bool(is_python),
@@ -286,7 +266,6 @@ class RocProfCompute_Base:
                     skip_flag,
                     selected_frameworks,
                 )
-                self._inject_env = _build_inject_env(inject_pkg_parent)
             args.remaining = shlex.join(args.remaining)
         elif not args.attach_pid:
             console_error(
@@ -381,7 +360,6 @@ class RocProfCompute_Base:
                 format_rocprof_output=args.format_rocprof_output,
                 ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
                 retain_rocpd_output=args.retain_rocpd_output,
-                extra_env=getattr(self, "_inject_env", None),
             )
 
             end_time = time.time()
