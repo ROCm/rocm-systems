@@ -11,7 +11,6 @@ Panel Config:
         value: Avg
         unit: Unit
         peak: Peak
-        pop: Pct of Peak
       metric: {}
   - metric_table:
       id: 1102

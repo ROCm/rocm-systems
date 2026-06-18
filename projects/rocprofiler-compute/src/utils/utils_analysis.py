@@ -20,7 +20,7 @@ from utils.logger import (
 
 NS_TO_MS = 1.0 / 1_000_000.0
 
-# Canonical column-name preference order for Pct of Peak lookups
+# Canonical column-name preference order for Percent of Peak lookups
 VALUE_COL_PREFERENCE: tuple[str, ...] = ("Avg", "Value")
 PEAK_COL_PREFERENCE: tuple[str, ...] = ("Peak", "Peak (Empirical)")
 
