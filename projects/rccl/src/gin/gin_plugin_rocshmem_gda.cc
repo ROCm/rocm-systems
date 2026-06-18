@@ -9,7 +9,7 @@
 /**
  * Built-in GIN plugin for the rocshmem QP backend.
  *
- * Uses gin_qp_factory directly — no rocshmem_init(), no symmetric heap.
+ * Uses gin_rocshmem_gda_factory directly — no rocshmem_init(), no symmetric heap.
  * QP creation and connection are handled in ncclGinRocshmemGdaCreateContext().
  */
 

@@ -5,13 +5,13 @@
  *****************************************************************************/
 
 /**
- * @file gin_qp_factory_test.cpp
+ * @file gin_rocshmem_gda_factory_test.cu
  *
  * Standalone MPI test for the GIN QP factory.
  * Exercises: QP creation, MR registration, GPU-initiated RDMA put,
  * quiet (flush), and RDMA atomic (signal model).
  *
- * Run with: mpirun -np 2 ./gin_qp_factory_test
+ * Run with: mpirun -np 2 ./gin_rocshmem_gda_factory_test
  */
 
 #include <mpi.h>
@@ -33,7 +33,7 @@
 } while(0)
 
 ///////////////////////////////////////////////////////////////////////////////
-// MPI-based allgather callback for gin_qp_factory
+// MPI-based allgather callback for gin_rocshmem_gda_factory
 ///////////////////////////////////////////////////////////////////////////////
 
 static int mpi_allgather(void *ctx, void *buf, size_t perRankSize) {

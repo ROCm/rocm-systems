@@ -32,7 +32,7 @@ struct ginRocshmemCtx {
 
   bool hasError;
 
-  // QP set from gin_qp_factory (owns IB resources)
+  // QP set from gin_rocshmem_gda_factory (owns IB resources)
   rocshmem_gin_qp_set_t qpSet;
 
   // MRs for signal/counter buffers
@@ -43,12 +43,12 @@ struct ginRocshmemCtx {
 // Host-side memory handle that wraps the GPU handle
 struct ginRocshmemMemHandle {
   ncclGinRocshmemGdaMemHandle *devHandle;  // GPU-side handle
-  void *mr;                              // ibv_mr from gin_qp_factory
+  void *mr;                              // ibv_mr from gin_rocshmem_gda_factory
   uint32_t *rkeys_dev;                   // GPU array of per-peer rkeys
   uintptr_t *remote_vas_dev;                    // GPU array of per-peer base VAs
 };
 
-// Bootstrap allgather wrapper for gin_qp_factory callback
+// Bootstrap allgather wrapper for gin_rocshmem_gda_factory callback
 struct ginBootstrapCtx {
   struct ncclComm *comm;
 };
@@ -96,7 +96,7 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
   ctx->gpuCtxHost.nSignals = nSignals;
   ctx->gpuCtxHost.nCounters = nCounters;
 
-  // Create QPs via gin_qp_factory
+  // Create QPs via gin_rocshmem_gda_factory
   {
     struct ginBootstrapCtx bctx = { comm };
     void **gpu_qp_ptrs = nullptr;
@@ -104,7 +104,7 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
                                       ginBootstrapAllgather, &bctx,
                                       &ctx->qpSet, &gpu_qp_ptrs);
     if (rc != 0) {
-      WARN("GIN rocshmem: failed to create QPs via gin_qp_factory");
+      WARN("GIN rocshmem: failed to create QPs via gin_rocshmem_gda_factory");
       ret = ncclSystemError;
       goto fail;
     }
