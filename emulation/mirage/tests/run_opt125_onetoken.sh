@@ -78,7 +78,6 @@ if [[ "$LOG_KERNELS" == "1" ]]; then
     --env PYTORCH_SHOW_DISPATCH_TRACE=1
     # rocjitsu emulator kernel-execution logging (interposer plugin -> stderr).
     --env RJ_LOG=1
-    --env RJ_SINKS=stderr
   )
 fi
 
@@ -101,19 +100,6 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 [[ -x "$MIRAGE" ]] || fail "mirage wrapper not found: $MIRAGE"
 log "using mirage wrapper: $MIRAGE"
 
-# Pick a container provider (only used for the autodetect message; mirage
-# does its own detection unless PROVIDER is set).
-if [[ -z "${PROVIDER:-}" ]]; then
-  if command -v docker >/dev/null 2>&1; then
-    PROVIDER="docker"
-  elif command -v podman >/dev/null 2>&1; then
-    PROVIDER="podman"
-  else
-    fail "no container provider found (need docker or podman)"
-  fi
-fi
-log "using container provider: $PROVIDER"
-
 # Make sure the HuggingFace cache directory exists on the host so the
 # weights survive across runs.
 mkdir -p "$HF_CACHE"
@@ -128,12 +114,13 @@ log "caching model weights in $HF_CACHE"
 log "running $FIXTURE_NAME via mirage run (profile=$PROFILE, image=$IMAGE)"
 if [[ "$LOG_KERNELS" == "1" ]]; then
   log "kernel-execution logging enabled (torch/HIP + rocjitsu)"
+  export RJ_LOG_GROUPS="CP"  # enable all rocjitsu log groups for the fixture run
 fi
 cd "$MIRAGE_DIR"
 "$MIRAGE" run \
+  --in-process \
   --profile "$PROFILE" \
   --image "$IMAGE" \
-  --container-provider "$PROVIDER" \
   --mount "$FIXTURE_DIR:$CONTAINER_FIXTURE_DIR:ro" \
   --mount "$HF_CACHE:/root/.cache/huggingface" \
   "${KERNEL_LOG_ENV[@]}" \

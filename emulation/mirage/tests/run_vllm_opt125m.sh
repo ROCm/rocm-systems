@@ -85,9 +85,7 @@ if [[ "$LOG_KERNELS" == "1" ]]; then
     --env AMD_LOG_LEVEL=3
     --env PYTORCH_JIT_LOG_LEVEL=kernels
     --env PYTORCH_SHOW_DISPATCH_TRACE=1
-    # rocjitsu emulator kernel-execution logging (interposer plugin -> stderr).
     --env RJ_LOG=1
-    --env RJ_SINKS=stderr
   )
 fi
 
@@ -134,6 +132,7 @@ RUN_LOG="$(mktemp -t mirage-vllm.XXXXXX.log)"
 log "starting vLLM (model=$MODEL) via mirage run --daemon"
 if [[ "$LOG_KERNELS" == "1" ]]; then
   log "kernel-execution logging enabled (torch/HIP + rocjitsu) -> $RUN_LOG"
+  export RJ_LOG_GROUPS="CP"  # enable all rocjitsu log groups for the fixture run
 fi
 cd "$MIRAGE_DIR"
 "$MIRAGE_BIN" run \

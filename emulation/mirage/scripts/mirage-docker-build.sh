@@ -60,7 +60,7 @@ BUILD_IMAGE="${MIRAGE_BUILD_IMAGE:-ghcr.io/rocm/therock_build_manylinux_x86_64:m
 IMAGE_TAG="${MIRAGE_IMAGE_TAG:-mirage:local}"
 ENGINE="${CONTAINER_ENGINE:-docker}"
 CARGO_PROFILE="${CARGO_PROFILE:-release}"
-RJ_LOG_GROUPS="${RJ_LOG_GROUPS:-3}"
+RJ_LOG_GROUPS="${RJ_LOG_GROUPS:-OFF}"
 
 # Resolve the output prefix to an absolute host path and create it so we
 # can copy artifacts into it.
