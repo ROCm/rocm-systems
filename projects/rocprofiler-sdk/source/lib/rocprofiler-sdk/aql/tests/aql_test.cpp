@@ -164,6 +164,52 @@ TEST(aql_profile, packet_generation_single)
     hsa_shut_down();
 }
 
+TEST(aql_profile, counter_after_packets_stop_before_read)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+
+    struct HsaShutdownGuard
+    {
+        ~HsaShutdownGuard() { hsa_shut_down(); }
+    } cleanup;
+
+    rocprofiler::test_init();
+
+    auto agents = rocprofiler::hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+
+    size_t tested_agents = 0;
+
+    for(const auto& [_, agent] : agents)
+    {
+        auto metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
+        if(metrics.empty()) continue;
+
+        CounterPacketConstruct pkt(agent.get_rocp_agent()->id, metrics);
+        auto                   test_pkt =
+            pkt.construct_packet(rocprofiler::get_api_table(), rocprofiler::get_ext_table());
+
+        ASSERT_TRUE(test_pkt);
+        ASSERT_FALSE(test_pkt->empty);
+
+        constexpr uint64_t stop_marker = 0x53544f50;  // "STOP"
+        constexpr uint64_t read_marker = 0x52454144;  // "READ"
+
+        test_pkt->packets.stop_packet.completion_signal = hsa_signal_t{.handle = stop_marker};
+        test_pkt->packets.read_packet.completion_signal = hsa_signal_t{.handle = read_marker};
+
+        test_pkt->populate_after();
+
+        ASSERT_EQ(test_pkt->after_krn_pkt.size(), 2);
+        EXPECT_EQ(test_pkt->after_krn_pkt.at(0).completion_signal.handle, stop_marker);
+        EXPECT_EQ(test_pkt->after_krn_pkt.at(1).completion_signal.handle, read_marker);
+
+        ++tested_agents;
+    }
+
+    EXPECT_GT(tested_agents, 0);
+}
+
 TEST(aql_profile, packet_generation_multi)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
