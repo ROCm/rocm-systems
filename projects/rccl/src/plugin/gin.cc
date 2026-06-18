@@ -10,6 +10,10 @@
 #include "checks.h"
 #include "plugin.h"
 #include "nccl_gin.h"
+#ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_host_rocshmem_api.h"
+#include "gin/gin_host_rocshmem_gda.h"
+#endif
 
 #include <string.h>
 #include <errno.h>
@@ -120,6 +124,12 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
     if (pluginLib->ncclGin->init(&comm->ginContext, comm->commHash, ncclDebugLog) != ncclSuccess) {
       pluginLib->ncclGinPluginState = ncclGinPluginStateDisabled;
     }
+#ifdef ENABLE_ROCSHMEM_GIN
+    else if (comm->ginContext &&
+             (pluginLib->ncclGin == &ncclGinRocshmemApi)) {
+      ncclGinRocshmemSetInitContext(comm->ginContext, &comm->devrState, comm->bootstrap);
+    }
+#endif
   }
   if (pluginLib->ncclGinPluginState == ncclGinPluginStateInitReady && pluginLib->ncclGin) {
     if (pluginLib->ncclGin->devices(&ndev) != ncclSuccess || ndev <= 0) {

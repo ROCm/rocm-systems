@@ -1833,8 +1833,7 @@ ncclResult_t ncclWinGetUserPtr(struct ncclComm* comm, struct ncclWindow_vidmem* 
 }
 
 // Get the LSA flat VA for self rank corresponding to a primary (ncclMemAlloc) address.
-ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclComm* comm, void* addr, void** outAddr) {
-  struct ncclDevrState* devr = &comm->devrState;
+ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
   uintptr_t a = reinterpret_cast<uintptr_t>(addr);
   uintptr_t flatBase = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
   uintptr_t flatEnd  = flatBase + (uintptr_t)devr->lsaSize * devr->bigSize;

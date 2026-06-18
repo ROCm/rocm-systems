@@ -114,7 +114,7 @@ void freeDevCommRequirements(
 // If addr is already in the LSA flat range, returns addr unchanged.
 // If addr matches a registered memory's primaryAddr, returns lsaFlatBase + lsaSelf*bigSize + bigOffset.
 // outAddr is set to nullptr if addr cannot be resolved.
-ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclComm* comm, void* addr, void** outAddr);
+ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr);
 
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win);
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win);

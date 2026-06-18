@@ -14,27 +14,22 @@
 #include "gin/gin_host.h"
 #include "plugin/nccl_net.h"
 
-// Called from gin_host.cc (with ncclComm context)
-ncclResult_t ncclGinRocshmemApiCreateContext(struct ncclComm *comm, void *collComm, int devId,
-                                          int nSignals, int nCounters, void **outGinCtx,
-                                          ncclNetDeviceHandle_v11_t **outDevHandle);
-ncclResult_t ncclGinRocshmemApiRegister(ncclGin_t *ginComm, void *ginCtx, void *addr, size_t size,
-                                     int type, int mr_flags, void **mhandle, void **ginHandle);
-ncclResult_t ncclGinRocshmemApiDeregister(ncclGin_t *ginComm, void *ginCtx, void *mhandle);
-ncclResult_t ncclGinRocshmemApiDestroyContext(ncclGin_t *ginComm, void *ginCtx);
-ncclResult_t ncclGinRocshmemApiProgress(ncclGin_t *ginComm, void *ginCtx);
-ncclResult_t ncclGinRocshmemApiQueryLastError(ncclGin_t *ginComm, void *ginCtx, bool *hasError);
+struct ncclDevrState;
 
-// Called from gin_plugin_rocshmem_api.cc (plugin interface, no ncclComm)
-ncclResult_t ncclGinRocshmemApiCreateContextFromPlugin(int nSignals, int nCounters,
-                                                     void **outGinCtx,
-                                                     ncclNetDeviceHandle_v11_t **outDevHandle);
-ncclResult_t ncclGinRocshmemApiRegisterFromPlugin(void *addr, size_t size, int type,
-                                                uint64_t mr_flags, void **mhandle, void **ginHandle);
-ncclResult_t ncclGinRocshmemApiDeregisterFromPlugin(void *mhandle);
-ncclResult_t ncclGinRocshmemApiDestroyContextFromPlugin(void *ginCtx);
+// Init context: allocated by init(), populated by ncclGinRocshmemSetInitContext()
+// after init() succeeds, passed to connect() as ctx parameter.
+struct ginRocshmemInitCtx {
+  struct ncclDevrState *devrState;
+  void *bootstrap;
+};
 
-// The built-in plugin instance
-extern ncclGin_v11_t ncclGinRocshmemApiPlugin;
+// Set RCCL-internal state into the plugin init context.
+// Called from gin.cc immediately after a rocshmem plugin's init() succeeds.
+void ncclGinRocshmemSetInitContext(void *initCtx,
+                                   struct ncclDevrState *devrState,
+                                   void *bootstrap);
+
+// The built-in plugin instances
+extern ncclGin_t ncclGinRocshmemApi;
 
 #endif

@@ -1081,20 +1081,10 @@ endif()
 # a FetchContent-built fmt-header-only target leaks into rccl's link
 # interface and breaks install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
-if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
+if(ENABLE_ROCSHMEM)
   # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
-  # The __hip_gpubin_handle_* symbols referenced by __hip_module_ctor in the
-  # librocshmem.a objects are only defined by the RDC device-link step.
-  # --hip-link tells amdclang++ to perform that step as part of the final
-  # librccl.so link; -fgpu-rdc marks the link as RDC-mode.  --offload-arch
-  # flags use RCCL's GPU_TARGETS (stripped of feature suffixes like :xnack-)
-  # so the device-link covers every arch RCCL is built for.
-  # RCCL's own device code (already embedded in device_build/common.o by the
-  # custom device-linker pipeline) is NOT compiled with -fgpu-rdc and is
-  # therefore unaffected by this device-link step.
-  # ENABLE_ROCSHMEM_GIN also requires this because RCCL's symmetric GIN
-  # kernels (reduce_scatter_gin, all_gather_gin) instantiate rocshmem backend
-  # templates that reference device symbols from librocshmem.a.
+  # --hip-link tells amdclang++ to perform the RDC device-link step as part
+  # of the final librccl.so link.
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE hsakmt)
   target_link_libraries(rccl PRIVATE ${IBVERBS})
@@ -1105,9 +1095,12 @@ if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   endforeach()
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
-  if(ENABLE_ROCSHMEM_GIN AND NOT ENABLE_ROCSHMEM)
-    target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
-  endif()
+elseif(ENABLE_ROCSHMEM_GIN)
+  # GIN-only: rocshmem device symbols (QueuePair methods for GDA backend)
+  # are left unresolved in librccl.so and resolved from the executable
+  # that links librocshmem.a. This avoids duplicating rocshmem device state
+  # (__constant__ memory) across librccl.so and the executable.
+  target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 
 ## Set RCCL link options
