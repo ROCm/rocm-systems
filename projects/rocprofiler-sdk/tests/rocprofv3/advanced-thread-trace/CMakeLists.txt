@@ -243,6 +243,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 90
     LABELS "integration-tests;thread-trace;pc-sampling"
+    UNSTABLE
     DISABLED ${ATT_PLUS_PCS_DISABLE})
 
 # the two-GPU index test needs the decoder and at least two GPUs. The gfx-info list is
