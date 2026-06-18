@@ -59,17 +59,16 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
     auto output_path   = fs::path{cfg_output_path};
     auto output_prefix = tool::format_path(cfg.output_file);
 
-    // In a multi-process trace, every descendant of the root process must write
-    // to its own file so processes do not overwrite each other's output. The
-    // root process keeps the user-specified name unchanged; a descendant appends
-    // its PID, unless the user already requested a PID token in the pattern.
-    static const bool _append_pid = []() {
-        auto _root = common::get_env_optional("ROCPROF_OUTPUT_ROOT_PID");
-        return _root.has_value() && *_root != std::to_string(getpid());
-    }();
-    if(_append_pid && output_prefix.find("%pid%") == std::string::npos &&
-       output_prefix.find("{pid}") == std::string::npos &&
-       output_prefix.find("%p") == std::string::npos)
+    // Descendants of the root process append their PID so they don't overwrite
+    // each other's output; the root keeps the user-specified name. Recomputed
+    // per call (not a static) so a process that forks later still gets its PID.
+    // Token check uses raw cfg.output_file since format_path() already expanded
+    // any %pid%/%p/{pid} in output_prefix.
+    auto _root_pid      = common::get_env_optional("ROCPROF_OUTPUT_ROOT_PID");
+    bool _is_descendant = _root_pid.has_value() && *_root_pid != std::to_string(getpid());
+    if(_is_descendant && cfg.output_file.find("%pid%") == std::string::npos &&
+       cfg.output_file.find("{pid}") == std::string::npos &&
+       cfg.output_file.find("%p") == std::string::npos)
     {
         output_prefix += fmt::format("_{}", getpid());
     }
