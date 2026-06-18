@@ -479,6 +479,12 @@ read_code_object_file(int fd)
         offset += static_cast<size_t>(nread);
     }
 
+    if(offset != buffer.size())
+    {
+        ROCP_INFO << "short read on loaded code object file descriptor " << fd << ": expected "
+                  << buffer.size() << " bytes, read " << offset;
+    }
+
     buffer.resize(offset);
     return buffer;
 }
@@ -488,7 +494,14 @@ get_loaded_code_object_symbol_map(const rocprofiler_callback_tracing_code_object
 {
     if(data.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
     {
-        if(data.memory_base == 0 || data.memory_size == 0) return {};
+        if(data.memory_base == 0 || data.memory_size == 0)
+        {
+            ROCP_WARNING << "loaded memory code object has invalid storage: memory_base="
+                         << data.memory_base << ", memory_size=" << data.memory_size;
+            return {};
+        }
+
+        // The loader reports memory_size as uint64_t while COMGR takes a size_t byte count.
         if(data.memory_size > std::numeric_limits<size_t>::max())
         {
             ROCP_INFO << "loaded memory code object is too large to parse: " << data.memory_size;
@@ -1164,12 +1177,10 @@ hip_register_fat_binary(const void* data)
 {
     const hip::hip_fat_binary_wrapper* fbwrapper =
         reinterpret_cast<const hip::hip_fat_binary_wrapper*>(data);
-    const auto valid_magic =
-        (fbwrapper->magic == hip::HIP_FAT_MAGIC || fbwrapper->magic == hip::HIP_FAT_MAGIC_HIPK);
-    ROCP_ERROR_IF((!valid_magic || fbwrapper->version != 1)) << "register fat binary failed";
+    ROCP_ERROR_IF(!hip::is_valid_fat_binary_wrapper(*fbwrapper)) << "register fat binary failed";
     // HIPK wrappers carry kpack metadata here, not a HIP fatbin. Kernel metadata is populated from
     // the HSA loader's actual loaded code object bytes instead.
-    if(fbwrapper->magic == hip::HIP_FAT_MAGIC && fbwrapper->version == 1)
+    if(hip::has_hip_fat_binary_payload(*fbwrapper))
     {
         CHECK_NOTNULL(get_hip_register_data())
             ->wlock([fbwrapper](hip::hip_register_data& reg_data) {

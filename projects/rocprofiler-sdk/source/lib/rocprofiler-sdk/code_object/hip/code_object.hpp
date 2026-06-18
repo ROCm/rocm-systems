@@ -77,6 +77,19 @@ struct hip_fat_binary_wrapper
     void*        dummy1  = nullptr;
 };
 
+constexpr bool
+is_valid_fat_binary_wrapper(const hip_fat_binary_wrapper& fbwrapper)
+{
+    return (fbwrapper.magic == HIP_FAT_MAGIC || fbwrapper.magic == HIP_FAT_MAGIC_HIPK) &&
+           fbwrapper.version == 1;
+}
+
+constexpr bool
+has_hip_fat_binary_payload(const hip_fat_binary_wrapper& fbwrapper)
+{
+    return fbwrapper.magic == HIP_FAT_MAGIC && fbwrapper.version == 1;
+}
+
 comgr_code_object_vec_t
 get_isa_offsets(hsa_agent_t hsa_agent, const void* fat_bin);
 

@@ -103,6 +103,8 @@ constexpr auto kernel_symbol_metadata_lookup = ".symbol";
         return AMD_COMGR_STATUS_ERROR;                                                             \
     }
 
+namespace
+{
 bool
 comgr_success(amd_comgr_status_s status, const char* call)
 {
@@ -149,36 +151,6 @@ get_isa_info(hsa_isa_t isa, void* data)
     }
 
     return HSA_STATUS_SUCCESS;
-}
-
-comgr_code_object_vec_t
-get_isa_offsets(hsa_agent_t hsa_agent, const void* fat_bin)
-{
-    auto isas       = isa_names_t{};
-    auto hsa_status = rocprofiler::hsa::get_core_table()->hsa_agent_iterate_isas_fn(
-        hsa_agent, get_isa_info, &isas);
-
-    if(isas.empty())
-    {
-        ROCP_INFO << "failed to get ISAs for agent-"
-                  << CHECK_NOTNULL(agent::get_rocprofiler_agent(hsa_agent))->node_id
-                  << " :: " << rocprofiler::hsa::get_hsa_status_string(hsa_status);
-        return comgr_code_object_vec_t{};
-    }
-
-    auto query_list = comgr_code_object_vec_t{};
-    for(auto& isa : isas)
-        query_list.emplace_back(amd_comgr_code_object_info_t{isa->c_str(), 0, 0});
-
-    auto data_object = amd_comgr_data_t{0};
-    CHECK_WARNING_COMGR(amd_comgr_create_data(AMD_COMGR_DATA_KIND_FATBIN, &data_object));
-    CHECK_WARNING_COMGR(
-        amd_comgr_set_data(data_object, 4096, reinterpret_cast<const char*>(fat_bin)));
-    CHECK_WARNING_COMGR(
-        amd_comgr_lookup_code_object(data_object, query_list.data(), query_list.size()));
-    CHECK_WARNING_COMGR(amd_comgr_release_data(data_object));
-
-    return query_list;
 }
 
 amd_comgr_status_t
@@ -265,17 +237,48 @@ get_kernels_meta_node(const amd_comgr_code_object_info_t& isa_offset,
 {
     CHECK_RETURN_COMGR(amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, binary_data));
 
-    void* bin_offset = static_cast<char*>(const_cast<void*>(fat_bin)) + isa_offset.offset;
-    CHECK_RETURN_COMGR_EXT(
-        amd_comgr_set_data(*binary_data, isa_offset.size, static_cast<const char*>(bin_offset)),
-        "binary_data=" << binary_data->handle << ", isa=(" << isa_offset.isa << ", "
-                       << isa_offset.size << ", " << isa_offset.offset << "), fat_bin=" << fat_bin);
+    const char* bin_offset = static_cast<const char*>(fat_bin) + isa_offset.offset;
+    CHECK_RETURN_COMGR_EXT(amd_comgr_set_data(*binary_data, isa_offset.size, bin_offset),
+                           "binary_data=" << binary_data->handle << ", isa=(" << isa_offset.isa
+                                          << ", " << isa_offset.size << ", " << isa_offset.offset
+                                          << "), fat_bin=" << fat_bin);
 
     CHECK_RETURN_COMGR(amd_comgr_get_data_metadata(*binary_data, binary_metadata));
     CHECK_RETURN_COMGR(
         amd_comgr_metadata_lookup(*binary_metadata, kernels_metadata_lookup, kernels_metadata));
 
     return AMD_COMGR_STATUS_SUCCESS;
+}
+}  // namespace
+
+comgr_code_object_vec_t
+get_isa_offsets(hsa_agent_t hsa_agent, const void* fat_bin)
+{
+    auto isas       = isa_names_t{};
+    auto hsa_status = rocprofiler::hsa::get_core_table()->hsa_agent_iterate_isas_fn(
+        hsa_agent, get_isa_info, &isas);
+
+    if(isas.empty())
+    {
+        ROCP_INFO << "failed to get ISAs for agent-"
+                  << CHECK_NOTNULL(agent::get_rocprofiler_agent(hsa_agent))->node_id
+                  << " :: " << rocprofiler::hsa::get_hsa_status_string(hsa_status);
+        return comgr_code_object_vec_t{};
+    }
+
+    auto query_list = comgr_code_object_vec_t{};
+    for(auto& isa : isas)
+        query_list.emplace_back(amd_comgr_code_object_info_t{isa->c_str(), 0, 0});
+
+    auto data_object = amd_comgr_data_t{0};
+    CHECK_WARNING_COMGR(amd_comgr_create_data(AMD_COMGR_DATA_KIND_FATBIN, &data_object));
+    CHECK_WARNING_COMGR(
+        amd_comgr_set_data(data_object, 4096, reinterpret_cast<const char*>(fat_bin)));
+    CHECK_WARNING_COMGR(
+        amd_comgr_lookup_code_object(data_object, query_list.data(), query_list.size()));
+    CHECK_WARNING_COMGR(amd_comgr_release_data(data_object));
+
+    return query_list;
 }
 
 kernel_symbol_hip_device_map_t
