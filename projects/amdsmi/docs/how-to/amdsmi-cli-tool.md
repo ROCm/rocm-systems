@@ -112,6 +112,9 @@ Lists GPU information.
 ```{note}
 `amd-smi list -e` is useful for mapping physical-to-logical GPU IDs.
 The `oam_id` field identifies the physical board slot in multi-GPU OAM chassis.
+The `ID` shown for `--gpu` (0, 1, 2, …) is an enumeration index assigned in discovery
+order, not the device-type value returned by `amdsmi_get_gpu_id()`; `--gpu` also accepts a
+BDF or UUID to select a specific card.
 ```
 
 ```shell-session

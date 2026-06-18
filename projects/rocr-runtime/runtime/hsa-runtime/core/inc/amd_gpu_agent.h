@@ -383,7 +383,7 @@ class GpuAgent : public GpuAgentInt {
 
   hsa_status_t Preload(uint64_t flags);
 
-  core::Agent* GetNearestCpuAgent(void) const;
+  core::Agent* GetNearestCpuAgent() const override;
 
   void RegisterGangPeer(core::Agent& gang_peer, unsigned int bandwidth_factor) override;
 

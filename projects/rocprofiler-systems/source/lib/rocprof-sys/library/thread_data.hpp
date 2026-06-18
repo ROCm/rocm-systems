@@ -125,10 +125,9 @@ struct thread_data : base_thread_data<thread_data<Tp, Tag, MaxThreads>>
     void resize(size_t _n) { container::resize(m_data, _n, m_init()); }
 
     template <typename Up>
+        requires std::is_assignable_v<value_type, Up>
     void resize(size_t _n, Up&& _v)
     {
-        static_assert(std::is_assignable<value_type, Up>::value,
-                      "value is not assignable to optional<Tp>");
         container::resize(m_data, _n, std::forward<Up>(_v));
     }
 
@@ -277,10 +276,9 @@ struct thread_data<std::optional<Tp>, Tag, MaxThreads>
     void resize(size_t _n) { container::resize(m_data, _n, m_init()); }
 
     template <typename Up>
+        requires std::is_assignable_v<value_type, Up>
     void resize(size_t _n, Up&& _v)
     {
-        static_assert(std::is_assignable<value_type, Up>::value,
-                      "value is not assignable to optional<Tp>");
         container::resize(m_data, _n, std::forward<Up>(_v));
     }
 

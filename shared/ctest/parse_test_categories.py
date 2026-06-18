@@ -97,10 +97,7 @@ def main():
         execution_settings = config.get("execution_settings", {})
         timeouts = execution_settings.get("category_timeouts", {})
         timeout_multiplier = execution_settings.get("timeout_multiplier", 1)
-        env_dict = execution_settings.get("environment", {}) or {}
-        env_string = (
-            ";".join(f"{k}={v}" for k, v in env_dict.items()) if env_dict else None
-        )
+        global_env_dict = execution_settings.get("environment", {}) or {}
         exclude_gpu_config = config.get("exclude_gpu", {})
 
         # Detect OS
@@ -138,6 +135,20 @@ def main():
                 if exclude_linux:
                     exclude.extend(exclude_linux)
 
+            # Merge global env with per-category env_variables (category wins on conflict)
+            cat_env_list = category_info.get("env_variables", []) or []
+            cat_env_dict = {}
+            for entry in cat_env_list:
+                if "=" in entry:
+                    k, v = entry.split("=", 1)
+                    cat_env_dict[k] = v
+            merged_env = {**global_env_dict, **cat_env_dict}
+            env_string = (
+                ";".join(f"{k}={v}" for k, v in merged_env.items())
+                if merged_env
+                else None
+            )
+
             base_timeout = timeouts.get(category_name, 300)
             timeout = int(base_timeout * timeout_multiplier)
             print(f"# Category: {category_name}")
@@ -147,12 +158,13 @@ def main():
             positive_string = ":".join(patterns)
             exclude_string = ":".join(exclude) if exclude else ""
 
-            # Store positive and exclude strings separately for GPU exclusion processing
+            # Store per-category data for GPU exclusion and environment propagation
             category_data[category_name] = {
                 "positive_string": positive_string,
                 "exclude_string": exclude_string,
-                "labels": labels[:],  # Make a copy
+                "labels": labels[:],
                 "timeout": timeout,
+                "env_string": env_string,
             }
 
             # Build complete pattern string for this category test
@@ -283,6 +295,7 @@ def main():
                 cat_exclude_string = cat_data["exclude_string"]
                 cat_labels = cat_data["labels"]
                 timeout = cat_data["timeout"]
+                env_string = cat_data["env_string"]
 
                 # Build combined pattern string: positive - category_excludes:gpu_excludes
                 combined_exclude_string = ""
