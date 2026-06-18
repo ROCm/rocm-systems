@@ -1417,9 +1417,7 @@ template <class T, class Op>
 struct CGIdentity {
   __CG_QUALIFIER__ T operator()()
   {
-    T result;
-
-    __builtin_memset(&result, 0, sizeof(T));
+    T result = {};
     return result;
   }
 };
