@@ -1838,6 +1838,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   auto& new_async_events_ = eventsInfo->new_events;
   auto& hsa_events = eventsInfo->events.hsa_events_;
   auto& event_age = eventsInfo->events.age_;
+  auto& event_age_map = eventsInfo->events.age_by_event_;
   uint32_t unique_evts = 0;
   auto hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
 
@@ -1847,6 +1848,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     assert(async_events_.handler_[index] != nullptr);
     bool keep = async_events_.handler_[index](value, async_events_.arg_[index]);
     if (!keep) {
+      // Drop the removed event's cached age so a future event reusing the same
+      // HsaEvent* address does not inherit a stale baseline.
+      HsaEvent* removed_event = hsa_signal_handle(async_events_.signal_[index])->EopEvent();
+      if (removed_event != nullptr) event_age_map.erase(removed_event);
       hsa_signal_handle(async_events_.signal_[index])->Release();
       async_events_.CopyIndex(index, async_events_.Size() - 1);
       async_events_.PopBack();
@@ -1866,8 +1871,20 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           hsa_events.resize(unique_evts + 10);
           event_age.resize(unique_evts + 10);
       }
-      if (init_age || hsa_events[unique_evts] != hsa_event ) {
-        event_age[unique_evts] = runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
+      // Restore this event's last-known KFD age, keyed by the event itself
+      // rather than by the compacted slot index. The async list is reordered in
+      // place on handler removal (CopyIndex/PopBack) and grows on registration,
+      // so the event occupying a given slot changes frequently. Re-priming a
+      // live event's baseline to 1 on such a slot change makes KFD report it
+      // satisfied immediately (event_age != 1) and busy-spins this loop.
+      const uint64_t default_age =
+          runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
+      if (init_age) {
+        event_age[unique_evts] = default_age;
+      } else {
+        auto age_it = event_age_map.find(hsa_event);
+        event_age[unique_evts] =
+            (age_it != event_age_map.end()) ? age_it->second : default_age;
       }
       hsa_events[unique_evts] = hsa_event;
       unique_evts++;
@@ -1882,6 +1899,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     HsaEvent** end = std::unique(&hsa_events[0], &hsa_events[0] + unique_evts);
     unique_evts = uint32_t(end - &hsa_events[0]);
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]));
+    // Persist the round-tripped ages keyed by event so a later reordering of
+    // the async list restores the correct baseline instead of re-priming to 1.
+    for (uint32_t k = 0; k < unique_evts; k++)
+      event_age_map[hsa_events[k]] = event_age[k];
   };
 
   while (!async_events_control_.exit.load(std::memory_order_acquire)) {
@@ -3035,6 +3056,7 @@ void Runtime::AsyncEvents::Clear() {
   value_.clear();
   handler_.clear();
   arg_.clear();
+  age_by_event_.clear();
 }
 
 hsa_status_t Runtime::SetCustomSystemEventHandler(hsa_amd_system_event_callback_t callback,
