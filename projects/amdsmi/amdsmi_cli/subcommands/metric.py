@@ -708,17 +708,13 @@ class MetricCommands:
                         # Populate GFX clocks from partition metrics
                         current_gfx_clocks = gpu_partition_metrics.get("current_gfxclks", "N/A")
                         if current_gfx_clocks != "N/A" and isinstance(current_gfx_clocks, list):
-                            for xcp_idx, xcp_gfx_clks in enumerate(current_gfx_clocks):
-                                if xcp_gfx_clks != "N/A" and isinstance(xcp_gfx_clks, list):
-                                    for engine_idx, clk in enumerate(xcp_gfx_clks):
-                                        if clk != "N/A":
-                                            gfx_index = (
-                                                f"gfx_{xcp_idx * len(xcp_gfx_clks) + engine_idx}"
-                                            )
-                                            if gfx_index in clocks:
-                                                clocks[gfx_index]["clk"] = self.helpers.unit_format(
-                                                    self.logger, clk, clock_unit
-                                                )
+                            for clk_idx, clk in enumerate(current_gfx_clocks):
+                                if clk != "N/A":
+                                    gfx_index = f"gfx_{clk_idx}"
+                                    if gfx_index in clocks:
+                                        clocks[gfx_index]["clk"] = self.helpers.unit_format(
+                                            self.logger, clk, clock_unit
+                                        )
 
                         # GFX clock lock status from partition metrics
                         gfxclk_lock_status = gpu_partition_metrics.get("gfxclk_lock_status", 0)

@@ -14,7 +14,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - When `--partition` is set with `--temperature`: adds MID and per-XCP/XCD temperatures.
   - When `--partition` is set with `--clock`: sources GFX/VCLK/DCLK/SOCCLK from partition metrics and adds per-AID and per-XCP clock entries with their limits.
   - When `--partition` is set with `--usage`: reports per-XCP GFX/JPEG/VCN activity.
-  - Only available on MI300 or newer ASICs.
 
 - **Added `--folder` support to `amd-smi ras --afid`**.
   - `amd-smi ras --afid --folder <DIR>` decodes every `*.cper` in a directory and prints a `file_name | list of afids` table (or a JSON array under `--json`).
