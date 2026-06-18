@@ -1,211 +1,100 @@
-
 .. meta::
-   :description: Installation instructions for hipFile, including prerequisites, package installation, and building from source.
+   :description: Install hipFile
    :keywords: hipFile, install, ROCm, build, CMake, GPU IO, AMD, direct storage
 
+.. _hipfile-installation:
 
-
-***************
+****************
 Install hipFile
-***************
+****************
 
 Before you begin, verify that your system is supported. For more information,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
-Prerequisites
-=============
+For source builds, CMake options, and sparse-checkout layout from ``rocm-systems``,
+see :doc:`./build-from-source`. For the Python bindings after the C library is on
+the machine, see :doc:`./python-bindings`.
 
-hipFile requires the following software to build and run:
+.. _hipfile-install-rocm:
 
-- ``ROCm`` with ``hsa-runtime64`` and HIP runtime
-- ``CMake`` 3.21 or later
-- ``C++17`` compiler (Clang or GCC)
-- ``libmount`` (from ``util-linux``)
-- Linux kernel with P2PDMA support
-
-For Python bindings:
-
-* Python 3.12 or later
-* Cython
-
-
-Install the ROCm core SDK
+Install the ROCm Core SDK
 =========================
 
-hipFile is included with the AMD ROCm Core SDK on Linux. For the most complete
-installation, use the ``amdrocm-core-sdk`` meta package.
+hipFile ships with the ROCm Core SDK on Linux. For the broadest set of
+components in one step, install the ``amdrocm-core-sdk`` meta package.
 
 For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
-selector panel on that page to view instructions appropriate for your system
-environment.
+selector panel on that page to match your distribution and hardware.
 
-Install on Linux
-================
+.. _hipfile-install-linux:
 
-.. note::
+Install hipFile on Linux
+========================
 
-   The exact ``amdrocm-*`` group package name for hipFile could not be
-   determined from the available packaging files. Verify the correct
-   package name with the latest ROCm release documentation before
-   installing.
+If you want hipFile as a smaller ``amdrocm-*`` group instead of installing the full
+``amdrocm-core-sdk`` stack, install the group that carries the hipFile runtime and
+headers for your ROCm release. Package names follow this pattern:
 
-If you want to install hipFile as part of a library group (a subset of the
-ROCm Core SDK) without additional ROCm libraries and tools, use the
-appropriate ``amdrocm-*`` meta package.
+.. code-block:: shell-session
 
-1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
-   install dependencies and configure GPU access permissions.
+   amdrocm-<group><-dev/-devel><rocm_version><-llvm_target>
 
-2. Install the package that matches your desired ROCm version, development
-   package needs, and AMD GPU architecture. Package names use the following
-   format:
+Where:
 
-   .. code-block:: shell-session
+* ``<-dev/-devel>`` selects library files and headers. Omit the suffix for
+  runtime-only packages.
 
-      amdrocm-<group><-dev/-devel><rocm_version><-llvm_target>
+  * ``-dev`` applies on Debian-based distributions, including Ubuntu.
 
-   Where:
+  * ``-devel`` applies on RPM-based distributions, including RHEL and SLES.
 
-   * ``<-dev/-devel>`` specifies whether to install library files and headers.
-     Omit this suffix to install only runtime packages.
+* ``<rocm_version>`` pins the ROCm Core SDK version. Omit it to track the latest
+  release your repository publishes.
 
-     * ``-dev`` is used on Debian-based distributions, including Ubuntu.
-     * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
+* ``<-llvm_target>`` starting with ``gfx`` limits the install to one AMD GPU
+  architecture. Omit it to pull every supported architecture at higher disk
+  cost.
 
-   * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
-     suffix to install the latest available version.
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` so
+   dependencies and GPU access permissions are in place.
 
-   * ``<-llvm_target>`` (starting with ``gfx``) is used if you are installing
-     for a single AMD GPU architecture. Omit this to install for all
-     architectures at the cost of disk space.
+2. Install the ``amdrocm-*`` group that matches your ROCm version, development
+   package needs, and GPU architecture. The exact ``<group>`` string for hipFile
+   can change between ROCm releases. Confirm the name in the release notes for
+   your target version before you run the package manager.
 
-Building from source
-====================
+3. Run the install command for your distribution. Replace ``<group>`` with the
+   value from step 2.
 
-Source download
----------------
+   .. tab-set::
 
-hipFile lives in the ``rocm-systems`` super-repository. Use a sparse checkout
-to fetch only the hipFile project:
+      .. tab-item:: Debian-based distros
 
-.. code:: shell
+         .. code:: shell
 
-   git clone --filter=blob:none --sparse \
-       https://github.com/ROCm/rocm-systems.git
-   cd rocm-systems
-   git sparse-checkout set projects/hipfile
+            sudo apt update
+            sudo apt install amdrocm-<group>-dev
 
-Library dependencies
---------------------
+      .. tab-item:: RHEL-based distros
 
-The CMake configuration step automatically locates the required packages:
+         .. code:: shell
 
-* ``hsa-runtime64`` — found via CMake ``find_package`` in CONFIG mode
-* ``hip`` — found via CMake ``find_package`` in CONFIG mode
+            sudo dnf install amdrocm-<group>-devel
 
-On NVIDIA platforms, the following are also required:
+      .. tab-item:: SLES
 
-* ``CUDAToolkit`` — found via CMake ``find_package``
-* ``cuFile`` — the ``cufile`` shared library, located in the CUDA toolkit
-  library directory
+         .. code:: shell
 
-Build commands
---------------
+            sudo zypper install amdrocm-<group>-devel
 
-Configure, build, and install with the standard CMake workflow:
+.. _hipfile-install-nightly:
 
-.. code:: shell
+Install a nightly build
+=======================
 
-   cmake -B build \
-       -DCMAKE_HIP_PLATFORM=amd \
-       -DBUILD_SHARED_LIBS=ON \
-       ..
-   cmake --build build -j
-   sudo cmake --install build
+The `TheRock <https://github.com/ROCm/TheRock>`__ build system publishes nightly
+builds for the ROCm Core SDK and its components. See `Nightly release status
+<https://github.com/ROCm/TheRock#nightly-release-status>`__ for download links and
+support notes.
 
-By default, the install prefix is set to the value of ``ROCM_PATH``. If
-``ROCM_PATH`` is not set, it defaults to ``/opt/rocm``. You can override
-the install location with ``-DCMAKE_INSTALL_PREFIX=<path>``.
-
-CMake options
--------------
-
-The following table lists key CMake options recognized by the hipFile build
-system. All options shown here appear in the top-level ``CMakeLists.txt``.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 10 60
-
-   * - Option
-     - Default
-     - Description
-   * - ``BUILD_SHARED_LIBS``
-     - ``ON``
-     - Build shared libraries instead of static libraries.
-   * - ``AIS_CXX_STANDARD``
-     - ``17``
-     - C++ standard to build with. Accepted values: ``17``, ``20``.
-   * - ``CMAKE_HIP_PLATFORM``
-     - ``amd``
-     - Target HIP platform. Accepted values: ``amd``, ``nvidia``.
-   * - ``ROCM_PATH``
-     - ``/opt/rocm``
-     - Path to the ROCm installation. Also used as the default install prefix.
-   * - ``ROCM_VERSION``
-     - Auto-detected
-     - ROCm version to build against. Read from ``$ROCM_PATH/.info/version``
-       if not specified.
-   * - ``AIS_INSTALL_EXAMPLES``
-     - ``ON``
-     - Build and install example programs (such as ``aiscp``).
-   * - ``AIS_INSTALL_TOOLS``
-     - ``ON``
-     - Build and install tool programs (such as ``ais-stats``). AMD platform
-       only.
-   * - ``AIS_BUILD_DOCS``
-     - See ``AISDocumentation`` module
-     - Generate API documentation with Doxygen.
-   * - ``AIS_USE_CODE_COVERAGE``
-     - ``OFF``
-     - Build with LLVM code-coverage instrumentation.
-   * - ``BUILD_TESTING``
-     - ``ON``
-     - Build the test suite (uses CTest).
-
-NVIDIA platform build
-^^^^^^^^^^^^^^^^^^^^^
-
-To build for an NVIDIA platform, set ``CMAKE_HIP_PLATFORM`` to ``nvidia``.
-The build requires the CUDAToolkit and the cuFile library:
-
-.. code-block:: shell
-
-   cmake -B build \
-       -DCMAKE_HIP_PLATFORM=nvidia \
-       ..
-   cmake --build build -j
-
-Python bindings
----------------
-
-hipFile provides Python bindings built with Cython. The bindings have their
-own CMake project under ``python/`` and a ``pyproject.toml`` for
-Python-ecosystem tooling.
-
-To build the Python bindings with CMake:
-
-.. code-block:: shell
-
-   cmake -B build-python python/
-   cmake --build build-python
-
-For details on using the Python API, see :doc:`/how-to/use-python-api` and
-:doc:`/reference/api-python`.
-
-Post-install configuration
-==========================
-
-hipFile uses environment variables to control runtime behavior such as IO
-backend selection and statistics collection. For a full list, see
-:doc:`/reference/hipFile-environment-variables`.
+Some hipFile preview packages also appear on the `ROCm hipFile releases page <https://github.com/ROCm/hipFile/releases>`__. Treat those artifacts as previews unless your release notes state otherwise. Match the ``.deb`` or RPM file names to your distribution and ROCm version before you install them.

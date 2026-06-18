@@ -26,8 +26,6 @@ subtrees:
         title: Asynchronous multistream I/O
       - file: tutorials/get-version
         title: Query the hipFile version
-      - file: tutorials/python-file-copy
-        title: Python file copy
       - file: tutorials/python-gpu-io
         title: Python GPU I/O
   - caption: Reference

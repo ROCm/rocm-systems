@@ -2,146 +2,121 @@
   :description: Step-by-step instructions for building hipFile from source using CMake on AMD ROCm platforms.
   :keywords: hipFile, build from source, CMake, ROCm, install, direct-to-GPU I/O, AMD
 
-*************************
-Build hipFile from source
-*************************
+***************************************
+Build and install hipFile from source
+***************************************
+
+To build hipFile as part of the ROCm Core SDK, see `TheRock build instructions <https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the supported path for full-stack ROCm source builds.
+
+Alternatively, you can build hipFile standalone from ``rocm-systems`` using the
+steps below. For ROCm meta packages instead of compiling, see :doc:`./install`.
 
 Prerequisites
-*************
+=============
 
-Before building hipFile, make sure you have the following software installed:
+hipFile targets Linux with ROCm HIP. For supported GPUs and stack components,
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
-- ``ROCm`` (provides ``hsa-runtime64`` and HIP). See :doc:`Install AMD ROCm <rocm:install/rocm>` for current requirements.
-- ``CMake`` >= 3.21
-- C++17 compiler (Clang or GCC)
-- ``libmount`` (from ``util-linux``)
+- CMake 3.21 or later
+- A C++ compiler that matches the ``AIS_CXX_STANDARD`` value you select. The
+  default is C++20.
+- HIP and HSA packages from ROCm so CMake can locate ``hip`` and ``hsa-runtime64``
+- ``libmount`` from ``util-linux`` for mount metadata parsing
+- A Linux kernel that exposes the P2PDMA paths hipFile expects for peer
+  transfers on AMD builds
 
-Install the ROCm Core SDK
-*************************
 
-hipFile is included with the ROCm Core SDK. For the most complete installation, use the ``amdrocm-core-sdk`` meta package. Refer to :doc:`Install AMD ROCm <rocm:install/rocm>` for detailed installation instructions.
+Build and install
+=================
 
-Install on Linux
-****************
+1. hipFile lives under ``projects/hipfile`` in the `ROCm rocm-systems repository <https://github.com/ROCm/rocm-systems>`__. Clone with a sparse checkout so you only fetch that subtree.
 
-To install only the hipFile library group as a subset of the ROCm Core SDK, use the appropriate ``amdrocm-*`` meta package. The package name follows this format:
+   .. code:: shell
 
-.. code-block:: text
+      git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+      cd rocm-systems
+      git sparse-checkout init --cone
+      git sparse-checkout set projects/hipfile
 
-   amdrocm-<group><-dev/-devel><rocm_version><-llvm_target>
+2. Check out the branch you intend to build, then enter the hipFile tree.
 
-Where:
+   .. code:: shell
 
-- ``-dev`` is used for Debian-based distributions
-- ``-devel`` is used for RPM-based distributions
-- ``<rocm_version>`` is an optional version pin
-- ``<-llvm_target>`` is an optional single GPU architecture specifier
+      git checkout develop
+      cd projects/hipfile
 
-.. note::
+3. Configure, compile, and install with CMake. The defaults wire ``CMAKE_INSTALL_PREFIX``
+   to ``ROCM_PATH`` so libraries and headers land next to your ROCm install.
 
-   Verify that the exact package name for hipFile against the latest ROCm release documentation, as the group name might vary between releases.
+   .. code:: shell
 
-.. tab-set::
+      cmake -B build -DCMAKE_HIP_PLATFORM=amd
+      cmake --build build -j
+      sudo cmake --install build
 
-   .. tab-item:: Debian-based
+   After installation, ``libhipfile.so`` and ``hipfile.h`` appear under the ``lib``
+   and ``include`` directories beneath ``CMAKE_INSTALL_PREFIX``, typically
+   ``/opt/rocm`` when you don't override ``ROCM_PATH``.
 
-      .. code:: shell
+4. Optional CTest pass from the build tree:
 
-         sudo apt-get update
-         sudo apt-get install amdrocm-<group>-dev
+   .. code:: shell
 
-   .. tab-item:: RHEL-based
+      cd build
+      ctest --output-on-failure
 
-      .. code:: shell
-
-         sudo dnf install amdrocm-<group>-devel
-
-   .. tab-item:: SLES
-
-      .. code:: shell
-
-         sudo zypper install amdrocm-<group>-devel
-
-Building from source
-********************
-
-Source download
----------------
-
-Clone the repository using a sparse checkout from the ROCm monorepo:
-
-.. code:: shell
-
-   git clone --filter=blob:none --sparse https://github.com/ROCm/rocm-systems.git
-   cd rocm-systems
-   git sparse-checkout set projects/hipfile
-
-Library dependencies
---------------------
-
-hipFile requires the following libraries during configuration and linking:
-
-- ``hsa-runtime64``: HSA runtime (found via CMake config)
-- ``hip``: HIP runtime (found via CMake config)
-- ``libmount``: mount information parsing (from ``util-linux``; located via ``find_library``)
-
-Build
-------------
-
-.. code:: shell
-
-   cd rocm-systems/projects/hipfile
-   cmake -B build \
-       -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-       -DCMAKE_HIP_PLATFORM=amd
-   cmake --build build
-   sudo cmake --install build
+   You can also run ``cmake --build . --target test`` from ``build`` if you
+   prefer Make-driven test targets.
 
 CMake options
--------------
+=============
 
-The following table lists the CMake options available when configuring hipFile.
+The table lists the most common CMake cache entries for hipFile. Other flags
+exist for sanitizers, clang-tidy, and documentation generation. Inspect
+``CMakeCache.txt`` after the first configure pass for the full set.
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 15 55
+   :widths: 30 18 52
 
    * - Option
      - Default
      - Description
    * - ``CMAKE_HIP_PLATFORM``
      - ``amd``
-     - Target HIP platform. Set to ``amd``.
+     - HIP platform selector. Use ``amd``.
    * - ``ROCM_PATH``
-     - ``/opt/rocm``
-     - Path to the ROCm installation. Can also be set via the ``ROCM_PATH`` environment variable.
+     - ``/opt/rocm`` or derived from ``ROCM_VERSION``
+     - ROCm root used for ``CMAKE_PREFIX_PATH`` and the default install prefix.
    * - ``ROCM_VERSION``
-     - Auto-detected
-     - ROCm version string. If not set, it is read from the version file at ``ROCM_PATH``.
+     - Read from ``${ROCM_PATH}/.info/version`` when unset
+     - ROCm version string for path logic and compatibility checks.
    * - ``CMAKE_INSTALL_PREFIX``
-     - ``${ROCM_PATH}``
-     - Installation directory for hipFile. Defaults to the ROCm path.
+     - ``${ROCM_PATH}`` when left at the CMake default
+     - Install root for libraries, headers, and tools.
    * - ``BUILD_SHARED_LIBS``
      - ``ON``
-     - Build shared libraries when ``ON``, or static libraries when ``OFF``.
+     - Builds shared libraries when ``ON`` and static libraries when ``OFF``.
    * - ``AIS_CXX_STANDARD``
-     - ``17``
-     - C++ standard to build with. Allowed values are ``17`` and ``20``.
+     - ``20``
+     - C++ dialect. Allowed values are ``20``, ``23``, and ``26``.
    * - ``AIS_INSTALL_EXAMPLES``
      - ``ON``
-     - Install example programs (such as ``aiscp`` and API examples).
+     - Installs sample binaries such as ``aiscp`` when enabled.
    * - ``AIS_INSTALL_TOOLS``
      - ``ON``
-     - When ``ON``, builds ``ais-stats`` on AMD platform builds. ``ais-check`` is always installed; ``ais-stats`` is built but not installed by default.
+     - Installs host tools such as ``ais-stats`` when enabled on AMD builds.
    * - ``AIS_BUILD_DOCS``
      - ``OFF``
-     - Build documentation.
-   * - ``BUILD_TESTING``
-     - ``ON``
-     - Enable building of tests via CTest.
+     - Enables the ``doc`` target when ``ON``. Requires Doxygen in your environment.
    * - ``AIS_USE_CODE_COVERAGE``
      - ``OFF``
-     - Build with LLVM code coverage instrumentation flags.
+     - Adds LLVM coverage instrumentation for Clang builds.
+   * - ``BUILD_TESTING``
+     - ``ON`` unless you pass ``-DBUILD_TESTING=OFF``
+     - Controls whether CTest registers the hipFile unit and system tests.
    * - ``CMAKE_BUILD_TYPE``
      - ``RelWithDebInfo``
-     - Build type. Valid values are ``Debug``, ``Release``, ``RelWithDebInfo``, ``MinSizeRel``, and ``None``.
+     - CMake build flavor. Other common values are ``Debug``, ``Release``,
+       ``MinSizeRel``, and ``None``.

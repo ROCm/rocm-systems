@@ -12,7 +12,7 @@ concurrently.
 
 .. note::
 
-  Asynchronous I/O does not not currently support the fastpath backend and will perform fallback I/O using a CPU bounce buffer.
+  Asynchronous I/O does not currently support the fastpath backend and will perform fallback I/O using a CPU bounce buffer.
 
 When to use this pattern
 ************************
