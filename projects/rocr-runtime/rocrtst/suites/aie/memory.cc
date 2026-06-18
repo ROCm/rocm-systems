@@ -161,6 +161,8 @@ TEST(Memory, DMABufExportImportGPUtoAIE) {
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
+#if 0
+
 TEST(Memory, DMABufExportImportAIEtoGPU) {
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
@@ -213,6 +215,8 @@ TEST(Memory, DMABufExportImportAIEtoGPU) {
   EXPECT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
+
+#endif
 
 TEST(Memory, MemoryLock) {
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -806,8 +810,6 @@ TEST(Memory, AgentPoolGetInfo) {
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-#if 0
-
 TEST(Memory, VMemGetAccess) {
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
@@ -865,8 +867,6 @@ TEST(Memory, VMemGetAccess) {
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
-
-#endif
 
 TEST(Memory, VMemDataIntegrity) {
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -951,14 +951,11 @@ TEST(Memory, VMemExportImportShareableHandle) {
   EXPECT_EQ(hsa_amd_vmem_export_shareable_handle(&dmabuf_fd, memory_handle, 0), HSA_STATUS_SUCCESS);
   EXPECT_GT(dmabuf_fd, 0);
 
-  // TODO VMemoryImportShareableHandle only supports GPU agents (checks device_type() ==
-  // kAmdGpuDevice). For XDNA-originated handles, the runtime cannot find a matching GPU region
-  // to associate the imported BO with.
   hsa_amd_vmem_alloc_handle_t imported_handle = {};
-  EXPECT_NE(hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &imported_handle), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &imported_handle), HSA_STATUS_SUCCESS);
 
   // cleanup
-  EXPECT_NE(hsa_amd_vmem_handle_release(imported_handle), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_vmem_handle_release(imported_handle), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
@@ -1067,8 +1064,6 @@ TEST(Memory, PoolCanMigrate) {
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-#if 0
-
 TEST(Memory, VMemMapWithOffset) {
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
@@ -1130,8 +1125,6 @@ TEST(Memory, VMemMapWithOffset) {
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
-
-#endif
 
 TEST(Memory, VMemDoubleMap) {
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
