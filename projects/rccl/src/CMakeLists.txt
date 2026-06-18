@@ -90,22 +90,31 @@ add_subdirectory(transport)
 add_subdirectory(misc)
 add_subdirectory(register)
 add_subdirectory(graph)
+
+if (NCCL_OS_LINUX)
 add_subdirectory(plugin)
+add_subdirectory(ras)
+endif()
+
 add_subdirectory(device)
 add_subdirectory(nccl_device)
-add_subdirectory(ras)
 add_subdirectory(scheduler)
 add_subdirectory(os)
-add_subdirectory(gin)
 add_subdirectory(rma)
 # >>> RCCL-DELTA: DDA headers consolidated under algorithms/dda/
 add_subdirectory(algorithms/dda)
 # src/include is an RCCL-only header tree (NCCL never lists headers in CMake). It
 # sets INCLUDE_HEADERS so the hipify loop copies/converts every header into HIPIFY_DIR.
 # (net_ib_cast is wired from within src/transport/CMakeLists.txt, mirroring how NCCL nests net_ib.)
+add_subdirectory(param)
 add_subdirectory(devcomm)
 add_subdirectory(include)
 # <<< RCCL-DELTA
+
+# GIN is Linux-only (requires InfiniBand verbs)
+if(NCCL_OS_LINUX)
+    add_subdirectory(gin)
+endif()
 
 #[[ >>> RCCL-DELTA
 if(NCCL_OS_LINUX)
@@ -146,14 +155,19 @@ list(APPEND LIBSRCFILES
     ${SYM_SOURCES}
     ${SCHEDULER_SOURCES}
     ${OS_SOURCES}
-    ${GIN_SOURCES}
     ${DOCA_SOURCES}
     ${RMA_SOURCES}
     ${DDA_HEADERS} # RCCL-DELTA
+    ${PARAM_SOURCES}
     ${INCLUDE_HEADERS} # RCCL-DELTA
     ${NET_IB_CAST_SOURCES} # RCCL-DELTA
-    ${DEVCOMM_SOURCES} # RCCL-DELTA
+    ${DEVCOMM_SOURCES}
 )
+
+# Add GIN sources only on Linux
+if(NCCL_OS_LINUX)
+    list(APPEND LIBSRCFILES ${GIN_SOURCES})
+endif()
 
 # >>> RCCL-DELTA
 ########################## Hipify source files #################################
@@ -224,11 +238,14 @@ endforeach()
 add_library(rccl SHARED)
 
 target_sources(rccl PRIVATE ${HIP_SOURCES})
-# target_sources(rccl PRIVATE $<TARGET_OBJECTS:nccl_device>) # RCCL-DELTA: Handled by device subdirectory
+if(NCCL_OS_WINDOWS)
+    # target_link_libraries(nccl PRIVATE nccl_device) # RCCL-DELTA: Handled by device subdirectory
+else()
+    # target_sources(nccl PRIVATE $<TARGET_OBJECTS:nccl_device>) # RCCL-DELTA: Handled by device subdirectory
+endif()
 
-# Include directories
-target_include_directories(rccl
-  PRIVATE
+# Include directories; add DOCA only on non-Windows (skip for Windows platform)
+set(RCCL_PRIVATE_INCLUDES
     ${PROJECT_BINARY_DIR}/include        # for generated rccl.h header
     ${HIPIFY_SRC}                        # for hipified headers
     ${HIPIFY_SRC}/device
@@ -248,24 +265,33 @@ target_include_directories(rccl
     ${SMI_INCLUDE_DIR}
     ${ROCMCORE_PATH}/include
 )
+#[[ >>> RCCL-DELTA
+if(NOT NCCL_OS_WINDOWS AND DOCA_HOME)
+    list(APPEND NCCL_PRIVATE_INCLUDES ${DOCA_HOME}/include)
+endif()
+]] # <<< RCCL-DELTA
 if(DEMANGLE_DIR)
-  target_include_directories(rccl PRIVATE ${DEMANGLE_DIR})
+    list(APPEND RCCL_PRIVATE_INCLUDES ${DEMANGLE_DIR})
 endif()
 if(ROCTX_ENABLE)
-  target_include_directories(rccl PRIVATE ${ROCTRACER_INCLUDE_DIR})
+    list(APPEND RCCL_PRIVATE_INCLUDES ${ROCTRACER_INCLUDE_DIR})
 endif()
+target_include_directories(rccl
+#[[ >>> RCCL-DELTA
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+]] # <<< RCCL-DELTA
+  PRIVATE
+    ${RCCL_PRIVATE_INCLUDES}
+)
 
 #[[ >>> RCCL-DELTA
 add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/include/nccl.h
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/include
-    COMMAND sed -e "s/\\\$$\\{nccl:Major\\}/${NCCL_MAJOR}/g"
-                -e "s/\\\$$\\{nccl:Minor\\}/${NCCL_MINOR}/g"
-                -e "s/\\\$$\\{nccl:Patch\\}/${NCCL_PATCH}/g"
-                -e "s/\\\$$\\{nccl:Suffix\\}/${NCCL_SUFFIX}/g"
-                -e "s/\\\$$\\{nccl:Version\\}/${NCCL_VERSION_CODE}/g"
-                ${CMAKE_CURRENT_SOURCE_DIR}/nccl.h.in > ${CMAKE_BINARY_DIR}/include/nccl.h
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/nccl.h.in
+    COMMAND ${CMAKE_COMMAND} -DNCCL_MAJOR=${NCCL_MAJOR} -DNCCL_MINOR=${NCCL_MINOR} -DNCCL_PATCH=${NCCL_PATCH} -DNCCL_SUFFIX=${NCCL_SUFFIX} -DNCCL_VERSION_CODE=${NCCL_VERSION_CODE} -DINPUT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/nccl.h.in -DOUTPUT_FILE=${CMAKE_BINARY_DIR}/include/nccl.h -P ${CMAKE_CURRENT_SOURCE_DIR}/generate_header.cmake
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/nccl.h.in ${CMAKE_CURRENT_SOURCE_DIR}/generate_header.cmake
 )
 ]]
 file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include")
@@ -411,12 +437,16 @@ add_dependencies(rccl copy_nccl_device_headers) # net_ib_header_symlinks rma_hea
 
 # Set version and output name
 #[[ >>> RCCL-DELTA
+# On Windows, use nccl.dll/nccl.lib (no "lib" prefix) so the import library matches what linkers expect
+# On Linux, use libnccl.so (PREFIX "lib" for Unix convention)
 set_target_properties(nccl PROPERTIES
     VERSION ${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}
     SOVERSION ${NCCL_MAJOR}
     OUTPUT_NAME "nccl"
-    PREFIX "lib"
 )
+if(NCCL_OS_LINUX)
+    set_target_properties(nccl PROPERTIES PREFIX "lib")
+endif()
 ]]
 rocm_set_soversion(rccl "1.0")
 # <<< RCCL-DELTA
@@ -462,7 +492,7 @@ if(NCCL_GIT_COMMIT_HASH)
     target_compile_definitions(nccl PRIVATE NCCL_GIT_COMMIT_HASH="${NCCL_GIT_COMMIT_HASH}")
 endif()
 
-# Set CUDA specific flags
+# Set CUDA specific flags (separable compilation + device link for cross-TU device symbols).
 set_target_properties(nccl PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
@@ -883,6 +913,11 @@ target_link_options(nccl PRIVATE
 set_target_properties(nccl PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
+
+# On Windows, export all symbols to generate import library (nccl.lib) for DLL linking
+if(NCCL_OS_WINDOWS)
+    set_target_properties(nccl PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
 ]]
 ## Set RCCL link options
 ## Find out available memory
@@ -993,6 +1028,7 @@ set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 # <<< RCCL-DELTA
 
 ###################### Create a ras binary executable ############################
+if(NOT NCCL_OS_WINDOWS)
 set(RAS_BINSRCFILES "${HIPIFY_DIR}/src/ras/client.cc")
 
 add_executable(rcclras ${RAS_BINSRCFILES})
@@ -1027,11 +1063,45 @@ set_target_properties(ncclras PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 ]] # <<< RCCL-DELTA
+endif()
+
+###################### Create a param tool binary executable #####################
+#[[ >>> RCCL-DELTA
+if(NOT NCCL_OS_WINDOWS)
+add_executable(ncclparam param/ncclparam.cc)
+
+target_include_directories(ncclparam
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/plugin
+    ${CUDAToolkit_INCLUDE_DIRS}
+)
+
+add_dependencies(ncclparam nccl_header)
+
+target_link_libraries(ncclparam
+    PRIVATE
+    nccl
+    CUDA::cudart
+)
+
+set_target_properties(ncclparam PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+endif()
+]] # <<< RCCL-DELTA
 
 ###################### Create a static RCCL library ############################
 #[[ >>> RCCL-DELTA
 add_library(nccl_static STATIC ${LIBSRCFILES})
-target_sources(nccl_static PRIVATE $<TARGET_OBJECTS:nccl_device>)
+if(NCCL_OS_WINDOWS)
+    target_link_libraries(nccl_static PRIVATE nccl_device)
+else()
+    target_sources(nccl_static PRIVATE $<TARGET_OBJECTS:nccl_device>)
+endif()
 
 # Include directories
 target_include_directories(nccl_static
@@ -1069,7 +1139,7 @@ target_link_libraries(nccl_static
     ${EXTRA_LIBS}
 )
 
-# Set CUDA specific flags
+# Set CUDA specific flags (match nccl shared library for consistency).
 set_target_properties(nccl_static PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
@@ -1122,11 +1192,20 @@ install(TARGETS nccl nccl_static
   LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )
+# On Windows, nccl/nccl_static link to nccl_device (STATIC); export set must include it.
+if(NCCL_OS_WINDOWS)
+  install(TARGETS nccl_device
+    EXPORT NCCLTargets
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  )
+endif()
 
 # Install tools, but do not export them as linkable imported targets.
-install(TARGETS ncclras
+if(NOT NCCL_OS_WINDOWS)
+install(TARGETS ncclras ncclparam
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
+endif()
 
 # Install generated + copied public headers from the build tree.
 install(DIRECTORY "${CMAKE_BINARY_DIR}/include/"
