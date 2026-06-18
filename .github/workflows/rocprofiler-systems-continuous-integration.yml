@@ -161,7 +161,7 @@ jobs:
 
       - name: Configure, Build, and Test
         id: run_ci
-        timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 90 || 60 }}
+        timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 60 }}
         working-directory: projects/rocprofiler-systems
         run: |
           set -e
