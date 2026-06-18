@@ -25,9 +25,9 @@
 #include "library/pmc/collectors/cpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/procfs/provider.hpp"
 
-#include "backends/amd_smi/amdsmi_backend.hpp"
 #include "backends/amd_smi/backend.hpp"
-#include "backends/amd_smi/device_backend.hpp"
+#include "backends/amd_smi/device.hpp"
+#include "backends/amd_smi/wrapper.hpp"
 #include "core/agent.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
@@ -101,12 +101,12 @@ struct cpu_production_config
 };
 
 using provider_factory_t = device_providers::amd_smi::provider_factory<
-    backends::amd_smi::backend_factory<backends::amd_smi::amdsmi_backend>>;
+    backends::amd_smi::backend_factory<backends::amd_smi::wrapper>>;
 using provider_t = provider_factory_t::provider_t;
 
 using backend_session_t = provider_factory_t::provider_t::backend_t;
-using device_backend_t  = backends::amd_smi::device_backend<backend_session_t>;
-using gpu_device_t      = collectors::gpu::device<device_backend_t>;
+using amd_smi_device_t  = backends::amd_smi::device<backend_session_t>;
+using gpu_device_t      = collectors::gpu::device<amd_smi_device_t>;
 using gpu_collector_t =
     collectors::gpu::collector<provider_t, gpu_device_t, gpu_production_config>;
 
@@ -118,7 +118,7 @@ using gpu_perf_counter_collector_t =
 #endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC)
-using nic_device_t = collectors::nic::device<device_backend_t>;
+using nic_device_t = collectors::nic::device<amd_smi_device_t>;
 using nic_collector_t =
     collectors::nic::collector<provider_t, nic_device_t, nic_production_config>;
 #endif

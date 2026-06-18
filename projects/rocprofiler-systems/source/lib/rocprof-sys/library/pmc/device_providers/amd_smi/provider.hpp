@@ -137,7 +137,7 @@ public:
      * @brief Get all GPU devices.
      *
      * Enumerates GPU handles via the shared session, then wraps each handle in
-     * a @c Device::backend_type (i.e. @c device_backend<backend_t>) constructed
+     * a @c Device::backend_type (i.e. @c device<backend_t>) constructed
      * with the session and the handle.
      *
      * @tparam Device  Concrete device type; exposes @c backend_type used to

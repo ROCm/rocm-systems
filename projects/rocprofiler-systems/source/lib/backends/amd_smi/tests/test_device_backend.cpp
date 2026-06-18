@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "backends/amd_smi/backend.hpp"
-#include "backends/amd_smi/device_backend.hpp"
+#include "backends/amd_smi/device.hpp"
 #include "mock_amdsmi_backend.hpp"
 
 #include <gmock/gmock.h>
@@ -29,7 +29,7 @@ namespace rocprofsys::backends::amd_smi
 using MockApi   = StrictMock<testing::gmock_backend_api>;
 using factory_t = backend_factory<testing::mock_backend>;
 using sut_t     = factory_t::backend_t;
-using DeviceSut = device_backend<sut_t>;
+using DeviceSut = device<sut_t>;
 
 constexpr testing::mock_status_t k_ok     = testing::mock_backend::STATUS_SUCCESS;
 constexpr testing::mock_status_t k_err    = 1;

@@ -16,14 +16,14 @@ namespace rocprofsys::backends::amd_smi
 {
 
 /**
- * @brief Concept that an AmdsmiBackend policy type must satisfy.
+ * @brief Concept that a wrapper policy type must satisfy.
  *
  * Checked at the point @c backend<T> or @c backend_factory<T> is instantiated,
  * so a mismatch produces a clear error at the template boundary rather than deep
  * inside the template body.
  */
 template <typename T>
-concept amdsmi_backend_policy =
+concept wrapper_policy =
     // ── Required type aliases ─────────────────────────────────────────────────
     requires {
         typename T::status_t;
@@ -92,8 +92,8 @@ concept amdsmi_backend_policy =
  * @brief Session-level smart wrapper around an AMD SMI backend policy.
  *
  * Responsibilities:
- *  - Re-export all type aliases from @p AmdsmiBackend so upper layers can
- *    reference @c Backend::processor_handle etc. without naming amdsmi_backend.
+ *  - Re-export all type aliases from @p Wrapper so upper layers can
+ *    reference @c Backend::processor_handle etc. without naming wrapper.
  *  - Manage global lifecycle (initialize / shutdown / version).
  *  - Enumerate processor handles.
  *  - Forward per-device raw calls (taking an explicit handle) so
@@ -101,39 +101,39 @@ concept amdsmi_backend_policy =
  *
  * Error checking and type conversion live in backend_proxy, not here.
  *
- * @tparam AmdsmiBackend  Raw AMD SMI C API policy (e.g. amdsmi_backend).
+ * @tparam Wrapper  Raw AMD SMI C API policy (e.g. wrapper).
  */
-template <amdsmi_backend_policy AmdsmiBackend>
+template <wrapper_policy Wrapper>
 class backend
 {
 public:
-    // ── Type aliases — forwarded from AmdsmiBackend ───────────────────────────
-    using status_t         = typename AmdsmiBackend::status_t;
-    using version_t        = typename AmdsmiBackend::version_t;
-    using socket_handle    = typename AmdsmiBackend::socket_handle;
-    using processor_handle = typename AmdsmiBackend::processor_handle;
-    using gpu_metrics_t    = typename AmdsmiBackend::gpu_metrics_t;
-    using asic_info_t      = typename AmdsmiBackend::asic_info_t;
-    using memory_type_t    = typename AmdsmiBackend::memory_type_t;
+    // ── Type aliases — forwarded from Wrapper ─────────────────────────────────
+    using status_t         = typename Wrapper::status_t;
+    using version_t        = typename Wrapper::version_t;
+    using socket_handle    = typename Wrapper::socket_handle;
+    using processor_handle = typename Wrapper::processor_handle;
+    using gpu_metrics_t    = typename Wrapper::gpu_metrics_t;
+    using asic_info_t      = typename Wrapper::asic_info_t;
+    using memory_type_t    = typename Wrapper::memory_type_t;
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    using nic_asic_info_t         = typename AmdsmiBackend::nic_asic_info_t;
-    using nic_port_info_t         = typename AmdsmiBackend::nic_port_info_t;
-    using nic_rdma_devices_info_t = typename AmdsmiBackend::nic_rdma_devices_info_t;
-    using nic_stat_t              = typename AmdsmiBackend::nic_stat_t;
+    using nic_asic_info_t         = typename Wrapper::nic_asic_info_t;
+    using nic_port_info_t         = typename Wrapper::nic_port_info_t;
+    using nic_rdma_devices_info_t = typename Wrapper::nic_rdma_devices_info_t;
+    using nic_stat_t              = typename Wrapper::nic_stat_t;
 #endif
 
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-    using proc_info_t = typename AmdsmiBackend::proc_info_t;
+    using proc_info_t = typename Wrapper::proc_info_t;
 #endif
 
     // ── Status constants — forwarded ──────────────────────────────────────────
-    static constexpr status_t      STATUS_SUCCESS = AmdsmiBackend::STATUS_SUCCESS;
-    static constexpr memory_type_t MEM_TYPE_VRAM  = AmdsmiBackend::MEM_TYPE_VRAM;
+    static constexpr status_t      STATUS_SUCCESS = Wrapper::STATUS_SUCCESS;
+    static constexpr memory_type_t MEM_TYPE_VRAM  = Wrapper::MEM_TYPE_VRAM;
 
     [[nodiscard]] static std::string status_to_string(status_t status)
     {
-        return AmdsmiBackend::status_to_string(status);
+        return Wrapper::status_to_string(status);
     }
 
     // ── Constructor ───────────────────────────────────────────────────────────
@@ -169,7 +169,7 @@ public:
         return enumerate_handles(
             [this](socket_handle socket, std::uint32_t* count, processor_handle* procs) {
                 return m_amdsmi.get_processor_handles_by_type(
-                    socket, AmdsmiBackend::NIC_PROCESSOR_TYPE, procs, count);
+                    socket, Wrapper::NIC_PROCESSOR_TYPE, procs, count);
             },
             "amdsmi_get_processor_handles_by_type");
     }
@@ -238,7 +238,7 @@ public:
 #endif
 
 private:
-    AmdsmiBackend m_amdsmi{};
+    Wrapper m_amdsmi{};
 
     static void check_status(status_t status, const char* func)
     {
@@ -280,12 +280,12 @@ private:
 };
 
 /**
- * @brief Factory for creating backend<AmdsmiBackend> session instances.
+ * @brief Factory for creating backend<Wrapper> session instances.
  */
-template <amdsmi_backend_policy AmdsmiBackend>
+template <wrapper_policy Wrapper>
 struct backend_factory
 {
-    using backend_t = backend<AmdsmiBackend>;
+    using backend_t = backend<Wrapper>;
 
     static std::shared_ptr<backend_t> create_backend()
     {

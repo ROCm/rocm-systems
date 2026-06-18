@@ -18,13 +18,13 @@ namespace rocprofsys::backends::amd_smi
  *
  * Every public method maps directly to one amdsmi_* call and returns its raw
  * status code.  No error checking, no exceptions — this struct is a pure
- * dependency-injection seam that lets upper layers (backend<AmdsmiBackend>)
+ * dependency-injection seam that lets upper layers (backend<wrapper>)
  * swap in a mock for testing without touching AMD SMI headers.
  *
- * Type aliases hide amdsmi_* names from callers: use AmdsmiBackend::processor_handle,
- * AmdsmiBackend::status_t, AmdsmiBackend::STATUS_SUCCESS, etc.
+ * Type aliases hide amdsmi_* names from callers: use wrapper::processor_handle,
+ * wrapper::status_t, wrapper::STATUS_SUCCESS, etc.
  */
-struct amdsmi_backend
+struct wrapper
 {
     // ── Type aliases ──────────────────────────────────────────────────────────
     using status_t         = amdsmi_status_t;

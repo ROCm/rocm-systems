@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "backends/amd_smi/backend.hpp"
-#include "backends/amd_smi/device_backend.hpp"
+#include "backends/amd_smi/device.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
 #include "mock_amdsmi_backend.hpp"
 
@@ -33,7 +33,7 @@ namespace bk_test = ::rocprofsys::backends::amd_smi::testing;
 using MockApi        = StrictMock<bk_test::gmock_backend_api>;
 using factory_t      = bknd::backend_factory<bk_test::mock_backend>;
 using backend_t      = factory_t::backend_t;
-using device_proxy_t = bknd::device_backend<backend_t>;
+using device_proxy_t = bknd::device<backend_t>;
 using provider_t     = provider<factory_t>;
 
 constexpr bk_test::mock_status_t k_ok  = bk_test::mock_backend::STATUS_SUCCESS;
@@ -41,7 +41,7 @@ constexpr bk_test::mock_status_t k_err = 1;
 
 // ── Stub device types ─────────────────────────────────────────────────────────
 // provider::get_{gpu,nic}_devices<Device>() constructs:
-//   Device::backend_type(shared_ptr<backend_t>, handle)   ← device_backend ctor
+//   Device::backend_type(shared_ptr<backend_t>, handle)   ← device ctor
 //   Device(shared_ptr<Device::backend_type>, index)
 // The stub captures both to let tests inspect what was created.
 

@@ -26,9 +26,9 @@ using gpu::metrics;
 using gpu::populate_if_supported;
 
 /**
- * @brief Concept that a Backend session type passed to device_backend must satisfy.
+ * @brief Concept that a Backend session type passed to device must satisfy.
  *
- * Enumerates every expression device_backend<T> evaluates on its session pointer,
+ * Enumerates every expression device<T> evaluates on its session pointer,
  * so a missing method is caught at the template boundary rather than deep inside
  * the template body.
  */
@@ -88,13 +88,13 @@ concept backend_session_contract =
  * integration point (sampler.cpp).
  *
  * @tparam Backend  Session type satisfying @c backend_session_contract
- *                  (e.g. @c backends::amd_smi::backend<amdsmi_backend>).
+ *                  (e.g. @c backends::amd_smi::backend<wrapper>).
  */
 template <backend_session_contract Backend>
-class device_backend
+class device
 {
 public:
-    device_backend(std::shared_ptr<Backend> session, Backend::processor_handle handle)
+    device(std::shared_ptr<Backend> session, Backend::processor_handle handle)
     : m_session{ std::move(session) }
     , m_handle{ handle }
     {}
