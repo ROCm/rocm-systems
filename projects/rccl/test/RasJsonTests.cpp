@@ -23,8 +23,9 @@
 namespace RcclUnitTesting {
 
 // Picks a likely-free TCP port by binding to port 0 and reading the kernel
-// assignment, then closes the probe socket. The RAS listener uses SO_REUSEADDR,
-// so the brief window before the chosen port is reused is acceptable.
+// assignment, then closes the probe socket. Caller must use SO_REUSEADDR (the
+// RAS listener does) or accept a small race window before the chosen port is
+// reused by something else on the host.
 static int pickFreePort() {
   int s = ::socket(AF_INET, SOCK_STREAM, 0);
   if (s < 0) return 0;
@@ -46,35 +47,20 @@ static int pickFreePort() {
   return port;
 }
 
-// Reads a single '\n'-terminated line from the socket. Byte-at-a-time is fine
-// here: the handshake/ack replies are tiny and sent one per command.
-static bool recvLine(int sock, std::string& line) {
-  line.clear();
-  char c;
-  for (;;) {
-    ssize_t n = ::recv(sock, &c, 1, 0);
-    if (n <= 0) return false;
-    line.push_back(c);
-    if (c == '\n') return true;
-  }
-}
-
-// Connects to the local RAS server on the given port, performs the client
-// handshake, switches output format, runs one STATUS query, and returns the
-// full response body (empty string on connection/protocol failure).
-//
-// This speaks the RAS wire protocol directly (the same exchange rcclras does:
-// CLIENT PROTOCOL -> SET FORMAT -> STATUS), so the test has no dependency on
-// the external rcclras client binary being staged next to the unit tests.
-static std::string queryRas(const std::string& portStr, const std::string& format) {
+// Connects to the local RAS server and runs one STATUS query in the requested
+// format ("text" or "json"). Returns the entire response body, or an empty
+// string on connection/protocol failure. Uses getaddrinfo so it works whether
+// the RAS listener bound to IPv4 (127.0.0.1) or IPv6 (::1).
+static std::string queryRas(const std::string& format, const std::string& portStrIn) {
   int sock = -1;
   addrinfo hints{};
-  hints.ai_family = AF_UNSPEC;
+  hints.ai_family   = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
+  const char* portStr = portStrIn.c_str();
 
-  for (int attempt = 0; attempt < 50 && sock < 0; ++attempt) {
+  for (int attempt = 0; attempt < 20 && sock < 0; ++attempt) {
     addrinfo* results = nullptr;
-    if (::getaddrinfo("localhost", portStr.c_str(), &hints, &results) == 0) {
+    if (::getaddrinfo("localhost", portStr, &hints, &results) == 0) {
       for (addrinfo* ai = results; ai != nullptr; ai = ai->ai_next) {
         int s = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (s < 0) continue;
@@ -90,46 +76,24 @@ static std::string queryRas(const std::string& portStr, const std::string& forma
   }
   if (sock < 0) return {};
 
-  // Handshake. The server echoes its own version and ignores ours, so any
-  // "SERVER PROTOCOL " reply is acceptable.
-  std::string line;
-  const std::string hello = "CLIENT PROTOCOL 2\n";
-  if (::send(sock, hello.data(), hello.size(), 0) != static_cast<ssize_t>(hello.size()) ||
-      !recvLine(sock, line) ||
-      line.rfind("SERVER PROTOCOL ", 0) != 0) {
-    ::close(sock);
-    return {};
-  }
-
-  // Select output format (text or json); the server replies "OK\n".
-  const std::string setFmt = "SET FORMAT " + format + "\n";
-  if (::send(sock, setFmt.data(), setFmt.size(), 0) != static_cast<ssize_t>(setFmt.size()) ||
-      !recvLine(sock, line) || line != "OK\n") {
-    ::close(sock);
-    return {};
-  }
-
-  // Request status; the server streams the body and then closes the socket.
-  const char* status = "STATUS\n";
-  if (::send(sock, status, ::strlen(status), 0) != static_cast<ssize_t>(::strlen(status))) {
-    ::close(sock);
-    return {};
-  }
-
-  std::string body;
-  char buf[4096];
-  for (;;) {
-    ssize_t n = ::recv(sock, buf, sizeof(buf), 0);
-    if (n > 0) {
-      body.append(buf, n);
-    } else if (n == 0) {
-      break;  // Clean EOF: the server finished the body and closed the socket.
-    } else {
-      // recv() error: don't pass off a partial body as a complete response.
+  if (format != "text") {
+    std::string setFmt = "SET FORMAT " + format + "\n";
+    ::send(sock, setFmt.c_str(), setFmt.size(), 0);
+    char ack[16] = {};
+    ssize_t n = ::recv(sock, ack, sizeof(ack) - 1, 0);
+    if (n <= 0 || std::string(ack, n).find("OK") == std::string::npos) {
       ::close(sock);
       return {};
     }
   }
+
+  const char* status = "STATUS\n";
+  ::send(sock, status, ::strlen(status), 0);
+
+  std::string body;
+  char buf[4096];
+  ssize_t n;
+  while ((n = ::recv(sock, buf, sizeof(buf), 0)) > 0) body.append(buf, n);
   ::close(sock);
   return body;
 }
@@ -164,14 +128,8 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
         // Give the RAS listener a brief moment to come up after init.
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
-        std::string textBody;
-        std::string jsonBody;
-        for (int attempt = 0; attempt < 20; ++attempt) {
-          textBody = queryRas(portStr, "text");
-          jsonBody = queryRas(portStr, "json");
-          if (!textBody.empty() && !jsonBody.empty()) break;
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
+        std::string textBody = queryRas("text", portStr);
+        std::string jsonBody = queryRas("json", portStr);
 
         ASSERT_FALSE(textBody.empty()) << "RAS returned no text response";
         ASSERT_FALSE(jsonBody.empty())
