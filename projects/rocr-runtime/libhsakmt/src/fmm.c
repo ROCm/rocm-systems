@@ -1153,21 +1153,34 @@ static svm_api_range_t *svm_api_range_find(struct hsa_kfd_fmm_context *fmm_ctx,
 	return rb_entry(n, svm_api_range_t, node);
 }
 
-/* Add a new SVM-API range, or bump the refcount of an existing one. */
-static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
-			      void *aligned_addr, uint64_t aligned_size)
+/*
+ * Add a new SVM-API range, or bump the refcount of an existing identical one.
+ *
+ * A registration can only be identified at deregister time by its base address
+ * (hipHostUnregister passes just the pointer, not the size). We therefore
+ * require that a given base address is always (re-)registered with the same
+ * size, and reject a re-registration of the same base with a different size -
+ * otherwise deregister could not tell which extent to revoke. Repeated
+ * registrations of the same (base, size) are refcounted.
+ */
+static HSAKMT_STATUS svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
+				       void *aligned_addr, uint64_t aligned_size)
 {
 	svm_api_range_t *r;
 
 	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 	r = svm_api_range_find(fmm_ctx, aligned_addr);
 	if (r) {
+		if (r->size != aligned_size) {
+			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+			pr_warn("SVM-API re-register of %p size 0x%lx != tracked 0x%lx; rejected\n",
+				aligned_addr, (unsigned long)aligned_size,
+				(unsigned long)r->size);
+			return HSAKMT_STATUS_INVALID_PARAMETER;
+		}
 		++r->refcount;
-		/* A later registration may cover a larger range. */
-		if (aligned_size > r->size)
-			r->size = aligned_size;
 		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
-		return;
+		return HSAKMT_STATUS_SUCCESS;
 	}
 
 	r = calloc(1, sizeof(*r));
@@ -1178,7 +1191,7 @@ static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
 		pr_warn("Failed to track SVM-API range %p, deregister will be a no-op\n",
 			aligned_addr);
 		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
-		return;
+		return HSAKMT_STATUS_SUCCESS;
 	}
 	r->start = aligned_addr;
 	r->size = aligned_size;
@@ -1186,77 +1199,112 @@ static void svm_api_range_get(struct hsa_kfd_fmm_context *fmm_ctx,
 	r->node.key = rbtree_key((unsigned long)aligned_addr, 0);
 	hsakmt_rbtree_insert(&fmm_ctx->svm_api_range_tree, &r->node);
 	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+/* A page range whose GPU access must be revoked on deregister. */
+struct svm_revoke_range {
+	void *addr;
+	uint64_t size;
+};
+
+/* Append [a, b) to a growable array. Best-effort: on OOM returns false and the
+ * caller stops collecting (the unrevoked tail just keeps its GPU mapping). */
+static bool svm_revoke_add(struct svm_revoke_range **arr, int *n, int *cap,
+			   HSAuint64 a, HSAuint64 b)
+{
+	if (a >= b)
+		return true;
+	if (*n == *cap) {
+		int nc = *cap ? *cap * 2 : 4;
+		struct svm_revoke_range *t = realloc(*arr, nc * sizeof(**arr));
+
+		if (!t)
+			return false;
+		*arr = t;
+		*cap = nc;
+	}
+	(*arr)[*n].addr = (void *)a;
+	(*arr)[*n].size = b - a;
+	(*n)++;
+	return true;
 }
 
 /*
- * Drop a reference on the SVM-API range covering @addr. If this was the last
- * reference, remove it from the RB tree and return the page-aligned range that
- * should have GPU access revoked through @out_addr/@out_size, so the caller can
- * issue the inverse SET_ATTR outside the lock. Returns true if there is a range
- * to revoke.
+ * Drop a reference on the SVM-API registration based at @addr. If this was the
+ * last reference, remove it and compute which sub-ranges of [base, base+size)
+ * no *other* surviving registration still covers - those are the only ranges
+ * whose GPU access must be revoked. Overlapping or page-rounded-neighbor
+ * registrations keep coverage of the parts they still own, so a shared region
+ * survives until its last owner is dropped.
  *
- * Registrations are page-expanded (fmm_register_mem_svm_api rounds the base down
- * and the end up), so two adjacent host buffers can land in distinct tree nodes
- * that still share a boundary page. Unconditionally issuing NO_ACCESS for the whole
- * [base, base+size) would clobber a shared head/tail page that a surviving
- * neighbor still owns, faulting that neighbor. We therefore trim a shared head
- * and/or tail page off the revoke range.
+ * On return *out points to a malloc'd array of ranges (caller frees) and the
+ * function returns the count (0 if nothing to revoke). NO_ACCESS is issued by
+ * the caller outside the lock, per range.
  */
-static bool svm_api_range_put(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
-			      void **out_addr, uint64_t *out_size)
+static int svm_api_range_put(struct hsa_kfd_fmm_context *fmm_ctx, void *addr,
+			     struct svm_revoke_range **out)
 {
 	HSAuint64 page_offset = (HSAuint64)addr & (PAGE_SIZE - 1);
 	void *aligned_addr = (void *)((HSAuint64)addr - page_offset);
+	struct svm_revoke_range *ranges = NULL;
+	int n = 0, cap = 0;
+	HSAuint64 base, end, cur;
+	rbtree_key_t key;
+	rbtree_node_t *node;
 	svm_api_range_t *r;
-	bool released = false;
+
+	*out = NULL;
 
 	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 	r = svm_api_range_find(fmm_ctx, aligned_addr);
-	if (r && --r->refcount == 0) {
-		HSAuint64 start = (HSAuint64)r->start;
-		HSAuint64 end = start + r->size;
-		rbtree_key_t key;
-		rbtree_node_t *n;
-
-		hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, &r->node);
-		free(r);
-
-		/* Head: if the nearest preceding range extends into our first
-		 * page, that page is still owned - skip past it.
-		 */
-		key = rbtree_key(start, 0);
-		n = rbtree_lookup_nearest(&fmm_ctx->svm_api_range_tree, &key,
-					  LKP_ADDR, LEFT);
-		if (n) {
-			svm_api_range_t *p = rb_entry(n, svm_api_range_t, node);
-			HSAuint64 pend = (HSAuint64)p->start + p->size;
-
-			if (pend > start)
-				start = pend < end ? pend : end;
-		}
-
-		/* Tail: if the next range starts inside ours, it owns our last
-		 * page(s) - stop before it.
-		 */
-		key = rbtree_key(start, 0);
-		n = rbtree_lookup_nearest(&fmm_ctx->svm_api_range_tree, &key,
-					  LKP_ADDR, RIGHT);
-		if (n) {
-			svm_api_range_t *s = rb_entry(n, svm_api_range_t, node);
-			HSAuint64 sstart = (HSAuint64)s->start;
-
-			if (sstart < end)
-				end = sstart > start ? sstart : start;
-		}
-
-		if (start < end) {
-			*out_addr = (void *)start;
-			*out_size = end - start;
-			released = true;
-		}
+	if (!r || --r->refcount > 0) {
+		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+		return 0;
 	}
+
+	base = (HSAuint64)r->start;
+	end = base + r->size;
+	hsakmt_rbtree_delete(&fmm_ctx->svm_api_range_tree, &r->node);
+	free(r);
+
+	/* Emit the gaps in [base, end) not covered by any surviving registration.
+	 * Walk the tree in address order starting from the nearest range at or
+	 * before base (it may extend into us), else from the smallest.
+	 */
+	cur = base;
+	key = rbtree_key(base, 0);
+	node = rbtree_lookup_nearest(&fmm_ctx->svm_api_range_tree, &key, LKP_ADDR, LEFT);
+	if (!node)
+		node = rbtree_min_max(&fmm_ctx->svm_api_range_tree, LEFT);
+
+	while (node && cur < end) {
+		svm_api_range_t *o = rb_entry(node, svm_api_range_t, node);
+		HSAuint64 ostart = (HSAuint64)o->start;
+		HSAuint64 oend = ostart + o->size;
+
+		if (oend <= cur) {		/* entirely before cur */
+			node = hsakmt_rbtree_next(&fmm_ctx->svm_api_range_tree, node);
+			continue;
+		}
+		if (ostart >= end)		/* past our range */
+			break;
+		if (ostart > cur) {		/* uncovered gap [cur, ostart) */
+			if (!svm_revoke_add(&ranges, &n, &cap, cur,
+					    ostart < end ? ostart : end))
+				break;
+			cur = ostart < end ? ostart : end;
+		}
+		if (oend > cur)			/* covered up to oend */
+			cur = oend < end ? oend : end;
+		node = hsakmt_rbtree_next(&fmm_ctx->svm_api_range_tree, node);
+	}
+	if (cur < end)				/* uncovered tail */
+		svm_revoke_add(&ranges, &n, &cap, cur, end);
+
 	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
-	return released;
+	*out = ranges;
+	return n;
 }
 
 /*
@@ -1346,10 +1394,11 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_ERROR;
 	}
 
-	/* Record the range so deregistration can issue the inverse SET_ATTR. */
-	svm_api_range_get(fmm_ctx, (void *)aligned_addr, aligned_size);
-
-	return HSAKMT_STATUS_SUCCESS;
+	/* Record the range so deregistration can issue the inverse SET_ATTR.
+	 * Reject a same-base re-registration with a mismatched size: deregister
+	 * is keyed only by base address and could not disambiguate the two.
+	 */
+	return svm_api_range_get(fmm_ctx, (void *)aligned_addr, aligned_size);
 }
 
 static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
@@ -4570,17 +4619,18 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 		 * SET_ATTR to revoke GPU access and clear coherency flags.
 		 */
 		if (ctx->hsakmt_is_svm_api_supported) {
-			void *aligned_addr;
-			uint64_t aligned_size;
+			struct svm_revoke_range *rr = NULL;
+			int nr, i;
 
-			/* Revoke only the pages no surviving registration still
-			 * owns, so a neighbor sharing a boundary page keeps its
-			 * GPU access.
+			/* Revoke only the sub-ranges no surviving registration
+			 * still covers, so overlapping/boundary-sharing
+			 * neighbors keep their GPU access.
 			 */
-			if (svm_api_range_put(fmm_ctx, address, &aligned_addr,
-					      &aligned_size))
-				fmm_unregister_mem_svm_api(ctx, aligned_addr,
-							   aligned_size);
+			nr = svm_api_range_put(fmm_ctx, address, &rr);
+			for (i = 0; i < nr; i++)
+				fmm_unregister_mem_svm_api(ctx, rr[i].addr,
+							   rr[i].size);
+			free(rr);
 			return HSAKMT_STATUS_SUCCESS;
 		}
 		/* On APUs we assume it's a random system memory address
