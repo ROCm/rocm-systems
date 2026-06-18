@@ -46,7 +46,9 @@ Many functions in the library take a _socket handle_ or _device handle_. A
 _socket_ refers to a physical hardware socket, abstracted by the library to
 represent the hardware more effectively to the user. While there is always one
 unique GPU per socket, an APU may house both a GPU and CPU on the same socket.
-For MI200 GPUs, multiple GCDs may reside within a single socket
+For MI200 GPUs, multiple GCDs may reside within a single socket, so a single socket can
+own several processor handles. GPU socket IDs are derived from the device's BDF, whereas
+CPU socket IDs correspond to the physical CPU package.
 
 To identify the sockets in a system, use the `amdsmi_get_socket_handles()`
 function, which returns a list of socket handles. These handles can then be used

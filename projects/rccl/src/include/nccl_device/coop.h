@@ -147,6 +147,26 @@ struct ncclCoopLanes { // Some lanes of this warp.
 #endif
 
 #if NCCL_CHECK_CUDACC
+#if defined(__HIP_PLATFORM_AMD__)
+// AMD has no named barriers, so emulate sub-block warp-span sync with a shared,
+// sense-reversing barrier keyed by span id. Init must zero the slots before use.
+constexpr int ncclCoopNamedBarrierSlots = 16; // mirrors CUDA's 16 hardware named barriers (ids 0-15)
+struct ncclCoopNamedBarrierSlot { uint32_t arrive; uint32_t sense; };
+
+NCCL_DEVICE_INLINE ncclCoopNamedBarrierSlot* ncclCoopNamedBarrierState() {
+  __shared__ ncclCoopNamedBarrierSlot slots[ncclCoopNamedBarrierSlots];
+  return slots;
+}
+
+NCCL_DEVICE_INLINE void ncclCoopNamedBarrierInit() {
+  ncclCoopNamedBarrierSlot* slots = ncclCoopNamedBarrierState();
+  for (int i = threadIdx.x; i < ncclCoopNamedBarrierSlots; i += blockDim.x) { slots[i].arrive = 0; slots[i].sense = 0; }
+  __syncthreads();
+}
+#else
+NCCL_DEVICE_INLINE void ncclCoopNamedBarrierInit() {}
+#endif
+
 struct ncclCoopWarpSpan {
   uint32_t warp0:8, nWarps:8, id:8;
 
@@ -166,7 +186,23 @@ struct ncclCoopWarpSpan {
 
   NCCL_DEVICE_INLINE void sync() {
   #if defined(__HIP_PLATFORM_AMD__)
-    __syncthreads();
+    // __syncthreads() can't sync a subset of warps; emulate a named barrier in software.
+    // Single-warp span is lockstep: skip the shared atomic (hot path) and just fence.
+    using Atom = cuda::atomic_ref<uint32_t, cuda::thread_scope_block>;
+    if (nWarps <= 1) { cuda::atomic_thread_fence(cuda::memory_order_acq_rel, cuda::thread_scope_block); return; }
+    ncclCoopNamedBarrierSlot* slot = &ncclCoopNamedBarrierState()[id];
+    cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_block);
+    if ((threadIdx.x % WARP_SIZE) == 0) {  // one leader per warp
+      uint32_t s = Atom{slot->sense}.load(cuda::memory_order_relaxed);
+      if (Atom{slot->arrive}.fetch_add(1u, cuda::memory_order_relaxed) + 1u == (uint32_t)nWarps) {
+        Atom{slot->arrive}.store(0u, cuda::memory_order_relaxed);  // last in: reset, flip to release
+        Atom{slot->sense}.store(s ^ 1u, cuda::memory_order_release);
+      } else {
+        while (Atom{slot->sense}.load(cuda::memory_order_acquire) == s)
+          __builtin_amdgcn_s_sleep(1);
+      }
+    }
+    cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_block);
   #else
     asm volatile("barrier.sync %0, %1;" :: "r"(1+id), "r"(32*nWarps) : "memory");
     __barrier_sync_count(1+id, 32*nWarps);
@@ -185,17 +221,20 @@ struct ncclCoopCta {
 #endif
 
 #if NCCL_CHECK_CUDACC
+// NOTE: upstream v2.30 renamed ncclCoopLaneMask -> ncclCoopGetLaneMask; the
+// auto-merged callers (impl/vector__funcs.h, impl/core__funcs.h) use the new
+// name, so adopt it here while keeping RCCL's wave64 ncclCoopMask_t bodies.
 template<int nThreadsPow2>
-NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopLaneMask(ncclCoopTile<nThreadsPow2> coop) {
+NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopGetLaneMask(ncclCoopTile<nThreadsPow2> coop) {
   return coop.laneMask();
 }
-NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopLaneMask(ncclCoopLanes coop) {
+NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopGetLaneMask(ncclCoopLanes coop) {
   return coop.lmask;
 }
-NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopLaneMask(ncclCoopWarpSpan coop) {
+NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopGetLaneMask(ncclCoopWarpSpan coop) {
   return ncclCoopFullMask;
 }
-NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopLaneMask(ncclCoopCta coop) {
+NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopGetLaneMask(ncclCoopCta coop) {
   return ncclCoopFullMask;
 }
 #endif

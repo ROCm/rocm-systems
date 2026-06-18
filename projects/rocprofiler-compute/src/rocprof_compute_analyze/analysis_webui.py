@@ -120,32 +120,15 @@ class webui_analysis(OmniAnalyze_Base):
 
             run_workload = base_data[base_run]
 
-            if self.pc_sampling_only():
-                run_workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
-                    str(self.dest_dir)
-                )
-                run_workload.raw_pmc = run_workload.raw_pmc.rename(
-                    columns={"Dispatch_Id": "Dispatch_ID"}
-                )
+            pc_sampling_data = self.load_pc_sampling_tool_data(str(self.dest_dir))
 
-                kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
-                    df_in=run_workload.raw_pmc,
-                    raw_data_dir=str(self.dest_dir),
-                    filter_gpu_ids=run_workload.filter_gpu_ids,
-                    filter_dispatch_ids=run_workload.filter_dispatch_ids,
-                    filter_nodes=self._runs[self.dest_dir].filter_nodes,
-                    time_unit=args.time_unit,
-                    kernel_verbose=args.kernel_verbose,
-                )
-                run_workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
-                run_workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
-                parser.load_non_mertrics_table(
+            if self.pc_sampling_only():
+                self.build_pc_sampling_only_workload(
                     run_workload,
                     self.dest_dir,
                     args,
-                )
-                parser.nullify_unevaluated_metric_values(
-                    run_workload,
+                    pc_sampling_data,
+                    filter_nodes=self._runs[self.dest_dir].filter_nodes,
                 )
             else:
                 # Generate original raw df
@@ -241,6 +224,7 @@ class webui_analysis(OmniAnalyze_Base):
                     is_gui=True,
                     args=args,
                     dfs_expressions=self._arch_configs[gpu_arch].dfs_expressions,
+                    pc_sampling_tool_data=pc_sampling_data,
                 )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~
@@ -422,31 +406,16 @@ class webui_analysis(OmniAnalyze_Base):
 
         workload = self._runs[self.dest_dir]
 
+        pc_sampling_data = self.load_pc_sampling_tool_data(str(self.dest_dir))
+
         if self.pc_sampling_only():
             console_log(
                 "analysis",
                 "PC sampling only -- skipping counter collection data loading",
             )
-            workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
-                str(self.dest_dir)
+            self.build_pc_sampling_only_workload(
+                workload, self.dest_dir, args, pc_sampling_data
             )
-            workload.raw_pmc = workload.raw_pmc.rename(
-                columns={"Dispatch_Id": "Dispatch_ID"}
-            )
-
-            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
-                df_in=workload.raw_pmc,
-                raw_data_dir=self.dest_dir,
-                filter_gpu_ids=workload.filter_gpu_ids,
-                filter_dispatch_ids=workload.filter_dispatch_ids,
-                filter_nodes=workload.filter_nodes,
-                time_unit=args.time_unit,
-                kernel_verbose=args.kernel_verbose,
-            )
-            workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
-            workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
-
-            parser.load_non_mertrics_table(workload, self.dest_dir, args)
             self.arch = workload.sys_info.iloc[0]["gpu_arch"]
             return
 
@@ -481,7 +450,9 @@ class webui_analysis(OmniAnalyze_Base):
         workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
         workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
         # Load remaining non-metric tables (sysinfo, etc.)
-        parser.load_non_mertrics_table(workload, self.dest_dir, args)
+        parser.load_non_mertrics_table(
+            workload, self.dest_dir, args, pc_sampling_tool_data=pc_sampling_data
+        )
         # set architecture
         self.arch = workload.sys_info.iloc[0]["gpu_arch"]
 

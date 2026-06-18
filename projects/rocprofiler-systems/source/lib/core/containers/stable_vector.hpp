@@ -137,10 +137,10 @@ public:
     explicit stable_vector(size_type count, const Tp& value);
     explicit stable_vector(size_type count);
 
-    template <typename InputItrT,
-              typename = std::enable_if_t<std::is_convertible<
-                  typename std::iterator_traits<InputItrT>::iterator_category,
-                  std::input_iterator_tag>::value>>
+    template <typename InputItrT>
+        requires std::convertible_to<
+            typename std::iterator_traits<InputItrT>::iterator_category,
+            std::input_iterator_tag>
     stable_vector(InputItrT first, InputItrT last);
 
     stable_vector(std::initializer_list<Tp>);
@@ -237,7 +237,10 @@ stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(size_type count)
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-template <typename InputItrT, typename>
+template <typename InputItrT>
+    requires std::convertible_to<
+        typename std::iterator_traits<InputItrT>::iterator_category,
+        std::input_iterator_tag>
 stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(InputItrT first, InputItrT last)
 {
     for(; first != last; ++first)

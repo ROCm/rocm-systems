@@ -41,6 +41,7 @@ The RCCL public repository is located within the rocm-systems repo at `<https://
 
     * :ref:`Library specification<library-specification>`
     * :ref:`api-library`
+    * :doc:`Precision support <./api-reference/data-type-support>`
     * :ref:`Environment variables<env-variables>`
 
 To contribute to the documentation, see

@@ -60,7 +60,10 @@ class cli_analysis(OmniAnalyze_Base):
         for path_info in args.path:
             workload = self._runs[path_info[0]]
 
-            # PC sampling only -- skip counter collection data loading
+            pc_sampling_data = self.load_pc_sampling_tool_data(path_info[0])
+
+            # No counters collected -- derive scaffolding from the PC sampling
+            # kernel trace and skip metrics calculation.
             if self.pc_sampling_only():
                 console_log(
                     "analysis",
@@ -68,28 +71,9 @@ class cli_analysis(OmniAnalyze_Base):
                     " available, metrics calculation will be"
                     " skipped",
                 )
-
-                workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
-                    path_info[0]
+                self.build_pc_sampling_only_workload(
+                    workload, path_info[0], args, pc_sampling_data
                 )
-                workload.raw_pmc = workload.raw_pmc.rename(
-                    columns={"Dispatch_Id": "Dispatch_ID"}
-                )
-
-                kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
-                    df_in=workload.raw_pmc,
-                    raw_data_dir=path_info[0],
-                    filter_gpu_ids=workload.filter_gpu_ids,
-                    filter_dispatch_ids=workload.filter_dispatch_ids,
-                    filter_nodes=workload.filter_nodes,
-                    time_unit=args.time_unit,
-                    kernel_verbose=args.kernel_verbose,
-                )
-                workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
-                workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
-
-                parser.load_non_mertrics_table(workload, path_info[0], args)
-                parser.nullify_unevaluated_metric_values(workload)
                 continue
 
             # create 'mega dataframe'
@@ -153,6 +137,7 @@ class cli_analysis(OmniAnalyze_Base):
                 is_gui=False,
                 args=args,
                 dfs_expressions=self._arch_configs[gpu_arch].dfs_expressions,
+                pc_sampling_tool_data=pc_sampling_data,
             )
 
     @demarcate

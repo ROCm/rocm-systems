@@ -17,6 +17,7 @@
 #include "dda_reduce_scatter_ipc.h"
 #include "dda_all_gather_ipc.h"
 #include "dda_alltoall_ipc.h"
+#include "sym_kernels.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -131,7 +132,7 @@ RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
 // threshold for gfx942; gfx950 uses the user-configurable rcclParamDdaThreshold();
 // all other architectures return false (threshold 0).
 static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0 || comm->nRanks < 8) return false;
+  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0 || comm->nRanks < 8 || comm->symmetricSupport) return false;
   size_t threshold;
   if (IsArchMatch(comm->archName, "gfx942")) {
     threshold = gfx942Default;
@@ -561,7 +562,18 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
 
   // Reset value forcing direct reduce scatter algorithm 
   comm->enableDirectReduceScatter = 0;
-  if (rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608) &&
+
+  // Skip DDA IPC and Direct RS if the symmetric path will handle this op, so they don't collide and deadlock.
+  // Symmetric reduce-scatter implements sum and avg (ncclDevSumPostDiv), refer ncclSymkImplemented
+  bool symEligible = false;
+  if (comm->symmetricSupport && (op == ncclSum || op == ncclAvg)) {
+    NCCLCHECK(ncclSymkInitOnce(comm));
+    int symkOp = (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum;
+    symEligible = ncclSymkAvailable(comm, ncclFuncReduceScatter, symkOp, datatype, recvcount);
+  }
+
+  if (!symEligible &&
+      rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608) &&
       ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
     NCCLCHECK(ncclReduceScatterDdaIpc(
         sendbuff,
@@ -574,7 +586,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     return ncclSuccess;
   }
 
-  if (rcclUseReduceScatterDirect(comm, msgSize)) {
+  if (!symEligible && rcclUseReduceScatterDirect(comm, msgSize)) {
     INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p sendbuff=%p recvbuff=%p",
       recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
 

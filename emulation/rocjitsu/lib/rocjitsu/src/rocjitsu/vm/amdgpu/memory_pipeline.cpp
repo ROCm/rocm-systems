@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "util/log.h"
 
@@ -230,29 +231,6 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
   }
 }
 
-uint64_t update_ds_barrier_arrive(uint64_t state, uint64_t decrement, bool has_decrement) {
-  constexpr uint64_t kPendingMask = (1ull << 29) - 1ull;
-  constexpr uint32_t kPhaseShift = 29;
-  constexpr uint32_t kInitCountShift = 32;
-
-  const uint64_t init_count = state >> kInitCountShift;
-  uint64_t phase = (state >> kPhaseShift) & 0x7ull;
-  uint64_t pending = state & kPendingMask;
-
-  if (pending == 0) {
-    phase = (phase + 7) & 0x7ull;
-    pending = init_count;
-  }
-
-  if (has_decrement) {
-    pending = decrement >= pending ? 0 : pending - decrement;
-  } else if (pending > 0) {
-    --pending;
-  }
-
-  return (init_count << kInitCountShift) | (phase << kPhaseShift) | pending;
-}
-
 /// @brief Apply a floating-point atomic RMW operation.
 template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {
   switch (op) {
@@ -410,7 +388,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
         const bool has_decrement = d.store_data.size() >= lane * src_stride + 8;
         if (has_decrement)
           std::memcpy(&decrement, &d.store_data[lane * src_stride], 8);
-        new_val = update_ds_barrier_arrive(old_val, decrement, has_decrement);
+        new_val = lds_barrier_cell_update_arrive(old_val, has_decrement ? decrement : 1);
       } else if (is_fp) {
         double old_f = std::bit_cast<double>(old_val);
         double src_f;
