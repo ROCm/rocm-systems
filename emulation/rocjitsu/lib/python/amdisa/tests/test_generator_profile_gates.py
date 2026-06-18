@@ -13,6 +13,7 @@ from amdisa.codegen.execute.vector_cmp import (
     gen_vector_add_co,
     gen_vector_cmp,
     gen_vector_cmp_class,
+    gen_vector_cmpx,
 )
 from amdisa.codegen.execute.simd_codegen import simd_probe_line
 from amdisa.gpuisa import Instruction, Operand
@@ -128,9 +129,25 @@ def test_true16_vop3_cmp_uses_selected_source_halves():
     body = gen_vector_cmp(['vdst'], ['src0', 'src1'], 'lt', 'i16', is_vop3=True)
 
     assert 'uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
+    assert body.index('uint32_t opsel = amdgpu::vop3_opsel(inst_);') < body.index(
+        'for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)'
+    )
     assert 'if (opsel & (1u << 0)) s0_raw >>= 16;' in body
     assert 'if (opsel & (1u << 1)) s1_raw >>= 16;' in body
     assert 'vcc &= ~(1ULL << lane)' not in body
+
+
+def test_true16_vop3_cmpx_hoists_opsel():
+    opsel_line = 'uint32_t opsel = amdgpu::vop3_opsel(inst_);'
+    loop_line = 'for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)'
+
+    for dtype in ('i16', 'u16'):
+        body = gen_vector_cmpx(['src0', 'src1'], 'lt', dtype, is_vop3=True)
+
+        assert body.count(opsel_line) == 1
+        assert body.index(opsel_line) < body.index(loop_line)
+        assert 'if (opsel & (1u << 0)) s0_raw >>= 16;' in body
+        assert 'if (opsel & (1u << 1)) s1_raw >>= 16;' in body
 
 
 def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():

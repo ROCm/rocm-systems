@@ -237,7 +237,6 @@ def _cmp_condition(
         L.append(f'    uint64_t s1 = {src[1]}.read_lane64(wf, lane);')
     elif dtype in ('i16',):
         if is_vop3:
-            L.append('    uint32_t opsel = amdgpu::vop3_opsel(inst_);')
             L.append(f'    uint32_t s0_raw = {src[0]}.read_lane(wf, lane);')
             L.append(f'    uint32_t s1_raw = {src[1]}.read_lane(wf, lane);')
             L.append('    if (opsel & (1u << 0)) s0_raw >>= 16;')
@@ -257,7 +256,6 @@ def _cmp_condition(
             )
     elif dtype in ('u16',):
         if is_vop3:
-            L.append('    uint32_t opsel = amdgpu::vop3_opsel(inst_);')
             L.append(f'    uint32_t s0_raw = {src[0]}.read_lane(wf, lane);')
             L.append(f'    uint32_t s1_raw = {src[1]}.read_lane(wf, lane);')
             L.append('    if (opsel & (1u << 0)) s0_raw >>= 16;')
@@ -294,6 +292,10 @@ def _cmp_condition(
     return f's0 {cmp_op} s1'
 
 
+def _uses_vop3_i16_opsel(op: str | None, dtype: str | None, is_vop3: bool) -> bool:
+    return is_vop3 and dtype in ('i16', 'u16') and op not in ('f', 't')
+
+
 def gen_vector_cmp(
     dst: list[str],
     src: list[str],
@@ -312,6 +314,8 @@ def gen_vector_cmp(
     L.append('  uint64_t exec = wf.exec();')
     # All v_cmp variants zero inactive lanes regardless of encoding.
     L.append('  uint64_t vcc = 0;')
+    if _uses_vop3_i16_opsel(op, dtype, is_vop3):
+        L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
@@ -351,6 +355,8 @@ def gen_vector_cmpx(
     L = []
     L.append('  uint64_t exec = wf.exec();')
     L.append('  uint64_t result = 0;')
+    if _uses_vop3_i16_opsel(op, dtype, is_vop3):
+        L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 

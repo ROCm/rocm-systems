@@ -1293,12 +1293,12 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
       }
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
-        auto al = wmma_input_loc(M, K, row, k, in_bits);
+        auto al = wmma_a_input_loc(M, K, row, k, in_bits, in_bits);
         A_buf[row * K + k] = A_f32[(al.vgpr_offset * wf + al.lane) * 4 + al.sub_element];
       }
     for (uint32_t k = 0; k < K; ++k)
       for (uint32_t col = 0; col < N; ++col) {
-        auto bl = wmma_input_loc(N, K, col, k, in_bits);
+        auto bl = wmma_b_input_loc(N, K, col, k, in_bits, in_bits);
         B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 4 + bl.sub_element];
       }
     // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
@@ -2024,12 +2024,12 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
       }
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
-        auto al = wmma_input_loc(M, K, row, k, in_bits);
+        auto al = wmma_a_input_loc(M, K, row, k, in_bits, in_bits);
         A_buf[row * K + k] = A_f32[(al.vgpr_offset * wf + al.lane) * 4 + al.sub_element];
       }
     for (uint32_t k = 0; k < K; ++k)
       for (uint32_t col = 0; col < N; ++col) {
-        auto bl = wmma_input_loc(N, K, col, k, in_bits);
+        auto bl = wmma_b_input_loc(N, K, col, k, in_bits, in_bits);
         B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 4 + bl.sub_element];
       }
     for (uint32_t row = 0; row < M; ++row)

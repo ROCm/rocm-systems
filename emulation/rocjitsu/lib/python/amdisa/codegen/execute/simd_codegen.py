@@ -980,7 +980,7 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
         'double',
         '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
     ),
-    'v_sqrt_f64_vop1': ('double', '[](auto a) { return util::stdx::sqrt(a); }'),
+    'v_sqrt_f64_vop1': ('double', '[](auto a) { return util::sqrt_f64_simd(a); }'),
     'v_mov_b64_vop1': ('uint64_t', '[](auto a) { return a; }'),
     # frexp mantissa: significand in [0.5,1) via bitfield rebias + denormal
     # renorm (see util::frexp_mant_f64_simd). VOP3 twin in SIMD_VOP3_UNARY_FP64.
@@ -1015,18 +1015,13 @@ SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
     'v_cvt_i32_f64_vop1': (
         'int32_t',
         '[](auto s) {'
-        ' auto r = s;'
-        ' util::stdx::where(util::stdx::isnan(s), r) = 0.0;'
-        ' util::stdx::where(s >= 2147483648.0, r) = 2147483647.0;'
-        ' util::stdx::where(s < -2147483648.0, r) = -2147483648.0;'
+        ' auto r = util::cvt_i32_f64_saturate_input_simd(s);'
         ' return util::stdx::static_simd_cast<util::narrow32<int32_t>>(r); }',
     ),
     'v_cvt_u32_f64_vop1': (
         'uint32_t',
         '[](auto s) {'
-        ' auto r = s;'
-        ' util::stdx::where(util::stdx::isnan(s) || s < 0.0, r) = 0.0;'
-        ' util::stdx::where(s >= 4294967296.0, r) = 4294967295.0;'
+        ' auto r = util::cvt_u32_f64_saturate_input_simd(s);'
         ' return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r); }',
     ),
     # frexp exponent (f64 -> int32). util::frexp_exp_f64_simd returns the int32 in
@@ -1550,7 +1545,7 @@ SIMD_VOPC_CLASS: dict[str, tuple[str, str]] = {
 # v_cmp_class_f64: a 64-bit f64 value (src0) tested against a 32-bit class mask
 # (vsrc1), so it needs the mixed-width class glue (try_execute_vopc_class_f64_simd)
 # rather than the equal-width VOPC path. The functor receives src0 as
-# native<uint64_t> raw bits and vsrc1 as a native_width64-wide narrow32<uint32_t>
+# a uint64 SIMD raw-bit vector and vsrc1 as the matching uint32 SIMD class-mask
 # mask; it classifies the f64 from its raw bits (qNaN bit = mantissa MSB
 # 0x0008000000000000), partitions into one of the 10 mutually exclusive classes,
 # casts the small class code down to the 32-bit mask width, and returns
@@ -1558,7 +1553,8 @@ SIMD_VOPC_CLASS: dict[str, tuple[str, str]] = {
 # class-bit layout matches the f16/f32 forms above.
 _CMP_CLASS_F64 = (
     '[](auto s, auto m) {'
-    ' using U = util::native<uint64_t>;'
+    ' using U = std::decay_t<decltype(s)>;'
+    ' using M = std::decay_t<decltype(m)>;'
     ' U exp = (s >> 52) & 0x7FFu;'
     ' U mant = s & 0xFFFFFFFFFFFFFull;'
     ' auto sgn = ((s >> 63) & 1u) != 0u;'
@@ -1579,7 +1575,7 @@ _CMP_CLASS_F64 = (
     ' util::stdx::where(is_den && !sgn, cls) = 0x080u;'
     ' util::stdx::where(is_norm && !sgn, cls) = 0x100u;'
     ' util::stdx::where(is_inf && !sgn, cls) = 0x200u;'
-    ' auto cls32 = util::stdx::static_simd_cast<util::narrow32<uint32_t>>(cls);'
+    ' auto cls32 = util::stdx::static_simd_cast<M>(cls);'
     ' return (cls32 & m) != 0u; }'
 )
 SIMD_VOPC_CLASS_F64: dict[str, str] = {
@@ -1984,13 +1980,7 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     'v_rndne_f64_vop3': '[](auto a) { return util::rndne_simd(a); }',
     # sqrt_f64 is correctly-rounded IEEE (scalar uses transcendental::sqrt_f64
     # which is `std::sqrt` after NaN/negative guards); stdx::sqrt matches.
-    'v_sqrt_f64_vop3': (
-        '[](auto a) {'
-        ' auto r = util::stdx::sqrt(a);'
-        ' util::stdx::where(util::stdx::isnan(a), r) = a;'
-        ' util::stdx::where(a < 0.0, r) = std::numeric_limits<double>::quiet_NaN();'
-        ' return r; }'
-    ),
+    'v_sqrt_f64_vop3': ('[](auto a) { return util::sqrt_f64_simd(a); }'),
     # v_fract_f64: scalar = v - std::floor(v); util::floor_simd matches
     # std::floor bit-exact incl. sign-of-zero (NaN-floor(NaN) = NaN; NaN result
     # skipped by the test like any other NaN-result lane).

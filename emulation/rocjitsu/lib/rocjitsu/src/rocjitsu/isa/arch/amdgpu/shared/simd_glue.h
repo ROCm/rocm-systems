@@ -20,8 +20,11 @@
 #include "simdojo/components/vector_reg.h"
 #include "util/simd.h"
 
+#include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 
 namespace rocjitsu::gfx1250 {
@@ -152,8 +155,12 @@ util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t cl
   else if (omod == 3)
     v = v * T(0.5);
   if (clamp) {
-    util::stdx::where(v < T(0), v) = T(0);
-    util::stdx::where(v > T(1), v) = T(1);
+    if constexpr (std::is_same_v<T, double>) {
+      v = util::ordered_clamp_f64_simd(v, 0.0, 1.0);
+    } else {
+      util::stdx::where(v < T(0), v) = T(0);
+      util::stdx::where(v > T(1), v) = T(1);
+    }
   }
   return v;
 }
@@ -481,6 +488,51 @@ template <typename To, typename Mask>
   requires(util::has_stdx_simd)
 inline auto simd_mask_as(const Mask &m) {
   return util::stdx::__proposed::static_simd_cast<util::native<To>>(m);
+}
+
+template <typename T, typename CmpOp>
+  requires(util::has_stdx_simd)
+inline uint64_t cmp_bits64(util::native<T> a, util::native<T> b, CmpOp cmp_op) {
+  constexpr std::size_t W = util::native_width64;
+  alignas(64) T abuf[W];
+  alignas(64) T bbuf[W];
+  a.copy_to(abuf, util::stdx::element_aligned);
+  b.copy_to(bbuf, util::stdx::element_aligned);
+  uint64_t bits = 0;
+  for (std::size_t i = 0; i < W; ++i) {
+    if constexpr (std::is_floating_point_v<T>) {
+      using One = util::stdx::fixed_size_simd<T, 1>;
+      const One av(&abuf[i], util::stdx::element_aligned);
+      const One bv(&bbuf[i], util::stdx::element_aligned);
+      if (cmp_op(av, bv)[0])
+        bits |= (1ULL << i);
+    } else {
+      if (cmp_op(abuf[i], bbuf[i]))
+        bits |= (1ULL << i);
+    }
+  }
+  return bits;
+}
+
+template <typename CmpOp>
+  requires(util::has_stdx_simd)
+inline uint64_t cmp_class_f64_bits(util::native<uint64_t> s, util::narrow32<uint32_t> mask,
+                                   CmpOp cmp_op) {
+  constexpr std::size_t W = util::native_width64;
+  alignas(64) uint64_t sbuf[W];
+  alignas(64) uint32_t mbuf[W];
+  s.copy_to(sbuf, util::stdx::element_aligned);
+  mask.copy_to(mbuf, util::stdx::element_aligned);
+  uint64_t bits = 0;
+  for (std::size_t i = 0; i < W; ++i) {
+    using One64 = util::stdx::fixed_size_simd<uint64_t, 1>;
+    using One32 = util::stdx::fixed_size_simd<uint32_t, 1>;
+    const One64 sv(&sbuf[i], util::stdx::element_aligned);
+    const One32 mv(&mbuf[i], util::stdx::element_aligned);
+    if (cmp_op(sv, mv)[0])
+      bits |= (1ULL << i);
+  }
+  return bits;
 }
 
 /// VOP1 unary SIMD fast path. Reads `src0` as `Tin`, applies `un_op`
@@ -1150,11 +1202,7 @@ template <typename T, typename Inst, typename CmpOp>
       continue;
     const auto a = simd_load64_or<T>(rs0, base, a_bcast);
     const auto b = simd_load64_or<T>(rs1, base, b_bcast);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   wf.set_vcc(vcc);
@@ -1199,11 +1247,7 @@ template <typename Inst, typename CmpOp>
       continue;
     const auto s = simd_load64_or<uint64_t>(rs0, base, s_bcast);
     const auto mask = simd_load_narrow_or<uint32_t>(rm, base, mask_bcast);
-    const auto m = cmp_op(s, mask);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   wf.set_vcc(vcc);
@@ -1311,11 +1355,7 @@ template <typename Inst, typename CmpOp>
     if (do_neg)
       s = s ^ sm;
     const auto mask = simd_load_narrow_or<uint32_t>(rm, base, mask_bcast);
-    const auto m = cmp_op(s, mask);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_explicit_lane_mask(inst.vdst, wf, vcc);
@@ -1501,11 +1541,7 @@ template <typename T, typename Inst, typename CmpOp>
       continue;
     const auto a = simd_load64_or<T>(rs0, base, a_bcast);
     const auto b = simd_load64_or<T>(rs1, base, b_bcast);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_explicit_lane_mask(inst.vdst, wf, dst);
@@ -1653,11 +1689,7 @@ template <typename Inst, typename CmpOp>
       continue;
     const auto a = apply_vop3_src_mod_f64<0>(simd_load64_or<T>(rs0, base, a_bcast), abs, neg);
     const auto b = apply_vop3_src_mod_f64<1>(simd_load64_or<T>(rs1, base, b_bcast), abs, neg);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   write_explicit_lane_mask(inst.vdst, wf, dst);
@@ -2290,28 +2322,41 @@ inline util::native<float> div_fixup_f32_simd(util::native<float> p, util::nativ
 /// f64 counterpart of div_fixup_f32_simd — same cascade, 64-bit-lane domain.
 inline util::native<double> div_fixup_f64_simd(util::native<double> p, util::native<double> b,
                                                util::native<double> c) {
-  using D = util::native<double>;
-  using U = util::native<uint64_t>;
-  const auto bxc = std::bit_cast<D>(std::bit_cast<U>(b) ^ std::bit_cast<U>(c));
-  const auto inf_val = util::stdx::copysign(D(std::numeric_limits<double>::infinity()), bxc);
-  const auto zero_val = util::stdx::copysign(D(0.0), bxc);
-  const auto qnan = D(std::numeric_limits<double>::quiet_NaN());
-  const auto b_nan = util::stdx::isnan(b);
-  const auto c_nan = util::stdx::isnan(c);
-  const auto b_inf = util::stdx::isinf(b);
-  const auto c_inf = util::stdx::isinf(c);
-  const auto b_zero = (b == D(0.0));
-  const auto c_zero = (c == D(0.0));
-  D r = p;
-  util::stdx::where(b_inf, r) = zero_val;
-  util::stdx::where(c_inf, r) = inf_val;
-  util::stdx::where(c_zero, r) = zero_val;
-  util::stdx::where(b_zero, r) = inf_val;
-  util::stdx::where(b_inf && c_inf, r) = qnan;
-  util::stdx::where(b_zero && c_zero, r) = qnan;
-  util::stdx::where(b_nan, r) = b;
-  util::stdx::where(c_nan, r) = c;
-  return r;
+  constexpr std::size_t W = util::native_width64;
+  alignas(64) double pbuf[W];
+  alignas(64) double bbuf[W];
+  alignas(64) double cbuf[W];
+  alignas(64) double out[W];
+  p.copy_to(pbuf, util::stdx::element_aligned);
+  b.copy_to(bbuf, util::stdx::element_aligned);
+  c.copy_to(cbuf, util::stdx::element_aligned);
+  for (std::size_t i = 0; i < W; ++i) {
+    const double bv = bbuf[i];
+    const double cv = cbuf[i];
+    const double sign =
+        std::bit_cast<double>(std::bit_cast<uint64_t>(bv) ^ std::bit_cast<uint64_t>(cv));
+    if (std::isnan(cv))
+      out[i] = cv;
+    else if (std::isnan(bv))
+      out[i] = bv;
+    else if (cv == 0.0 && bv == 0.0)
+      out[i] = std::numeric_limits<double>::quiet_NaN();
+    else if (std::isinf(cv) && std::isinf(bv))
+      out[i] = std::numeric_limits<double>::quiet_NaN();
+    else if (bv == 0.0)
+      out[i] = std::copysign(std::numeric_limits<double>::infinity(), sign);
+    else if (cv == 0.0)
+      out[i] = std::copysign(0.0, sign);
+    else if (std::isinf(cv))
+      out[i] = std::copysign(std::numeric_limits<double>::infinity(), sign);
+    else if (std::isinf(bv))
+      out[i] = std::copysign(0.0, sign);
+    else
+      out[i] = pbuf[i];
+  }
+  util::native<double> result;
+  result.copy_from(out, util::stdx::element_aligned);
+  return result;
 }
 
 /// VOP3 div_fmas SIMD fast path (f32). The scalar body is `fma(s0, s1, s2)`
@@ -2408,15 +2453,9 @@ template <typename Inst>
     const auto c = apply_vop3_src_mod_f64<2>(simd_load64_or<T>(rs2, base, c_bcast), abs, neg);
     auto r = util::stdx::fma(a, b, c);
     const auto scaled = util::stdx::ldexp(r, shift_64);
-    // VCC mask built directly in the f64 abi via a generator; avoids a
-    // cross-abi mask cast (the f32 path can ride load+simd_mask_as because
-    // native<uint32_t> shares abi with native<float>, but native<uint64_t>
-    // does not match native<double>::abi on AVX-512).
     const uint64_t vcc_chunk = vcc >> base;
-    const auto vcc_mask = util::native<double>([&](std::size_t i) {
-                            return ((vcc_chunk >> i) & 1ULL) ? 1.0 : 0.0;
-                          }) != 0.0;
-    util::stdx::where(vcc_mask, r) = scaled;
+    r = util::replace_f64_lanes(r, scaled,
+                                [&](std::size_t i) { return ((vcc_chunk >> i) & 1ULL) != 0; });
     write_simd64_at<T>(rd64, inst.vdst, wf, base, r, chunk);
   }
   return true;
