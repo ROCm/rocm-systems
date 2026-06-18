@@ -43,6 +43,16 @@ if(NOT TARGET amd_smi AND NOT TARGET amd_smi_static)
     find_package(amd_smi CONFIG REQUIRED)
 endif()
 
+# Set the link target based on which targets are available
+# Prefer static library for examples
+if(TARGET amd_smi_static)
+    set(_AMDSMI_LINK_TARGET amd_smi_static)
+elseif(TARGET amd_smi)
+    set(_AMDSMI_LINK_TARGET amd_smi)
+else()
+    message(FATAL_ERROR "Neither amd_smi nor amd_smi_static target is available")
+endif()
+
 find_package(Threads REQUIRED)
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

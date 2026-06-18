@@ -453,15 +453,15 @@ install(
 | Old file (`tests/python_unittest/`) | New file(s) (`tests/python/`) |
 | :--- | :--- |
 | `unit_tests.py` — BDF class | `unit/bdf/test_bdf.py` |
-| `unit_tests.py` — GPU getters | `unit/gpu/test_{feature}.py` (one file per feature) |
-| `unit_tests.py` — CPU getters | `unit/cpu/test_{feature}.py` (one file per feature) |
+| `unit_tests.py` — GPU getters | `functional/gpu/test_{feature}.py` (one file per feature) |
+| `unit_tests.py` — CPU getters | `functional/cpu/test_{feature}.py` (one file per feature) |
 | `integration_test.py` — init/shutdown | `functional/system/test_init.py` |
 | `integration_test.py` — GPU setters | `functional/gpu/test_{feature}.py` |
 | `integration_test.py` — CPU setters | `functional/cpu/test_{feature}.py` |
 | `integration_test.py` — topology | `functional/system/test_topology.py` |
 | `integration_test.py` — NIC/switch | `functional/nic/test_discovery.py` |
 | `cli_unit_test.py` | `cli/test_cli_{common,gpu,cpu,topology}.py` |
-| `perf_tests.py` | `functional/gpu/test_perf_benchmark.py` |
-| `perf_cputests.py` | `functional/cpu/test_perf_benchmark.py` |
+| `perf_tests.py` | *(deferred to future work)* |
+| `perf_cputests.py` | *(deferred to future work)* |
 | `common.py` | `common/helpers.py` |
 | `runcmd.py` | `common/runcmd.py` |

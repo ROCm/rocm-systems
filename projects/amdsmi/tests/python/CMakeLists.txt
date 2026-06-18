@@ -8,20 +8,13 @@ message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("--------Share Install Prefix: " ${SHARE_INSTALL_PREFIX})
 
 # ---------------------------------------------------------------------------
-# Install the entire tests/python/ tree into the shared install prefix so that
-# the tests can be run from the installed location without the source tree.
+# Note: Tests are installed by tests/python_unittest/CMakeLists.txt to
+# ${SHARE_INSTALL_PREFIX}/tests/python_unittest/ for backward compatibility.
+# No installation from this CMakeLists.txt to avoid duplication.
 # ---------------------------------------------------------------------------
-install(
-    DIRECTORY ./
-    DESTINATION ${SHARE_INSTALL_PREFIX}/tests/python/
-    COMPONENT ${TESTS_COMPONENT}
-    USE_SOURCE_PERMISSIONS
-    FILES_MATCHING
-    PATTERN "*.py"
-)
 
-# Tests are run directly via the runner scripts installed alongside the test tree:
-#   unit_tests.py -v
-#   integration_test.py -v
-#   cli_unit_test.py -v
+# Tests are run directly via the runner scripts installed at python_unittest/:
+#   .../python_unittest/unit_tests.py -v
+#   .../python_unittest/integration_test.py -v
+#   .../python_unittest/cli_unit_test.py -v
 # See tests/python/unit_tests.py (and integration_test.py, cli_unit_test.py) for usage.
