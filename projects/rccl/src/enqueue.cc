@@ -50,23 +50,6 @@ struct ncclKernelMatch {
 };
 
 
-#ifdef ENABLE_COLLTRACE
-#define ncclGetKernelIndex(p_comm) ((p_comm)->unroll + ((p_comm)->collTraceEnabled ? 6 : 0))
-static ncclKernelMatch const ncclKerns[12] = {
-  {(void *)ncclDevKernel_Generic_1, true},
-  {(void *)ncclDevKernel_Generic_2, true},
-  {(void *)ncclDevKernel_Generic_4, true},
-  {(void *)ncclDevKernel_Generic_8, true},
-  {(void *)ncclDevKernel_Generic_16, true},
-  {(void *)ncclDevKernel_Generic_32, true},
-  {(void *)ncclDevKernelDebug_Generic_1, true},
-  {(void *)ncclDevKernelDebug_Generic_2, true},
-  {(void *)ncclDevKernelDebug_Generic_4, true},
-  {(void *)ncclDevKernelDebug_Generic_8, true},
-  {(void *)ncclDevKernelDebug_Generic_16, true},
-  {(void *)ncclDevKernelDebug_Generic_32, true}
-};
-#else
 #define ncclGetKernelIndex(p_comm) ((p_comm)->unroll)
 static ncclKernelMatch const ncclKerns[6] = {
   {(void*)ncclDevKernel_Generic_1, true},
@@ -76,7 +59,6 @@ static ncclKernelMatch const ncclKerns[6] = {
   {(void*)ncclDevKernel_Generic_16, true},
   {(void*)ncclDevKernel_Generic_32, true}
 };
-#endif
 static int rcclProtoGrainSize(int proto, ncclComm *comm){
   switch (proto) {
     case NCCL_PROTO_LL: return 16;
