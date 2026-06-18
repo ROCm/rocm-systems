@@ -215,9 +215,9 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case TeamCtxInfraOddEvenTestType:
       max_msg_size = min_msg_size;
       break;
-    case FenceOrderPutWaveNbiChunksTestType:
-      min_msg_size = 16;  // must be >= STRESS_NUM_CHUNKS for chunk_size >= 1
-      break;
+    // case FenceOrderPutWaveNbiChunksTestType:
+    //   min_msg_size = 16;  // must be >= STRESS_NUM_CHUNKS for chunk_size >= 1
+    //   break;
     case PTestType:
     case GTestType:
       min_msg_size = 1;
