@@ -1096,12 +1096,12 @@ bool RocVideoDecoder::InitHIP(int device_id) {
     return true;
 }
 
-std::chrono::_V2::system_clock::time_point RocVideoDecoder::StartTimer() {
-    return std::chrono::_V2::system_clock::now();
+std::chrono::system_clock::time_point RocVideoDecoder::StartTimer() {
+    return std::chrono::system_clock::now();
 }
 
-double RocVideoDecoder::StopTimer(const std::chrono::_V2::system_clock::time_point &start_time) {
-    return std::chrono::duration<double, std::milli>(std::chrono::_V2::system_clock::now() - start_time).count();
+double RocVideoDecoder::StopTimer(const std::chrono::system_clock::time_point &start_time) {
+    return std::chrono::duration<double, std::milli>(std::chrono::system_clock::now() - start_time).count();
 }
 
 bool RocVideoDecoder::CodecSupported(int device_id, rocDecVideoCodec codec_id, uint32_t bit_depth) {

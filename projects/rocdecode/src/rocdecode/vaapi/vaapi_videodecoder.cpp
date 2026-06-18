@@ -24,7 +24,11 @@ THE SOFTWARE.
 
 VaapiVideoDecoder::VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info) : decoder_create_info_{decoder_create_info},
     output_surface_format_override_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_ {VAProfileNone},
-    va_context_id_{0}, va_surface_ids_{{}}, supports_modifiers_{false}, pic_params_buf_id_{0}, iq_matrix_buf_id_{0}, num_slices_{0},
+    va_context_id_{0}, va_surface_ids_{{}}, supports_modifiers_{false},
+#ifdef _WIN32
+    d3d12_device_{nullptr}, d3d12_shared_resources_{},
+#endif
+    pic_params_buf_id_{0}, iq_matrix_buf_id_{0}, num_slices_{0},
     slice_data_buf_id_{0} {
 };
 
@@ -40,6 +44,17 @@ VaapiVideoDecoder::~VaapiVideoDecoder() {
         if (va_status != VA_STATUS_SUCCESS) {
             CriticalLog(g_rocdec_logger, "vaDestroySurfaces failed");
         }
+#ifdef _WIN32
+        // Release D3D12 shared resources after VA surfaces are destroyed
+        for (auto* res : d3d12_shared_resources_) {
+            if (res) res->Release();
+        }
+        d3d12_shared_resources_.clear();
+        if (d3d12_device_) {
+            d3d12_device_->Release();
+            d3d12_device_ = nullptr;
+        }
+#endif
         if (va_context_id_) {
             va_status = vaDestroyContext(va_display_, va_context_id_);
             if (va_status != VA_STATUS_SUCCESS) {
@@ -381,6 +396,97 @@ rocDecStatus VaapiVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus 
     return ROCDEC_SUCCESS;
 }
 
+#ifdef _WIN32
+rocDecStatus VaapiVideoDecoder::ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_handle) {
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
+    if (pic_idx >= va_surface_ids_.size()) {
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_INVALID_PARAMETER;
+    }
+
+    // Try direct NTHANDLE export first (supported by some VA-API drivers).
+    VAStatus va_status = vaExportSurfaceHandle(va_display_, va_surface_ids_[pic_idx],
+                VA_SURFACE_ATTRIB_MEM_TYPE_NTHANDLE,
+                VA_EXPORT_SURFACE_READ_ONLY |
+                VA_EXPORT_SURFACE_COMPOSED_LAYERS,
+                &nt_handle);
+    if (va_status == VA_STATUS_SUCCESS) {
+        InfoLog(g_rocdec_logger, "Exported surface via NTHANDLE (pic_idx=" + ROCDEC_TOSTR(pic_idx) + ")");
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_SUCCESS;
+    }
+    DebugLog(g_rocdec_logger, "NTHANDLE export not supported (status=" + ROCDEC_TOSTR(va_status) +
+             "), using pre-created shared D3D12 resource");
+
+    // Use our pre-created shared D3D12 resource (created with D3D12_HEAP_FLAG_SHARED in CreateSurfaces).
+    if (pic_idx >= d3d12_shared_resources_.size() || d3d12_shared_resources_[pic_idx] == nullptr) {
+        CriticalLog(g_rocdec_logger, "No shared D3D12 resource for pic_idx=" + ROCDEC_TOSTR(pic_idx));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+
+    HRESULT hr = d3d12_device_->CreateSharedHandle(d3d12_shared_resources_[pic_idx], nullptr, GENERIC_ALL, nullptr, &nt_handle);
+    if (FAILED(hr)) {
+        CriticalLog(g_rocdec_logger, "CreateSharedHandle failed, HRESULT=0x" +
+                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(hr));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+
+    InfoLog(g_rocdec_logger, "Exported surface via shared D3D12 resource (pic_idx=" + ROCDEC_TOSTR(pic_idx) + ")");
+    FunctionExitLog(g_rocdec_logger);
+    return ROCDEC_SUCCESS;
+}
+rocDecStatus VaapiVideoDecoder::MapSurfaceToCPU(int pic_idx, uint8_t** cpu_ptr, uint32_t &width, uint32_t &height,
+                                                uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes) {
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
+    if (pic_idx >= va_surface_ids_.size()) {
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_INVALID_PARAMETER;
+    }
+
+    // Determine the pixel format matching our surfaces (NV12 for 8-bit 420, P010 for 10-bit, etc.)
+    VAImageFormat img_fmt = {};
+    if (decoder_create_info_.bit_depth_minus_8 == 0) {
+        img_fmt.fourcc = VA_FOURCC_NV12;
+    } else {
+        img_fmt.fourcc = VA_FOURCC_P010;
+    }
+
+    // Create a CPU-accessible image, copy surface data into it, then map.
+    // vaGetImage performs an internal GPU→CPU readback (unlike vaDeriveImage which
+    // tries zero-copy and fails on D3D12 DEFAULT heap surfaces).
+    CHECK_VAAPI(vaCreateImage(va_display_, &img_fmt,
+                              decoder_create_info_.width, decoder_create_info_.height, &va_mapped_image_));
+    CHECK_VAAPI(vaGetImage(va_display_, va_surface_ids_[pic_idx],
+                           0, 0, decoder_create_info_.width, decoder_create_info_.height,
+                           va_mapped_image_.image_id));
+
+    void* buf = nullptr;
+    CHECK_VAAPI(vaMapBuffer(va_display_, va_mapped_image_.buf, &buf));
+
+    *cpu_ptr = static_cast<uint8_t*>(buf);
+    width = va_mapped_image_.width;
+    height = va_mapped_image_.height;
+    num_planes = va_mapped_image_.num_planes;
+    for (uint32_t i = 0; i < num_planes && i < 3; i++) {
+        pitches[i] = va_mapped_image_.pitches[i];
+        offsets[i] = va_mapped_image_.offsets[i];
+    }
+
+    FunctionExitLog(g_rocdec_logger);
+    return ROCDEC_SUCCESS;
+}
+
+rocDecStatus VaapiVideoDecoder::UnmapSurface(int pic_idx) {
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
+    CHECK_VAAPI(vaUnmapBuffer(va_display_, va_mapped_image_.buf));
+    CHECK_VAAPI(vaDestroyImage(va_display_, va_mapped_image_.image_id));
+    memset(&va_mapped_image_, 0, sizeof(va_mapped_image_));
+    FunctionExitLog(g_rocdec_logger);
+    return ROCDEC_SUCCESS;
+}
+#else
 rocDecStatus VaapiVideoDecoder::ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc) {
     FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
     if (pic_idx >= va_surface_ids_.size()) {
@@ -396,6 +502,7 @@ rocDecStatus VaapiVideoDecoder::ExportSurface(int pic_idx, VADRMPRIMESurfaceDesc
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
+#endif
 
 rocDecStatus VaapiVideoDecoder::SyncSurface(int pic_idx) {
     FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
@@ -608,6 +715,118 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
             return ROCDEC_NOT_SUPPORTED;
     }
     surf_attribs.push_back(surf_attrib);
+#ifdef _WIN32
+    // On Windows, create D3D12 resources with D3D12_HEAP_FLAG_SHARED so that
+    // CreateSharedHandle will succeed for HIP interop later.
+    // Map the VA fourcc to a DXGI format for D3D12 resource creation.
+    DXGI_FORMAT dxgi_format;
+    switch (surf_attrib.value.value.i) {
+        case VA_FOURCC_NV12: dxgi_format = DXGI_FORMAT_NV12; break;
+        case VA_FOURCC_P010: dxgi_format = DXGI_FORMAT_P010; break;
+        case VA_FOURCC_P012: dxgi_format = DXGI_FORMAT_P016; break; // D3D12 uses P016 for 12-bit
+        default:
+            CriticalLog(g_rocdec_logger, "Unsupported fourcc for D3D12 shared surface: 0x" +
+                        ([](int f) { std::ostringstream o; o << std::hex << f; return o.str(); })(surf_attrib.value.value.i));
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_NOT_SUPPORTED;
+    }
+
+    if (d3d12_device_ == nullptr) {
+        // Get the adapter LUID from the VaContext to create a matching D3D12 device.
+        VaContext& va_ctx = VaContext::GetInstance();
+        LUID adapter_luid = {};
+        for (auto& ctx : va_ctx.va_contexts_) {
+            if (ctx.device_id == decoder_create_info_.device_id) {
+                adapter_luid = ctx.adapter_luid;
+                break;
+            }
+        }
+        IDXGIFactory2* factory = nullptr;
+        HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory2), reinterpret_cast<void**>(&factory));
+        if (FAILED(hr)) {
+            CriticalLog(g_rocdec_logger, "CreateDXGIFactory1 failed");
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
+        IDXGIAdapter1* adapter = nullptr;
+        for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+            DXGI_ADAPTER_DESC1 desc;
+            adapter->GetDesc1(&desc);
+            if (desc.AdapterLuid.HighPart == adapter_luid.HighPart &&
+                desc.AdapterLuid.LowPart == adapter_luid.LowPart) {
+                break;
+            }
+            adapter->Release();
+            adapter = nullptr;
+        }
+        factory->Release();
+        if (adapter == nullptr) {
+            CriticalLog(g_rocdec_logger, "Failed to find DXGI adapter matching LUID");
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_DEVICE_INVALID;
+        }
+        hr = D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0,
+                               __uuidof(ID3D12Device), reinterpret_cast<void**>(&d3d12_device_));
+        adapter->Release();
+        if (FAILED(hr) || d3d12_device_ == nullptr) {
+            CriticalLog(g_rocdec_logger, "D3D12CreateDevice failed");
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
+    }
+
+    uint32_t num_surfaces = decoder_create_info_.num_decode_surfaces;
+    // Release any previously created shared resources (reconfigure path).
+    for (auto* res : d3d12_shared_resources_) {
+        if (res) res->Release();
+    }
+    d3d12_shared_resources_.resize(num_surfaces, nullptr);
+
+    D3D12_RESOURCE_DESC res_desc = {};
+    res_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    res_desc.Width = decoder_create_info_.width;
+    res_desc.Height = decoder_create_info_.height;
+    res_desc.DepthOrArraySize = 1;
+    res_desc.MipLevels = 1;
+    res_desc.Format = dxgi_format;
+    res_desc.SampleDesc.Count = 1;
+    res_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    res_desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+    D3D12_HEAP_PROPERTIES heap_props = {};
+    heap_props.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    for (uint32_t i = 0; i < num_surfaces; i++) {
+        HRESULT hr = d3d12_device_->CreateCommittedResource(
+            &heap_props, D3D12_HEAP_FLAG_SHARED,
+            &res_desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+            __uuidof(ID3D12Resource), reinterpret_cast<void**>(&d3d12_shared_resources_[i]));
+        if (FAILED(hr) || d3d12_shared_resources_[i] == nullptr) {
+            CriticalLog(g_rocdec_logger, "Failed to create shared D3D12 resource " + ROCDEC_TOSTR(i) +
+                        ", HRESULT=0x" + ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(hr));
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
+    }
+
+    // Tell VA-API to use our pre-created shared D3D12 resources as external surfaces.
+    VASurfaceAttrib ext_attrib;
+    ext_attrib.type = VASurfaceAttribMemoryType;
+    ext_attrib.flags = VA_SURFACE_ATTRIB_SETTABLE;
+    ext_attrib.value.type = VAGenericValueTypeInteger;
+    ext_attrib.value.value.i = VA_SURFACE_ATTRIB_MEM_TYPE_D3D12_RESOURCE;
+    surf_attribs.push_back(ext_attrib);
+
+    VASurfaceAttrib ext_buf_attrib;
+    ext_buf_attrib.type = VASurfaceAttribExternalBufferDescriptor;
+    ext_buf_attrib.flags = VA_SURFACE_ATTRIB_SETTABLE;
+    ext_buf_attrib.value.type = VAGenericValueTypePointer;
+    ext_buf_attrib.value.value.p = d3d12_shared_resources_.data();
+    surf_attribs.push_back(ext_buf_attrib);
+
+    CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format, decoder_create_info_.width,
+        decoder_create_info_.height, va_surface_ids_.data(), va_surface_ids_.size(), surf_attribs.data(), surf_attribs.size()));
+#else
     uint64_t mod_linear = 0;
     VADRMFormatModifierList modifier_list = {
         .num_modifiers = 1,
@@ -621,6 +840,7 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
     }
     CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format, decoder_create_info_.width,
         decoder_create_info_.height, va_surface_ids_.data(), va_surface_ids_.size(), surf_attribs.data(), surf_attribs.size()));
+#endif
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
@@ -658,14 +878,18 @@ rocDecStatus VaapiVideoDecoder::DestroyDataBuffers() {
 }
 
 VaContext::VaContext() {
+#ifndef _WIN32
     GetGpuUuids();
+#endif
 }
 
 VaContext::~VaContext() {
     for (int i = 0; i < va_contexts_.size(); i++) {
+#ifndef _WIN32
         if (va_contexts_[i].drm_fd != -1) {
             close(va_contexts_[i].drm_fd);
         }
+#endif
         if (va_contexts_[i].va_display) {
             if (vaTerminate(va_contexts_[i].va_display) != VA_STATUS_SUCCESS) {
                 CriticalLog(g_rocdec_logger, "Failed to terminate VA");
@@ -708,12 +932,25 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         va_contexts_[va_ctx_idx].device_id = device_id;
         va_contexts_[va_ctx_idx].gpu_uuid.assign(gpu_uuid);
         va_contexts_[va_ctx_idx].hip_dev_prop = hip_dev_prop;
+#ifdef _WIN32
+        memcpy(&va_contexts_[va_ctx_idx].adapter_luid, hip_dev_prop.luid, sizeof(LUID));
+#else
         va_contexts_[va_ctx_idx].drm_fd = -1;
+#endif
         va_contexts_[va_ctx_idx].va_display = 0;
         va_contexts_[va_ctx_idx].num_dec_engines = 1;
         va_contexts_[va_ctx_idx].va_profile = VAProfileNone;
         va_contexts_[va_ctx_idx].config_attributes_probed = false;
 
+#ifdef _WIN32
+        rocdec_status = InitVAAPI(va_ctx_idx, &va_contexts_[va_ctx_idx].adapter_luid);
+        if (rocdec_status != ROCDEC_SUCCESS) {
+            CriticalLog(g_rocdec_logger, "Failed to initialize the VAAPI via vaon12.");
+            va_contexts_.pop_back();
+            FunctionExitLog(g_rocdec_logger);
+            return rocdec_status;
+        }
+#else
         std::vector<int> visible_devices;
         GetVisibleDevices(visible_devices);
 
@@ -761,8 +998,9 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
             CriticalLog(g_rocdec_logger, "Failed to get the number of video decode engines.");
         }
         amdgpu_device_deinitialize(dev_handle);
+#endif
 
-        // Prob VA profiles
+        // Probe VA profiles
         va_contexts_[va_ctx_idx].num_va_profiles = vaMaxNumProfiles(va_contexts_[va_ctx_idx].va_display);
         va_contexts_[va_ctx_idx].va_profile_list.resize(va_contexts_[va_ctx_idx].num_va_profiles);
         CHECK_VAAPI(vaQueryConfigProfiles(va_contexts_[va_ctx_idx].va_display, va_contexts_[va_ctx_idx].va_profile_list.data(), &va_contexts_[va_ctx_idx].num_va_profiles));
@@ -781,7 +1019,11 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
     } else {
+#ifdef _WIN32
+        VADisplay new_va_display = vaGetDisplayWin32(&va_contexts_[va_ctx_id].adapter_luid);
+#else
         VADisplay new_va_display = vaGetDisplayDRM(va_contexts_[va_ctx_id].drm_fd);
+#endif
         if (!new_va_display) {
             CriticalLog(g_rocdec_logger, "Failed to create VA display.");
             FunctionExitLog(g_rocdec_logger);
@@ -1039,6 +1281,62 @@ rocDecStatus VaContext::InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop) {
     return ROCDEC_SUCCESS;
 }
 
+#ifdef _WIN32
+rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, const LUID* adapter_luid) {
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(va_ctx_idx));
+    InfoLog(g_rocdec_logger, "Initializing VA-API via vaon12 (LUID: " +
+            ROCDEC_TOSTR(adapter_luid->HighPart) + ":" + ROCDEC_TOSTR(adapter_luid->LowPart) + ")");
+
+    // Auto-set LIBVA_DRIVERS_PATH to the directory containing rocdecode.dll so that
+    // libva can find vaon12_drv_video.dll (which is deployed alongside rocdecode.dll).
+    if (std::getenv("LIBVA_DRIVERS_PATH") == nullptr) {
+        HMODULE hm = nullptr;
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               reinterpret_cast<LPCSTR>(&VaContext::GetInstance), &hm)) {
+            char module_path[MAX_PATH] = {};
+            if (GetModuleFileNameA(hm, module_path, MAX_PATH) > 0) {
+                std::string dir(module_path);
+                auto pos = dir.find_last_of("\\/");
+                if (pos != std::string::npos) {
+                    dir = dir.substr(0, pos);
+                    _putenv_s("LIBVA_DRIVERS_PATH", dir.c_str());
+                    InfoLog(g_rocdec_logger, "Auto-set LIBVA_DRIVERS_PATH=" + dir);
+                }
+            }
+        }
+    }
+
+    va_contexts_[va_ctx_idx].va_display = vaGetDisplayWin32(adapter_luid);
+    if (!va_contexts_[va_ctx_idx].va_display) {
+        CriticalLog(g_rocdec_logger, "Failed to create VA display via vaGetDisplayWin32.");
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_NOT_INITIALIZED;
+    }
+    std::string va_driver_path;
+    vaSetInfoCallback(va_contexts_[va_ctx_idx].va_display, [](void* user_context, const char* message) {
+        std::string msg(message);
+        if (msg.find("Trying to open") != std::string::npos) {
+            *static_cast<std::string*>(user_context) = msg;
+        }
+    }, &va_driver_path);
+    int major_version = 0, minor_version = 0;
+    VAStatus va_status = vaInitialize(va_contexts_[va_ctx_idx].va_display, &major_version, &minor_version);
+    vaSetInfoCallback(va_contexts_[va_ctx_idx].va_display, nullptr, nullptr);
+    if (va_status != VA_STATUS_SUCCESS) {
+        CriticalLog(g_rocdec_logger, std::string("vaInitialize failed: ") + vaErrorStr(va_status));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+    InfoLog(g_rocdec_logger, "VA-API version " + std::to_string(major_version) + "." + std::to_string(minor_version));
+    const char* vendor_str = vaQueryVendorString(va_contexts_[va_ctx_idx].va_display);
+    InfoLog(g_rocdec_logger, "VA-API vendor: " + std::string(vendor_str ? vendor_str : "<unknown>"));
+    if (!va_driver_path.empty()) {
+        InfoLog(g_rocdec_logger, va_driver_path);
+    }
+    FunctionExitLog(g_rocdec_logger);
+    return ROCDEC_SUCCESS;
+}
+#else
 rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, std::string drm_node) {
     FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(va_ctx_idx) + ", " + drm_node);
     InfoLog(g_rocdec_logger, "Opening DRM node: " + drm_node);
@@ -1078,7 +1376,9 @@ rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, std::string drm_node) {
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
+#endif
 
+#ifndef _WIN32
 void VaContext::GetVisibleDevices(std::vector<int>& visible_devices_vetor) {
     FunctionEntryLogWithArgs(g_rocdec_logger, "");
     // First, check if the ROCR_VISIBLE_DEVICES environment variable is present
@@ -1219,3 +1519,4 @@ void VaContext::GetGpuUuids() {
         closedir(dir);
     }
 }
+#endif // !_WIN32

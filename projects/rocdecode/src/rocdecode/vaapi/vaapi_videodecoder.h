@@ -27,18 +27,27 @@ THE SOFTWARE.
 #include <sstream>
 #include <vector>
 #include <string>
-#include <fcntl.h>
-#include <unistd.h>
-#include <dirent.h>
-#include <sys/stat.h>
 #include <cstring>
 #include <mutex>
 #include <algorithm>
 #include <unordered_map>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <d3d12.h>
+#include <dxgi1_2.h>
+#include <va/va_win32.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <libdrm/amdgpu_drm.h>
 #include <libdrm/amdgpu.h>
-#include <va/va.h>
 #include <va/va_drm.h>
+#endif
+
+#include <va/va.h>
 #include <va/va_drmcommon.h>
 #include "../../commons.h"
 #include "../../../api/rocdecode/rocdecode.h"
@@ -61,6 +70,7 @@ THE SOFTWARE.
 
 #define INIT_SLICE_PARAM_LIST_NUM 16 // initial slice parameter buffer list size
 
+#ifndef _WIN32
 typedef enum {
     kSpx = 0, // Single Partition Accelerator
     kDpx = 1, // Dual Partition Accelerator
@@ -68,11 +78,16 @@ typedef enum {
     kQpx = 3, // Quad Partition Accelerator
     kCpx = 4, // Core Partition Accelerator
 } ComputePartition;
+#endif
 
 typedef struct {
     int device_id;
     std::string gpu_uuid;
+#ifdef _WIN32
+    LUID adapter_luid;
+#else
     int drm_fd;
+#endif
     VADisplay va_display;
     hipDeviceProp_t hip_dev_prop;
     uint32_t num_dec_engines;
@@ -96,7 +111,16 @@ public:
     rocDecStatus InitializeDecoder();
     rocDecStatus SubmitDecode(RocdecPicParams *pPicParams);
     rocDecStatus GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status);
+#ifdef _WIN32
+    // Zero-copy path (blocked on HIP D3D12 interop support — not yet functional):
+    rocDecStatus ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_handle);
+    // EXPERIMENTAL CPU-staged path (functional workaround):
+    rocDecStatus MapSurfaceToCPU(int pic_idx, uint8_t** cpu_ptr, uint32_t &width, uint32_t &height,
+                                 uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes);
+    rocDecStatus UnmapSurface(int pic_idx);
+#else
     rocDecStatus ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc);
+#endif
     rocDecStatus SyncSurface(int pic_idx);
     rocDecStatus ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params);
 
@@ -110,6 +134,11 @@ private:
     VAContextID va_context_id_;
     std::vector<VASurfaceID> va_surface_ids_;
     bool supports_modifiers_;
+#ifdef _WIN32
+    ID3D12Device* d3d12_device_;                         // D3D12 device for creating shared resources
+    std::vector<ID3D12Resource*> d3d12_shared_resources_; // Shared D3D12 textures used as VA surfaces
+    VAImage va_mapped_image_;                             // Current derived image for CPU mapping
+#endif
 
     VABufferID pic_params_buf_id_;
     VABufferID iq_matrix_buf_id_;
@@ -143,23 +172,29 @@ public:
 
 private:
     std::mutex mutex;
+#ifndef _WIN32
     /**
      * @brief A map that associates GPU UUIDs with their corresponding render node indices.
-     * 
-     * This unordered map uses GPU UUIDs as keys (std::string) and maps them to their 
-     * respective render node indices (int). It provides a fast lookup mechanism to 
+     *
+     * This unordered map uses GPU UUIDs as keys (std::string) and maps them to their
+     * respective render node indices (int). It provides a fast lookup mechanism to
      * retrieve the render node index for a given GPU UUID.
      */
     std::unordered_map<std::string, int> gpu_uuids_to_render_nodes_map_;
     std::unordered_map<std::string, ComputePartition> gpu_uuids_to_compute_partition_map_;
+#endif
     VaContext();
     VaContext(const VaContext&) = delete;
     VaContext& operator = (const VaContext) = delete;
     ~VaContext();
 
     rocDecStatus InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop);
+#ifdef _WIN32
+    rocDecStatus InitVAAPI(int va_ctx_idx, const LUID* adapter_luid);
+#else
     rocDecStatus InitVAAPI(int va_ctx_idx, std::string drm_node);
     void GetVisibleDevices(std::vector<int>& visible_devices_vetor);
     void GetDrmNodeOffset(std::string device_name, uint8_t device_id, std::vector<int>& visible_devices, ComputePartition current_compute_partition, int &offset);
     void GetGpuUuids();
+#endif
 };

@@ -25,13 +25,15 @@ THE SOFTWARE.
 #include <cstring>
 #include <string>
 #include <iomanip>
+#ifndef _WIN32
 #include <unistd.h>
+#include <libgen.h>
+#endif
 #include <vector>
 #include <string>
 #include <chrono>
 #include <sys/stat.h>
-#include <libgen.h>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if (defined(__cplusplus) && __cplusplus >= 201703L) || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
     #include <filesystem>
 #else
     #include <experimental/filesystem>

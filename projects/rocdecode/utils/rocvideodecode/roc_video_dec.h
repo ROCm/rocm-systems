@@ -39,8 +39,13 @@ THE SOFTWARE.
 #include <thread>
 #include <ctime>
 #include <time.h>
+#ifdef _WIN32
+#include <process.h>
+#include <windows.h>
+#else
 #include <unistd.h>
 #include <sys/syscall.h>
+#endif
 #include <hip/hip_runtime.h>
 #include "rocdecode/rocdecode.h"
 #include "rocdecode/rocparser.h"
@@ -50,6 +55,25 @@ THE SOFTWARE.
 
 // Simple logging macros - format matches src/commons.h:
 //   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y hashid:0xZZZZZ] func(): message
+#ifdef _WIN32
+#define RocVideoDecCriticalLog(msg) \
+    do { \
+        static LARGE_INTEGER _freq_ = {}; \
+        if (_freq_.QuadPart == 0) QueryPerformanceFrequency(&_freq_); \
+        LARGE_INTEGER _cnt_; QueryPerformanceCounter(&_cnt_); \
+        uint64_t _us_ = static_cast<uint64_t>(_cnt_.QuadPart * 1000000ULL / _freq_.QuadPart); \
+        const char *_f_ = strrchr(__FILE__, '\\'); \
+        if (!_f_) _f_ = strrchr(__FILE__, '/'); \
+        uint32_t _tid_ = GetCurrentThreadId(); \
+        std::ostringstream _htid_oss_; \
+        _htid_oss_ << "0x" << std::hex << std::setw(5) << std::setfill('0') \
+                  << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); \
+        std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
+                  << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
+                  << _getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
+                  << __func__ << "(): " << (msg) << std::endl; \
+    } while (0)
+#else
 #define RocVideoDecCriticalLog(msg) \
     do { \
         struct timespec _ts_; \
@@ -65,6 +89,7 @@ THE SOFTWARE.
                   << getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
                   << __func__ << "(): " << (msg) << std::endl; \
     } while (0)
+#endif
 
 /*!
  * \file
@@ -486,13 +511,13 @@ class RocVideoDecoder {
          * @brief Function to get start time
          * 
          */
-        std::chrono::_V2::system_clock::time_point StartTimer();
+        std::chrono::system_clock::time_point StartTimer();
 
         /**
          * @brief Function to get elapsed time
          * 
          */
-        double StopTimer(const std::chrono::_V2::system_clock::time_point &start_time);
+        double StopTimer(const std::chrono::system_clock::time_point &start_time);
 
         int num_devices_;
         int device_id_;

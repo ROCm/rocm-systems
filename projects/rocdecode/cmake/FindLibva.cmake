@@ -21,18 +21,32 @@
 #
 ################################################################################
 
-# Search super-project (e.g. amd-mesa) sysdeps first when building in TheRock
-if(DEFINED THEROCK_SUPERPROJECT_INCLUDE_DIRS)
-  list(APPEND _libva_include_hints ${THEROCK_SUPERPROJECT_INCLUDE_DIRS})
+if(WIN32)
+  # On Windows, use vaon12 (VA-API on D3D12 translation layer)
+  set(VAON12_ROOT "C:/vaon12" CACHE PATH "Path to vaon12 NuGet package")
+  set(VAON12_BASE "${VAON12_ROOT}/build/native/x64")
+
+  find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS "${VAON12_BASE}/include" NO_DEFAULT_PATH)
+  find_library(LIBVA_LIBRARY NAMES va PATHS "${VAON12_BASE}/lib" NO_DEFAULT_PATH)
+  find_library(LIBVA_WIN32_LIBRARY NAMES va_win32 PATHS "${VAON12_BASE}/lib" NO_DEFAULT_PATH)
+
+  include(FindPackageHandleStandardArgs)
+  find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
+  mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
+else()
+  # Search super-project (e.g. amd-mesa) sysdeps first when building in TheRock
+  if(DEFINED THEROCK_SUPERPROJECT_INCLUDE_DIRS)
+    list(APPEND _libva_include_hints ${THEROCK_SUPERPROJECT_INCLUDE_DIRS})
+  endif()
+
+  find_library(LIBVA_LIBRARY NAMES va HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib /opt/amdgpu/lib/x86_64-linux-gnu /opt/amdgpu/lib64 /usr/lib/x86_64-linux-gnu /usr/lib64)
+  find_library(LIBVA_DRM_LIBRARY NAMES va-drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib /opt/amdgpu/lib/x86_64-linux-gnu /opt/amdgpu/lib64 /usr/lib/x86_64-linux-gnu /usr/lib64)
+  find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS ${_libva_include_hints} ${ROCM_PATH}/lib/rocm_sysdeps/include /opt/amdgpu/include /usr/include NO_DEFAULT_PATH)
+
+  include(FindPackageHandleStandardArgs)
+  find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY)
+  mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_DRM_LIBRARY)
 endif()
-
-find_library(LIBVA_LIBRARY NAMES va HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib /opt/amdgpu/lib/x86_64-linux-gnu /opt/amdgpu/lib64 /usr/lib/x86_64-linux-gnu /usr/lib64)
-find_library(LIBVA_DRM_LIBRARY NAMES va-drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib /opt/amdgpu/lib/x86_64-linux-gnu /opt/amdgpu/lib64 /usr/lib/x86_64-linux-gnu /usr/lib64)
-find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS ${_libva_include_hints} ${ROCM_PATH}/lib/rocm_sysdeps/include /opt/amdgpu/include /usr/include NO_DEFAULT_PATH)
-
-include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY)
-mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_DRM_LIBRARY)
 
 if(Libva_FOUND)
   # Find VA Version
@@ -54,13 +68,23 @@ if(Libva_FOUND)
     set_target_properties(Libva::va PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${LIBVA_INCLUDE_DIR}"
         IMPORTED_LOCATION "${LIBVA_LIBRARY}")
   endif()
-  if(NOT TARGET Libva::va_drm)
-    add_library(Libva::va_drm UNKNOWN IMPORTED)
-    set_target_properties(Libva::va_drm PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${LIBVA_INCLUDE_DIR}"
-      IMPORTED_LOCATION "${LIBVA_DRM_LIBRARY}")
+  if(WIN32)
+    if(NOT TARGET Libva::va_win32)
+      add_library(Libva::va_win32 UNKNOWN IMPORTED)
+      set_target_properties(Libva::va_win32 PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${LIBVA_INCLUDE_DIR}"
+        IMPORTED_LOCATION "${LIBVA_WIN32_LIBRARY}")
+    endif()
+    message("-- ${White}Using Libva -- \n\tLibraries:${LIBVA_LIBRARY} \n\tIncludes:${LIBVA_INCLUDE_DIR}${ColourReset}")
+    message("-- ${White}Using Libva-win32 -- \n\tLibraries:${LIBVA_WIN32_LIBRARY}${ColourReset}")
+  else()
+    if(NOT TARGET Libva::va_drm)
+      add_library(Libva::va_drm UNKNOWN IMPORTED)
+      set_target_properties(Libva::va_drm PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${LIBVA_INCLUDE_DIR}"
+        IMPORTED_LOCATION "${LIBVA_DRM_LIBRARY}")
+    endif()
+    message("-- ${White}Using Libva -- \n\tLibraries:${LIBVA_LIBRARY} \n\tIncludes:${LIBVA_INCLUDE_DIR}${ColourReset}")
+    message("-- ${White}Using Libva-drm -- \n\tLibraries:${LIBVA_DRM_LIBRARY}${ColourReset}")
   endif()
-  message("-- ${White}Using Libva -- \n\tLibraries:${LIBVA_LIBRARY} \n\tIncludes:${LIBVA_INCLUDE_DIR}${ColourReset}")
-  message("-- ${White}Using Libva-drm -- \n\tLibraries:${LIBVA_DRM_LIBRARY}${ColourReset}")
 else()
   if(Libva_FIND_REQUIRED)
     message(FATAL_ERROR "{Red}FindLibva -- Libva NOT FOUND${ColourReset}")
