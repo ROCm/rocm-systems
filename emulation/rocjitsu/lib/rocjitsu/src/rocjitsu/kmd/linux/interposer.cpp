@@ -228,8 +228,16 @@ public:
   }
 
   const std::string &invocation_runtime_dir() {
-    if (invocation_runtime_dir_.empty())
-      invocation_runtime_dir_ = rocjitsu::rpc_invocation_runtime_dir(getpid());
+    if (invocation_runtime_dir_.empty()) {
+      // The launcher exports the resolved dir before execvp, so every descendant
+      // (including grandchildren spawned through wrappers like ctest) inherits
+      // it directly. Fall back to the PID-scoped default for attach mode, where
+      // no launcher set it.
+      if (const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv))
+        invocation_runtime_dir_ = dir;
+      else
+        invocation_runtime_dir_ = rocjitsu::rpc_invocation_runtime_dir(getpid());
+    }
     return invocation_runtime_dir_;
   }
 
