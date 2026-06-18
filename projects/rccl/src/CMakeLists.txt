@@ -628,7 +628,7 @@ if (HAVE_PARALLEL_JOBS)
   target_compile_options(rccl PRIVATE -parallel-jobs=12)
 endif()
 
-if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
+if (ROCM_INSTALL_VERSION VERSION_GREATER_EQUAL "60200")
   target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
   target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
   message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
@@ -693,8 +693,8 @@ if(ENABLE_CODE_COVERAGE)
   # atexit() handlers (e.g. ProcessIsolatedTestRunner using _exit()) can
   # still flush librccl's private LLVM profile runtime instance.
   target_sources(rccl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/misc/coverage_flush.cc)
-elseif(BUILD_TESTS) # Enable default/hidden visibility based on build type and ROCM_VERSION
-  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+elseif(BUILD_TESTS) # Enable default/hidden visibility based on build type and ROCM_INSTALL_VERSION
+  if (ROCM_INSTALL_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
     target_compile_options(rccl PRIVATE -fvisibility=default)
   else()
     target_compile_options(rccl PRIVATE -fvisibility=hidden)
@@ -751,11 +751,11 @@ endif()
 ## Set RCCL linked library directories
 target_link_directories(rccl PRIVATE ${SMI_LIB_DIR})
 
-if (ROCM_VERSION VERSION_GREATER_EQUAL "60100")
+if (ROCM_INSTALL_VERSION VERSION_GREATER_EQUAL "60100")
     option(RCCL_ROCPROFILER_REGISTER "Enable rocprofiler-register support" ON)
 else()
     if(RCCL_ROCPROFILER_REGISTER)
-        message(AUTHOR_WARNING "RCCL_ROCPROFILER_REGISTER is not valid option for ROCm < 6.2. Current ROCm version: ${ROCM_VERSION}")
+        message(AUTHOR_WARNING "RCCL_ROCPROFILER_REGISTER is not valid option for ROCm < 6.2. Current ROCm version: ${ROCM_INSTALL_VERSION}")
     endif()
     set(RCCL_ROCPROFILER_REGISTER OFF CACHE BOOL "" FORCE)
 endif()

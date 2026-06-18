@@ -294,6 +294,7 @@ string(REGEX MATCH "([0-9]+)$" CUDA_MINOR "${CUDA_VERSION}")
 string(REGEX REPLACE ".*\\.([0-9]+)$" "\\1" CUDA_MINOR "${CUDA_VERSION}")
 ]]
 # Extract major, minor, and patch version numbers
+# Use ROCM_INSTALL_VERSION instead of ROCM_VERSION, which is owned by Dependencies.cmake
 string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
 if (rocm_version_matches)
     set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
@@ -303,8 +304,8 @@ if (rocm_version_matches)
     message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}")
 
     # Convert the version components to int for comparison
-    math(EXPR ROCM_VERSION "(10000 * ${ROCM_MAJOR_VERSION}) + (100 * ${ROCM_MINOR_VERSION}) + ${ROCM_PATCH_VERSION}")
-    add_definitions("-DROCM_VERSION=${ROCM_VERSION}")
+    math(EXPR ROCM_INSTALL_VERSION "(10000 * ${ROCM_MAJOR_VERSION}) + (100 * ${ROCM_MINOR_VERSION}) + ${ROCM_PATCH_VERSION}")
+    add_definitions("-DROCM_VERSION=${ROCM_INSTALL_VERSION}")
 else()
     message(WARNING "Failed to extract ROCm version.")
 endif()
@@ -723,7 +724,7 @@ get_target_property(HSA_INCLUDE_PATH hsa-runtime64::hsa-runtime64 INTERFACE_INCL
 message(STATUS "HSA runtime: ${HSA_INCLUDE_PATH}")
 
 ## Check for amd-smi if ROCm 7.11.0 or newer
-if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
+if(ROCM_INSTALL_VERSION VERSION_GREATER_EQUAL "71100")
   find_package(amd_smi PATHS ${ROCM_PATH}/lib/cmake/amd_smi)
   if(amd_smi_FOUND)
     message(STATUS "amd_smi_INCLUDE_DIR: ${amd_smi_INCLUDE_DIR}")
