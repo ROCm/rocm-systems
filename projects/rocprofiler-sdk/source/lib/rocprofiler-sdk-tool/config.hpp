@@ -137,6 +137,7 @@ struct config : output_config
     bool   list_metrics                  = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file      = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace         = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
+    bool   att_no_intercept              = get_env("ROCPROF_ATT_NO_INTERCEPT", false);
     bool   att_serialize_all             = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     bool   enable_signal_handlers        = get_env("ROCPROF_SIGNAL_HANDLERS", true);
     bool   enable_process_sync           = get_env("ROCPROF_PROCESS_SYNC", false);
@@ -225,6 +226,7 @@ config::get_attach_invariants() const
                            rocjpeg_api_trace,
                            ompt_trace,
                            advanced_thread_trace,
+                           att_no_intercept,
                            att_serialize_all,
                            att_param_shader_engine_mask,
                            att_param_buffer_size,
@@ -332,6 +334,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(pc_sampling_unit_value);
 
     CFG_SERIALIZE_MEMBER(advanced_thread_trace);
+    CFG_SERIALIZE_MEMBER(att_no_intercept);
     CFG_SERIALIZE_MEMBER(att_serialize_all);
     CFG_SERIALIZE_MEMBER(att_param_shader_engine_mask);
     CFG_SERIALIZE_MEMBER(att_param_buffer_size);
