@@ -86,6 +86,7 @@ class TestRocSHMEMTracing(RocprofsysTest):
         rocshmem_env,
         rocshmem_demo_available,
         assert_perfetto,
+        assert_rocpd,
         assert_regex,
     ):
         available, reason = rocshmem_demo_available
@@ -110,6 +111,12 @@ class TestRocSHMEMTracing(RocprofsysTest):
                 # (e.g. "barrier_all_on_stream") as the span label; using
                 # substrings is robust against any "rocshmem_" prefix that
                 # different build configurations may emit.
+                label_substrings=EXPECTED_OPERATIONS,
+                skip_on_fail=True,
+            )
+            assert_rocpd(
+                result,
+                categories=["rocm_rocshmem_api"],
                 label_substrings=EXPECTED_OPERATIONS,
                 skip_on_fail=True,
             )
