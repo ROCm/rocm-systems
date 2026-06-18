@@ -22,6 +22,7 @@
 
 #include <rocprofiler-register/rocprofiler-register.h>
 
+#include "details/checked_lock.hpp"
 #include "details/dl.hpp"
 #include "details/environment.hpp"
 #include "details/filesystem.hpp"
@@ -528,27 +529,12 @@ struct registered_library_api_table
 constexpr auto instance_bits     = sizeof(uint64_t) * 8;  // bits in instance_counters
 constexpr auto max_instances     = instance_bits * ROCP_REG_LAST;
 constexpr auto library_seq       = std::make_index_sequence<ROCP_REG_LAST>{};
-auto           global_count      = std::atomic<uint32_t>{ 0 };
 auto           import_info       = rocp_reg_get_imports(library_seq);
 auto           instance_counters = std::array<std::atomic_uint64_t, ROCP_REG_LAST>{};
 auto           registered =
     std::array<std::optional<registered_library_api_table>, max_instances>{};
-
-struct scoped_count
-{
-    scoped_count()
-    : value{ ++global_count }
-    { }
-
-    ~scoped_count() { --global_count; }
-
-    scoped_count(const scoped_count&)     = delete;
-    scoped_count(scoped_count&&) noexcept = delete;
-    scoped_count& operator=(const scoped_count&) = delete;
-    scoped_count& operator=(scoped_count&&) noexcept = delete;
-
-    uint32_t value = 0;
-};
+// Serialises concurrent callers and detects (disallowed) recursive re-entry.
+auto registration_mutex = common::checked_mutex{};
 
 std::optional<registered_library_api_table>*
 rocp_add_registered_library_api_table(const char*                        common_name,
@@ -564,17 +550,18 @@ rocp_add_registered_library_api_table(const char*                        common_
                              lib_version,
                              api_tables_len);
 
-    constexpr auto rocattach_name = supported_library_trait<ROCP_REG_ROCATTACH>::common_name;
-    const bool     is_rocattach   = (std::string_view{ common_name } == rocattach_name);
+    constexpr auto rocattach_name =
+        supported_library_trait<ROCP_REG_ROCATTACH>::common_name;
+    const bool is_rocattach = (std::string_view{ common_name } == rocattach_name);
 
     auto _tables = std::vector<void*>{};
     _tables.reserve(api_tables_len);
     for(uint64_t i = 0; i < api_tables_len; ++i)
         _tables.emplace_back(api_tables[i]);
 
-    auto _entry = registered_library_api_table{
-        false, common_name, import_func, lib_version, std::move(_tables), instance_val
-    };
+    auto _entry =
+        registered_library_api_table{ false,       common_name,        import_func,
+                                      lib_version, std::move(_tables), instance_val };
 
     if(is_rocattach)
     {
@@ -605,8 +592,8 @@ rocp_add_registered_library_api_table(const char*                        common_
 rocprofiler_register_error_code_t
 rocp_invoke_registrations(bool invoke_all)
 {
-    auto _count = scoped_count{};
-    if(_count.value > 1) return ROCP_REG_DEADLOCK;
+    auto _lk = common::checked_lock{ registration_mutex };
+    if(_lk.recursive) return ROCP_REG_DEADLOCK;
 
     for(auto& itr : registered)
     {
@@ -747,8 +734,8 @@ rocprofiler_register_library_api_table(
         return ROCP_REG_NO_TOOLS;
     }
 
-    auto _count = scoped_count{};
-    if(_count.value > 1) return ROCP_REG_DEADLOCK;
+    auto _lk = common::checked_lock{ registration_mutex };
+    if(_lk.recursive) return ROCP_REG_DEADLOCK;
 
     auto _scan_result = rocp_reg_scan_for_tools();
 
