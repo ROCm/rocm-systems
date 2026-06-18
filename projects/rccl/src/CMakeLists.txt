@@ -267,7 +267,7 @@ set(SRC_FILES
   include/nvtx3/nvtxDetail/nvtxInitDefs.h
   include/nvtx3/nvtxDetail/nvtxLinkOnce.h
   include/nvtx3/nvtxDetail/nvtxTypes.h
-  include/proxy_trace/proxy_trace.h
+  include/proxy_diag_counters.h
   include/plugin/nccl_net.h
   include/plugin/nccl_profiler.h
   include/plugin/nccl_tuner.h
@@ -325,7 +325,6 @@ set(SRC_FILES
   misc/socket.cc
   misc/strongstream.cc
   misc/utils.cc
-  misc/proxy_trace/proxy_trace.cc
   nccl_device/core.cc
   nccl_device/gin_barrier.cc
   nccl_device/gin_scratch.cc
@@ -530,6 +529,19 @@ add_custom_command(
 )
 list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
 list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
+
+# proxy_trace headers are not produced by hipify-perl; copy from src so the
+# hipify include tree matches (unit tests search hipify paths before src/include).
+set(PROXY_TRACE_HDR_SRC "${RCCL_SOURCE_DIR}/src/include/proxy_trace/proxy_trace.h")
+set(PROXY_TRACE_HDR_DST "${HIPIFY_DIR}/src/include/proxy_trace/proxy_trace.h")
+add_custom_command(
+  OUTPUT ${PROXY_TRACE_HDR_DST}
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPIFY_DIR}/src/include/proxy_trace"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROXY_TRACE_HDR_SRC} ${PROXY_TRACE_HDR_DST}
+  MAIN_DEPENDENCY ${PROXY_TRACE_HDR_SRC}
+  COMMENT "Copying proxy_trace/proxy_trace.h (no hipification)"
+)
+list(APPEND HIP_SOURCES ${PROXY_TRACE_HDR_DST})
 
 # copy_directory_if_different was added in CMake 3.26.  On older toolchains
 # fall back to the unconditional copy_directory (same behaviour, just causes

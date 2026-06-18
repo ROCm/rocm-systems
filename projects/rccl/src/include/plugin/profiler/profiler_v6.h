@@ -3,6 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * See LICENSE.txt for more license information
+ *
+ * NCCL profiler v6 event descriptor (upstream) with RCCL extensions:
+ *   - Extended proxyOp (proxy-diag / proxy-trace)
+ *   - CE collective / sync / batch descriptor arms
  *************************************************************************/
 
 #ifndef PROFILER_V6_H_
@@ -10,13 +14,11 @@
 
 #include "profiler_v5.h"
 
-// Extend v5 descriptor with CE-specific fields
 typedef struct {
   uint64_t type;                // event type descriptor
   void* parentObj;              // pointer to the profiler parent object
   int rank;                     // originating rank
   union {
-    // All v5 descriptors (groupApi, collApi, p2pApi, kernelLaunch, coll, p2p, proxyOp, proxyStep, kernelCh, netPlugin)
     struct {
       bool graphCaptured;
       int groupDepth;
@@ -75,6 +77,15 @@ typedef struct {
       int nSteps;
       int chunkSize;
       int isSend;
+      /* RCCL: proxy-diag / proxy-trace plugin (zero when unused) */
+      uint64_t commHash;
+      int64_t opCount;
+      int32_t traceFuncIdx;
+      int32_t traceProtocol;
+      int32_t tracePattern;
+      uint32_t traceTotalBytes;
+      uint32_t proxyNbytes;
+      int rawProxyNsteps;
     } proxyOp;
 
     struct {
@@ -91,7 +102,7 @@ typedef struct {
       void* data;
     } netPlugin;
 
-    // v6 CE-specific descriptors
+    /* CE (upstream v6) + RCCL */
     struct {
       uint64_t seqNumber;
       const char* func;
@@ -121,28 +132,45 @@ typedef struct {
   };
 } ncclProfilerEventDescr_v6_t;
 
-// v6 uses same state args as v5 (no CE-specific state args needed)
-// CE events don't use recordEventState - plugin manages all timing internally
-typedef ncclProfilerEventStateArgs_v5_t ncclProfilerEventStateArgs_v6_t;
+/* RCCL: proxy-diag / proxy-trace counter payloads (v6-only; not part of narrow v5 plugins). */
+typedef union {
+  struct {
+    size_t transSize;
+  } proxyStep;
+
+  struct {
+    int appendedProxyOps;
+  } proxyCtrl;
+
+  struct {
+    void* data;
+  } netPlugin;
+
+  struct {
+    uint64_t pTimer;
+  } kernelCh;
+
+  struct {
+    uint8_t counterKind;
+    uint8_t reserved;
+    uint16_t flags; /* bit0: record wall-clock timestamp for this counter */
+    int64_t value;
+    int64_t value2;
+  } proxyDiag;
+} ncclProfilerEventStateArgs_v6_t;
 
 typedef struct {
   const char* name;
 
-  // init - initialize the profiler plugin
   ncclResult_t (*init)(void** context, uint64_t commId, int* eActivationMask, const char* commName, int nNodes, int nranks, int rank, ncclDebugLogger_t logfn);
 
-  // startEvent - initialize and start a new event
   ncclResult_t (*startEvent)(void* context, void** eHandle, ncclProfilerEventDescr_v6_t* eDescr);
 
-  // stopEvent - stop/finalize an event
   ncclResult_t (*stopEvent)(void* eHandle);
 
-  // recordEventState - record event state transitions and updates
   ncclResult_t (*recordEventState)(void* eHandle, ncclProfilerEventState_v6_t eState, ncclProfilerEventStateArgs_v6_t* eStateArgs);
 
-  // finalize - finalize the profiler plugin
   ncclResult_t (*finalize)(void* context);
 } ncclProfiler_v6_t;
 
 #endif // PROFILER_V6_H_
-

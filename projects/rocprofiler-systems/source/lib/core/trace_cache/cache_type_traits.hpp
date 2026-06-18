@@ -4,6 +4,8 @@
 #pragma once
 #include "common/span.hpp"
 #include <array>
+#include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -61,9 +63,6 @@ struct tuple_to_variant<std::tuple<Types...>>
     using type = std::variant<Types...>;
 };
 
-template <class...>
-using void_t = void;
-
 template <typename T>
 struct is_span : std::false_type
 {};
@@ -118,6 +117,9 @@ inline constexpr bool is_supported_type_v =
     is_string_view_v<T> || is_vector_v<T> || is_optional_v<T> || is_array_v<T>;
 
 template <typename T>
+concept supported_cache_type = is_supported_type_v<std::decay_t<T>>;
+
+template <typename T>
 struct is_enum_class
 : std::bool_constant<std::is_enum_v<T> &&
                      !std::is_convertible_v<T, std::underlying_type_t<T>>>
@@ -126,70 +128,32 @@ struct is_enum_class
 template <typename T>
 inline constexpr bool is_enum_class_v = is_enum_class<T>::value;
 
-template <typename T, typename TypeIdentifierEnum, typename = void>
-struct has_type_identifier : std::false_type
-{};
-
-template <class T, typename TypeIdentifierEnum>
-struct has_type_identifier<T, TypeIdentifierEnum, void_t<decltype(T::type_identifier)>>
-: std::bool_constant<
-      is_enum_class_v<TypeIdentifierEnum> &&
-      std::is_convertible_v<decltype(T::type_identifier), TypeIdentifierEnum>>
-{};
-
-template <typename T, typename = void>
-struct has_serialize : std::false_type
-{};
+template <typename T>
+concept serializable = requires(std::uint8_t* dst, const T& v) { serialize(dst, v); };
 
 template <typename T>
-struct has_serialize<T, std::void_t<decltype(serialize(std::declval<std::uint8_t*>(),
-                                                       std::declval<const T&>()))>>
-: std::true_type
-{};
-
-template <typename T, typename = void>
-struct has_deserialize : std::false_type
-{};
+concept deserializable = requires(std::uint8_t*& src) {
+    { deserialize<T>(src) } -> std::same_as<T>;
+};
 
 template <typename T>
-struct has_deserialize<
-    T, void_t<std::is_same<decltype(deserialize<T>(std::declval<std::uint8_t*&>())), T>>>
-: std::true_type
-{};
-
-template <typename T, typename = void>
-struct has_get_size : std::false_type
-{};
-
-template <typename T>
-struct has_get_size<T, void_t<decltype(get_size(std::declval<const T&>()))>>
-: std::true_type
-{};
+concept has_get_size = requires(const T& v) {
+    { get_size(v) } -> std::convertible_to<std::size_t>;
+};
 
 template <typename T, typename TypeIdentifierEnum>
-__attribute__((always_inline)) inline constexpr void
-check_type()
-{
-    static_assert(has_serialize<T>::value, "Type doesn't have `serialize` function.");
-    static_assert(has_deserialize<T>::value, "Type doesn't have `deserialize` function.");
-    static_assert(has_get_size<T>::value, "Type doesn't have `get_size` function.");
-    static_assert(has_type_identifier<T, TypeIdentifierEnum>::value,
-                  "Type doesn't have `type_identifier` member with correct type.");
-}
+concept has_type_identifier = is_enum_class_v<TypeIdentifierEnum> && requires {
+    { T::type_identifier } -> std::convertible_to<TypeIdentifierEnum>;
+};
 
-template <typename T, typename TypeIdentifierEnum, typename CacheableType,
-          typename = void>
-struct has_execute_processing : std::false_type
-{};
+template <typename T, typename TypeIdentifierEnum>
+concept cacheable = serializable<T> && deserializable<T> && has_get_size<T> &&
+                    has_type_identifier<T, TypeIdentifierEnum>;
 
 template <typename T, typename TypeIdentifierEnum, typename CacheableType>
-struct has_execute_processing<
-    T, TypeIdentifierEnum, CacheableType,
-    void_t<decltype(std::declval<T>().execute_sample_processing(
-        std::declval<TypeIdentifierEnum>(), std::declval<const CacheableType&>()))>>
-: std::bool_constant<std::is_void_v<decltype(std::declval<T>().execute_sample_processing(
-      std::declval<TypeIdentifierEnum>(), std::declval<const CacheableType&>()))>>
-{};
+concept sample_processor = requires(T t, TypeIdentifierEnum e, const CacheableType& c) {
+    { t.execute_sample_processing(e, c) } -> std::same_as<void>;
+};
 
 }  // namespace type_traits
 }  // namespace trace_cache

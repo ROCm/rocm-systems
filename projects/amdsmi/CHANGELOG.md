@@ -51,6 +51,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added the new types to `amdsmi_link_types` as part of support for NICs
 
 ### Changed
+
+- **Fixed `amd-smi static --clock` csv and human_readable formatting to output frequency 
+levels as strings instead of dictionary objects**.  
+
 - **Deprecated `amdsmi_get_gpu_vram_vendor()` in favor of `amdsmi_get_gpu_vram_info()`**.  
   - `amdsmi_get_gpu_vram_vendor` is slated for removal in a future ROCm release. It now emits a `DeprecationWarning` from the Python interface and functions as a wrapper of `amdsmi_get_gpu_vram_info()`.
 
@@ -62,6 +66,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Removed the non-functional `--decode` flag from `amd-smi ras`**. Out-of-band CPER decoding is available via `amd-smi ras --afid --cper-file <path>` or `--afid --folder <DIR>`.
 
 ### Resolved Issues
+
+- **Corrected invalid AMD SMI status-code names in exception messages and documentation**.  
+  - Some `AmdSmiLibraryException` messages and API documentation entries were misspelled; they now use the correct `AMDSMI_STATUS_*` names.
 
 - **Fixed a crash in `amdsmi_get_gpu_vram_vendor()` and made `amdsmi_get_gpu_vram_info()` resilient to DRM failures**.  
   - `amdsmi_get_gpu_vram_vendor()` now validates the output buffer and only writes it on success, fixing a null-pointer dereference on the not-supported path.
