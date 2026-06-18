@@ -50,6 +50,20 @@ Project structure and test directories are stored in repo memories.
 8. **Evaluate testability as a design property** — hard-to-test code is a design smell. When code is difficult to test (hidden dependencies, global state, monolithic functions), flag it and suggest a more testable structure (pure functions, explicit inputs, narrow interfaces).
 9. **Challenge redundant tests** — excessive or duplicated tests that test implementation details rather than behavior should be flagged for consolidation. Tests should specify behavior, not mirror the implementation.
 
+## Test Substance
+
+Presence is not coverage. For any test claimed to cover new behavior, ask the **mutation question**: *what single change to the source would make this test fail?* If there is no clear answer, it is coverage padding — ⚠️ IMPORTANT, or ❌ BLOCKING when it is the only "test" for new behavior. AI-generated tells worth a closer read: phantom methods/attributes that do not exist in the source, and mock-only assertions that still pass against a no-op implementation.
+
+## Anti-Gaming (never weaken a test to green CI)
+
+Disabling, skipping, or weakening a test to make CI pass is never valid. When a PR changes product code **and** the same diff does any of the following without a stated justification, it is ❌ BLOCKING:
+
+- Adds an entry to `tests/amd_smi_test/amdsmitst.exclude` or widens `GTEST_EXCLUDE` via `tests/amd_smi_test/detect_asic_filter.sh`
+- Adds a `DISABLED_` prefix to a GTest case
+- Adds `@unittest.skip` / `pytest.mark.skip` (or comments out a test body)
+
+A genuine reason (test invalid on this ASIC, behavior intentionally removed) is fine when stated; a silent exclusion that happens to green a failing lane is not.
+
 ## CI Evidence (when available)
 
 If the orchestrator provides CI run data, use it to:
