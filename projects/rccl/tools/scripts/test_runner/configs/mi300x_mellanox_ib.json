@@ -542,6 +542,11 @@
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
+        },
+        {
+          "name": "TimeoutTests",
+          "description": "ncclTimeout host API unit tests: enum ordering, error string, async-error set/get/clear, argument validation",
+          "test_filter": "TimeoutTests.*"
         }
       ]
     },
