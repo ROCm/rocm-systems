@@ -33,9 +33,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROF_COLLECTION_PERIOD_TESTING=true"
-    FIXTURES_SETUP rocprofv3-test-collection-period
-    DISABLED_MEMCHECKS "ThreadSanitizer"
-    DISABLED_CODECOV)
+                "REPRODUCIBLE_RUNTIME_RUNTIME_SCALE=0"
+    FIXTURES_SETUP rocprofv3-test-collection-period)
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-collection-period

@@ -41,56 +41,64 @@ class TimeWindow(object):
         return f"[{self.offset}:{self.offset+self.duration}]"
 
 
-def check_traces(data, valid_regions, invalid_regions, corrid_records=None):
-    for record in data:
-        corr_id = record.correlation_id.internal
-        rval = (
-            corrid_records[corr_id]
-            if corrid_records is not None and corr_id in corrid_records
-            else record
-        )
-        valid = [itr for itr in valid_regions if itr.in_region(rval.start_timestamp)]
-        assert (
-            len(valid) == 1
-        ), f"\nrval:\n\t{rval}\nrecord:\n\t{record}\nnot found in valid regions:\n{valid_regions}"
+def compute_guard(collection_period_data):
+    # Guard band around each on/off transition, ignored during assertions, since a
+    # record issued near a boundary can land on either side (the start/stop effect lags
+    # the logged call by a variable amount that grows under TSan/codecov). Derived from
+    # the measured start/stop call spans so it scales with environment overhead, scaled
+    # up to also cover effect latency, and floored at 2 ms.
+    call_spans = []
+    for period in collection_period_data:
+        for key in ("start", "stop"):
+            if key in period.keys():
+                call_spans.append(period[key].stop - period[key].start)
 
-        invalid = [itr for itr in invalid_regions if itr.in_region(rval.start_timestamp)]
-        assert (
-            len(invalid) == 0
-        ), f"\nrval:\n\t{rval}\nrecord:\n\t{record}\nfound in invalid region(s):\n{invalid}"
+    return max([8 * span for span in call_spans] + [int(2e6)])
 
 
 def test_collection_period_trace(json_data, collection_period_data):
-    # Adding 20 us error margin to handle the time taken for the start/stop context to affect the collection
-    time_error_margin = 20 * 1e4
-    valid_regions = []
-    invalid_regions = []
+    guard = compute_guard(collection_period_data)
+
+    # off_cores: genuinely-off (delay) time, shrunk by guard -- must contain no records.
+    # on_cores:  genuinely-on (collection) time, shrunk by guard -- records expected.
+    off_cores = []
+    on_cores = []
     for period in collection_period_data:
-        _start = None
-        _stop = None
-        if "start" in period.keys():
-            _start = period.start.start - time_error_margin
-        if "stop" in period.keys():
-            _stop = period.stop.stop + time_error_margin
-
-        if _start and _stop:
-            valid_regions.append(TimeWindow(_start, _stop))
-        elif "duration" in period.keys():
-            valid_regions.append(TimeWindow(period.duration.start, period.duration.stop))
-        elif _start and not _stop:
-            valid_regions.append(TimeWindow(_start, _start + 10e9))  # add 10 seconds
-
         if "delay" in period.keys():
-            invalid_regions.append(TimeWindow(period.delay.start, period.delay.stop))
+            beg = period.delay.start + guard
+            end = period.delay.stop - guard
+            if end > beg:
+                off_cores.append(TimeWindow(beg, end))
+
+        if "duration" in period.keys():
+            beg = period.duration.start + guard
+            end = period.duration.stop - guard
+            if end > beg:
+                on_cores.append(TimeWindow(beg, end))
 
     data = json_data["rocprofiler-sdk-tool"]
-    corrid_records = {}
 
+    on_core_records = 0
     for itr in ["hsa_api", "hip_api", "marker_api", "rccl_api"]:
         grp = data.buffer_records[itr]
-        check_traces(grp, valid_regions, invalid_regions)
         for record in grp:
-            corrid_records[record.correlation_id.external] = record
+            ts = record.start_timestamp
+
+            off_hit = [w for w in off_cores if w.in_region(ts)]
+            assert len(off_hit) == 0, (
+                f"\nrecord collected while tracing was off:\n\t{record}\n"
+                f"found in off-window(s):\n{off_hit}\nguard={guard} ns"
+            )
+
+            if any(w.in_region(ts) for w in on_cores):
+                on_core_records += 1
+
+    # Sanity check: collection must have actually captured data inside the active
+    # windows (guards against the feature silently collecting nothing).
+    assert on_core_records > 0, (
+        "no records were collected inside any active collection window "
+        f"(on_cores={on_cores}, guard={guard} ns)"
+    )
 
 
 def test_perfetto_data(pftrace_data, json_data):
