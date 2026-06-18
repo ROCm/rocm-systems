@@ -215,6 +215,10 @@ function(write_install_test_definition TEST_NAME TEST_COMMAND TEST_LABELS TEST_T
             # Executable is at: <install>/share/rocshmem/rocshmem_functional_tests
             # Relative from working dir: ../../../../share/rocshmem/rocshmem_functional_tests
             list(APPEND INSTALL_CMD_PARTS "../../../../share/rocshmem/rocshmem_functional_tests")
+        elseif("${part}" STREQUAL "${CMAKE_COMMAND}")
+            # Replace build-host cmake path with portable system env
+            # This prevents build-host absolute paths from leaking into install files
+            list(APPEND INSTALL_CMD_PARTS "env")
         elseif("${part}" STREQUAL "${MPIEXEC_EXECUTABLE}")
             # Use the MPI executable found at configure time (absolute path)
             list(APPEND INSTALL_CMD_PARTS "${MPIEXEC_EXECUTABLE}")
@@ -615,8 +619,9 @@ function(_add_single_rocshmem_test)
     # Build test command - choose launcher based on MPI availability
     if(USE_SLR_LAUNCHER)
         # SLR mode: Direct execution with ROCSHMEM_SLR_NP environment variable
+        # Use system env instead of cmake -E env for portability (build-host cmake path doesn't leak into install)
         set(TEST_COMMAND
-            ${CMAKE_COMMAND} -E env "ROCSHMEM_SLR_NP=${TEST_RANKS}"
+            env "ROCSHMEM_SLR_NP=${TEST_RANKS}"
             "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
             "ROCSHMEM_HEAP_SIZE=6442450944"
         )
