@@ -9,12 +9,14 @@ on:
   pull_request:
     paths:
       - "emulation/rocjitsu/**"
+      - "emulation/mirage/**"
       - ".github/workflows/rocjitsu-*.yml"
   push:
     branches:
       - main
     paths:
       - "emulation/rocjitsu/**"
+      - "emulation/mirage/**"
       - ".github/workflows/rocjitsu-*.yml"
   workflow_dispatch:
     inputs:
@@ -38,8 +40,10 @@ permissions:
 env:
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
+  ROCJITSU_KMD_LIB: ${{ github.workspace }}/build/lib/rocjitsu/src/rocjitsu/kmd/linux/librocjitsu_kmd.so
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   ROCJITSU_CORPUS_CONFIG: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu/tests/corpus/iree_gfx1250_hip.json
+  MIRAGE_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/mirage
 
 jobs:
   pytest:
@@ -58,8 +62,11 @@ jobs:
             build-essential \
             ca-certificates \
             cmake \
+            curl \
             git \
             libdrm-dev \
+            pkg-config \
+            libssl-dev \
             ninja-build
 
       - name: Checkout rocm-systems
@@ -68,6 +75,7 @@ jobs:
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
+            emulation/mirage
             .github
 
       - name: Checkout rocjitsu corpus
@@ -92,18 +100,10 @@ jobs:
 
           ROCM_ROOT="$(rocm-sdk path --root)"
           ROCM_LIB="$(rocm-sdk path --root)"/lib
-          LLVM_BIN="${ROCM_LIB}/llvm/bin"
-          LLVM_LIB="${ROCM_LIB}/llvm/lib"
           ROCM_SYSDEPS="${ROCM_LIB}/rocm_sysdeps"
-
-          test -x "${LLVM_BIN}/amdclang"
-          test -x "${LLVM_BIN}/amdclang++"
-          test -d "${LLVM_LIB}"
 
           {
             echo "ROCM_PATH=${ROCM_ROOT}"
-            echo "CC=${LLVM_BIN}/amdclang"
-            echo "CXX=${LLVM_BIN}/amdclang++"
             echo "LD_LIBRARY_PATH=${ROCM_LIB}:${LD_LIBRARY_PATH:-}"
           } >> "${GITHUB_ENV}"
 
@@ -116,20 +116,31 @@ jobs:
             echo "CXXFLAGS=-Wno-error=unknown-warning-option -Wno-error=nested-anon-types" >> "${GITHUB_ENV}"
           fi
 
-          echo "${LLVM_BIN}" >> "${GITHUB_PATH}"
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
 
-      - name: Build rocjitsu
+      - name: Build rocjitsu dependency
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
           cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER="${CC}" \
-            -DCMAKE_CXX_COMPILER="${CXX}" \
             -DCMAKE_C_FLAGS="${CFLAGS:-}" \
-            -DCMAKE_CXX_FLAGS="${CXXFLAGS:-}" \
-            -DAMDCLANG="${CXX}"
+            -DCMAKE_CXX_FLAGS="${CXXFLAGS:-}"
           cmake --build "${ROCJITSU_BUILD_DIR}"
-          echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
+          test -f "${ROCJITSU_KMD_LIB}"
+
+      - name: Build mirage
+        working-directory: ${{ env.MIRAGE_SOURCE_DIR }}
+        env:
+          MIRAGE_DASHBOARD_SKIP_NPM_CI: "1"
+          ROCJITSU_ROOT: ${{ env.ROCJITSU_SOURCE_DIR }}
+          ROCJITSU_KMD_LIB: ${{ env.ROCJITSU_KMD_LIB }}
+        run: |
+          cargo build
+          ./target/debug/mirage state builtins
+          echo "${MIRAGE_SOURCE_DIR}/target/debug" >> "${GITHUB_PATH}"
 
       - name: Install corpus test dependencies
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
@@ -141,5 +152,5 @@ jobs:
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         env:
           ROCJITSU_ROOT: ${{ env.ROCJITSU_SOURCE_DIR }}
-          ROCJITSU_BUILD: ${{ env.ROCJITSU_BUILD_DIR }}
-        run: rocjitsu --config "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_gfx1250.json" -- pytest --config-files="${ROCJITSU_CORPUS_CONFIG}" --timeout 15
+          ROCJITSU_KMD_LIB: ${{ env.ROCJITSU_KMD_LIB }}
+        run: mirage run --profile MI450 --env LD_LIBRARY_PATH=$LD_LIBRARY_PATH -- pytest --config-files="${ROCJITSU_CORPUS_CONFIG}" --timeout 15
