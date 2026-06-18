@@ -139,14 +139,14 @@ event:
     <<: *level_default
     tags: [ipc]
   Unit_hipEventCoalescing_CrossStreamWait:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization]
   Unit_hipEventCoalescing_AsyncOpsBreakCoalescing:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization]
   Unit_hipEventCoalescing_InterleavedEvents:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization]
   Unit_hipEventCoalescing_EventQuery:
-    <<: *level_2
+    <<: *level_default
     tags: [synchronization]
