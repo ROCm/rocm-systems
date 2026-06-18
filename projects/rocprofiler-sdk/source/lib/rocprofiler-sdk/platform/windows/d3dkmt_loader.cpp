@@ -111,52 +111,66 @@ struct d3dkmt_loader::impl
 
 namespace
 {
-// Open the first module in the prioritized list that yields all three D3DKMT
-// symbols. GetModuleHandleW first (no refcount bump, no FreeLibrary needed),
-// LoadLibraryW as a fallback (refcounted, recorded so we FreeLibrary it).
+// Resolve D3DKMT entry points from a single named module. GetModuleHandleW
+// first (no refcount bump, no FreeLibrary needed), LoadLibraryW as a fallback
+// (refcounted; recorded so the destructor FreeLibrary()s it). Returns true and
+// fills out on success; false and leaves out unchanged on any failure.
+bool
+open_d3dkmt_module(const std::wstring& name, d3dkmt_loader::impl& out)
+{
+    if(name.empty()) return false;
+
+    bool      owns   = false;
+    ::HMODULE module = ::GetModuleHandleW(name.c_str());
+    if(module == nullptr)
+    {
+        module = ::LoadLibraryW(name.c_str());
+        owns   = (module != nullptr);
+    }
+    if(module == nullptr)
+    {
+        ROCP_INFO << "d3dkmt_loader: could not obtain a handle for module";
+        return false;
+    }
+
+    auto enum_fn  = resolve<::PFND3DKMT_ENUMADAPTERS3>(module, "D3DKMTEnumAdapters3");
+    auto query_fn = resolve<::PFND3DKMT_QUERYADAPTERINFO>(module, "D3DKMTQueryAdapterInfo");
+    auto close_fn = resolve<::PFND3DKMT_CLOSEADAPTER>(module, "D3DKMTCloseAdapter");
+
+    if(enum_fn == nullptr || query_fn == nullptr || close_fn == nullptr)
+    {
+        if(owns) ::FreeLibrary(module);
+        return false;
+    }
+
+    out.module        = module;
+    out.owns_module   = owns;
+    out.enum_adapters = enum_fn;
+    out.query_adapter = query_fn;
+    out.close_adapter = close_fn;
+    return true;
+}
+
+// Resolve D3DKMT entry points. When ROCPROFILER_D3DKMT_MODULE is set the
+// override is tried exclusively — no fallback to gdi32.dll — so a test that
+// forces a bogus module name reliably produces a failed load. Without the
+// override, gdi32.dll is the only candidate (the real implementation on native
+// Windows).
 void
 open_d3dkmt(d3dkmt_loader::impl& out)
 {
-    auto candidates = std::vector<std::wstring>{};
-    auto override   = common::get_env(kEnvModuleOverride, std::string{});
-    if(!override.empty()) candidates.emplace_back(utf8_to_wide(override));
-    candidates.emplace_back(kDefaultModule);
-
-    for(const auto& name : candidates)
+    auto override = common::get_env(kEnvModuleOverride, std::string{});
+    if(!override.empty())
     {
-        if(name.empty()) continue;
-
-        bool      owns   = false;
-        ::HMODULE module = ::GetModuleHandleW(name.c_str());
-        if(module == nullptr)
-        {
-            module = ::LoadLibraryW(name.c_str());
-            owns   = (module != nullptr);
-        }
-        if(module == nullptr)
-        {
-            ROCP_INFO << "d3dkmt_loader: could not obtain a handle for a candidate module";
-            continue;
-        }
-
-        auto enum_fn  = resolve<::PFND3DKMT_ENUMADAPTERS3>(module, "D3DKMTEnumAdapters3");
-        auto query_fn = resolve<::PFND3DKMT_QUERYADAPTERINFO>(module, "D3DKMTQueryAdapterInfo");
-        auto close_fn = resolve<::PFND3DKMT_CLOSEADAPTER>(module, "D3DKMTCloseAdapter");
-
-        if(enum_fn == nullptr || query_fn == nullptr || close_fn == nullptr)
-        {
-            // Wrong module: release it only if we are the ones who loaded it.
-            if(owns) ::FreeLibrary(module);
-            continue;
-        }
-
-        out.module        = module;
-        out.owns_module   = owns;
-        out.enum_adapters = enum_fn;
-        out.query_adapter = query_fn;
-        out.close_adapter = close_fn;
+        if(!open_d3dkmt_module(utf8_to_wide(override), out))
+            ROCP_INFO << fmt::format(
+                "d3dkmt_loader: {} override '{}' failed to load or missing D3DKMT symbols; "
+                "not falling back to gdi32.dll",
+                kEnvModuleOverride,
+                override);
         return;
     }
+    open_d3dkmt_module(std::wstring{kDefaultModule}, out);
 }
 
 // Single KMTQAITYPE query into a caller-provided buffer.

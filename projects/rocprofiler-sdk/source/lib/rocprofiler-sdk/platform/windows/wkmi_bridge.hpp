@@ -56,16 +56,9 @@ struct wkmi_device_info
     uint32_t    device_id    = 0;
 
     // Compute capabilities
-    uint32_t wavefront_size     = 0;
-    uint32_t compute_unit_count = 0;
-    // ASSUMPTION (TODO-verify against the real wkmi.h when the submodule
-    // lands): wave_per_cu is the MAX waves resident per compute unit. agent.cpp
-    // maps this directly to rocprofiler_agent_t::max_waves_per_cu and derives
-    // max_waves_per_simd = wave_per_cu / simd_per_cu. This is the reverse of the
-    // gnulinux path, which reads max_waves_per_simd from KFD sysfs and derives
-    // max_waves_per_cu = simd_per_cu * max_waves_per_simd. The two only agree if
-    // wave_per_cu truly means "max waves per CU"; confirm once wkmi.h is present.
-    uint32_t wave_per_cu                    = 0;
+    uint32_t wavefront_size                 = 0;
+    uint32_t compute_unit_count             = 0;
+    uint32_t wave_per_cu                    = 0;  // Maximum waves per compute unit (wkmi.h)
     uint32_t simd_per_cu                    = 0;
     uint32_t max_scratch_slots_per_cu       = 0;
     uint32_t num_shader_engine              = 0;

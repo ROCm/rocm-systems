@@ -26,6 +26,7 @@
 // on an actual GPU host and skipped otherwise.
 
 #include "lib/rocprofiler-sdk/platform/windows/agent.hpp"
+#include "lib/rocprofiler-sdk/platform/windows/wkmi_bridge.hpp"
 
 #include "lib/common/environment.hpp"
 
@@ -39,6 +40,7 @@
 
 namespace common   = ::rocprofiler::common;
 namespace platform = ::rocprofiler::platform;
+namespace windows  = ::rocprofiler::platform::windows;
 
 namespace
 {
@@ -93,6 +95,9 @@ TEST(agent, windows_negative_path_bogus_module)
 
 // On a GPU host, enumerate() must surface at least one GPU agent with the
 // minimum sane fields populated. Skipped on GPU-less CI.
+// Compute-topology assertions (gfx_target_version, cu_count, gfx name) require
+// wkmi; in a stub build those fields are zero/empty and only the D3DKMT basics
+// (agent type) are guaranteed.
 TEST(agent, windows_positive_path_gpu_host)
 {
     if(!have_real_gpu())
@@ -106,13 +111,19 @@ TEST(agent, windows_positive_path_gpu_host)
     auto agents = platform::windows::enumerate();
     ASSERT_FALSE(agents.empty());
 
+    const bool have_wkmi = windows::wkmi_is_present();
+
     for(const auto& agent : agents)
     {
         ASSERT_NE(agent.get(), nullptr);
         EXPECT_EQ(agent->type, ROCPROFILER_AGENT_TYPE_GPU);
-        EXPECT_NE(agent->gfx_target_version, 0u);
-        EXPECT_GT(agent->cu_count, 0u);
-        ASSERT_NE(agent->name, nullptr);
-        EXPECT_EQ(std::string_view{agent->name}.substr(0, 3), std::string_view{"gfx"});
+
+        if(have_wkmi)
+        {
+            EXPECT_NE(agent->gfx_target_version, 0u);
+            EXPECT_GT(agent->cu_count, 0u);
+            ASSERT_NE(agent->name, nullptr);
+            EXPECT_EQ(std::string_view{agent->name}.substr(0, 3), std::string_view{"gfx"});
+        }
     }
 }

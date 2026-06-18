@@ -140,7 +140,11 @@ enumerate()
             continue;
         }
 
-        if(!wkmi_adapter_supported(devids.device_id))
+        // wkmi_adapter_supported() returns false in a stub build (wkmi absent),
+        // which would silently discard every adapter and contradict the intended
+        // D3DKMT-only degraded mode. Only apply the wkmi support gate when wkmi
+        // is actually linked.
+        if(wkmi_is_present() && !wkmi_adapter_supported(devids.device_id))
         {
             ROCP_INFO << fmt::format(
                 "windows::enumerate: skipping unsupported AMD adapter (device=0x{:04x})",
@@ -229,14 +233,11 @@ enumerate()
             info.simd_count      = wk.compute_unit_count * wk.simd_per_cu;
             info.wave_front_size = wk.wavefront_size;
 
-            // ASSUMPTION (TODO-verify against the real wkmi.h when the submodule
-            // lands): wk.wave_per_cu is the MAX waves resident per CU, so we map
-            // it straight to max_waves_per_cu and derive max_waves_per_simd =
-            // wave_per_cu / simd_per_cu. This is the reverse of the gnulinux
-            // path, which reads max_waves_per_simd from KFD sysfs and derives
-            // max_waves_per_cu = simd_per_cu * max_waves_per_simd. Correct only
-            // if wkmi's wave_per_cu really means "max waves per CU". See the
-            // matching note on wkmi_device_info::wave_per_cu in wkmi_bridge.hpp.
+            // wkmi.h documents wave_per_cu as "Maximum waves per compute unit",
+            // matching max_waves_per_cu directly. max_waves_per_simd is derived
+            // from it (gnulinux reads max_waves_per_simd from KFD sysfs and
+            // derives max_waves_per_cu = simd_per_cu * max_waves_per_simd; here
+            // the direction is reversed but the semantics are equivalent).
             info.max_waves_per_cu = wk.wave_per_cu;
 
             // Guard divisions against zero exactly like gnulinux.
