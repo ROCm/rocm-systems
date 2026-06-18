@@ -28,8 +28,8 @@
  * Bucket layout mirrors nccl_device_wrapper.h exactly:
  *   [A] Always-on    — no preprocessor gate.
  *   [B] Always-on    — ncclCoopAny + LSA barrier session thunks.
- *   [C] Stubbed-out  — #if 0; ready to enable once RCCL syncs in
- *                      ncclGin* / composite ncclBarrierSession.
+ *   [C] Always-on    — GIN + composite ncclBarrierSession thunks, enabled
+ *                      now that the NCCL v2.29.x GIN sync landed them.
  */
 
 #include "nccl_device_wrapper.h"
@@ -140,18 +140,20 @@ void ncclLsaBarrierSessionSync(ncclLsaBarrierSession_C* session,
 
 
 /* ========================================================================
- * [C] GIN + composite Barrier Session bodies (disabled)
+ * [C] GIN + composite Barrier Session bodies
  *
- * Carried over from NCCL v2.29.2-1. Will become usable once RCCL imports:
- * usable once RCCL imports:
- *   - ncclGin / ncclGin_C
+ * Enabled now that the NCCL v2.29.x GIN sync landed the prerequisites in
+ * RCCL:
+ *   - ncclGin / ncclGin_C                         (nccl_device/gin.h)
  *   - ncclGinBarrierSession<Coop>, ncclGinBarrierHandle, ncclGinFenceLevel
- *   - composite ncclBarrierSession<Coop>
+ *                                                 (nccl_device/gin_barrier.h)
+ *   - composite ncclBarrierSession<Coop>          (nccl_device/barrier.h)
  *
- * Remove the #if 0 guard when those land (ncclCoopAny is unconditionally
- * available).
+ * These templates are gated on the upstream __CUDACC__ in the shared
+ * headers; hipify rewrites it to __HIPCC__ in the staged copy fed to this
+ * -x hip bitcode build, so they instantiate without any shared-header
+ * change. ncclCoopAny is unconditionally available.
  * ======================================================================*/
-#if 0  /* TODO(rccl-ir): enable once RCCL grows ncclGin* / composite Barrier */
 
 /* GIN barrier session */
 NCCL_IR_EXPORT void ncclGinBarrierSessionInit(
@@ -197,8 +199,6 @@ NCCL_IR_EXPORT void ncclBarrierSessionSync(
     ncclGinFenceLevel fence) {
   session->bar.sync(coop, order, fence);
 }
-
-#endif  /* 0 -- GIN / composite Barrier bodies */
 
 #endif  /* NCCL_CHECK_CUDACC */
 
