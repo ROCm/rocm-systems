@@ -100,12 +100,19 @@ def _make_codegen(profile) -> CodeGenerator:
 
 
 # Regex tolerant to whitespace and identifier choice. We anchor on the
-# stable parts of the contract — the API call (``write_scalar64``,
+# stable parts of the contract — the API calls (``write_scalar``/``write_scalar64``,
 # ``set_vcc``, ``set_exec``) and the dst identifier — not on the exact
 # variable name of the result-mask local.
 def _re_write_scalar64(dst_ident: str) -> re.Pattern[str]:
     return re.compile(
         rf'\b{re.escape(dst_ident)}\s*\.\s*write_scalar64\s*\(\s*wf\s*,\s*\w+\s*\)\s*;'
+    )
+
+
+def _re_write_scalar32(dst_ident: str) -> re.Pattern[str]:
+    return re.compile(
+        rf'\b{re.escape(dst_ident)}\s*\.\s*write_scalar\s*\(\s*wf\s*,\s*'
+        rf'static_cast\s*<\s*uint32_t\s*>\s*\(\s*\w+\s*\)\s*\)\s*;'
     )
 
 
@@ -144,7 +151,7 @@ class TestGenVectorCmpxWriteBacks:
     Asserts the structural invariant rather than exact string output:
 
       * ``set_exec`` is emitted unconditionally.
-      * ``write_scalar64`` on the SDST is emitted iff
+      * a wave-size-width-aware write on the SDST is emitted iff
         ``profile.cmpx_writes_vcc and is_vop3 and dst``.
       * ``set_vcc`` is emitted iff
         ``profile.cmpx_writes_vcc and not (is_vop3 and dst)``.
@@ -178,12 +185,16 @@ class TestGenVectorCmpxWriteBacks:
         ), f'V_CMPX must always update EXEC; not found in:\n{body}'
 
         # SDST write: must appear iff expected, and target the right ident.
+        sdst32_match = _re_write_scalar32(_DST_IDENT).search(body) if dst else None
         sdst_match = _re_write_scalar64(_DST_IDENT).search(body) if dst else None
         sdst_count = len(_RE_ANY_WRITE_SCALAR64.findall(body))
         if expect_sdst_write:
             assert (
+                sdst32_match
+            ), f'Expected wave32 write_scalar on {_DST_IDENT!r}; body was:\n{body}'
+            assert (
                 sdst_match
-            ), f'Expected write_scalar64 on {_DST_IDENT!r}; body was:\n{body}'
+            ), f'Expected wave64 write_scalar64 on {_DST_IDENT!r}; body was:\n{body}'
             # Guard against a stray second write_scalar64 to a different
             # target slipping through alongside the expected one.
             assert sdst_count == 1, (
@@ -207,5 +218,6 @@ class TestGenVectorCmpxWriteBacks:
 
         # Mutual exclusion: a single V_CMPX never writes both VCC and SDST.
         assert not (
-            (sdst_match is not None) and (vcc_match is not None)
+            ((sdst32_match is not None) or (sdst_match is not None))
+            and (vcc_match is not None)
         ), f'V_CMPX wrote both SDST and VCC; body was:\n{body}'

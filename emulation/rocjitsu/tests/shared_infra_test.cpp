@@ -107,6 +107,83 @@ TEST(MfmaExecTest, InputLocF16_16x16) {
   EXPECT_EQ(loc1.sub_element, 1u);
 }
 
+TEST(MfmaExecTest, WmmaF8f6f4K128InputLocUsesPairAwareSubbyteLayouts) {
+  auto ab6 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/4, 6,
+                                           /*mixed_subbyte=*/false);
+  EXPECT_EQ(ab6.lane, 19u);
+  EXPECT_EQ(ab6.vgpr_offset, 0u);
+  EXPECT_EQ(ab6.bit_offset, 0u);
+  EXPECT_EQ(ab6.data_bits, 6u);
+
+  auto ab4 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/4, 4,
+                                           /*mixed_subbyte=*/false);
+  EXPECT_EQ(ab4.lane, 19u);
+  EXPECT_EQ(ab4.vgpr_offset, 0u);
+  EXPECT_EQ(ab4.bit_offset, 0u);
+  EXPECT_EQ(ab4.data_bits, 4u);
+
+  auto mixed6 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/4, 6,
+                                              /*mixed_subbyte=*/true);
+  EXPECT_EQ(mixed6.lane, 3u);
+  EXPECT_EQ(mixed6.vgpr_offset, 3u);
+  EXPECT_EQ(mixed6.bit_offset, 0u);
+
+  auto mixed4 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/31, 4,
+                                              /*mixed_subbyte=*/true);
+  EXPECT_EQ(mixed4.lane, 3u);
+  EXPECT_EQ(mixed4.vgpr_offset, 3u);
+  EXPECT_EQ(mixed4.bit_offset, 28u);
+
+  auto ab8 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/4, 8,
+                                           /*mixed_subbyte=*/false);
+  EXPECT_EQ(ab8.lane, 19u);
+  EXPECT_EQ(ab8.vgpr_offset, 0u);
+  EXPECT_EQ(ab8.sub_element, 0u);
+
+  EXPECT_EQ(amdgpu::wmma_f8f6f4_scale_byte(/*k=*/4, /*data_bits=*/6,
+                                           /*mixed_pair=*/false, /*scale16=*/false),
+            1u);
+  EXPECT_EQ(amdgpu::wmma_f8f6f4_scale_byte(/*k=*/32, /*data_bits=*/6,
+                                           /*mixed_pair=*/false, /*scale16=*/true),
+            1u);
+  EXPECT_EQ(amdgpu::wmma_f8f6f4_scale_byte(/*k=*/64, /*data_bits=*/4,
+                                           /*mixed_pair=*/false, /*scale16=*/true),
+            4u);
+  EXPECT_EQ(amdgpu::wmma_f8f6f4_scale_byte(/*k=*/32, /*data_bits=*/4,
+                                           /*mixed_pair=*/true, /*scale16=*/false),
+            1u);
+  EXPECT_EQ(amdgpu::wmma_f8f6f4_scale_byte(/*k=*/36, /*data_bits=*/4,
+                                           /*mixed_pair=*/true, /*scale16=*/true),
+            3u);
+}
+
+TEST(MfmaExecTest, WmmaF4_32x16x128UsesSiliconGroundedALayoutAndScaleLane) {
+  auto row0 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/0, /*k=*/0, 4, 4);
+  EXPECT_EQ(row0.lane, 0u);
+  EXPECT_EQ(row0.vgpr_offset, 0u);
+  EXPECT_EQ(row0.bit_offset, 0u);
+
+  auto row8 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/8, /*k=*/0, 4, 4);
+  EXPECT_EQ(row8.lane, 0u);
+  EXPECT_EQ(row8.vgpr_offset, 8u);
+  EXPECT_EQ(row8.bit_offset, 0u);
+
+  auto row16 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/16, /*k=*/4, 4, 4);
+  EXPECT_EQ(row16.lane, 24u);
+  EXPECT_EQ(row16.vgpr_offset, 0u);
+  EXPECT_EQ(row16.bit_offset, 0u);
+
+  auto row24 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/24, /*k=*/7, 4, 4);
+  EXPECT_EQ(row24.lane, 24u);
+  EXPECT_EQ(row24.vgpr_offset, 8u);
+  EXPECT_EQ(row24.bit_offset, 12u);
+
+  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/0, 0, 4, 4), 0u);
+  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/8, 0, 4, 4), 16u);
+  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/16, 0, 4, 4), 8u);
+  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/24, 0, 4, 4), 24u);
+}
+
 TEST(MfmaExecTest, OutputLoc32_4x4) {
   // 4x4 matrix, block 0: reg = column index, lane = row index.
   auto loc = amdgpu::output_loc_32(4, 4, /*col=*/2, /*row=*/1, /*b=*/0);
@@ -316,6 +393,19 @@ TEST(DppPermuteTest, RowXmask) {
   EXPECT_EQ(dpp_permute(0x151, 1, 64, oob), 0);
   EXPECT_EQ(dpp_permute(0x151, 2, 64, oob), 3);
   EXPECT_EQ(dpp_permute(0x151, 3, 64, oob), 2);
+}
+
+TEST(DppPermuteTest, Dpp8SelectsWithinGroupsOfEight) {
+  using namespace amdgpu::dpp;
+  const uint32_t lane_sel = (7u << 0u) | (0u << 3u) | (3u << 6u) | (2u << 9u) | (5u << 12u) |
+                            (4u << 15u) | (1u << 18u) | (6u << 21u);
+
+  EXPECT_EQ(dpp8_src_lane(0, lane_sel), 7u);
+  EXPECT_EQ(dpp8_src_lane(1, lane_sel), 0u);
+  EXPECT_EQ(dpp8_src_lane(6, lane_sel), 1u);
+  EXPECT_EQ(dpp8_src_lane(7, lane_sel), 6u);
+  EXPECT_EQ(dpp8_src_lane(8, lane_sel), 15u);
+  EXPECT_EQ(dpp8_src_lane(15, lane_sel), 14u);
 }
 
 TEST(DppPermuteTest, DppRead) {

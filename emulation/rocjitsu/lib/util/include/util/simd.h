@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <type_traits>
 
 #if __has_include(<experimental/simd>)
@@ -263,6 +264,85 @@ template <class T> void masked_store_narrow(uint32_t *dst, narrow32<T> v, uint64
       dst[i] = std::bit_cast<uint32_t>(buf[i]);
 }
 
+template <typename Pred>
+inline native<double> replace_f64_lanes(native<double> dst, native<double> replacement, Pred pred) {
+  constexpr std::size_t W = native<double>::size();
+  alignas(64) double out[W];
+  alignas(64) double repl[W];
+  dst.copy_to(out, stdx::element_aligned);
+  replacement.copy_to(repl, stdx::element_aligned);
+  for (std::size_t i = 0; i < W; ++i)
+    if (pred(i))
+      out[i] = repl[i];
+  native<double> result;
+  result.copy_from(out, stdx::element_aligned);
+  return result;
+}
+
+inline native<double> ordered_clamp_f64_simd(native<double> v, double lo, double hi) {
+  constexpr std::size_t W = native<double>::size();
+  alignas(64) double lanes[W];
+  v.copy_to(lanes, stdx::element_aligned);
+  for (double &lane : lanes) {
+    if (lane < lo)
+      lane = lo;
+    else if (lane > hi)
+      lane = hi;
+  }
+  native<double> result;
+  result.copy_from(lanes, stdx::element_aligned);
+  return result;
+}
+
+inline native<double> cvt_i32_f64_saturate_input_simd(native<double> s) {
+  constexpr std::size_t W = native<double>::size();
+  alignas(64) double lanes[W];
+  s.copy_to(lanes, stdx::element_aligned);
+  for (double &lane : lanes) {
+    if (std::isnan(lane))
+      lane = 0.0;
+    else if (lane >= 2147483648.0)
+      lane = 2147483647.0;
+    else if (lane < -2147483648.0)
+      lane = -2147483648.0;
+  }
+  native<double> result;
+  result.copy_from(lanes, stdx::element_aligned);
+  return result;
+}
+
+inline native<double> cvt_u32_f64_saturate_input_simd(native<double> s) {
+  constexpr std::size_t W = native<double>::size();
+  alignas(64) double lanes[W];
+  s.copy_to(lanes, stdx::element_aligned);
+  for (double &lane : lanes) {
+    if (std::isnan(lane) || lane < 0.0)
+      lane = 0.0;
+    else if (lane >= 4294967296.0)
+      lane = 4294967295.0;
+  }
+  native<double> result;
+  result.copy_from(lanes, stdx::element_aligned);
+  return result;
+}
+
+inline native<double> sqrt_f64_simd(native<double> a) {
+  native<double> r = stdx::sqrt(a);
+  constexpr std::size_t W = native<double>::size();
+  alignas(64) double in[W];
+  alignas(64) double out[W];
+  a.copy_to(in, stdx::element_aligned);
+  r.copy_to(out, stdx::element_aligned);
+  for (std::size_t i = 0; i < W; ++i) {
+    if (std::isnan(in[i]))
+      out[i] = in[i];
+    else if (in[i] < 0.0)
+      out[i] = std::numeric_limits<double>::quiet_NaN();
+  }
+  r.copy_from(out, stdx::element_aligned);
+  return r;
+}
+
 /// Vectorized, bit-exact port of `f16_to_f32` (util/data_types.h). Each lane's
 /// low 16 bits hold the f16; high bits are ignored. All branch selection is
 /// done with `where`-masks in the uint32 domain. Bit-identical to the scalar
@@ -379,22 +459,33 @@ native<Float> round_fixup_simd(native<Float> a, Round round) {
 
   const U ai = std::bit_cast<U>(a);
   F r = round(a);
-  // All blends use float-domain masks (simd_mask<Float>) to match the existing
-  // f64 transcendental helpers' compile-tested pattern (== / isnan), keeping the
-  // 64-bit-mask path off the libstdc++ AVX-512 `_S_to_bits<long long>` hazard.
-  //
   // Zero-magnitude result inherits the input sign: round-to-integer of x in
   // (-1, 0] is -0.0 (scalar libc result), but the stdx intrinsic yields +0.0 at
-  // narrow widths. `r == 0` matches both +0 and -0 lanes.
+  // narrow widths. The f64 AVX-512 path avoids 64-bit SIMD comparisons because
+  // clang + libstdc++ 13 trips `_S_to_bits<long long>` in that mask code.
   const F signed_zero = std::bit_cast<F>(ai & U(kSign));
-  stdx::where(r == F(Float(0)), r) = signed_zero;
+  if constexpr (sizeof(Float) == 8) {
+    alignas(64) Float r_lanes[F::size()];
+    alignas(64) Bits ai_lanes[U::size()];
+    r.copy_to(r_lanes, stdx::element_aligned);
+    ai.copy_to(ai_lanes, stdx::element_aligned);
+    for (std::size_t i = 0; i < F::size(); ++i) {
+      const Bits rb = std::bit_cast<Bits>(r_lanes[i]);
+      if ((rb & ~kSign) == 0)
+        r_lanes[i] = std::bit_cast<Float>(ai_lanes[i] & kSign);
+    }
+    r.copy_from(r_lanes, stdx::element_aligned);
+  } else {
+    stdx::where(r == F(Float(0)), r) = signed_zero;
+  }
   // NaN input: repair to the scalar path for this compiler and operation.
   // Clang quiets sNaNs for these scalar std:: calls. GCC's scalar wrappers
   // below quiet explicitly, so the SIMD repair follows that same policy.
 #if defined(__clang__) || defined(__GNUC__)
   constexpr bool kQuietNan = true;
 #else
-  static_assert(QuietNan, "round_fixup_simd needs a compiler-specific signaling-NaN policy");
+  static_assert(!sizeof(Float),
+                "round_fixup_simd needs scalar NaN quieting policy for this compiler");
   constexpr bool kQuietNan = QuietNan;
 #endif
   F nan_result;
@@ -614,24 +705,64 @@ inline native<float> bf8_e5m2_to_f32_simd(native<uint32_t> v) {
 ///   if (a==b)              return signbit(a) ? <tie> : <other>;
 ///   return a <cmp> b ? a : b;
 template <typename V> V ieee_maximum_simd(V a, V b) {
-  const auto nan = stdx::isnan(a) || stdx::isnan(b);
-  const auto eq = (a == b);
-  const auto sa = stdx::signbit(a); // true when a is negative (incl. -0)
-  V res = b;                        // a < b (and the a==b,!sa case start)
-  stdx::where(a > b, res) = a;
-  stdx::where(eq && !sa, res) = a; // ±0 / equal tie: pick the +signed operand
-  stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
-  return res;
+  if constexpr (std::is_same_v<typename V::value_type, double>) {
+    constexpr std::size_t W = V::size();
+    alignas(64) double abuf[W];
+    alignas(64) double bbuf[W];
+    alignas(64) double out[W];
+    a.copy_to(abuf, stdx::element_aligned);
+    b.copy_to(bbuf, stdx::element_aligned);
+    for (std::size_t i = 0; i < W; ++i) {
+      if (std::isnan(abuf[i]) || std::isnan(bbuf[i]))
+        out[i] = std::numeric_limits<double>::quiet_NaN();
+      else if (abuf[i] == bbuf[i])
+        out[i] = std::signbit(abuf[i]) ? bbuf[i] : abuf[i];
+      else
+        out[i] = abuf[i] > bbuf[i] ? abuf[i] : bbuf[i];
+    }
+    V result;
+    result.copy_from(out, stdx::element_aligned);
+    return result;
+  } else {
+    const auto nan = stdx::isnan(a) || stdx::isnan(b);
+    const auto eq = (a == b);
+    const auto sa = stdx::signbit(a); // true when a is negative (incl. -0)
+    V res = b;                        // a < b (and the a==b,!sa case start)
+    stdx::where(a > b, res) = a;
+    stdx::where(eq && !sa, res) = a; // ±0 / equal tie: pick the +signed operand
+    stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
+    return res;
+  }
 }
 template <typename V> V ieee_minimum_simd(V a, V b) {
-  const auto nan = stdx::isnan(a) || stdx::isnan(b);
-  const auto eq = (a == b);
-  const auto sa = stdx::signbit(a);
-  V res = b; // a > b (and the a==b,!sa case)
-  stdx::where(a < b, res) = a;
-  stdx::where(eq && sa, res) = a; // ±0 / equal tie: pick the -signed operand
-  stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
-  return res;
+  if constexpr (std::is_same_v<typename V::value_type, double>) {
+    constexpr std::size_t W = V::size();
+    alignas(64) double abuf[W];
+    alignas(64) double bbuf[W];
+    alignas(64) double out[W];
+    a.copy_to(abuf, stdx::element_aligned);
+    b.copy_to(bbuf, stdx::element_aligned);
+    for (std::size_t i = 0; i < W; ++i) {
+      if (std::isnan(abuf[i]) || std::isnan(bbuf[i]))
+        out[i] = std::numeric_limits<double>::quiet_NaN();
+      else if (abuf[i] == bbuf[i])
+        out[i] = std::signbit(abuf[i]) ? abuf[i] : bbuf[i];
+      else
+        out[i] = abuf[i] < bbuf[i] ? abuf[i] : bbuf[i];
+    }
+    V result;
+    result.copy_from(out, stdx::element_aligned);
+    return result;
+  } else {
+    const auto nan = stdx::isnan(a) || stdx::isnan(b);
+    const auto eq = (a == b);
+    const auto sa = stdx::signbit(a);
+    V res = b; // a > b (and the a==b,!sa case)
+    stdx::where(a < b, res) = a;
+    stdx::where(eq && sa, res) = a; // ±0 / equal tie: pick the -signed operand
+    stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
+    return res;
+  }
 }
 
 /// Cubemap face ops (back v_cube{id,sc,tc}_f32). The scalar bodies select among
@@ -762,21 +893,32 @@ inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
 /// exact); ±0 / Inf pass through; NaN is quieted (mantissa MSB set). Bit-identical
 /// to the scalar v_frexp_mant_f64 body.
 inline native<double> frexp_mant_f64_simd(native<double> x) {
-  using U = native<uint64_t>;
-  U v = std::bit_cast<U>(x);
-  U sign = v & U(0x8000000000000000ull);
-  U E = (v >> 52) & U(0x7FFull);
-  U M = v & U(0xFFFFFFFFFFFFFull); // 52 mantissa bits
-  U normal = sign | (U(1022ull) << 52) | M;
-  const native<double> mf = stdx::static_simd_cast<native<double>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
-  U dn = sign | (U(1022ull) << 52) | ((M << (U(52ull) - p)) & U(0xFFFFFFFFFFFFFull));
-  U out = normal;
-  stdx::where(E == 0ull, out) = v;                   // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn; // denormal -> renormalized
-  stdx::where(E == 2047ull, out) = v;                // Inf passes through unchanged
-  stdx::where((E == 2047ull) && (M != 0ull), out) = v | U(0x0008000000000000ull); // quiet NaN
-  return std::bit_cast<native<double>>(out);
+  constexpr uint64_t SIGN = 0x8000000000000000ull;
+  constexpr uint64_t MANT = 0x000FFFFFFFFFFFFFull;
+  alignas(64) double in[native<double>::size()];
+  alignas(64) double out[native<double>::size()];
+  x.copy_to(in, stdx::element_aligned);
+  for (std::size_t i = 0; i < native<double>::size(); ++i) {
+    const uint64_t v = std::bit_cast<uint64_t>(in[i]);
+    const uint64_t sign = v & SIGN;
+    const uint64_t E = (v >> 52) & 0x7FFull;
+    const uint64_t M = v & MANT;
+    uint64_t bits = sign | (1022ull << 52) | M;
+    if (E == 0) {
+      if (M == 0) {
+        bits = v;
+      } else {
+        const uint64_t p = 63u - std::countl_zero(M);
+        bits = sign | (1022ull << 52) | ((M << (52u - p)) & MANT);
+      }
+    } else if (E == 2047) {
+      bits = M == 0 ? v : (v | 0x0008000000000000ull);
+    }
+    out[i] = std::bit_cast<double>(bits);
+  }
+  native<double> result;
+  result.copy_from(out, stdx::element_aligned);
+  return result;
 }
 
 /// 64-bit-lane port of the f64 `std::frexp` exponent. Returns each int32 result
@@ -785,19 +927,25 @@ inline native<double> frexp_mant_f64_simd(native<double> x) {
 /// E - 1022; denormals p - 1073; ±0 / Inf / NaN give 0 (the scalar guards
 /// frexp to finite non-zero inputs). Bit-identical to v_frexp_exp_i32_f64.
 inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
-  using U = native<uint64_t>;
-  U v = std::bit_cast<U>(x);
-  U E = (v >> 52) & U(0x7FFull);
-  U M = v & U(0xFFFFFFFFFFFFFull);
-  U normal = E - U(1022ull);
-  const native<double> mf = stdx::static_simd_cast<native<double>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
-  U dn = p - U(1073ull);
-  U out = normal;
-  stdx::where(E == 0ull, out) = U(0ull);
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn;
-  stdx::where(E == 2047ull, out) = U(0ull);
-  return out;
+  constexpr uint64_t MANT = 0x000FFFFFFFFFFFFFull;
+  alignas(64) double in[native<double>::size()];
+  alignas(64) uint64_t out[native<double>::size()];
+  x.copy_to(in, stdx::element_aligned);
+  for (std::size_t i = 0; i < native<double>::size(); ++i) {
+    const uint64_t v = std::bit_cast<uint64_t>(in[i]);
+    const uint64_t E = (v >> 52) & 0x7FFull;
+    const uint64_t M = v & MANT;
+    if (E == 0) {
+      out[i] = M == 0 ? 0ull : (uint64_t(63u - std::countl_zero(M)) - 1073ull);
+    } else if (E == 2047) {
+      out[i] = 0ull;
+    } else {
+      out[i] = E - 1022ull;
+    }
+  }
+  native<uint64_t> result;
+  result.copy_from(out, stdx::element_aligned);
+  return result;
 }
 
 /// Sum of the four per-byte absolute differences of two uint32 lanes (the core

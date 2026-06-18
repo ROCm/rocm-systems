@@ -1899,6 +1899,43 @@ TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesVop3px2Pair) {
             "v_wmma_scale_f32_16x16x128_f8f6f4 v[6:13], v[18:33], v[52:67], 0, v0, v4");
 }
 
+TEST(Gfx1250DecodeTest, WmmaScale16F8f6f4ConsumesVop3px2Pair) {
+  const uint32_t words[] = {
+      0xCC3A0000u,
+      0x0202391Au,
+      0xCC336012u,
+      0x02021502u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_wmma_scale16_f32_16x16x128_f8f6f4");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->disassemble(),
+            "v_wmma_scale16_f32_16x16x128_f8f6f4 v[18:25], v[2:9], v[10:17], 0, "
+            "v[26:27], v[28:29] matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4");
+}
+
+TEST(Gfx1250DecodeTest, WmmaScaleF4_32x16x128ConsumesVop3px2Pair) {
+  const uint32_t words[] = {
+      0xCC350000u,
+      0x02025328u,
+      0xCC884000u,
+      0x1A024110u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_wmma_scale_f32_32x16x128_f4");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->disassemble(),
+            "v_wmma_scale_f32_32x16x128_f4 v[0:15], v[16:31], v[32:39], 0, v40, v41");
+}
+
 TEST(Gfx1250DecodeTest, SwmmacPrintsIndexKeyAndReuseModifiers) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
@@ -2058,6 +2095,33 @@ TEST(Gfx1250SimulationTest, MultiWaveDispatchPacksWorkitemIdsInV0) {
                                               31u | (3u << 10)};
   EXPECT_EQ(lane0_values, expected_lane0);
   EXPECT_EQ(lane31_values, expected_lane31);
+}
+
+TEST(Gfx1250SimulationTest, PartialWorkgroupMasksTailWaveExec) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 33, 33);
+  step_until_xcd_halted(sim);
+
+  std::vector<uint64_t> exec_masks;
+  for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
+    auto *se = sim.xcd()->shader_engine(se_idx);
+    for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx) {
+      auto *cu = se->compute_unit(cu_idx);
+      for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
+        auto *wf = cu->wf(wf_idx);
+        if (wf && wf->sgpr_alloc().count > 0)
+          exec_masks.push_back(wf->exec());
+      }
+    }
+  }
+
+  std::sort(exec_masks.begin(), exec_masks.end());
+  const std::vector<uint64_t> expected{1ULL, 0xFFFFFFFFULL};
+  EXPECT_EQ(exec_masks, expected);
 }
 
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
@@ -2486,6 +2550,29 @@ TEST(Gfx1250SimulationTest, VgprMsbRolesSelectHighVgprBanks) {
   dst.write_lane(*wf, kLane, 0x44444444u);
   EXPECT_EQ(cu.read_vgpr(vb + 2 * 256 + 5, kLane), 0x44444444u);
   EXPECT_EQ(cu.read_vgpr(vb + 5, kLane), 0xDEADBEEFu);
+}
+
+TEST(Gfx1250SimulationTest, PackedTrue16SourcesHonorGprIdx) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_GE(wf->vgpr_alloc().count, kGfx1250Wave32VgprAllocation);
+
+  constexpr uint32_t kLane = 0;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_mode_raw(amdgpu::Wavefront::GPR_IDX_EN_BIT);
+  wf->set_m0((1u << 8u) | 16u);
+  cu.write_vgpr(vb + 2, kLane, 0xAAAA1111u);
+  cu.write_vgpr(vb + 18, kLane, 0xBBBB2222u);
+
+  gfx1250::Operand lo(16, gfx1250::OperandType::OPR_VGPR, 2, true);
+  gfx1250::Operand hi(16, gfx1250::OperandType::OPR_VGPR, 128 + 2, true);
+  EXPECT_EQ(lo.read_lane(*wf, kLane), 0x2222u);
+  EXPECT_EQ(hi.read_lane(*wf, kLane), 0xBBBBu);
 }
 
 TEST(Gfx1250SimulationTest, VMovrelsReadsM0RelativeVgpr) {
