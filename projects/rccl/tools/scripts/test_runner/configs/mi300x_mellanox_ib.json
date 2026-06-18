@@ -2521,7 +2521,6 @@
         "NCCL_GIN_TYPE": "2",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_DMABUF_ENABLE": "1",
         "NCCL_ENV_PLUGIN": "none"
       },
       "tests": [
@@ -2559,7 +2558,6 @@
       "timeout": 300,
       "env_variables": {
         "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_DMABUF_ENABLE": "1",
         "NCCL_ENV_PLUGIN": "none"
       },
       "tests": [
@@ -2579,6 +2577,28 @@
         }
       ]
     },
+    "gin_reducescatter_sym": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_ReduceScatter_Symmetric",
+          "description": "Symmetric-memory ReduceScatter (RailA2A_LsaLD) sum + avg; requires >=2 ranks/node across >=2 nodes",
+          "test_filter": "GinMPIDeviceTests.ReduceScatter_Symmetric*"
+        }
+      ]
+    },
     "gin_negative": {
       "extends": "default",
       "is_gtest": true,
@@ -2591,7 +2611,6 @@
         "NCCL_GIN_TYPE": "2",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_DMABUF_ENABLE": "1",
         "NCCL_ENV_PLUGIN": "none"
       },
       "tests": [
@@ -3167,6 +3186,12 @@
       "name": "GIN BarrierSession - LSA + Hybrid",
       "description": "ncclBarrierSession LSA-only and hybrid LSA+GIN barrier with 2 ranks/node",
       "config": "gin_barrier_session",
+      "enabled": true
+    },
+    {
+      "name": "GIN ReduceScatter - Symmetric",
+      "description": "Symmetric-memory ReduceScatter (RailA2A_LsaLD) sum + avg with 2 ranks/node across 2 nodes",
+      "config": "gin_reducescatter_sym",
       "enabled": true
     },
     {
