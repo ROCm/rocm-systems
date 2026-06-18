@@ -11,7 +11,7 @@ import importlib.util
 from functools import wraps
 from typing import Any
 
-from utils.inject_roctx._core import (
+from utils.inject_roctx.core import (
     _pop_scope,
     _push_scope,
     ensure_python_tier,
@@ -19,7 +19,7 @@ from utils.inject_roctx._core import (
 )
 from utils.logger import console_log, console_warning
 
-from . import register
+from ..registry import register
 
 _BACKEND_NAME = "triton"
 

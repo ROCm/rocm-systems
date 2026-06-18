@@ -4,8 +4,7 @@
 """Backend-agnostic core for ROCTX scope tracking.
 
 Maintains the per-thread marker and context stacks and the Python-tier
-range push and pop callbacks. Backends interact only through _push_scope,
-_pop_scope, and the helpers defined here.
+rangePush/rangePop callbacks shared by all backends.
 """
 
 import importlib
@@ -13,23 +12,26 @@ import inspect
 import os
 import sys
 import threading
-from functools import wraps
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Callable, Union
 
 # Backends recognized by install_global_wraps and the "api" alias.
 KNOWN_BACKENDS: tuple[str, ...] = ("torch", "triton")
 
+# The "api" alias selects every supported backend.
+_API_ALIAS = "api"
+
 
 def _missing_range_push(_label: str) -> None:
     raise RuntimeError(
-        "inject_roctx._core: Python tier rangePush is not configured.",
+        "inject_roctx.core: Python tier rangePush is not configured.",
     )
 
 
 def _missing_range_pop() -> None:
     raise RuntimeError(
-        "inject_roctx._core: Python tier rangePop is not configured.",
+        "inject_roctx.core: Python tier rangePop is not configured.",
     )
 
 
@@ -184,69 +186,25 @@ def _pop_scope() -> None:
             context_stack.pop()
 
 
-# Structural wrappers for entry points the ATen dispatcher does not record.
+def install_global_wraps(backends: Union[str, Iterable[str]] = "") -> None:
+    """Install ROCTX instrumentation for each backend in backends.
 
-
-def roctx_wrapper(
-    func: Callable[..., Any],
-    name: Optional[str] = None,
-    backend: str = "",
-    push: Callable[..., None] = _push_scope,
-    pop: Callable[[], None] = _pop_scope,
-) -> Callable[..., Any]:
-    """Wrap func so each call emits a ROCTX range. Idempotent.
-
-    When set, backend attributes the scope to that backend. push and pop
-    default to the Python tier; a backend may pass its own to route the scope
-    through another tier.
+    "api" expands to every known backend. Empty input is a no-op.
     """
-    if getattr(func, "_roctx_wrapped", False):
-        return func
-    func_name = name or func.__name__
-    call_counter = {"count": 0}
+    from .registry import install_many
 
-    @wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> object:
-        call_counter["count"] += 1
-        location = resolve_user_caller_location()
-        push(func_name, f"#{call_counter['count']}@{location}", backend=backend)
-        try:
-            return func(*args, **kwargs)
-        finally:
-            pop()
+    if isinstance(backends, str):
+        names = [n.strip() for n in backends.split(",") if n.strip()]
+    else:
+        names = [str(n).strip() for n in backends if str(n).strip()]
 
-    wrapper._roctx_wrapped = True
-    return wrapper
+    expanded: list[str] = []
+    for n in names:
+        if n == _API_ALIAS:
+            expanded.extend(KNOWN_BACKENDS)
+        else:
+            expanded.append(n)
 
-
-def _marker_only_init_wrapper(
-    name: str,
-    backend: str = "",
-    push: Callable[..., None] = _push_scope,
-    pop: Callable[[], None] = _pop_scope,
-) -> Callable[..., Any]:
-    """Build an __init__ that emits a ROCTX range, then calls object.__init__.
-
-    Used for classes whose construction occurs in __new__ (e.g. cuda.Event,
-    cuda.Stream). push and pop default to the Python tier.
-    """
-    call_counter = {"count": 0}
-
-    def marker_only_init(self: object, *args: Any, **kwargs: Any) -> None:
-        call_counter["count"] += 1
-        location = resolve_user_caller_location()
-        push(name, f"#{call_counter['count']}@{location}", backend=backend)
-        try:
-            return object.__init__(self)
-        finally:
-            pop()
-
-    marker_only_init._roctx_wrapped = True
-    return marker_only_init
-
-
-def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
-    """Apply `fn` to every (transitive) subclass of `cls`."""
-    for sub in cls.__subclasses__():
-        fn(sub)
-        _walk_subclasses(sub, fn)
+    if not expanded:
+        return
+    install_many(expanded)
