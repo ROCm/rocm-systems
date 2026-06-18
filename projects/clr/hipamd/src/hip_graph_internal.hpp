@@ -2890,6 +2890,16 @@ class GraphEmptyNode : public GraphNode {
 
   GraphNode* clone() const override { return new GraphEmptyNode(*this); }
 
+  // Empty nodes participate in AQL capture as zero-packet dependency points.
+  // The capture loop registers them as zero-packet nodeRanges so dependency
+  // tracking works without emitting any GPU commands.
+  bool GraphCaptureEnabled() override {
+    if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
+      return true;
+    }
+    return false;
+  }
+
   hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
