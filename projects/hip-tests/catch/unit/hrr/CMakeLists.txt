@@ -12,6 +12,10 @@
 #   hrr_workload.cc      — Hidden ([.][hrr-direct]) GPU test cases invoked as
 #                          subprocesses by hrr_roundtrip.cc; provides clean
 #                          Windows process context for HIP + capture layer.
+#   hrr_repro_workload.cc — Hidden ([.][hrr-direct]) regression micro-kernels
+#                          (first-hipMalloc capture, embedded-pointer struct
+#                          args, uncaptured-host-write divergence, null optional
+#                          output pointer 0x20000 fault class, replay zero-init).
 #   hrr_roundtrip.cc     — Round-trip: sets HIP_HRR_CAPTURE_OUTPUT, spawns
 #                          Unit_HRR_GpuWorkload_Direct / Unit_HRR_GraphWorkload_Direct
 #                          as subprocesses, then runs hrr-playback to validate
@@ -35,6 +39,7 @@ set(TEST_SRC
     hrr_format.cc
     hrr_recovery.cc
     hrr_workload.cc
+    hrr_repro_workload.cc
     hrr_roundtrip.cc
     ${HRR_CLR_DIR}/playback/hrr_reader.cpp
 )

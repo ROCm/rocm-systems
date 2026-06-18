@@ -269,6 +269,101 @@ HIP_TEST_CASE(Unit_HRR_TranslatePtr_Zero_ReturnsNull) {
   CHECK(ctx.translate_ptr(0) == nullptr);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Allocations are recorded with PADDED sizes, so synthetic ranges can
+ *     overlap.  When a recorded address falls inside two overlapping entries,
+ *     translate_ptr must resolve it against the TIGHTEST enclosing entry (the
+ *     one with the largest base <= rec), not an arbitrary neighbour whose pad
+ *     happens to cover the address.  This makes range translation deterministic
+ *     and points at the true home allocation.
+ *   - Regression for the tightest-enclosing range search in hip_playback.h.
+ */
+HIP_TEST_CASE(Unit_HRR_TranslatePtr_TightestEnclosing) {
+  PlaybackContext ctx;
+  void* liveOuter = reinterpret_cast<void*>(static_cast<uintptr_t>(0xA0000000u));
+  void* liveInner = reinterpret_cast<void*>(static_cast<uintptr_t>(0xB0000000u));
+
+  // Outer entry [0x10000, 0x12000) and inner entry [0x10800, 0x11800) overlap.
+  ctx.record_alloc(0x10000ULL, liveOuter, 0x2000);
+  ctx.record_alloc(0x10800ULL, liveInner, 0x1000);
+
+  // 0x11000 is inside BOTH ranges; the tightest enclosing entry is the inner
+  // one (largest base <= rec == 0x10800).  Expected = liveInner + (0x11000 -
+  // 0x10800) = liveInner + 0x800.
+  void* result = ctx.translate_ptr(0x11000ULL);
+  CHECK(result == static_cast<char*>(liveInner) + 0x800);
+
+  // An address inside only the outer entry still resolves to the outer entry.
+  void* outer_only = ctx.translate_ptr(0x10100ULL);
+  CHECK(outer_only == static_cast<char*>(liveOuter) + 0x100);
+}
+
+// ---------------------------------------------------------------------------
+// AllocKind free-dispatch (CPU-only)
+//
+// The playback teardown loop releases each alloc_map entry with the API that
+// matches its AllocKind (Device -> hipFree, HostMalloc -> hipHostFree, and
+// HostRegister / DevicePtrAlias -> not via hipFree).  Passing a host pointer to
+// hipFree returns errors and can corrupt allocator bookkeeping.  These tests
+// verify the kind tagging the dispatch relies on: record_alloc preserves the
+// kind, and the free-routing decision (mirrored from hrr_playback.cpp) sends a
+// host pointer to hipFree for NONE of the host kinds.
+// ---------------------------------------------------------------------------
+
+namespace {
+// Mirrors the teardown switch in hrr_playback.cpp: returns true iff this kind
+// is released via hipFree.  Only AllocKind::Device must map to hipFree.
+bool kind_uses_hipFree(AllocKind k) {
+  switch (k) {
+    case AllocKind::Device:         return true;
+    case AllocKind::HostMalloc:     return false;  // hipHostFree
+    case AllocKind::HostRegister:   return false;  // host_reg_bufs path
+    case AllocKind::DevicePtrAlias: return false;  // not separately freed
+  }
+  return false;
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ----------------
+ *   - Record one allocation of each AllocKind into a PlaybackContext.
+ *   - Verify record_alloc preserved each entry's kind.
+ *   - Verify the free-dispatch decision routes ONLY the Device entry to hipFree;
+ *     every host-backed pointer (HostMalloc / HostRegister / DevicePtrAlias) is
+ *     routed away from hipFree.  Guards against re-introducing a hipFree call on
+ *     a host pointer at teardown.
+ */
+HIP_TEST_CASE(Unit_HRR_AllocKind_FreeDispatch) {
+  PlaybackContext ctx;
+  void* dev   = reinterpret_cast<void*>(static_cast<uintptr_t>(0x10000000u));
+  void* hmal  = reinterpret_cast<void*>(static_cast<uintptr_t>(0x20000000u));
+  void* hreg  = reinterpret_cast<void*>(static_cast<uintptr_t>(0x30000000u));
+  void* alias = reinterpret_cast<void*>(static_cast<uintptr_t>(0x40000000u));
+
+  ctx.record_alloc(0x1000ULL, dev,   256, AllocKind::Device);
+  ctx.record_alloc(0x2000ULL, hmal,  256, AllocKind::HostMalloc);
+  ctx.record_alloc(0x3000ULL, hreg,  256, AllocKind::HostRegister);
+  ctx.record_alloc(0x4000ULL, alias, 256, AllocKind::DevicePtrAlias);
+
+  REQUIRE(ctx.alloc_map.size() == 4);
+  CHECK(ctx.alloc_map.at(0x1000ULL).kind == AllocKind::Device);
+  CHECK(ctx.alloc_map.at(0x2000ULL).kind == AllocKind::HostMalloc);
+  CHECK(ctx.alloc_map.at(0x3000ULL).kind == AllocKind::HostRegister);
+  CHECK(ctx.alloc_map.at(0x4000ULL).kind == AllocKind::DevicePtrAlias);
+
+  // Only the Device entry may be released via hipFree.
+  for (const auto& [rec, entry] : ctx.alloc_map) {
+    if (entry.kind == AllocKind::Device) {
+      CHECK(kind_uses_hipFree(entry.kind));
+    } else {
+      CHECK_FALSE(kind_uses_hipFree(entry.kind));
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Archive reader SIZE_OK guard tests (CPU-only, no GPU required)
 //

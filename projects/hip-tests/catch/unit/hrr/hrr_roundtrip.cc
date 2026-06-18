@@ -445,6 +445,194 @@ static void hrr_run_roundtrip(const std::string& direct_case,
   hrr_run_playback(cap_path, /*extra_args=*/"", require_d2h);
 }
 
+// ---------------------------------------------------------------------------
+// Env-aware capture + playback helpers (used by the repro roundtrips).
+//
+// hrr_capture_direct: spawn a hidden _Direct workload with HIP_HRR_CAPTURE_OUTPUT
+//   set, REQUIRE a clean capture, and assert the archive has >= min_events.
+//
+// hrr_playback_env: run hrr-playback with arbitrary extra environment pairs
+//   (e.g. HIP_HRR_REPLAY_ZERO_INIT / HIP_HRR_REPLAY_DIVERGENCE_ABORT) and return
+//   {exit_code, stdout}.  Note: SpawnProc only captures stdout, not stderr, so
+//   the divergence-guard "[HRR] replay DIVERGED" message (emitted on stderr) is
+//   NOT visible here — the deterministic, observable contract is the exit code
+//   (2 == clean divergence stop), which is what the callers assert.
+// ---------------------------------------------------------------------------
+static void hrr_capture_direct(const std::string& direct_case,
+                               const fs::path& cap_path,
+                               size_t min_events = 5) {
+  { hip::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+    { set_proc_search_path(proc); }
+    int ret = proc.run("\"" + direct_case + "\"");
+    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
+  REQUIRE(fs::exists(cap_path / "events.bin"));
+  REQUIRE(fs::exists(cap_path / "blobs"));
+  hrr::Archive arc;
+  bool arc_ok = hrr::load_archive(cap_path.string(), arc);
+  INFO("Archive event count: " << arc.events.size());
+  REQUIRE(arc_ok);
+  REQUIRE(arc.events.size() >= min_events);
+}
+
+static std::pair<int, std::string> hrr_playback_env(
+    const fs::path& cap_path,
+    const std::vector<std::pair<std::string, std::string>>& env,
+    const std::string& extra_args = "") {
+  hip::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  set_proc_search_path(proc);
+  for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
+#ifdef _WIN32
+  std::string path_arg = "\"" + cap_path.string() + "\"";
+#else
+  std::string path_arg = cap_path.string();
+#endif
+  int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
+  return {ret, proc.getOutput()};
+}
+
+// ---------------------------------------------------------------------------
+// Repro roundtrips — capture the micro-kernel workloads from
+// hrr_repro_workload.cc and validate the playback behaviours fixed in this area.
+// ---------------------------------------------------------------------------
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FirstMalloc_Direct, whose very first HIP call is a
+ *     hipMalloc (no hipSetDevice / warm-up allocation first).  Replay and
+ *     REQUIRE the D2H validates — i.e. the very first allocation was captured
+ *     and translated.
+ *
+ *   Hidden ([.]) because it reproduces the known dropped-first-hipMalloc
+ *   limitation: capture shims are installed from hip_capture_init() (run inside
+ *   hip::init()), which is the in-flight first HIP API call, so that first call
+ *   itself is not recorded.  When the first call is a hipMalloc the allocation
+ *   is missing and replay aborts with "H2D dst ... not mapped".  The accepted
+ *   workaround is a warm-up allocation before the real work.  Run explicitly by
+ *   name; this case PASSES once first-call capture is fixed (the warm-up is no
+ *   longer required), so it doubles as the regression guard for that fix.
+ */
+TEST_CASE("Unit_HRR_FirstMallocRoundtrip", "[.][hrr-repro]") {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_firstmalloc"};
+  hrr_run_roundtrip("Unit_HRR_FirstMalloc_Direct", cap.path);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_EmbeddedPtrStruct_Direct (kernel takes a by-value struct
+ *     with embedded device pointers).  Replay and REQUIRE D2H pass >= 1, proving
+ *     the embedded pointers were detected at capture and translated at replay.
+ */
+HIP_TEST_CASE(Unit_HRR_EmbeddedPtrRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_embeddedptr"};
+  hrr_run_roundtrip("Unit_HRR_EmbeddedPtrStruct_Direct", cap.path);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ZeroInitRead_Direct (uninitialised device buffer copied
+ *     to out, then D2H; captured blob is all-zero on a zeroing driver).
+ *   - Replay with HIP_HRR_REPLAY_ZERO_INIT=1: the replayed source is zeroed
+ *     deterministically, so the D2H validates (exit 0, pass >= 1).  Verifies the
+ *     zero-init replay knob.  Note: with the knob off the replay may reuse stale
+ *     bytes and diverge — that path is intentionally not asserted here.
+ */
+HIP_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_zeroinit"};
+  hrr_capture_direct("Unit_HRR_ZeroInitRead_Direct", cap.path);
+
+  auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_REPLAY_ZERO_INIT", "1"}});
+  INFO("Playback stdout:\n" << out);
+  INFO("Playback exit code: " << ret);
+  REQUIRE(ret == 0);  // zero-init reproduces the captured all-zero output
+
+  size_t pos = out.find("D2H checks");
+  REQUIRE(pos != std::string::npos);
+  size_t colon = out.find(':', pos);
+  REQUIRE(colon != std::string::npos);
+  int d2h_pass = 0, d2h_fail = 0;
+  sscanf(out.c_str() + colon + 1, " %d pass, %d fail", &d2h_pass, &d2h_fail);
+  INFO("D2H pass=" << d2h_pass << " fail=" << d2h_fail);
+  CHECK(d2h_pass >= 1);
+  CHECK(d2h_fail == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_UncapturedHostWrite_Direct: a mapped host flag is set by
+ *     an uncaptured CPU store, then kDivergeIters kernels each write the flag
+ *     value out and read it back.  Every replay D2H diverges (fresh zero flag).
+ *   - Section 1 (guard ON): replay with a low divergence-abort threshold and a
+ *     small min-samples count.  REQUIRE clean exit code 2 (replay diverged) —
+ *     the guard stops the replay deterministically.  Directly validates the
+ *     divergence-abort guard.
+ *   - Section 2 (guard OFF): replay with HIP_HRR_REPLAY_DIVERGENCE_ABORT=0.
+ *     REQUIRE the exit code is NOT 2 (it runs to completion / D2H-fail), proving
+ *     the guard is what produces exit 2, not some unrelated error.
+ */
+HIP_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_divergence"};
+  hrr_capture_direct("Unit_HRR_UncapturedHostWrite_Direct", cap.path);
+
+  SECTION("guard ON -> clean exit 2") {
+    auto [ret, out] = hrr_playback_env(
+        cap.path,
+        {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0.25"},
+         {"HIP_HRR_REPLAY_DIVERGENCE_MIN_SAMPLES", "16"}});
+    INFO("Playback stdout:\n" << out);
+    INFO("Playback exit code: " << ret);
+    // Exit 2 == divergence guard tripped and stopped cleanly. The "replay
+    // DIVERGED" text is on stderr (not captured), so the exit code is the
+    // asserted contract.
+    REQUIRE(ret == 2);
+  }
+
+  SECTION("guard OFF -> not exit 2") {
+    auto [ret, out] = hrr_playback_env(
+        cap.path, {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0"}});
+    INFO("Playback stdout:\n" << out);
+    INFO("Playback exit code: " << ret);
+    // With the guard disabled the replay does not stop early: it either
+    // completes (exit 0/1 from D2H-fail) — never the divergence exit 2.
+    REQUIRE(ret != 2);
+    REQUIRE(ret < 128);  // and never a crash
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_NullOptionalPtr_Direct: a divergence loop (uncaptured
+ *     host write) followed by a slotmap kernel whose optional output pointer is
+ *     NULL at capture and would be written at byte offset 0x20000 on replay.
+ *   - Replay with the divergence guard ON: the guard trips during the readback
+ *     loop and stops the replay (exit 2) BEFORE the faulting kernel runs, so the
+ *     null + 0x20000 write never happens.  REQUIRE a clean exit 2 rather than a
+ *     GPU memory fault.
+ *
+ *   Hidden ([.]) because a mistuned guard could let the raw GPU fault through,
+ *   which can destabilise a shared runner.  Run explicitly by name to validate
+ *   the guard converts the fault class into a clean exit.
+ */
+TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_nulloptional"};
+  hrr_capture_direct("Unit_HRR_NullOptionalPtr_Direct", cap.path);
+
+  auto [ret, out] = hrr_playback_env(
+      cap.path,
+      {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0.25"},
+       {"HIP_HRR_REPLAY_DIVERGENCE_MIN_SAMPLES", "16"}});
+  INFO("Playback stdout:\n" << out);
+  INFO("Playback exit code: " << ret);
+  // Clean divergence stop (2), NOT a GPU fault (signal -> >128) nor a generic
+  // fatal HIP error (1) from the null write.
+  REQUIRE(ret == 2);
+}
+
 HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetvariants"};
   hrr_run_roundtrip("Unit_HRR_MemsetVariants_Direct", cap.path);
