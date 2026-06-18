@@ -126,7 +126,8 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
     }
 #ifdef ENABLE_ROCSHMEM_GIN
     else if (comm->ginContext &&
-             (pluginLib->ncclGin == &ncclGinRocshmemApi)) {
+             (pluginLib->ncclGin == &ncclGinRocshmemApiPlugin ||
+              pluginLib->ncclGin == &ncclGinRocshmemGdaPlugin)) {
       ncclGinRocshmemSetInitContext(comm->ginContext, &comm->devrState, comm->bootstrap);
     }
 #endif
@@ -268,8 +269,8 @@ static void initPluginLibsOnceFunc() {
 #ifdef ENABLE_ROCSHMEM_GIN
   // Add internal rocshmem API plugin (device-initiated, GIN_TYPE=4)
   {
-    extern ncclGin_t ncclGinRocshmemApi;
-    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemApi;
+    extern ncclGin_t ncclGinRocshmemApiPlugin;
+    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemApiPlugin;
     ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
     pluginCounter++;
   }

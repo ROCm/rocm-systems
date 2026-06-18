@@ -30,6 +30,6 @@ void ncclGinRocshmemSetInitContext(void *initCtx,
                                    void *bootstrap);
 
 // The built-in plugin instances
-extern ncclGin_t ncclGinRocshmemApi;
+extern ncclGin_t ncclGinRocshmemApiPlugin;
 
 #endif

@@ -434,9 +434,7 @@ set(SRC_FILES
   transport/shm.cc
   gin/gin_host.cc
   gin/gin_host_proxy.cc
-  gin/gin_host_rocshmem_api.cc
   gin/gin_plugin_rocshmem_api.cc
-  gin/gin_host_rocshmem_gda.cc
   gin/gin_plugin_rocshmem_gda.cc
   gin/gin_rocshmem_gda_factory.cc
   include/latency_profiler/CollTrace.h

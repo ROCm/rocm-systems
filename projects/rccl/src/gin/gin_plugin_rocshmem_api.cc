@@ -319,7 +319,7 @@ static ncclResult_t ginRocshmemQueryLastError(void* ginCtx, bool* hasError) {
 ///////////////////////////////////////////////////////////////////////////////
 
 __attribute__((visibility("default")))
-ncclGin_t ncclGinRocshmemApi = {
+ncclGin_t ncclGinRocshmemApiPlugin = {
   .name            = "rocshmem-api",
   .init            = ginRocshmemInit,
   .devices         = ginRocshmemDevices,
