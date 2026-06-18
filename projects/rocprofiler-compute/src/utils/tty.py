@@ -54,9 +54,7 @@ def scale_bw_columns(
     if not bw_rows.any():
         return df_copy
 
-    # "Pct of Peak" and "PoP" are retained for backward compatibility with workloads
-    # profiled under older schema.
-    pct_cols = ["Percent of Peak", "Pct of Peak", "PoP"]
+    pct_cols = ["Percent of Peak"]
     value_col = "Value" if "Value" in df_copy.columns else "Avg"
     peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df_copy.columns else "Peak"
 

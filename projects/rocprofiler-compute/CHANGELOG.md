@@ -3,6 +3,11 @@
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
 
+### Changed
+
+* Renamed the `Pct of Peak` / `PoP` analysis column to `Percent of Peak` in CLI and GUI output.
+
+
 ## ROCm Compute Profiler 3.7.0 for ROCm 7.14.0
 
 ### Added
@@ -21,6 +26,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations
 
 ### Changed
+
+* Renamed the `Pct of Peak` / `PoP` analysis column to `Percent of Peak` in CLI and GUI output.
 
 * Moved `--gui` and `--tui` analyze options to experimental status. These features now require the `--experimental` flag to be enabled (e.g., `rocprof-compute analyze --experimental --gui`).
 
