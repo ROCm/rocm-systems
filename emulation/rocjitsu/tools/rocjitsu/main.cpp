@@ -798,6 +798,11 @@ int main(int argc, char *argv[]) {
     setenv("HSA_TOOLS_DISABLE_REGISTER", "1", 1);
     setenv("HSA_TOOLS_LIB", hooks_path.c_str(), 1);
   }
+  // Export the invocation runtime dir so every descendant (including grandchild
+  // processes spawned through wrappers like ctest) inherits the exact directory
+  // holding config_path/daemon.sock. Attach mode creates no such dir.
+  if (!attach_mode)
+    setenv(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid).c_str(), 1);
   execvp(app_argv[0], app_argv);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));

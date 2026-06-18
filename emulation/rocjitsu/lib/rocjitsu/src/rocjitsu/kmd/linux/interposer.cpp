@@ -200,16 +200,26 @@ public:
 
   static void init() {
     new (storage_) InterposerContext();
-    // Resolve the per-PID invocation directory once here, in the library
+    // Resolve the per-invocation runtime directory once here, in the library
     // constructor: this runs single-threaded before any app code (and thus before
-    // any app fork). Eager init closes two hazards of a lazy accessor: (1) a data
-    // race — invocation_runtime_dir() is called from paths holding different locks
+    // any app fork). Writing it once here keeps invocation_runtime_dir() an
+    // immutable, lock-free read and closes two hazards a lazy resolve would have:
+    // (1) a data race — the accessor is reached from paths holding different locks
     // (remote_mutex_ vs init_mutex_); (2) an empty-at-fork window — a child the app
     // forks inherits this populated string and reconnects to the parent's daemon,
     // instead of recomputing rpc_invocation_runtime_dir(child_pid) and missing it.
+    //
+    // Prefer the dir the launcher exported before execvp: every descendant
+    // (including grandchildren spawned through wrappers like ctest, whose PID
+    // differs from the launcher's) inherits the exact directory holding
+    // config_path/daemon.sock. Fall back to this process's PID-scoped default for
+    // attach mode, where no launcher set the variable.
     // Assigned before resolve() (which flips real().ready() true, the gate every
     // interposed entry point checks) so no reader can observe an empty value.
-    ctx.invocation_runtime_dir_ = rocjitsu::rpc_invocation_runtime_dir(getpid());
+    if (const char *dir = getenv(rocjitsu::kRpcInvocationDirEnv))
+      ctx.invocation_runtime_dir_ = dir;
+    else
+      ctx.invocation_runtime_dir_ = rocjitsu::rpc_invocation_runtime_dir(getpid());
     real().resolve();
   }
 
@@ -280,7 +290,7 @@ public:
                : nullptr;
   }
 
-  /// @brief The per-PID invocation runtime directory for this process image.
+  /// @brief The per-invocation runtime directory for this process image.
   /// @details Populated once in init() before any thread or app fork, so this is
   /// a lock-free immutable read. A forked app child inherits the parent's value
   /// (reset_after_fork() intentionally does not clear it) and thus reconnects to

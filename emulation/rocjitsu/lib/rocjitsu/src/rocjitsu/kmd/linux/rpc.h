@@ -257,11 +257,20 @@ inline std::string rpc_default_config_file_path() {
   return rpc_default_runtime_dir() + "/config_path";
 }
 
+/// @brief Environment variable carrying the resolved per-invocation runtime dir.
+/// @details The CLI exports this before execvp, so every descendant process
+/// (direct children and grandchildren spawned through wrappers like ctest)
+/// inherits the exact directory holding config_path/daemon.sock without
+/// re-deriving it from its own PID. Absent in attach mode, where the interposer
+/// falls back to its own PID-scoped runtime dir (which does not exist, so
+/// connect_to_daemon then uses the well-known socket).
+inline constexpr char kRpcInvocationDirEnv[] = "ROCJITSU_INVOCATION_DIR";
+
 /// @brief Per-invocation runtime directory scoped by PID.
-/// @details The CLI creates <runtime_dir>/<pid>/ before execvp, so the
-/// interposer can locate the correct config/socket using getpid(). Forked
-/// children inherit the parent's cached directory to reconnect to the same
-/// daemon instance.
+/// @details The CLI creates <runtime_dir>/<pid>/ before execvp and exports its
+/// path via $ROCJITSU_INVOCATION_DIR so the interposer locates the correct
+/// config/socket without depending on the process-tree shape. All descendants
+/// inherit the same directory through the environment.
 inline std::string rpc_invocation_runtime_dir(pid_t pid) {
   return rpc_default_runtime_dir() + "/" + std::to_string(pid);
 }
