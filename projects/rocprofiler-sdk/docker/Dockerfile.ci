@@ -15,7 +15,7 @@ ENV HIP_COMPILER=amdclang++
 ENV LLVM_PATH=/opt/rocm/llvm
 ENV CMAKE_PREFIX_PATH=/opt/rocm
 ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/usr/lib64/openmpi/bin:/opt/openmpi/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:/usr/local/bin:~/.local/bin:${PATH}
-ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:/opt/openmpi/lib:${LD_LIBRARY_PATH:-}
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:/opt/openmpi/lib
 
 # Debian/Ubuntu
 RUN set -euo pipefail; \
