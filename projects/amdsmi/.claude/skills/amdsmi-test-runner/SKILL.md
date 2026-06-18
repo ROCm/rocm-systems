@@ -27,8 +27,8 @@ cd build && make -j$(nproc) amdsmitst
 
 ```bash
 cd build/tests
-source ../../tests/amd_smi_test/amdsmitst.exclude
-source ../../tests/amd_smi_test/detect_asic_filter.sh
+source ../../tests/cpp/amdsmitst.exclude
+source ../../tests/cpp/detect_asic_filter.sh
 ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}"
 ```
 
@@ -80,8 +80,8 @@ Tests must work in **both** install contexts:
 
 ```bash
 cd build/tests && \
-source ../../tests/amd_smi_test/amdsmitst.exclude && \
-source ../../tests/amd_smi_test/detect_asic_filter.sh && \
+source ../../tests/cpp/amdsmitst.exclude && \
+source ../../tests/cpp/detect_asic_filter.sh && \
 ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" && \
 cd ../../tests/python_unittest && python3 -m pytest -v
 ```

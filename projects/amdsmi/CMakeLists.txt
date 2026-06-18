@@ -385,7 +385,7 @@ add_subdirectory("src")
 
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
-    add_subdirectory("tests/amd_smi_test")
+    add_subdirectory("tests/cpp")
     add_subdirectory("tests/python_unittest")
 endif()
 

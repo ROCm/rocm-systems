@@ -61,7 +61,7 @@ set(TEST "amdsmitst")
 # Source files
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} tstSources)
 # Header file include path
-# ${CMAKE_CURRENT_SOURCE_DIR} (= tests/amd_smi_test/) lets test_base.h, test_common.h, and
+# ${CMAKE_CURRENT_SOURCE_DIR} (= tests/cpp/) lets test_base.h, test_common.h, and
 # test_utils.h be included as "test_base.h" from any subdirectory depth.
 include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
 

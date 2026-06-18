@@ -51,7 +51,7 @@ meaningful timing data.
 ### Directory layout
 
 ```text
-tests/amd_smi_test/
+tests/cpp/
 ├── main.cc                          # GTest entry point; registers all TestBase tests
 ├── test_base.{h,cc}                 # TestBase lifecycle (SetUp / Run / Close / DisplayResults)
 ├── test_common.{h,cc}               # Verbosity macros, enum-to-string helpers
@@ -145,7 +145,7 @@ all independently filterable via `--gtest_filter` wildcards.
 
 ### CMake integration
 
-`tests/amd_smi_test/CMakeLists.txt` uses `file(GLOB_RECURSE ...)` to collect all sources under
+`tests/cpp/CMakeLists.txt` uses `file(GLOB_RECURSE ...)` to collect all sources under
 `unit/` and `functional/` automatically, so adding a new file to any subdirectory requires no
 CMake change:
 
@@ -172,7 +172,7 @@ add_executable(amdsmitst
 ### Running C++ tests
 
 All examples use `amdsmitst` directly with `--gtest_filter`. The binary is at
-`<build>/tests/amd_smi_test/amdsmitst` or `/opt/rocm/share/amd_smi/tests/amdsmitst` after install.
+`<build>/tests/cpp/amdsmitst` or `/opt/rocm/share/amd_smi/tests/amdsmitst` after install.
 
 The suite name scheme `<Component><Type><Operation>` makes every axis independently filterable:
 - **Component**: `Gpu*`, `Cpu*`, `Nic*`, `Ifoe*`, `System*`
@@ -406,7 +406,7 @@ install(
 
 ### C++ file mapping
 
-| Old path (`tests/amd_smi_test/`) | New path (`tests/amd_smi_test/`) |
+| Old path (`tests/cpp/`) | New path (`tests/cpp/`) |
 | :--- | :--- |
 | `functional/api_support_read.{h,cc}` | `functional/gpu/identity/api_support_read.{h,cc}` |
 | `functional/computepartition_read_write.{h,cc}` | `functional/gpu/partition/computepartition_read_write.{h,cc}` |

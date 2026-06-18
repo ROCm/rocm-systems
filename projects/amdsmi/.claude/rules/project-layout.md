@@ -65,7 +65,7 @@ Missing results = cascade gap.
 
 | Suite | Path | Runner |
 |-------|------|--------|
-| C++ GTest | `tests/amd_smi_test/` | `build/tests/amd_smi_test/amdsmitst` |
+| C++ GTest | `tests/cpp/` | `build/tests/cpp/amdsmitst` |
 | Python unit | `tests/python_unittest/unit_tests.py` | `python3` |
 | Python integration | `tests/python_unittest/integration_test.py` | `python3` |
 | Python CLI | `tests/python_unittest/cli_unit_test.py` | `python3` |
