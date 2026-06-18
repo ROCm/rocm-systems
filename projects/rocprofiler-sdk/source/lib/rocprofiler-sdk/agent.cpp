@@ -46,13 +46,6 @@
 #include <fmt/ranges.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
-#include <libdrm/amdgpu.h>
-#include <xf86drm.h>
-// amdgpu_drm.h provides AMDGPU_INFO_DEV_INFO / drm_amdgpu_info_device for the
-// V2 cu_bitmap path below; only needed in internal-aqlprofile builds.
-#if !ROCPROFILER_EXTERNAL_AQLPROFILE
-#    include <libdrm/amdgpu_drm.h>
-#endif
 
 #include <iomanip>
 #include <limits>
@@ -155,9 +148,10 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
         auto set_hip_visibility = [&agent_info](bool is_hip_visible) {
             if(is_hip_visible && agent_info.runtime_visibility.hsa == 0)
             {
-                ROCP_WARNING << fmt::format("Attempt to enable hip visiblity for agent-{} which is "
-                                            "not visible to HSA (ROCR)",
-                                            agent_info.node_id);
+                ROCP_WARNING << fmt::format(
+                    "Attempt to enable hip visibility for agent-{} which is "
+                    "not visible to HSA (ROCR)",
+                    agent_info.node_id);
                 return;
             }
 
@@ -411,72 +405,6 @@ get_bdf_info(const rocprofiler_agent_t* agent)
             .function = static_cast<uint8_t>(agent->location_id & 0x07)};
 }
 
-// Attempt V2 agent registration with cu_bitmap from DRM for WGP harvesting support.
-// Returns true on success, false if any step fails (caller should fall back to V1).
-//
-// V2 is gated to GFX11+ because the cu_bitmap is only consumed by the SQ-counter
-// WGP iteration path in source/lib/aqlprofile/pm4/pmc_builder.h (bIsWGPcounter11);
-// on GFX9 (MI100/200/300) and GFX10 the bitmap is unused, and a per-process
-// drmOpenRender + amdgpu_device_initialize on the shared /dev/dri/renderD* node
-// serializes on the kernel DRM mutex, inflating CI runtime under parallel loads.
-// gfx_target_version is the KFD-populated numeric encoding
-// (major*10000 + minor*100 + patch) already used elsewhere in this file
-// (see _set_default_agent_names) and across the SDK (pc_sampling, evaluate_ast),
-// so the >= 110000 threshold cleanly selects GFX11 / GFX12 / future families.
-//
-// Only compiled for internal-aqlprofile builds. External-aqlprofile builds
-// (ROCPROFILER_BUILD_AQLPROFILE=OFF) link against the ROCm-release-shipped
-// libhsa-amd-aqlprofile64.so which neither exposes aqlprofile_register_agent_info
-// nor the AQLPROFILE_AGENT_VERSION_V2 enum value, so this function is omitted
-// there and the caller's #if branch takes the legacy aqlprofile_register_agent path.
-#if !ROCPROFILER_EXTERNAL_AQLPROFILE
-bool
-try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_t* handle)
-{
-    if(agent->gfx_target_version < 110000) return false;
-
-    int drm_fd = drmOpenRender(agent->drm_render_minor);
-    if(drm_fd < 0) return false;
-
-    uint32_t             major_ver  = 0;
-    uint32_t             minor_ver  = 0;
-    amdgpu_device_handle dev_handle = nullptr;
-    bool                 success    = false;
-
-    if(amdgpu_device_initialize(drm_fd, &major_ver, &minor_ver, &dev_handle) == 0)
-    {
-        drm_amdgpu_info_device dev_info = {};
-        if(amdgpu_query_info(dev_handle, AMDGPU_INFO_DEV_INFO, sizeof(dev_info), &dev_info) == 0)
-        {
-            aqlprofile_agent_info_v2_t info_v2 = {};
-            info_v2.agent_gfxip                = agent->name;
-            info_v2.xcc_num                    = agent->num_xcc;
-            info_v2.se_num                     = agent->num_shader_banks;
-            info_v2.cu_num                     = agent->cu_count;
-            info_v2.shader_arrays_per_se       = agent->simd_arrays_per_engine;
-            info_v2.domain                     = agent->domain;
-            info_v2.location_id                = agent->location_id;
-            // Size from the (smaller, fixed) kernel uAPI side so this cannot
-            // over-read dev_info if the V2 cu_bitmap layout ever grows.
-            static_assert(sizeof(info_v2.cu_bitmap.bits) >= sizeof(dev_info.cu_bitmap),
-                          "drm_amdgpu_info_device.cu_bitmap larger than "
-                          "aqlprofile_cu_bitmap_t::bits; bump "
-                          "AQLPROFILE_DRM_CU_BITMAP_NUM_SE / "
-                          "AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE in aql_profile_v2.h to "
-                          "match the kernel uAPI and bump the V2 ABI version");
-            memcpy(info_v2.cu_bitmap.bits, dev_info.cu_bitmap, sizeof(dev_info.cu_bitmap));
-
-            success = (aqlprofile_register_agent_info(
-                           handle, &info_v2, AQLPROFILE_AGENT_VERSION_V2) == HSA_STATUS_SUCCESS);
-        }
-        amdgpu_device_deinitialize(dev_handle);
-    }
-
-    drmClose(drm_fd);
-    return success;
-}
-#endif  // !ROCPROFILER_EXTERNAL_AQLPROFILE
-
 const std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles()
 {
@@ -517,37 +445,26 @@ get_aql_handles()
                     bdf.function,
                     agent->name);
 
-                // Try V2 registration with cu_bitmap from DRM for WGP harvesting support.
-                bool registered_v2 = false;
-                if(agent->type == ROCPROFILER_AGENT_TYPE_GPU && agent->drm_render_minor > 0)
-                {
-                    registered_v2 = try_register_agent_v2(agent, &handle);
-                }
+                aqlprofile_agent_info_v1_t agent_info = {
+                    .agent_gfxip          = agent->name,
+                    .xcc_num              = agent->num_xcc,
+                    .se_num               = agent->num_shader_banks,
+                    .cu_num               = agent->cu_count,
+                    .shader_arrays_per_se = agent->simd_arrays_per_engine,
+                    .domain               = agent->domain,
+                    .location_id          = agent->location_id,
+                };
 
-                // Fallback to V1 if V2 was unavailable or failed
-                if(!registered_v2)
+                if(aqlprofile_register_agent_info(
+                       &handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) != HSA_STATUS_SUCCESS)
                 {
-                    aqlprofile_agent_info_v1_t agent_info = {
-                        .agent_gfxip          = agent->name,
-                        .xcc_num              = agent->num_xcc,
-                        .se_num               = agent->num_shader_banks,
-                        .cu_num               = agent->cu_count,
-                        .shader_arrays_per_se = agent->simd_arrays_per_engine,
-                        .domain               = agent->domain,
-                        .location_id          = agent->location_id,
-                    };
-
-                    if(aqlprofile_register_agent_info(
-                           &handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) != HSA_STATUS_SUCCESS)
-                    {
-                        ROCP_WARNING << fmt::format(
-                            "Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
-                            bdf.domain,
-                            bdf.bus,
-                            bdf.device,
-                            bdf.function,
-                            agent->name);
-                    }
+                    ROCP_WARNING << fmt::format(
+                        "Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
+                        bdf.domain,
+                        bdf.bus,
+                        bdf.device,
+                        bdf.function,
+                        agent->name);
                 }
 #endif
                 agent_handles.push_back(handle);

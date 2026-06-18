@@ -41,6 +41,10 @@ class tui_analysis(OmniAnalyze_Base):
         # Initialize per-kernel dataframes
         self.raw_dfs: dict[str, Any] = {}
 
+        pc_sampling_data = self.load_pc_sampling_tool_data(self.path)
+
+        # No counters collected -- derive scaffolding from the PC sampling
+        # kernel trace and skip metrics calculation.
         if self.pc_sampling_only():
             console_log(
                 "analysis",
@@ -48,29 +52,9 @@ class tui_analysis(OmniAnalyze_Base):
                 " available, metrics calculation will be"
                 " skipped",
             )
-            workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(self.path)
-            workload.raw_pmc = workload.raw_pmc.rename(
-                columns={"Dispatch_Id": "Dispatch_ID"}
+            self.build_pc_sampling_only_workload(
+                workload, self.path, self.args, pc_sampling_data
             )
-
-            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
-                df_in=workload.raw_pmc,
-                raw_data_dir=self.path,
-                filter_gpu_ids=workload.filter_gpu_ids,
-                filter_dispatch_ids=workload.filter_dispatch_ids,
-                filter_nodes=workload.filter_nodes,
-                time_unit=self.args.time_unit,
-                kernel_verbose=self.args.kernel_verbose,
-            )
-            workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
-            workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
-
-            parser.load_non_mertrics_table(
-                workload=workload,
-                dir_path=self.path,
-                args=self.args,
-            )
-            parser.nullify_unevaluated_metric_values(workload)
             return
 
         # Join results_*.csv source files into pmc_perf.csv if needed (Phase 2)
@@ -104,6 +88,7 @@ class tui_analysis(OmniAnalyze_Base):
             workload=workload,
             dir_path=self.path,
             args=self.args,
+            pc_sampling_tool_data=pc_sampling_data,
         )
 
         # Group raw PMC data by kernel name
@@ -119,9 +104,11 @@ class tui_analysis(OmniAnalyze_Base):
             kernel_dfs = copy.deepcopy(workload.dfs)
 
             # Evaluate metrics aggregated across all dispatches of this kernel
+            gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
             eval_metric(
                 kernel_dfs,
                 workload.dfs_type,
+                self._arch_configs[gpu_arch].dfs_expressions,
                 workload.sys_info.iloc[0],
                 workload.roofline_peaks,
                 kernel_raw_pmc,
@@ -133,7 +120,7 @@ class tui_analysis(OmniAnalyze_Base):
     def initalize_runs(
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
-        sys_info = file_io.load_sys_info(str(Path(self.path) / "sysinfo.csv"))
+        sys_info = pd.read_csv(str(Path(self.path) / "sysinfo.csv"))
         arch = sys_info.iloc[0]["gpu_arch"]
 
         self.generate_configs(
@@ -142,6 +129,7 @@ class tui_analysis(OmniAnalyze_Base):
             self.args.list_stats,
             self.args.filter_metrics,
             sys_info.iloc[0],
+            getattr(self, "_profiling_config", {}),
         )
         self.load_options(normalization_filter)
 

@@ -17,9 +17,6 @@ System Speed-of-Light:
   MFMA FLOPs (F64):
     rst: 'The total number of 64-bit floating point MFMA operations executed per second. Note: this does not include any 64-bit floating point operations from VALU instructions. This is also presented as a percent of the peak theoretical F64 MFMA operations achievable on the specific accelerator.'
     unit: GFLOP/s
-  MFMA FLOPs (F6F4):
-    rst: The total number of 4-bit and 6-bit floating-point operations executed on MFMA units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later only.
-    unit: GFLOPs
   MFMA IOPs (Int8):
     rst: 'The total number of 8-bit integer MFMA operations executed per second. Note: this does not include any 8-bit integer operations from VALU instructions. This is also presented as a percent of the peak theoretical INT8 MFMA operations achievable on the specific accelerator.'
     unit: GIOP/s
@@ -98,12 +95,74 @@ System Speed-of-Light:
   CU Utilization:
     rst: The percent of :ref:`total SIMD cycles <total-simd-cycles>` in the kernel where any :ref:`SIMD <desc-valu>` on a CU was actively doing any work, summed over all CUs. Low values (less than 100%) indicate that the accelerator was not fully saturated by the kernel, or a potential load-imbalance issue.
     unit: Percent
+  MFMA FLOPs (F6F4):
+    rst: The total number of 4-bit and 6-bit floating-point operations executed on MFMA units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later only.
+    unit: GFLOPs
   VL1 Lat:
     rst: Calculated as the average number of cycles that a vL1D cache line request spent in the vL1D cache pipeline.
   L2 Rd Lat:
     rst: Calculated as the average number of cycles that the vL1D cache took to issue and receive read requests from the L2 Cache. This number also includes requests for atomics with return values.
   L2 Wr Lat:
     rst: Calculated as the average number of cycles that the vL1D cache took to issue and receive acknowledgement of a write request to the L2 Cache. This number also includes requests for atomics without return values.
+Roofline Performance Rates:
+  VALU FLOPs (F16):
+    rst: 'The total 16-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F16 FLOPs achievable on the specific accelerator. Note: this does not include any F16 operations from MFMA instructions.'
+    unit: GFLOP/s
+  VALU FLOPs (F32):
+    rst: 'The total 32-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F32 FLOPs achievable on the specific accelerator. Note: this does not include any F32 operations from MFMA instructions.'
+    unit: GFLOP/s
+  VALU FLOPs (F64):
+    rst: 'The total 64-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F64 FLOPs achievable on the specific accelerator. Note: this does not include any F64 operations from MFMA instructions.'
+    unit: GFLOP/s
+  MFMA FLOPs (F8):
+    rst: The total number of 8-bit brain floating point MFMA operations executed per second. This does not include any 16-bit brain floating point operations from VALU instructions. The peak empirically measured F8 MFMA operations achievable on the specific accelerator is displayed alongside for comparison. It is supported on AMD Instinct MI300 series and later only.
+    unit: GFLOP/s
+  MFMA FLOPs (BF16):
+    rst: 'The total number of 16-bit brain floating point MFMA operations executed per second. Note: this does not include any 16-bit brain floating point operations from VALU instructions. The peak empirically measured BF16 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: GFLOP/s
+  MFMA FLOPs (F16):
+    rst: 'The total number of 16-bit floating point MFMA operations executed per second. Note: this does not include any 16-bit floating point operations from VALU instructions. The peak empirically measured F16 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: GFLOP/s
+  MFMA FLOPs (F32):
+    rst: 'The total number of 32-bit floating point MFMA operations executed per second. Note: this does not include any 32-bit floating point operations from VALU instructions. The peak empirically measured F32 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: GFLOP/s
+  MFMA FLOPs (F64):
+    rst: 'The total number of 64-bit floating point MFMA operations executed per second. Note: this does not include any 64-bit floating point operations from VALU instructions. The peak empirically measured F64 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: GFLOP/s
+  MFMA FLOPs (F6F4):
+    rst: 'The total number of 4-bit and 6-bit floating point MFMA operations executed per second. Note: this does not include any floating point operations from VALU instructions. The peak empirically measured F6F4 MFMA operations achievable on the specific accelerator is displayed alongside for comparison. It is supported on AMD Instinct MI350 series (gfx950) and later only.'
+    unit: GFLOP/s
+  MFMA IOPs (Int8):
+    rst: 'The total number of 8-bit integer MFMA operations executed per second. Note: this does not include any 8-bit integer operations from VALU instructions. The peak empirically measured INT8 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: GIOP/s
+  HBM Bandwidth:
+    rst: The total number of bytes read from and written to High-Bandwidth Memory (HBM) per second. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    unit: GB/s
+  L2 Cache Bandwidth:
+    rst: The number of bytes looked up in the L2 cache per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    unit: GB/s
+  L1 Cache Bandwidth:
+    rst: The number of bytes looked up in the vL1D cache as a result of VMEM instructions per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    unit: GB/s
+  LDS Bandwidth:
+    rst: Indicates the maximum amount of bytes that could have been loaded from, stored to, or atomically updated in the LDS per unit time (see LDS Bandwidth example for more detail). The peak empirically measured LDS bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    unit: GB/s
+Roofline Plot Points:
+  AI L1:
+    rst: The Arithmetic Intensity (AI) relative to the L1 Cache. It is the ratio of total floating-point operations (FLOPs) to total bytes transferred between the L1 cache and the processing units.
+    unit: FLOPs/Byte
+  AI L2:
+    rst: The Arithmetic Intensity (AI) relative to the L2 Cache. It is the ratio of total floating-point operations (FLOPs) to total bytes transferred between the L2 cache and the L1 cache.
+    unit: FLOPs/Byte
+  AI HBM:
+    rst: The Arithmetic Intensity (AI) relative to High-Bandwidth Memory (HBM). It is the ratio of total floating-point operations (FLOPs) to total bytes transferred between HBM and the L2 cache.
+    unit: FLOPs/Byte
+  AI LDS:
+    rst: Arithmetic Intensity relative to the Local Data Share (LDS). Higher values indicate more compute per byte of LDS traffic, suggesting effective reuse of shared data within a workgroup. Lower values suggest memory-bound behavior limited by LDS bandwidth or bank-conflict pressure.
+    unit: FLOPs/Byte
+  Performance (GFLOPs):
+    rst: The overall achieved performance, measured in GigaFLOPs per second (GFLOP/s). This is calculated as the sum of all VALU and MFMA floating-point operations divided by the total execution time. This value is used as the y-coordinate for the kernel's point on the Roofline plot.
+    unit: GFLOP/s
 Command processor fetcher (CPF):
   CPF Utilization:
     rst: Percent of total cycles where the CPF was busy actively doing any work. The ratio of CPF busy cycles over total cycles counted by the CPF.
@@ -125,7 +184,7 @@ Command processor packet processor (CPC):
     rst: Percent of total cycles where the CPC was busy actively doing any work. The ratio of CPC busy cycles over total cycles counted by the CPC.
     unit: Percent
   CPC SYNC FIFO Full Rate:
-    rst: Percent of cycles where CPC sync counter FIFO was full. High values indicate backpressure in sync counter processing.
+    rst: Percent of CPC sync counter request FIFO busy cycles where the FIFO was full. High values indicate backpressure in synchronization counter processing.
     unit: Percent
   CPC CANE Stall Rate:
     rst: Percent of CPC CANE bus busy cycles where sync counter requests were stalled. High values indicate contention on the CANE bus for synchronization counter operations.
@@ -162,7 +221,7 @@ Workgroup manager utilizations:
     rst: 'The percent of :ref:`total scheduler-pipe cycles <total-pipe-cycles>` in the kernel where the scheduler-pipes were actively doing any work. Note: this value is expected to range between 0% and 25%. See :ref:`desc-spi`.'
     unit: Percent
   Scheduler-Pipe Wave Utilization:
-    rst: Percent of cycles when scheduler-pipe has at least one wave. This measures wave presence in the pipes before dispatch to compute units.
+    rst: Percent of total scheduler-pipe cycles when waves are actively resident in the scheduler-pipe structures. This measures wave presence in the pipes before dispatch to compute units.
     unit: Percent
   Workgroup Manager Utilization:
     rst: The percent of cycles in the kernel where the workgroup manager was actively doing any work.
@@ -372,6 +431,9 @@ Compute Speed-of-Light:
   VALU FLOPs:
     rst: 'The total floating-point operations executed per second on the :ref:`VALU <desc-valu>`. This is also presented as a percent of the peak theoretical FLOPs achievable on the specific accelerator. Note: this does not include any floating-point operations from :ref:`MFMA <desc-mfma>` instructions.'
     unit: GFLOPs
+  MFMA FLOPs (F8):
+    rst: The total number of 8-bit floating-point operations executed on MFMA units, per normalization unit. F8 (FP8) uses either E4M3 or E5M2 format.
+    unit: GFLOPs
   MFMA FLOPs (BF16):
     rst: 'The total number of 16-bit brain floating point :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 16-bit brain floating point operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical BF16 MFMA operations achievable on the specific accelerator.'
     unit: GFLOPs
@@ -384,15 +446,12 @@ Compute Speed-of-Light:
   MFMA FLOPs (F64):
     rst: 'The total number of 64-bit floating point :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 64-bit floating point operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical F64 MFMA operations achievable on the specific accelerator. The total number of 64-bit floating point :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 64-bit floating point operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical F64 MFMA operations achievable on the specific accelerator.'
     unit: GFLOPs
-  MFMA IOPs (INT8):
-    rst: 'The total number of 8-bit integer :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 8-bit integer operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical INT8 MFMA operations achievable on the specific accelerator.'
-    unit: GIOPs
   MFMA FLOPs (F6F4):
     rst: The total number of 4-bit and 6-bit floating-point operations executed on MFMA units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later only.
     unit: GFLOPs
-  MFMA FLOPs (F8):
-    rst: The total number of 8-bit floating-point operations executed on MFMA units, per second. F8 (FP8) uses either E4M3 or E5M2 format.
-    unit: GFLOPs
+  MFMA IOPs (INT8):
+    rst: 'The total number of 8-bit integer :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 8-bit integer operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical INT8 MFMA operations achievable on the specific accelerator.'
+    unit: GIOPs
 Pipeline statistics:
   IPC:
     rst: The ratio of the total number of instructions executed on the :doc:`CU <compute-unit>` over the :ref:`total active CU cycles <total-active-cu-cycles>`.
@@ -732,7 +791,6 @@ vL1D cache stall metrics:
     rst: The ratio of the number of cycles where the vL1D is stalled due to Write requests with conflicting tags being looked up concurrently, divided by the number of cycles where the vL1D is active.
   Tag RAM Stall (Atomic):
     rst: The ratio of the number of cycles where the vL1D is stalled due to Atomic requests with conflicting tags being looked up concurrently, divided by the number of cycles where the vL1D is active.
-    unit: Unknown
 vL1D cache access metrics:
   Total Req:
     rst: The total number of incoming requests from the :ref:`address processing unit <desc-ta>` after coalescing.
@@ -906,6 +964,12 @@ L2 cache accesses:
   Streaming Req:
     rst: The total number of incoming requests to the L2 that are marked as *streaming*. The exact meaning of this may differ depending on the targeted accelerator, however on an :ref:`MI2XX <mixxx-note>` this corresponds to `non-temporal load or stores <https://clang.llvm.org/docs/LanguageExtensions.html#non-temporal-load-store-builtins>`_. The L2 cache attempts to evict *streaming* requests before normal requests when the L2 is at capacity.
     unit: Req per Normalization Unit
+  Bypass Req:
+    rst: Number of L2 cache bypass requests measured at the tag block. These requests skip normal cache lookup and go directly to memory, typically for uncacheable or write-combined memory accesses.
+    unit: Req per Normalization Unit
+  Input Buffer Req:
+    rst: Number of raw memory requests received through the L2 cache Input Buffer (IB) from compute units and other hardware clients. This counts all incoming requests before cache lookup processing and represents the total incoming demand on the L2 cache.
+    unit: Req per Normalization Unit
   Probe Req:
     rst: The number of coherence probe requests made to the L2 cache from outside the accelerator. On an :ref:`MI2XX <mixxx-note>`, probe requests may be generated by, for example, writes to :ref:`fine-grained device <memory-type>` memory or by writes to :ref:`coarse-grained <memory-type>` device memory.
     unit: Req per Normalization Unit
@@ -974,23 +1038,20 @@ L2 - Fabric interface detailed metrics:
   Read (64B):
     rst: The total number of L2 requests to Infinity Fabric to read 64B of data from any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
     unit: Req per Normalization Unit
+  Read (128B):
+    rst: The total number of L2 requests to Infinity Fabric to read 128B of data from any memory location, per normalization unit.
+    unit: Req per Normalization Unit
   Read (Uncached):
     rst: The total number of L2 requests to Infinity Fabric to read :ref:`uncached data <memory-type>` from any memory location, per :ref:`normalization unit <normalization-units>`. 64B requests for uncached data are counted as two 32B uncached data requests. See :ref:`l2-request-flow` for more detail.
     unit: Req per Normalization Unit
-  HBM Read:
-    rst: The total number of L2 requests to Infinity Fabric to read 32B or 64B of data from the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
-    unit: Req per Normalization Unit
-  Remote Read:
-    rst: The total number of L2 requests to Infinity Fabric to read 32B or 64B of data from any source other than the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
-    unit: Req per Normalization Unit
   Read Bandwidth - PCIe:
-    rst: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration.
+    rst: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Read Bandwidth - Infinity Fabric™:
-    rst: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration.
+    rst: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Read Bandwidth - HBM:
-    rst: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration.
+    rst: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Write and Atomic (32B):
     rst: The total number of L2 requests to Infinity Fabric to write or atomically update 32B of data to any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
@@ -1001,36 +1062,24 @@ L2 - Fabric interface detailed metrics:
   Write and Atomic (64B):
     rst: The total number of L2 requests to Infinity Fabric to write or atomically update 64B of data in any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
     unit: Req per Normalization Unit
-  HBM Write and Atomic:
-    rst: The total number of L2 requests to Infinity Fabric to write or atomically update 32B or 64B of data in the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail. plain
-    unit: Req per Normalization Unit
-  Remote Write and Atomic:
-    rst: The total number of L2 requests to Infinity Fabric to write or atomically update 32B or 64B of data in any memory location other than the accelerator's local HBM, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
-    unit: Req per Normalization Unit
   Write Bandwidth - PCIe:
-    rst: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration.
+    rst: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Write Bandwidth - Infinity Fabric™:
-    rst: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration.
+    rst: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Write Bandwidth - HBM:
-    rst: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration.
+    rst: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Atomic Bandwidth - PCIe:
-    rst: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration.
+    rst: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Atomic Bandwidth - Infinity Fabric™:
-    rst: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration.
+    rst: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Atomic Bandwidth - HBM:
-    rst: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration.
+    rst: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
-  Atomic - HBM:
-    rst: The total number of L2 atomic requests (either 32-byte or 64-byte) destined for the accelerator's local high-bandwidth memory (HBM), per normalization unit. These are read-modify-write operations that update memory atomically.
-    unit: Requests per Normalization Unit
   Atomic:
     rst: The total number of L2 requests to Infinity Fabric to atomically update 32B or 64B of data in any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail. Note that on current CDNA accelerators, such as the :ref:`MI2XX <mixxx-note>`, requests are only considered *atomic* by Infinity Fabric if they are targeted at non-write-cacheable memory, such as :ref:`fine-grained memory <memory-type>` allocations or :ref:`uncached memory <memory-type>` allocations on the MI2XX.
-    unit: Req per Normalization Unit
-  Read (128B):
-    rst: The total number of L2 requests to Infinity Fabric to read 128B of data from any memory location, per normalization unit.
     unit: Req per Normalization Unit

@@ -37,7 +37,7 @@ extern "C" {
 #endif
 
 extern "C" {
-#include "nic/ai-nic/amdsmi_unified/interface/smi_nic_interface.h"
+#include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
 }
 namespace amd::smi {
 

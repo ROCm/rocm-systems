@@ -11,7 +11,7 @@
 /// -- once forcing the scalar body, once the SIMD fast path, with identical
 /// inputs/EXEC/VCC-in -- and the 64-bit compare results are asserted equal with
 /// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
-/// In-process inactive SGPR-pair bits must be preserved.
+/// In-process inactive SGPR-pair bits must be zeroed.
 ///
 /// Coverage: every (rel, suffix) pair routed through try_execute_vopc_vop3_*_int_simd
 /// — 8 rels × {i16,u16,i32,u32,i64,u64} = 48 ops, full + partial EXEC. Each lane
@@ -250,10 +250,10 @@ void check_case(const Case &c, uint64_t exec) {
                                       << vcc_in << ": SIMD result diverged from scalar body";
 
       const uint64_t inactive = ~exec;
-      EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
-          << c.name << " rot=" << rot << ": altered inactive-lane dst bit";
-      EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
-          << c.name << " rot=" << rot << ": altered inactive-lane dst bit";
+      EXPECT_EQ(simd_vcc & inactive, 0ULL)
+          << c.name << " rot=" << rot << ": inactive-lane dst bit not zeroed";
+      EXPECT_EQ(scalar_vcc & inactive, 0ULL)
+          << c.name << " rot=" << rot << ": inactive-lane dst bit not zeroed";
     }
   }
 }

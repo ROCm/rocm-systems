@@ -513,12 +513,6 @@ aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
                     static_cast<const aqlprofile_agent_info_v1_t*>(agent_info));
             }
             break;
-            case AQLPROFILE_AGENT_VERSION_V2:
-            {
-                *agent_id = aql_profile::RegisterAgent(
-                    static_cast<const aqlprofile_agent_info_v2_t*>(agent_info));
-            }
-            break;
             case AQLPROFILE_AGENT_VERSION_NONE:
             case AQLPROFILE_AGENT_VERSION_LAST: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }

@@ -15,6 +15,37 @@ the simulated GPU. It operates in two modes:
 Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.
 
+## Command-Line Options
+
+```
+Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--config <path>` | Path to simulation config JSON (required) |
+| `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
+| `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
+| `--help`, `-h` | Print usage and exit |
+| `--version`, `-v` | Print version and exit |
+| `--` | Separator between rocjitsu options and the target application command line |
+
+### Usage Examples
+
+```bash
+# Local mode: in-process simulation
+rocjitsu --config configs/amdgpu_cdna4_kmd.json -- ./app
+
+# Daemon mode: fork daemon + launch app
+rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json -- ./app args...
+
+# Daemon-only: run server (no app launched)
+rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json
+
+# Attach to running daemon
+rocjitsu --attach --config configs/amdgpu_cdna4_kmd.json -- ./app
+```
+
 ## Architecture
 
 ```
@@ -235,12 +266,6 @@ protected fds.
 
 ## Limitations
 
-### Single Client
-
-The daemon uses an atomic guard to reject concurrent connections. Same-VA
-mapping prevents multiple clients from using overlapping GPUVM ranges.
-Multi-client support requires per-client VA translation tables in the CP.
-
 ### Kernel 6.17 shmem Bug
 
 MAP_SHARED at GPUVM addresses can trigger SIGBUS on kernel 6.17 due to a
@@ -264,7 +289,6 @@ kernel 6.12.59+ and 6.15+.
 
 ## Future Work
 
-- **Multi-client**: Per-client state isolation, VA translation tables
 - **Windows**: Named pipe transport, KMD escape driver backend
 - **RDMA**: Rack-scale transport for distributed simulation
 - **Platform-independent commands**: Abstract command enum for cross-platform

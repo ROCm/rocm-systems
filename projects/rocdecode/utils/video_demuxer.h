@@ -31,6 +31,7 @@ extern "C" {
     #endif
 }
 
+#include <cstdint>
 #include <cstring>
 #include <ctime>
 #include <time.h>
@@ -224,15 +225,22 @@ class VideoDemuxer {
                 if (is_mpeg4_ && (frame_count_ == 0)) {
                     int ext_data_size = av_fmt_input_ctx_->streams[av_stream_]->codecpar->extradata_size;
                     if (ext_data_size > 0) {
-                        data_with_header_ = (uint8_t *)av_malloc(ext_data_size + packet_->size - 3 * sizeof(uint8_t));
+                        if (packet_->size < 3 ||
+                            (size_t)ext_data_size > SIZE_MAX - (size_t)(packet_->size - 3)) {
+                            DemuxCriticalLog("malformed first MPEG-4 packet!");
+                            return false;
+                        }
+                        size_t payload = (size_t)packet_->size - 3;
+                        size_t total = (size_t)ext_data_size + payload;
+                        data_with_header_ = (uint8_t *)av_malloc(total);
                         if (!data_with_header_) {
                             DemuxCriticalLog("av_malloc failed!");
                             return false;
                         }
                         memcpy(data_with_header_, av_fmt_input_ctx_->streams[av_stream_]->codecpar->extradata, ext_data_size);
-                        memcpy(data_with_header_ + ext_data_size, packet_->data + 3, packet_->size - 3 * sizeof(uint8_t));
+                        memcpy(data_with_header_ + ext_data_size, packet_->data + 3, payload);
                         *video = data_with_header_;
-                        *video_size = ext_data_size + packet_->size - 3 * sizeof(uint8_t);
+                        *video_size = total;
                     }
                 } else {
                     *video = packet_->data;

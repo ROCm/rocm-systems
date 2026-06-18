@@ -29,6 +29,12 @@ Walkthrough
 
 1. To begin, generate a high-level analysis report using ROCm Compute Profiler's ``-b`` (or ``--block``) flag.
 
+.. note::
+
+   By default, analyze only evaluates the profiled blocks. Analyze-mode
+   ``-b`` overrides this and might produce missing-counter warnings for blocks
+   whose counters were not collected.
+
 There are three high-level GPU analysis views:
 
 * System Speed-of-Light: Key GPU performance metrics to show overall GPU performance and utilization.
@@ -469,7 +475,9 @@ This generates enhanced roofline output showing per-kernel performance rates and
       |   ├─────────────┼──────────────────────┼─────────┼────────────┤
       |   │ 4.2.2       │ AI L1                │         │ Flops/byte │
       |   ├─────────────┼──────────────────────┼─────────┼────────────┤
-      |   │ 4.2.3       │ Performance (GFLOPs) │         │ Gflop/s    │
+      |   │ 4.2.3       │ AI LDS               │         │ Flops/byte │
+      |   ├─────────────┼──────────────────────┼─────────┼────────────┤
+      |   │ 4.2.4       │ Performance (GFLOPs) │         │ Gflop/s    │
       |   ╘═════════════╧══════════════════════╧═════════╧════════════╛
 
 The per-kernel analysis uses YAML-based metric evaluation for accurate calculations.
@@ -730,10 +738,10 @@ line ``Operator summary: (no operators with recorded dispatches)``.
 Filtering by Operator
 ---------------------
 
-``--torch-operator`` uses PurePosixPath glob patterns to select operators.
-Operator hierarchies are ``/``-separated (e.g.
-``nn.Module.Net.forward/torch.nn.functional.relu``), and patterns are matched
-using ``PurePosixPath.match()``:
+``--torch-operator`` uses shell-style glob patterns (``fnmatch``) to select
+operators. Operator hierarchies are ``/``-separated (e.g.
+``nn.Module.Net.forward/torch.nn.functional.relu``); ``*``, ``?``, and
+``[seq]`` cross hierarchy levels, and matching is case-sensitive:
 
 * **Wildcard** — ``*relu`` (ends with relu), ``*conv*`` (contains conv)
 * **Exact** — ``torch.nn.functional.relu``

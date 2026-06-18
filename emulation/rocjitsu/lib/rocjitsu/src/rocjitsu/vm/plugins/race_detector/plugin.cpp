@@ -163,7 +163,8 @@ void RaceDetectorPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInf
 }
 
 void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                                     uint32_t vgpr_count, uint32_t sgpr_count,
+                                                     uint32_t physical_vgpr_count,
+                                                     uint32_t sgpr_count,
                                                      std::span<amdgpu::Wavefront *> wavefronts) {
   uint32_t num_waves = static_cast<uint32_t>(wavefronts.size());
   WorkgroupKey key{dispatch_id, wg_id};
@@ -224,8 +225,8 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   // partition threads, so detectors_ and dispatch_disasm_ need protection.
   std::lock_guard<std::mutex> lock(dispatch_mutex_);
   detectors_[key] = std::make_unique<RaceDetector>(
-      static_cast<int>(num_waves), static_cast<int>(vgpr_count), static_cast<int>(sgpr_count),
-      Dim3d(static_cast<int>(wg_id)), std::move(handler));
+      static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
+      static_cast<int>(sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler));
 
   auto &det = *detectors_[key];
   auto &dc = dispatch_disasm_[dispatch_id];

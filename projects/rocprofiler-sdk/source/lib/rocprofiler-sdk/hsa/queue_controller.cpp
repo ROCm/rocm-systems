@@ -219,13 +219,27 @@ queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, voi
 }
 
 void
+queue_controller_attach_queue_event(hsa_queue_t*                     queue,
+                                    hsa_agent_t                      agent,
+                                    rocprofiler_attach_queue_phase_t phase,
+                                    void* /*data*/)
+{
+    if(phase == ROCPROFILER_ATTACH_QUEUE_CREATED)
+    {
+        queue_controller_iterate_attach_queue(queue, agent, nullptr);
+    }
+    else if(auto* qc = get_queue_controller())
+    {
+        qc->destroy_queue(queue);
+    }
+}
+
+void
 queue_controller_load_attach_queues()
 {
     auto* attach_table = CHECK_NOTNULL(*(get_attach_table()));
 
-    attach_table->rocprofiler_attach_iterate_all_queues(queue_controller_iterate_attach_queue,
-                                                        nullptr);
-    attach_table->rocprofiler_attach_notify_new_queue = queue_controller_iterate_attach_queue;
+    attach_table->rocprofiler_attach_add_queue_cb(queue_controller_attach_queue_event, nullptr);
 }
 
 }  // namespace

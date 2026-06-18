@@ -2436,6 +2436,8 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         fail_regex: (Optional) Regex patterns that must NOT be found in validation.stdout
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
+        gpu_category_to_skip: GPU categories to skip tagged validation queries for
+            (instinct, radeon, apu). Omit or pass empty to run all queries
     """
     if _is_assert_disabled(request, "assert_rocpd"):
         return lambda *args, **kwargs: None
@@ -2449,6 +2451,7 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         fail_regex: Optional[list[str]] = None,
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
+        gpu_category_to_skip: Optional[list[str]] = None,
     ) -> None:
         with subtests.test(subtest_name):
             if not check_use_rocpd():
@@ -2470,6 +2473,7 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
                 tests_dir=tests_dir,
                 rules_files=existing_rules,
                 timeout=timeout,
+                gpu_category_to_skip=gpu_category_to_skip,
             )
             output = f"Command: {validation.command}\n\n{validation.message}"
             if not validation.is_valid:

@@ -1,7 +1,14 @@
 #include "sym_kernels.h"
+#if defined(__HIP_PLATFORM_AMD__)
+#include "symmetric/kernel.h"
+#include "symmetric/primitives.h"
+#include "symmetric/data_ops.h"
+#include "symmetric/gin_scratch__funcs.h"
+#else
 #include "kernel.cuh"
 #include "primitives.cuh"
 #include "data_ops.cuh"
+#endif
 
 template<template<typename> typename Red, typename T, bool multimem>
 static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multimem> multimemTag) {
@@ -16,7 +23,12 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
   Red<AccT> red(handler.devWork->redOpArg);
   Red<T> mmRed(handler.devWork->redOpArg);
 
+  // Use WARP_SIZE, not a hardcoded 32, so warp partitioning is correct on AMD's 64-lane wavefronts.
+#if defined(__HIP_PLATFORM_AMD__)
+  int nWorkWarps = blockDim.x/WARP_SIZE - 2;
+#else
   int nWorkWarps = blockDim.x/32 - 2;
+#endif
   int stage0_nWorkWarps;
   if (lsa.nRanks == 1) {
     stage0_nWorkWarps = 0; // Stage 0 just posts sends so no workers.
@@ -29,19 +41,30 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
   }
 
   // 2 stage pipeline, one coop per stage.
+#if defined(__HIP_PLATFORM_AMD__)
+  int stage = threadIdx.x/WARP_SIZE < 1 + stage0_nWorkWarps ? 0 : 1;
+#else
   int stage = threadIdx.x/32 < 1 + stage0_nWorkWarps ? 0 : 1;
+#endif
   ncclCoopWarpSpan coopStage{
     /*warp0=*/stage == 0 ? 0 : 1 + stage0_nWorkWarps,
     /*nWarps=*/1 + (stage == 0 ? stage0_nWorkWarps : nWorkWarps-stage0_nWorkWarps),
     /*id=*/stage
   };
   // Within each stage we have 2 roles: GIN warp, worker warps.
+#if defined(__HIP_PLATFORM_AMD__)
+  bool roleIsWorker = WARP_SIZE <= coopStage.thread_rank();
+#else
   bool roleIsWorker = 32 <= coopStage.thread_rank();
+#endif
   ncclCoopWarpSpan coopRole{
     /*warp0=*/(stage == 0 ? 0 : 1 + stage0_nWorkWarps) + (roleIsWorker ? 1 : 0),
     /*nWarps=*/!roleIsWorker ? 1 : (stage == 0 ? stage0_nWorkWarps : nWorkWarps - stage0_nWorkWarps),
     /*id=*/2 + stage
   };
+
+  // Zero the AMD software warp-span barrier slots before any coop sync (no-op on NVIDIA).
+  ncclCoopNamedBarrierInit();
 
   // Construct outbox only for stage=0 when lsa peers exist.
   alignas(ncclGinOutboxSession<ncclCoopWarpSpan>) char outbox_storage[sizeof(ncclGinOutboxSession<ncclCoopWarpSpan>)];
@@ -137,12 +160,17 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
             /*initFn*/[&]__device__(int nChunkElts, ncclSymPtr<T> inPtr)->void {
               if (!roleIsWorker) {
                 if (coopRole.thread_rank() == 0) {
+#if defined(__HIP_PLATFORM_AMD__)
+                  // Portable replacement for upstream's NVPTX red.shared.add asm (no amdgcn equiv).
+                  atomicAdd(&totalSends, rail.nRanks-1);
+#else
                   // totalSends += rail.nRanks-1;
                   #if __CUDA_ARCH__ >= 700
                   asm volatile("red.relaxed.shared.add.s32 [%0],%1;" :: "r"((uint32_t)__cvta_generic_to_shared(&totalSends)), "r"(rail.nRanks-1) : "memory");
                   #else
                   __trap();
                   #endif
+#endif
                 }
               } else {
                 // outbox.apportion() was told to defer sync so that we don't sync
@@ -255,7 +283,9 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
               if (roleIsWorker) {
                 copy(coopRole, nChunkElts,
                   /*dstMem=*/GMemTag(), /*dst=*/outPtr.localPtr(),
-                  /*srcMem=*/SMemTag(), /*src=*/accum);
+                  /*srcMem=*/SMemTag(), /*src=*/accum,
+                  [&]__device__(auto x) { return applyPostOp(red, x); }
+                );
                 coopRole.sync(); // prevent initFn from trampling accum
               }
             }
@@ -275,7 +305,11 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
         gin.waitCounter(ncclCoopThread(), handler.ginCounterPerBlock + blockIdx.x, totalSends, 32);
       }
     } else {
+#if defined(__HIP_PLATFORM_AMD__)
+      outbox.~ncclGinOutboxSession<ncclCoopWarpSpan>();
+#else
       outbox.template ~ncclGinOutboxSession<ncclCoopWarpSpan>();
+#endif
     }
   }
 

@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 include(AISAddExecutable)
-include(AISUseGTest)
 
 set(SHARED_SOURCE_FILES
     common/magic-word.cpp

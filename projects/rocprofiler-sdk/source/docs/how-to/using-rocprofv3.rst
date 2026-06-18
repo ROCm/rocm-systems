@@ -1023,7 +1023,7 @@ An example of the interval period for this input is given below:
     Device 1, <Kernel A>, Collect SQ_WAVES, GRBM_COUNT
     Device 1, <Kernel B>, Collect SQ_WAVES, GRBM_COUNT
     Device 1, <Kernel C>, Collect SQ_WAVES, GRBM_COUNT
-    <Interval reached on Device 1, Swtiching Counters>
+    <Interval reached on Device 1, Switching Counters>
     Device 1, <Kernel D>, Collect GRBM_GUI_ACTIVE
 
 Here is the same sample in JSON format:
@@ -1501,7 +1501,7 @@ Here are the properties of the JSON output schema:
                   -  **wave_id** *(integer)*: Wave slot index.
                   -  **simd_id** *(integer)*: SIMD index.
                   -  **pipe_id** *(integer)*: Pipe index.
-                  -  **cu_or_wgp_id** *(integer)*: Index of compute unit or workgroup processer.
+                  -  **cu_or_wgp_id** *(integer)*: Index of compute unit or workgroup processor.
                   -  **shader_array_id** *(integer)*: Shader array index.
                   -  **shader_engine_id** *(integer)*: Shader engine
                      index.

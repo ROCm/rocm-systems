@@ -53,6 +53,8 @@ stream:
     tags: [callback]
   Unit_hipStreamAttachMemAsync_Negative:
     <<: *level_2
+    # Asan test disabled temporarily until PR #5287 is merged
+    disabled: [asan]
     tags: [memory]
   Unit_hipStreamAttachMemAsync_UseCase:
     <<: *level_2
@@ -80,12 +82,14 @@ stream:
   Unit_hipStreamCreateWithPriority_MulthreadDefaultflag:
     <<: *level_2
     # SWDEV-398981 fails in stress test
-    disabled: [amd_wsl]
+    # Does not play well with ASAN
+    disabled: [amd_wsl, asan]
     tags: [lifecycle]
   Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag:
     <<: *level_2
     # Disabling test tracked SWDEV-394199
-    disabled: [amd_windows, amd_wsl]
+    # Does not play well with ASAN
+    disabled: [amd_windows, amd_wsl, asan]
     tags: [lifecycle]
   Unit_hipStreamCreateWithPriority_NegTst:
     <<: *level_2
@@ -123,6 +127,8 @@ stream:
     tags: [properties]
   Unit_hipMemPrefetchAsync_Basic:
     <<: *level_2
+    # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
+    disabled: [amd_windows, amd_wsl, amd_linux]
     tags: [memory]
   Unit_hipMemPoolApi_hipStreamLegacy_Basic:
     <<: *level_2

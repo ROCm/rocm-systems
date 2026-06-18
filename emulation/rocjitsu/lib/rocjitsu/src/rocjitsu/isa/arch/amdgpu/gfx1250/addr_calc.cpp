@@ -7,8 +7,10 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/bit.h"
 #include "util/except.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 
@@ -108,15 +110,20 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
 
 } // namespace
 
-uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
+uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                uint32_t access_size_bytes) {
   auto &cu = wf.cu();
+  assert(access_size_bytes != 0);
   uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
   uint64_t base = (static_cast<uint64_t>(cu.read_sgpr(sbase + 1)) << 32) | cu.read_sgpr(sbase);
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
+  uint32_t scale = inst.scale_offset ? access_size_bytes : 1;
+  off *= scale;
   if (has_smem_offset(inst.soffset))
-    off += read_sreg_m0_operand(wf, inst.soffset);
+    off += static_cast<int64_t>(read_sreg_m0_operand(wf, inst.soffset)) * scale;
   uint64_t addr = base + off;
-  assert((addr & 0x7u) == 0 && "gfx1250 scalar memory address must be 8-byte aligned");
+  assert(util::is_aligned(addr, std::min<uint64_t>(access_size_bytes, 4u)) &&
+         "gfx1250 scalar memory address must satisfy access alignment");
   return addr;
 }
 

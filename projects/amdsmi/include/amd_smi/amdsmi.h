@@ -3327,23 +3327,24 @@ amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_hand
                                           amdsmi_processor_type_t* processor_type);
 
 /**
- *  @brief Get information about the given processor
+ *  @brief Get a string identifier for the given processor.
  *
  *  @ingroup tagProcDiscovery
  *
- *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm} @platform{guest_1vf}
- *  @platform{guest_mvf} @platform{guest_windows}
+ *  @platform{gpu_bm_linux} @platform{cpu_bm} @platform{guest_1vf}
+ *  @platform{guest_mvf}
  *
- *  @details This function retrieves processor information. The @p processor_handle must
- *  be provided to retrieve the processor ID. The implementation depends only on
- *  ::amdsmi_get_processor_type and is available regardless of whether the library was
- *  built with ENABLE_ESMI_LIB.
+ *  @details This function writes the processor's index into @p name as a decimal
+ *  string (for example "0", "1", "2"). The index is the processor's zero-based
+ *  position in the library's processor list, the same order used by
+ *  ::amdsmi_get_processor_handles. A valid @p processor_handle must be provided.
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[in] len the length of the caller provided buffer @p name.
+ *  @param[in] len The length of the caller-provided buffer @p name.
  *
- *  @param[out] name The id of the processor.
+ *  @param[out] name Buffer that receives the processor index as a decimal string.
+ *  Must not be NULL.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3639,6 +3640,9 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_han
 
 /**
  *  @brief Get the vram vendor string of a device.
+ *
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_get_gpu_vram_info() should be used instead
  *
  *  @ingroup tagIdentQuery
  *
@@ -6036,8 +6040,12 @@ amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processo
  * AMDSMI_STATUS_OUT_OF_RESOURCES.
  *
  * Even if the API returns AMDSMI_STATUS_MORE_DATA, the 2nd call may still get the entry_count == 0
- * as the driver cache may not contain the severity user is interested in. The API should return
- * AMDSMI_STATUS_SUCCESS in this case so that user can ignore that call.
+ * as the driver cache may not contain the severity user is interested in. The API returns
+ * AMDSMI_STATUS_SUCCESS with entry_count == 0 and buf_size == 0 in this case so that user can
+ * ignore that call.
+ *
+ * An empty CPER ring (no records) also returns AMDSMI_STATUS_SUCCESS with
+ * entry_count == 0 and buf_size == 0.
  *
  * @ingroup tagRasInfo
  *
@@ -6882,6 +6890,7 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle process
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::AMDSMI_STATUS_FILE_ERROR problem accessing the sysfs file
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
  */
@@ -6911,13 +6920,15 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
  *  updated to.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires admin/sudo privileges
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_FILE_ERROR problem accessing the sysfs file
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
  */
 amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode);
+
 /** @} End tagComputePartition */
 
 /*****************************************************************************/

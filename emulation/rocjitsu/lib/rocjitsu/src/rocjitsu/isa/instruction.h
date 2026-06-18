@@ -237,6 +237,8 @@ public:
         first = false;
       }
       for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i]->size_bits() == 0)
+          continue;
         disassembly_ += (first ? " " : ", ");
         disassembly_ += src_operands_[i]->name();
         first = false;
@@ -282,6 +284,8 @@ protected:
 /// @tparam Isa ISA traits type providing a Context type alias.
 template <typename Isa> class IsaInstruction : public Instruction {
 public:
+  using IsaType = Isa;
+
   /// @brief Construct an ISA instruction with the given mnemonic.
   /// @param[in] mnemonic Human-readable mnemonic string.
   IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn) : Instruction(mnemonic, exec_fn) {}

@@ -82,7 +82,9 @@ should_bypass_inline_intercept()
 {
     return (!s_intercept_installed.load(std::memory_order_acquire) ||
             !s_intercept_active.load(std::memory_order_acquire) ||
-            registration::get_fini_status() != 0);
+            registration::get_fini_status() != 0 ||
+            // TODO: debug and enable queue interposition for attachment
+            registration::supports_attachment());
 }
 
 auto*&
@@ -523,7 +525,7 @@ write_interceptor(Queue*                                queue,
                                                   .correlation_id = corr_id,
                                                   .packet_data    = packet_data_array_t{}};
 
-        // Searching accross all the packets given during this write
+        // Searching across all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
         {
             const auto& original_packet = _packets[i].kernel_dispatch;

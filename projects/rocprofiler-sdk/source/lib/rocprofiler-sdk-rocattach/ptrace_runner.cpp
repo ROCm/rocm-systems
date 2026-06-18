@@ -150,7 +150,7 @@ public:
         m_runners.wlock([&](auto& runners) {
             if(runners.count(pid) > 0)
             {
-                // if thread already exists, re-use it
+                // if thread already exists, reuse it
                 runner = runners.at(pid);
             }
             else if(op == PTRACE_SEIZE)

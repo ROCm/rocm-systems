@@ -1,4 +1,3 @@
-latest_arch: gfx950
 panels:
 - file: top_stats.yaml
   panel_id: 0

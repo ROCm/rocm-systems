@@ -208,7 +208,8 @@ private:
           return pt_it->second.host_ptr;
       }
     }
-    if (passthrough_)
+    static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
+    if (passthrough_ && addr < kUserSpaceLimit)
       return reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
     return nullptr;
   }

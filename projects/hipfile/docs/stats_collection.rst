@@ -46,6 +46,7 @@ Stats Collected
 
 * Basic: Number of file handle registrations.
 * Basic: Number of buffer registrations.
+* Basic: Number of fastpath rejections due to failing fastpath eligibility checks (e.g., alignment, size, configuration, buffer type, or filesystem constraints).
 * Basic: Bytes read/written on the fastpath/fallback backends.
 * Basic: Bandwidth for reads/writes on the fastpath/fallback backends.
 * Basic: Latency for reads/writes on the fastpath/fallback backends.
@@ -65,6 +66,7 @@ Example output shape:
     HipFile Stats Level: 1
     File Handle Registrations: 1
     Buffer Registrations: 1
+    Fastpath Rejections: 0
 
     Total Fastpath Read Size (B): 67108864
     Average Fastpath Read Bandwidth (GiB/s): 0.776272

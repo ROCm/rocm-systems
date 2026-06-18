@@ -140,7 +140,7 @@ get_ioctl_version(rocprofiler_ioctl_version_info_t& ioctl_version)
     struct kfd_ioctl_get_version_args args = {.major_version = 0, .minor_version = 0};
     if(ioctl(get_kfd_fd(), AMDKFD_IOC_GET_VERSION, &args) != 0)
     {
-        // An error occured while querying KFD IOCTL version.
+        // An error occurred while querying KFD IOCTL version.
         return ROCPROFILER_STATUS_ERROR;
     }
 
@@ -193,7 +193,7 @@ get_pc_sampling_ioctl_version(uint32_t kfd_gpu_id, pcs_ioctl_version_t* pcs_ioct
     }
     else if(ret != 0)
     {
-        // An unexpected error occured, so we cannot be sure if the
+        // An unexpected error occurred, so we cannot be sure if the
         // context of the `version` is valid.
         return ROCPROFILER_STATUS_ERROR;
     }
@@ -399,7 +399,7 @@ ioctl_query_pc_sampling_capabilities(uint32_t  kfd_gpu_id,
     {
         if(ret == -EBUSY)
         {
-            // Querying PC sampling capabilities is requsted from within the ROCgdb
+            // Querying PC sampling capabilities is requested from within the ROCgdb
             // which is not supported.
             return ROCPROFILER_IOCTL_STATUS_UNAVAILABLE;
         }
@@ -453,7 +453,7 @@ convert_ioctl_pcs_config_to_rocp(const rocprofiler_ioctl_pc_sampling_info_t& ioc
     if(ioctl_pcs_config.interval != 0)
     {
         // The pc sampling is configured on the corresponding device.
-        // The `interval` contains the value of the interval used for deliverying samples.
+        // The `interval` contains the value of the interval used for delivering samples.
         // Values of `interval_min` and `interval_max` are irrelevant.
         rocp_pcs_config.min_interval = ioctl_pcs_config.interval;
         rocp_pcs_config.max_interval = ioctl_pcs_config.interval;
@@ -633,7 +633,7 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
         if(errno == EBUSY || errno == EEXIST)
         {
             // Currently, KFD uses EBUSY when e.g., PC sampling create is requested from
-            // withing the ROCgdb.
+            // within the ROCgdb.
             // On the other hand, EEXIST is used when one tries to create a PC sampling
             // with a configuration different than the one already active.
             return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
