@@ -18,6 +18,14 @@ struct tmaSmemStruct {
   alignas(8) __mbarrier_t bar;
 };
 
+// HIP has no __isShared() (used only as a __builtin_assume hint); map it to the AMDGCN builtin.
+#if defined(__HIP_PLATFORM_AMD__) && !defined(NCCL_SYMK_HAVE_ISSHARED)
+#define NCCL_SYMK_HAVE_ISSHARED 1
+static __device__ __forceinline__ bool __isShared(const void* p) {
+  return __builtin_amdgcn_is_shared((void*)p);
+}
+#endif
+
 #if __CUDA_ARCH__ >= 700
 // __grid_constant__ appears to break cuda-gdb
 #define NCCL_GRID_CONSTANT __grid_constant__
@@ -248,6 +256,13 @@ template<> struct ncclSymkGinAccumType<FuncSum, __nv_fp8_e4m3> { using Type = __
 template<> struct ncclSymkGinAccumType<FuncSum, __nv_fp8_e5m2> { using Type = __half; };
 template<> struct ncclSymkGinAccumType<FuncSumPostDiv, __nv_fp8_e4m3> { using Type = __half; };
 template<> struct ncclSymkGinAccumType<FuncSumPostDiv, __nv_fp8_e5m2> { using Type = __half; };
+#endif
+
+#if defined(__HIP_PLATFORM_AMD__)
+// avg reduces in float on ROCm: raw bf16/fp8 have no FuncSumPostDiv, but FuncSumPostDiv<float> does.
+template<> struct ncclSymkGinAccumType<FuncSumPostDiv, hip_bfloat16> { using Type = float; };
+template<> struct ncclSymkGinAccumType<FuncSumPostDiv, rccl_float8>  { using Type = float; };
+template<> struct ncclSymkGinAccumType<FuncSumPostDiv, rccl_bfloat8> { using Type = float; };
 #endif
 
 static __device__ __forceinline__ void tmaLoadStoreMc(void* dest, void* smem, void* source, size_t size, __mbarrier_t* bar) {

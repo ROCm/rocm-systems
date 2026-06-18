@@ -22,6 +22,7 @@
 #include <assert.h>
 #include <algorithm>
 #include <mutex>
+#include <cstring>
 #include <chrono>
 #include <cinttypes>
 #include <thread>
@@ -373,8 +374,6 @@ ncclResult_t dumpProxyState(struct ncclProxyProgressState* state) {
   return ncclSuccess;
 }
 
-RCCL_PARAM_DECLARE(EnableProxyTrace);
-
 static ncclResult_t ncclProxyOpToArgs(struct ncclProxyOp* op, struct ncclProxyArgs* args, int subIndex) {
   struct ncclProxySubArgs* sub = args->subs+subIndex;
   if (subIndex >= NCCL_PROXY_MAX_SUBS) {
@@ -405,13 +404,16 @@ static ncclResult_t ncclProxyOpToArgs(struct ncclProxyOp* op, struct ncclProxyAr
   sub->ringAlgo = op->ringAlgo;
   sub->workCounter = op->workCounter;
   args->nsubs = subIndex+1;
-  if (rcclParamEnableProxyTrace()) {
-    sub->traceKey = op->traceKey;
-    sub->traceInfo.funcIdx = op->coll;
-    sub->traceInfo.protocol = op->protocol;
-    sub->traceInfo.pattern = op->pattern;
-    sub->traceInfo.totalBytes = op->totalBytes;
-    sub->traceInfo.chunkSize = op->chunkSize;
+  if (ncclProfilerProxyDiagEnabled()) {
+    sub->commHash = op->commHash;
+    sub->profExtras.funcIdx = op->coll;
+    sub->profExtras.protocol = op->protocol;
+    sub->profExtras.pattern = op->pattern;
+    sub->profExtras.totalBytes = op->totalBytes;
+    sub->profExtras.chunkSize = (uint32_t)op->chunkSize;
+  } else {
+    sub->commHash = 0;
+    memset(&sub->profExtras, 0, sizeof(sub->profExtras));
   }
   if (subIndex) {
     args->nChannels = std::min(args->nChannels, op->nChannels);
@@ -615,6 +617,7 @@ static ncclResult_t SaveProxy(struct ncclComm* comm, struct ncclChannel* channel
 // justInquire != nullptr means don't actually do anything, just assertain need of
 // ncclProxySaveOp for this op.
 ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool* justInquire) {
+  op->commHash = comm->commHash;
   struct ncclChannel* channel = &comm->channels[op->channelId];
   bool needProxy = false;
   if (justInquire) *justInquire = false;
@@ -2040,11 +2043,6 @@ ncclResult_t ncclProxyInit(struct ncclComm* comm, struct ncclSocket* sock, union
   comm->proxyState->peerAddresses = peerAddresses;
   comm->proxyState->peerAddressesUDS = peerAddressesUDS;
   comm->proxyState->netAttr = NCCL_NET_ATTR_INIT;
-  if (rcclParamEnableProxyTrace()) {
-    INFO(NCCL_PROXY, "Initializing ProxyTrace, rank: %d, commHash: %lu", comm->rank, comm->commHash);
-    if (comm->proxyState->proxyTrace) delete comm->proxyState->proxyTrace;
-    comm->proxyState->proxyTrace = new facebook_rccl::ProxyTrace(comm->rank);
-  }
 
   // UDS support
   NCCLCHECK(ncclIpcSocketInit(&comm->proxyState->ipcSock, comm->rank, peerAddressesUDS[comm->rank], comm->abortFlag));
@@ -2147,7 +2145,6 @@ ncclResult_t ncclProxyDestroy(struct ncclComm* comm) {
     free(sharedProxyState->proxyOps);
     free(sharedProxyState->sharedDevMems);
     expectedProxyResponseFree(sharedProxyState);
-    delete sharedProxyState->proxyTrace;
     delete sharedProxyState;
   }
   return ncclSuccess;

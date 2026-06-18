@@ -5,6 +5,7 @@
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_TENSOR_DMA_H_
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/except.h"
 
@@ -20,9 +21,6 @@ namespace tensor_dma_detail {
 
 constexpr int kSgprNull = 124;
 constexpr uint32_t kGlobalHighBitsMask = (1u << 25) - 1u;
-constexpr uint64_t kDsBarrierPendingMask = (1ull << 29) - 1ull;
-constexpr uint32_t kDsBarrierPhaseShift = 29;
-constexpr uint32_t kDsBarrierInitCountShift = 32;
 
 template <size_t N>
 uint64_t read_bits(const std::array<uint32_t, N> &words, uint32_t bit_offset, uint32_t bit_count) {
@@ -113,8 +111,8 @@ inline TensorDmaDescriptor parse_descriptor(std::array<uint32_t, 4> d0, std::arr
 
   // Descriptor bit layout follows LLVM MLIR's gfx1250 TDM lowering in
   // mlir/lib/Conversion/AMDGPUToROCDL/AMDGPUToROCDL.cpp.
-  desc.gather = (d0[0] & (1u << 30)) != 0;
-  desc.gather_indices_32bit = (d0[0] & (1u << 31)) != 0;
+  desc.gather_indices_32bit = (d0[0] & (1u << 30)) != 0;
+  desc.gather = (d0[0] & (1u << 31)) != 0;
   desc.lds_base = d0[1];
   desc.global_base =
       static_cast<uint64_t>(d0[2]) | (static_cast<uint64_t>(d0[3] & kGlobalHighBitsMask) << 32);
@@ -310,24 +308,28 @@ inline void copy_tensor(const TensorDmaDescriptor &desc, Wavefront &wf, bool sto
 }
 
 inline void arrive_atomic_barrier(const TensorDmaDescriptor &desc, Wavefront &wf) {
-  // Layout follows LLVM MLIR's ds_barrier_state lowering:
-  // [63:32] init count, [31:29] phase, [28:0] pending count.
   const uint32_t addr = wf.lds_base() + desc.atomic_barrier_addr;
   const uint64_t state = wf.cu().lds().read64(addr);
-  const uint64_t init_count = state >> kDsBarrierInitCountShift;
-  uint64_t phase = (state >> kDsBarrierPhaseShift) & 0x7ull;
-  uint64_t pending = state & kDsBarrierPendingMask;
+  wf.cu().lds().write64(addr, lds_barrier_cell_update_arrive(state));
+}
 
-  if (pending == 0) {
-    phase = (phase + 7) & 0x7ull;
-    pending = init_count;
-  } else {
-    --pending;
+class ScopedWaitCounter {
+public:
+  ScopedWaitCounter(Wavefront &wf, WaitCounterType type) : wf_(wf), type_(type) {
+    wf_.wait_counters().increment(type_);
   }
 
-  wf.cu().lds().write64(addr, (init_count << kDsBarrierInitCountShift) |
-                                  (phase << kDsBarrierPhaseShift) | pending);
-}
+  ScopedWaitCounter(const ScopedWaitCounter &) = delete;
+  ScopedWaitCounter &operator=(const ScopedWaitCounter &) = delete;
+  ScopedWaitCounter(ScopedWaitCounter &&) = delete;
+  ScopedWaitCounter &operator=(ScopedWaitCounter &&) = delete;
+
+  ~ScopedWaitCounter() { wf_.release_wait_counter(type_); }
+
+private:
+  Wavefront &wf_;
+  WaitCounterType type_;
+};
 
 template <typename Inst>
 TensorDmaDescriptor read_descriptor(const Inst &inst, const Wavefront &wf) {
@@ -340,6 +342,7 @@ TensorDmaDescriptor read_descriptor(const Inst &inst, const Wavefront &wf) {
 } // namespace tensor_dma_detail
 
 template <typename Inst> void execute_tensor_load_to_lds(const Inst &inst, Wavefront &wf) {
+  tensor_dma_detail::ScopedWaitCounter counter(wf, WaitCounterType::TENSORCNT);
   const auto desc = tensor_dma_detail::read_descriptor(inst, wf);
   tensor_dma_detail::copy_tensor(desc, wf, false);
   if (desc.atomic_barrier)
@@ -347,6 +350,7 @@ template <typename Inst> void execute_tensor_load_to_lds(const Inst &inst, Wavef
 }
 
 template <typename Inst> void execute_tensor_store_from_lds(const Inst &inst, Wavefront &wf) {
+  tensor_dma_detail::ScopedWaitCounter counter(wf, WaitCounterType::TENSORCNT);
   const auto desc = tensor_dma_detail::read_descriptor(inst, wf);
   tensor_dma_detail::copy_tensor(desc, wf, true);
   if (desc.atomic_barrier)

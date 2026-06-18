@@ -41,6 +41,22 @@
 #    include "rocprof_trace_decoder/cxx/code_printing.hpp"
 #endif
 
+static_assert(
+    sizeof(((rocprofiler_thread_trace_decoder_event_payload_t*) nullptr)->cluster_barrier) == 8,
+    "Unexpected rocprofiler_thread_trace_decoder_event_payload_t.cluster_barrier size"
+);
+static_assert(
+    sizeof(rocprofiler_thread_trace_decoder_event_payload_t) == 8,
+    "Unexpected rocprofiler_thread_trace_decoder_event_payload_t size"
+);
+static_assert(
+    sizeof(rocprofiler_thread_trace_decoder_event_t) == 40, "Unexpected rocprofiler_thread_trace_decoder_event_t size"
+);
+static_assert(
+    sizeof(rocprofiler_thread_trace_decoder_dispatch_t) == 80,
+    "Unexpected rocprofiler_thread_trace_decoder_dispatch_t size"
+);
+
 #define RADT(x) ROCPROFILER_THREAD_TRACE_DECODER_RECORD_##x
 
 // ============================================================================

@@ -12,6 +12,8 @@
 #include <tuple>
 #include <type_traits>
 
+#include "traits.hpp"
+
 #if !defined(ROCPROFSYS_FOLD_EXPRESSION)
 #    define ROCPROFSYS_FOLD_EXPRESSION(...) ((__VA_ARGS__), ...)
 #endif
@@ -22,33 +24,10 @@ inline namespace common
 {
 namespace
 {
-template <typename Tp>
-struct is_string_impl : std::false_type
-{};
-
-template <>
-struct is_string_impl<std::string> : std::true_type
-{};
-
-template <>
-struct is_string_impl<std::string_view> : std::true_type
-{};
-
-template <>
-struct is_string_impl<const char*> : std::true_type
-{};
-
-template <>
-struct is_string_impl<char*> : std::true_type
-{};
-
-template <typename Tp>
-struct is_string : is_string_impl<std::remove_cv_t<std::decay_t<Tp>>>
-{};
-
 template <typename ArgT>
+    requires traits::string_literal<ArgT>
 auto
-as_string(ArgT&& _v, std::enable_if_t<is_string<ArgT>::value, int> = 0)
+as_string(const ArgT& _v)
 {
     if constexpr(std::is_pointer<std::decay_t<ArgT>>::value)
     {
@@ -62,8 +41,9 @@ as_string(ArgT&& _v, std::enable_if_t<is_string<ArgT>::value, int> = 0)
 }
 
 template <typename ArgT>
+    requires(!traits::string_literal<ArgT>)
 auto
-as_string(ArgT&& _v, std::enable_if_t<!is_string<ArgT>::value, long> = 0)
+as_string(const ArgT& _v)
 {
     return _v;
 }
