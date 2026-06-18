@@ -167,8 +167,8 @@ public:
     void populate_after() override
     {
         if(empty) return;
-        after_krn_pkt.push_back(packets.read_packet);
         after_krn_pkt.push_back(packets.stop_packet);
+        after_krn_pkt.push_back(packets.read_packet);
     };
 
     aqlprofile_pmc_aql_packets_t packets{};
