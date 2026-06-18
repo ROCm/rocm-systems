@@ -3068,9 +3068,8 @@ extern "C"
     {
         // only activate once
         {
-            static bool _first = true;
-            if(!_first) return nullptr;
-            _first = false;
+            static std::atomic<bool> _first{ true };
+            if(!_first.exchange(false)) return nullptr;
         }
 
         if(!rocprofsys::get_env(rocprofsys::env_vars::INIT_TOOLING, true)) return nullptr;
