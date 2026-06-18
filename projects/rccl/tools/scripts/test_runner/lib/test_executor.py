@@ -238,7 +238,7 @@ class TestExecutor:
     MPI_IMPL_CONFIG = {
         "openmpi": {
             "env_format": "-x {key}='{value}'",
-            "default_args": "--mca btl ^vader,openib --mca pml ucx --bind-to none",
+            "default_args": "--mca btl ^vader,openib --bind-to none",
         },
         "mpich": {
             "env_format": "-env {key} '{value}'",
