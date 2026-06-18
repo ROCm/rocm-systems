@@ -344,4 +344,51 @@ namespace RcclUnitTesting
     }
     testBed.Finalize();
   }
+
+  // Group of broadcasts each rooted at a different rank. With >=2 distinct roots
+  // and ALLGATHERV_ENABLE=1 (default) the task producer fuses them into a single
+  // ncclFuncAllGatherV ring kernel; with ALLGATHERV_ENABLE=0 they fall back to
+  // individual broadcasts. Results must validate either way. Sizes vary per root
+  // to exercise AllGatherV's variable-length partitioning.
+  TEST(GroupCall, MultiRootBroadcast)
+  {
+    TestBed testBed;
+
+    ncclDataType_t const dataType      = ncclFloat;
+    bool           const inPlace       = false;
+    bool           const useManagedMem = false;
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+
+      // One broadcast per rank-root => totalRanks distinct roots in one group.
+      int const numCollPerGroup = totalRanks;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s %d-ranks GroupCall MultiRootBroadcast", isMultiProcess ? "MP" : "SP", totalRanks);
+
+      for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+      {
+        OptionalColArgs options;
+        options.root = collIdx;                            // distinct root per broadcast
+        size_t const numElements = 1048576 >> (collIdx % 4); // 1M, 512K, 256K, 128K, repeating
+        testBed.SetCollectiveArgs(ncclCollBroadcast, dataType,
+                                  numElements, numElements,
+                                  options, collIdx);
+      }
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
 }
