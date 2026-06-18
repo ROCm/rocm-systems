@@ -36,6 +36,16 @@ if(AIS_GTEST_TRY_SYSTEM)
 endif()
 
 if(NOT GTest_FOUND)
+    # Force the fetched GoogleTest to build as a static archive, even when the
+    # project is built with BUILD_SHARED_LIBS=ON (the hipFile default). The
+    # installed unit-test binaries are packaged into a relocatable test tree
+    # whose RPATH only resolves libhipfile.so; a shared GoogleTest would add
+    # libgtest.so/libgmock.so as runtime dependencies that the package neither
+    # ships nor can locate, breaking both install-time test enumeration and
+    # `ctest -L unit` from the installed tree. Static linkage keeps libhipfile.so
+    # as the only project-private runtime dependency.
+    set(_ais_saved_build_shared_libs "${BUILD_SHARED_LIBS}")
+    set(BUILD_SHARED_LIBS OFF)
 # lint_cmake: -readability/wonkycase
     FetchContent_Declare(
       googletest
@@ -45,6 +55,8 @@ if(NOT GTest_FOUND)
     )
     FetchContent_MakeAvailable(googletest)
 # lint_cmake: +readability/wonkycase
+    set(BUILD_SHARED_LIBS "${_ais_saved_build_shared_libs}")
+    unset(_ais_saved_build_shared_libs)
 endif()
 
 if(googletest_SOURCE_DIR)
