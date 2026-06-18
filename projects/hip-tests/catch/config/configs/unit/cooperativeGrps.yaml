@@ -105,7 +105,7 @@ cooperativeGrps:
     tags: [cooperative, launch]
   Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
     <<: *level_2
-    # Does not play well with ASAN
+    # Test launches near the GPU's max concurrent blocks; under ASAN fewer fit, so gg.sync() deadlocks
     disabled: [asan]
     tags: [cooperative, launch]
   Unit_Multi_Grid_Group_Getters_Positive_Basic:
