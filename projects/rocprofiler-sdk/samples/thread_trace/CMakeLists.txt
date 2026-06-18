@@ -69,16 +69,18 @@ target_link_libraries(
             rocprofiler-sdk::samples-common-library amd_comgr
             rocprof-trace-decoder::rocprof-trace-decoder)
 
-# Buffered agent: triple-buffered SQTT capture with inline quick-scan; emits the same
-# disassembled hotspot report as the simple agent (needs amd_comgr via the shared
-# thread_trace_hotspots.hpp).
-add_library(thread-trace-buffered-client SHARED)
-target_sources(thread-trace-buffered-client PRIVATE agent_buffered.cpp)
-target_link_libraries(
-    thread-trace-buffered-client
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-build-flags
-            rocprofiler-sdk::samples-common-library amd_comgr
-            rocprof-trace-decoder::rocprof-trace-decoder)
+if(NOT ROCPROFILER_DISABLE_ATT_QUICK_SCAN)
+    # Buffered agent: triple-buffered SQTT capture with inline quick-scan; emits the same
+    # disassembled hotspot report as the simple agent (needs amd_comgr via the shared
+    # thread_trace_hotspots.hpp).
+    add_library(thread-trace-buffered-client SHARED)
+    target_sources(thread-trace-buffered-client PRIVATE agent_buffered.cpp)
+    target_link_libraries(
+        thread-trace-buffered-client
+        PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-build-flags
+                rocprofiler-sdk::samples-common-library amd_comgr
+                rocprof-trace-decoder::rocprof-trace-decoder)
+endif()
 
 # --- simple test ---
 rocprofiler_samples_get_preload_env(THREAD_TRACE_SIMPLE_PRELOAD_ENV
@@ -91,20 +93,22 @@ set_tests_properties(
     PROPERTIES TIMEOUT 60 ENVIRONMENT "${THREAD_TRACE_SIMPLE_PRELOAD_ENV}" LABELS
                "samples;thread-trace")
 
-# --- buffered test (requires triple-buffer support) ---
-rocprofiler_samples_get_preload_env(THREAD_TRACE_BUFFERED_PRELOAD_ENV
-                                    thread-trace-buffered-client)
+if(NOT ROCPROFILER_DISABLE_ATT_QUICK_SCAN)
+    # --- buffered test (requires triple-buffer support) ---
+    rocprofiler_samples_get_preload_env(THREAD_TRACE_BUFFERED_PRELOAD_ENV
+                                        thread-trace-buffered-client)
 
-set(IS_DISABLED ON)
-rocprofiler_sdk_sqtt_triple_buffer_disabled(_TB_DISABLED)
-if(NOT _TB_DISABLED)
-    set(IS_DISABLED OFF)
+    set(IS_DISABLED ON)
+    rocprofiler_sdk_sqtt_triple_buffer_disabled(_TB_DISABLED)
+    if(NOT _TB_DISABLED)
+        set(IS_DISABLED OFF)
+    endif()
+
+    add_test(NAME thread-trace-buffered-sample COMMAND $<TARGET_FILE:thread-trace-sample>)
+
+    set_tests_properties(
+        thread-trace-buffered-sample
+        PROPERTIES TIMEOUT 60 ENVIRONMENT
+                   "${THREAD_TRACE_BUFFERED_PRELOAD_ENV};RUN_SECONDS=3" LABELS
+                   "samples;thread-trace;triple-buffer" DISABLED ${IS_DISABLED})
 endif()
-
-add_test(NAME thread-trace-buffered-sample COMMAND $<TARGET_FILE:thread-trace-sample>)
-
-set_tests_properties(
-    thread-trace-buffered-sample
-    PROPERTIES TIMEOUT 60 ENVIRONMENT
-               "${THREAD_TRACE_BUFFERED_PRELOAD_ENV};RUN_SECONDS=3" LABELS
-               "samples;thread-trace;triple-buffer" DISABLED ${IS_DISABLED})
