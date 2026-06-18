@@ -85,7 +85,8 @@ static HSAKMT_STATUS init_vars_from_env(void) {
     std::string devices(envvar);
     size_t first_num_pos = devices.find_first_of("0123456789");
     if (first_num_pos != std::string::npos)
-      rt.default_node = std::stoi(devices.substr(first_num_pos)) + 1;
+      rt.default_node = rocdxg::wddm_index_to_gpu_node(static_cast<uint32_t>(
+          std::stoi(devices.substr(first_num_pos))));
   }
 
   return HSAKMT_STATUS_SUCCESS;

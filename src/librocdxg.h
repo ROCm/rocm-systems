@@ -37,6 +37,26 @@
 #include "impl/wddm/device.h"
 #include "shared/include/dxcore_loader.h"
 
+namespace rocdxg {
+
+// HSA KMT node 0 is the CPU node; GPU node ids start here and map to
+// zero-based WDDM adapter indices by subtracting this value.
+constexpr uint32_t kFirstGpuNodeId = 1;
+
+inline constexpr bool is_cpu_hsa_node(uint32_t node_id) {
+  return node_id < kFirstGpuNodeId;
+}
+
+inline constexpr uint32_t gpu_node_to_wddm_index(uint32_t node_id) {
+  return node_id - kFirstGpuNodeId;
+}
+
+inline constexpr uint32_t wddm_index_to_gpu_node(uint32_t wddm_index) {
+  return wddm_index + kFirstGpuNodeId;
+}
+
+} // namespace rocdxg
+
 wsl::thunk::WDDMDevice* get_wddmdev(uint32_t node_id);
 uint32_t get_num_wddmdev();
 wsl::thunk::GpuMemory *get_gpu_mem(void *MemoryAddress);

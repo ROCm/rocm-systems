@@ -354,13 +354,14 @@ static int get_cpu_cache_info(const char *prefix,
 
 static HSAKMT_STATUS topology_map_node_id(uint32_t node_id,
                                           wsl::thunk::WDDMDevice *&device) {
-  uint32_t idx = node_id;
-  if ((!dxg_topology->wdevices_.size()) || (!node_id) || (node_id >= dxg_topology->num_sysfs_nodes)) {
+  if ((!dxg_topology->wdevices_.size()) ||
+      rocdxg::is_cpu_hsa_node(node_id) ||
+      (node_id >= dxg_topology->num_sysfs_nodes)) {
     device = nullptr;
     return HSAKMT_STATUS_ERROR;
   }
 
-  device = dxg_topology->wdevices_[node_id - 1];
+  device = dxg_topology->wdevices_[rocdxg::gpu_node_to_wddm_index(node_id)];
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -515,7 +516,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 
   props.MaxEngineClockMhzCCompute = dxg_topology->freq_max_;
 
-  if (node_id == 0) {
+  if (rocdxg::is_cpu_hsa_node(node_id)) {
     /* CPU node */
     props.NumCPUCores = sysconf(_SC_NPROCESSORS_ONLN);
     props.NumMemoryBanks = 1;
@@ -626,7 +627,7 @@ static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 
   std::memset(&props, 0, sizeof(props));
-  if (node_id == 0) {
+  if (rocdxg::is_cpu_hsa_node(node_id)) {
     /* CPU node */
     props.HeapType = HSA_HEAPTYPE_SYSTEM;
 
@@ -1483,10 +1484,12 @@ HSAKMT_STATUS validate_nodeid_array(uint32_t **gpu_id_array,
 uint32_t get_num_sysfs_nodes(void) { return dxg_topology->num_sysfs_nodes; }
 
 wsl::thunk::WDDMDevice *get_wddmdev(uint32_t node_id) {
-  if ((!dxg_topology->wdevices_.size()) || (!node_id) || (node_id >= dxg_topology->num_sysfs_nodes))
+  if ((!dxg_topology->wdevices_.size()) ||
+      rocdxg::is_cpu_hsa_node(node_id) ||
+      (node_id >= dxg_topology->num_sysfs_nodes))
     return nullptr;
 
-  return dxg_topology->wdevices_[node_id - 1];
+  return dxg_topology->wdevices_[rocdxg::gpu_node_to_wddm_index(node_id)];
 }
 
 uint32_t get_num_wddmdev() {

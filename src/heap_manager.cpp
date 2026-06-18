@@ -87,7 +87,7 @@ bool HeapManager::ReserveSvmSpace(uint64_t &base, uint64_t &size,
 
     int match_cnt = 0;
     for (uint32_t j = 0; j < num_adapters; j++) {
-      device = get_wddmdev(j+1);
+      device = get_wddmdev(wddm_index_to_gpu_node(j));
       uint64_t start = (base == 0) ? (uint64_t)ptr : base;
       uint64_t end = start + ((base == 0) ? sys_va_size : size) + 1;
 
@@ -142,7 +142,7 @@ bool HeapManager::ReserveLocalHeapSpace() {
   size_t num_adapters = get_num_wddmdev();
 
   for (uint32_t j = 0; j < num_adapters; j++) {
-    device = get_wddmdev(j+1);
+    device = get_wddmdev(wddm_index_to_gpu_node(j));
     if (device == nullptr)
       return -1;
 
@@ -166,7 +166,7 @@ bool HeapManager::FreeSvmSpace(uint64_t &base, uint64_t &size) {
   wsl::thunk::WDDMDevice* device;
   size_t num_adapters = get_num_wddmdev();
   for (uint32_t j = 0; j < num_adapters; j++) {
-    device = get_wddmdev(j+1);
+    device = get_wddmdev(wddm_index_to_gpu_node(j));
     if (device == nullptr)
       return -1;
     wsl::thunk::d3dthunk::FreeGpuVirtualAddress(device->GetAdapter(), base, size);
@@ -365,7 +365,7 @@ bool HeapManager::InitHandleApertureSpace() {
 
   while (handle_aperture_start_ < END_NON_CANONICAL_ADDR - 1) {
     for (uint32_t j = 0; j < num_adapters;) {
-      device = get_wddmdev(j+1);
+      device = get_wddmdev(wddm_index_to_gpu_node(j));
       if (device == nullptr)
         return -1;
 

@@ -387,7 +387,9 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
     auto *chain = sdev->GetLdaChain();
     D3DKMT_HANDLE adapter = chain->AdapterHandle();
 
-    auto device = new WDDMDevice(sdev, adapter, devices.size() + 1);
+    auto device = new WDDMDevice(
+        sdev, adapter,
+        rocdxg::wddm_index_to_gpu_node(static_cast<uint32_t>(devices.size())));
     if (!device)
       continue;
     devices.push_back(device);
