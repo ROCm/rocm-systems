@@ -51,8 +51,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_collection_periods.log
     TIMEOUT 120
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-collection-period
-    UNSTABLE)
+    FIXTURES_REQUIRED rocprofv3-test-collection-period)
 
 # Conflict: --selected-regions + --collection-period should fail
 rocprofiler_add_integration_execute_test(
