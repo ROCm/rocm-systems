@@ -871,9 +871,9 @@ def shmem_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
 # Test-category (tier) label injection from test_categories.yaml
 # ----------------------------------------------------------------------------
 # Single source of truth for tier policy is tests/test_categories.yaml.
-# At CTest-generate time we read the YAML and append tier and arch-exclude
-# labels to each test's emitted LABELS set, so `ctest -L <tier>` Just Works
-# from the installed share/rocprofiler-systems/tests directory.
+# At CTest-generate time we read the YAML and append tier labels to each
+# test's emitted LABELS set, so `ctest -L <tier>` Just Works from the
+# installed share/rocprofiler-systems/tests directory.
 
 TIER_ORDER = ["quick", "standard", "comprehensive", "full"]
 
@@ -972,16 +972,7 @@ def _load_test_categories() -> Optional[dict]:
             "labels": _flatten_labels(cfg.get("labels")),
         }
 
-    arch_exclude: dict[str, list] = {}  # {label: [compiled_patterns]}
-    for _key, section in (data.get("exclude_arch") or {}).items():
-        if not isinstance(section, dict):
-            continue
-        labels = _flatten_labels(section.get("labels"))
-        patterns = _compile_list(section.get("test_patterns"))
-        for label in labels:
-            arch_exclude.setdefault(label, []).extend(patterns)
-
-    return {"tiers": tier_cfg, "arch_exclude": arch_exclude}
+    return {"tiers": tier_cfg}
 
 
 def _resolve_tier_labels(test_name: str, existing_labels: set[str]) -> set[str]:
@@ -1021,24 +1012,6 @@ def _resolve_tier_labels(test_name: str, existing_labels: set[str]) -> set[str]:
         matched_indices.append(i)
         extra_labels.update(cfg.get("labels", []))
     return {TIER_ORDER[i] for i in matched_indices} | extra_labels
-
-
-def _resolve_arch_exclude_labels(test_name: str) -> set[str]:
-    """Return arch-exclude labels (e.g. ``gfx950_linux_exclude``) matching *test_name*.
-
-    The TheRock test_runner.py honours ``<gfx_pattern>[_<os>]_exclude`` labels
-    via its find_matching_arch_exclude_labels() helper - any label emitted
-    here just needs to follow that naming convention to be auto-excluded on
-    the matching GPU/OS combination.
-    """
-    categories = _load_test_categories()
-    if not categories:
-        return set()
-    matched: set[str] = set()
-    for label, patterns in categories["arch_exclude"].items():
-        if any(p.search(test_name) for p in patterns):
-            matched.add(label)
-    return matched
 
 
 # ----------------------------------------------------------------------------
@@ -1300,10 +1273,9 @@ def _ctest_generate_tests(
                 args_str = ", ".join(str(a) for a in marker.args)
                 labels.add(f"{marker.name}[{args_str}]")
 
-        # Inject tier (quick/standard/comprehensive/full) and arch-exclude
-        # labels from test_categories.yaml
+        # Inject tier (quick/standard/comprehensive/full) labels from
+        # test_categories.yaml
         labels |= _resolve_tier_labels(test_name, labels)
-        labels |= _resolve_arch_exclude_labels(test_name)
 
         escaped_name = _cmake_escape(test_name)
 

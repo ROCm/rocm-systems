@@ -49,9 +49,8 @@ set_target_properties(
         RUNTIME_OUTPUT_DIRECTORY "${_capchk_dir}"
 )
 
-# test_categories.yaml drives tier (quick/standard/comprehensive/full) and
-# arch-exclude label injection at CTest-generate time (see _load_test_categories
-in conftest.py).
+# test_categories.yaml drives tier (quick/standard/comprehensive/full) label
+# injection at CTest-generate time (see conftest.py:_load_test_categories).
 set(ROCPROFSYS_TEST_CATEGORIES_YAML ${CMAKE_CURRENT_LIST_DIR}/test_categories.yaml)
 configure_file(
     ${ROCPROFSYS_TEST_CATEGORIES_YAML}
