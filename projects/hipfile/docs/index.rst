@@ -42,7 +42,8 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
       * :doc:`hipFile buffer registration <reference/hipFile-buffer-registration>`
       * :doc:`hipFile reference counting <reference/hipFile-reference-count>`
       * :doc:`hipFile ais-stats tool <reference/hipFile-ais-stats-tool>`
-      * :doc:`hipFile environment variables <reference/hipFile-environment-variables>`\]
+      * :doc:`hipFile environment variables <reference/hipFile-environment-variables>`
+      * :doc:`cuFile compatibility <reference/hipFile-cuFile-compatibility>`
       * API reference
          * :doc:`/reference/api-synchronous-io`
          * :doc:`/reference/api-driver`

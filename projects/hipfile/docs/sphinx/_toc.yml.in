@@ -42,6 +42,8 @@ subtrees:
         title: ais-stats tool
       - file: reference/hipFile-environment-variables.rst
         title: Environment variables
+      - file: reference/hipFile-cuFile-compatibility.rst
+        title: cuFile compatibility
       - file: reference/hipFile-api-reference.rst
         title: API reference
         subtrees:
