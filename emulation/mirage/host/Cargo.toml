@@ -5,7 +5,9 @@ edition = "2024"
 
 [dependencies]
 mirage_core = { workspace = true }
+mirage_container = { workspace = true }
 mirage_rocjitsu = { workspace = true }
+mirage_hotswap = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }

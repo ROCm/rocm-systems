@@ -195,7 +195,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
  *        counters variable is owned by rocprofiler and should not be free'd.
  *
  * @param [in] agent_id Agent ID of the current callback
- * @param [in] counters An array of counters that are avialable on the agent
+ * @param [in] counters An array of counters that are available on the agent
  *      ::rocprofiler_iterate_agent_supported_counters was called on.
  * @param [in] num_counters Number of counters contained in counters
  * @param [in] user_data User data supplied by

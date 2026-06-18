@@ -201,8 +201,6 @@ hsa_status_t IterateCPUAgents(hsa_agent_t agent, void *data) {
   return status;
 }
 
-
-
 // Find GPU Agents
 hsa_status_t IterateGPUAgents(hsa_agent_t agent, void *data) {
   hsa_status_t status;
@@ -216,6 +214,23 @@ hsa_status_t IterateGPUAgents(hsa_agent_t agent, void *data) {
   RET_IF_HSA_COMMON_ERR(status);
   if (HSA_STATUS_SUCCESS == status && HSA_DEVICE_TYPE_GPU == device_type) {
     gpus->push_back(agent);
+  }
+  return status;
+}
+
+// Find AIE Agents
+hsa_status_t IterateAIEAgents(hsa_agent_t agent, void* data) {
+  hsa_status_t status;
+  assert(data != nullptr);
+  if (data == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  std::vector<hsa_agent_t>* aies = static_cast<std::vector<hsa_agent_t>*>(data);
+  hsa_device_type_t device_type;
+  status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
+  RET_IF_HSA_COMMON_ERR(status);
+  if (HSA_STATUS_SUCCESS == status && HSA_DEVICE_TYPE_AIE == device_type) {
+    aies->push_back(agent);
   }
   return status;
 }

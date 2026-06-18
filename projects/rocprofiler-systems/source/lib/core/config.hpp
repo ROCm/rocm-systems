@@ -5,6 +5,7 @@
 
 #include "common.hpp"
 #include "common/defines.h"
+#include "common/environment.hpp"
 #include "state.hpp"
 #include "timemory.hpp"
 #include <cstdint>

@@ -86,3 +86,28 @@ class TestConfig(RocprofsysTest):
             pass_regex=[r"Error reading configuration file"],
             use_abort_fail_regex=False,
         )
+
+    @pytest.mark.timeout(120)
+    def test_trace_category_enabled_in_runtime(self, config_target: str):
+        """Perfetto settings must appear in the runtime config print when tracing is on.
+
+        Regression for the phantom ``ROCPROFSYS_USE_TRACE`` key: the perfetto
+        setting category was gated on an unregistered key, so it was always
+        disabled at runtime and every perfetto setting (including
+        ``ROCPROFSYS_TRACE``) was silently dropped from the printed
+        configuration. The canonical switch is ``ROCPROFSYS_TRACE``.
+        """
+        env = {
+            "ROCPROFSYS_TRACE": "ON",
+            "ROCPROFSYS_VERBOSE": "2",
+        }
+
+        result = self.run_test("sampling", target=config_target, env=env)
+
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"ROCPROFSYS_TRACE\s+=\s+(true|false)",
+                r"ROCPROFSYS_PERFETTO_\w+\s+=",
+            ],
+        )

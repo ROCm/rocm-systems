@@ -102,7 +102,9 @@ class ResetCommands:
             try:
                 amdsmi_interface.amdsmi_reset_ttm_pages_limit()
                 self.logger.output["reset_gtt"] = (
-                    "Successfully reset GTT to system default. Reboot required for changes to take effect."
+                    "Successfully reset GTT to system default. "
+                    "Takes effect after the next reboot — "
+                    "current values shown by 'amd-smi node --gtt' still reflect the previous boot."
                 )
                 self.logger.print_output()
                 self.helpers.prompt_reboot()

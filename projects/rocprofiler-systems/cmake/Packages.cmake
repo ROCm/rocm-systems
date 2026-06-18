@@ -918,7 +918,7 @@ rocprofiler_systems_checkout_git_submodule(
     RELATIVE_PATH external/timemory
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://github.com/ROCm/timemory.git
-    REPO_BRANCH omnitrace
+    REPO_BRANCH rocprofiler-systems-cppstd20
 )
 
 rocprofiler_systems_save_variables(

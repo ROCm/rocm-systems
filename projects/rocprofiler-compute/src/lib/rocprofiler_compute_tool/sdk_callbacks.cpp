@@ -7,6 +7,7 @@
 #include <cxxabi.h>
 
 #include <algorithm>
+#include <cassert>
 #include <iostream>
 #include <map>
 #include <regex>
@@ -14,6 +15,7 @@
 
 using namespace rocprofiler_compute_tool;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
+using code_object_load_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
 
 SdkCallbacksImpl::SdkCallbacksImpl(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
     : m_sdk_wrapper(sdk_wrapper)
@@ -316,15 +318,27 @@ void SdkCallbacksImpl::record_callback(rocprofiler_dispatch_counting_service_dat
 void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                              void*                                 callback_data)
 {
-    if (record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD &&
-        record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-        record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+    if (record.phase != ROCPROFILER_CALLBACK_PHASE_LOAD ||
+        record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT)
+        return;
+
+    assert(callback_data);
+    auto* tool = static_cast<std::unique_ptr<tool_data_t>*>(callback_data)->get();
+
+    if (record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
+    {
+        if (tool->pc_sampling.enabled())
+        {
+            assert(record.payload);
+            const auto* obj_data = static_cast<code_object_load_data_t*>(record.payload);
+            tool->pc_sampling.on_code_object_load(*obj_data);
+        }
+    }
+    else if (record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
         auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
         // check if regex can be found in kernel name matches regex from tool data,
         // if matches store kernel id
-        auto* tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(callback_data);
-        auto* tool          = tool_data_ptr->get();
         // Lock before modifying target_kernel_ids
         std::lock_guard<std::mutex> lock(tool->mut);
         if (!tool->kernel_filter_include_regex.empty())

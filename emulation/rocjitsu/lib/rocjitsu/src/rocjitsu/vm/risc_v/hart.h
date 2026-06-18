@@ -4,7 +4,7 @@
 #ifndef ROCJITSU_VM_RISC_V_HART_H_
 #define ROCJITSU_VM_RISC_V_HART_H_
 
-#include "rocjitsu/vm/execution_plugin.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/risc_v/hart_state.h"
 #include "rocjitsu/vm/risc_v/memory.h"
 #include "simdojo/sim/clock_domain.h"

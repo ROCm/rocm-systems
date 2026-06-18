@@ -410,6 +410,42 @@ __host__ int HostInterface::reduce(rocshmem_team_t team, T* dest,
   return ROCSHMEM_SUCCESS;
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__host__ int HostInterface::reduce_on_stream(rocshmem_team_t team,
+                                              T *dest,
+                                              const T *source,
+                                              int nreduce,
+                                              hipStream_t stream)
+{
+  // Use dynamic block size determination:
+  // - Query optimal block size using occupancy API
+  // - Limit block size to size (number of bytes) to avoid over-subscription
+  // - Always use 1 block (single workgroup collective)
+
+  int optimal_block_size = 0;
+  int grid_size = 0;
+  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, 
+                                              &optimal_block_size,
+                                              rocshmem_reduce_on_stream_kernel<T, Op>, 0,
+                                              0));
+
+  // Limit block size to size (bytes) to avoid over-subscription
+  int num_threads_per_block = (optimal_block_size > nreduce)
+                                  ? nreduce
+                                  : optimal_block_size;
+
+  // Launch kernel to do reduce with given stream
+  dim3 gridSize(1);
+  dim3 blockSize(num_threads_per_block);
+  rocshmem_reduce_on_stream_kernel<T, Op><<<gridSize, blockSize, 0, stream>>>(team,
+                                                                              dest,
+                                                                              source,
+                                                                              nreduce);
+  hipError_t launch_status = hipGetLastError();
+  return launch_status;
+
+}
+
 template <typename T>
 __host__ inline int HostInterface::compare(int cmp, T input_val,
                                            T target_val) {

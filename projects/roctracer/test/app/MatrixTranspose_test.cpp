@@ -170,21 +170,21 @@ int main() {
     CHECK_HIP(hipMalloc((void**)&gpuMatrix, NUM * sizeof(float)));
     CHECK_HIP(hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float)));
 
-    // correlation reagion32
+    // correlation region 31
     roctracer_activity_push_external_correlation_id(31);
-    // correlation reagion32
+    // correlation region 32
     roctracer_activity_push_external_correlation_id(32);
 
     // Memory transfer from host to device
     CHECK_HIP(hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice));
 
-    // correlation reagion33
+    // correlation region 33
     roctracer_activity_push_external_correlation_id(33);
 
     roctxMark("before hipLaunchKernel");
     roctxRangePush("hipLaunchKernel");
 
-    // Lauching kernel from host
+    // Launching kernel from host
     CALL_HIP(hipLaunchKernelGGL(matrixTranspose,
                                 dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
                                 dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0,
@@ -192,7 +192,7 @@ int main() {
 
     roctxMark("after hipLaunchKernel");
 
-    // correlation reagion end
+    // correlation region end
     roctracer_activity_pop_external_correlation_id(NULL);
 
     // Memory transfer from device to host
@@ -230,9 +230,9 @@ int main() {
     CHECK_HIP(hipFree(gpuMatrix));
     CHECK_HIP(hipFree(gpuTransposeMatrix));
 
-    // correlation reagion end
+    // correlation region end
     roctracer_activity_pop_external_correlation_id(NULL);
-    // correlation reagion end
+    // correlation region end
     roctracer_activity_pop_external_correlation_id(NULL);
 
     // free the resources on host side

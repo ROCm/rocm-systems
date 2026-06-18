@@ -1067,6 +1067,7 @@ static int topology_get_node_props_from_drm(HsaNodeProperties *props)
 	struct amdgpu_gpu_info gpu_info;
 	const char *name;
 	int i, ret = 0;
+	char fabric_handle_supported_path[256];
 
 	if (props == NULL)
 		return -1;
@@ -1096,6 +1097,15 @@ static int topology_get_node_props_from_drm(HsaNodeProperties *props)
 	props->FamilyID = gpu_info.family_id;
 	props->Integrated = !!(gpu_info.ids_flags & AMDGPU_IDS_FLAGS_FUSION);
 	props->WallClockKHz = gpu_info.gpu_counter_freq;
+
+	snprintf(fabric_handle_supported_path, 256, "/sys/class/drm/renderD%d/device/ualink", props->DrmRenderMinor);
+	FILE *file = fopen(fabric_handle_supported_path, "r");
+	if (file) {
+		props->FabricHandleSupported = 1;
+		fclose(file);
+	} else {
+		props->FabricHandleSupported = 0;
+	}
 
 err_query_gpu_info:
 	hsakmt_amdgpu_device_deinitialize(device_handle);

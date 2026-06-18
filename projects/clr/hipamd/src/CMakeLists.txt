@@ -233,6 +233,9 @@ endif()
 # Add hiprtc
 add_subdirectory(hiprtc)
 
+# HRR in-tree capture layer
+add_subdirectory(hrr)
+
 #############################
 # Profiling API support
 #############################

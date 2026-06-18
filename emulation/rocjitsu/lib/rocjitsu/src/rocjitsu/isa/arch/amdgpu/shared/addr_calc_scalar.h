@@ -18,7 +18,6 @@
 #include "util/log.h"
 
 #include <array>
-#include <cassert>
 #include <cstdint>
 
 namespace rocjitsu {
@@ -39,7 +38,6 @@ uint64_t smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf) {
   if (inst.imm)
     off += static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
   uint64_t addr = base + off;
-  assert((addr & 0x3) == 0 && "SMEM address must be 4-byte aligned");
   util::Logger::vm([&](auto &os) {
     static thread_local uint64_t smem_count = 0;
     if (++smem_count <= 12 || (smem_count % 240) == 0)
@@ -62,6 +60,7 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   uint64_t exec = wf.exec();
   d.lane_mask = exec;
   d.exec_mask = exec;
+  d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   d.cu_path = wf.cu().full_path();

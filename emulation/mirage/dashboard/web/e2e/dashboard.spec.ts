@@ -216,7 +216,6 @@ test.describe.serial("mirage dashboard e2e", () => {
     const modal = page.getByTestId("topology-create-modal");
     await expect(modal).toBeVisible();
     await page.getByTestId("topology-create-name").fill(TOPOLOGY);
-    await page.getByTestId("topology-create-racks").fill("1");
     await page.getByTestId("topology-create-nodes").fill("1");
     await page.getByTestId("topology-create-gpus").fill("2");
     await page.getByTestId("topology-create-submit").click();

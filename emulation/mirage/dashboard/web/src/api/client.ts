@@ -20,6 +20,22 @@ import type {
 
 const API = "/api";
 
+/// Error thrown for any non-2xx API response. Carries the HTTP
+/// `status` and the server-provided `detail` so callers can react to
+/// specific failures (e.g. a 409 conflict on a duplicate session name)
+/// instead of string-matching the message.
+export class ApiError extends Error {
+  readonly status: number;
+  readonly detail: string;
+
+  constructor(method: string, path: string, status: number, detail: string) {
+    super(`${method} ${path} failed (${status}): ${detail}`);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 async function req<T>(
   method: string,
   path: string,
@@ -38,7 +54,7 @@ async function req<T>(
     } catch {
       detail = await res.text();
     }
-    throw new Error(`${method} ${path} failed (${res.status}): ${detail}`);
+    throw new ApiError(method, path, res.status, detail);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;

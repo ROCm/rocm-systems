@@ -6,6 +6,8 @@
 #include "binary/dwarf_entry.hpp"
 #include "binary/symbol.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
+#include "common/units.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
@@ -26,7 +28,6 @@
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/tpls/cereal/cereal/archives/json.hpp>
 #include <timemory/tpls/cereal/types.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 
 #include "logger/debug.hpp"
@@ -54,7 +55,7 @@ auto         experiment_history        = std::vector<experiment>{};
 std::int64_t global_scaling            = 1;
 std::int64_t global_scaling_increments = 0;
 bool         use_exp_speedup_scaling =
-    get_env<bool>("ROCPROFSYS_CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP", false);
+    get_env<bool>(env_vars::CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP, false);
 }  // namespace
 
 experiment::sample::sample(const base_type& _b, std::uint64_t _c)
@@ -517,7 +518,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
     }
 
     bool _causal_output_reset =
-        config::get_setting_value<bool>("ROCPROFSYS_CAUSAL_FILE_RESET").value_or(false);
+        config::get_setting_value<bool>(std::string{ env_vars::CAUSAL_FILE_RESET })
+            .value_or(false);
 
     {
         auto _saved_experiments = (_causal_output_reset)

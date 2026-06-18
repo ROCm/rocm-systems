@@ -173,6 +173,7 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
                             0
                         );
                     }
+                    break;
                 case BF8_E5M2: // bf8 x bf8
                     for(int i = 0; i < iter; ++i)
                     {

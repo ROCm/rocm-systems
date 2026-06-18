@@ -255,6 +255,8 @@ TEST(spm_core, check_packet_generation)
                 EXPECT_EQ(get_spm_packet(pkt, profile), ROCPROFILER_STATUS_SUCCESS)
                     << "Unable to generate packet";
                 EXPECT_TRUE(pkt) << "Expected a packet to be generated";
+                ROCPROFILER_CALL(rocprofiler_spm_destroy_counter_config(cfg_id),
+                                 "Could not delete profile id");
             }
         }
     }
@@ -458,6 +460,8 @@ TEST(spm_core, check_callbacks)
                 pkts.emplace_back(
                     std::make_pair(std::move(ret_pkt.packet), static_cast<spm::ClientID>(0)));
                 post_kernel_call(&ctx, cb_info, sess, pkts, kernel_dispatch::profiling_time{});
+                ROCPROFILER_CALL(rocprofiler_spm_destroy_counter_config(expected.id),
+                                 "Could not delete profile id");
             }
         }
     }

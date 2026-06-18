@@ -22,6 +22,7 @@
 
 #include <hip/hip_runtime.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <chrono>
 #include <csignal>
@@ -35,14 +36,22 @@
 namespace
 {
 // required type for signal handlers
-volatile std::sig_atomic_t signal_received = 0;
+volatile std::sig_atomic_t sigint_received   = 0;
+volatile std::sig_atomic_t sigwinch_received = 0;
 }  // namespace
 
 // signal handler - must have C linkage
 extern "C" void
 attachment_test_signal_handler(int signum)
 {
-    signal_received = signum;
+    if(signum == SIGINT)
+    {
+        sigint_received = signum;
+    }
+    else if(signum == SIGWINCH)
+    {
+        sigwinch_received = signum;
+    }
 }
 
 /* Macro for checking GPU API return values */
@@ -78,12 +87,13 @@ execute_kernels(const size_t tid, const size_t device_id)
     HIP_ASSERT(hipStreamCreate(&stream));
 
     // Allocate memory
-    const int    size  = 1024 * 1024;  // 1M elements
+    const int    size  = 512 * 512;  // 256K elements
     const size_t bytes = size * sizeof(float);
 
-    float* h_data = new float[size];
+    float* h_data = nullptr;
     float* d_data = nullptr;
 
+    HIP_ASSERT(hipHostMalloc(&h_data, bytes));
     HIP_ASSERT(hipMalloc(&d_data, bytes));
 
     // Initialize data
@@ -100,13 +110,13 @@ execute_kernels(const size_t tid, const size_t device_id)
             << "...\n";
         std::cout << msg.str();
     }
-    const int num_iterations = 30;
+    size_t iter = 0;
 
-    for(int iter = 0; iter < num_iterations; ++iter)
+    while(!sigint_received)
     {
         // Add ROCTX markers for better profiling
         std::string range_name = "Iteration_" + std::to_string(iter + 1);
-        roctxRangePush(range_name.c_str());  // Removed - ROCTx not linked
+        roctxRangePush(range_name.c_str());
 
         // Copy data to device
         roctxMark("Start_H2D_Copy");
@@ -115,14 +125,14 @@ execute_kernels(const size_t tid, const size_t device_id)
         {
             std::cerr << "Failed to copy data for thread " << tid << " on device " << device_id
                       << "...\n";
-            roctxRangePop();  // Removed - ROCTx not linked
+            roctxRangePop();
             break;
         }
 
         // Launch kernel
         roctxMark("Launch_Kernel");
         int threads_per_block = 256;
-        int blocks_per_grid   = (size + threads_per_block - 1) / threads_per_block;
+        int blocks_per_grid   = size / threads_per_block;
 
         hipLaunchKernelGGL(
             simple_kernel, dim3(blocks_per_grid), dim3(threads_per_block), 0, stream, d_data, size);
@@ -134,7 +144,7 @@ execute_kernels(const size_t tid, const size_t device_id)
         {
             std::cerr << "Failed to copy data for thread " << tid << " on device " << device_id
                       << "...\n";
-            roctxRangePop();  // Removed - ROCTx not linked
+            roctxRangePop();
             break;
         }
 
@@ -145,52 +155,87 @@ execute_kernels(const size_t tid, const size_t device_id)
         {
             std::cerr << "Failed to synchronize stream " << stream << " with thread " << tid
                       << " on device " << device_id << "...\n";
-            roctxRangePop();  // Removed - ROCTx not linked
+            roctxRangePop();
             break;
         }
 
-        roctxRangePop();  // Removed - ROCTx not linked
+        roctxRangePop();
+
+        if(sigint_received)
+        {
+            break;
+        }
 
         // Small delay between iterations
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        iter++;
     }
 
     {
         // compose string first to avoid multithreaded handling of cout << operator
         auto msg = std::stringstream{};
-        msg << "Kernel execution loop completed for thread " << tid << " on device " << device_id
-            << "...\n";
+        msg << "Kernel execution loop completed " << iter << " iterations for thread " << tid
+            << " on device " << device_id << "\n";
         std::cout << msg.str();
     }
 
     HIP_ASSERT(hipStreamDestroy(stream));
     // Cleanup
+    HIP_ASSERT(hipHostFree(h_data));
     HIP_ASSERT(hipFree(d_data));
-    delete[] h_data;
 }
 
 int
 main(int argc, char** argv)
 {
-    // Install signal handler for SIGINT
+    // Install signal handler for SIGINT and SIGWINCH
+    std::signal(SIGINT, attachment_test_signal_handler);
     std::signal(SIGWINCH, attachment_test_signal_handler);
 
     size_t nthreads{8};
     int    ndevices{0};
+    bool   fork_child{false};
+    int    positional{0};
     for(int i = 1; i < argc; ++i)
     {
         auto _arg = std::string{argv[i]};
-        if(_arg == "?" || _arg == "-h" || _arg == "--help")
+        if(_arg == "--fork-child")
         {
-            fprintf(stderr,
-                    "usage: attachment-test [NUM_THREADS (%zu)] [NUM_DEVICES (%d)]\n",
-                    nthreads,
-                    ndevices);
+            fork_child = true;
+        }
+        else if(_arg == "?" || _arg == "-h" || _arg == "--help")
+        {
+            fprintf(
+                stderr,
+                "usage: attachment-test [--fork-child] [NUM_THREADS (%zu)] [NUM_DEVICES (%d)]\n",
+                nthreads,
+                ndevices);
             exit(EXIT_SUCCESS);
         }
+        else if(positional == 0)
+        {
+            nthreads = std::atoll(argv[i]);
+            ++positional;
+        }
+        else if(positional == 1)
+        {
+            ndevices = std::stoi(argv[i]);
+            ++positional;
+        }
     }
-    if(argc > 1) nthreads = std::atoll(argv[1]);
-    if(argc > 2) ndevices = std::stoi(argv[2]);
+
+    // Fork a child process before HIP initialization so each process gets a
+    // clean HIP context. Used by the attach-tree test to exercise --attach-children.
+    pid_t child_pid = -1;
+    if(fork_child)
+    {
+        child_pid = fork();
+        if(child_pid < 0)
+        {
+            std::cerr << "fork failed\n";
+            return 1;
+        }
+    }
 
     std::cout << "Attachment test app started with PID: " << getpid() << std::endl;
 
@@ -212,8 +257,6 @@ main(int argc, char** argv)
         ndevices = device_count;
     }
 
-    std::cout << "After first call " << getpid() << std::endl;
-
     auto _threads = std::vector<std::thread>{};
     _threads.reserve(nthreads);
 
@@ -222,12 +265,25 @@ main(int argc, char** argv)
     for(auto& itr : _threads)
         itr.join();
 
-    if(signal_received)
+    if(sigwinch_received)
     {
-        std::cout << "Attachment test process " << getpid() << " received signal "
-                  << signal_received << "\n";
+        std::cout << "Attachment test process " << getpid() << " received signal " << SIGWINCH
+                  << "\n";
     }
     std::cout << "Attachment test app finished" << std::endl;
+
+    if(child_pid > 0)
+    {
+        kill(child_pid, SIGINT);
+        int child_status = 0;
+        waitpid(child_pid, &child_status, 0);
+        if(child_status != 0)
+        {
+            std::cout << "Child process " << child_pid
+                      << " returned non-zero status: " << child_status << std::endl;
+            return 1;
+        }
+    }
 
     return 0;
 }

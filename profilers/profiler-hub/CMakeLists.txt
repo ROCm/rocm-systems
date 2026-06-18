@@ -26,6 +26,8 @@ if(PROFILER_HUB_BUILD_TESTS)
     enable_testing()
 endif()
 
+include(GNUInstallDirs)
+
 # ------------------------------------------------------------ #
 # Version
 # ------------------------------------------------------------ #
@@ -136,6 +138,13 @@ include(sqlite3)
 target_link_libraries(profiler-hub-objects PRIVATE profiler-hub-sqlite3)
 
 # ------------------------------------------------------------ #
+# fmt
+# ------------------------------------------------------------ #
+
+include(fmt)
+target_link_libraries(profiler-hub-objects PRIVATE fmt::fmt)
+
+# ------------------------------------------------------------ #
 # spdlog
 # ------------------------------------------------------------ #
 
@@ -215,6 +224,18 @@ set_target_properties(
     PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
+# fmt is the one third-party dependency exported in the install interface: the
+# static library calls into it and cannot resolve it on its own. Exporting a
+# link requirement is only valid when fmt is an imported package - a
+# FetchContent-built fmt target is not part of our export set and cannot be
+# referenced by the installed targets file. When fmt is vendored, keep it
+# build-only.
+if(fmt_FOUND)
+    set(profiler_hub_fmt_link fmt::fmt)
+else()
+    set(profiler_hub_fmt_link $<BUILD_INTERFACE:fmt::fmt>)
+endif()
+
 foreach(_target profiler-hub profiler-hub-static)
     target_include_directories(
         ${_target}
@@ -229,6 +250,7 @@ foreach(_target profiler-hub profiler-hub-static)
             $<BUILD_INTERFACE:profiler-hub_queries>
             $<BUILD_INTERFACE:profiler-hub-sqlite3>
             $<BUILD_INTERFACE:spdlog::spdlog>
+            ${profiler_hub_fmt_link}
             $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
     )
 
@@ -253,7 +275,6 @@ endforeach()
 # ------------------------------------------------------------ #
 
 include(CMakePackageConfigHelpers)
-include(GNUInstallDirs)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME profiler-hub)
 set(PACKAGE_NAME "profiler-hub")
@@ -290,6 +311,14 @@ install(
 
 set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
+
+if(fmt_FOUND)
+    set(PROFILER_HUB_FMT_FIND_DEPENDENCY
+        "include(CMakeFindDependencyMacro)\nfind_dependency(fmt)"
+    )
+else()
+    set(PROFILER_HUB_FMT_FIND_DEPENDENCY "")
+endif()
 
 configure_package_config_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/profiler-hub-config.cmake.in

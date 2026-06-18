@@ -27,7 +27,11 @@
 
 #include "gfx9token.h" // gfx9::token_len_dict, sqtt_token_type_t
 
-#if defined(__x86_64__) || defined(_M_X64)
+// SIMD-only scanner — no scalar fallback. The AVX paths use GCC function
+// multiversioning (__attribute__((target("…")))) which MSVC does not
+// implement, so MSVC and non-x86 targets compile to a stub that returns
+// quick_scan::SCAN_NOT_IMPLEMENTED.
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
 #    include <immintrin.h>
 #    define GFX9_QUICK_SCAN_HAS_X86 1
 #else
@@ -97,62 +101,6 @@ static_assert(
     TOKEN_REG == 2 && TOKEN_REG_CS == 5 && TOKEN_EVENT == 7 && TOKEN_EVENT_CS == 8 && TOKEN_REG_CS_PRIV == 15,
     "gfx9 rare-token cluster nibble ids changed — update RARE_MASK"
 );
-
-size_t scan_gfx9_scalar(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
-{
-    if (!buf || !out || out_cap == 0 || size == 0) return 0;
-
-    const Tables& T = tables();
-    const uint8_t* lut = T.info_lut;
-
-    size_t bp = 0;
-    size_t n_out = 0;
-
-    // 16-byte safety: 8B unaligned load + max 8B token = 16B max access.
-    constexpr size_t TAIL_GUARD = 16;
-
-    while (bp + TAIL_GUARD < size && n_out < out_cap)
-    {
-        const uint8_t nibble = buf[bp] & 0x0F;
-        const uint8_t v = lut[nibble];
-        const unsigned bytes = v & INFO_LEN;
-
-        if (__builtin_expect(v & INFO_RARE, 0))
-        {
-            uint64_t contents;
-            std::memcpy(&contents, buf + bp, sizeof(contents));
-            out[n_out++] = QuickToken{contents, nibble, bp};
-            if (n_out >= out_cap) return n_out;
-        }
-
-        // bytes is 0 only if token_len_dict had a zero entry, which would
-        // be malformed — guard with +2 to avoid an infinite loop. (Min
-        // legal length is 2 bytes, so this is a "must-not-happen" path.)
-        bp += bytes ? bytes : 2;
-    }
-
-    // Tail: byte-by-byte, bounds-checked memcpy on rare hits.
-    while (bp < size && n_out < out_cap)
-    {
-        const uint8_t nibble = buf[bp] & 0x0F;
-        const uint8_t v = lut[nibble];
-        const unsigned bytes = v & INFO_LEN;
-
-        if (__builtin_expect(v & INFO_RARE, 0))
-        {
-            uint64_t contents = 0;
-            const size_t avail = size - bp;
-            const size_t to_copy = avail < 8 ? avail : 8;
-            std::memcpy(&contents, buf + bp, to_copy);
-            out[n_out++] = QuickToken{contents, nibble, bp};
-            if (n_out >= out_cap) break;
-        }
-
-        bp += bytes ? bytes : 2;
-    }
-
-    return n_out;
-}
 
 #if GFX9_QUICK_SCAN_HAS_X86
 
@@ -388,7 +336,8 @@ __attribute__((target("avx512bw,avx512f,bmi2"))) size_t scan_gfx9_avx512bw(
     bp += entry;
 
 done:
-    // Scalar tail: identical to scan_gfx9_scalar's tail.
+    // Scalar tail: handles the last <CHUNK+TAIL_GUARD bytes with
+    // bounds-checked memcpy on rare hits.
     while (bp < size && n_out < out_cap)
     {
         const uint8_t nibble = buf[bp] & 0x0F;
@@ -542,6 +491,9 @@ done:
 
 using ScanFn = size_t (*)(const uint8_t*, size_t, QuickToken*, size_t);
 
+// Returns nullptr when no SIMD path is available — either because the TU
+// was compiled for a non-x86 target / a non-GCC compiler, or because the
+// running x86 CPU is below the AVX2 bar.
 ScanFn select_scanner()
 {
 #if GFX9_QUICK_SCAN_HAS_X86
@@ -551,7 +503,7 @@ ScanFn select_scanner()
     if (__builtin_cpu_supports("avx512bw") && __builtin_cpu_supports("avx512f")) return &scan_gfx9_avx512bw;
     if (__builtin_cpu_supports("avx2")) return &scan_gfx9_avx2;
 #endif
-    return &scan_gfx9_scalar;
+    return nullptr;
 }
 
 } // namespace
@@ -560,9 +512,13 @@ ScanFn select_scanner()
 
 namespace quick_scan
 {
+#if GFX9_QUICK_SCAN_HAS_X86
 size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
 {
     thread_local const gfx9::quick_scan::ScanFn fn = gfx9::quick_scan::select_scanner();
+    if (!fn) throw std::exception();
+
     return fn(buf, size, out, out_cap);
 }
-}
+#endif
+} // namespace quick_scan

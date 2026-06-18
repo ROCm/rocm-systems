@@ -32,7 +32,10 @@ using namespace std;
 constexpr size_t N_THREADS = 10;
 constexpr int    RUNTIME_S = 10;
 
-static mutex cout_mutex;
+// Guards all writes to cout/cerr from worker threads. Worker threads share
+// these streams, so unsynchronized formatted output is a data race on the
+// stream object's internal state.
+static mutex io_mutex;
 
 static atomic<bool> run_flag{true};
 
@@ -100,8 +103,10 @@ thread_function(int id)
                     // TODO: Maintain a data collection to ensure there are no races
                     //       on the data
                 } break;
-                default:
+                default: {
+                    lock_guard<mutex> guard{io_mutex};
                     cout << "ERROR: Tried to pick a non-existent case" << endl;
+                }
                     exit(EXIT_FAILURE);
             }
         }
@@ -112,9 +117,10 @@ thread_function(int id)
         bcm.destroyContext(h);
     }
 
-    cout_mutex.lock();
-    cout << "Thread " << id << ": DONE (final size: " << to_string(final_size) << ")" << endl;
-    cout_mutex.unlock();
+    {
+        lock_guard<mutex> guard{io_mutex};
+        cout << "Thread " << id << ": DONE (final size: " << to_string(final_size) << ")" << endl;
+    }
 }
 
 int

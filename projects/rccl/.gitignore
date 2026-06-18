@@ -8,6 +8,8 @@ ext/
 src/transport/net_ib_rocm.cc
 ext-profiler/inspector/librccl-profiler-inspector.so
 ext-profiler/inspector/version.cc
+plugins/profiler/inspector/librccl-profiler-inspector.so
+plugins/profiler/inspector/version.cc
 
 # Visual Studio Code
 .vscode

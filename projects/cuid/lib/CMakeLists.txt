@@ -18,12 +18,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-cmake_minimum_required(VERSION 3.10)
 project(amdcuid_lib)
 
 set(CMAKE_CXX_STANDARD 14)
 
-find_package(OpenSSL REQUIRED)
+# When built as part of the top-level project, OpenSSL is already resolved
+# (either from the system or via FetchContent). QUIET prevents a redundant
+# hard failure when targets are already available through FetchContent.
+find_package(OpenSSL QUIET)
 
 set(CUID_SOURCES
     src/cuid.cc
@@ -63,30 +65,62 @@ set(CUID_HEADERS
 add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
 add_library(amdcuid_shared SHARED ${CUID_SOURCES} ${CUID_HEADERS})
 
-target_include_directories(amdcuid_static 
+target_include_directories(
+    amdcuid_static
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_include_directories(amdcuid_shared 
+target_include_directories(
+    amdcuid_shared
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+# Pass the version-independent shared config directory to the library at compile
+# time. All installed versions of the library must agree on this path so that
+# the HMAC key is shared and CUIDs remain stable across version upgrades.
+target_compile_definitions(
+    amdcuid_static
+    PRIVATE AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_SYSCONFDIR}"
+)
+target_compile_definitions(
+    amdcuid_shared
+    PRIVATE AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_SYSCONFDIR}"
+)
+
+if(WIN32)
+    target_link_libraries(amdcuid_shared PRIVATE bcrypt)
+    target_link_libraries(amdcuid_static PUBLIC bcrypt)
+else()
+    target_link_libraries(amdcuid_shared PRIVATE OpenSSL::Crypto)
+    target_link_libraries(amdcuid_static PUBLIC OpenSSL::Crypto)
+endif()
+
 # Shared library
-install(TARGETS amdcuid_shared
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}    # Windows DLLs go here
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}    # Linux .so
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}    # Static libs & Windows import libs
-    COMPONENT library
+install(
+    TARGETS amdcuid_shared
+    RUNTIME
+        DESTINATION
+            ${CMAKE_INSTALL_BINDIR} # Windows DLLs go here
+    LIBRARY
+        DESTINATION
+            ${CMAKE_INSTALL_LIBDIR} # Linux .so
+    ARCHIVE
+        DESTINATION
+            ${CMAKE_INSTALL_LIBDIR} # Static libs & Windows import libs
+        COMPONENT library
 )
 
 # Static library
-install(TARGETS amdcuid_static
+install(
+    TARGETS amdcuid_static
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT library
 )
 
 # Install public headers
-set(PUBLIC_HEADERS
-    include/amd_cuid.h
+set(PUBLIC_HEADERS include/amd_cuid.h)
+install(
+    FILES ${PUBLIC_HEADERS}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    COMPONENT library
 )
-install(FILES ${PUBLIC_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT library)

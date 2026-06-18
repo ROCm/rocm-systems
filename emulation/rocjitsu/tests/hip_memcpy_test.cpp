@@ -4,8 +4,7 @@
 /// @file hip_memcpy_test.cpp
 /// @brief Validates hipMemcpy H2D and D2H data correctness on simulated GPU.
 ///
-/// Compiled with hipcc. Requires LD_PRELOAD=librocjitsu_kmd.so and
-/// RJ_CONFIG env var.
+/// Compiled with hipcc. Requires LD_PRELOAD=librocjitsu_kmd.so.
 
 #include <hip/hip_runtime.h>
 #include <vector>

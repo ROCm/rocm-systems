@@ -18,36 +18,49 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-cmake_minimum_required(VERSION 3.10)
-
 # Find required packages
-find_package(GTest REQUIRED)
-find_package(OpenSSL REQUIRED)
+find_package(GTest CONFIG QUIET)
+# fallback to CMake module if GTest is not found via config
+if(NOT GTest_FOUND)
+    find_package(GTest MODULE QUIET)
+endif()
+# If GTest is still not found, we'll fetch it from source in the next step.
+if(NOT GTest_FOUND)
+    # Download and compile googletest to ensure it's available
+    message("GTest not found on system. Fetching from source...")
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.14.0
+    )
+    FetchContent_MakeAvailable(googletest)
+endif()
 
-# Enable testing
-enable_testing()
-
-# Unit tests executable
-add_executable(
-    amdcuid_test
+set(AMDCUID_TST_EXECUTABLE amdcuid_test)
+set(UNIT_TEST_SOURCES
     unit/cuid_api_test.cc
     unit/cuid_misc_test.cc
     functional/cuid_reverse_lookup_test.cc
 )
 
+# Enable testing
+enable_testing()
+
+# Unit tests executable
+add_executable(amdcuid_test ${UNIT_TEST_SOURCES})
+
 target_include_directories(amdcuid_test PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 
 target_link_libraries(
-    amdcuid_test
+    ${AMDCUID_TST_EXECUTABLE}
     amdcuid_static
     GTest::GTest
     GTest::Main
-    OpenSSL::SSL
-    OpenSSL::Crypto
 )
 
 # Register tests with CTest
-add_test(NAME cuid_unit_tests COMMAND amdcuid_test)
+add_test(NAME cuid_unit_tests COMMAND ${AMDCUID_TST_EXECUTABLE})
 
 # Platform-specific config directory
 if(WIN32)
@@ -57,4 +70,8 @@ else()
 endif()
 
 # Install the test binary
-install(TARGETS amdcuid_test DESTINATION ${TESTS_INSTALL_DIR} COMPONENT tests)
+install(
+    TARGETS ${AMDCUID_TST_EXECUTABLE}
+    DESTINATION ${TESTS_INSTALL_DIR}
+    COMPONENT tests
+)

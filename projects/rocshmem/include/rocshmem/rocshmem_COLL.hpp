@@ -742,12 +742,32 @@ __host__ int rocshmem_ctx_double_prod_reduce(
 __global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel();
 
 /**
+ * @brief kernel for performing a team-scoped barrier synchronization.
+ * Caller enqueues the kernel on given stream.
+ *
+ * @param[in] team  The team participating in the barrier.
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_barrier_kernel(rocshmem_team_t team);
+
+/**
  * @brief kernel for performing a sync_all operation.
  * Caller enqueues the kernel on given stream
  *
  * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_sync_all_kernel();
+
+/**
+ * @brief kernel for performing a team-scoped sync operation.
+ * Caller enqueues the kernel on given stream.
+ *
+ * @param[in] team  The team participating in the sync.
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_team_sync_kernel(rocshmem_team_t team);
 
 /**
  * @brief kernel for performing an alltoall collective operation.
@@ -765,6 +785,23 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                                            void *dest,
                                                            const void *source,
                                                            size_t size);
+
+/**
+ * @brief kernel for performing a reduce on stream operation.
+ *
+ * @param[in] team     The team participating in the collective.
+ * @param[in] dest     Destination address. Must be an address on the symmetric
+ *                     heap.
+ * @param[in] source   Source address. Must be an address on the symmetric heap.
+ * @param[in] nreduce  Number of elements to reduce.
+ *
+ * @return void
+ */
+template <typename T, ROCSHMEM_OP Op>
+__global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t team,
+                                                                T *dest,
+                                                                const T *source,
+                                                                int nreduce);
 
 /**
  * @brief kernel for performing a broadcast collective operation.
@@ -981,6 +1018,165 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wave(
 __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team);
 
+/**
+ * @name ROCSHMEM_REDUCE_ON_STREAM
+ * @brief Performs a reduction across all PEs in a team on the specified HIP
+  * stream.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+                           heap.
+ * @param[in] nreduce      Size of the buffer to participate in the reduction.
+ * @param[in] stream       HIP stream on which the reduction is issued.
+ *
+ * @return int (Zero on successful local completion. Nonzero otherwise.)
+ */
+ATTR_NO_INLINE int rocshmem_ctx_short_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_short_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_short_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_short_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_short_or_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_short_and_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_short_xor_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  short *dest, const short *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_or_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_and_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_int_xor_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  int *dest, const int *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_or_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_and_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_long_xor_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long *dest, const long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_or_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_and_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_longlong_xor_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  long long *dest, const long long *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_float_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  float *dest, const float *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_float_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  float *dest, const float *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_float_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  float *dest, const float *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_float_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  float *dest, const float *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_double_sum_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  double *dest, const double *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_double_min_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  double *dest, const double *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_double_max_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  double *dest, const double *source, int nreduce, hipStream_t stream);
+
+ATTR_NO_INLINE int rocshmem_ctx_double_prod_reduce_on_stream(
+  rocshmem_ctx_t ctx, rocshmem_team_t team,
+  double *dest, const double *source, int nreduce, hipStream_t stream);
 }  // namespace rocshmem
 
 #endif  // LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP

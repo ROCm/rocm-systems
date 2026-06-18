@@ -146,7 +146,7 @@ target_include_directories( ${ROCDXG_TARGET}
   PRIVATE
   ${WIN_SDK}
   ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime
@@ -157,7 +157,7 @@ add_compile_definitions(LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
 # Ensure version macro is defined for this target
 target_compile_definitions(${ROCDXG_TARGET} PRIVATE ROCDXG_VERSION="${ROCDXG_VERSION}")
 
-target_link_directories(${ROCDXG_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/lnx)
+target_link_directories(${ROCDXG_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/lnx/lib)
 target_link_libraries(${ROCDXG_TARGET} PRIVATE wkmi)
 
 set_property(TARGET ${ROCDXG_TARGET} PROPERTY LINK_FLAGS ${ROCDXG_LINK_FLAGS})

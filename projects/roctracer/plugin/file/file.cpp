@@ -311,7 +311,7 @@ class file_plugin_t {
           // The post-processing script cannot handle HIP ops without a correlation ID. The
           // correlation ID is needed to connect the record to a HIP stream and originating thread.
           // The script could be modified to handle ops without correlation IDs, but for backward
-          // compatibilty, we are simply dropping the records here.
+          // compatibility, we are simply dropping the records here.
           if (begin->correlation_id == 0) break;
 
           output_file = get_output_file(ACTIVITY_DOMAIN_HIP_OPS);
@@ -374,7 +374,7 @@ ROCTRACER_EXPORT int roctracer_plugin_initialize(uint32_t roctracer_major_versio
   file_plugin = new file_plugin_t();
   if (file_plugin->is_valid()) return 0;
 
-  // The plugin failed to initialied, destroy it and return an error.
+  // The plugin failed to initialize, destroy it and return an error.
   delete file_plugin;
   file_plugin = nullptr;
   return -1;

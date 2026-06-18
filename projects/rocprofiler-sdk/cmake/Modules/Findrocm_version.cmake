@@ -135,7 +135,7 @@ function(ROCM_VERSION_COMPUTE FULL_VERSION_STRING _VAR_PREFIX)
     endforeach()
 endfunction()
 
-# this macro watches for changes in the variables and unsets the remaining cache varaible
+# this macro watches for changes in the variables and unsets the remaining cache variable
 # when they change
 function(ROCM_VERSION_WATCH_FOR_CHANGE _var)
     set(_rocm_version_watch_var_name rocm_version_WATCH_VALUE_${_var})

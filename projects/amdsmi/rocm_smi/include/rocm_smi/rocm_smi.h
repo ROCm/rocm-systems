@@ -424,6 +424,16 @@ typedef rsmi_compute_partition_type_t rsmi_compute_partition_type;
 /// \endcond
 
 /**
+ * @brief Compute Partition Memory Allocation Mode. Controls how GPU memory
+ * is allocated across XCPs within a memory partition.
+ */
+typedef enum {
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID = 0,  //!< Invalid mode
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING,      //!< Memory evenly capped per XCP
+  RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL           //!< Each XCP may use full partition memory
+} rsmi_compute_partition_mem_alloc_mode_t;
+
+/**
  * @brief Memory Partitions. This enum is used to identify various
  * memory partition types.
  */
@@ -5109,6 +5119,27 @@ rsmi_status_t rsmi_dev_compute_partition_get(uint32_t dv_ind, char* compute_part
  */
 rsmi_status_t rsmi_dev_compute_partition_set(uint32_t dv_ind,
                                              rsmi_compute_partition_type_t compute_partition);
+
+/**
+ *  @brief Retrieves the compute partition memory allocation mode for a device.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[out] mode a pointer to an ::rsmi_compute_partition_mem_alloc_mode_t into
+ *  which the current mode will be written.
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ */
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_get(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t* mode);
+
+/**
+ *  @brief Sets the compute partition memory allocation mode for a device.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] mode the desired ::rsmi_compute_partition_mem_alloc_mode_t value.
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ */
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_set(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t mode);
 
 /**
  *  @brief Retrieves the partition_id for a desired device

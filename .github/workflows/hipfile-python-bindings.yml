@@ -4,6 +4,8 @@ run-name: Build and install hipFile Python bindings
 env:
   AIS_GHA_CMD_FILES_DOCKER_DIR: /root/github
   AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
+  AIS_INPUT_CXX_COMPILER: ${{ inputs.cxx_compiler }}
+  AIS_INPUT_CXX_STANDARD: ${{ inputs.cxx_standard }}
   AIS_INPUT_HIPFILE_PKG_DEV_FILENAME: ${{ inputs.ais_hipfile_pkg_dev_filename }}
   AIS_INPUT_HIPFILE_PKG_FILENAME: ${{ inputs.ais_hipfile_pkg_filename }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
@@ -27,6 +29,14 @@ on:
       ci_image:
         required: true
         type: string
+      cxx_compiler:
+        description: "C++ compiler the consumed packages were built with"
+        required: true
+        type: string
+      cxx_standard:
+        description: "C++ standard the consumed packages were built with"
+        required: true
+        type: number
       platform:
         required: true
         type: string
@@ -53,9 +63,10 @@ jobs:
         run: |
           echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
           echo "AIS_GHA_CMD_FILES_DIR=${GITHUB_ENV%/*}" >> "${GITHUB_ENV}"
+          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}" >> "${GITHUB_ENV}"
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
       - name: Fetching code repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -140,6 +151,9 @@ jobs:
           docker exec \
             -e "AIS_GITHUB_OUTPUT=${{ env.AIS_GHA_CMD_FILES_DOCKER_DIR }}/${GITHUB_OUTPUT##*/}" \
             -e "_AIS_INPUT_PLATFORM=${AIS_INPUT_PLATFORM}" \
+            -e "_AIS_INPUT_ROCM_VERSION=${AIS_INPUT_ROCM_VERSION}" \
+            -e "_AIS_SAFE_COMPILER_NAME=${AIS_SAFE_COMPILER_NAME}" \
+            -e "_AIS_INPUT_CXX_STANDARD=${AIS_INPUT_CXX_STANDARD}" \
             -t \
             -w /ais/rocm-systems/projects/hipfile \
             "${AIS_CONTAINER_NAME}" \
@@ -147,7 +161,11 @@ jobs:
               .venv/bin/python -m build --sdist ./python
               shopt -s nullglob
               OLD_FILENAME="$(basename ./python/dist/hipfile-*.tar.gz)"
-              NEW_FILENAME="${OLD_FILENAME%.tar.gz}-${_AIS_INPUT_PLATFORM}.tar.gz"
+              # python_bindings runs for every (platform, rocm, cxx) leg and the
+              # sdist version does not encode any of them, so disambiguate the
+              # artifact (named after the file) across all of them. Sanitized
+              # compiler avoids a "+" being read as a PEP 440 local version.
+              NEW_FILENAME="${OLD_FILENAME%.tar.gz}-${_AIS_INPUT_PLATFORM}-${_AIS_INPUT_ROCM_VERSION}-${_AIS_SAFE_COMPILER_NAME}-cxx${_AIS_INPUT_CXX_STANDARD}.tar.gz"
               mv ./python/dist/${OLD_FILENAME} ./python/dist/${NEW_FILENAME}
               echo "HIPFILE_PYTHON_SDIST_FILENAME=${NEW_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
             '

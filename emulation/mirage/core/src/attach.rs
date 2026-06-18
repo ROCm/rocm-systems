@@ -3,7 +3,7 @@
 //! When the CLI calls `MirageCtl::session_attach`, this module returns
 //! a `Stream<Item = StreamPacket>` that:
 //!
-//! * tails each node's `stdout` and `stderr` files
+//! * tails each node's `stdout` file (the PTY merges stderr into stdout)
 //! * emits `NodeExit` once a node's `exit_code` file appears
 //! * emits a final `ExecExit` once the overall `status.json` shows
 //!   `ended: true`
@@ -45,10 +45,7 @@ pub fn attach_stream(layout: ExecLayout) -> StreamPacketStream {
 
             for n in &nodes {
                 let nl = layout.node(*n);
-                for (st, path) in [
-                    (StdStream::Stdout, nl.stdout()),
-                    (StdStream::Stderr, nl.stderr()),
-                ] {
+                for (st, path) in [(StdStream::Stdout, nl.stdout())] {
                     if let Ok(meta) = std::fs::metadata(&path) {
                         let len = meta.len();
                         let cursor = tails.entry((*n, st)).or_insert(0);

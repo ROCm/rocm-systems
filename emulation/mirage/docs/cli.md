@@ -35,13 +35,17 @@ Profiles are reusable emulator presets stored in
 ```text
 mirage profile list [-l]
 mirage profile show <name>
-mirage profile create <name> [--emulator NAME] [--nodes N]
+mirage profile create [<name>] [--emulator NAME] [--nodes N]
                               [--gpus-per-node N] [--description TEXT]
+                              [--no-input]
 mirage profile import <file>            # use '-' for stdin
 mirage profile delete <name> [-f]
 ```
 
 `profile import` accepts any valid `ProfileDef` JSON document.
+
+On a terminal, `profile create` prompts for any field not passed as a
+flag; pass `--no-input` (or pipe/redirect stdin) to use defaults instead.
 
 ## `mirage session`
 
@@ -51,9 +55,9 @@ Sessions are the long-lived contexts in which execs run.
 mirage session list
 mirage session show <id>
 mirage session wait <id> [--timeout SECONDS]
-mirage session start --profile NAME [--id ID] [--workdir DIR]
+mirage session start [--profile NAME] [--id ID] [--workdir DIR]
                      [--no-host] [--host-bin PATH]
-                     [--ready-timeout SECONDS]
+                     [--ready-timeout SECONDS] [--no-input]
 mirage session stop  <id> [-f]
 mirage session dir   <id>     # print the on-disk directory
 ```
@@ -61,6 +65,9 @@ mirage session dir   <id>     # print the on-disk directory
 * `session start` creates the session and spawns `mirage-host --session
   <id>` in a new process group, then waits up to `--ready-timeout`
   seconds for the host to publish `healthy=true`.
+* On a terminal, `session start` prompts for the profile (and id,
+  workdir, ready-timeout) when not passed as flags; pass `--no-input`
+  (or pipe/redirect stdin) to require `--profile` and use defaults.
 * `--no-host` is useful for tests or when you want to start the host
   yourself (for example, in a container).
 * `session stop` sends `SIGTERM` to the host, waits briefly, escalates
@@ -78,7 +85,7 @@ mirage exec remove <session> <exec>
 
 `exec start` is the workhorse:
 
-* By default it attaches to the new exec's stdout/stderr and exits
+* By default it attaches to the new exec's stdout and exits
   with the exec's exit code, then cleans up the on-disk exec directory.
 * `--detach` returns the exec id immediately without attaching.
 * `--keep` preserves the exec directory after it exits so you can
@@ -91,10 +98,10 @@ Re-attach to an exec that is still running (or to one that has
 finished, in which case the buffered output is replayed and the saved
 exit code is returned). Useful after a `--detach`.
 
-## `mirage logs <session> <exec> [-f] [--stdout|--stderr]`
+## `mirage logs <session> <exec> [-f]`
 
-Show the contents of `node/0/stdout` and `node/0/stderr`. With `-f`,
-follow the streams (uses the same attach machinery).
+Show the contents of `node/0/stdout`. With `-f`,
+follow the stream (uses the same attach machinery).
 
 ## `mirage run --profile NAME -- <cmd> [args...]`
 

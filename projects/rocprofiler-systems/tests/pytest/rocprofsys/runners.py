@@ -378,7 +378,7 @@ class SamplingRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        sample_args: Optional[list[str]] = None,
+        sampling_args: Optional[list[str]] = None,
         **kwargs,
     ):
         """Initialize sampling runner.
@@ -387,17 +387,17 @@ class SamplingRunner(BaseRunner):
             config: rocprofiler-systems configuration
             target: Name of target executable
             output_dir: Directory for output files
-            sample_args: Arguments for rocprof-sys-sample
+            sampling_args: Arguments for rocprof-sys-sample
             **kwargs: Additional arguments passed to BaseRunner
         """
         base_env = config.get_base_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
-        self.sample_args = sample_args or []
+        self.sampling_args = sampling_args or []
 
     def build_command(self) -> list[str]:
         return (
             [str(self.config.rocprofsys_sample)]
-            + self.sample_args
+            + self.sampling_args
             + ["--"]
             + self.pre_run_args
             + [str(self.target_exe)]
@@ -413,7 +413,7 @@ class BinaryRewriteRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        rewrite_args: Optional[list[str]] = None,
+        binary_rewrite_args: Optional[list[str]] = None,
         cleanup_on_success: bool = False,
         **kwargs,
     ):
@@ -423,7 +423,7 @@ class BinaryRewriteRunner(BaseRunner):
             config: rocprofiler-systems configuration
             target: Name of target executable
             output_dir: Directory for output files
-            rewrite_args: Arguments for rocprof-sys-instrument
+            binary_rewrite_args: Arguments for rocprof-sys-instrument
             cleanup_on_success: Whether to clean up instrumented binary immediately
                 after successful run. Default is False - let the test_output_dir
                 fixture handle cleanup after validation completes.
@@ -431,7 +431,7 @@ class BinaryRewriteRunner(BaseRunner):
         """
         base_env = config.get_base_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
-        self.rewrite_args = rewrite_args or []
+        self.binary_rewrite_args = binary_rewrite_args or []
         self.instrumented_exe = output_dir / f"{target}.inst"
         self.cleanup_on_success = cleanup_on_success
         self._instrumented_files: list[Path] = []
@@ -449,7 +449,7 @@ class BinaryRewriteRunner(BaseRunner):
         command = (
             [str(self.config.rocprofsys_instrument)]
             + ["-o", str(self.instrumented_exe)]
-            + self.rewrite_args
+            + self.binary_rewrite_args
             + ["--print-instrumented", "functions"]
             + ["--", str(self.target_exe)]
         )
@@ -574,7 +574,7 @@ class RuntimeInstrumentRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        runtime_args: Optional[list[str]] = None,
+        runtime_instrument_args: Optional[list[str]] = None,
         **kwargs,
     ):
         """Initialize runtime instrument runner.
@@ -583,17 +583,17 @@ class RuntimeInstrumentRunner(BaseRunner):
             config: rocprofiler-systems configuration
             target: Name of target executable
             output_dir: Directory for output files
-            runtime_args: Arguments for rocprof-sys-instrument
+            runtime_instrument_args: Arguments for rocprof-sys-instrument
             **kwargs: Additional arguments passed to BaseRunner
         """
         base_env = config.get_base_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
-        self.runtime_args = runtime_args or []
+        self.runtime_instrument_args = runtime_instrument_args or []
 
     def build_command(self) -> list[str]:
         return (
             [str(self.config.rocprofsys_instrument)]
-            + self.runtime_args
+            + self.runtime_instrument_args
             + ["--print-instrumented", "functions"]
             + ["--"]
             + self.pre_run_args
@@ -610,7 +610,7 @@ class SysRunRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        sysrun_args: Optional[list[str]] = None,
+        sys_run_args: Optional[list[str]] = None,
         **kwargs,
     ):
         """Initialize sys-run runner.
@@ -619,17 +619,17 @@ class SysRunRunner(BaseRunner):
             config: rocprofiler-systems configuration
             target: Name of target executable
             output_dir: Directory for output files
-            sysrun_args: Arguments for rocprof-sys-run (before --)
+            sys_run_args: Arguments for rocprof-sys-run (before --)
             **kwargs: Additional arguments passed to BaseRunner
         """
         base_env = config.get_base_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
-        self.sysrun_args = sysrun_args or []
+        self.sys_run_args = sys_run_args or []
 
     def build_command(self) -> list[str]:
         return (
             [str(self.config.rocprofsys_run)]
-            + self.sysrun_args
+            + self.sys_run_args
             + ["--"]
             + self.pre_run_args
             + [str(self.target_exe)]

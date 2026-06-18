@@ -3,12 +3,13 @@
 
 #pragma once
 
+#include "backends/procfs/backend.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
-#include "library/pmc/device_providers/procfs/drivers/driver.hpp"
 #include <cstdint>
 
 #include <spdlog/fmt/fmt.h>
 
+#include <concepts>
 #include <map>
 #include <memory>
 #include <set>
@@ -17,6 +18,22 @@
 namespace rocprofsys::pmc::collectors::cpu
 {
 
+// Contract the CPU collector requires of its backend (procfs, the data producer).
+template <typename Backend>
+concept backend_contract = requires(Backend backend, const Backend const_backend) {
+    {
+        backend.read_proc_stat()
+    } -> std::same_as<std::map<size_t, ::rocprofsys::backends::procfs::cpu_jiffies>>;
+    { backend.read_cpu_frequencies() } -> std::same_as<std::map<size_t, float>>;
+    {
+        backend.read_rusage()
+    } -> std::same_as<::rocprofsys::backends::procfs::rusage_snapshot>;
+    {
+        const_backend.get_socket_topology()
+    } -> std::same_as<const ::rocprofsys::backends::procfs::socket_topology_t&>;
+    { const_backend.get_socket_count() } -> std::same_as<size_t>;
+};
+
 /**
  * @brief CPU device that manages metric collection for a set of monitored CPUs.
  *
@@ -24,23 +41,23 @@ namespace rocprofsys::pmc::collectors::cpu
  * CPUs because /proc/stat and /proc/cpuinfo are read in a single pass.
  * Maintains previous jiffies state for delta-based CPU load computation.
  *
- * @tparam Driver The procfs driver type (real or mock).
+ * @tparam Backend The procfs backend type (real or mock).
  */
-template <typename Driver>
+template <backend_contract Backend>
 class device
 {
 public:
-    using cpu_jiffies     = drivers::procfs::cpu_jiffies;
-    using rusage_snapshot = drivers::procfs::rusage_snapshot;
+    using cpu_jiffies     = ::rocprofsys::backends::procfs::cpu_jiffies;
+    using rusage_snapshot = ::rocprofsys::backends::procfs::rusage_snapshot;
 
     /**
-     * @param driver Shared pointer to the procfs driver.
+     * @param backend Shared pointer to the procfs backend.
      * @param socket_id Physical package (socket) ID for this device.
      * @param monitored_cpus Set of CPU IDs to collect metrics for.
      */
-    device(std::shared_ptr<Driver> driver, size_t socket_id,
+    device(std::shared_ptr<Backend> backend, size_t socket_id,
            std::set<size_t> monitored_cpus)
-    : m_driver(std::move(driver))
+    : m_backend(std::move(backend))
     , m_socket_id(socket_id)
     , m_monitored_cpus(std::move(monitored_cpus))
     , m_device_name(fmt::format("CPU {}", socket_id))
@@ -105,19 +122,19 @@ private:
     {
         m_supported_metrics.value = 0;
 
-        auto jiffies = m_driver->read_proc_stat();
+        auto jiffies = m_backend->read_proc_stat();
         if(!jiffies.empty())
         {
             m_supported_metrics.bits.load = 1;
         }
 
-        auto freqs = m_driver->read_cpu_frequencies();
+        auto freqs = m_backend->read_cpu_frequencies();
         if(!freqs.empty())
         {
             m_supported_metrics.bits.frequency = 1;
         }
 
-        auto rusage                           = m_driver->read_rusage();
+        auto rusage                           = m_backend->read_rusage();
         m_supported_metrics.bits.page_rss     = 1;
         m_supported_metrics.bits.virt_mem     = 1;
         m_supported_metrics.bits.peak_rss     = (rusage.peak_rss > 0) ? 1u : 0u;
@@ -137,7 +154,7 @@ private:
     {
         if(!m_supported_metrics.bits.load) return;
 
-        auto current_jiffies = m_driver->read_proc_stat();
+        auto current_jiffies = m_backend->read_proc_stat();
 
         for(const auto& cpu_id : m_monitored_cpus)
         {
@@ -186,7 +203,7 @@ private:
     {
         if(!m_supported_metrics.bits.frequency) return;
 
-        auto freqs = m_driver->read_cpu_frequencies();
+        auto freqs = m_backend->read_cpu_frequencies();
 
         for(const auto& cpu_id : m_monitored_cpus)
         {
@@ -206,7 +223,7 @@ private:
             enabled.bits.user_time || enabled.bits.kernel_time;
         if(!any_process_metric) return;
 
-        auto snap = m_driver->read_rusage();
+        auto snap = m_backend->read_rusage();
 
         if(m_supported_metrics.bits.page_rss && enabled.bits.page_rss)
             result.process_data.page_rss = snap.page_rss;
@@ -251,7 +268,7 @@ private:
         return &result.cpu_data.back();
     }
 
-    std::shared_ptr<Driver>       m_driver;
+    std::shared_ptr<Backend>      m_backend;
     size_t                        m_socket_id = 0;
     std::set<size_t>              m_monitored_cpus;
     enabled_metrics               m_supported_metrics{};

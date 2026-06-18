@@ -1,12 +1,15 @@
 /*************************************************************************
- * Copyright (c) 2015-2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "comm.h"
 #include "transport.h"
 #include "bootstrap.h"
+
+NCCL_PARAM(MultiSegmentRegister, "MULTI_SEGMENT_REGISTER", 1);
 
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) {
   struct ringConnInfo {

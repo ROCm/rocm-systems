@@ -20,13 +20,13 @@ struct RunWorkNop {
 };
 
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/1>(&argsStorage.args);
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/1>(&argsStorage.args);
 }
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/2>(&argsStorage.args);
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/2>(&argsStorage.args);
 }
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/4>(&argsStorage.args);
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/4>(&argsStorage.args);
 }
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/8>(&argsStorage.args);
@@ -63,3 +63,9 @@ __device__ void ncclDevFunc_Nop();
 #else
 __device__ __attribute__((noinline)) void ncclDevFunc_Nop();
 #endif
+
+// [RCCL] Body for the no-op device func. RCCL's common.cu declares ncclDevFunc_Nop
+// above (mode-aware attributes); generate.py excludes "Nop" from the generated
+// per-impl/specialized files, so the definition must live here (as in upstream and
+// the v2.29.7-1 base). The generated ncclDevFuncTable references this symbol.
+__device__ void ncclDevFunc_Nop() {}

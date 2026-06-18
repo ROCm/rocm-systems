@@ -17,7 +17,7 @@ Sphinx documentation that uses the .rst files from the `docs` directory is built
 ### Install Python dependencies
 
 ```bash
-pip3 install -r ./sphinx/requirements.txt
+pip3 install -r ./sphinx/requirements.in
 ```
 
 ### Build HTML documentation

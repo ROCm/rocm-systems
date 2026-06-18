@@ -9,6 +9,7 @@
 
 #include "util/bit.h"
 #include "util/meta_programming.h"
+#include "util/simd.h"
 
 #include <array>
 #include <cstddef>
@@ -40,6 +41,55 @@ public:
 
   VecElem operator[](size_t idx) const { return data_[idx]; }
   VecElem &operator[](size_t idx) { return data_[idx]; }
+
+  /// SIMD load of `native<T>` from W contiguous lanes starting at `lane_base`.
+  /// The storage pointer never escapes the object. T is a 32-bit lane type.
+  template <typename T> util::native<T> simd_load(size_t lane_base) const {
+    static_assert(sizeof(T) == sizeof(VecElem), "simd_load: T must match element width");
+    return util::load<T>(reinterpret_cast<const uint32_t *>(&data_[lane_base]));
+  }
+
+  /// Masked SIMD store of `v` into W contiguous lanes at `lane_base`; bit i of
+  /// `mask` enables lane `lane_base + i`.
+  template <typename T> void simd_store(size_t lane_base, util::native<T> v, uint64_t mask) {
+    static_assert(sizeof(T) == sizeof(VecElem), "simd_store: T must match element width");
+    util::masked_store<T>(reinterpret_cast<uint32_t *>(&data_[lane_base]), v, mask);
+  }
+
+  /// Narrow (native_width64-wide) SIMD load of a 32-bit lane type from W
+  /// contiguous lanes at `lane_base`, used by the mixed-width f64<->32-bit glue.
+  /// The storage pointer never escapes the object.
+  template <typename T> util::narrow32<T> simd_load_narrow(size_t lane_base) const {
+    static_assert(sizeof(T) == sizeof(VecElem), "simd_load_narrow: T must match element width");
+    return util::load_narrow<T>(reinterpret_cast<const uint32_t *>(&data_[lane_base]));
+  }
+
+  /// Masked narrow (native_width64-wide) SIMD store of a 32-bit lane type into W
+  /// contiguous lanes at `lane_base`; bit i of `mask` enables lane `lane_base + i`.
+  template <typename T>
+  void simd_store_narrow(size_t lane_base, util::narrow32<T> v, uint64_t mask) {
+    static_assert(sizeof(T) == sizeof(VecElem), "simd_store_narrow: T must match element width");
+    util::masked_store_narrow<T>(reinterpret_cast<uint32_t *>(&data_[lane_base]), v, mask);
+  }
+
+  /// 64-bit-lane SIMD load combining this register (lo, bits [31:0]) with `hi`
+  /// (bits [63:32]) over W = native_width64 lanes at `lane_base`. T is a 64-bit
+  /// lane type. The two storage pointers never escape the objects.
+  template <typename T> util::native<T> simd_load64(const VectorReg &hi, size_t lane_base) const {
+    static_assert(sizeof(T) == sizeof(uint64_t), "simd_load64: T must be a 64-bit lane type");
+    return util::load64<T>(reinterpret_cast<const uint32_t *>(&data_[lane_base]),
+                           reinterpret_cast<const uint32_t *>(&hi.data_[lane_base]));
+  }
+
+  /// Masked 64-bit-lane SIMD store of `v` into this register (lo) + `hi` over W =
+  /// native_width64 lanes at `lane_base`; bit i of `mask` enables lane
+  /// `lane_base + i`. The two storage pointers never escape the objects.
+  template <typename T>
+  void simd_store64(VectorReg &hi, size_t lane_base, util::native<T> v, uint64_t mask) {
+    static_assert(sizeof(T) == sizeof(uint64_t), "simd_store64: T must be a 64-bit lane type");
+    util::masked_store64<T>(reinterpret_cast<uint32_t *>(&data_[lane_base]),
+                            reinterpret_cast<uint32_t *>(&hi.data_[lane_base]), v, mask);
+  }
 
   template <size_t OtherN, typename OtherVecElem>
     requires(num_elems_ == VectorReg<OtherN, OtherVecElem>::num_elems_)

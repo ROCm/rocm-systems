@@ -21,7 +21,6 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/sampling/allocator.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/types.hpp>
 
 #include "logger/debug.hpp"

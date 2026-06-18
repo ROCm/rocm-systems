@@ -4,6 +4,7 @@
 """CLI entry point: ``python -m amdisa``."""
 
 import argparse
+from pathlib import Path
 import sys
 import xml.etree.ElementTree as elem_tree
 
@@ -13,6 +14,7 @@ from amdisa import (
     CdnaProfile,
     CodegenConfig,
     CodeGenerator,
+    Gfx1250Profile,
     Parser,
     Rdna1Profile,
     Rdna2Profile,
@@ -47,15 +49,21 @@ _PROFILES = {
     'rdna3': Rdna3Profile,
     'rdna3.5': Rdna3_5Profile,
     'rdna4': Rdna4Profile,
+    'gfx1250': Gfx1250Profile,
 }
 
 
 def _detect_profile(isa_xml: str) -> str:
-    """Detect the ISA profile from the XML architecture name.
+    """Detect the ISA profile from the XML filename and architecture name.
 
     Parses only the architecture name element to determine the profile
     without loading the full spec.
     """
+    # TODO: Remove this filename override once the gfx1250 XML carries a
+    # finalized architecture name that can be detected through the normal path.
+    if 'gfx1250' in Path(isa_xml).stem:
+        return 'gfx1250'
+
     root = elem_tree.parse(isa_xml).getroot()
     isa_node = xs.get_node(root, xs.ISA)
     arch_node = xs.get_node(isa_node, xs.ARCH)
@@ -135,18 +143,29 @@ def _run_multi(args) -> None:
 
     # DBT legalization tables and encoding translators.
     if args.gen_dbt:
-        dbt_output = args.dbt_output or args.isa_output or '.'
+        dbt_output = args.dbt_output
+        if not dbt_output:
+            print(
+                'error: --dbt-output is required when generating DBT tables with --multi',
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
         leg_gen = LegalizationGenerator(specs)
         results = leg_gen.generate_all()
         generated = emit_legalization(dbt_output, results)
         for src, dst, entries in results:
             counts = leg_gen.summary(entries)
+            identity = counts['identity']
+            substitute = counts['substitute']
+            lower = counts['lower']
+            expand = counts['expand']
+            illegal = counts['illegal']
             print(
                 f'  {src} -> {dst}: {len(entries)} entries '
-                f'({counts["identity"]} identity, {counts["substitute"]} substitute, '
-                f'{counts["lower"]} lower, {counts["expand"]} expand, '
-                f'{counts["illegal"]} illegal)',
+                f'({identity} identity, {substitute} substitute, '
+                f'{lower} lower, {expand} expand, '
+                f'{illegal} illegal)',
                 file=sys.stderr,
             )
         print(f'Generated {len(generated)} files in {dbt_output}', file=sys.stderr)
@@ -165,40 +184,40 @@ def _run_multi(args) -> None:
 def main() -> None:
     """Parse an AMD GPU ISA XML spec and generate C++ sources."""
     arg_parser = argparse.ArgumentParser(
-        description="Parse a machine-readable AMD GPU ISA specification and generate C++ sources"
+        description='Parse a machine-readable AMD GPU ISA specification and generate C++ sources'
     )
     arg_parser.add_argument(
-        "isafile",
+        'isafile',
         nargs='?',
         default=None,
-        help="XML file with machine-readable AMD GPU ISA specification",
+        help='XML file with machine-readable AMD GPU ISA specification',
     )
     arg_parser.add_argument(
-        "--multi",
+        '--multi',
         nargs='+',
         metavar='NAME:XML',
-        help="Multi-ISA mode: parse all XMLs and generate shared execute() templates. "
-        "Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml).",
+        help='Multi-ISA mode: parse all XMLs and generate shared execute() templates. '
+        'Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml).',
     )
     arg_parser.add_argument(
-        "--gen-isas",
-        action="store_true",
+        '--gen-isas',
+        action='store_true',
         default=True,
-        help="Generate ISA C++ files (decoders, encodings, execute bodies). Default.",
+        help='Generate ISA C++ files (decoders, encodings, execute bodies). Default.',
     )
     arg_parser.add_argument(
-        "--gen-dbt",
-        action="store_true",
+        '--gen-dbt',
+        action='store_true',
         default=True,
-        help="Generate DBT legalization tables and encoding translators. Default.",
+        help='Generate DBT legalization tables and encoding translators. Default.',
     )
     arg_parser.add_argument(
-        "--isa-output", help="Output path for generated ISA C++ files"
+        '--isa-output', help='Output path for generated ISA C++ files'
     )
     arg_parser.add_argument(
-        "--dbt-output",
-        metavar="DIR",
-        help="Output directory for DBT tables (defaults to --isa-output).",
+        '--dbt-output',
+        metavar='DIR',
+        help='Output directory for DBT tables (defaults to --isa-output).',
     )
     args = arg_parser.parse_args()
 
