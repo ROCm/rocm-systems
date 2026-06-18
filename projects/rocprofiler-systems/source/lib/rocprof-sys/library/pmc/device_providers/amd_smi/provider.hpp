@@ -4,6 +4,7 @@
 #pragma once
 
 #include "backends/amd_smi/backend.hpp"
+#include "backends/concepts/backend_factory.hpp"
 #include "library/pmc/common/types.hpp"
 
 #include <cstddef>
@@ -19,12 +20,6 @@
 namespace rocprofsys::pmc::device_providers::amd_smi
 {
 
-template <typename T>
-concept backend_factory = requires {
-    typename T::driver_t;
-    T::create_driver();
-};
-  
 /**
  * @brief AMD SMI device provider for initialization and device enumeration.
  *
@@ -35,7 +30,7 @@ concept backend_factory = requires {
  *
  * @tparam BackendFactory Factory for creating AMD SMI backend instances.
  */
-template <backend_factory BackendFactory>
+template <backends::concepts::backend_factory BackendFactory>
 class provider
 {
 private:
@@ -228,7 +223,7 @@ public:
      * fails.
      */
     provider()
-    : m_backend_api(BackendFactory::create_backend())
+    : m_backend_api(BackendFactory::create())
     {
         // Initialize AMD SMI backend
         check_amd_smi_status(m_backend_api->init(),
@@ -333,7 +328,7 @@ public:
  *
  * @tparam BackendFactory Factory type for creating AMD SMI backend instances.
  */
-template <typename BackendFactory>
+template <backends::concepts::backend_factory BackendFactory>
 struct provider_factory
 {
     using provider_t = provider<BackendFactory>;

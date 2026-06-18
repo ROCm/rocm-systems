@@ -180,10 +180,7 @@ struct backend_factory
 {
     using backend_t = backend;
 
-    static std::shared_ptr<backend_t> create_backend()
-    {
-        return std::make_shared<backend_t>();
-    }
+    static std::shared_ptr<backend_t> create() { return std::make_shared<backend_t>(); }
 };
 
 }  // namespace rocprofsys::backends::rocprofiler_sdk

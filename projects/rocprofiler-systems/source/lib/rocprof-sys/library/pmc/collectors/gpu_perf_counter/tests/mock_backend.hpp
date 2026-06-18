@@ -81,7 +81,7 @@ struct mock_backend_factory
 
     static void set_mock(std::shared_ptr<backend_t> mock) { s_mock = std::move(mock); }
 
-    static std::shared_ptr<backend_t> create_backend()
+    static std::shared_ptr<backend_t> create()
     {
         if(s_mock) return s_mock;
         return std::make_shared<backend_t>();
