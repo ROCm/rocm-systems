@@ -197,8 +197,9 @@ def test_triton_backend_wraps_compiled_kernel_call(monkeypatch):
         def __call__(self, *a, **kw):
             return ("ran", a, kw)
 
-    monkeypatch.setattr(triton_backend, "CompiledKernel", FakeKernel)
-    triton_backend.patch_triton_launcher()
+    backend = triton_backend.TritonBackend()
+    backend._compiled_kernel = FakeKernel
+    backend.patch_launcher()
 
     out = FakeKernel()(1, x=2)
     assert out == ("ran", (1,), {"x": 2})
@@ -235,8 +236,9 @@ def test_triton_backend_kernel_name_fallbacks(monkeypatch):
         (KernelWithDictMeta, "triton.CompiledKernel.from_meta"),
         (KernelNoName, "triton.CompiledKernel.<triton_kernel>"),
     ):
-        monkeypatch.setattr(triton_backend, "CompiledKernel", cls)
-        triton_backend.patch_triton_launcher()
+        backend = triton_backend.TritonBackend()
+        backend._compiled_kernel = cls
+        backend.patch_launcher()
         cls()()
         assert pushes[-1] == expected
 
@@ -253,10 +255,11 @@ def test_triton_backend_patch_is_idempotent(monkeypatch):
         def __call__(self):
             pass
 
-    monkeypatch.setattr(triton_backend, "CompiledKernel", FakeKernel)
-    triton_backend.patch_triton_launcher()
+    backend = triton_backend.TritonBackend()
+    backend._compiled_kernel = FakeKernel
+    backend.patch_launcher()
     first = FakeKernel.__call__
-    triton_backend.patch_triton_launcher()
+    backend.patch_launcher()
     assert FakeKernel.__call__ is first
 
 
@@ -293,12 +296,12 @@ def torch_backend_tiers():
             delattr(core._thread_local, attr)
     if hasattr(torch_mod._thread_local, "tier_stack"):
         delattr(torch_mod._thread_local, "tier_stack")
-    saved_hook = torch_mod._native_hook
-    torch_mod._native_hook = None
+    saved_hook = torch_mod._STATE.native_hook
+    torch_mod._STATE.native_hook = None
     try:
         yield torch_mod, pushed, popped
     finally:
-        torch_mod._native_hook = saved_hook
+        torch_mod._STATE.native_hook = saved_hook
 
 
 def test_push_scope_appends_backend_suffix(core_with_python_tier):
@@ -331,7 +334,7 @@ def test_torch_push_scope_routes_to_native_tier_when_active(torch_backend_tiers)
         def pop(self):
             pass
 
-    torch_backend._native_hook = Hook()
+    torch_backend._STATE.native_hook = Hook()
     torch_backend._push_scope("op", "#1@x:1", backend="torch")
 
     assert seen == [("op", "#1@x:1", "torch")]
@@ -356,7 +359,7 @@ def test_torch_pop_scope_routes_each_frame_to_its_originating_tier(torch_backend
             native_pops.append(None)
 
     hook = Hook()
-    torch_backend._native_hook = hook
+    torch_backend._STATE.native_hook = hook
     torch_backend._push_scope("native_op", "#1@x:1", backend="torch")
     hook.active_flag = False
     torch_backend._push_scope("py_op", "#2@x:2", backend="torch")

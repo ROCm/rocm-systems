@@ -35,12 +35,20 @@ def _missing_range_pop() -> None:
     )
 
 
-_range_push: Callable[[str], None] = _missing_range_push
-_range_pop: Callable[[], None] = _missing_range_pop
-_framework_roots: list[str] = []
+class _CoreState:
+    """Mutable core state: the Python-tier rangePush/rangePop callbacks, the
+    registered framework roots, and the ROCm directories probed for the roctx
+    module.
+    """
 
-# ROCm site directories probed for the roctx module.
-_roctx_candidate_paths: list[str] = []
+    def __init__(self) -> None:
+        self.range_push: Callable[[str], None] = _missing_range_push
+        self.range_pop: Callable[[], None] = _missing_range_pop
+        self.framework_roots: list[str] = []
+        self.roctx_candidate_paths: list[str] = []
+
+
+_STATE = _CoreState()
 
 # Frames under the package directory are skipped during caller-location
 # resolution.
@@ -51,24 +59,23 @@ def set_python_tier_io(
     push: Callable[[str], None],
     pop: Callable[[], None],
 ) -> None:
-    global _range_push, _range_pop
-    _range_push = push
-    _range_pop = pop
+    _STATE.range_push = push
+    _STATE.range_pop = pop
 
 
 def python_tier_configured() -> bool:
     """True once the Python-tier push/pop callbacks have been wired."""
-    return _range_push is not _missing_range_push
+    return _STATE.range_push is not _missing_range_push
 
 
 def get_python_tier_io() -> tuple[Callable[[str], None], Callable[[], None]]:
     """Return the currently wired (rangePush, rangePop) callbacks."""
-    return _range_push, _range_pop
+    return _STATE.range_push, _STATE.range_pop
 
 
 def roctx_candidate_paths() -> list[str]:
     """Return the directories probed for the roctx module."""
-    return list(_roctx_candidate_paths)
+    return list(_STATE.roctx_candidate_paths)
 
 
 def ensure_python_tier() -> bool:
@@ -77,14 +84,13 @@ def ensure_python_tier() -> bool:
     """
     if python_tier_configured():
         return True
-    global _roctx_candidate_paths
     rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
     py = f"python{sys.version_info.major}.{sys.version_info.minor}"
-    _roctx_candidate_paths = [
+    _STATE.roctx_candidate_paths = [
         f"{rocm_root}/lib/{py}/site-packages",
         f"{rocm_root}/libexec/rocprofiler-sdk/python",
     ]
-    for candidate in _roctx_candidate_paths:
+    for candidate in _STATE.roctx_candidate_paths:
         if candidate not in sys.path:
             sys.path.insert(0, candidate)
     try:
@@ -100,8 +106,8 @@ def add_framework_root(path: str) -> None:
     if not path:
         return
     root = path if path.endswith(os.sep) else path + os.sep
-    if root not in _framework_roots:
-        _framework_roots.append(root)
+    if root not in _STATE.framework_roots:
+        _STATE.framework_roots.append(root)
 
 
 # Per-thread stacks shared by all backends so nested scopes compose correctly.
@@ -126,7 +132,7 @@ def resolve_user_caller_location() -> str:
     while frame is not None:
         fn_path = frame.f_code.co_filename
         in_package = fn_path.startswith(_PACKAGE_ROOT) or fn_path == __file__
-        in_framework = any(fn_path.startswith(root) for root in _framework_roots)
+        in_framework = any(fn_path.startswith(root) for root in _STATE.framework_roots)
         if not in_package and not in_framework:
             return f"{Path(fn_path).name}:{frame.f_lineno}"
         frame = frame.f_back
@@ -153,7 +159,7 @@ def _push_scope(marker: str, context: str, backend: str = "") -> None:
     marker_stack = get_marker_stack()
     context_stack = get_context_stack()
 
-    _range_push(compose_marker(marker, context, backend))
+    _STATE.range_push(compose_marker(marker, context, backend))
 
     snapshot_len = len(marker_stack)
     try:
@@ -163,7 +169,7 @@ def _push_scope(marker: str, context: str, backend: str = "") -> None:
         del marker_stack[snapshot_len:]
         del context_stack[snapshot_len:]
         try:
-            _range_pop()
+            _STATE.range_pop()
         except Exception:
             pass
         raise
@@ -178,7 +184,7 @@ def _pop_scope() -> None:
         return
 
     try:
-        _range_pop()
+        _STATE.range_pop()
     finally:
         if marker_stack:
             marker_stack.pop()
