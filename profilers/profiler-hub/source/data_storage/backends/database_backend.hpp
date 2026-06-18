@@ -5,7 +5,7 @@
 
 #include "common/traits.hpp"
 #include "debug.hpp"
-#include "spdlog/fmt/bundled/core.h"
+#include <fmt/core.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -92,10 +92,10 @@ public:
 
         ~transaction_guard()
         {
-            auto statement_handle = std::uncaught_exceptions() > m_uncaught_on_entry
-                                        ? m_backend->m_rollback_stmt
-                                        : m_backend->m_commit_stmt;
-            run_prepared(statement_handle);
+            auto stmt = std::uncaught_exceptions() > m_uncaught_on_entry
+                            ? m_backend->m_rollback_stmt
+                            : m_backend->m_commit_stmt;
+            run_prepared(stmt);
         }
 
         transaction_guard(const transaction_guard&)            = delete;

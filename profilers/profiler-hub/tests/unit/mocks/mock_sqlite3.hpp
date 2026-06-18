@@ -48,7 +48,9 @@ public:
     MOCK_METHOD(std::string, errstr, (int result_code));
 
     // Persist an in-memory database to a file (wraps the sqlite3_backup_* dance).
-    MOCK_METHOD(int, backup_to_file, (mock_connection * src, const char* dst_path));
+    MOCK_METHOD(int,
+                backup_to_file,
+                (mock_connection * src, const char* dst_path, std::string& out_errmsg));
 
     // Statement lifecycle
     MOCK_METHOD(int, step, (mock_statement * stmt));
@@ -134,9 +136,9 @@ struct mock_sqlite3
     static std::string errmsg(database_t db) { return active().errmsg(db); }
     static std::string errstr(int result_code) { return active().errstr(result_code); }
 
-    static int backup_to_file(database_t src, const char* dst_path)
+    static int backup_to_file(database_t src, const char* dst_path, std::string& out_errmsg)
     {
-        return active().backup_to_file(src, dst_path);
+        return active().backup_to_file(src, dst_path, out_errmsg);
     }
 
     static int step(statement_t stmt) { return active().step(stmt); }

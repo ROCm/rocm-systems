@@ -46,7 +46,7 @@ enum rocpd_sql_schema_kind_t
 
 namespace
 {
-void
+[[maybe_unused]] void
 create_directory_for_database_file(const std::string& db_file)
 {
     auto db_dirname = profiler_hub::common::dirname(db_file);
@@ -82,7 +82,7 @@ load_schema_cb(rocpd_sql_engine_t /*unused*/,
 }
 #endif
 
-std::string
+[[maybe_unused]] std::string
 get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
 {
 #if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
@@ -314,12 +314,12 @@ database_backend<SqlitePolicy>::flush()
         throw std::runtime_error("Database already flushed!");
     }
 
-    const int rc = SqlitePolicy::backup_to_file(m_sqlite3, m_db_path.c_str());
+    std::string backup_errmsg;
+    const int   rc = SqlitePolicy::backup_to_file(m_sqlite3, m_db_path.c_str(), backup_errmsg);
     if(rc != SqlitePolicy::result_ok)
     {
-        throw std::runtime_error(
-            "Database flush (backup) failed: rc=" + std::to_string(rc) + ": " +
-            SqlitePolicy::errmsg(m_sqlite3));
+        throw std::runtime_error("Database flush (backup) failed: rc=" +
+                                 std::to_string(rc) + ": " + backup_errmsg);
     }
     m_flushed = true;
 }
