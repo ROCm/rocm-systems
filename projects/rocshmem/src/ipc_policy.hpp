@@ -199,12 +199,12 @@ class IpcOnImpl {
 
   __device__ void ipcQuiet() {
     detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_acq_rel>();
+                                detail::atomic::memory_order_release>();
   }
 
   __device__ void ipcQuiet([[maybe_unused]] int local_pe) {
     detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_acq_rel>();
+                                detail::atomic::memory_order_release>();
   }
 
   template <typename T>

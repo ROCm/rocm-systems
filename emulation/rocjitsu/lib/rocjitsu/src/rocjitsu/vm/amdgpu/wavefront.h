@@ -243,6 +243,9 @@ public:
   /// @returns Const reference to the wait counters.
   const WaitCounters &wait_counters() const { return wait_counters_; }
 
+  /// @brief Retire one outstanding wait-counter operation and wake the wave if ready.
+  void release_wait_counter(WaitCounterType type);
+
   /// @brief Set the s_waitcnt target thresholds and stall if not yet satisfied.
   ///
   /// @details Used by GFX9 (CDNA1-4), GFX10 (RDNA1/2), and GFX11 (RDNA3/3.5)
