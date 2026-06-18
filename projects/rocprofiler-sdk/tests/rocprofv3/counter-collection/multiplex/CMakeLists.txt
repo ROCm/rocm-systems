@@ -59,8 +59,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_counter_collection.csv
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiplex
-    UNSTABLE)
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiplex)
 
 # YAML input test
 rocprofiler_add_integration_execute_test(
@@ -86,5 +85,4 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_counter_collection.csv
     TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiple-yaml
-    UNSTABLE)
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiple-yaml)
