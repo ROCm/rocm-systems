@@ -102,9 +102,9 @@ struct ncclDevRedOpFull {
 
 union ncclLLFifoLine {
   /* Flags have to be *after* data, because otherwise, an incomplete receive
-    from the network may receive the flag but not the data.
-    Note this is assuming that either we receive contiguous chunks of data
-    (sockets) or data is written with an atomicity of 8 bytes (IB/RDMA). */
+     from the network may receive the flag but not the data.
+     Note this is assuming that either we receive contiguous chunks of data
+     (sockets) or data is written with an atomicity of 8 bytes (IB/RDMA). */
   struct {
     uint32_t data1;
     uint32_t flag1;
@@ -213,18 +213,18 @@ struct ncclConnInfo {
   // Regular comm mechanism
   char* buffs[NCCL_NUM_PROTOCOLS]; // Local for recv, remote for send
   void* mhandles[NCCL_NUM_PROTOCOLS];
-  uint64_t* tail; // Local for recv, remote for send
-  uint64_t* head; // Local for send, remote for recv
+  uint64_t* tail;     // Local for recv, remote for send
+  uint64_t* head;     // Local for send, remote for recv
 
-  int flags; // Direct communication / other flags
-  int shared; // Buffers are shared
-  int stepSize; // Step size for the SIMPLE buffer
+  int flags;          // Direct communication / other flags
+  int shared;         // Buffers are shared
+  int stepSize;       // Step size for the SIMPLE buffer
   void** ptrExchange; // Pointer exchange for direct communication
   uint64_t* redOpArgExchange; // PreOp scaler exchange for direct pull case
 
   struct ncclConnFifo* connFifo; // Used for GPU - Proxy communication
 
-  uint64_t step; // Keep where we are
+  uint64_t step;      // Keep where we are
   uint64_t llLastCleaning;
 
   // GPU's HDP_MEM_FLUSH_ADDR: HDP Memory Coherency Flush Control. This register
@@ -268,7 +268,7 @@ struct ncclRing {
   // devices. Ordered from current device.
   int* userRanks;
   // Maps a user rank to an internal ring index.
-  int* rankToIndex; // inverse lookup of userRanks, setup in setupChannel
+  int* rankToIndex;  // inverse lookup of userRanks, setup in setupChannel
   int index; // This rank's index in the ring
 };
 
@@ -286,9 +286,9 @@ struct ncclTree {
 struct ncclDirect {
   int depth;
   int out;
-  int nHeads; // Number of parallel N<->1<->net operations we'll do in parallel; size of up/down
+  int nHeads;   // Number of parallel N<->1<->net operations we'll do in parallel; size of up/down
   int headRank; // Index in 0..nHeads-1 I am the head rank of. -1 if I'm not a head rank (no local NIC)
-  int shift; // Shuffling of send/recv for scatter/gather operations, basically localRank%nHeads
+  int shift;    // Shuffling of send/recv for scatter/gather operations, basically localRank%nHeads
   // The heads[...] are guaranteed to be in rotated order start with self:
   //   headRank, (headRank+1)%nHeads, (headRank+2)%nHeads, ...
   int heads[NCCL_MAX_DIRECT_ARITY + 1];
@@ -301,7 +301,7 @@ struct ncclDirect {
 #define NCCL_MAX_NVLS_TREE_ARITY 3
 struct ncclNvls {
   int out;
-  int nHeads; // Number of parallel N<->1<->net operations we'll do in parallel; size of up/down
+  int nHeads;   // Number of parallel N<->1<->net operations we'll do in parallel; size of up/down
   int headRank; // Index in 0..nHeads-1 I am the head rank of. -1 if I'm not a head rank (no local NIC)
   int up[NCCL_MAX_NVLS_ARITY];
   int down;
@@ -516,7 +516,7 @@ enum ncclDevWorkType : uint8_t {
   ncclDevWorkTypeP2p,
   ncclDevWorkTypeColl,
   ncclDevWorkTypeCollReg,
-  ncclDevWorkTypeBcast, // for batched broadcast
+  ncclDevWorkTypeBcast,  // for batched broadcast
 };
 
 constexpr size_t ncclDevWorkSize(enum ncclDevWorkType type) {

@@ -189,15 +189,15 @@ static int gpuPciBw(struct ncclTopoNode* gpu) {
 }
 
 /* Choose the order in which we try next GPUs. This is critical for the search
-  to quickly converge to the best solution even if it eventually times out. */
+   to quickly converge to the best solution even if it eventually times out. */
 struct ncclGpuScore {
-  int g; // Retain the index
-  int startIndex; // Least important
+  int g;             // Retain the index
+  int startIndex;    // Least important
   int intraNhops;
   int intraBw;
   int interNhops;
   int interPciBw;
-  int interBw; // Most important
+  int interBw;    // Most important
 };
 
 static int cmpScore(const void* g1, const void* g2) {
@@ -455,7 +455,8 @@ ncclResult_t ncclTopoSearchTryNvls(struct ncclTopoSystem* system, struct ncclTop
     } while (nvs && d1 < system->nodes[GPU].count);
     if (nvs == NULL) {
       d1--;
-    } else { // Both directions worked. Move on to the next path.
+    } else {
+      // Both directions worked. Move on to the next path.
       NCCLCHECK(ncclTopoSearchRecGpu(system, graph, saveGraph, NULL, ngpus, -1, -1, 0, time));
     }
     while (d1) {
@@ -475,8 +476,8 @@ ncclResult_t ncclTopoCompareGraphs(struct ncclTopoSystem* system, struct ncclTop
   // 1. Try to get the same nChannels between Rings and Trees
   if (graph->nChannels < graph->minChannels) return ncclSuccess;
 
-  if (graph->pattern ==
-      NCCL_TOPO_PATTERN_NVLS) { // NVLS channels correspond to GPUs pulling from NVLS. So the more the better.
+  if (graph->pattern == NCCL_TOPO_PATTERN_NVLS) {
+    // NVLS channels correspond to GPUs pulling from NVLS. So the more the better.
     if (graph->nChannels > refGraph->nChannels && graph->nChannels <= system->nodes[GPU].count) *copy = 1;
     if (graph->nChannels * graph->bwInter > refGraph->nChannels * refGraph->bwInter) *copy = 1;
     return ncclSuccess;
@@ -722,13 +723,16 @@ ncclResult_t ncclTopoSearchRecGpu(struct ncclTopoSystem* system, struct ncclTopo
     // Go to next GPU
     int next[NCCL_TOPO_MAX_NODES];
     int count;
-    if (forcedOrder == FORCED_ORDER_PCI) { // Try the PCI order
+    if (forcedOrder == FORCED_ORDER_PCI) {
+      // Try the PCI order
       next[0] = step + 1;
       count = 1;
-    } else if (forcedOrder == FORCED_ORDER_REPLAY) { // Try last channel order
+    } else if (forcedOrder == FORCED_ORDER_REPLAY) {
+      // Try last channel order
       NCCLCHECK(ncclTopoReplayGetGpu(system, graph, step, next));
       count = 1;
-    } else { // Normal search
+    } else {
+      // Normal search
       NCCLCHECK(ncclTopoSearchNextGpuSort(system, graph, gpu, next, &count,
                                           backToNet == -1       ? 0 :
                                           backToNet == step + 1 ? 1 :

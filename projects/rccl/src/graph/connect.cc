@@ -681,14 +681,15 @@ static ncclResult_t connectCollNet(struct ncclComm* comm, struct ncclTopoGraph* 
     sprintf(line, "CollNetDirect channel %d rank %d ", c, rank);
     int nDown = 0;
     for (int i = 0; i < nHeads; i++) {
-      if (rank == heads[i]) { // is head
+      if (rank == heads[i]) {
+        // is head
         channel->collnetDirect.headRank = i; // Mark the index for deciding offset in the CUDA kernel
         channel->collnetDirect.out = comm->nRanks; // Set root of collnetDirect to id nranks
         int* collNetIntra = collNetGraph->intra + i * localRanks;
         sprintf(line + strlen(line), "down ");
         for (int r = 0; r < localRanks; r++) {
           if (collNetIntra[r] == rank) continue;
-          channel->collnetDirect.down[nDown++] = collNetIntra[r]; // connect to all peers
+          channel->collnetDirect.down[nDown++] = collNetIntra[r];  // connect to all peers
           sprintf(line + strlen(line), " %d ", collNetIntra[r]);
         }
         sprintf(line + strlen(line), "nDown %d ", nDown);
@@ -744,7 +745,7 @@ static ncclResult_t connectNvls(struct ncclComm* comm, int* nvlsHeads, int nHead
     for (int h = 0; h < nHeads; h++) channel->nvls.up[h] = comm->nRanks + 1 + h;
     for (int h = nHeads; h < NCCL_MAX_NVLS_ARITY; h++) channel->nvls.up[h] = -1;
     channel->nvls.down = comm->nRanks + 1 + headRank;
-    channel->nvls.out = -1; // NVLS+SHARP not yet implemented.
+    channel->nvls.out = -1;       // NVLS+SHARP not yet implemented.
     channel->nvls.headRank = headRank;
     channel->nvls.treeUp = channel->nvls.treeDown[0] = channel->nvls.treeDown[1] = channel->nvls.treeDown[2] = -1;
     if (comm->config.collnetEnable && channel->nvls.headRank != -1) channel->nvls.out = comm->nRanks;

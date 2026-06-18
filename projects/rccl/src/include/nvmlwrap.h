@@ -41,7 +41,7 @@ typedef enum nvmlNvLinkCapability_enum {
   NVML_NVLINK_CAP_SYSMEM_ATOMICS = 3,     // System memory atomics are supported
   NVML_NVLINK_CAP_SLI_BRIDGE = 4,     // SLI is supported over this link
   NVML_NVLINK_CAP_VALID = 5,     // Link is supported on this device
-    // should be last
+  // should be last
   NVML_NVLINK_CAP_COUNT
 } nvmlNvLinkCapability_t;
 

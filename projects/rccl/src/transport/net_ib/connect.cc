@@ -826,7 +826,8 @@ ib_recv_dev_list:
     for (int q = 0; q < comm->base.nqps; q++) {
       // Print just the QPs for this dev
       if (comm->base.qps[q].devIndex == i) {
-        if (devInfo->link_layer == IBV_LINK_LAYER_INFINIBAND) { // IB
+        if (devInfo->link_layer == IBV_LINK_LAYER_INFINIBAND) {
+          // IB
           INFO(NCCL_NET,
                "NET/IB: %s: %s %d IbDev %d Port %d qp_num %d mtu %d LID %d subnet-prefix %lu  FLID %d ctsFifoRkey=0x%x "
                "ctsFifoLkey=0x%x",

@@ -42,9 +42,9 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
   T* inputBuf = (T*)work->sendbuff;
   T* outputBuf = (T*)work->recvbuff;
 
-    // If isNetOffload == true, we only use 1 warp to drive Ring algo/network communication
-    // and the rest of warps proceed to copy src data into dst buffer in parallel when AG
-    // is not in-place.
+  // If isNetOffload == true, we only use 1 warp to drive Ring algo/network communication
+  // and the rest of warps proceed to copy src data into dst buffer in parallel when AG
+  // is not in-place.
   if (isNetOffload) {
     workNthreads = WARP_SIZE;
     chunkCount = NCCL_MAX_NET_SIZE;
@@ -61,32 +61,33 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       work->connIndex, work, nullptr, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
 
     for (size_t elemOffset = 0; elemOffset < partCount; elemOffset += chunkCount) {
-        /////////////// begin AllGather steps ///////////////
+      /////////////// begin AllGather steps ///////////////
       nelem = min(chunkCount, partCount - elemOffset);
       dataOffset = partOffset + elemOffset;
 
-        // step 0: push data to next GPU
+      // step 0: push data to next GPU
       rankDest = ringRanks[0];
       offset = dataOffset + rankDest * count;
 
-      if ((inputBuf + dataOffset == outputBuf + offset) || isNetOffload) { // In place or onePPN
+      if ((inputBuf + dataOffset == outputBuf + offset) || isNetOffload) {
+        // In place or onePPN
         prims.directSend(dataOffset, offset, nelem);
       } else {
         prims.directCopySend(dataOffset, offset, nelem);
       }
 
-        // k-2 steps: copy to next GPU
+      // k-2 steps: copy to next GPU
       for (int j = 1; j < nranks - 1; ++j) {
         rankDest = ringRanks[nranks - j];
         offset = dataOffset + rankDest * count;
         prims.directRecvCopyDirectSend(offset, offset, nelem);
       }
 
-        // Make final copy from buffer to dest.
+      // Make final copy from buffer to dest.
       rankDest = ringRanks[1];
       offset = dataOffset + rankDest * count;
 
-        // Final wait/copy.
+      // Final wait/copy.
       prims.directRecv(offset, nelem);
     }
   } else if (inputBuf != outputBuf + ringRanks[0] * count) {
@@ -179,7 +180,8 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
     if (tid == nworkers) shmem->parallelFactor = 0;
     __syncthreads();
 
-    if (tid == nworkers) { // Algo computation thread
+    if (tid == nworkers) {
+      // Algo computation thread
       PatAGAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, NCCL_PAT_NWORKERS / WARP_SIZE, channelOffset,
                                 channelOffset + channelCount, count, chunkCount, rank, nranks);
       int parallelFactor = shmem->parallelFactor = patAlgo.getParallelFactor();
@@ -196,7 +198,8 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         step++;
         if (last == 2) break;
       }
-    } else if (tid < nworkers) { // Worker threads
+    } else if (tid < nworkers) {
+      // Worker threads
       T* inputBuf = (T*)work->sendbuff;
       T* outputBuf = (T*)work->recvbuff;
       int parallelFactor = 0;

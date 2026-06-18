@@ -115,7 +115,7 @@ struct sendNetResources {
   int shared;
   int channelId;
   int connIndex;
-  int sameDevice; // proxy and kernel are on the same CUDA device
+  int sameDevice;  // proxy and kernel are on the same CUDA device
   char* buffers[NCCL_NUM_PROTOCOLS];
   int buffSizes[NCCL_NUM_PROTOCOLS];
   void* mhandles[NCCL_NUM_PROTOCOLS];
@@ -151,7 +151,7 @@ struct recvNetResources {
   int shared;
   int channelId;
   int connIndex;
-  int sameDevice; // proxy and kernel are on the same CUDA device
+  int sameDevice;  // proxy and kernel are on the same CUDA device
   char* buffers[NCCL_NUM_PROTOCOLS];
   int buffSizes[NCCL_NUM_PROTOCOLS];
   void* mhandles[NCCL_NUM_PROTOCOLS];
@@ -1190,7 +1190,8 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   map->shared = resources->shared;
   CUDACHECK(cudaGetDevice(&map->cudaDev));
 
-  if (resources->shared == 0) { // Only allocate dedicated buffers for ring/tree, not for p2p
+  if (resources->shared == 0) {
+    // Only allocate dedicated buffers for ring/tree, not for p2p
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
       NCCL_NET_MAP_ADD_POINTER(map, 0, p != NCCL_PROTO_LL && resources->useGdr ? 1 : 0, proxyState->buffSizes[p],
                                buffs[p]);
@@ -1442,7 +1443,8 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   if (map->sameProcess == 0) return ncclInternalError; // We don't support remote proxy for recv
   map->shared = resources->shared;
 
-  if (resources->shared == 0) { // Only allocate dedicated buffers for ring/tree, not for p2p
+  if (resources->shared == 0) {
+    // Only allocate dedicated buffers for ring/tree, not for p2p
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
       NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0, proxyState->buffSizes[p], buffs[p]);
       resources->buffSizes[p] = proxyState->buffSizes[p];
@@ -1588,7 +1590,8 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
 
 static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState) {
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
-  if (connection->state == connSharedInitialized) { // NVB Preconnect
+  if (connection->state == connSharedInitialized) {
+    // NVB Preconnect
     NCCLCHECK(sharedNetBuffersDestroy(proxyState, connection->tpLocalRank, 0, connection));
     return ncclSuccess;
   }
@@ -1646,7 +1649,8 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
 
 static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState) {
   struct recvNetResources* resources = (struct recvNetResources*)(connection->transportResources);
-  if (connection->state == connSharedInitialized) { // NVB Preconnect
+  if (connection->state == connSharedInitialized) {
+    // NVB Preconnect
     NCCLCHECK(sharedNetBuffersDestroy(proxyState, connection->tpLocalRank, 1, connection));
     return ncclSuccess;
   }
@@ -1926,16 +1930,19 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
       struct ncclProxySubArgs* sub = args->subs + s;
       if (groupSize == maxRecvs) {
         groupSize = 0;
-      } else if (s > 0) { // Find next sub with the same recvComm
+      } else if (s > 0) {
+        // Find next sub with the same recvComm
         int next;
         for (next = s; next < args->nsubs; next++) {
           struct recvNetResources* nextRes =
             (struct recvNetResources*)(args->subs[next].connection->transportResources);
           if (nextRes->netRecvComm == recvComm) break;
         }
-        if (next == args->nsubs) { // Not found
+        if (next == args->nsubs) {
+          // Not found
           groupSize = 0;
-        } else if (s != next) { // We found a sub later with the same recvComm ; swap subs
+        } else if (s != next) {
+          // We found a sub later with the same recvComm ; swap subs
           struct ncclProxySubArgs temp;
           memcpy(&temp, sub, sizeof(struct ncclProxySubArgs));
           memcpy(sub, args->subs + next, sizeof(struct ncclProxySubArgs));

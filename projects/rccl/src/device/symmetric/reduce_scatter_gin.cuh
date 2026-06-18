@@ -74,15 +74,15 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
 
     int chunkBytes_log2 = log2Up(nElts) + log2Up(sizeof(T));
 
-      // Chunk size should not be larger than what host dictates and 1/2 of
-      // total capacity so we enjoy some pipeline overlap. This is a soft constraint
-      // because chunks which are too big can always be partially used.
+    // Chunk size should not be larger than what host dictates and 1/2 of
+    // total capacity so we enjoy some pipeline overlap. This is a soft constraint
+    // because chunks which are too big can always be partially used.
     int maxChunkBytes_log2 = min(log2Up(maxChunkElts) + log2Up(sizeof(T)), handler.ginInboxRail.size_log2 - 1);
     chunkBytes_log2 = min(chunkBytes_log2, maxChunkBytes_log2);
 
-      // Chunk size must not be so small that the chunk count exceeds either the
-      // per peer number or total number. This is a hard constraint imposed
-      // by inbox credit logic so we enforce after the max chunk size.
+    // Chunk size must not be so small that the chunk count exceeds either the
+    // per peer number or total number. This is a hard constraint imposed
+    // by inbox credit logic so we enforce after the max chunk size.
     int minChunkBytes_log2 =
       handler.ginInboxRail.size_log2 -
       min(log2Down(rail.nRanks - 1) + ncclGinScratchMaxBufsPerPeer_log2, ncclGinScratchMaxBufs_log2);
@@ -116,19 +116,20 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
       }
     };
 
-    if (stage == 0) { // !!! Pipeline Stage 0 !!!
+    if (stage == 0) {
+      // !!! Pipeline Stage 0 !!!
       inbox.apportion(cta, /*subcoop=*/coopStage, /*subcoopIsNonTrivial=*/false, nBufs_log2);
       if (lsa.nRanks != 1) {
         outbox.apportion(coopStage, /*subcoop=*/coopRole, /*subcoopIsNonTrivial=*/roleIsWorker, nBufs_log2,
                          /*deferSync=*/true);
       }
 
-        // Generalize worker and non-worker logic with compile time BoolTag to differentiate.
+      // Generalize worker and non-worker logic with compile time BoolTag to differentiate.
       auto stage0_impl = [&](/*BoolTag<roleIsWorker>*/ auto roleIsWorker_tag) {
-          // Shadow runtime value with compile time value.
+        // Shadow runtime value with compile time value.
         constexpr bool roleIsWorker = roleIsWorker_tag.value;
         skeleton(
-            /*initFn*/
+          /*initFn*/
           [&] __device__(int nChunkElts, ncclSymPtr<T> inPtr) -> void {
             if (!roleIsWorker) {
               if (coopRole.thread_rank() == 0) {
@@ -148,7 +149,7 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
               coopRole.sync();
             }
           },
-            /*stepFn=*/
+          /*stepFn=*/
           [&] __device__(int step0, int nSteps, int nChunkElts, ncclSymPtr<T> inPtr) -> void {
             auto getInputOffset = [&] __device__(int step) -> size_t {
               int peer = inbox.getSendPeer(step, /*step_lt_nPeers=*/true);
@@ -156,13 +157,14 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
               return dstWorld * nAllElts;
             };
 
-            if (lsa.nRanks != 1) { // No need to process data when we can send from input buf.
+            if (lsa.nRanks != 1) {
+              // No need to process data when we can send from input buf.
               if (roleIsWorker) {
-                  // Wait for outbox bufs to free up. Since outbox advances with each call of this
-                  // function we always index starting at 0.
+                // Wait for outbox bufs to free up. Since outbox advances with each call of this
+                // function we always index starting at 0.
                 outbox.waitBufs(coopRole, 0, nSteps);
                 coopRole.sync();
-                  // Make `outbox.getBufPtr()` as cheap as possible within reduction loop.
+                // Make `outbox.getBufPtr()` as cheap as possible within reduction loop.
                 auto outbox_getBufPtr = outbox.make_getBufPtr(0);
                 reduceLsaBatch(
                   coopRole, /*nBatch=*/nSteps, nChunkElts,
@@ -178,7 +180,7 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
             if (!roleIsWorker) {
               inbox.postSends(
                 coopRole, step0, nSteps,
-                  /*getPtr*/
+                /*getPtr*/
                 [&] __device__(int i, int peer) {
                   return lsa.nRanks == 1 ? inPtr + getInputOffset(step0 + i) : (ncclSymPtr<T>)outbox.getBuf(i);
                 },
@@ -200,20 +202,21 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
           /*finishFn=*/nop);
       };
 
-        // Instantiate stage0_impl specialized to each case of roleIsWorker.
+      // Instantiate stage0_impl specialized to each case of roleIsWorker.
       if (!roleIsWorker) stage0_impl(BoolTag</*roleIsWorker=*/false>());
       else stage0_impl(BoolTag</*roleIsWorker=*/true>());
 
-    } else { // !!! Pipeline Stage 1 !!!
+    } else {
+      // !!! Pipeline Stage 1 !!!
 
-        // Generalize worker and non-worker logic with compile time BoolTag to differentiate.
+      // Generalize worker and non-worker logic with compile time BoolTag to differentiate.
       auto stage1_impl = [&] __device__(/*BoolTag<roleIsWorker>*/ auto roleIsWorker_tag) -> void {
         constexpr bool roleIsWorker = roleIsWorker_tag.value;
         inbox.apportion(cta, /*subcoop=*/coopRole, /*subcoopIsNonTrivial=*/!roleIsWorker, nBufs_log2);
         coopStage.sync();
 
         skeleton(
-            /*initFn*/
+          /*initFn*/
           [&] __device__(int nChunkElts, ncclSymPtr<T> inPtr) -> void {
             if (roleIsWorker) {
               reduceLsa(coopRole, nChunkElts,
@@ -222,12 +225,12 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
                         /*srcPtr=*/inPtr + world.rank * nAllElts, handler.comm, multimemTag);
             }
           },
-            /*stepFn*/
+          /*stepFn*/
           [&] __device__(int step0, int nSteps, int nChunkElts, ncclSymPtr<T> inPtr) -> void {
             if (roleIsWorker) {
               inbox.waitRecvs(coopRole, step0, nSteps);
               coopRole.sync();
-                // Make `inbox.getBufPtr()` as cheap as possible within reduction loop.
+              // Make `inbox.getBufPtr()` as cheap as possible within reduction loop.
               auto inbox_getBufPtr = inbox.make_getBufPtr(step0);
               reduce(coopRole, red, /*inPlace=*/true, nChunkElts,
                      /*dstMem=*/SMemTag(), /*dstAlignMin=*/16, /*dst=*/accum,
@@ -239,7 +242,7 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
               inbox.finishRecvs(coopRole, step0, nSteps);
             }
           },
-            /*finishFn*/
+          /*finishFn*/
           [&] __device__(int nChunkElts, ncclSymPtr<T> outPtr) -> void {
             if (roleIsWorker) {
               copy(coopRole, nChunkElts,
@@ -250,7 +253,7 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
           });
       };
 
-        // Instantiate stage1_impl specialized to each case of roleIsWorker.
+      // Instantiate stage1_impl specialized to each case of roleIsWorker.
       if (!roleIsWorker) stage1_impl(BoolTag</*roleIsWorker=*/false>());
       else stage1_impl(BoolTag</*roleIsWorker=*/true>());
     }

@@ -219,7 +219,7 @@ struct ncclGin_BackendMask {
                               SegmentType bufType = ncclGin_SegmentDevice{}) const;
 
   template <typename T, // requires sizeof(T) <= 8
-            // See put() for all template arguments.
+    // See put() for all template arguments.
             typename RemoteAction = ncclGin_None, typename Coop = ncclCoopThread,
             typename DescriptorSmem = ncclGin_None>
   NCCL_DEVICE_INLINE void putValue(ncclTeam, int peer, ncclWindow_t dstWnd, size_t dstOffset, T value,
@@ -230,7 +230,7 @@ struct ncclGin_BackendMask {
                                    uint32_t optFlags = ncclGinOptFlagsDefault) const;
 
   template <typename T, // requires sizeof(T) <= 8
-            // See put() for all template arguments.
+    // See put() for all template arguments.
             typename RemoteAction = ncclGin_None, typename Coop = ncclCoopThread,
             typename DescriptorSmem = ncclGin_None>
   NCCL_DEVICE_INLINE void putValue(ncclTeam, int peer, ncclSymPtr<T> dst, T value,

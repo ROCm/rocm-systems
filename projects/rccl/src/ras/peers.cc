@@ -169,7 +169,8 @@ static ncclResult_t rasRanksConvertToPeers(struct rasRankInit* ranks, int nranks
     }
     if (cmp < 0) {
       (*newNRasPeers)++;
-    } else { // cmp == 0.  Duplicates between the rank array and the peers array will be merged.
+    } else {
+      // cmp == 0.  Duplicates between the rank array and the peers array will be merged.
       if (rank->pid != rasPeer->pid) {
         INFO(NCCL_RAS, "RAS pid mismatch for the same address %s: rank->pid %d, rasPeer->pid %d -- internal error?",
              ncclSocketToString(&rank->addr, rasLine), rank->pid, rasPeer->pid);
@@ -268,7 +269,8 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
                  ncclSocketToString(&rankPeer->addr, rasLine), newNRasPeers, nRasPeers);
           }
           rankPeerIdx++;
-        } else { // cmp >= 0
+        } else {
+          // cmp >= 0
           // Start by copying peer to newRasPeer, if needed.
           if (newRasPeers != rasPeers) {
             if (newPeerIdx < newNRasPeers) {
@@ -280,7 +282,8 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
                    ncclSocketToString(&rasPeer->addr, rasLine), newPeerIdx, newNRasPeers, nRasPeers);
               break;
             }
-          } else { // in-place
+          } else {
+            // in-place
             if (newPeerIdx != peerIdx) {
               // Should never happen -- both indexes should advance at the same pace.
               INFO(NCCL_RAS,
@@ -307,7 +310,8 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
           if (myPeerIdx == peerIdx) newMyPeerIdx = newPeerIdx;
           peerIdx++;
         } // cmp >= 0
-      } else { // peerIdx == nRasPeers
+      } else {
+        // peerIdx == nRasPeers
         // No more rasPeers -- add a new entry based on rank.
         if (newPeerIdx < newNRasPeers) {
           memcpy(newRasPeer, rankPeer, sizeof(*newRasPeer));
@@ -325,7 +329,8 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
           newMyPeerIdx = newPeerIdx;
         rankPeerIdx++;
       }
-    } else { // rankPeerIdx == *nRankPeers
+    } else {
+      // rankPeerIdx == *nRankPeers
       // No more rankPeers -- copy the rasPeer over if needed.
       if (newRasPeers != rasPeers) {
         if (newPeerIdx < newNRasPeers) {
@@ -337,7 +342,8 @@ static ncclResult_t rasPeersUpdate(struct rasPeerInfo* rankPeers, int* nRankPeer
                ncclSocketToString(&rasPeer->addr, rasLine), newPeerIdx, newNRasPeers, nRasPeers);
           break;
         }
-      } else { // in-place at the end.
+      } else {
+        // in-place at the end.
         if (newPeerIdx != peerIdx) {
           // Should never happen -- both indexes should advance at the same pace.
           INFO(NCCL_RAS,
@@ -679,7 +685,8 @@ static ncclResult_t rasLinkReinitConns(struct rasLink* link) {
     }
     memset(link->conns, '\0', sizeof(*link->conns));
     link->lastUpdatePeersTime = 0;
-  } else { // link->conns == nullptr
+  } else {
+    // link->conns == nullptr
     NCCLCHECK(ncclCalloc(&link->conns, 1));
   }
 
@@ -698,11 +705,13 @@ static ncclResult_t rasLinkReinitConns(struct rasLink* link) {
            ncclSocketToString(&rasPeers[linkConn->peerIdx].addr, rasLine));
       if (myPeerIdx < linkConn->peerIdx) {
         NCCLCHECK(rasConnCreate(&rasPeers[linkConn->peerIdx].addr, &linkConn->conn));
-      } else { // If we didn't initiate the connection, start the timeout.
+      } else {
+        // If we didn't initiate the connection, start the timeout.
         link->lastUpdatePeersTime = clockNano();
       }
     } // if (linkConn->peerIdx != -1)
-  } else { // linkConn->conn
+  } else {
+    // linkConn->conn
     INFO(NCCL_RAS, "RAS link %d: calculated existing primary connection with %s", link->direction,
          ncclSocketToString(&rasPeers[linkConn->peerIdx].addr, rasLine));
   } // linkConn->conn

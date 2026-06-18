@@ -161,16 +161,16 @@ NCCL_DEVICE_INLINE EltPack<half, 1> load<EltPack<half, 1>, true, OpSum<half>>(co
                   "https://docs.nvidia.com/cuda/parallel-thread-execution/#addresses-as-operands");
   return EltPack<half, 1>{};
 #else
-    // Align address to 4 bytes for f16x2 load
+  // Align address to 4 bytes for f16x2 load
   const char* charAddr = reinterpret_cast<const char*>(addr);
   const size_t offset = reinterpret_cast<size_t>(addr) & 3;
   const char* alignedAddr = charAddr - offset;
-    // Load as EltPack<half, 2> and extract the correct half
+  // Load as EltPack<half, 2> and extract the correct half
   EltPack<half, 2> loaded =
     load<EltPack<half, 2>, true, OpSum<half>>(reinterpret_cast<const EltPack<half, 2>*>(alignedAddr));
   EltPack<half, 1> result;
   const half* loadedElts = loaded.elts();
-    // Extract the correct half based on address offset
+  // Extract the correct half based on address offset
   result.elts()[0] = loadedElts[offset / sizeof(half)];
   return result;
 #endif
@@ -203,7 +203,7 @@ NCCL_DEVICE_INLINE EltPack<__nv_bfloat16, 2> load<EltPack<__nv_bfloat16, 2>, tru
   const EltPack<__nv_bfloat16, 2>* addr) {
   EltPack<__nv_bfloat16, 2> result;
   uint32_t raw;
-    // Use bf16x2 instruction - bf16 requires its own instruction format
+  // Use bf16x2 instruction - bf16 requires its own instruction format
   asm volatile("multimem.ld_reduce.global.add.acc::f32.bf16x2 %0, [%1];"
                : "=r"(raw)
                : "l"(__cvta_generic_to_global(addr))
@@ -229,16 +229,16 @@ NCCL_DEVICE_INLINE EltPack<__nv_bfloat16, 1> load<EltPack<__nv_bfloat16, 1>, tru
                   "https://docs.nvidia.com/cuda/parallel-thread-execution/#addresses-as-operands");
   return EltPack<__nv_bfloat16, 1>{};
 #else
-    // Align address to 4 bytes for bf16x2 load
+  // Align address to 4 bytes for bf16x2 load
   const char* charAddr = reinterpret_cast<const char*>(addr);
   const size_t offset = reinterpret_cast<size_t>(addr) & 3;
   const char* alignedAddr = charAddr - offset;
-    // Load as EltPack<__nv_bfloat16, 2> and extract the correct bf16
+  // Load as EltPack<__nv_bfloat16, 2> and extract the correct bf16
   EltPack<__nv_bfloat16, 2> loaded = load<EltPack<__nv_bfloat16, 2>, true, OpSum<__nv_bfloat16>>(
     reinterpret_cast<const EltPack<__nv_bfloat16, 2>*>(alignedAddr));
   EltPack<__nv_bfloat16, 1> result;
   const __nv_bfloat16* loadedElts = loaded.elts();
-    // Extract the correct bf16 based on address offset
+  // Extract the correct bf16 based on address offset
   result.elts()[0] = loadedElts[offset / sizeof(__nv_bfloat16)];
   return result;
 #endif
@@ -248,7 +248,7 @@ NCCL_DEVICE_INLINE EltPack<__nv_bfloat16, 1> load<EltPack<__nv_bfloat16, 1>, tru
 template <>
 NCCL_DEVICE_INLINE EltPack<__nv_bfloat16, 8> load<EltPack<__nv_bfloat16, 8>, true, OpSum<__nv_bfloat16>>(
   const EltPack<__nv_bfloat16, 8>* addr) {
-    // Use v4.bf16x2 instruction - bf16 requires its own instruction format
+  // Use v4.bf16x2 instruction - bf16 requires its own instruction format
   EltPack<__nv_bfloat16, 8> result;
   uint32_t raw[4];
   asm volatile("multimem.ld_reduce.global.add.acc::f32.v4.bf16x2 {%0, %1, %2, %3}, [%4];"
@@ -283,7 +283,7 @@ NCCL_DEVICE_INLINE EltPack<__nv_fp8_e4m3, 4> load<EltPack<__nv_fp8_e4m3, 4>, tru
    (__CUDA_ARCH_FAMILY_SPECIFIC__ == 1000 || __CUDA_ARCH_FAMILY_SPECIFIC__ == 1010))
   EltPack<__nv_fp8_e4m3, 4> result;
   uint32_t raw;
-    // Use e4m3x4 instruction with .acc::f16 accumulation
+  // Use e4m3x4 instruction with .acc::f16 accumulation
   asm volatile("multimem.ld_reduce.global.add.acc::f16.e4m3x4 %0, [%1];"
                : "=r"(raw)
                : "l"(__cvta_generic_to_global(addr))
@@ -314,15 +314,15 @@ NCCL_DEVICE_INLINE EltPack<__nv_fp8_e4m3, 2> load<EltPack<__nv_fp8_e4m3, 2>, tru
                   "https://docs.nvidia.com/cuda/parallel-thread-execution/#addresses-as-operands");
   return EltPack<__nv_fp8_e4m3, 2>{};
 #else
-    // Align address to 4 bytes for e4m3x4 load
+  // Align address to 4 bytes for e4m3x4 load
   const char* charAddr = reinterpret_cast<const char*>(addr);
   const size_t offset = reinterpret_cast<size_t>(addr) & 3;
   const char* alignedAddr = charAddr - offset;
-    // Load as EltPack<__nv_fp8_e4m3, 4> and extract the correct two fp8s
+  // Load as EltPack<__nv_fp8_e4m3, 4> and extract the correct two fp8s
   EltPack<__nv_fp8_e4m3, 4> loaded = load<EltPack<__nv_fp8_e4m3, 4>, true, OpSum<__nv_fp8_e4m3>>(
     reinterpret_cast<const EltPack<__nv_fp8_e4m3, 4>*>(alignedAddr));
   EltPack<__nv_fp8_e4m3, 2> result;
-    // Extract the correct two fp8s based on address offset
+  // Extract the correct two fp8s based on address offset
   const __nv_fp8_e4m3* loadedElts = loaded.elts();
   const int startIdx = offset / sizeof(__nv_fp8_e4m3);
   __nv_fp8_e4m3* resultElts = result.elts();
@@ -344,15 +344,15 @@ NCCL_DEVICE_INLINE EltPack<__nv_fp8_e4m3, 1> load<EltPack<__nv_fp8_e4m3, 1>, tru
                   "https://docs.nvidia.com/cuda/parallel-thread-execution/#addresses-as-operands");
   return EltPack<__nv_fp8_e4m3, 1>{};
 #else
-    // Align address to 4 bytes for e4m3x4 load
+  // Align address to 4 bytes for e4m3x4 load
   const char* charAddr = reinterpret_cast<const char*>(addr);
   const size_t offset = reinterpret_cast<size_t>(addr) & 3;
   const char* alignedAddr = charAddr - offset;
-    // Load as EltPack<__nv_fp8_e4m3, 4> and extract the correct fp8
+  // Load as EltPack<__nv_fp8_e4m3, 4> and extract the correct fp8
   EltPack<__nv_fp8_e4m3, 4> loaded = load<EltPack<__nv_fp8_e4m3, 4>, true, OpSum<__nv_fp8_e4m3>>(
     reinterpret_cast<const EltPack<__nv_fp8_e4m3, 4>*>(alignedAddr));
   EltPack<__nv_fp8_e4m3, 1> result;
-    // Extract the correct fp8 based on address offset
+  // Extract the correct fp8 based on address offset
   const __nv_fp8_e4m3* loadedElts = loaded.elts();
   result.elts()[0] = loadedElts[offset / sizeof(__nv_fp8_e4m3)];
   return result;
@@ -370,7 +370,7 @@ NCCL_DEVICE_INLINE EltPack<__nv_fp8_e4m3, 16> load<EltPack<__nv_fp8_e4m3, 16>, t
    (__CUDA_ARCH_FAMILY_SPECIFIC__ == 1000 || __CUDA_ARCH_FAMILY_SPECIFIC__ == 1010))
   EltPack<__nv_fp8_e4m3, 16> result;
   uint32_t raw[4];
-    // Use v4.e4m3x4 instruction (4 x e4m3x4 = 16 elements)
+  // Use v4.e4m3x4 instruction (4 x e4m3x4 = 16 elements)
   asm volatile("multimem.ld_reduce.global.add.acc::f16.v4.e4m3x4 {%0, %1, %2, %3}, [%4];"
                : "=r"(raw[0]), "=r"(raw[1]), "=r"(raw[2]), "=r"(raw[3])
                : "l"(__cvta_generic_to_global(addr))
@@ -400,7 +400,7 @@ NCCL_DEVICE_INLINE EltPack<__nv_fp8_e5m2, 4> load<EltPack<__nv_fp8_e5m2, 4>, tru
    (__CUDA_ARCH_FAMILY_SPECIFIC__ == 1000 || __CUDA_ARCH_FAMILY_SPECIFIC__ == 1010))
   EltPack<__nv_fp8_e5m2, 4> result;
   uint32_t raw;
-    // Use e5m2x4 instruction with .acc::f16 accumulation
+  // Use e5m2x4 instruction with .acc::f16 accumulation
   asm volatile("multimem.ld_reduce.global.add.acc::f16.e5m2x4 %0, [%1];"
                : "=r"(raw)
                : "l"(__cvta_generic_to_global(addr))
@@ -431,15 +431,15 @@ NCCL_DEVICE_INLINE EltPack<__nv_fp8_e5m2, 2> load<EltPack<__nv_fp8_e5m2, 2>, tru
                   "https://docs.nvidia.com/cuda/parallel-thread-execution/#addresses-as-operands");
   return EltPack<__nv_fp8_e5m2, 2>{};
 #else
-    // Align address to 4 bytes for e5m2x4 load
+  // Align address to 4 bytes for e5m2x4 load
   const char* charAddr = reinterpret_cast<const char*>(addr);
   const size_t offset = reinterpret_cast<size_t>(addr) & 3;
   const char* alignedAddr = charAddr - offset;
-    // Load as EltPack<__nv_fp8_e5m2, 4> and extract the correct two fp8s
+  // Load as EltPack<__nv_fp8_e5m2, 4> and extract the correct two fp8s
   EltPack<__nv_fp8_e5m2, 4> loaded = load<EltPack<__nv_fp8_e5m2, 4>, true, OpSum<__nv_fp8_e5m2>>(
     reinterpret_cast<const EltPack<__nv_fp8_e5m2, 4>*>(alignedAddr));
   EltPack<__nv_fp8_e5m2, 2> result;
-    // Extract the correct two fp8s based on address offset
+  // Extract the correct two fp8s based on address offset
   const __nv_fp8_e5m2* loadedElts = loaded.elts();
   const int startIdx = offset / sizeof(__nv_fp8_e5m2);
   __nv_fp8_e5m2* resultElts = result.elts();
@@ -461,15 +461,15 @@ NCCL_DEVICE_INLINE EltPack<__nv_fp8_e5m2, 1> load<EltPack<__nv_fp8_e5m2, 1>, tru
                   "https://docs.nvidia.com/cuda/parallel-thread-execution/#addresses-as-operands");
   return EltPack<__nv_fp8_e5m2, 1>{};
 #else
-    // Align address to 4 bytes for e5m2x4 load
+  // Align address to 4 bytes for e5m2x4 load
   const char* charAddr = reinterpret_cast<const char*>(addr);
   const size_t offset = reinterpret_cast<size_t>(addr) & 3;
   const char* alignedAddr = charAddr - offset;
-    // Load as EltPack<__nv_fp8_e5m2, 4> and extract the correct fp8
+  // Load as EltPack<__nv_fp8_e5m2, 4> and extract the correct fp8
   EltPack<__nv_fp8_e5m2, 4> loaded = load<EltPack<__nv_fp8_e5m2, 4>, true, OpSum<__nv_fp8_e5m2>>(
     reinterpret_cast<const EltPack<__nv_fp8_e5m2, 4>*>(alignedAddr));
   EltPack<__nv_fp8_e5m2, 1> result;
-    // Extract the correct fp8 based on address offset
+  // Extract the correct fp8 based on address offset
   const __nv_fp8_e5m2* loadedElts = loaded.elts();
   result.elts()[0] = loadedElts[offset / sizeof(__nv_fp8_e5m2)];
   return result;
@@ -486,7 +486,7 @@ NCCL_DEVICE_INLINE EltPack<__nv_fp8_e5m2, 16> load<EltPack<__nv_fp8_e5m2, 16>, t
    (__CUDA_ARCH_FAMILY_SPECIFIC__ == 1000 || __CUDA_ARCH_FAMILY_SPECIFIC__ == 1010))
   EltPack<__nv_fp8_e5m2, 16> result;
   uint32_t raw[4];
-    // Use v4.e5m2x4 instruction (4 x e5m2x4 = 16 elements)
+  // Use v4.e5m2x4 instruction (4 x e5m2x4 = 16 elements)
   asm volatile("multimem.ld_reduce.global.add.acc::f16.v4.e5m2x4 {%0, %1, %2, %3}, [%4];"
                : "=r"(raw[0]), "=r"(raw[1]), "=r"(raw[2]), "=r"(raw[3])
                : "l"(__cvta_generic_to_global(addr))
@@ -727,7 +727,7 @@ NCCL_DEVICE_INLINE void multimemStore(void* addr, const Pack& pack) {
   return;
 #else
   const size_t multimem_addr = __cvta_generic_to_global(addr);
-    // Convert EltPack to typeless BytePack via union
+  // Convert EltPack to typeless BytePack via union
   union {
     Pack eltPack;
     BytePack<Pack::Bytes> bytePack;

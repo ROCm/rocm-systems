@@ -204,7 +204,8 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
     if (tid == nworkers) shmem->parallelFactor = 0;
     __syncthreads();
 
-    if (tid == nworkers) { // Algo computation thread
+    if (tid == nworkers) {
+      // Algo computation thread
       PatRSAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, NCCL_PAT_NWORKERS / WARP_SIZE, channelOffset,
                                 channelOffset + channelCount, count, chunkCount, rank, nranks);
       int parallelFactor = shmem->parallelFactor = patAlgo.getParallelFactor();
@@ -221,7 +222,8 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
         step++;
         if (last == 2) break;
       }
-    } else if (tid < nworkers) { // Worker threads
+    } else if (tid < nworkers) {
+      // Worker threads
       T* inputBuf = (T*)work->sendbuff;
       T* outputBuf = (T*)work->recvbuff;
       int parallelFactor = 0;

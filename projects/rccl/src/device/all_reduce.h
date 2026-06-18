@@ -57,7 +57,7 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
 
     auto modRanks = [&] __device__(int r) -> int { return r - (r >= nranks ? nranks : 0); };
 
-      // step 0: push data to next GPU
+    // step 0: push data to next GPU
     chunk = modRanks(ringIx + nranks - 1);
     chunkOffset = chunk * chunkCount;
     offset = gridOffset + elemOffset + chunkOffset;
@@ -65,8 +65,7 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
 
     prims.directSend(offset, offset, nelem);
 
-      // k-2 steps: reduce and copy to next GPU
-
+    // k-2 steps: reduce and copy to next GPU
     for (int j = 2; j < nranks; ++j) {
       chunk = modRanks(ringIx + nranks - j);
       chunkOffset = chunk * chunkCount;
@@ -75,8 +74,8 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       prims.directRecvReduceDirectSend(offset, offset, nelem);
     }
 
-      // step k-1: reduce this buffer and data, which will produce the final
-      // result that we store in this data and push to the next GPU
+    // step k-1: reduce this buffer and data, which will produce the final
+    // result that we store in this data and push to the next GPU
     chunk = ringIx + 0;
     chunkOffset = chunk * chunkCount;
     offset = gridOffset + elemOffset + chunkOffset;
@@ -84,7 +83,7 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
 
     prims.directRecvReduceCopyDirectSend(offset, offset, nelem, /*postOp=*/true);
 
-      // k-2 steps: copy to next GPU
+    // k-2 steps: copy to next GPU
     for (int j = 1; j < nranks - 1; ++j) {
       chunk = modRanks(ringIx + nranks - j);
       chunkOffset = chunk * chunkCount;
@@ -93,7 +92,7 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       prims.directRecvCopyDirectSend(offset, offset, nelem);
     }
 
-      // Make final copy from buffer to dest.
+    // Make final copy from buffer to dest.
     chunk = modRanks(ringIx + 1);
     chunkOffset = chunk * chunkCount;
     offset = gridOffset + elemOffset + chunkOffset;
@@ -187,9 +186,10 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
   if (Proto::Id == NCCL_PROTO_SIMPLE) {
     nthreadsSplit = nthreads / 2;
     if (nthreadsSplit >= 256) nthreadsSplit += 64;
-  } else { // LL & LL128
-      // Receiving from up to 3 sources is more compute intensive than sending
-      // to 3 dests. Use 70% for reduce and 30% for bcast.
+  } else {
+    // LL & LL128
+    // Receiving from up to 3 sources is more compute intensive than sending
+    // to 3 dests. Use 70% for reduce and 30% for bcast.
     nthreadsSplit = (nthreads * 7 / (10 * WARP_SIZE)) * WARP_SIZE;
   }
 
@@ -205,7 +205,7 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
     }
 
   } else if (tid < nthreadsSplit) {
-      /* Reduce up. Max number of recv is 3, max number of send is 1 (binary tree + local).
+    /* Reduce up. Max number of recv is 3, max number of send is 1 (binary tree + local).
      * Why Direct=1????
      * Answer: Because despite not performing any direct operations, the ctor
      * must assume Direct so that it can exchange direct pointers with remote ctors
@@ -346,7 +346,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
       ssize_t maxNelems;
       if (work->netRegUsed) {
         offsetBase = bid * chunkSize;
-        maxNelems = size; // never be the min
+        maxNelems = size;  // never be the min
         peerOffset = nChannels * chunkSize;
       } else {
         offsetBase = bid * direct->nHeads * chunkSize;
@@ -403,7 +403,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
       ssize_t maxNelems;
       if (work->netRegUsed) {
         offsetBase = bid * chunkSize;
-        maxNelems = size; // never be the min
+        maxNelems = size;  // never be the min
         peerOffset = nChannels * chunkSize;
       } else {
         offsetBase = bid * direct->nHeads * chunkSize;

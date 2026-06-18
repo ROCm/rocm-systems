@@ -388,7 +388,8 @@ public:
             if (isSendNotRecv) {
               if (flags & DirectWrite) {
                 ptrs[index] = directBuff;
-              } else if (flags & DirectRead) { // empty send
+              } else if (flags & DirectRead) {
+                // empty send
                 ptrs[index] = nullptr;
               } else {
                 ptrs[index] = connEltsFifo + (step % NCCL_STEPS) * connStepSize;
@@ -397,7 +398,7 @@ public:
               if (flags & DirectRead) {
                 ptrs[index] = directBuff;
               } else if (flags & DirectWrite) {
-                if (Send) ptrs[index] = directBuff; // send to next from my output buffer
+                if (Send) ptrs[index] = directBuff;  // send to next from my output buffer
                 else ptrs[index] = nullptr;
               } else {
                 ptrs[index] = connEltsFifo + (step % NCCL_STEPS) * connStepSize;
@@ -456,7 +457,7 @@ private:
     constexpr int DirectSend = /*1 &&*/ Direct && DirectSend1;
     int offset = 0; // slice offset
     int sliceSize = stepSize * StepPerSlice;
-    int dataSize = max(DIVUP(peerElem, 16 * SlicePerChunk) * 16, sliceSize / 32); // per-peer slice size
+    int dataSize = max(DIVUP(peerElem, 16 * SlicePerChunk) * 16, sliceSize / 32);  // per-peer slice size
 
 #pragma unroll 1
     for (int slice = 0; slice < SlicePerChunk; ++slice) {
@@ -600,7 +601,7 @@ private:
             if (P2p) {
               flags |= conn->flags & NCCL_P2P_WRITE ? DirectWrite : DirectRead;
             } else if (connIndex == 1 && direct) {
-              flags |= DirectRead; // scatter-reduce use direct pull
+              flags |= DirectRead;  // scatter-reduce use direct pull
             } else {
               flags |= direct & NCCL_P2P_READ ? DirectRead : DirectWrite;
             }
@@ -649,21 +650,21 @@ public:
     // // For send operations, we need an extra warp to overlap the threadfence and the copy
     // this->nworkers = nthreads - (MaxSend > 0 && nthreads >= NCCL_SIMPLE_EXTRA_GROUP_IF_NTHREADS_GE ? WARP_SIZE : 0);
 
-    int nrecv = 0, nsend = 0;
-    // Yes, for some template arguments this code will be unreachable.  That's fine.
-    // coverity[dead_error_line]
-    while (nrecv < MaxRecv && recvPeers[nrecv] != -1) nrecv++;
-    // coverity[dead_error_line]
-    while (nsend < MaxSend && sendPeers[nsend] != -1) nsend++;
-    this->fan = Fan(nrecv, nsend);
+      int nrecv = 0, nsend = 0;
+      // Yes, for some template arguments this code will be unreachable.  That's fine.
+      // coverity[dead_error_line]
+      while (nrecv < MaxRecv && recvPeers[nrecv] != -1) nrecv++;
+      // coverity[dead_error_line]
+      while (nsend < MaxSend && sendPeers[nsend] != -1) nsend++;
+      this->fan = Fan(nrecv, nsend);
 
     constexpr int ThreadPerSync =
       MaxSend >= 16 || MaxRecv >= 16 ?
         32 : // NVLS may have an arity > 8. In that case increase the size of the groups
         MaxSend >= 8 || MaxRecv >= 8 ?
-        16 :
-        8; // Allows for all roles (WaitRecv/WaitSend/PostRecv/PostSend) within a single warp
-    static_assert(MaxSend <= ThreadPerSync && MaxRecv <= ThreadPerSync, "Not enough threads to cover all peers");
+          16 :
+          8; // Allows for all roles (WaitRecv/WaitSend/PostRecv/PostSend) within a single warp
+      static_assert(MaxSend <= ThreadPerSync && MaxRecv <= ThreadPerSync, "Not enough threads to cover all peers");
 
     assert(2 * (nrecv + nsend) <= nthreads); // Ensure no thread is assigned more than one role.
     // Coverity assumes that index will equal tid based on the line below, but it doesn't consider the setting

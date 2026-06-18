@@ -59,21 +59,21 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
   __device__ __attribute__((noinline)) void run() {
 #endif
     const int tid = threadIdx.x;
-  const int tn = blockDim.x;
-  const int wid = tid / WARP_SIZE;
-  const int nWarps = tn / WARP_SIZE;
-  const int lane = tid % WARP_SIZE;
+    const int tn = blockDim.x;
+    const int wid = tid / WARP_SIZE;
+    const int nWarps = tn / WARP_SIZE;
+    const int lane = tid % WARP_SIZE;
 
-  struct Shared {
-    uint32_t workSendMask; // bitmasks of which work indices have send/recv
-    uint32_t workRecvMask;
-  };
-  Shared* shared = (Shared*)ncclScratchForWarp(0);
+    struct Shared {
+      uint32_t workSendMask; // bitmasks of which work indices have send/recv
+      uint32_t workRecvMask;
+    };
+    Shared* shared = (Shared*)ncclScratchForWarp(0);
 
-  struct ncclDevWorkP2p* works = (ncclDevWorkP2p*)ncclShmem.workStorage;
-  int nWorks = ncclShmem.nWorks;
+    struct ncclDevWorkP2p* works = (ncclDevWorkP2p*)ncclShmem.workStorage;
+    int nWorks = ncclShmem.nWorks;
 
-  if (wid == 0) {
+    if (wid == 0) {
       // Modify the memory range of each work[] to reflect this channel's
       // partition of the work. Since integer divides are very heavy it's
       // best to do them all in one warp.
@@ -120,26 +120,26 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     // This might reduce nWarpPerWork which is probably desirable. It is better
     // to have a balanced number of reading and writing threads even if that
     // leaves warps unused.
-  nWarpPerWork = nSendWarpPerWork + nRecvWarpPerWork;
+    nWarpPerWork = nSendWarpPerWork + nRecvWarpPerWork;
     // The work index this warp belongs to: workIx = wid/nWarpPerWork
   int workIx = __popcll(__ballot((lane + 1) * nWarpPerWork <= wid));
 
-  __syncthreads(); // Wait for works[] and shared->* to be updated by warp=0
+    __syncthreads(); // Wait for works[] and shared->* to be updated by warp=0
 
-  uint32_t workSendMask = shared->workSendMask;
-  uint32_t workRecvMask = shared->workRecvMask;
+    uint32_t workSendMask = shared->workSendMask;
+    uint32_t workRecvMask = shared->workRecvMask;
 
-  __syncthreads(); // release scratch space used by shared->*
-  if (nWorks <= workIx) return;
+    __syncthreads(); // release scratch space used by shared->*
+    if (nWorks <= workIx) return;
 
     // Thread range for whole work (send & recv combined)
-  int subtid = tid - workIx * nWarpPerWork * WARP_SIZE;
-  int subtn = nWarpPerWork * WARP_SIZE;
+    int subtid = tid - workIx * nWarpPerWork * WARP_SIZE;
+    int subtn = nWarpPerWork * WARP_SIZE;
 
     // A send primtive of sufficient size requires 2 cuda barrier ids.
-  constexpr int nSendWarpsForExtraGroup = NCCL_SIMPLE_EXTRA_GROUP_IF_NTHREADS_GE / WARP_SIZE;
+    constexpr int nSendWarpsForExtraGroup = NCCL_SIMPLE_EXTRA_GROUP_IF_NTHREADS_GE / WARP_SIZE;
     // Count up all group ids used below this workIx:
-  int group, extra;
+    int group, extra;
     // Each recv gets one group id:
   group = __popcll(workRecvMask & ((1 << workIx) - 1));
     // Sends accompanying recvs get one and maybe an extra:
@@ -149,13 +149,13 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
   extra = (nWarpPerWork >= nSendWarpsForExtraGroup) ? 1 : 0;
   group += __popcll((workSendMask & ~workRecvMask) & ((1 << workIx) - 1)) * (1 + extra);
 
-  struct ncclDevWorkP2p* work = &works[workIx];
-  bool hasSend = 1 & (workSendMask >> workIx);
-  bool hasRecv = 1 & (workRecvMask >> workIx);
-  bool isCopy = work->sendRank == ncclShmem.comm.rank;
-  bool isSend = !hasRecv || (hasSend && subtid < nSendWarpPerWork * WARP_SIZE);
+    struct ncclDevWorkP2p* work = &works[workIx];
+    bool hasSend = 1 & (workSendMask >> workIx);
+    bool hasRecv = 1 & (workRecvMask >> workIx);
+    bool isCopy = work->sendRank == ncclShmem.comm.rank;
+    bool isSend = !hasRecv || (hasSend && subtid < nSendWarpPerWork * WARP_SIZE);
 
-  if (!isCopy && hasSend && hasRecv) {
+    if (!isCopy && hasSend && hasRecv) {
       // Translate thread ids to reflect just this send or recv as opposed to whole work.
     if (isSend) {
       subtn = nSendWarpPerWork * WARP_SIZE;

@@ -379,7 +379,8 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
                                             sizeof(symLsaMessage) * maxSegments),
                 ret, fail);
 
-  if (devr->lsaFlatBase == nullptr) { // Create on first need.
+  if (devr->lsaFlatBase == nullptr) {
+    // Create on first need.
     CUdeviceptr addr;
     CUCHECKGOTO(cuMemAddressReserve(&addr, devr->lsaSize * devr->bigSize, NCCL_MAX_PAGE_SIZE, 0, 0), ret, fail);
     devr->lsaFlatBase = reinterpret_cast<void*>(addr);
@@ -403,7 +404,7 @@ fail:
 static ncclResult_t symBindTeamMemory(struct ncclComm* comm, struct ncclDevrTeam* tm, struct ncclDevrMemory* mem) {
   if (comm->nvlsSupport && tm->mcBasePtr != nullptr) {
 #if CUDART_VERSION >= 12010
-      // Multimem teams are currently unsupported for memory containing CPU-backed physical segments
+    // Multimem teams are currently unsupported for memory containing CPU-backed physical segments
     if (mem->globalHasSysmemSegment) {
       INFO(NCCL_NVLS, "Skipping bind multicast for maxGlobalNumSegments = %d, big=%lx, team {%d x %d}",
            mem->maxGlobalNumSegments, mem->bigOffset, tm->team.nRanks, tm->team.stride);
@@ -504,7 +505,8 @@ static ncclResult_t symTeamObtain(struct ncclComm* comm, struct ncclTeam team, b
         NCCLCHECKGOTO(symBindTeamMemory(comm, t, mem), ret, fail_mcHandle_mcAddr_unmap_mems);
       }
 
-      if (false) { // Error labels:
+      if (false) {
+        // Error labels:
       fail_mcHandle_mcAddr_unmap_mems:
         for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
           symUnbindTeamMemory(comm, t, mem);
@@ -848,7 +850,8 @@ static void symMemoryDropRef(struct ncclComm* comm, struct ncclDevrMemory* mem) 
 static ncclResult_t symWindowTableInitOnce(struct ncclComm* comm, cudaStream_t stream) {
   struct ncclDevrState* devr = &comm->devrState;
   struct ncclDevCommWindowTable* tableDev = devr->windowTable;
-  if (tableDev == nullptr) { // Create on first need.
+  if (tableDev == nullptr) {
+    // Create on first need.
     NCCLCHECK(ncclShadowPoolAlloc<ncclDevCommWindowTable>(&devr->shadows, &tableDev, nullptr, stream));
     devr->windowTable = tableDev;
   }
