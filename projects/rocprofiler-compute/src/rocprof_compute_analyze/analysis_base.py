@@ -73,6 +73,16 @@ def test_df_column_equality(df: pd.DataFrame) -> bool:
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()
 
 
+def _pmc_perf_is_current(pmc_perf: Path, results_files: list[Path]) -> bool:
+    """Return True if pmc_perf.csv can be reused (no newer results_*.csv)."""
+    if not pmc_perf.exists():
+        return False
+    if not results_files:
+        return True
+    newest_results_mtime = max(file.stat().st_mtime for file in results_files)
+    return pmc_perf.stat().st_mtime >= newest_results_mtime
+
+
 class OmniAnalyze_Base:
     def __init__(
         self, args: argparse.Namespace, supported_archs: dict[str, str]
@@ -700,7 +710,7 @@ class OmniAnalyze_Base:
             pmc_perf = directory / "pmc_perf.csv"
             results_files = list(directory.glob("results_*.csv"))
 
-            if pmc_perf.exists():
+            if _pmc_perf_is_current(pmc_perf, results_files):
                 console_debug(f"Using existing {pmc_perf}")
             elif results_files:
                 console_log(f"Joining results_*.csv for {directory}...")

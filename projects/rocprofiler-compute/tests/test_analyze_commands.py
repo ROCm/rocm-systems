@@ -2185,3 +2185,30 @@ def test_join_prof_renames_sq_accum_prev_hires_to_bucket_target(tmp_path):
     assert "SQ_ACCUM_PREV_HIRES" not in merged.columns
     assert set(merged["SQ_LEVEL_WAVES_ACCUM"].tolist()) == {100, 200}
     assert "SQ_WAVES" in merged.columns
+
+
+def test_pmc_perf_is_current_detects_stale_join(tmp_path):
+    """pmc_perf.csv must be treated as stale when a results_*.csv is newer.
+    """
+    from rocprof_compute_analyze.analysis_base import _pmc_perf_is_current
+
+    pmc_perf = tmp_path / "pmc_perf.csv"
+    results_file = tmp_path / "results_pmc_perf_0.csv"
+
+    # No pmc_perf.csv so we must rejoin.
+    assert _pmc_perf_is_current(pmc_perf, [results_file]) is False
+
+    # pmc_perf.csv exists and no results, reuse (deprecated direct path).
+    pmc_perf.write_text("a,b\n1,2\n")
+    assert _pmc_perf_is_current(pmc_perf, []) is True
+
+    # pmc_perf.csv newer than results, reuse.
+    results_file.write_text("a,b\n3,4\n")
+    os.utime(results_file, (1000, 1000))
+    os.utime(pmc_perf, (2000, 2000))
+    assert _pmc_perf_is_current(pmc_perf, [results_file]) is True
+
+    # results newer than pmc_perf.csv, stale, must rejoin.
+    os.utime(pmc_perf, (1000, 1000))
+    os.utime(results_file, (2000, 2000))
+    assert _pmc_perf_is_current(pmc_perf, [results_file]) is False
