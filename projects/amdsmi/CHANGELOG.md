@@ -30,7 +30,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Added IFoE/UALoE fabric telemetry and topology support**.  
   - New `amd-smi fabric` CLI subcommand with `--topology`/`-t` and `--info`/`-i` flags for querying fabric (UALoE) information.
-  - New C APIs: `amdsmi_alloc_fabric_telemetry()`, `amdsmi_get_fabric_telemetry_data()`, `amdsmi_free_fabric_telemetry()`, `amdsmi_fabric_telem_id_to_string()`, and `amdsmi_get_gpu_fabric_info()`.
+  - New C APIs: `amdsmi_alloc_fabric_telemetry()`, `amdsmi_get_fabric_telemetry_data()`, `amdsmi_free_fabric_telemetry()`, `amdsmi_get_gpu_fabric_info()`, and `amdsmi_fabric_telem_id_to_string()` — the last returns `amdsmi_status_t` and writes the telemetry-item name through an output parameter (`AMDSMI_STATUS_INVAL` on a NULL parameter, `AMDSMI_STATUS_NOT_FOUND` for an unrecognized ID).
   - New Python APIs: `amdsmi_get_fabric_telemetry_data()` and `amdsmi_get_gpu_fabric_info()`.
   - Fabric telemetry category masks and size constants converted from preprocessor `#define`s to enums so they are exposed through the Python wrapper.
 

@@ -7028,20 +7028,17 @@ def amdsmi_get_fabric_telemetry_data(
                 for item_idx in range(inst.item_count):
                     item = inst.items[item_idx]
                     telem_id = item.id
-                    name_ptr = amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(telem_id)
-                    # Handle both c_char_p (string) and POINTER(c_char) (pointer) return types
-                    if name_ptr:
-                        if isinstance(name_ptr, bytes):
-                            name_str = name_ptr.decode("utf-8")
-                        elif hasattr(name_ptr, "value"):
-                            # c_char_p has a .value attribute
-                            name_str = (
-                                name_ptr.value.decode("utf-8") if name_ptr.value else "UNKNOWN"
-                            )
-                        else:
-                            # POINTER(c_char) - dereference and convert to string
-                            name_str = ctypes.string_at(name_ptr).decode("utf-8")
+                    name_ptr = ctypes.POINTER(ctypes.c_char)()
+                    name_status = amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(
+                        telem_id, ctypes.byref(name_ptr)
+                    )
+                    if name_status == amdsmi_wrapper.AMDSMI_STATUS_SUCCESS and name_ptr:
+                        name_str = ctypes.string_at(name_ptr).decode("utf-8")
+                    elif name_status == amdsmi_wrapper.AMDSMI_STATUS_NOT_FOUND:
+                        name_str = "UNKNOWN"
                     else:
+                        # Only SUCCESS/NOT_FOUND are expected; surface anything else.
+                        _check_res(name_status)
                         name_str = "UNKNOWN"
                     items.append({"id": telem_id, "name": name_str, "value": item.value})
                 instances.append(

@@ -562,12 +562,17 @@ static const std::unordered_map<uint64_t, const char*> telemetry_id_map = {
      "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE"},
 };
 
-const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id) {
-  auto it = telemetry_id_map.find(telem_id);
-  if (it != telemetry_id_map.end()) {
-    return it->second;
+amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char** name) {
+  if (name == nullptr) {
+    return AMDSMI_STATUS_INVAL;
   }
-  return "UNKNOWN";
+  auto it = telemetry_id_map.find(telem_id);
+  if (it == telemetry_id_map.end()) {
+    *name = nullptr;
+    return AMDSMI_STATUS_NOT_FOUND;
+  }
+  *name = it->second;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 // Note: AMDSMI and UALoE telemetry structures are now designed to be binary compatible

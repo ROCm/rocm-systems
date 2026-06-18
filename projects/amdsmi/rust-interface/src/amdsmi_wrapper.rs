@@ -4392,7 +4392,10 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
-    pub fn amdsmi_fabric_telem_id_to_string(telem_id: u64) -> *const ::std::os::raw::c_char;
+    pub fn amdsmi_fabric_telem_id_to_string(
+        telem_id: u64,
+        name: *mut *const ::std::os::raw::c_char,
+    ) -> AmdsmiStatusT;
 }
 extern "C" {
     pub fn amdsmi_free_fabric_telemetry(

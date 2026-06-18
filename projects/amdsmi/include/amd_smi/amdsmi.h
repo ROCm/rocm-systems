@@ -5714,18 +5714,21 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
  *
  *  @platform{gpu_bm_linux}
  *
- *  @details Given a telemetry item ID @p telem_id,
- *  this function returns a pointer to a string containing the human-readable name
- *  for the specified telemetry item. The returned string is statically allocated
- *  and should not be freed by the caller.
+ *  @details Given a telemetry item ID @p telem_id, this function writes a
+ *  pointer to the statically allocated, human-readable name string for the
+ *  specified telemetry item into @p name.
  *
+ *  @param[in] telem_id - The telemetry item ID for which the name is requested
  *
- *  @param[in] telem_id The telemetry item ID for which the name is requested
+ *  @param[out] name - Pointer to a string pointer. On success @p *name is set to
+ *  the statically allocated item name; on ::AMDSMI_STATUS_NOT_FOUND @p *name is
+ *  set to NULL. The string must not be freed by the caller.
  *
- *  @return const char* | Pointer to string containing the telemetry item name,
- *  or UNKNOWN if the category or telemetry ID is not recognized
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *  ::AMDSMI_STATUS_INVAL if @p name is NULL,
+ *  ::AMDSMI_STATUS_NOT_FOUND if @p telem_id is not recognized.
  */
-const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
+amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char** name);
 
 /**
  *  @brief Free Fabric telemetry storage

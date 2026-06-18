@@ -3564,8 +3564,8 @@ except AttributeError:
     pass
 try:
     amdsmi_fabric_telem_id_to_string = _libraries['libamd_smi.so'].amdsmi_fabric_telem_id_to_string
-    amdsmi_fabric_telem_id_to_string.restype = ctypes.POINTER(ctypes.c_char)
-    amdsmi_fabric_telem_id_to_string.argtypes = [uint64_t]
+    amdsmi_fabric_telem_id_to_string.restype = amdsmi_status_t
+    amdsmi_fabric_telem_id_to_string.argtypes = [uint64_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError:
     pass
 try:

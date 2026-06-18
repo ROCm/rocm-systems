@@ -201,9 +201,13 @@ int main() {
               // Display items for this instance
               for (uint32_t item_idx = 0; item_idx < instance->item_count; item_idx++) {
                 auto& item = instance->items[item_idx];
+                const char* item_name = nullptr;
+                amdsmi_status_t name_status = amdsmi_fabric_telem_id_to_string(item.id, &item_name);
+                if (name_status != AMDSMI_STATUS_SUCCESS) {
+                  item_name = "UNKNOWN";
+                }
                 std::cout << "\t\t\t\t\t\tItem " << item_idx << ": "
-                          << "ID=0x" << std::hex << item.id << std::dec << "("
-                          << amdsmi_fabric_telem_id_to_string(item.id) << ")"
+                          << "ID=0x" << std::hex << item.id << std::dec << "(" << item_name << ")"
                           << ", Value=" << item.value << std::endl;
               }
             }
