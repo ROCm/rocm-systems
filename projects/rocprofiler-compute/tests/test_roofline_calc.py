@@ -4,11 +4,14 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from utils import schema
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
+    GraphPoints,
     calc_ai_analyze,
+    calc_ceilings,
     sanitize_ai_value,
     sanitize_mem_level,
 )
@@ -237,3 +240,219 @@ def test_sanitize_mem_level_vl1d_normalised():
     """'vL1D' is normalised to 'L1' before filtering."""
     result = sanitize_mem_level("vL1D", "mi210")
     assert result == ["L1"]
+
+
+##############################################################################
+# calc_ceilings Tests
+##############################################################################
+
+# gfx90a-class model whose memory levels (LDS/L1/L2/HBM) match BW_COLUMNS.
+MFMA_GPU_MODEL = "mi210"
+# gfx1151-class model; memory levels resolve to LDS/L0/L1/L2 (MALL skipped).
+WMMA_GPU_MODEL = "rdna35_halo"
+
+# Union of BW columns needed by both models (mi210 reads HBM, rdna35_halo reads
+# L0); calc_ceilings only consumes the levels its model supports.
+BW_COLUMNS = ["HBMBw", "L2Bw", "L1Bw", "L0Bw", "LDSBw"]
+BW_VALUE = 500.0
+
+PEAK_VALUES = {
+    "FP16Flops": 1000.0,
+    "FP32Flops": 2000.0,
+    "FP64Flops": 3000.0,
+    "I8Ops": 4000.0,
+    "I32Ops": 5000.0,
+    "I64Ops": 6000.0,
+    "MFMAF4Flops": 7000.0,
+    "MFMAF6Flops": 8000.0,
+    "MFMAF8Flops": 9000.0,
+    "MFMAF16Flops": 10000.0,
+    "MFMAF32Flops": 11000.0,
+    "MFMAF64Flops": 12000.0,
+    "MFMAI8Ops": 13000.0,
+    "WMMAF16Flops": 20000.0,
+    "WMMABF16Flops": 21000.0,
+    "WMMAF32Flops": 22000.0,
+    "WMMAF64Flops": 23000.0,
+    "WMMAI8Ops": 24000.0,
+}
+
+# MFMA (CDNA) supports the full datatype set.
+MFMA_CASES = [
+    ("FP32", "FP32Flops", "MFMAF32Flops"),
+    ("FP16", "FP16Flops", "MFMAF16Flops"),
+    ("FP64", "FP64Flops", "MFMAF64Flops"),
+    ("I8", "I8Ops", "MFMAI8Ops"),
+    ("I32", "I32Ops", None),
+    ("I64", "I64Ops", None),
+    ("BF16", None, "MFMAF16Flops"),
+    ("FP8", None, "MFMAF8Flops"),
+    ("FP4", None, "MFMAF4Flops"),
+    ("FP6", None, "MFMAF6Flops"),
+]
+
+# FP4/FP6/FP8 are not supported on gfx1151.
+WMMA_CASES = [
+    ("FP32", "FP32Flops", "WMMAF32Flops"),
+    ("FP16", "FP16Flops", "WMMAF16Flops"),
+    ("FP64", "FP64Flops", "WMMAF64Flops"),
+    ("I8", "I8Ops", "WMMAI8Ops"),
+    ("I32", "I32Ops", None),
+    ("I64", "I64Ops", None),
+    ("BF16", None, "WMMAF16Flops"),
+]
+
+# (matrix_ops_type, gpu_model, cases) tuples driving the parametrized tests.
+MATRIX_FAMILIES = [
+    ("MFMA", MFMA_GPU_MODEL, MFMA_CASES),
+    ("WMMA", WMMA_GPU_MODEL, WMMA_CASES),
+]
+
+# Flattened (matrix_ops_type, gpu_model, dtype, valu_col, matrix_col) rows.
+ROOFLINE_DATATYPE_CASES = [
+    (prefix, model, dtype, valu_col, matrix_col)
+    for prefix, model, cases in MATRIX_FAMILIES
+    for (dtype, valu_col, matrix_col) in cases
+]
+
+
+class _MockMspec:
+    """Minimal stand-in for MachineSpecs; calc_ceilings only reads gpu_model."""
+
+    def __init__(self, gpu_model=MFMA_GPU_MODEL):
+        self.gpu_model = gpu_model
+
+
+def _roofline_parameters(matrix_ops_type="MFMA"):
+    # matrix_ops_type is "MFMA" for CDNA (MI-series) and "WMMA" for RDNA.
+    return {
+        "device_id": 0,
+        "mem_level": "ALL",
+        "workload_dir": "/tmp",
+        "matrix_ops_type": matrix_ops_type,
+    }
+
+
+def _full_benchmark_data():
+    """Benchmark dict with every BW, PEAK_OPS and matrix column populated."""
+    data = {col: [str(BW_VALUE)] for col in BW_COLUMNS}
+    for col, value in PEAK_VALUES.items():
+        data[col] = [str(value)]
+    return data
+
+
+@pytest.mark.parametrize(
+    ("matrix_ops_type", "gpu_model", "dtype", "valu_col", "matrix_col"),
+    ROOFLINE_DATATYPE_CASES,
+    ids=[f"{row[0]}-{row[2]}" for row in ROOFLINE_DATATYPE_CASES],
+)
+def test_calc_ceilings_roofline_datatype(
+    matrix_ops_type, gpu_model, dtype, valu_col, matrix_col
+):
+    """Each datatype populates exactly its expected VALU and/or matrix roof."""
+    result = calc_ceilings(
+        _roofline_parameters(matrix_ops_type),
+        dtype,
+        _full_benchmark_data(),
+        _MockMspec(gpu_model),
+    )
+
+    if valu_col is None:
+        assert result["valu"] == [], (
+            f"{dtype} should not produce a VALU (PEAK_OPS) roof"
+        )
+    else:
+        assert result["valu"], f"{dtype} should produce a VALU (PEAK_OPS) roof"
+        assert result["valu"][2] == PEAK_VALUES[valu_col], (
+            f"{dtype} VALU peak should be read from {valu_col}"
+        )
+
+    if matrix_col is None:
+        assert result["matrix_ops"] == [], (
+            f"{dtype} should not produce a {matrix_ops_type} (matrix) roof"
+        )
+    else:
+        assert result["matrix_ops"], (
+            f"{dtype} should produce a {matrix_ops_type} (matrix) roof"
+        )
+        assert result["matrix_ops"][2] == PEAK_VALUES[matrix_col], (
+            f"{dtype} {matrix_ops_type} peak should be read from {matrix_col}"
+        )
+
+
+@pytest.mark.parametrize(
+    ("matrix_ops_type", "gpu_model", "matrix_col"),
+    [
+        ("MFMA", MFMA_GPU_MODEL, "MFMAF16Flops"),
+        ("WMMA", WMMA_GPU_MODEL, "WMMAF16Flops"),
+    ],
+    ids=["MFMA", "WMMA"],
+)
+def test_bf16_uses_f16_matrix_column(matrix_ops_type, gpu_model, matrix_col):
+    """BF16 has no VALU roof and reads its matrix peak from the F16 column.
+
+    Proves the ``f"F{dtype[2:]}"`` remap: BF16 -> F16 -> {prefix}F16Flops.
+    """
+    result = calc_ceilings(
+        _roofline_parameters(matrix_ops_type),
+        "BF16",
+        _full_benchmark_data(),
+        _MockMspec(gpu_model),
+    )
+
+    assert result["valu"] == [], "BF16 is matrix-only; no VALU roof expected"
+    assert result["matrix_ops"][2] == PEAK_VALUES[matrix_col]
+
+
+def test_fp8_special_mfma_only():
+    """FP8 is matrix-only and reads its peak from the dedicated MFMAF8 column.
+
+    FP8 is a CDNA/MFMA datatype only.
+    """
+    result = calc_ceilings(
+        _roofline_parameters("MFMA"), "FP8", _full_benchmark_data(), _MockMspec()
+    )
+
+    assert result["valu"] == [], "FP8 is not a PEAK_OPS datatype; no VALU roof"
+    assert result["matrix_ops"][2] == PEAK_VALUES["MFMAF8Flops"]
+
+
+def test_missing_peak_ops_column_returns_empty():
+    """A PEAK_OPS datatype missing its Flops column returns empty ceilings."""
+    benchmark_data = _full_benchmark_data()
+    del benchmark_data["FP64Flops"]
+
+    result = calc_ceilings(_roofline_parameters(), "FP64", benchmark_data, _MockMspec())
+
+    assert result == GraphPoints.empty().__dict__
+
+
+@pytest.mark.parametrize(
+    ("matrix_ops_type", "gpu_model", "matrix_col"),
+    [
+        ("MFMA", MFMA_GPU_MODEL, "MFMAF16Flops"),
+        ("WMMA", WMMA_GPU_MODEL, "WMMAF16Flops"),
+    ],
+    ids=["MFMA", "WMMA"],
+)
+def test_missing_matrix_column_skips_matrix_roof(
+    matrix_ops_type, gpu_model, matrix_col
+):
+    """A matrix datatype missing its matrix column emits no matrix roof.
+
+    BF16 is matrix-only.
+    """
+    benchmark_data = _full_benchmark_data()
+    del benchmark_data[matrix_col]
+
+    result = calc_ceilings(
+        _roofline_parameters(matrix_ops_type),
+        "BF16",
+        benchmark_data,
+        _MockMspec(gpu_model),
+    )
+
+    assert result["valu"] == [], "BF16 has no VALU roof regardless of matrix data"
+    assert result["matrix_ops"] == [], (
+        f"missing {matrix_ops_type} column should skip the roof"
+    )
