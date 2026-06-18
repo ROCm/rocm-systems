@@ -66,7 +66,14 @@ output_config::parse_env()
     annotate_args  = common::get_env("ROCPROF_ANNOTATE_ARGS", false);
     annotate_kfd   = common::get_env("ROCPROF_ANNOTATE_KFD", false);
     annotate_pmc   = common::get_env("ROCPROF_ANNOTATE_PMC", false);
-    auto to_upper  = [](std::string val) {
+
+    // Record the PID of the first (root) process in this trace. The value is
+    // inherited across both fork and fork+exec (spawn), so any descendant can
+    // detect that it is not the root by comparing its PID against this value.
+    // override=0 ensures descendants never overwrite the root's PID.
+    common::set_env("ROCPROF_OUTPUT_ROOT_PID", std::to_string(getpid()), 0);
+
+    auto to_upper = [](std::string val) {
         for(auto& vitr : val)
             vitr = toupper(vitr);
         return val;

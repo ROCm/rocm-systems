@@ -22,6 +22,7 @@
 
 #include "output_stream.hpp"
 
+#include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 
@@ -29,6 +30,8 @@
 
 #include <string_view>
 #include <unordered_set>
+
+#include <unistd.h>
 
 namespace rocprofiler
 {
@@ -55,6 +58,21 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
 
     auto output_path   = fs::path{cfg_output_path};
     auto output_prefix = tool::format_path(cfg.output_file);
+
+    // In a multi-process trace, every descendant of the root process must write
+    // to its own file so processes do not overwrite each other's output. The
+    // root process keeps the user-specified name unchanged; a descendant appends
+    // its PID, unless the user already requested a PID token in the pattern.
+    static const bool _append_pid = []() {
+        auto _root = common::get_env_optional("ROCPROF_OUTPUT_ROOT_PID");
+        return _root.has_value() && *_root != std::to_string(getpid());
+    }();
+    if(_append_pid && output_prefix.find("%pid%") == std::string::npos &&
+       output_prefix.find("{pid}") == std::string::npos &&
+       output_prefix.find("%p") == std::string::npos)
+    {
+        output_prefix += fmt::format("_{}", getpid());
+    }
 
     if(fs::exists(output_path) && !fs::is_directory(fs::status(output_path)))
     {
