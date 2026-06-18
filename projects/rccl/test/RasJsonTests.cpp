@@ -8,70 +8,23 @@
 #include <hip/hip_runtime.h>
 
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <sys/socket.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include <chrono>
-#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <thread>
-#include <vector>
 
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
-#ifndef RCCL_RAS_CLIENT_BIN
-#define RCCL_RAS_CLIENT_BIN "rcclras"
-#endif
-
 namespace RcclUnitTesting {
 
-namespace {
-
-static bool isExecutable(const std::string& path) {
-  return !path.empty() && ::access(path.c_str(), X_OK) == 0;
-}
-
-static std::string dirnameOf(const std::string& path) {
-  const auto pos = path.find_last_of('/');
-  return pos == std::string::npos ? std::string{} : path.substr(0, pos);
-}
-
-static std::string joinPath(const std::string& dir, const char* name) {
-  if (dir.empty()) return name;
-  return dir.back() == '/' ? dir + name : dir + "/" + name;
-}
-
-// Resolves rcclras at runtime. The compile-time RCCL_RAS_CLIENT_BIN path points
-// at the cmake build tree, which is absent in TheRock CI test containers that
-// only stage artifacts under build/bin (THEROCK_BIN_DIR).
-static std::string findRcclrasPath() {
-  if (const char* binDir = std::getenv("THEROCK_BIN_DIR")) {
-    const std::string candidate = joinPath(binDir, "rcclras");
-    if (isExecutable(candidate)) return candidate;
-  }
-
-  char exeBuf[4096];
-  const ssize_t exeLen = ::readlink("/proc/self/exe", exeBuf, sizeof(exeBuf) - 1);
-  if (exeLen > 0) {
-    exeBuf[exeLen] = '\0';
-    const std::string candidate = joinPath(dirnameOf(exeBuf), "rcclras");
-    if (isExecutable(candidate)) return candidate;
-  }
-
-  if (isExecutable(RCCL_RAS_CLIENT_BIN)) return RCCL_RAS_CLIENT_BIN;
-
-  return "rcclras";
-}
-
-}  // namespace
-
 // Picks a likely-free TCP port by binding to port 0 and reading the kernel
-// assignment, then closes the probe socket. Caller must use SO_REUSEADDR (the
-// RAS listener does) or accept a small race window before the chosen port is
-// reused by something else on the host.
+// assignment, then closes the probe socket. The RAS listener uses SO_REUSEADDR,
+// so the brief window before the chosen port is reused is acceptable.
 static int pickFreePort() {
   int s = ::socket(AF_INET, SOCK_STREAM, 0);
   if (s < 0) return 0;
@@ -93,53 +46,92 @@ static int pickFreePort() {
   return port;
 }
 
-// Runs rcclras via fork+exec and captures stdout. Returns {stdout, exit_code}.
-static std::pair<std::string, int> runRcclras(const std::string& format,
-                                              const std::string& portStr) {
-  static const std::string rcclrasPath = findRcclrasPath();
-
-  int pipefd[2];
-  if (pipe(pipefd) != 0) return {"", -1};
-
-  const std::vector<std::string> argStrings = {
-      rcclrasPath, "-f", format, "-p", portStr, "-h", "localhost"};
-  std::vector<std::vector<char>> argBufs;
-  std::vector<char*> argv;
-  argBufs.reserve(argStrings.size());
-  argv.reserve(argStrings.size() + 1);
-  for (const auto& arg : argStrings) {
-    argBufs.emplace_back(arg.begin(), arg.end());
-    argBufs.back().push_back('\0');
-    argv.push_back(argBufs.back().data());
+// Reads a single '\n'-terminated line from the socket. Byte-at-a-time is fine
+// here: the handshake/ack replies are tiny and sent one per command.
+static bool recvLine(int sock, std::string& line) {
+  line.clear();
+  char c;
+  for (;;) {
+    ssize_t n = ::recv(sock, &c, 1, 0);
+    if (n <= 0) return false;
+    line.push_back(c);
+    if (c == '\n') return true;
   }
-  argv.push_back(nullptr);
+}
 
-  const pid_t pid = fork();
-  if (pid < 0) {
-    ::close(pipefd[0]);
-    ::close(pipefd[1]);
-    return {"", -1};
+// Connects to the local RAS server on the given port, performs the client
+// handshake, switches output format, runs one STATUS query, and returns the
+// full response body (empty string on connection/protocol failure).
+//
+// This speaks the RAS wire protocol directly (the same exchange rcclras does:
+// CLIENT PROTOCOL -> SET FORMAT -> STATUS), so the test has no dependency on
+// the external rcclras client binary being staged next to the unit tests.
+static std::string queryRas(const std::string& portStr, const std::string& format) {
+  int sock = -1;
+  addrinfo hints{};
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+
+  for (int attempt = 0; attempt < 50 && sock < 0; ++attempt) {
+    addrinfo* results = nullptr;
+    if (::getaddrinfo("localhost", portStr.c_str(), &hints, &results) == 0) {
+      for (addrinfo* ai = results; ai != nullptr; ai = ai->ai_next) {
+        int s = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (s < 0) continue;
+        if (::connect(s, ai->ai_addr, ai->ai_addrlen) == 0) {
+          sock = s;
+          break;
+        }
+        ::close(s);
+      }
+      ::freeaddrinfo(results);
+    }
+    if (sock < 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
-  if (pid == 0) {
-    ::close(pipefd[0]);
-    if (dup2(pipefd[1], STDOUT_FILENO) < 0) _exit(127);
-    ::close(pipefd[1]);
-    ::close(STDERR_FILENO);
-    execv(rcclrasPath.c_str(), argv.data());
-    _exit(127);
+  if (sock < 0) return {};
+
+  // Handshake. The server echoes its own version and ignores ours, so any
+  // "SERVER PROTOCOL " reply is acceptable.
+  std::string line;
+  const std::string hello = "CLIENT PROTOCOL 2\n";
+  if (::send(sock, hello.data(), hello.size(), 0) != static_cast<ssize_t>(hello.size()) ||
+      !recvLine(sock, line) ||
+      line.rfind("SERVER PROTOCOL ", 0) != 0) {
+    ::close(sock);
+    return {};
   }
 
-  ::close(pipefd[1]);
-  std::string output;
+  // Select output format (text or json); the server replies "OK\n".
+  const std::string setFmt = "SET FORMAT " + format + "\n";
+  if (::send(sock, setFmt.data(), setFmt.size(), 0) != static_cast<ssize_t>(setFmt.size()) ||
+      !recvLine(sock, line) || line != "OK\n") {
+    ::close(sock);
+    return {};
+  }
+
+  // Request status; the server streams the body and then closes the socket.
+  const char* status = "STATUS\n";
+  if (::send(sock, status, ::strlen(status), 0) != static_cast<ssize_t>(::strlen(status))) {
+    ::close(sock);
+    return {};
+  }
+
+  std::string body;
   char buf[4096];
-  ssize_t n;
-  while ((n = ::read(pipefd[0], buf, sizeof(buf))) > 0) output.append(buf, n);
-  ::close(pipefd[0]);
-
-  int status = 0;
-  if (waitpid(pid, &status, 0) < 0) return {output, -1};
-  if (!WIFEXITED(status)) return {output, -1};
-  return {output, WEXITSTATUS(status)};
+  for (;;) {
+    ssize_t n = ::recv(sock, buf, sizeof(buf), 0);
+    if (n > 0) {
+      body.append(buf, n);
+    } else if (n == 0) {
+      break;  // Clean EOF: the server finished the body and closed the socket.
+    } else {
+      // recv() error: don't pass off a partial body as a complete response.
+      ::close(sock);
+      return {};
+    }
+  }
+  ::close(sock);
+  return body;
 }
 
 // Verifies the RAS subsystem supports JSON output and that switching to JSON
@@ -174,20 +166,13 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
 
         std::string textBody;
         std::string jsonBody;
-        int textRc = -1;
-        int jsonRc = -1;
         for (int attempt = 0; attempt < 20; ++attempt) {
-          std::tie(textBody, textRc) = runRcclras("text", portStr);
-          std::tie(jsonBody, jsonRc) = runRcclras("json", portStr);
-          if (textRc == 0 && jsonRc == 0 && !textBody.empty() && !jsonBody.empty()) {
-            break;
-          }
+          textBody = queryRas(portStr, "text");
+          jsonBody = queryRas(portStr, "json");
+          if (!textBody.empty() && !jsonBody.empty()) break;
           std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
-        const std::string rcclrasPath = findRcclrasPath();
-        ASSERT_EQ(textRc, 0) << "rcclras -f text failed (binary: " << rcclrasPath << ")";
-        ASSERT_EQ(jsonRc, 0) << "rcclras -f json failed (binary: " << rcclrasPath << ")";
         ASSERT_FALSE(textBody.empty()) << "RAS returned no text response";
         ASSERT_FALSE(jsonBody.empty())
             << "RAS did not respond to 'SET FORMAT json' -- JSON support missing";
