@@ -38,6 +38,7 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <cstddef>
 #include <unordered_map>
 
 /**
@@ -630,7 +631,42 @@ amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_
     return convert_errno_to_amdsmi_status(ret);
   }
 
-  // Cast UALoE telemetry directly to AMDSMI telemetry since structures are now binary compatible
+  // Cast UALoE telemetry directly to AMDSMI telemetry since structures are now
+  // binary compatible. The cast is traversed as datasets -> instances -> items,
+  // so guard size and alignment of every struct in that chain at compile time.
+  static_assert(sizeof(amdsmi_fabric_telemetry_t) == sizeof(ualoe_telemetry_t),
+                "amdsmi_fabric_telemetry_t and ualoe_telemetry_t must be binary compatible");
+  static_assert(alignof(amdsmi_fabric_telemetry_t) == alignof(ualoe_telemetry_t),
+                "amdsmi_fabric_telemetry_t and ualoe_telemetry_t must have matching alignment");
+  static_assert(
+      sizeof(amdsmi_fabric_telemetry_dataset_t) == sizeof(ualoe_telemetry_dataset_t),
+      "amdsmi_fabric_telemetry_dataset_t and ualoe_telemetry_dataset_t must be binary compatible");
+  static_assert(alignof(amdsmi_fabric_telemetry_dataset_t) == alignof(ualoe_telemetry_dataset_t),
+                "amdsmi_fabric_telemetry_dataset_t and ualoe_telemetry_dataset_t must have "
+                "matching alignment");
+  static_assert(sizeof(amdsmi_fabric_telemetry_instance_t) == sizeof(ualoe_telemetry_instance_t),
+                "amdsmi_fabric_telemetry_instance_t and ualoe_telemetry_instance_t must be binary "
+                "compatible");
+  static_assert(alignof(amdsmi_fabric_telemetry_instance_t) == alignof(ualoe_telemetry_instance_t),
+                "amdsmi_fabric_telemetry_instance_t and ualoe_telemetry_instance_t must have "
+                "matching alignment");
+  static_assert(
+      sizeof(amdsmi_fabric_telemetry_item_t) == sizeof(ualoe_telemetry_item_t),
+      "amdsmi_fabric_telemetry_item_t and ualoe_telemetry_item_t must be binary compatible");
+  static_assert(
+      alignof(amdsmi_fabric_telemetry_item_t) == alignof(ualoe_telemetry_item_t),
+      "amdsmi_fabric_telemetry_item_t and ualoe_telemetry_item_t must have matching alignment");
+  // Size and alignment alone can miss independent field reordering, so pin the
+  // offset of the pointer members the cast dereferences and one trailing scalar.
+  static_assert(offsetof(amdsmi_fabric_telemetry_dataset_t, instances) ==
+                    offsetof(ualoe_telemetry_dataset_t, instances),
+                "dataset instances pointer must be at the same offset");
+  static_assert(offsetof(amdsmi_fabric_telemetry_instance_t, items) ==
+                    offsetof(ualoe_telemetry_instance_t, items),
+                "instance items pointer must be at the same offset");
+  static_assert(
+      offsetof(amdsmi_fabric_telemetry_item_t, value) == offsetof(ualoe_telemetry_item_t, value),
+      "item value must be at the same offset");
   *telemetry = reinterpret_cast<amdsmi_fabric_telemetry_t*>(ualoe_tel);
 
   return AMDSMI_STATUS_SUCCESS;
