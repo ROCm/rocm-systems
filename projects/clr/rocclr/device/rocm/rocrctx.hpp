@@ -97,6 +97,8 @@ struct RocrEntryPoints {
   decltype(hsa_amd_ipc_memory_create)* hsa_amd_ipc_memory_create_;
   decltype(hsa_amd_ipc_memory_attach)* hsa_amd_ipc_memory_attach_;
   decltype(hsa_amd_ipc_memory_detach)* hsa_amd_ipc_memory_detach_;
+  decltype(hsa_amd_ipc_signal_create)* hsa_amd_ipc_signal_create_;
+  decltype(hsa_amd_ipc_signal_attach)* hsa_amd_ipc_signal_attach_;
   decltype(hsa_amd_signal_create)* hsa_amd_signal_create_;
   decltype(hsa_amd_register_system_event_handler)* hsa_amd_register_system_event_handler_;
   decltype(hsa_amd_queue_set_priority)* hsa_amd_queue_set_priority_;
@@ -106,6 +108,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_svm_attributes_set)* hsa_amd_svm_attributes_set_;
   decltype(hsa_amd_svm_attributes_get)* hsa_amd_svm_attributes_get_;
   decltype(hsa_amd_svm_prefetch_async)* hsa_amd_svm_prefetch_async_;
+  decltype(hsa_amd_svm_discard_batch_async)* hsa_amd_svm_discard_batch_async_;
   decltype(hsa_amd_portable_export_dmabuf)* hsa_amd_portable_export_dmabuf_;
   decltype(hsa_amd_portable_close_dmabuf)* hsa_amd_portable_close_dmabuf_;  // CLR doesn't use it?
   decltype(hsa_amd_vmem_address_reserve)* hsa_amd_vmem_address_reserve_;
@@ -118,6 +121,8 @@ struct RocrEntryPoints {
   decltype(hsa_amd_vmem_get_access)* hsa_amd_vmem_get_access_;
   decltype(hsa_amd_vmem_export_shareable_handle)* hsa_amd_vmem_export_shareable_handle_;
   decltype(hsa_amd_vmem_import_shareable_handle)* hsa_amd_vmem_import_shareable_handle_;
+  decltype(hsa_amd_vmem_export_fabric_handle)* hsa_amd_vmem_export_fabric_handle_;
+  decltype(hsa_amd_vmem_import_fabric_handle)* hsa_amd_vmem_import_fabric_handle_;
   decltype(hsa_amd_vmem_retain_alloc_handle)* hsa_amd_vmem_retain_alloc_handle_;
   decltype(hsa_amd_agent_set_async_scratch_limit)* hsa_amd_agent_set_async_scratch_limit_;
   decltype(hsa_amd_vmem_address_reserve_align)* hsa_amd_vmem_address_reserve_align_;
@@ -408,6 +413,13 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t ipc_memory_detach(void* mapped_ptr) {
     return ROCR_DYN(hsa_amd_ipc_memory_detach)(mapped_ptr);
   }
+  static hsa_status_t ipc_signal_create(hsa_signal_t signal, hsa_amd_ipc_signal_t* handle) {
+    return ROCR_DYN(hsa_amd_ipc_signal_create)(signal, handle);
+  }
+  static hsa_status_t ipc_signal_attach(const hsa_amd_ipc_signal_t* handle,
+                                        hsa_signal_t* signal) {
+    return ROCR_DYN(hsa_amd_ipc_signal_attach)(handle, signal);
+  }
   static hsa_status_t signal_create(hsa_signal_value_t initial_value, uint32_t num_consumers,
     const hsa_agent_t* consumers, uint64_t attributes, hsa_signal_t* signal) {
     return ROCR_DYN(hsa_amd_signal_create)(initial_value, num_consumers, consumers, attributes,
@@ -444,6 +456,11 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t svm_prefetch_async(void* ptr, size_t size, hsa_agent_t agent,
     uint32_t num_dep_signals, const hsa_signal_t* dep_signals, hsa_signal_t completion_signal) {
     return ROCR_DYN(hsa_amd_svm_prefetch_async)(ptr, size, agent, num_dep_signals,
+        dep_signals, completion_signal);
+  }
+  static hsa_status_t svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count,
+    uint32_t num_dep_signals, const hsa_signal_t* dep_signals, hsa_signal_t completion_signal) {
+    return ROCR_DYN(hsa_amd_svm_discard_batch_async)(ptrs, sizes, count, num_dep_signals,
         dep_signals, completion_signal);
   }
   static hsa_status_t portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
@@ -486,6 +503,14 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t vmem_import_shareable_handle(int dmabuf_fd,
     hsa_amd_vmem_alloc_handle_t* handle) {
     return ROCR_DYN(hsa_amd_vmem_import_shareable_handle)(dmabuf_fd, handle);
+  }
+  static hsa_status_t vmem_export_fabric_handle(hsa_fabric_handle_t* fabric_handle,
+    hsa_amd_vmem_alloc_handle_t handle, uint64_t flags) {
+    return ROCR_DYN(hsa_amd_vmem_export_fabric_handle)(fabric_handle, handle, flags);
+  }
+  static hsa_status_t vmem_import_fabric_handle(hsa_fabric_handle_t fabric_handle,
+    hsa_amd_vmem_alloc_handle_t* handle) {
+    return ROCR_DYN(hsa_amd_vmem_import_fabric_handle)(fabric_handle, handle);
   }
   static hsa_status_t vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* allocHandle,
     void* addr) {

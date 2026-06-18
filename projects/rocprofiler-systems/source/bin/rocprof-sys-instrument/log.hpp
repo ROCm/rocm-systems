@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <timemory/log/color.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/join.hpp>
@@ -19,7 +20,7 @@
 struct log_entry;
 
 void
-print_log_entries(std::ostream& = std::cerr, int64_t _count = 10,
+print_log_entries(std::ostream& = std::cerr, std::int64_t _count = 10,
                   const std::function<bool(const log_entry&)>& _cond    = {},
                   const std::function<void()>&                 _prelude = {},
                   const char* _color         = tim::log::color::warning(),
@@ -57,7 +58,7 @@ private:
     std::string           m_message   = {};
     tim::unwind::stack<4> m_backtrace = {};
 
-    friend void print_log_entries(std::ostream&, int64_t,
+    friend void print_log_entries(std::ostream&, std::int64_t,
                                   std::function<bool(const log_entry&)>, const char*,
                                   bool);
 };

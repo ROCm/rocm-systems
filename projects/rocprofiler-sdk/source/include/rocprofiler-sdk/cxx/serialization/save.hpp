@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip.h>
@@ -526,6 +527,15 @@ save(ArchiveT& ar, rocprofiler_dispatch_counting_service_data_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_spm_dispatch_counting_service_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
+    ROCP_SDK_SAVE_DATA_FIELD(dispatch_info);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_dispatch_counting_service_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
@@ -575,6 +585,17 @@ save(ArchiveT& ar, rocprofiler_counter_record_t data)
     ROCP_SDK_SAVE_DATA_FIELD(id);
     ROCP_SDK_SAVE_DATA_FIELD(counter_value);
     ROCP_SDK_SAVE_DATA_FIELD(dispatch_id);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_spm_counter_record_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(dispatch_id);
+    ROCP_SDK_SAVE_DATA_FIELD(id);
+    ROCP_SDK_SAVE_DATA_FIELD(agent_id);
+    ROCP_SDK_SAVE_DATA_FIELD(timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(value);
 }
 
 template <typename ArchiveT>
@@ -1274,6 +1295,7 @@ save(ArchiveT& ar, rocprofiler_counter_info_v1_t data)
     ROCP_SDK_SAVE_VALUE("instances",
                         rocprofiler::sdk::container::make_c_array(data.dimensions_instances,
                                                                   data.dimensions_instances_count));
+    ROCP_SDK_SAVE_DATA_FIELD(spm_support);
 }
 
 template <typename ArchiveT>

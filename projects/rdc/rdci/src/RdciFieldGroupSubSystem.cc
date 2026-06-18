@@ -219,6 +219,9 @@ void RdciFieldGroupSubSystem::process() {
                            "Must specify the group name when create a field group");
       }
       std::vector<std::string> fields = split_string(field_ids_, ',');
+      if (fields.size() > RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
+        throw RdcException(RDC_ST_MAX_LIMIT, "Too many field IDs specified");
+      }
       rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
       for (uint32_t i = 0; i < fields.size(); i++) {
         if (!IsNumber(fields[i])) {

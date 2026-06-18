@@ -6,6 +6,7 @@ from perfxpert.providers._base import Provider, ProviderResponse
 from perfxpert.providers._exceptions import (
     AuthError, DryRunResponse, ProviderError, RateLimitError, TimeoutError,
 )
+from perfxpert.providers._sanitization import redact_paths, sanitize_messages
 from perfxpert.providers.registry import register
 from perfxpert.tools._tooldep import require_tool
 try:
@@ -44,6 +45,8 @@ class AnthropicProvider(Provider):
             return DryRunResponse
         model_id = model or _DEFAULT_MODEL
         budget = max_tokens or _DEFAULT_MAX_TOKENS
+        messages = sanitize_messages(messages)
+        system = redact_paths(system)
         try:
             resp = self._client.messages.create(
                 model=model_id, max_tokens=budget,

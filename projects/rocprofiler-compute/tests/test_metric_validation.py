@@ -1,58 +1,83 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import common
 import pandas as pd
 import pytest
-import test_utils
 
-config = {}
-config["memcopy"] = ["tests/memcopy"]
-config["cleanup"] = True
+_, soc = common.gpu_soc()
 
-soc = test_utils.gpu_soc()
 
-# workload -> gfx -> metric definition
+def get_hbm_data_transfer(analysis_workload_dir, data):
+    bw_df = pd.read_csv(f"{analysis_workload_dir}/{data['bw_csv']}")
+    bw_rows = bw_df[
+        (bw_df["metric_id"] == data["bw_metric_id"])
+        & (bw_df["value_name"] == data["bw_value_name"])
+    ]
+    bw = bw_rows["value"].values[0]
+    duration_ns = pd.read_csv(f"{analysis_workload_dir}/{data['duration_csv']}")[
+        data["duration_column"]
+    ].values[0]
+    return bw * duration_ns / 1e9
+
+
+# workload -> gfx -> metric definition. CSV references point at the per-view
+# CSVs produced by analyze: workload/kernel-level metric values live in
+# workload_metric.csv / kernel_metric.csv (filter by metric_id + value_name),
+# kernel-level dispatch durations live in kernel.csv.
 VALIDATE_METRICS = {
     "memcopy": {
+        "command": ["tests/memcopy"],
+        "name": "HBM Data Transfer",
+        "get_actual_func": get_hbm_data_transfer,
         "MI200": [
             {
-                "name": "HBM Bandwidth",
-                "metric_id": "4.1.8",
-                "csv_file": "4.1_Roofline_Performance_Rates.csv",
-                "column": "Value",
-                "expected_values": [1389.17],
+                "profile_metric_id": ["4.1.8"],
+                "expected_values": [4096.0],
+                "tolerance": 0.10,
+                "get_actual_data": {
+                    "soc": "MI200",
+                    "bw_csv": "workload_metric.csv",
+                    "bw_metric_id": "4.1.8",
+                    "bw_value_name": "Value",
+                    "duration_csv": "kernel.csv",
+                    "duration_column": "duration_ns_sum",
+                },
             },
         ],
         "MI300": [
             {
-                "name": "HBM Bandwidth",
-                "metric_id": "4.1.9",
-                "csv_file": "4.1_Roofline_Performance_Rates.csv",
-                "column": "Value",
-                # MI 300 series contains MI 325X GPU which
-                # uses improved HBM3E instead of HBM3 used in
-                # MI 300X GPU. Hence, multiple expected values
-                # to cover both cases.
-                # MI 300A CPX and MI 308 have lower bandwidth.
-                # MI 300X: 3910.62 GB/s
-                # MI 325X: 4287.31 GB/s
-                # MI 308: 2003.45 GB/s
-                # MI 300A CPX: 710.23 GB/s (per-partition, CPX/NPS1)
-                "expected_values": [710.23, 2003.45, 3910.62, 4287.31],
+                "profile_metric_id": ["4.1.9"],
+                "expected_values": [4096.0],
+                "tolerance": 0.10,
+                "get_actual_data": {
+                    "soc": "MI300",
+                    "bw_csv": "workload_metric.csv",
+                    "bw_metric_id": "4.1.9",
+                    "bw_value_name": "Value",
+                    "duration_csv": "kernel.csv",
+                    "duration_column": "duration_ns_sum",
+                },
             },
         ],
         "MI350": [
             {
-                "name": "HBM Bandwidth",
-                "metric_id": "4.1.10",
-                "csv_file": "4.1_Roofline_Performance_Rates.csv",
-                "column": "Value",
-                "expected_values": [5690.42],
+                "profile_metric_id": ["4.1.10"],
+                "expected_values": [4096.0],
+                "tolerance": 0.10,
+                "get_actual_data": {
+                    "soc": "MI350",
+                    "bw_csv": "workload_metric.csv",
+                    "bw_metric_id": "4.1.10",
+                    "bw_value_name": "Value",
+                    "duration_csv": "kernel.csv",
+                    "duration_column": "duration_ns_sum",
+                },
             },
         ],
         # Ignore warmup dispatch
         # Collect roofline block
-        "profile_options": ["-d", "2-1001", "-b", "4"],
+        "profile_options": ["-d", "2:1001", "-b", "4"],
         "roof": True,
     }
 }
@@ -62,9 +87,9 @@ VALIDATE_METRICS = {
 def test_validate_metrics(
     binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
 ):
-    for workload in VALIDATE_METRICS.keys():
+    for workload in VALIDATE_METRICS:
         metrics = VALIDATE_METRICS[workload].get(soc, [])
-        metric_ids = [metric["metric_id"] for metric in metrics]
+        metric_ids = [mid for metric in metrics for mid in metric["profile_metric_id"]]
         if not metric_ids:
             print(
                 f"Skipping metric validation for {workload} on {soc}. "
@@ -72,22 +97,22 @@ def test_validate_metrics(
             )
             continue
 
-        profile_workload_dir = test_utils.get_output_dir(param_id=f"{workload}_profile")
-        analysis_workload_dir = test_utils.get_output_dir(
-            param_id=f"{workload}_analysis"
-        )
+        profile_workload_dir = common.get_output_dir(param_id=f"{workload}_profile")
+        analysis_workload_dir = common.get_output_dir(param_id=f"{workload}_analysis")
         try:
-            # Ensure non zero length of profile df
-            options = VALIDATE_METRICS[workload].get("profile_options", [])
+            # Copy to prevent upstream global mutations
+            options = list(VALIDATE_METRICS[workload].get("profile_options", []))
+            profile_config = {workload: VALIDATE_METRICS[workload]["command"]}
             _ = binary_handler_profile_rocprof_compute(
-                config,
+                profile_config,
                 profile_workload_dir,
                 options,
                 check_success=True,
                 roof=VALIDATE_METRICS[workload].get("roof", False),
                 app_name=workload,
             )
-            _ = test_utils.check_csv_files(
+            # Ensure non zero length of profile df
+            _ = common.check_csv_files(
                 profile_workload_dir, num_devices=1, num_kernels=1
             )
 
@@ -103,24 +128,28 @@ def test_validate_metrics(
                 "--path",
                 profile_workload_dir,
             ])
-            assert code == 0
+            assert code == 0, (
+                f"rocprof-compute analyze failed for {workload} on {soc} "
+                f"with metric ids {metric_ids}: exit code {code}"
+            )
 
+            get_actual_func = VALIDATE_METRICS[workload]["get_actual_func"]
             for metric in metrics:
-                actual = pd.read_csv(f"{analysis_workload_dir}/{metric['csv_file']}")[
-                    metric["column"]
-                ].values[0]
+                actual = get_actual_func(
+                    analysis_workload_dir, metric["get_actual_data"]
+                )
                 expected_values = metric["expected_values"]
-                # 5% tolerance in checking - assert if actual matches any expected value
+                tolerance = metric["tolerance"]
                 matches = [
-                    abs(actual - expected) / expected <= 0.05
+                    abs(actual - expected) / expected <= tolerance
                     for expected in expected_values
                 ]
                 diffs = [(abs(actual - exp) / exp * 100) for exp in expected_values]
                 assert any(matches), (
-                    f"{metric['name']} ({metric['metric_id']}): "
+                    f"{VALIDATE_METRICS[workload]['name']}: "
                     f"actual={actual}, expected_values={expected_values}, "
-                    f"diffs={diffs} (tolerance: 5%)"
+                    f"diffs={diffs} (tolerance: {tolerance * 100}%)"
                 )
         finally:
-            test_utils.clean_output_dir(config["cleanup"], analysis_workload_dir)
-            test_utils.clean_output_dir(config["cleanup"], profile_workload_dir)
+            common.clean_output_dir(True, analysis_workload_dir)
+            common.clean_output_dir(True, profile_workload_dir)

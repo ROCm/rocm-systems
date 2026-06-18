@@ -38,7 +38,7 @@ When run with `--help`, it reports the available subcommands:
 ~$ amd-smi --help
 usage: amd-smi [-h] [--rocm-smi]  ...
 
-AMD System Management Interface | Version: 26.4.0 | ROCm version: 7.13.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 26.5.0 | ROCm version: 7.14.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -112,6 +112,9 @@ Lists GPU information.
 ```{note}
 `amd-smi list -e` is useful for mapping physical-to-logical GPU IDs.
 The `oam_id` field identifies the physical board slot in multi-GPU OAM chassis.
+The `ID` shown for `--gpu` (0, 1, 2, …) is an enumeration index assigned in discovery
+order, not the device-type value returned by `amdsmi_get_gpu_id()`; `--gpu` also accepts a
+BDF or UUID to select a specific card.
 ```
 
 ```shell-session
@@ -575,7 +578,7 @@ Set options for specified devices.
 ~$ amd-smi set --help
 usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-f %]
                    [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
-                   [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS]
+                   [-a MODE] [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS]
                    [--cpu-pwr-limit PWR_LIMIT] [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE [UTIL PPT_LIMIT]]
                    [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
@@ -607,6 +610,9 @@ Set Arguments:
                                                 Use `sudo amd-smi partition --accelerator` to find acceptable values.
   -M, --memory-partition PARTITION            Set one of the following the memory partition modes:
                                                 NPS1, NPS2, NPS4, NPS8
+  -a, --compute-partition-mem-alloc-mode MODE Set compute partition memory allocation mode (requires sudo):
+                                                CAPPING - each XCP is capped to an even share of partition memory
+                                                ALL     - each XCP may use the full partition memory
   -o, --power-cap WATTS                       Set power capacity limit:
                                                 min cap: 0 W, max cap: 550 W
   -p, --soc-pstate POLICY_ID                  Set the GPU soc pstate policy using policy id, an integer. Valid id's include:
@@ -680,6 +686,17 @@ Command Modifiers:
 ### amd-smi reset
 
 Reset options for specified devices.
+
+```{warning}
+
+   * On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
+     GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
+
+   * Any process with an open `/dev/kfd` handle will be terminated when a GPU reset occurs,
+     even if that process is not using the GPU being reset. GPU isolation techniques using the
+     environment variables `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` do not
+     prevent this.
+```
 
 ```shell-session
 ~$ amd-smi reset --help
@@ -872,10 +889,10 @@ Displays RAS information of specified devices.
 
 ```shell-session
 ~$ amd-smi ras --help
-usage: amd-smi ras [-h] --cper [--severity SEVERITY [SEVERITY ...]] [--folder FOLDER]
-                   [--file-limit FILE_LIMIT] [--follow]
-                   [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
-                   [--json | --csv] [--file FILE] [--loglevel LEVEL]
+usage: amd-smi ras [-h] (--cper | --afid) [--severity SEVERITY [SEVERITY ...]]
+                   [--folder FOLDER] [--file-limit FILE_LIMIT] [--follow]
+                   [--cper-file CPER_FILE] [-g GPU [GPU ...]] [--json | --csv]
+                   [--file FILE] [--overwrite] [--append] [--loglevel LEVEL]
 
 Retrieve and decode RAS (CPER) entries from the kernel driver.
 Supports filtering by severity, exporting to different formats, and continuous monitoring.
@@ -883,14 +900,20 @@ This command accepts options only; no positional arguments are required.
 
 RAS arguments:
   -h, --help                          show this help message and exit
-  --cper                              Trigger CPER data retrieval
-  --afid                              Generate an AFID (AMD Field ID) given a CPER record file.
+  --cper                              Trigger current CPER data retrieval
+  --afid                              Generate an AFID (AMD Field ID) given a CPER record file or folder
+
+CPER Arguments:
   --severity SEVERITY [SEVERITY ...]  Set the SEVERITY filters from the following:
                                           nonfatal-uncorrected, fatal, nonfatal-corrected, all
-  --folder FOLDER                     Folder to dump CPER report files
-  --file-limit FILE_LIMIT             Maximum number of entries per output file
-  --cper-file CPER_FILE               Full path of the CPER record file to generate the AFID
-  --follow                            Continuously monitor for new entries
+  --folder FOLDER                     With --cper: folder to dump current CPER report files (created if missing).
+                                          With --afid: existing folder of CPER records to decode.
+  --file-limit FILE_LIMIT             Maximum number of current CPER files in target folder
+                                          Older files beyond limit will be deleted
+  --follow                            Continuously monitor for new CPER entries
+
+AFID Arguments:
+  --cper-file CPER_FILE               Full path of a retrieved CPER record file to generate the AFID
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
@@ -1044,7 +1067,7 @@ GPU: 0
     ASIC:
         MARKET_NAME: AMD Instinct MI300A
         VENDOR_ID: 0x1002
-        VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
+        VENDOR_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
         SUBVENDOR_ID: 0x1002
         DEVICE_ID: 0x74a0
         SUBSYSTEM_ID: 0x74a0
@@ -1114,6 +1137,7 @@ GPU: 0
         ACCELERATOR_PARTITION: SPX
         MEMORY_PARTITION: NPS1
         PARTITION_ID: 0
+        COMPUTE_PARTITION_MEM_ALLOC_MODE: CAPPING
     SOC_PSTATE: N/A
     XGMI_PLPD: N/A
     PROCESS_ISOLATION: Disabled
@@ -1421,3 +1445,37 @@ Refer to
 and
 [amd_smi_afid_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_afid_example.py)
 for API examples.
+
+## Memory tuning: UMA carveout and GTT
+
+`amd-smi static --mem-carveout` / `amd-smi set --mem-carveout INDEX` and
+`amd-smi node --gtt` / `amd-smi set --gtt GB` / `amd-smi reset --gtt` let
+users inspect and tune the BIOS VRAM carveout and the TTM `pages_limit`
+(shared GTT) respectively. Both features talk directly to kernel UAPI
+interfaces (sysfs / modprobe.d) and do **not** require libdrm.
+
+### Supported ASICs
+
+| Feature | Hardware | Status |
+|---|---|---|
+| `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported |
+| `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — reported as `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)` |
+| `--gtt` (TTM `pages_limit`) | Any amdgpu system, including Instinct MI300A (`amdttm` / `amd-ttm`) and Ryzen APUs (`ttm`) | Supported |
+
+### Prerequisites
+
+- **UMA carveout:** Linux kernel >= 7.0 (upstream commit [`685b711`](https://github.com/torvalds/linux/commit/685b711); some distros backport it to earlier kernels), an APU VBIOS that advertises ATCS 0xA + IGP info table v2.3, root, and a reboot after changing the index.
+- **GTT (TTM `pages_limit`):** root (to write `/etc/modprobe.d/<module>.conf`), optionally `dracut` (the tool will rebuild the initramfs automatically when `dracut` is present), and a reboot to apply the new limit. amd-smi auto-detects the TTM kernel module name (`ttm`, `amdttm`, or `amd-ttm`) and writes the matching `.conf`.
+
+### Troubleshooting: `MEM_CARVEOUT: N/A`
+
+On MI300A (and every non-APU / pre-ATCS-0xA platform) the kernel does not
+create `/sys/class/drm/<card>/device/uma/`, so `amd-smi static --mem-carveout`
+prints
+
+```text
+MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)
+```
+
+This is expected. Use `amd-smi node --gtt` / `amd-smi set --gtt` to tune
+shared GPU memory on those platforms instead.

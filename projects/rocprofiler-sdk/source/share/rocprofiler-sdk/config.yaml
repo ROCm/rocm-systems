@@ -38,7 +38,7 @@ rocprofiler-sdk:
             - gfx90a
           expression: reduce(SQ_THREAD_CYCLES_VALU,sum)/reduce(SQ_ACTIVE_INST_VALU,sum)
     - name: CHA_BUSY
-      description: Count busy cyles. Not windowable.
+      description: Count busy cycles. Not windowable.
       properties: []
       definitions:
         - architectures:
@@ -3134,21 +3134,6 @@ rocprofiler-sdk:
             - gfx1250
           block: SQ
           event: 642
-    - name: SQC_ICACHE_MISSES
-      description: Number of cache misses, includes uncached requests. {per-Bank, nondeterministic, 
-        C2}
-      properties: []
-      definitions:
-        - architectures:
-            - gfx12
-            - gfx1200
-            - gfx1201
-          block: SQ
-          event: 303
-        - architectures:
-            - gfx1250
-          block: SQ
-          event: 643
     - name: SQC_ICACHE_INPUT_VALID_READYB
       description: ' Input stalled by SQC (per-SQ, nondeterministic, unwindowed)'
       properties: []
@@ -3174,6 +3159,16 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 272
+        - architectures:
+            - gfx12
+            - gfx1200
+            - gfx1201
+          block: SQ
+          event: 303
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 643
     - name: SQC_ICACHE_MISSES_DUPLICATE
       description: Number of misses that were duplicates (access to a non-resident, miss pending 
         CL). (per-SQ, per-Bank, nondeterministic)
@@ -3354,6 +3349,112 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 267
+    - name: SQG_BUSY_CYCLES
+      description: Number of clock cycles SQG is reporting that it is busy (per shader engine). 
+        SQG_PERF_SEL_BUSY_CYCLES.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 16
+    - name: SQG_CYCLES
+      description: Number of SQG clock cycles (per shader engine). SQG_PERF_SEL_CYCLES.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 15
+    - name: SQG_ITEMS
+      description: Sum of work items processed by SQG-tracked waves. Useful for computing average 
+        wave occupancy across pipeline stages (per shader engine). SQG_PERF_SEL_ITEMS.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 24
+    - name: SQG_MSG
+      description: Number of S_SENDMSG instructions issued by waves observed by SQG (per shader 
+        engine). SQG_PERF_SEL_MSG.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 18
+    - name: SQG_REFCLKS
+      description: Number of SQG reference clock cycles (per shader engine). SQG_PERF_SEL_REFCLKS.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 33
+    - name: SQG_WAVES
+      description: Number of waves dispatched and observed by SQG, summed across all graphics and 
+        compute pipeline stages (per shader engine). SQG_PERF_SEL_WAVES.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 20
+    - name: SQG_WAVES_INITIAL_PREFETCH
+      description: Number of waves that issued an initial instruction prefetch (per shader engine). 
+        SQG_PERF_SEL_WAVES_INITIAL_PREFETCH.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 10
+    - name: SQG_WAVES_RESTORED
+      description: Number of waves restored by context-switch (per shader engine). 
+        SQG_PERF_SEL_WAVES_RESTORED.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 12
+    - name: SQG_WAVES_SAVED
+      description: Number of waves saved by context-switch (per shader engine). 
+        SQG_PERF_SEL_WAVES_SAVED.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 13
     - name: SQ_ACCUM_PREV
       description: This is a hardware register that can be used for accumulating values for other 
         counters. This is useful in expressions where you want to integrate over time. Only 
@@ -3714,7 +3815,7 @@ rocprofiler-sdk:
           event: 136
     - name: SQ_IFETCH_LEVEL
       description: Number of inflight instruction fetch requests from the cache. This is a value 
-        returned per-sharder engine. Best used with accumlate() functions as part of a derived 
+        returned per-shader engine. Best used with accumulate() functions as part of a derived 
         counter.
       properties: []
       definitions:
@@ -3777,6 +3878,17 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 71
+    - name: SQ_INSTS_DUAL_VALU_WAVE32
+      description: Number of dual VALU (VOPD) instructions issued in wave32 mode. {emulated}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQ
+          event: 178
     - name: SQ_INSTS_EXP_GDS
       description: Total number of EXPORT or GDS (global wave state) instructions issued. When used 
         in combination with SQ_ACTIVE_INST_EXP_GDS (cycle count for executing instructions) the 
@@ -4455,7 +4567,7 @@ rocprofiler-sdk:
           event: 42
     - name: SQ_INSTS_VALU_MFMA_F8
       description: The number of MFMA (Matrix-Fused-Multiply-Add) operating on F8 format (V_MFMA or 
-        V_SMFMAC). See AMD CDNA3 ISA for more informations.
+        V_SMFMAC). See AMD CDNA3 ISA for more information.
       properties: []
       definitions:
         - architectures:
@@ -5713,7 +5825,7 @@ rocprofiler-sdk:
           event: 7
     - name: SQ_WAVES_RESTORED
       description: Count number of context-restored waves sent to SQs. This value represents the 
-        number of waves whos current register state has been restored from a register bank during 
+        number of waves whose current register state has been restored from a register bank during 
         the collection timeframe (for dispatch profiling this is the timeframe of kernel execution, 
         for agent profiling it is the timeframe between start_context and read counter data). 
         Context saving/restoring is a slow operation and should be limited. High values can also 
@@ -5741,9 +5853,9 @@ rocprofiler-sdk:
           event: 201
     - name: SQ_WAVES_SAVED
       description: Count number of context-saved waves sent to SQs. This value represents the number
-        of waves whos current register state has been saved to a register bank during the collection
-        timeframe (for dispatch profiling this is the timeframe of kernel execution, for agent 
-        profiling it is the timeframe between start_context and read counter data) . Context 
+        of waves whose current register state has been saved to a register bank during the 
+        collection timeframe (for dispatch profiling this is the timeframe of kernel execution, for 
+        agent profiling it is the timeframe between start_context and read counter data) . Context 
         saving/restoring is a slow operation and should be limited. High values can also indicate 
         that stalling may be taking place (waiting for free register space). Returns one value 
         per-SE (aggregates of SIMD values).
@@ -10809,6 +10921,54 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: reduce(TD_COALESCABLE_WAVEFRONT,sum)
+    - name: TD_INPUT_BUSY
+      description: TD input subblock is busy or waiting for data. This means the instruction, state 
+        or TC data fifos may not be empty or the TD is processing a wave. Perf_Windowing not 
+        supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 2
+    - name: TD_INPUT_BUSY_sum
+      description: TD input subblock is busy or waiting for data. This means the instruction, state 
+        or TC data fifos may not be empty or the TD is processing a wave. Perf_Windowing not 
+        supported for this counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_INPUT_BUSY,sum)
+    - name: TD_LDS_STALL
+      description: TD is stalled because it has run out of credits and it has data waiting to be 
+        sent out to the LDS. Perf_Windowing not supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 43
+    - name: TD_LDS_STALL_sum
+      description: TD is stalled because it has run out of credits and it has data waiting to be 
+        sent out to the LDS. Perf_Windowing not supported for this counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_LDS_STALL,sum)
     - name: TD_LOAD_WAVEFRONT
       description: Count the wavefronts with opcode = load, include atomics and store.
       properties: []
@@ -10838,6 +10998,106 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: reduce(TD_LOAD_WAVEFRONT,sum)
+    - name: TD_NOFILTER_BUSY
+      description: TD no_filter subblock is busy. This means the TD's no_filter pipeline (decode, 
+        format, data swizzle, data packing) could be processing non-sampler data. Perf_Windowing not
+        supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 5
+    - name: TD_NOFILTER_BUSY_sum
+      description: TD no_filter subblock is busy. This means the TD's no_filter pipeline (decode, 
+        format, data swizzle, data packing) could be processing non-sampler data. Perf_Windowing not
+        supported for this counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_NOFILTER_BUSY,sum)
+    - name: TD_RAY_TRACING_BVH4_BUSY
+      description: TD ray tracing subblock is busy. This means the TD's raytracing pipeline (box and
+        triangle test pipeline) could be processing a thread. Perf_Windowing not supported for this 
+        counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 6
+    - name: TD_RAY_TRACING_BVH4_BUSY_sum
+      description: TD ray tracing subblock is busy. This means the TD's raytracing pipeline (box and
+        triangle test pipeline) could be processing a thread. Perf_Windowing not supported for this 
+        counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_RAY_TRACING_BVH4_BUSY,sum)
+    - name: TD_SAMPLER_LERP_BUSY
+      description: TD filter subblock is busy, which means any of the four lerps has pixel data 
+        flowing down its pipeline (blend, accumulation, format). Perf_Windowing not supported for 
+        this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 3
+    - name: TD_SAMPLER_LERP_BUSY_sum
+      description: TD filter subblock is busy, which means any of the four lerps has pixel data 
+        flowing down its pipeline (blend, accumulation, format). Perf_Windowing not supported for 
+        this counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_SAMPLER_LERP_BUSY,sum)
+    - name: TD_SAMPLER_OUT_BUSY
+      description: TD sampler output subblock is busy. This means the TD's sampler output pipeline 
+        (accumulation, data swizzle, data packing) could be processing pixel data. Perf_Windowing 
+        not supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 4
+    - name: TD_SAMPLER_OUT_BUSY_sum
+      description: TD sampler output subblock is busy. This means the TD's sampler output pipeline 
+        (accumulation, data swizzle, data packing) could be processing pixel data. Perf_Windowing 
+        not supported for this counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_SAMPLER_OUT_BUSY,sum)
     - name: TD_SPI_STALL
       description: TD is stalled SPI vinit
       properties: []
@@ -10892,10 +11152,62 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: reduce(TD_STORE_WAVEFRONT,sum)
+    - name: TD_TA_DATA_STALL
+      description: TD is stalled waiting for TA data. Perf_Windowing not supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 40
+    - name: TD_TA_DATA_STALL_sum
+      description: TD is stalled waiting for TA data. Perf_Windowing not supported for this counter.
+        Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_TA_DATA_STALL,sum)
+    - name: TD_TC_RAM_STALL
+      description: TD is stalled waiting for a TC ram request. Perf_Windowing not supported for this
+        counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 42
+    - name: TD_TC_RAM_STALL_sum
+      description: TD is stalled waiting for a TC ram request. Perf_Windowing not supported for this
+        counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_TC_RAM_STALL,sum)
     - name: TD_TC_STALL
       description: TD is stalled waiting for TC data.
       properties: []
       definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 41
         - architectures:
             - gfx90a
             - gfx908
@@ -10913,6 +11225,10 @@ rocprofiler-sdk:
       properties: []
       definitions:
         - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
             - gfx90a
             - gfx908
             - gfx940
@@ -10926,6 +11242,10 @@ rocprofiler-sdk:
       properties: []
       definitions:
         - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
             - gfx90a
             - gfx908
             - gfx940
@@ -10940,6 +11260,10 @@ rocprofiler-sdk:
       properties: []
       definitions:
         - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
             - gfx90a
             - gfx908
             - gfx940
@@ -11251,6 +11575,16 @@ rocprofiler-sdk:
         - architectures:
             - gfx906
           expression: ((TCC_EA1_WRREQ_sum-TCC_EA1_WRREQ_64B_sum)*32+TCC_EA1_WRREQ_64B_sum*64)
+    - name: WGPUtilization
+      description: 'WGP Utilization - SQG busy cycles as a percent of SQG cycles.'
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: 100*reduce(SQG_BUSY_CYCLES,sum)/reduce(SQG_CYCLES,sum)
     - name: WRITE_REQ_32B
       description: The total number of 32-byte effective memory writes.
       properties: []

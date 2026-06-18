@@ -115,7 +115,10 @@ def test_scratch_memory(json_input_data, csv_input_data):
 
     verify_scratch_memory_alternating_pattern(scratch_memory_data, bf_op_names)
     assert 2**64 - 1 not in scratch_reported_agent_ids
-    assert scratch_reported_agent_ids == detected_agents_ids
+    assert scratch_reported_agent_ids, "no scratch memory was reported on any agent"
+    assert scratch_reported_agent_ids.issubset(
+        detected_agents_ids
+    ), f"scratch reported on unknown agents: {scratch_reported_agent_ids - detected_agents_ids}"
 
     assert len(csv_input_data) > 0
 
@@ -159,32 +162,39 @@ def test_scratch_memory(json_input_data, csv_input_data):
 
 def verify_scratch_memory_alternating_pattern(scratch_memory_data, bf_op_names):
     """
-    Verify that operations follow ALLOC→FREE→ALLOC→FREE pattern per (thread, flags) combination.
+    Verify that operations follow ALLOC→FREE→ALLOC→FREE pattern per
+    (agent, thread, flags) combination.
+
+    Scratch memory is managed independently per agent (each device maintains its
+    own scratch pool), so the alternating sequence must be validated per agent.
+    Otherwise, a single host thread that allocates scratch on multiple agents
+    produces consecutive ALLOC events that are not actually out of order.
     """
-    # Track operations by thread and flags
-    thread_flag_operations = {}
+    # Track operations by agent, thread and flags
+    agent_thread_flag_operations = {}
 
     for node in scratch_memory_data:
+        agent_id = node["agent_id"]["handle"]
         thread_id = node["thread_id"]
         operation = node["operation"]  # Numeric (1=ALLOC, 2=FREE)
         flags = node["flags"]
         timestamp = node["start_timestamp"]
 
-        key = (thread_id, flags)
-        if key not in thread_flag_operations:
-            thread_flag_operations[key] = []
+        key = (agent_id, thread_id, flags)
+        if key not in agent_thread_flag_operations:
+            agent_thread_flag_operations[key] = []
 
-        thread_flag_operations[key].append((timestamp, operation))
+        agent_thread_flag_operations[key].append((timestamp, operation))
 
-    # Verify proper alternating sequence for each thread+flags combination
-    for (thread_id, flags), operations in thread_flag_operations.items():
+    # Verify proper alternating sequence for each agent+thread+flags combination
+    for (agent_id, thread_id, flags), operations in agent_thread_flag_operations.items():
         # Sort by timestamp to ensure chronological order
         sorted_ops = [op for _, op in sorted(operations)]
 
         # Must start with ALLOC (operation code 1)
         if sorted_ops and sorted_ops[0] != 1:
             raise AssertionError(
-                f"Thread {thread_id}, Flags {flags}: Must start with ALLOC, found operation code {sorted_ops[0]}"
+                f"Agent {agent_id}, Thread {thread_id}, Flags {flags}: Must start with ALLOC, found operation code {sorted_ops[0]}"
             )
 
         # Check for alternating pattern - expected pattern is ALLOC→FREE→ALLOC→FREE
@@ -203,7 +213,7 @@ def verify_scratch_memory_alternating_pattern(scratch_memory_data, bf_op_names):
                 )
 
                 raise AssertionError(
-                    f"Thread {thread_id}, Flags {flags}: Operation #{i+1} should be {expected_name} (code {expected}), found {op_name} (code {sorted_ops[i]})"
+                    f"Agent {agent_id}, Thread {thread_id}, Flags {flags}: Operation #{i+1} should be {expected_name} (code {expected}), found {op_name} (code {sorted_ops[i]})"
                 )
 
 

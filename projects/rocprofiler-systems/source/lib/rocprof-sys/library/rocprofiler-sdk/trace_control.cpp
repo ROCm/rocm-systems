@@ -49,7 +49,7 @@ trace_control::force_initial_pause()
 }
 
 void
-trace_control::handle_range_start(uint64_t range_id, const char* message)
+trace_control::handle_range_start(std::uint64_t range_id, const char* message)
 {
     if(message == nullptr || m_trace_regions.count(message) == 0)
     {
@@ -61,7 +61,7 @@ trace_control::handle_range_start(uint64_t range_id, const char* message)
         std::scoped_lock const lk{ m_region_mutex };
         was_empty = m_active_range_ids.empty();
         m_active_range_ids.insert(range_id);
-        m_active_region_count.store(static_cast<uint32_t>(m_active_range_ids.size()),
+        m_active_region_count.store(static_cast<std::uint32_t>(m_active_range_ids.size()),
                                     std::memory_order_relaxed);
     }
 
@@ -72,9 +72,10 @@ trace_control::handle_range_start(uint64_t range_id, const char* message)
 }
 
 void
-trace_control::handle_range_stop(uint64_t range_id)
+trace_control::handle_range_stop(std::uint64_t range_id)
 {
-    bool now_empty = false;
+    bool now_empty  = false;
+    bool had_paused = false;
     {
         std::scoped_lock const lk{ m_region_mutex };
         auto                   it = m_active_range_ids.find(range_id);
@@ -82,14 +83,16 @@ trace_control::handle_range_stop(uint64_t range_id)
         {
             m_active_range_ids.erase(it);
             now_empty = m_active_range_ids.empty();
-            m_active_region_count.store(static_cast<uint32_t>(m_active_range_ids.size()),
-                                        std::memory_order_relaxed);
+            m_active_region_count.store(
+                static_cast<std::uint32_t>(m_active_range_ids.size()),
+                std::memory_order_relaxed);
         }
     }
 
     if(now_empty)
     {
-        if(m_user_paused.load(std::memory_order_relaxed))
+        had_paused = m_user_paused.load(std::memory_order_relaxed);
+        if(had_paused)
         {
             LOG_WARNING(
                 "Target region ended while paused. Subsequent resume will be ignored.");
@@ -103,7 +106,7 @@ trace_control::handle_range_stop(uint64_t range_id)
 }
 
 void
-trace_control::handle_pause()
+trace_control::handle_pause(std::uint64_t tid)
 {
     if(region_filter_active())
     {
@@ -122,12 +125,12 @@ trace_control::handle_pause()
     }
 
     m_user_paused.store(true, std::memory_order_relaxed);
-    LOG_INFO("Pausing tracing session...");
+    LOG_INFO("Pausing tracing session (thread {})...", tid);
     trigger_callbacks(m_pause_callbacks);
 }
 
 void
-trace_control::handle_resume()
+trace_control::handle_resume(std::uint64_t tid)
 {
     if(!m_user_paused.load(std::memory_order_relaxed))
     {
@@ -146,7 +149,7 @@ trace_control::handle_resume()
     }
 
     m_user_paused.store(false, std::memory_order_relaxed);
-    LOG_INFO("Resuming tracing session...");
+    LOG_INFO("Resuming tracing session (thread {})...", tid);
     trigger_callbacks(m_resume_callbacks);
 }
 
@@ -166,28 +169,30 @@ trace_control::shutdown()
         m_trace_regions.clear();
         m_region_filter_active.store(false, std::memory_order_relaxed);
     }
+
+    m_user_paused.store(false, std::memory_order_relaxed);
 }
 
 void
-trace_control::register_region_pauser_resume_callbacks(callback_t start_callback,
-                                                       callback_t stop_callback)
+trace_control::register_region_pause_resume_callbacks(callback_t resume_callback,
+                                                      callback_t pause_callback)
 {
     std::scoped_lock const lk{ m_callback_mutex };
-    m_resume_callbacks.push_back(std::move(start_callback));
-    m_pause_callbacks.push_back(std::move(stop_callback));
+    m_resume_callbacks.push_back(std::move(resume_callback));
+    m_pause_callbacks.push_back(std::move(pause_callback));
 }
 
 bool
 trace_control::should_write_markers() const
 {
-    if(!region_filter_active())
-    {
-        return true;
-    }
-
     if(m_user_paused.load(std::memory_order_relaxed))
     {
         return false;
+    }
+
+    if(!region_filter_active())
+    {
+        return true;
     }
 
     return m_active_region_count.load(std::memory_order_relaxed) > 0;

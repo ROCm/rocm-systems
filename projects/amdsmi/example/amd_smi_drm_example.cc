@@ -422,7 +422,7 @@ static const std::map<amdsmi_virtualization_mode_t, std::string> virtualization_
     {AMDSMI_VIRTUALIZATION_MODE_GUEST, "GUEST"},
     {AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH, "PASSTHROUGH"}};
 
-static const std::map<processor_type_t, std::string> processor_type_map = {
+static const std::map<amdsmi_processor_type_t, std::string> processor_type_map = {
     {AMDSMI_PROCESSOR_TYPE_UNKNOWN, "UNKNOWN"},
     {AMDSMI_PROCESSOR_TYPE_AMD_GPU, "AMD_GPU"},
     {AMDSMI_PROCESSOR_TYPE_AMD_CPU, "AMD_CPU"},
@@ -1090,7 +1090,7 @@ int main() {
 
       // Get device type. Since the amdsmi is initialized with
       // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMDSMI_PROCESSOR_TYPE_AMD_GPU.
-      processor_type_t processor_type = {};
+      amdsmi_processor_type_t processor_type = {};
       ret = amdsmi_get_processor_type(processor_handles[device_index], &processor_type);
       CHK_AMDSMI_RET(ret)
 

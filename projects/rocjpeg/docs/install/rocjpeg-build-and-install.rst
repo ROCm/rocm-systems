@@ -2,35 +2,66 @@
   :description: Install rocJPEG with the source code
   :keywords: install, building, rocJPEG, AMD, ROCm, source code, developer
 
-********************************************************************
-Building and installing rocJPEG from source code
-********************************************************************
+*************************************
+Build and install rocJPEG from source
+*************************************
 
-rocJPEG is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. For TheRock installation details, refer to the `TheRock documentation <https://github.com/ROCm/TheRock#readme>`_.
+To build rocJPEG as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
 
-To build rocJPEG standalone from source, :doc:`clone the rocJPEG project <./rocjpeg-clone-repo>` and change to the project directory:
+Alternatively, you can build rocJPEG standalone using the following
+instructions.
 
-.. code:: shell
+Prerequisites
+=============
 
-  cd rocm-systems/projects/rocjpeg
+rocJPEG requires a supported AMD GPU. For more information, see :ref:`ROCm Core
+SDK components <rocm:release-components>`.
 
-Build and install rocJPEG using the following commands:
+* HIP runtime and development libraries
+* AMD Clang++ compiler (C++17 required)
+* Libva and VA-API drivers
+* Libdrm (amdgpu)
+* CMake and pkg-config
 
-.. code:: shell
+Build and install
+=================
 
-  mkdir build && cd build
-  cmake ../
-  make -j8
-  sudo make install
+1. The rocJPEG source code is available from the `ROCm systems GitHub repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg>`__. Use sparse checkout when cloning the rocJPEG project. Clone the repo using `sparse-checkout`.
 
-After installation, the rocJPEG libraries will be copied to ``/opt/rocm/lib`` and the rocJPEG header files will be copied to ``/opt/rocm/include/rocjpeg``.
+   .. code-block:: bash
 
-To run the installed CTest-based verification:
+      git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+      cd rocm-systems
+      git sparse-checkout init --cone
+      git sparse-checkout set projects/rocjpeg
 
-.. code:: shell
+2. Then use ``git checkout`` to check out the branch you need.
 
-  mkdir rocjpeg-test && cd rocjpeg-test
-  cmake /opt/rocm/share/rocjpeg/test/
-  ctest -VV
+   .. code-block:: bash
 
-To test your build, run ``make test``. To run the test with the verbose option, run ``make test ARGS="-VV"``.
+      git checkout develop
+      cd projects/rocjpeg
+
+3. Build and install rocJPEG using the following commands:
+
+   .. code-block:: bash
+
+      mkdir build && cd build
+      cmake ../
+      make -j8
+      sudo make install
+
+   After installation, the rocJPEG libraries will be copied to ``/opt/rocm/lib`` and the rocJPEG header files will be copied to ``/opt/rocm/include/rocjpeg``.
+
+4. To run the installed CTest-based verification:
+
+   .. code-block:: bash
+
+     mkdir rocjpeg-test && cd rocjpeg-test
+     cmake /opt/rocm/share/rocjpeg/test/
+     ctest -VV
+
+   To test your build, run ``make test``. To run the test with the verbose option, run ``make test ARGS="-VV"``.

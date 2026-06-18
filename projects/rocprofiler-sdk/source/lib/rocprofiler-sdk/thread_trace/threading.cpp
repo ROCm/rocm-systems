@@ -28,6 +28,8 @@
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
+#include <fmt/format.h>
+
 #include <atomic>
 #include <cstdint>
 #include <thread>
@@ -85,14 +87,17 @@ copy_data_sync(void*         dst,
                size_t        size,
                hsa_signal_t* dependency)
 {
-    ROCP_FATAL_IF(dependency == nullptr) << "Dependency must not be null";
+    ROCP_TRACE << fmt::format("Executing async copy from {} to {}", src, dst);
 
     thread_local auto signal = scoped_signal_t{};
 
     auto copy_fn = CHECK_NOTNULL(hsa::get_amd_ext_table())->hsa_amd_memory_async_copy_fn;
 
+    // Workaround for ROCM-25606
+    if(dependency) signal_wait(*dependency);
+
     signal_reset(signal.sig);
-    auto status = copy_fn(dst, dst_agent, src, src_agent, size, 1, dependency, signal.sig);
+    auto status = copy_fn(dst, dst_agent, src, src_agent, size, 0, nullptr, signal.sig);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to copy: " << status;
     signal_wait(signal.sig);
 }
@@ -129,6 +134,7 @@ consumer_loop(
             continue;
         }
 
+        ROCP_TRACE << read_index.load() << "Consumer received ptr " << buffer.memory;
         auto flags = static_cast<rocprofiler_thread_trace_shader_data_flags_t>(buffer.flags);
         callback_fn(agent_id, 0, buffer.memory, buffer.size, flags, userdata);
         read_index.fetch_add(1);
@@ -203,7 +209,7 @@ producer_loop(
 
     auto stop_trace = [&]() {
         ROCP_INFO << "Stopping the trace";
-        att_queue_submit_and_signal_last(queue, parameters.control_packet->after_krn_pkt);
+        att_queue_submit_and_wait_last(queue, parameters.control_packet->after_krn_pkt);
     };
 
     auto iterate_trace = [&]() {
@@ -265,8 +271,8 @@ producer_loop(
                                          ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
                                          true);
 
-                    att_queue_submit_and_signal_last(queue,
-                                                     parameters.control_packet->before_krn_pkt);
+                    att_queue_submit_and_wait_last(queue,
+                                                   parameters.control_packet->before_krn_pkt);
                 }
             }
             // The status_query test verifies we immediately poll again after consuming a
@@ -282,6 +288,7 @@ producer_loop(
 
     auto end_t0 = std::chrono::system_clock::now();
     ROCP_INFO << "Total trace time: " << (end_t0 - start_t0).count() * 1E-9f << " s.";
+    ROCP_INFO << "Total flips: " << write_index.load();
 }
 }  // namespace thread_trace
 }  // namespace rocprofiler

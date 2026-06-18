@@ -15,6 +15,7 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
 #include "graph/topo.h"
+#include "net.h"
 #include "rocmwrap.h"
 
 namespace RcclUnitTesting
@@ -102,6 +103,9 @@ static void CreateMockComm(
     mockComm->nRanks = nRanks;
     mockComm->nNodes = 1; // Default to single node for P2P tests
     mockComm->rank   = 0; // Default rank
+
+    mockComm->pxnDisable      = RCCL_VALUE_UNSET;
+    mockComm->p2pNetChunkSize = RCCL_VALUE_UNSET;
 
     // Initialize topology
     memset(&mockTopo, 0, sizeof(mockTopo));
@@ -203,7 +207,6 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_UsesLL128WhenInRange)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
     // Manually populate minimal fields for comm
     comm->nRanks                    = 1;
     comm->nNodes                    = 2; // triggers inter-node logic
@@ -246,7 +249,6 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
     // Manually populate minimal fields for comm
     comm->nRanks                    = 1;
     comm->nNodes                    = 2; // triggers inter-node logic
@@ -288,7 +290,6 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
     setenv("NCCL_PROTO", "1", 1); // Simulate manual override
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
     // Manually populate minimal fields for comm
     comm->nRanks = 1;
     comm->nNodes = 2; // triggers inter-node logic
@@ -323,7 +324,6 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
     // Manually populate minimal fields for comm
     comm->nRanks = 1;
     comm->nNodes = 2; // triggers inter-node logic
@@ -1181,6 +1181,7 @@ TEST(Rcclwrap, AllrcclSetP2pNetChunkSizeTests)
                     }()
                 )
                 .withTimeout(std::chrono::seconds(60))
+                .withNumGpus(0)
         );
     }
 
@@ -1294,6 +1295,7 @@ TEST(Rcclwrap, AllPxnTests)
                         return env;
                     }()
                 )
+                .withNumGpus(0)
         );
     }
 
@@ -1351,6 +1353,195 @@ check_sticky:
         << "CUCHECKGOTO should set result to ncclUnhandledCudaError on failure";
     EXPECT_EQ(hipSuccess, hipGetLastError())
         << "CUCHECKGOTO must clear sticky HIP error after failure";
+}
+
+TEST(Rcclwrap, RcclUseAllGatherDirectNodeCountTests)
+{
+    TEST_INFO("=== Starting Process-Isolated rcclUseAllGatherDirect Node Count Tests ===");
+
+    // Test case structure for AllGather Direct node-count gating tests
+    struct AGDirectNodeCountTestCase
+    {
+        std::string                                  name;
+        std::string                                  arch;
+        int                                          nRanks;
+        int                                          nNodes;
+        bool                                         requiresAinic; // Skip if AINIC not present
+        std::unordered_map<std::string, std::string> extraEnv;
+    };
+
+    std::vector<AGDirectNodeCountTestCase> testCases = {
+        // nNodes > 32: must return false for any NIC type (hardware-independent)
+        {
+            "AGDirect_Disabled_nNodes33",
+            "gfx942",
+            128, // >= 64 ranks so PXN is enabled for gfx942
+            33,  // > 32 nodes
+            false,
+            {}
+        },
+        // nNodes > 16 with AINIC: must return false (skipped when AINIC hardware absent)
+        {
+            "AGDirect_Disabled_AINIC_nNodes17",
+            "gfx942",
+            128, // >= 64 ranks so PXN is enabled for gfx942
+            17,  // > 16 nodes
+            true,
+            {}
+        },
+    };
+
+    // Base environment: clean state, no env vars that would short-circuit earlier checks
+    std::unordered_map<std::string, std::string> baseEnv = {
+        {       "NCCL_DEBUG", "TRACE"},
+        {"NCCL_DEBUG_SUBSYS",   "ALL"}
+    };
+
+    for(const auto& tc : testCases)
+    {
+        ProcessIsolatedTestRunner::registerTest(
+            ProcessIsolatedTestRunner::TestConfig(
+                tc.name,
+                [tc]()
+                {
+                    // Skip AINIC tests when AINIC hardware is not present, since
+                    // rcclUseAinic() relies on hardware detection and cannot be
+                    // forced in a test environment without actual AINIC NICs.
+                    if(tc.requiresAinic && !rcclUseAinic())
+                    {
+                        GTEST_SKIP() << "Skipping " << tc.name
+                                     << ": AINIC hardware not present";
+                        return;
+                    }
+
+                    ncclComm_t            mockComm = nullptr;
+                    struct ncclTopoSystem mockTopo;
+                    struct ncclTopoNode   mockGpuNode;
+                    CreateMockComm(mockComm, mockTopo, mockGpuNode, tc.arch.c_str(), tc.nRanks);
+                    mockComm->nNodes = tc.nNodes;
+
+                    // Use a message size that passes the threshold check so only
+                    // the node-count guards are responsible for any false return.
+                    size_t msgSize = 8388608; // 8 MiB
+
+                    bool result = rcclUseAllGatherDirect(mockComm, msgSize);
+
+                    EXPECT_FALSE(result)
+                        << "Expected rcclUseAllGatherDirect to return false for "
+                        << tc.arch << " with nNodes=" << tc.nNodes;
+
+                    CleanupMockComm(mockComm);
+                }
+            )
+                .withEnvironment(
+                    [&tc, &baseEnv]()
+                    {
+                        auto env = baseEnv;
+                        env.insert(tc.extraEnv.begin(), tc.extraEnv.end());
+                        return env;
+                    }()
+                )
+                .withTimeout(std::chrono::seconds(60))
+                .withNumGpus(0)
+        );
+    }
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    bool allTestsPassed = ProcessIsolatedTestRunner::executeAllTests(options);
+
+    EXPECT_TRUE(allTestsPassed) << "One or more AllGather Direct node count tests failed";
+
+    TEST_INFO("=== Process-Isolated rcclUseAllGatherDirect Node Count Tests Completed ===");
+}
+
+TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
+{
+    TEST_INFO("=== Starting Process-Isolated rcclUseHierarchicalAllGather Tests ===");
+    struct HierAGCase
+    {
+        std::string                                  name;
+        int                                          nNodes;
+        bool                                         hierCommsInit;
+        size_t                                       msgSize;
+        bool                                         expected;
+        std::unordered_map<std::string, std::string> extraEnv;
+    };
+
+    const size_t HALF = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+    const size_t FULL = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
+
+    std::vector<HierAGCase> testCases = {
+        // nNodes < 8 --> disabled
+        {"LessThan8Nodes",            4,  true,  1ULL << 20, false, {}},
+        // sub-comms not initialized --> disabled
+        {"CommsNotInitialized",       16, false, 1ULL << 20, false, {}},
+        // 8 node size > 64MB --> disabled
+        {"Disabled_8Nodes_AboveHalf", 8,  true,  HALF + 1,   false, {}},
+        // 16 node size > 128MB --> disabled
+        {"Disabled_16N_AboveFull",    16, true,  FULL + 1,   false, {}},
+        // env var forces off --> disabled
+        {"DisabledByEnvVar",          16, true,  1ULL << 20, false, {{"RCCL_HIERARCHICAL_ALLGATHER", "0"}}},
+    };
+
+    // Base environment shared by every case
+    std::unordered_map<std::string, std::string> baseEnv = {
+        {       "NCCL_DEBUG", "TRACE"},
+        {"NCCL_DEBUG_SUBSYS",   "ALL"}
+    };
+
+    for(const auto& tc : testCases)
+    {
+        ProcessIsolatedTestRunner::registerTest(
+            ProcessIsolatedTestRunner::TestConfig(
+                tc.name,
+                [tc]()
+                {
+                    ncclComm_t            mockComm = nullptr;
+                    struct ncclTopoSystem mockTopo;
+                    struct ncclTopoNode   mockGpu;
+                    CreateMockComm(mockComm,
+                                   mockTopo,
+                                   mockGpu,
+                                   "gfx942",
+                                   /*nRanks=*/8 * tc.nNodes);
+                    mockComm->nNodes                       = tc.nNodes;
+                    mockComm->hierarchicalCommsInitialized = tc.hierCommsInit;
+
+                    EXPECT_EQ(rcclUseHierarchicalAllGather(mockComm, tc.msgSize),
+                              tc.expected)
+                        << "Case: " << tc.name
+                        << " (nNodes=" << tc.nNodes
+                        << ", hierCommsInit=" << tc.hierCommsInit
+                        << ", msgSize=" << tc.msgSize << ")";
+
+                    CleanupMockComm(mockComm);
+                }
+            )
+                .withEnvironment(
+                    [&tc, &baseEnv]()
+                    {
+                        auto env = baseEnv;
+                        env.insert(tc.extraEnv.begin(), tc.extraEnv.end());
+                        return env;
+                    }()
+                )
+                .withTimeout(std::chrono::seconds(60))
+        );
+    }
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    bool allTestsPassed = ProcessIsolatedTestRunner::executeAllTests(options);
+
+    EXPECT_TRUE(allTestsPassed)
+        << "One or more rcclUseHierarchicalAllGather tests failed";
+
+    TEST_INFO("=== Process-Isolated rcclUseHierarchicalAllGather Tests Completed ===");
 }
 
 } // namespace RcclUnitTesting

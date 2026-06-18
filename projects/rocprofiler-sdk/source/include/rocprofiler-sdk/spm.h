@@ -22,48 +22,8 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/defines.h>
-#include <rocprofiler-sdk/fwd.h>
+#if defined(ROCPROFILER_SDK_EXPERIMENTAL_WARNINGS)
+#    warning "rocprofiler-sdk/experimental/spm.h should be included for now"
+#endif
 
-ROCPROFILER_EXTERN_C_INIT
-
-/**
- * @defgroup SPM_SERVICE SPM Service
- * @brief Streaming Performance Monitoring
- *
- * @{
- */
-
-/**
- * @brief (experimental) ROCProfiler SPM Record.
- *
- */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_record_t
-{
-    /**
-     * Counters, including identifiers to get counter information and Counters
-     * values
-     */
-    rocprofiler_counter_record_t* counters;
-    uint64_t                      counters_count;
-} rocprofiler_spm_record_t;
-
-/**
- * @brief Configure SPM Service.
- *
- * @param [in] context_id
- * @param [in] buffer_id
- * @param [in] counter_config
- * @param [in] interval
- * @return ::rocprofiler_status_t
- */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
-rocprofiler_configure_spm_service(rocprofiler_context_id_t        context_id,
-                                  rocprofiler_buffer_id_t         buffer_id,
-                                  rocprofiler_counter_config_id_t counter_config,
-                                  uint64_t                        interval) ROCPROFILER_API;
-
-/** @} */
-
-ROCPROFILER_EXTERN_C_FINI
+#include <rocprofiler-sdk/experimental/spm.h>

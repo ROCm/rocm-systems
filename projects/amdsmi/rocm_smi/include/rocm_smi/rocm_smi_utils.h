@@ -83,7 +83,6 @@ rsmi_status_t GetDevValueVec(amd::smi::DevInfoTypes type, uint32_t dv_ind,
 rsmi_status_t GetDevBinaryBlob(amd::smi::DevInfoTypes type, uint32_t dv_ind, std::size_t b_size,
                                void* p_binary_data);
 rsmi_status_t ErrnoToRsmiStatus(int err);
-rsmi_status_t SysfsWriteErrnoToRsmiStatus(int err);
 int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max_pwm);
 int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm);
 rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value);
@@ -632,6 +631,12 @@ inline ostream_joiner<std::decay_t<DelimiterType>, CharType, TraitsType> make_os
 }
 
 uint64_t bdfid_from_domain(uint64_t bdfid, uint64_t domain);
+
+// Sleep for the given number of whole seconds, retrying on signal interruption
+// (EINTR) so the full duration is always served.
+void sleep_interruptible(uint32_t seconds);
+// Sleep for the given timespec duration, retrying on EINTR.
+void sleep_interruptible(const struct timespec& duration);
 }  // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_

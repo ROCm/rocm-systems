@@ -265,9 +265,19 @@ static_assert(sizeof(SharedMutex) == sizeof(pthread_rwlock_t*), "OS abstraction 
 static_assert(sizeof(Thread) == sizeof(os_thread*), "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
-  void* ret = dlopen(filename.c_str(), RTLD_LAZY);
+  // RTLD_NODELETE keeps the library mapped even after dlclose.
+  // This prevents crashes when the library has circular dependencies:
+  // if libA loads libB, and libB links against libA, then dlclose(libB)
+  // could unmap libA while libA's code is still executing.
+  // With RTLD_NODELETE, dlclose decrements the refcount but does not
+  // unmap the code pages or run destructors - those happen at process exit.
+  int dlopen_flags = RTLD_LAZY;
+#ifdef RTLD_NODELETE
+  dlopen_flags |= RTLD_NODELETE;
+#endif
+  void* ret = dlopen(filename.c_str(), dlopen_flags);
   if (ret == nullptr) debug_print("LoadLib(%s) failed: %s\n", filename.c_str(), dlerror());
-  return *(LibHandle*)&ret;
+  return ret;
 }
 
 void* GetExportAddress(LibHandle lib, std::string export_name) {
@@ -861,11 +871,18 @@ size_t PageSize() {
 bool UnmapMemory(void* va, size_t size) { return ::munmap(va, size) == 0; }
 
 bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) {
+  if (fd < 0)  return false;
+
   void* mapped_ptr = ::mmap(va, size, MemProtToOsProt(perms), 
                             MAP_SHARED | MAP_FIXED, fd, cpu_addr);
   if (mapped_ptr != va)
       return false;
   return true;
+}
+
+hsa_status_t DmaBufClose(int dmabuf) {
+  if (dmabuf < 0) return HSA_STATUS_SUCCESS;
+  return ::close(dmabuf) == 0 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_RESOURCE_FREE;
 }
 
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
@@ -957,6 +974,8 @@ uint64_t HostTotalPhysicalMemory() {
 int Ffs(int i) { return ffs(i); }
 
 int Ctz(uint64_t i) { return __builtin_ctz(i); }
+
+int Popcount(uint32_t i) { return __builtin_popcount(i); }
 
 char* DlError() { return dlerror(); }
 

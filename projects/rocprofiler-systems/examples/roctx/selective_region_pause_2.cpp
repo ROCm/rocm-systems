@@ -4,6 +4,10 @@
 // Demonstrates interleaving of Pause/Resume with Selective Region Tracing.
 // Scenario: Pause occurs OUTSIDE the target region (before it starts).
 //
+// Supports two region marker styles (selected via --push-pop argument):
+//   default (start/stop): roctxRangeStartA / roctxRangeStop
+//   --push-pop:           roctxRangePushA  / roctxRangePop
+//
 // The pause happens outside any target region, so it is not valid in the
 // context of region filtering. When the target region starts, profiling
 // begins normally. The resume inside the region is a no-op since there
@@ -12,16 +16,18 @@
 // Code flow:
 //   roctxProfilerPause
 //   CodeBlock_Z                                 (outside region — not profiled)
-//   roctxRangeStartA("Region 1")
+//   <range start>("Region1")
 //     CodeBlock_A                               (profiled)
 //     CodeBlock_B                               (profiled)
 //     roctxProfilerResume (no-op)
 //     CodeBlock_C                               (profiled)
-//   roctxRangeStop(Region 1)
+//   <range stop>
 //   CodeBlock_D                                 (outside region — not profiled)
 //
 // Run with filter:
-//   ROCPROFSYS_SELECTED_REGIONS="Region 1" rocprof-sys -- ./selective_region_pause_2
+//   ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys -- ./selective_region_pause_2
+//   ROCPROFSYS_SELECTED_REGIONS="Region1" rocprof-sys -- ./selective_region_pause_2
+//   --push-pop
 //
 // Expected: profiling data recorded for {CodeBlock_A, CodeBlock_B, CodeBlock_C}
 
@@ -34,8 +40,10 @@ DEFINE_KERNEL(CodeBlock_C, 40)
 DEFINE_KERNEL(CodeBlock_D, 50)
 
 int
-main()
+main(int argc, char** argv)
 {
+    const bool use_push_pop = (argc > 1 && std::string_view(argv[1]) == "--push-pop");
+
     gpu_buffer buf;
     float*     d = buf.get();
 
@@ -46,7 +54,7 @@ main()
 
     LAUNCH_KERNEL(CodeBlock_Z, d);
 
-    roctx_range_id_t region1_id = roctxRangeStartA("Region1");
+    roctx_range_id_t region1_id = range_start("Region1", use_push_pop);
 
     LAUNCH_KERNEL(CodeBlock_A, d);
 
@@ -56,7 +64,7 @@ main()
 
     LAUNCH_KERNEL(CodeBlock_C, d);
 
-    roctxRangeStop(region1_id);
+    range_stop(region1_id, use_push_pop);
 
     LAUNCH_KERNEL(CodeBlock_D, d);
 

@@ -1,0 +1,58 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_info_pmc_",
+            "required_columns": [
+                "agent_id",
+                "target_arch",
+                "name",
+                "symbol",
+                "description",
+                "units",
+                "value_type"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify GPU perf counter info entries exist for GPU agents",
+                    "error_message": "No GPU perf counter info entries found in rocpd_info_pmc",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE target_arch = 'GPU'"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify SQ_WAVES counter info entries exist (multi-dimensional)",
+                    "error_message": "No SQ_WAVES counter info entries found in rocpd_info_pmc",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'SQ_WAVES%'"
+                }
+            ]
+        },
+        {
+            "min_rows": 100,
+            "name_prefix": "rocpd_pmc_event_",
+            "required_columns": [
+                "event_id",
+                "pmc_id",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify GPU perf counter sample events were recorded",
+                    "error_message": "Fewer than expected GPU perf counter sample events in rocpd_pmc_event",
+                    "expected_result": 100,
+                    "query": "SELECT COUNT(*) as count FROM {table_name}"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify SQ_WAVES PMC events have been recorded with non-zero values",
+                    "error_message": "No SQ_WAVES PMC events found with non-zero values",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'SQ_WAVES%' AND event.value > 0"
+                }
+            ]
+        }
+    ]
+}

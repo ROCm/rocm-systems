@@ -39,8 +39,16 @@ class GPUInfo:
         return False
 
     @property
+    def _is_gfx1250(self) -> bool:
+        """Check if any detected GPU uses the gfx1250 architecture."""
+        return "gfx1250" in self.architectures
+
+    @property
     def rocm_events_for_test(self) -> str:
         """Get appropriate ROCm events for testing based on architecture."""
+        if self._is_gfx1250:
+            return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TX_VCA_VCA_BUSY"
+
         mi300_or_later = self._is_mi300_or_later
         if mi300_or_later:
             return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY"
@@ -49,10 +57,23 @@ class GPUInfo:
     @property
     def counter_names(self) -> list[str]:
         """Get counter names for validation based on architecture"""
+        if self._is_gfx1250:
+            return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TX_VCA_VCA_BUSY"]
+
         mi300_or_later = self._is_mi300_or_later
         if mi300_or_later:
             return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TA_TA_BUSY"]
         return ["SQ_WAVES"]
+
+    @property
+    def gpu_perf_counters_for_test(self) -> str:
+        """Get appropriate GPU perf counters for testing based on architecture.
+
+        These are the same counters as rocm_events_for_test but used with
+        ROCPROFSYS_GPU_PERF_COUNTERS (device counting service) instead of
+        ROCPROFSYS_ROCM_EVENTS (kernel dispatch counters).
+        """
+        return self.rocm_events_for_test
 
     @property
     def expected_counter_files(self) -> list[str]:
@@ -385,23 +406,31 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
 
 @lru_cache(maxsize=1)
 def get_xnack_support(rocm_path: Optional[Path] = None) -> bool:
-    """Check if a current GPU supports XNACK.
+    """Check whether the current GPU is XNACK-capable.
 
-    Runs rocminfo and checks if 'xnack' appears in the output.
+    Run ``rocminfo`` with ``HSA_XNACK=1`` injected into the subprocess
+    environment and return True only if the output reports ``xnack+``.
+
+    This keeps the check independent of the caller's shell environment:
+    ``xnack-`` remains unsupported for test gating, and GPUs with no
+    XNACK qualifier also return False.
     """
     rocminfo = get_rocminfo(rocm_path)
     if not rocminfo:
         return False
 
     try:
+        env = os.environ.copy()
+        env["HSA_XNACK"] = "1"
         result = subprocess.run(
             [str(rocminfo)],
             capture_output=True,
             text=True,
             timeout=30,
+            env=env,
         )
         if result.returncode == 0:
-            return "xnack" in result.stdout
+            return "xnack+" in result.stdout
     except (subprocess.TimeoutExpired, OSError):
         pass
 

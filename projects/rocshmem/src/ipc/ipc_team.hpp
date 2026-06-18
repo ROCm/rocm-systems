@@ -45,6 +45,7 @@ class IPCTeam : public Team {
   void* pAta{nullptr};
 
   int pool_index_{-1};
+  uint64_t alltoall_sequence_number = 0;
 };
 
 }  // namespace rocshmem

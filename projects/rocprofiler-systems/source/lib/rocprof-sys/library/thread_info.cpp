@@ -42,19 +42,19 @@ get_index_data()
 }
 
 auto&
-get_info_data(int64_t _tid)
+get_info_data(std::int64_t _tid)
 {
     return get_info_data()->at(_tid);
 }
 
 auto&
-get_index_data(int64_t _tid)
+get_index_data(std::int64_t _tid)
 {
     return get_index_data()->at(_tid);
 }
 
 auto
-init_index_data(int64_t _tid, bool _offset = false)
+init_index_data(std::int64_t _tid, bool _offset = false)
 {
     auto& itr = get_index_data(_tid);
     if(!itr)
@@ -78,14 +78,14 @@ init_index_data(int64_t _tid, bool _offset = false)
     return itr;
 }
 
-thread_local int64_t offset_causal_count = 0;
-const auto           unknown_thread      = std::optional<thread_info>{};
-int64_t              peak_num_threads    = max_supported_threads;
+thread_local std::int64_t offset_causal_count = 0;
+const auto                unknown_thread      = std::optional<thread_info>{};
+std::int64_t              peak_num_threads    = max_supported_threads;
 
 // Register callback to allow thread_data containers to query peak_num_threads
 // when they are instantiated, ensuring late-instantiated containers are properly sized.
 const auto peak_num_threads_callback_registered = []() {
-    set_peak_num_threads_callback([]() -> int64_t { return peak_num_threads; });
+    set_peak_num_threads_callback([]() -> std::int64_t { return peak_num_threads; });
     return true;
 }();
 }  // namespace
@@ -99,8 +99,8 @@ thread_index_data::as_string() const
     return _ss.str();
 }
 
-int64_t
-grow_data(int64_t _tid)
+std::int64_t
+grow_data(std::int64_t _tid)
 {
     struct data_growth
     {};
@@ -120,7 +120,7 @@ grow_data(int64_t _tid)
             {
                 if(itr)
                 {
-                    int64_t _new_capacity = (*itr)(_tid + 1);
+                    std::int64_t _new_capacity = (*itr)(_tid + 1);
                     LOG_WARNING("[{}] Grew thread data from {} to {}...", _tid,
                                 peak_num_threads, _new_capacity);
                 }
@@ -165,7 +165,7 @@ thread_info::init(bool _offset)
         _info                 = thread_info{};
         _info->is_offset      = threading::offset_this_id();
         _info->index_data     = init_index_data(_tid, _info->is_offset);
-        _info->lifetime.first = tim::get_clock_real_now<uint64_t, std::nano>();
+        _info->lifetime.first = tim::get_clock_real_now<std::uint64_t, std::nano>();
 
         const auto _sequent_tid = _info->index_data->sequent_value;
         _info->causal_count     = (!_info->is_offset && _sequent_tid < peak_num_threads)
@@ -209,7 +209,7 @@ thread_info::get(native_handle_t&& _tid)
         }
     }
 
-    if(get_is_continuous_integration() && unknown_thread)
+    if(unknown_thread)
     {
         throw std::runtime_error("Unknown thread has been assigned a value");
     }
@@ -228,7 +228,7 @@ thread_info::get(std::thread::id _tid)
         }
     }
 
-    if(get_is_continuous_integration() && unknown_thread)
+    if(unknown_thread)
     {
         throw std::runtime_error("Unknown thread has been assigned a value");
     }
@@ -237,7 +237,7 @@ thread_info::get(std::thread::id _tid)
 }
 
 const std::optional<thread_info>&
-thread_info::get(int64_t _tid, ThreadIdType _type)
+thread_info::get(std::int64_t _tid, ThreadIdType _type)
 {
     if(_type == ThreadIdType::InternalTID)
         return get_info_data(_tid);
@@ -267,16 +267,18 @@ thread_info::get(int64_t _tid, ThreadIdType _type)
     }
     else if(_type == ThreadIdType::PthreadID)
     {
-        throw std::runtime_error("rocprof-sys does not support thread_info::get(int64_t, "
-                                 "ThreadIdType) with ThreadIdType::PthreadID");
+        throw std::runtime_error(
+            "rocprof-sys does not support thread_info::get(std::int64_t, "
+            "ThreadIdType) with ThreadIdType::PthreadID");
     }
     else if(_type == ThreadIdType::StlThreadID)
     {
-        throw std::runtime_error("rocprof-sys does not support thread_info::get(int64_t, "
-                                 "ThreadIdType) with ThreadIdType::StlThreadID");
+        throw std::runtime_error(
+            "rocprof-sys does not support thread_info::get(std::int64_t, "
+            "ThreadIdType) with ThreadIdType::StlThreadID");
     }
 
-    if(get_is_continuous_integration() && unknown_thread)
+    if(unknown_thread)
     {
         throw std::runtime_error("Unknown thread has been assigned a value");
     }
@@ -285,7 +287,7 @@ thread_info::get(int64_t _tid, ThreadIdType _type)
 }
 
 void
-thread_info::set_start(uint64_t _ts, bool _force)
+thread_info::set_start(std::uint64_t _ts, bool _force)
 {
     auto& _v = get_info_data(utility::get_thread_index());
     if(!_v) init();
@@ -294,7 +296,7 @@ thread_info::set_start(uint64_t _ts, bool _force)
 }
 
 void
-thread_info::set_stop(uint64_t _ts)
+thread_info::set_stop(std::uint64_t _ts)
 {
     auto  _tid = utility::get_thread_index();
     auto& _v   = get_info_data(_tid);
@@ -319,26 +321,26 @@ thread_info::set_stop(uint64_t _ts)
     }
 }
 
-uint64_t
+std::uint64_t
 thread_info::get_start() const
 {
     return lifetime.first;
 }
 
-uint64_t
+std::uint64_t
 thread_info::get_stop() const
 {
     return lifetime.second;
 }
 
 bool
-thread_info::is_valid_time(uint64_t _ts) const
+thread_info::is_valid_time(std::uint64_t _ts) const
 {
     return (_ts >= lifetime.first && _ts <= lifetime.second);
 }
 
 bool
-thread_info::is_valid_lifetime(uint64_t _beg, uint64_t _end) const
+thread_info::is_valid_lifetime(std::uint64_t _beg, std::uint64_t _end) const
 {
     return (is_valid_time(_beg) && is_valid_time(_end));
 }

@@ -237,6 +237,16 @@ class NullDevice : public amd::Device {
     return true;
   }
 
+  cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override {
+    ShouldNotReachHere();
+    return CL_INVALID_OPERATION;
+  }
+
+  cl_int virtualUnmap(void* va, size_t size) override {
+    ShouldNotReachHere();
+    return CL_INVALID_OPERATION;
+  }
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) override {
     ShouldNotReachHere();
@@ -351,6 +361,11 @@ class Device : public NullDevice {
   static hsa_status_t iterateCpuMemoryPoolCallback(hsa_amd_memory_pool_t region, void* data);
   static hsa_status_t loaderQueryHostAddress(const void* device, const void** host);
 
+  //! Returns the AMD HSA loader extension function table.
+  static const hsa_ven_amd_loader_1_03_pfn_t& loaderExtensionTable() {
+    return amd_loader_ext_table;
+  }
+
   static bool loadHsaModules();
 
   hsa_agent_t getBackendDevice() const { return bkendDevice_; }
@@ -404,6 +419,7 @@ class Device : public NullDevice {
   }
 
   virtual device::Signal* createSignal() const override;
+  virtual device::Signal* createIpcSignal() const override;
 
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
@@ -463,16 +479,22 @@ class Device : public NullDevice {
   virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment) override;
   virtual bool virtualFree(void* addr) override;
 
+  virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override;
+  virtual cl_int virtualUnmap(void* va, size_t size) override;
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) override;
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override { return true; }
 
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle) override;
+  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle,
+                                        amd::Memory::HandleType handle_type) override;
 
-  bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) const;
+  bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr,
+                                amd::Memory::HandleType handle_type) const;
 
-  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle) override;
+  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle,
+                                                amd::Memory::HandleType handle_type) override;
 
   virtual bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
                             cl_set_device_clock_mode_output_amd* pSetClockModeOutput) override;
@@ -484,11 +506,17 @@ class Device : public NullDevice {
   virtual void RetainGlobalSignal(void* signal) const override;
   virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
   virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
+  virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket() const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
+
+  virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
+                                  amd::ExternalSemaphoreHandleType sem_handle_type) override;
+  virtual void DestroyExtSemaphore(void* extSemaphore) override;
 
   //! Allocate host memory in terms of numa policy set by user
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
@@ -545,7 +573,8 @@ class Device : public NullDevice {
       amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal,
       bool managed = false, bool dedicated_queue = false,
       hsa_queue_t* preferred = nullptr,
-      const std::unordered_set<uint64_t>* excluded_ids = nullptr);
+      const std::unordered_set<uint64_t>* excluded_ids = nullptr,
+      void** metadata_ring_buffer = nullptr);
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
@@ -553,8 +582,12 @@ class Device : public NullDevice {
 
   hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority,
                                    hsa_queue_t* preferred = nullptr,
-                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr);
+                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr,
+                                   void** metadata_ring_buffer = nullptr);
   bool ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
+
+  //! Return the pre-computed metadata packet version header bits
+  uint32_t MetadataVersionHeader() const { return metadata_version_header_; }
 
   //! Return multi GPU grid launch sync buffer
   address MGSync() const { return mg_sync_; }
@@ -618,7 +651,7 @@ class Device : public NullDevice {
   bool IsPm4Emulation() const { return pm4_emulation_; }
 
   //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
-  void WaitForHsaAsyncHandlersIdle();
+  void WaitForHsaAsyncHandlersIdle() override;
 
  private:
   bool create();
@@ -633,7 +666,7 @@ class Device : public NullDevice {
                            int numa_id = kDefaultNumaNode) const;
   static constexpr hsa_signal_value_t InitSignalValue = 1;
 
-  static hsa_ven_amd_loader_1_00_pfn_t amd_loader_ext_table;
+  static hsa_ven_amd_loader_1_03_pfn_t amd_loader_ext_table;
 
   std::recursive_mutex* mapCacheOps_;    //!< Lock to serialise cache for the map resources
   std::vector<amd::Memory*>* mapCache_;  //!< Map cache info structure
@@ -670,12 +703,17 @@ class Device : public NullDevice {
                                    //!< mode
   static address mg_sync_;         //!< MGPU grid launch sync memory (SVM location)
 
+  //! Pre-computed metadata packet version header bits
+  uint32_t metadata_version_header_ = 0;
+  bool metadata_version_queried_ = false;
+
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
+    void* metadataRingBuffer_; //! Metadata prefetch ring buffer base
 
     // Constructor
-    QueueInfo() : refCount(0), hasDedicatedQueue_(false) {}
+    QueueInfo() : refCount(0), hasDedicatedQueue_(false), metadataRingBuffer_(nullptr) {}
 
     //! Get the current hardware queue depth (wptr - rptr)
     static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
@@ -720,7 +758,8 @@ class Device : public NullDevice {
   //! Use dynamic queues mode to get a queue from pool
   hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false,
                                 hsa_queue_t* preferred = nullptr,
-                                const std::unordered_set<uint64_t>* excluded_ids = nullptr);
+                                const std::unordered_set<uint64_t>* excluded_ids = nullptr,
+                                void** metadata_ring_buffer = nullptr);
 
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.
   virtual bool findLinkInfo(const hsa_amd_memory_pool_t& pool,

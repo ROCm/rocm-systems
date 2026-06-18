@@ -110,13 +110,17 @@ public:
             num_xccs = 1;
             num_aid  = 4;
         }
+        if(num_xccs > 1 && HasAttr(CounterBlockGrbmaAttr))
+        {
+            num_aid  = (num_xccs + pm4_factory->GetXccPerAid() - 1) / pm4_factory->GetXccPerAid();
+            num_xccs = 1;
+        }
         shader_engine = HasAttr(CounterBlockSeAttr);
         shader_array  = HasAttr(CounterBlockSaAttr);
 
-        if(bIsGFX9)
-            compute_unit = HasAttr(CounterBlockTcAttr) && shader_engine;
-        else if(bIsGFX11 || bIsGFX12)
-            workgroup_processor = HasAttr(CounterBlockSqAttr);
+        if(bIsGFX9) compute_unit = HasAttr(CounterBlockTcAttr) && shader_engine;
+
+        workgroup_processor = HasAttr(CounterBlockWgpAttr);
 
         se_num  = pm4_factory->GetShaderEnginesNumber();
         sarrays = pm4_factory->GetShaderArraysNumber() * se_num;
@@ -137,7 +141,10 @@ public:
         if(workgroup_processor)
         {
             dimensions.push_back({"WGP", wgp_num});
-            if(bIsGFX11) dimensions.push_back({"INSTANCE", block_instance_count});
+            if(bIsGFX11)
+                dimensions.push_back({"INSTANCE", block_instance_count});
+            else if(block_instance_count > 1)
+                dimensions.push_back({"INSTANCE", block_instance_count});
         }
         else
             dimensions.push_back({"INSTANCE", block_instance_count});

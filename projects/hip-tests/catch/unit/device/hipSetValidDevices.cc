@@ -145,8 +145,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Negative_Length_Lessthan_DeviceArrSize) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Basic) {
   int totalDevices = HipTest::getDeviceCount();
   if (totalDevices < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   // By default, without setting any device, validate that 0th device is being used
@@ -247,8 +246,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_WithAllDevicesInSystem) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Cases) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   SECTION("length is 0 and deviceArr is nullPtr") {
@@ -303,8 +301,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Cases) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_MultiProcess) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   auto pid = fork();
@@ -369,8 +366,7 @@ void launchFunction(int deviceId) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_MultiThread) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   REQUIRE(getCurrentDevice() == 0);
@@ -411,14 +407,12 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiThread) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_with_hipMemcpyPeer) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   int canAccessPeer = -1;
   HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 1, 0));
   if (!canAccessPeer) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
   REQUIRE(canAccessPeer == 1);
   HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));

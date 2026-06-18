@@ -9,10 +9,10 @@ build:
       python: "3.10"
 
 sphinx:
-   configuration: docs/conf.py
+   configuration: projects/rccl/docs/conf.py
 
 formats: [htmlzip, pdf, epub]
 
 python:
    install:
-   - requirements: docs/sphinx/requirements.txt
+   - requirements: projects/rccl/docs/sphinx/requirements.txt

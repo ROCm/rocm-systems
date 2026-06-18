@@ -111,39 +111,41 @@ struct config : output_config
     config& operator=(const config&) = default;
     config& operator=(config&&) noexcept = default;
 
-    bool   demangle                    = get_env("ROCPROF_DEMANGLE_KERNELS", true);
-    bool   truncate                    = get_env("ROCPROF_TRUNCATE_KERNELS", false);
-    bool   kernel_trace                = get_env("ROCPROF_KERNEL_TRACE", false);
-    bool   hsa_core_api_trace          = get_env("ROCPROF_HSA_CORE_API_TRACE", false);
-    bool   hsa_amd_ext_api_trace       = get_env("ROCPROF_HSA_AMD_EXT_API_TRACE", false);
-    bool   hsa_image_ext_api_trace     = get_env("ROCPROF_HSA_IMAGE_EXT_API_TRACE", false);
-    bool   hsa_finalizer_ext_api_trace = get_env("ROCPROF_HSA_FINALIZER_EXT_API_TRACE", false);
-    bool   marker_api_trace            = get_env("ROCPROF_MARKER_API_TRACE", false);
-    bool   memory_copy_trace           = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
-    bool   memory_allocation_trace     = get_env("ROCPROF_MEMORY_ALLOCATION_TRACE", false);
-    bool   kfd_page_migration_trace    = get_env("ROCPROF_KFD_PAGE_MIGRATION_TRACE", false);
-    bool   kfd_page_mapping_trace      = get_env("ROCPROF_KFD_PAGE_MAPPING_TRACE", false);
-    bool   kfd_queue_trace             = get_env("ROCPROF_KFD_QUEUE_TRACE", false);
-    bool   kfd_dropped_events_trace    = get_env("ROCPROF_KFD_DROPPED_EVENTS_TRACE", false);
-    bool   scratch_memory_trace        = get_env("ROCPROF_SCRATCH_MEMORY_TRACE", false);
-    bool   counter_collection          = get_env("ROCPROF_COUNTER_COLLECTION", false);
-    bool   hip_runtime_api_trace       = get_env("ROCPROF_HIP_RUNTIME_API_TRACE", false);
-    bool   hip_compiler_api_trace      = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
-    bool   rccl_api_trace              = get_env("ROCPROF_RCCL_API_TRACE", false);
-    bool   rocdecode_api_trace         = get_env("ROCPROF_ROCDECODE_API_TRACE", false);
-    bool   rocjpeg_api_trace           = get_env("ROCPROF_ROCJPEG_API_TRACE", false);
-    bool   list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
-    bool   list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
-    bool   advanced_thread_trace       = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
-    bool   att_serialize_all           = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
-    bool   enable_signal_handlers      = get_env("ROCPROF_SIGNAL_HANDLERS", true);
-    bool   enable_process_sync         = get_env("ROCPROF_PROCESS_SYNC", false);
-    bool   selected_regions            = get_env("ROCPROF_SELECTED_REGIONS", false);
-    bool   selected_regions_ref_count  = get_env("ROCPROF_SELECTED_REGIONS_REF_COUNT", false);
-    bool   output_config_file          = get_env("ROCPROF_OUTPUT_CONFIG_FILE", false);
-    bool   pc_sampling_host_trap       = false;
-    bool   pc_sampling_stochastic      = false;
-    size_t pc_sampling_interval        = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
+    bool   demangle                      = get_env("ROCPROF_DEMANGLE_KERNELS", true);
+    bool   truncate                      = get_env("ROCPROF_TRUNCATE_KERNELS", false);
+    bool   kernel_trace                  = get_env("ROCPROF_KERNEL_TRACE", false);
+    bool   hsa_core_api_trace            = get_env("ROCPROF_HSA_CORE_API_TRACE", false);
+    bool   hsa_amd_ext_api_trace         = get_env("ROCPROF_HSA_AMD_EXT_API_TRACE", false);
+    bool   hsa_image_ext_api_trace       = get_env("ROCPROF_HSA_IMAGE_EXT_API_TRACE", false);
+    bool   hsa_finalizer_ext_api_trace   = get_env("ROCPROF_HSA_FINALIZER_EXT_API_TRACE", false);
+    bool   marker_api_trace              = get_env("ROCPROF_MARKER_API_TRACE", false);
+    bool   memory_copy_trace             = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
+    bool   memory_allocation_trace       = get_env("ROCPROF_MEMORY_ALLOCATION_TRACE", false);
+    bool   kfd_page_migration_trace      = get_env("ROCPROF_KFD_PAGE_MIGRATION_TRACE", false);
+    bool   kfd_page_mapping_trace        = get_env("ROCPROF_KFD_PAGE_MAPPING_TRACE", false);
+    bool   kfd_queue_trace               = get_env("ROCPROF_KFD_QUEUE_TRACE", false);
+    bool   kfd_dropped_events_trace      = get_env("ROCPROF_KFD_DROPPED_EVENTS_TRACE", false);
+    bool   scratch_memory_trace          = get_env("ROCPROF_SCRATCH_MEMORY_TRACE", false);
+    bool   counter_collection            = get_env("ROCPROF_COUNTER_COLLECTION", false);
+    bool   hip_runtime_api_trace         = get_env("ROCPROF_HIP_RUNTIME_API_TRACE", false);
+    bool   hip_compiler_api_trace        = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
+    bool   rccl_api_trace                = get_env("ROCPROF_RCCL_API_TRACE", false);
+    bool   rocdecode_api_trace           = get_env("ROCPROF_ROCDECODE_API_TRACE", false);
+    bool   rocjpeg_api_trace             = get_env("ROCPROF_ROCJPEG_API_TRACE", false);
+    bool   list_metrics                  = get_env("ROCPROF_LIST_METRICS", false);
+    bool   list_metrics_output_file      = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
+    bool   advanced_thread_trace         = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
+    bool   att_serialize_all             = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
+    bool   enable_signal_handlers        = get_env("ROCPROF_SIGNAL_HANDLERS", true);
+    bool   enable_process_sync           = get_env("ROCPROF_PROCESS_SYNC", false);
+    bool   selected_regions              = get_env("ROCPROF_SELECTED_REGIONS", false);
+    bool   selected_regions_ref_count    = get_env("ROCPROF_SELECTED_REGIONS_REF_COUNT", false);
+    bool   output_config_file            = get_env("ROCPROF_OUTPUT_CONFIG_FILE", false);
+    bool   attach_output_generation_sync = get_env("ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC", false);
+    bool   spm_counter_collection        = get_env("ROCPROF_SPM_COUNTER_COLLECTION", false);
+    bool   pc_sampling_host_trap         = false;
+    bool   pc_sampling_stochastic        = false;
+    size_t pc_sampling_interval          = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
 
@@ -161,6 +163,10 @@ struct config : output_config
     bool     att_param_target_only = get_env<int>("ROCPROF_ATT_PARAM_TARGET_ONLY", 0) != 0;
     uint64_t att_consecutive_kernels = get_env<uint64_t>("ROCPROF_ATT_CONSECUTIVE_KERNELS", 0);
 
+    size_t      spm_sample_interval      = get_env<uint64_t>("ROCPROF_SPM_SAMPLE_INTERVAL", 0);
+    std::string spm_sample_interval_unit = get_env("ROCPROF_SPM_SAMPLE_INTERVAL_UNIT", "none");
+    rocprofiler_spm_parameter_type_t spm_sample_interval_unit_value =
+        ROCPROFILER_SPM_PARAMETER_TYPE_NONE;
     std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
     std::string kernel_filter_exclude   = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
     std::string pc_sampling_method      = get_env("ROCPROF_PC_SAMPLING_METHOD", "none");
@@ -171,6 +177,7 @@ struct config : output_config
 
     std::unordered_set<size_t>         kernel_filter_range    = {};
     std::vector<std::set<std::string>> counters               = {};
+    std::set<std::string>              spm_counters           = {};
     std::vector<att_perfcounter>       att_param_perfcounters = {};
 
     std::queue<CollectionPeriod> collection_periods = {};
@@ -229,7 +236,8 @@ config::get_attach_invariants() const
                            extra_counters_contents,
                            counter_groups_random_seed,
                            counter_groups_interval,
-                           benchmark_mode);
+                           benchmark_mode,
+                           spm_counter_collection);
 }
 
 inline bool
@@ -287,6 +295,10 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(mpi_size_env_variable);
     CFG_SERIALIZE_MEMBER(collection_periods);
     CFG_SERIALIZE_MEMBER(counters);
+    CFG_SERIALIZE_MEMBER(spm_counters);
+    CFG_SERIALIZE_MEMBER(spm_sample_interval);
+    CFG_SERIALIZE_MEMBER(spm_sample_interval_unit);
+    CFG_SERIALIZE_MEMBER(spm_sample_interval_unit_value);
     CFG_SERIALIZE_MEMBER(extra_counters_contents);
     CFG_SERIALIZE_MEMBER(kernel_filter_include);
     CFG_SERIALIZE_MEMBER(kernel_filter_exclude);
@@ -298,6 +310,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(enable_process_sync);
     CFG_SERIALIZE_MEMBER(selected_regions);
     CFG_SERIALIZE_MEMBER(selected_regions_ref_count);
+    CFG_SERIALIZE_MEMBER(attach_output_generation_sync);
 
     CFG_SERIALIZE_MEMBER(counter_groups_random_seed);
     CFG_SERIALIZE_MEMBER(counter_groups_interval);

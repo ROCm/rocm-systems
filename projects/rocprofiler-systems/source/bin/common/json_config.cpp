@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/json_config.hpp"
+#include <cstdint>
 
 #include "common/env_vars.hpp"
 
@@ -98,7 +99,7 @@ json_value_to_string(const nlohmann::json& val)
     else if(val.is_boolean())
         return val.get<bool>() ? "true" : "false";
     else if(val.is_number_integer())
-        return std::to_string(val.get<int64_t>());
+        return std::to_string(val.get<std::int64_t>());
     else if(val.is_number_float())
         return std::to_string(val.get<double>());
     else if(val.is_array())
@@ -230,6 +231,9 @@ resolve_schema_config(const nlohmann::json& config)
                               env_vars::PROCESS_SAMPLING_DURATION);
                 if(gpu.contains("ainic"))
                     resolve_enabled(result, gpu["ainic"], "enabled", env_vars::USE_AINIC);
+                if(gpu.contains("unified_memory_profiling"))
+                    resolve_enabled(result, gpu["unified_memory_profiling"], "enabled",
+                                    env_vars::USE_UNIFIED_MEMORY_PROFILING);
             }
         }
 
@@ -348,6 +352,8 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& output = config["output"];
         resolve_value(result, output, "path", env_vars::OUTPUT_PATH);
+        resolve_value(result, output, "unified_memory_output_path",
+                      env_vars::UNIFIED_MEMORY_OUTPUT_PATH);
         if(output.contains("time_output"))
             resolve_enabled(result, output["time_output"], "enabled",
                             env_vars::TIME_OUTPUT);
@@ -391,10 +397,11 @@ resolve_schema_config(const nlohmann::json& config)
         {
             resolve_value(result, hw, "rocm_events", env_vars::ROCM_EVENTS);
             resolve_value(result, hw, "papi_events", env_vars::PAPI_EVENTS);
+            resolve_value(result, hw, "gpu_perf_counters", env_vars::GPU_PERF_COUNTERS);
         }
         if(hw.contains("papi_multiplexing"))
             resolve_enabled(result, hw["papi_multiplexing"], "enabled",
-                            env_vars::PAPI_MULTIPLEXING);
+                            env_vars::PAPI_MULTIPLEXING_ENABLED);
     }
 
     // --- Advanced section ---
@@ -412,7 +419,7 @@ resolve_schema_config(const nlohmann::json& config)
         resolve_value(result, adv, "trace_duration_sec", env_vars::TRACE_DURATION);
         resolve_value(result, adv, "verbose", env_vars::VERBOSE);
         if(adv.contains("debug"))
-            resolve_enabled(result, adv["debug"], "enabled", env_vars::DEBUG);
+            resolve_enabled(result, adv["debug"], "enabled", env_vars::DEBUG_MODE);
         resolve_value(result, adv, "timemory_components", env_vars::TIMEMORY_COMPONENTS);
         resolve_value(result, adv, "network_interface", env_vars::NETWORK_INTERFACE);
         resolve_value(result, adv, "trace_periods", env_vars::TRACE_PERIODS);
@@ -767,6 +774,8 @@ export_domain_gpu(nlohmann::json&                           config,
         set_json_double(gpu["process_sampling_duration"]["value"], *dur);
     if(auto v = lookup(env_map, env_vars::USE_AINIC))
         gpu["ainic"]["enabled"] = is_truthy(*v);
+    if(auto v = lookup(env_map, env_vars::USE_UNIFIED_MEMORY_PROFILING))
+        gpu["unified_memory_profiling"]["enabled"] = is_truthy(*v);
 }
 
 void
@@ -845,8 +854,13 @@ export_hardware_counters(nlohmann::json&                           config,
         hw["enabled"]              = true;
         hw["papi_events"]["value"] = *v;
     }
-    export_enabled(config, env_map, env_vars::PAPI_MULTIPLEXING, "hardware_counters",
-                   "papi_multiplexing");
+    if(auto v = lookup(env_map, env_vars::GPU_PERF_COUNTERS))
+    {
+        hw["enabled"]                    = true;
+        hw["gpu_perf_counters"]["value"] = *v;
+    }
+    export_enabled(config, env_map, env_vars::PAPI_MULTIPLEXING_ENABLED,
+                   "hardware_counters", "papi_multiplexing");
 }
 }  // namespace
 
@@ -868,6 +882,8 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     export_domain_parallel(config, env_map);
 
     export_string_value(config, env_map, env_vars::OUTPUT_PATH, "output", "path");
+    export_string_value(config, env_map, env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "output",
+                        "unified_memory_output_path");
     export_enabled(config, env_map, env_vars::TIME_OUTPUT, "output", "time_output");
     export_enabled(config, env_map, env_vars::FILE_OUTPUT, "output", "file_output");
     export_enabled(config, env_map, env_vars::USE_ROCPD, "output", "rocpd_output");
@@ -900,7 +916,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
 
     // --- Advanced ---
     export_int_value(config, env_map, env_vars::VERBOSE, "advanced", "verbose");
-    export_enabled(config, env_map, env_vars::DEBUG, "advanced", "debug");
+    export_enabled(config, env_map, env_vars::DEBUG_MODE, "advanced", "debug");
     export_int_value(config, env_map, env_vars::MAX_DEPTH, "advanced", "max_depth");
     export_double_value(config, env_map, env_vars::TRACE_DELAY, "advanced",
                         "trace_delay_sec");
@@ -947,6 +963,10 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     //                                        in a preset would break config
     //                                        file handling.
     //   ROCPROFSYS_CI                      - Internal CI mode flag.
+    //   ROCPROFSYS_LOG_LEVEL               - Diagnostic logging verbosity for
+    //                                        the profiler itself; controls how
+    //                                        the tool reports its own activity,
+    //                                        not what/how to profile.
     //   ROCPROFSYS_TMPDIR                  - Base directory for temporary
     //                                        files; depends on the system's
     //                                        filesystem layout, not profiling

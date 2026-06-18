@@ -17,9 +17,8 @@ rocJPEG is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
 
   .. grid-item-card:: Install
 
-    * :doc:`rocJPEG installation prerequisites <./install/rocjpeg-prerequisites>`
-    * :doc:`Cloning the rocJPEG project <./install/rocjpeg-clone-repo>`
-    * :doc:`Building rocJPEG from source code <./install/rocjpeg-build-and-install>`
+    * :doc:`Install rocJPEG <./install/rocjpeg-install>`
+    * :doc:`Build from source <./install/rocjpeg-build-and-install>`
 
   .. grid-item-card:: How to
 
@@ -34,6 +33,7 @@ rocJPEG is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
   .. grid-item-card:: Reference
 
     * :doc:`rocJPEG environment variables <./reference/rocJPEG-env-vars>`
+    * :doc:`rocJPEG logging levels <./reference/rocJPEG-logging-controls>`
     * :doc:`rocJPEG subsampling and hardware capabilities <./reference/rocjpeg-formats-and-architectures>`
     * :doc:`rocJPEG API library <../doxygen/html/files>`
     * :doc:`rocJPEG Functions <../doxygen/html/globals>`

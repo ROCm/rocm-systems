@@ -41,7 +41,7 @@ cmake --build <build_dir> --target transferBench
 TransferBench is primarily configured through environment variables. Key settings:
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | `NUM_ITERATIONS` | Number of benchmark iterations | varies |
 | `BLOCK_BYTES` | Transfer block size in bytes | 256 |
 | `GFX_BLOCK_SIZE` | GPU compute block size | 256 |
@@ -57,7 +57,7 @@ rocprof-sys-run -- ./transferBench
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation` | Trace all GPU memory operations |
 | `ROCPROFSYS_ROCM_EVENTS` | `SQ_WAVES,GRBM_COUNT` | Sample GPU hardware counters |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |

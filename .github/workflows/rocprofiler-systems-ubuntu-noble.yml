@@ -49,7 +49,7 @@ jobs:
   ubuntu-noble:
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ matrix.rocm-version }}-ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -64,6 +64,7 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
     - &sparse-checkout
@@ -73,18 +74,23 @@ jobs:
           projects/rocprofiler-systems/
           .gitmodules
 
-    - name: Install Packages
-      timeout-minutes: 25
-      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
+    - name: Restore ccache
+      uses: actions/cache@v4
       with:
-        retry_wait_seconds: 30
-        timeout_minutes: 25
-        max_attempts: 5
-        command: |
-          apt-get update &&
-          apt-get upgrade -y &&
-          apt-get install -y libomp-dev libopenmpi-dev &&
-          apt-get autoclean
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-ubuntu-noble-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
+        restore-keys: |
+          ccache-ubuntu-noble-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-
+          ccache-ubuntu-noble-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-
+
+    - &configure-ccache
+      name: Configure ccache
+      run: |
+        mkdir -p "${CCACHE_DIR}"
+        ccache --max-size=1G
+        ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+        ccache -z
+        ccache -p | head -20
 
     - name: Install Python Test Dependencies
       timeout-minutes: 10
@@ -98,21 +104,12 @@ jobs:
           fi
         done
 
-    - name: Install ROCm Packages
-      timeout-minutes: 115
+    - name: Configure ROCm Environment
       shell: bash
-      working-directory: projects/rocprofiler-systems/
       run: |
-        ROCM_VERSION=${{ matrix.rocm-version }}
-        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
-        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-        echo "ROCM_MAJOR=${ROCM_MAJOR} ROCM_MINOR=${ROCM_MINOR} ROCM_VERSN=${ROCM_VERSN}"
-        wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-        apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-        apt-get update
-        apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
-        apt-get autoclean
+        echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Configure, Build and Test
       timeout-minutes: 115
@@ -120,6 +117,8 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       env:
         GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
       run: |
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD}
@@ -139,7 +138,6 @@ jobs:
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
-          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
@@ -152,6 +150,15 @@ jobs:
           -DUSE_CLANG_OMP=OFF \
           -- \
           -LE "network|gpu"
+
+    - &ccache-stats
+      name: ccache stats
+      if: always()
+      run: |
+        echo "=== ccache stats ==="
+        ccache -s -v || true
+        echo "=== ccache dir size ==="
+        du -sh "${CCACHE_DIR}" || true
 
     - name: Check for Leftover Buffered Files
       timeout-minutes: 5
@@ -224,7 +231,7 @@ jobs:
   ubuntu-noble-system-deps:
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -243,9 +250,17 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
     - *sparse-checkout
+
+    - name: Configure ROCm Environment
+      shell: bash
+      run: |
+        echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Install System Dependency Packages
       timeout-minutes: 25
@@ -258,10 +273,20 @@ jobs:
           cd projects/rocprofiler-systems/
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y libomp-dev libopenmpi-dev g++ \
+          apt-get install -y g++ \
             binutils-dev libboost-all-dev libtbb-dev \
             libdw-dev libdwarf-dev libelf-dev libiberty-dev &&
           apt-get autoclean
+
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-ubuntu-noble-system-deps-${{ github.job }}-${{ matrix.compiler }}-${{ github.sha }}
+        restore-keys: |
+          ccache-ubuntu-noble-system-deps-${{ github.job }}-${{ matrix.compiler }}-
+
+    - *configure-ccache
 
     - name: Install Python Test Dependencies
       timeout-minutes: 10
@@ -275,35 +300,19 @@ jobs:
           fi
         done
 
-    - name: Install ROCm 7.2
-      timeout-minutes: 25
-      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
-      with:
-        retry_wait_seconds: 30
-        timeout_minutes: 25
-        max_attempts: 5
-        shell: bash
-        command: |
-          cd projects/rocprofiler-systems/
-          ROCM_VERSION=7.2
-          ROCM_MAJOR=7
-          ROCM_MINOR=2
-          ROCM_VERSN=70200
-          echo "Installing ROCm ${ROCM_VERSION}"
-          wget -q https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-          apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-          apt-get update
-          apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
-          apt-get autoclean
-          echo "/opt/rocm/bin" >> $GITHUB_PATH
-          echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-          /opt/rocm/bin/hipcc -O3 -c ./examples/transpose/transpose.cpp -o /tmp/transpose.o
+    - name: Sanity Check ROCm
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        /opt/rocm/bin/hipcc -O3 -c ./examples/transpose/transpose.cpp -o /tmp/transpose.o
 
     - name: Configure, Build, and Test with System Dependencies
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
+      env:
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
       run: |
         git config --global --add safe.directory ${GITHUB_WORKSPACE}
         git config --global --add safe.directory ${PWD}
@@ -322,9 +331,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
-          -DROCPROFSYS_USE_MPI_HEADERS=OFF \
           -DROCPROFSYS_BUILD_DYNINST=ON \
-          -DROCPROFSYS_BUILD_BOOST=OFF \
           -DROCPROFSYS_BUILD_TBB=OFF \
           -DROCPROFSYS_BUILD_ELFUTILS=OFF \
           -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
@@ -338,6 +345,8 @@ jobs:
           -DUSE_CLANG_OMP=${{ matrix.use-clang-omp }} \
           -- \
           -LE "network|gpu"
+
+    - *ccache-stats
 
     - name: Install
       timeout-minutes: 10

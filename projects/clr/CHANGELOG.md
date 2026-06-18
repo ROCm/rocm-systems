@@ -2,6 +2,35 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 7.14 for ROCm 7.14
+
+### Added
+* New HIP APIs
+    - Execution Context Management: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipDeviceGetDevResource` returns the device resource of a given type for a device
+      * `hipDevSmResourceSplitByCount` splits SM resources into groups with at least a minimum SM count
+      * `hipDevSmResourceSplit` splits SM resources into groups with configurable per-group parameters
+      * `hipDevResourceGenerateDesc` generates a resource descriptor from one or more device resources
+      * `hipGreenCtxCreate` creates a green context from a resource descriptor
+      * `hipExecutionCtxDestroy` destroys an execution context
+      * `hipDeviceGetExecutionCtx` returns the default execution context for a device
+      * `hipExecutionCtxStreamCreate` creates a stream on an execution context with specified flags and priority
+      * `hipExecutionCtxGetDevResource` returns the device resource of a given type for an execution context
+      * `hipExecutionCtxGetDevice` returns the device associated with an execution context
+      * `hipExecutionCtxGetId` returns a unique identifier for an execution context
+      * `hipStreamGetDevResource` returns the device resource of a given type for a stream
+      * `hipExecutionCtxRecordEvent` records an event on an execution context
+      * `hipExecutionCtxSynchronize` blocks until all work on an execution context has completed
+      * `hipExecutionCtxWaitEvent` makes an execution context wait on an event
+    - Module Management: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipLibraryGetGlobal` returns the device pointer and size of a `__device__` global defined in a `hipLibrary_t`. Mirrors `cudaLibraryGetGlobal` / `cuLibraryGetGlobal`.
+      * `hipLibraryGetManaged` returns the host pointer and size of a `__managed__` variable defined in a `hipLibrary_t`. Mirrors `cudaLibraryGetManaged` / `cuLibraryGetManaged`.
+    - Memory Management: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipMemDiscardBatchAsync` discards a batch of memory ranges asynchronously, allowing the runtime to reclaim resources. Mirrors `cudaMemDiscardBatchAsync`.
+      * `hipDrvMemDiscardBatchAsync` driver API variant of `hipMemDiscardBatchAsync`, using `hipDeviceptr_t` pointers. Mirrors `cuMemDiscardBatchAsync`.
+      * `hipMemDiscardAndPrefetchBatchAsync` combines discard and prefetch in a single call, enabling the runtime to optimize data movement. Mirrors `cudaMemDiscardAndPrefetchBatchAsync`.
+      * `hipDrvMemDiscardAndPrefetchBatchAsync` driver API variant of `hipMemDiscardAndPrefetchBatchAsync`, using `hipDeviceptr_t` pointers. Mirrors `cuMemDiscardAndPrefetchBatchAsync`.
+
 ## HIP 7.13 for ROCm 7.13
 
 ### Added
@@ -28,7 +57,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ## HIP 7.12 for ROCm 7.12
 
 ### Added
-
 * New HIP APIs
     - Library Management
     Support for the following APIs for parity with the corresponding CUDA APIs.
@@ -94,6 +122,16 @@ This approach reduces dispatch overhead and improves GPU utilization by overlapp
 * HIP runtime implemented a global SDMA engine allocator with per‑stream affinity to improve memory copy performance.
 * Packet batch‑dispatch optimization: A new graph‑segment scheduling mechanism has been added to the HIP runtime to reduce CPU overhead during HIP graph launches. It uses hierarchical path discovery to construct execution segments that can be dispatched efficiently in parallel, replacing the traditional topological‑ordering approach.
 * Improved `hipGraphLaunch` parallelism for complex data‑parallel graphs. The HIP runtime now eliminates recursion, applies topological ordering, and removes an extra loop in `hipGraphLaunch` to streamline execution.
+
+## HIP 7.2.4 for ROCm 7.2.4
+
+### Resolved issues
+
+* Fixed H2D memory copy latency regression in CPX mode. HIP runtime synchronization behavior has been corrected on AMD Instinct MI300 Series GPUs in CPX mode, restoring latency to previous levels for inference workloads that run multiple HIP streams with concurrent memory copies.
+
+### Optimized
+
+* Reduced `hipGraphLaunch` latency for multi-list graphs. The HIP runtime’s graph dispatch mechanism has been optimized, reducing launch latency for workloads using `hipGraphLaunch` with multi-list graph topologies.
 
 ## HIP 7.2.1 for ROCm 7.2.1
 

@@ -18,6 +18,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 
@@ -136,6 +137,43 @@ TEST_F(HipFileBuffer, registerOversizeRangeReturnsError)
     EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
     ASSERT_EQ(hipFileBufRegister(reinterpret_cast<void *>(0x1), 101, 0),
               HipFileOpError(hipFileHipPointerRangeError));
+}
+
+TEST_F(HipFileBuffer, registerRangeEndingAtUintptrMaxSucceeds)
+{
+    StrictMock<MHip>   mhip;
+    const uintptr_t    base_addr = std::numeric_limits<uintptr_t>::max() - 99;
+    void              *buffer    = reinterpret_cast<void *>(base_addr);
+    HipMemAddressRange range{buffer, 100};
+    EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
+    hipPointerAttribute_t attrs{};
+    attrs.type = hipMemoryTypeDevice;
+    EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
+    ASSERT_EQ(hipFileBufRegister(buffer, 100, 0), HIPFILE_SUCCESS);
+}
+
+TEST_F(HipFileBuffer, registerPointerBeforeAddressRangeBaseReturnsError)
+{
+    StrictMock<MHip>   mhip;
+    void              *buffer = reinterpret_cast<void *>(0x1FFF);
+    HipMemAddressRange range{reinterpret_cast<void *>(0x2000), 0x100};
+    EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
+    hipPointerAttribute_t attrs{};
+    attrs.type = hipMemoryTypeDevice;
+    EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
+    ASSERT_EQ(hipFileBufRegister(buffer, 1, 0), HipFileOpError(hipFileHipPointerRangeError));
+}
+
+TEST_F(HipFileBuffer, registerPointerAtOffsetPastEndReturnsError)
+{
+    StrictMock<MHip>   mhip;
+    void              *buffer = reinterpret_cast<void *>(0x2100);
+    HipMemAddressRange range{reinterpret_cast<void *>(0x2000), 0x100};
+    EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
+    hipPointerAttribute_t attrs{};
+    attrs.type = hipMemoryTypeDevice;
+    EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
+    ASSERT_EQ(hipFileBufRegister(buffer, 1, 0), HipFileOpError(hipFileHipPointerRangeError));
 }
 
 TEST_F(HipFileBuffer, registerHipMemGetAddressRangeThrowReturnsError)

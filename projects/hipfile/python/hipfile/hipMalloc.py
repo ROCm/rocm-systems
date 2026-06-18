@@ -28,6 +28,18 @@ _hip.hipFree.restype = ctypes.c_int
 
 
 def hipMalloc(size_bytes: int) -> ctypes.c_void_p:
+    """Allocate *size_bytes* of GPU device memory.
+
+    Returns
+    -------
+    ctypes.c_void_p
+        Pointer to the allocated device memory.
+
+    Raises
+    ------
+    RuntimeError
+        If the HIP runtime reports an error.
+    """
     d_ptr = ctypes.c_void_p()
     status = _hip.hipMalloc(ctypes.byref(d_ptr), ctypes.c_size_t(size_bytes))
     if status != 0:
@@ -36,6 +48,13 @@ def hipMalloc(size_bytes: int) -> ctypes.c_void_p:
 
 
 def hipFree(ptr: ctypes.c_void_p) -> None:
+    """Free GPU device memory previously allocated by ``hipMalloc``.
+
+    Raises
+    ------
+    RuntimeError
+        If the HIP runtime reports an error.
+    """
     status = _hip.hipFree(ptr)
     if status != 0:
         raise RuntimeError(f"hipFree failed ({status})")

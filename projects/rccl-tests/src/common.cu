@@ -39,6 +39,8 @@ size_t cache_bytes = 192 * 1024 * 1024; // Use 192MB
 rcclTestsGetAlgoInfo_t rcclTestsGetAlgoInfo = NULL;
 rcclTestsGetProtocolName_t rcclTestsGetProtocolName = NULL;
 rcclTestsGetAlgoName_t rcclTestsGetAlgoName= NULL;
+rcclTestsGetSymkInfo_t rcclTestsGetSymkInfo = NULL;
+
 static void loadRcclSyms() {
   static void* handle = NULL;
   const char* libname = "librccl.so";
@@ -50,8 +52,9 @@ static void loadRcclSyms() {
       }
   }
   rcclTestsGetAlgoInfo      = (rcclTestsGetAlgoInfo_t)     dlsym(handle, "rcclGetAlgoInfo");
-  rcclTestsGetAlgoName      = (rcclTestsGetAlgoName_t)     dlsym(handle,  "rcclGetAlgoName");
-  rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) dlsym(handle,  "rcclGetProtocolName");
+  rcclTestsGetAlgoName      = (rcclTestsGetAlgoName_t)     dlsym(handle, "rcclGetAlgoName");
+  rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) dlsym(handle, "rcclGetProtocolName");
+  rcclTestsGetSymkInfo      = (rcclTestsGetSymkInfo_t)     dlsym(handle, "rcclSymKGetInfo");
 }
 
 // RCCL_FLOAT8 support
@@ -139,6 +142,7 @@ std::string rccl_output_format;
 static int report_cputime = 0;
 static int report_timestamps = 0;
 static int deviceImpl = 0;
+int unalign = 0;
 int memory_report = 0;
 
 int deviceCtaCount = 16; // Default number of CTAs for device implementation
@@ -222,7 +226,7 @@ void Reporter::writeFile() {
     _out << "numCycle,";
     _out << "collective,";
 #ifdef MPI_SUPPORT
-    _out << "ranks,rankspernode,gpusperrank,";
+    _out << "nodes,ranks,ranksPerNode,gpusPerRank,";
 #else
     _out << "gpus,";
 #endif
@@ -378,6 +382,8 @@ testResult_t initComms(ncclComm_t* comms, int nComms, int firstRank, int nRanks,
   config.nvlinkCentricSched = 1;
 #endif
 #endif
+  if (ncclTestEngine.initCommConfig)
+    ncclTestEngine.initCommConfig(&config);
 #endif
 
   NCCLCHECK(ncclGroupStart());
@@ -771,7 +777,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     // Complete op before returning
     TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
   }
-  if (blocking_coll) Barrier(args);
+  if (blocking_coll == 1) Barrier(args);
   return testSuccess;
 }
 
@@ -1009,6 +1015,12 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   // Sync to avoid first-call timeout
   Barrier(args);
 
+  // Add forced misalignment
+  for (int i = 0; i < args->nGpus; i++) {
+    args->sendbuffs[i] = (char*)args->sendbuffs[i] + unalign * wordSize(type);
+    args->recvbuffs[i] = (char*)args->recvbuffs[i] + unalign * wordSize(type);
+  }
+
   // Warm-up for all sizes (using a stepfactor of 2)
   for (size_t size = args->minbytes; size <= args->maxbytes; size = size * 2) {
     setupArgs(size, type, args);
@@ -1098,10 +1110,23 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           int algo, proto, nchannels;
           const char* algoName = NULL;
           const char* protoName = NULL;
-          TESTCHECK(args->collTest->getAlgoProtoChannels(args->comms[0], args->nbytes / wordSize(type), type, &algo, &proto, &nchannels));
-          NCCLCHECK(rcclTestsGetAlgoName(algo, &algoName));
-          NCCLCHECK(rcclTestsGetProtocolName(proto, &protoName));
-          PRINT("%8s  %8s  %10d", algoName, protoName, nchannels);
+          bool fromSymk = false;
+          if (test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER && rcclTestsGetSymkInfo) {
+            if (args->collTest->getSymkInfo) {
+              TESTCHECK(args->collTest->getSymkInfo(args->comms[0], args->nbytes / wordSize(type), type, op, &algo, &proto, &nchannels));
+              fromSymk = true;
+            }
+          }
+          if (!fromSymk) {
+            TESTCHECK(args->collTest->getAlgoProtoChannels(args->comms[0], args->nbytes / wordSize(type), type, &algo, &proto, &nchannels));
+          }
+          if (rcclTestsGetAlgoName && rcclTestsGetProtocolName) {
+            NCCLCHECK(rcclTestsGetAlgoName(algo, &algoName));
+            NCCLCHECK(rcclTestsGetProtocolName(proto, &protoName));
+            PRINT("%8s  %8s  %10d", algoName, protoName, nchannels);
+          } else {
+            PRINT("%8s  %8s  %10s", "N/A", "N/A", "N/A");
+          }
         } else {
           PRINT("%8s  %8s  %10s","N/A", "N/A", "N/A");
         }
@@ -1112,6 +1137,11 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
     ++iter;
   } while(repeat != 0);
 
+  // Revert forced misalignment
+  for (int i = 0; i < args->nGpus; i++) {
+    args->sendbuffs[i] = (char*)args->sendbuffs[i] - unalign * wordSize(type);
+    args->recvbuffs[i] = (char*)args->recvbuffs[i] - unalign * wordSize(type);
+  }
   return testSuccess;
 }
 
@@ -1293,6 +1323,16 @@ testResult_t threadInit(struct threadArgs* args) {
   int firstRank = args->proc*args->nThreads*args->nGpus + args->thread*args->nGpus;
   TESTCHECK(initComms(args->comms, args->nGpus, firstRank, nranks, args->gpus, args->ncclId));
 
+  /* Allocate buffers for each GPU (parallel_init: each thread allocates its own) */
+  size_t sendBytes, recvBytes;
+  ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, (size_t)args->maxbytes, (size_t)nranks);
+  NCCLCHECK(ncclGroupStart());
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    TESTCHECK(AllocateBuffs(args->sendbuffs + i, sendBytes, args->recvbuffs + i, recvBytes, args->expected + i, (size_t)args->maxbytes, test_bias ? args->bias + i : NULL));
+  }
+  NCCLCHECK(ncclGroupEnd());
+
   // Capture the memory used by the GPUs after initializing the NCCL communicators
   for (int g = 0; g < args->nGpus; ++g) {
     CUDACHECK(cudaSetDevice(args->gpus[g]));
@@ -1409,6 +1449,7 @@ testResult_t threadLaunch(struct testThread* thread) {
 }
 
 testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes, void **bias) {
+  nbytes += 8*unalign; // pad with size of max datatype in case all datatypes selected; applies to all memory_type branches
   if(enable_rotating_tensor) {
     recvBytes = recvBytes + cache_bytes;
     nbytes = nbytes + cache_bytes;
@@ -1447,7 +1488,10 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
   else {
     // ROCM-2696:HIP_VERSION check added because ncclMemAlloc relies on hipMemRetainAllocationHandle, which had a bug
     // in older HIP versions that could cause use-after-free or segfaults due to premature allocation release.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && HIP_VERSION >= 71260540
+    // The ROCm 7.0.2.x backport (HIP_VERSION in [70051831, 70060000)) carries the same hipMemRetainAllocationHandle
+    // fix, so extend the guard to cover that range as well.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
+    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
     NCCLCHECK(ncclMemAlloc(sendbuff, nbytes));
     NCCLCHECK(ncclMemAlloc(recvbuff, nbytes));
     if (bias) NCCLCHECK(ncclMemAlloc(bias, nbytes));
@@ -1532,8 +1576,9 @@ int main(int argc, char* argv[], char **envp) {
     {"device_implementation", required_argument, 0, 'D'},
     {"device_cta_count", required_argument, 0, 'V'},
     {"memory_report", required_argument, 0, 'M'},
+    {"unalign", required_argument, 0, 'u'},
     {"memory_type", required_argument, 0, 'Y'},                     //RCCL
-    {"cumask", required_argument, 0, 'u'},                          //RCCL
+    {"cumask", required_argument, 0, 'U'},                          //RCCL
     {"out_of_place", required_argument, 0, 'O'},                    //RCCL
     {"delay_inout_place", required_argument, 0, 'q'},               //RCCL
     {"cache_flush", required_argument, 0, 'F'},                     //RCCL
@@ -1547,7 +1592,7 @@ int main(int argc, char* argv[], char **envp) {
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:Y:u:O:q:F:E:Z:X:A:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:Y:U:O:q:F:E:Z:X:A:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -1659,7 +1704,7 @@ int main(int argc, char* argv[], char **envp) {
       case 'Y':
         memorytype = ncclstringtomtype(optarg);
         break;
-      case 'u':
+      case 'U':
         {
           int nmasks = 0;
           char *mask = strtok(optarg, ",");
@@ -1695,7 +1740,6 @@ int main(int argc, char* argv[], char **envp) {
         break;
       case 'A':
         output_algo_proto_channels = strtol(optarg, NULL, 0);
-        if(rcclTestsGetAlgoInfo == NULL || rcclTestsGetAlgoName == NULL || rcclTestsGetProtocolName == NULL) output_algo_proto_channels = 0;
         break;
       case 'M':
         memory_report = (int)strtol(optarg, NULL, 0);
@@ -1732,6 +1776,9 @@ int main(int argc, char* argv[], char **envp) {
           return -1;
         }
         break;
+      case 'u':
+        unalign = (int)strtol(optarg, NULL, 0);
+        break;
       case 'h':
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
@@ -1757,7 +1804,7 @@ int main(int argc, char* argv[], char **envp) {
 #endif
             "[-d,--datatype <nccltype/all>] \n\t"
             "[-r,--root <root/all>] \n\t"
-            "[-z,--blocking <0/1>] \n\t"
+            "[-z,--blocking <0/1/2> 0=non-blocking (default), 1=wait for completion and barrier, 2=wait without barrier] \n\t"
             "[-y,--stream_null <0/1>] \n\t"
             "[-T,--timeout <time in seconds>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
@@ -1770,8 +1817,9 @@ int main(int argc, char* argv[], char **envp) {
             "[-D,--device_implementation <implementation number> enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0)] \n\t"
             "[-V,--device_cta_count <number> set number of CTAs for device implementation (default: 16)] \n\t"
             "[-M,--memory_report <0/1> enable memory usage report (default: 0)] \n\t"
+            "[-u,--unalign <index of first element> Misalign source and destination buffers (default: 0)] \n\t"
             "[-Y,--memory_type <coarse/fine/host/managed>] \n\t"                                                    //RCCL
-            "[-u,--cumask <d0,d1,d2,d3>] \n\t"                                                                      //RCCL
+            "[-U,--cumask <d0,d1,d2,d3>] \n\t"                                                                      //RCCL
             "[-O,--out_of_place <0/1>] \n\t"                                                                        //RCCL
             "[-q,--delay_inout_place <delay between out-of-place and in-place in microseconds>] \n\t"               //RCCL
             "[-F,--cache_flush <number of iterations between instruction cache flush>] \n\t"                        //RCCL
@@ -1784,6 +1832,26 @@ int main(int argc, char* argv[], char **envp) {
         return 0;
     }
   }
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+  if (output_algo_proto_channels) {
+    const bool haveSymk = (rcclTestsGetSymkInfo != NULL);
+    const bool haveAlgo = (rcclTestsGetAlgoInfo != NULL && rcclTestsGetAlgoName != NULL && rcclTestsGetProtocolName != NULL);
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    if (!haveAlgo && !(local_register == SYMMETRIC_REGISTER && haveSymk)) {
+      output_algo_proto_channels = 0;
+    }
+#else
+    (void)haveSymk;
+    if (!haveAlgo) output_algo_proto_channels = 0;
+#endif
+  }
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  if (output_algo_proto_channels) {
+    if (rcclTestsGetAlgoInfo == NULL || rcclTestsGetAlgoName == NULL || rcclTestsGetProtocolName == NULL)
+      output_algo_proto_channels = 0;
+  }
+#endif
 
   CUDACHECK(cudaGetDeviceCount(&numDevices));
 #ifndef MPI_SUPPORT
@@ -1963,6 +2031,13 @@ testResult_t run() {
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = ((gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i)%numDevices;
     CUDACHECK(cudaSetDevice(gpus[i]));
+    if (parallel_init) {
+      if (test_bias) {
+        TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, bias.data()+i));
+      } else {
+        TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, NULL));
+      }
+    }
     if (streamnull) {
       streams[i] = NULL;
     }

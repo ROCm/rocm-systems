@@ -33,8 +33,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetDefaultMemPool_Positive_Basic) {
   HIP_CHECK(
       hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, device));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
 
   hipMemPool_t mem_pool;

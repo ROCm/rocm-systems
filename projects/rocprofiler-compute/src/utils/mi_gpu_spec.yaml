@@ -14,9 +14,16 @@
 #           |-- chip_ids: chip id is specific to the environment the gpu is being used on
 #               | -- physical
 #               | -- virtual # The pattern is physical + 16
-#           |-- partition_mode
-#               | -- compute partition mode
-#               | -- memory partition mode
+#           |-- partition_mode:
+#               | -- compute partition mode:
+#                   | -- num_xcds # Number of XCDs per partition
+#               | -- memory partition mode:
+#                   | -- npsX: # NUMA partition per socket
+#                       | -- Xpx # Number of HBM stack partitions
+#           |-- design:
+#               | -- physical_aid # Number of physical AIDs (CDNA)
+#               | -- logical_partitions_per_die # Logical AID partitions per physical AID (CDNA)
+#               | -- memory_die # Number of memory dies / MCDs (RDNA/navi3)
 #
 # --------------------------------------------------------------------------------
 
@@ -93,6 +100,9 @@ mi_gpu_spec:
                 nps1:
                   spx: 1
                   tpx: 3
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
             chip_ids:
               physical: null
               virtual: null
@@ -128,6 +138,9 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
             chip_ids:
               physical: null
               virtual: null
@@ -159,6 +172,9 @@ mi_gpu_spec:
                   spx: 1
                   tpx: 3
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
             chip_ids:
               physical: 29856
               virtual: 29876
@@ -181,6 +197,9 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
             chip_ids:
               physical: 29857
               virtual: 29877
@@ -203,6 +222,9 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
             chip_ids:
               physical: 29865
               virtual: 29885
@@ -221,6 +243,9 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
             chip_ids:
               physical: 29858
               virtual: 29878
@@ -239,6 +264,9 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
             chip_ids:
               physical: 29864
               virtual: 29884
@@ -261,6 +289,9 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
             chip_ids:
               physical: 29861
               virtual: 29881
@@ -299,6 +330,10 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              # MI350 series has 2 physical AIDs that are subdivided into 2 independent logical partitions
+              physical_aid: 2
+              logical_partitions_per_die: 2
             chip_ids:
               physical: 30112
               virtual: 30128
@@ -320,6 +355,9 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 2
+              logical_partitions_per_die: 2
             chip_ids:
               physical: 30115
               virtual: 30131
@@ -339,6 +377,9 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 2
+              logical_partitions_per_die: 2
             chip_ids:
               physical: 30114
               virtual: 30130
@@ -354,6 +395,10 @@ mi_gpu_spec:
                   spx: 1
                   dpx: 2
                   cpx: 4
+            design:
+              # Half config- 2 AIDs but AID1 is dummy
+              physical_aid: 1
+              logical_partitions_per_die: 2
             chip_ids:
               physical: 30120
               virtual: 30136
@@ -361,7 +406,28 @@ mi_gpu_spec:
   #########################################################
   #Note: in the future, we might set a seperate file for NAVI
   - gpu_series: navi3
+    # for memory_die, APU does not have separate MCDs like dGPU,
+    # mark it as unified memory
     gpu_archs:
+      - gpu_arch: gfx1150
+        perfmon_config:
+            SQ: 8
+            TA: 2
+            GRBM: 2
+            CPC:  2
+            GCEA: 2
+            TCP:  4
+            SPI:  6
+            GL1A: 4
+            GL1C: 4
+            GL2A: 4
+            GL2C: 4
+        models:
+          - gpu_model: rdna35_point_1
+            design:
+              memory_die: 1
+            chip_ids:
+              physical: 5390
       - gpu_arch: gfx1151
         perfmon_config:
             SQ: 8
@@ -376,7 +442,28 @@ mi_gpu_spec:
             GL2A: 4
             GL2C: 4
         models:
-          - gpu_model: strix_halo
+          - gpu_model: rdna35_halo
+            design:
+              memory_die: 1
             chip_ids:
               physical: 5510
+      - gpu_arch: gfx1152
+        perfmon_config:
+            SQ: 8
+            TA: 2
+            GRBM: 2
+            CPC:  2
+            GCEA: 2
+            TCP:  4
+            SPI:  6
+            GL1A: 4
+            GL1C: 4
+            GL2A: 4
+            GL2C: 4
+        models:
+          - gpu_model: rdna35_point_2
+            design:
+              memory_die: 1
+            chip_ids:
+              physical: 4372
   #########################################################

@@ -31,6 +31,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -40,12 +41,38 @@ namespace common
 {
 namespace impl
 {
+// Safely read environment variable directly from environ array.
+// This avoids issues with bash's custom getenv() implementation which
+// breaks when setenv() is called before bash initializes its internal tables.
+//
+// THREAD SAFETY: Reads are NOT safe against concurrent setenv()/putenv()/
+// unsetenv() from any thread, because glibc may reallocate the environ
+// array itself (not just mutate entries). Prefer reading at init time or
+// caching in a function-local static.
+std::optional<std::string>
+get_env_direct(std::string_view name)
+{
+    if(name.empty() || !environ) return std::nullopt;
+
+    for(char** env = environ; *env; ++env)
+    {
+        std::string_view entry{*env};
+        if(entry.size() > name.size() && entry.compare(0, name.size(), name) == 0 &&
+           entry[name.size()] == '=')
+        {
+            // copy the value so callers do not retain pointers into environ.
+            return std::string{entry.substr(name.size() + 1)};
+        }
+    }
+
+    return std::nullopt;
+}
+
 std::string
 get_env(std::string_view env_id, std::string_view _default)
 {
-    if(env_id.empty()) return std::string{_default};
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var) return std::string{env_var};
+    auto env_var = get_env_direct(env_id);
+    if(env_var) return *env_var;
     return std::string{_default};
 }
 
@@ -59,24 +86,26 @@ bool
 get_env(std::string_view env_id, bool _default)
 {
     if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
+    auto env_var = get_env_direct(env_id);
     if(env_var)
     {
-        if(std::string_view{env_var}.empty())
+        if(env_var->empty())
         {
             ROCP_FATAL << fmt::format("No boolean value provided for {}", env_id);
         }
 
-        if(std::string_view{env_var}.find_first_not_of("0123456789") == std::string_view::npos)
+        if(env_var->find_first_not_of("0123456789") == std::string_view::npos)
         {
-            return static_cast<bool>(std::stoi(env_var));
+            return static_cast<bool>(std::stoi(*env_var));
         }
 
-        for(size_t i = 0; i < std::string_view{env_var}.length(); ++i)
-            env_var[i] = tolower(env_var[i]);
+        // Convert to lowercase in-place (cast to unsigned char to avoid UB)
+        for(size_t i = 0; i < env_var->length(); ++i)
+            (*env_var)[i] =
+                static_cast<char>(std::tolower(static_cast<unsigned char>((*env_var)[i])));
 
         for(const auto& itr : {"off", "false", "no", "n", "f", "0"})
-            if(std::string_view{env_var} == itr) return false;
+            if(*env_var == itr) return false;
 
         return true;
     }
@@ -94,8 +123,7 @@ get_env(std::string_view env_id,
         sizeof(Tp) <= sizeof(uint64_t),
         "change use of stol/stoul if instantiating for type larger than a 64-bit integer");
 
-    if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
+    auto env_var = get_env_direct(env_id);
     if(env_var)
     {
         try
@@ -104,18 +132,18 @@ get_env(std::string_view env_id,
             {
                 // use stol/stoul
                 if constexpr(std::is_signed<Tp>::value)
-                    return static_cast<Tp>(std::stol(env_var));
+                    return static_cast<Tp>(std::stol(*env_var));
                 else
-                    return static_cast<Tp>(std::stoul(env_var));
+                    return static_cast<Tp>(std::stoul(*env_var));
             }
             else if constexpr(std::is_floating_point<Tp>::value)
             {
-                return static_cast<Tp>(std::stod(env_var));
+                return static_cast<Tp>(std::stod(*env_var));
             }
         } catch(std::exception& _e)
         {
             ROCP_ERROR << "[rocprofiler][get_env] Exception thrown converting getenv(\"" << env_id
-                       << "\") = " << env_var << " to " << cxx_demangle(typeid(Tp).name())
+                       << "\") = " << *env_var << " to " << cxx_demangle(typeid(Tp).name())
                        << " :: " << _e.what() << ". Using default value of " << _default << "\n";
         }
         return _default;
@@ -123,6 +151,8 @@ get_env(std::string_view env_id,
     return _default;
 }
 
+// set_env uses standard ::setenv() (no wrapper needed).
+// Unlike getenv(), bash does not interpose setenv(), so it works correctly.
 int
 set_env(std::string_view env_id, bool value, int override)
 {

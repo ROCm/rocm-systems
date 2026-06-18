@@ -18,16 +18,6 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz);
 }  // namespace hip_impl
 
-// Unique file descriptor class
-struct UniqueFD {
-  UniqueFD(const std::string& fpath, amd::Os::FileDesc fdesc, size_t fsize)
-      : fpath_(fpath), fdesc_(fdesc), fsize_(fsize) {}
-
-  const std::string fpath_;        //!< File path of this unique file
-  const amd::Os::FileDesc fdesc_;  //!< File Descriptor
-  const size_t fsize_;             //!< File Size
-};
-
 namespace hip {
 class PlatformState {
  public:
@@ -66,9 +56,6 @@ class PlatformState {
   void ConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);
   void PopExec(ihipExec_t& exec);
 
-  std::shared_ptr<UniqueFD> GetUniqueFileHandle(const std::string& file_path);
-  bool CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd);
-
   // Logging lock accessor
   std::recursive_mutex& GetLogLock() { return lg_lock_; }
 
@@ -105,7 +92,6 @@ class PlatformState {
   ~PlatformState() {}
 
   std::recursive_mutex lock_;       //!< Guards PlatformState globals
-  std::recursive_mutex ufd_lock_;   //!< Unique FD Store Lock
   std::recursive_mutex lg_lock_;    //!< Lock for logging operations
   static PlatformState* platform_;  //!< Singleton instance
 
@@ -115,8 +101,6 @@ class PlatformState {
   bool initialized_{false};         //!< Platform initialization state
   //! Texture reference map: texRef -> (module, name)
   std::unordered_map<textureReference*, std::pair<hipModule_t, std::string>> texRef_map_;
-  //! Unique File Descriptor Map
-  std::unordered_map<std::string, std::shared_ptr<UniqueFD>> ufd_map_;
   void* dynamicLibraryHandle_{nullptr};  //!< Handle to dynamic library
   //! Library function map: kernel -> library
   std::unordered_map<hipKernel_t, hipLibrary_t> library_functions_;

@@ -27,6 +27,7 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "host/host_templates.hpp"
+#include <cstring>
 
 namespace rocshmem {
 
@@ -72,11 +73,33 @@ __host__ void IPCHostContext::amo_cas(void *dst, T value, T cond, int pe) {
 
 template <typename T>
 __host__ T IPCHostContext::amo_fetch_add(void *dst, T value, int pe) {
+  if (is_ipc_non_mpi()) {
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8,
+                  "amo_fetch_add: only 32-bit and 64-bit types supported");
+    uint64_t u_val{};
+    std::memcpy(&u_val, &value, sizeof(T));
+    uint64_t u_ret = ipc_amo_fadd(shmem_ptr(dst, pe), u_val, sizeof(T) == 4);
+    T ret{};
+    std::memcpy(&ret, &u_ret, sizeof(T));
+    return ret;
+  }
   return host_interface->amo_fetch_add(dst, value, pe, context_window_info);
 }
 
 template <typename T>
 __host__ T IPCHostContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
+  if (is_ipc_non_mpi()) {
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8,
+                  "amo_fetch_cas: only 32-bit and 64-bit types supported");
+    uint64_t u_val{}, u_cond{};
+    std::memcpy(&u_val, &value, sizeof(T));
+    std::memcpy(&u_cond, &cond, sizeof(T));
+    uint64_t u_ret = ipc_amo_fcas(shmem_ptr(dst, pe), u_cond, u_val,
+                                   sizeof(T) == 4);
+    T ret{};
+    std::memcpy(&ret, &u_ret, sizeof(T));
+    return ret;
+  }
   return host_interface->amo_fetch_cas(dst, value, cond, pe, context_window_info);
 }
 
@@ -109,6 +132,14 @@ template <typename T, ROCSHMEM_OP Op>
 __host__ int IPCHostContext::reduce(rocshmem_team_t team, T *dest,
                                     const T *source, int nreduce) {
   return host_interface->reduce<T, Op>(team, dest, source, nreduce);
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__host__ int IPCHostContext::reduce_on_stream(rocshmem_team_t team, T *dest, 
+                                              const T *source, 
+                                              int nreduce, 
+                                              hipStream_t stream) {
+  return host_interface->reduce_on_stream<T, Op>(team, dest, source, nreduce, stream);
 }
 
 template <typename T>

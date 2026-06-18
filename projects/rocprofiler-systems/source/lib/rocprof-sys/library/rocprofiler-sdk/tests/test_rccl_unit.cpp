@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocprof-sys/library/rocprofiler-sdk/rccl_internal.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -15,13 +16,13 @@ using namespace rocprofsys::rocprofiler_sdk;
 /**
  * @brief Mock PMC registrar for testing with GMock.
  *
- * This mock uses duck typing - it has the same register_gpu_pmc(uint32_t)
+ * This mock uses duck typing - it has the same register_gpu_pmc(std::uint32_t)
  * method signature as the production registrar, enabling template-based DI.
  */
 class mock_pmc_registrar
 {
 public:
-    MOCK_METHOD(void, register_gpu_pmc, (uint32_t device_idx));
+    MOCK_METHOD(void, register_gpu_pmc, (std::uint32_t device_idx));
 };
 
 using rccl_gpu_tracking_state_mock = rccl_gpu_tracking_state_t<mock_pmc_registrar>;
@@ -63,9 +64,9 @@ protected:
      * @brief Setup mock to expect registration for N GPUs (0 to num_gpus-1).
      * @param num_gpus Number of GPUs to expect registration for.
      */
-    void expect_gpu_registrations(uint32_t num_gpus)
+    void expect_gpu_registrations(std::uint32_t num_gpus)
     {
-        for(uint32_t i = 0; i < num_gpus; ++i)
+        for(std::uint32_t i = 0; i < num_gpus; ++i)
         {
             EXPECT_CALL(*m_mock_registrar, register_gpu_pmc(i)).Times(1);
         }
@@ -75,7 +76,7 @@ protected:
      * @brief Setup mock to expect registration for specific GPU indices.
      * @param gpu_indices Vector of GPU indices to expect registration for.
      */
-    void expect_specific_gpu_registrations(const std::vector<uint32_t>& gpu_indices)
+    void expect_specific_gpu_registrations(const std::vector<std::uint32_t>& gpu_indices)
     {
         for(auto idx : gpu_indices)
         {
@@ -263,7 +264,7 @@ TEST_F(rccl_test, tracking_state_get_bytes_before_any_add)
 {
     auto state = create_tracking_state_null();
 
-    for(uint32_t i = 0; i < 10; ++i)
+    for(std::uint32_t i = 0; i < 10; ++i)
     {
         EXPECT_EQ(state.get_bytes(i), 0u);
     }
@@ -325,7 +326,7 @@ TEST_F(rccl_test, tracking_state_multi_gpu_registration_order)
     state.register_gpu(1);
     state.register_gpu(0);
 
-    for(uint32_t i = 0; i < 4; ++i)
+    for(std::uint32_t i = 0; i < 4; ++i)
     {
         EXPECT_TRUE(state.is_registered(i));
     }
@@ -337,12 +338,12 @@ TEST_F(rccl_test, tracking_state_16_gpu_system)
 
     auto state = create_tracking_state_with_mock();
 
-    for(uint32_t i = 0; i < 16; ++i)
+    for(std::uint32_t i = 0; i < 16; ++i)
     {
         state.register_gpu(i);
     }
 
-    for(uint32_t i = 0; i < 16; ++i)
+    for(std::uint32_t i = 0; i < 16; ++i)
     {
         EXPECT_TRUE(state.is_registered(i));
     }
@@ -368,7 +369,7 @@ TEST_F(rccl_test, tracking_state_reset_clears_multiple_gpus)
 {
     auto state = create_tracking_state_null();
 
-    for(uint32_t i = 0; i < 4; ++i)
+    for(std::uint32_t i = 0; i < 4; ++i)
     {
         state.register_gpu(i);
         (void) state.add_bytes(i, 100 * (i + 1));
@@ -376,7 +377,7 @@ TEST_F(rccl_test, tracking_state_reset_clears_multiple_gpus)
 
     state.reset();
 
-    for(uint32_t i = 0; i < 4; ++i)
+    for(std::uint32_t i = 0; i < 4; ++i)
     {
         EXPECT_FALSE(state.is_registered(i));
         EXPECT_EQ(state.get_bytes(i), 0u);

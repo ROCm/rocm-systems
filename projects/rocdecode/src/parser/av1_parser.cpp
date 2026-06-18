@@ -38,7 +38,7 @@ Av1VideoParser::~Av1VideoParser() {
 }
 
 rocDecStatus Av1VideoParser::Initialize(RocdecParserParams *p_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_params));
     rocDecStatus ret;
     if ((ret = RocVideoParser::Initialize(p_params)) != ROCDEC_SUCCESS) {
         FunctionExitLog(g_rocdec_logger);
@@ -54,13 +54,13 @@ rocDecStatus Av1VideoParser::Initialize(RocdecParserParams *p_params) {
 }
 
 rocDecStatus Av1VideoParser::UnInitialize() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus Av1VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_data));
     if (p_data->payload && p_data->payload_size) {
         DebugLog(g_rocdec_logger, ROCDEC_STR("Parsing picture ") + ROCDEC_TOSTR(pic_count_) + ROCDEC_STR(" with payload size ") + ROCDEC_TOSTR(p_data->payload_size) + ROCDEC_STR(" bytes ..."));
         curr_pts_ = p_data->pts;
@@ -85,7 +85,7 @@ rocDecStatus Av1VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 }
 
 ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t pic_data_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(pic_data_size));
     ParserResult ret = PARSER_OK;
     pic_data_buffer_ptr_ = (uint8_t*)p_stream;
     pic_data_size_ = pic_data_size;
@@ -224,7 +224,7 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
 }
 
 ParserResult Av1VideoParser::NotifyNewSequence(Av1SequenceHeader *p_seq_header, Av1FrameHeader *p_frame_header) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_seq_header) + ", " + RocDecFmtPtr(p_frame_header));
     video_format_params_.codec = rocDecVideoCodec_AV1;
     video_format_params_.frame_rate.numerator = frame_rate_.numerator;
     video_format_params_.frame_rate.denominator = frame_rate_.denominator;
@@ -280,7 +280,7 @@ ParserResult Av1VideoParser::NotifyNewSequence(Av1SequenceHeader *p_seq_header, 
 }
 
 ParserResult Av1VideoParser::SendPicForDecode() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     int i, j;
     Av1SequenceHeader *p_seq_header = &seq_header_;
     Av1FrameHeader *p_frame_header = &frame_header_;
@@ -779,7 +779,7 @@ ParserResult Av1VideoParser::ReadObuHeaderAndSize() {
 }
 
 ParserResult Av1VideoParser::ParseSequenceHeaderObu(uint8_t *p_stream, size_t size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(size));
     Av1SequenceHeader *p_seq_header = &seq_header_;
     size_t offset = 0;  // current bit offset
 
@@ -962,7 +962,7 @@ ParserResult Av1VideoParser::ParseSequenceHeaderObu(uint8_t *p_stream, size_t si
 }
 
 ParserResult Av1VideoParser::ParseFrameHeaderObu(uint8_t *p_stream, size_t size, int *p_bytes_parsed) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(size) + ", " + RocDecFmtPtr(p_bytes_parsed));
     if (seen_frame_header_ == 1) {
         // frame_header_copy(). Use the existing frame_header_obu
     } else {
@@ -986,7 +986,7 @@ ParserResult Av1VideoParser::ParseFrameHeaderObu(uint8_t *p_stream, size_t size,
 }
 
 ParserResult Av1VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t size, int *p_bytes_parsed) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(size) + ", " + RocDecFmtPtr(p_bytes_parsed));
     ParserResult ret = PARSER_OK;
     size_t offset = 0;  // current bit offset
     Av1SequenceHeader *p_seq_header = &seq_header_;
@@ -1330,7 +1330,7 @@ ParserResult Av1VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
 }
 
 ParserResult Av1VideoParser::ParseTileGroupObu(uint8_t *p_stream, size_t size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(size));
     size_t offset = 0;  // current bit offset
     Av1FrameHeader *p_frame_header = &frame_header_;
     Av1TileGroupDataInfo *p_tile_group = &tile_group_data_;

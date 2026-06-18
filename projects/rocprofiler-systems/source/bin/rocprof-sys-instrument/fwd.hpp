@@ -13,7 +13,6 @@
 #include <timemory/tpls/cereal/archives.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/utility/argparse.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/popen.hpp>
 #include <timemory/variadic/macros.hpp>
 
@@ -368,7 +367,7 @@ get_symtab_function(procedure_t*);
 std::vector<module_t*>
 filter_modules(std::vector<module_t*>* app_modules);
 
-std::vector<procedure_t*>*
+std::vector<procedure_t*>
 get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
                bool include_uninstrumentable);
 

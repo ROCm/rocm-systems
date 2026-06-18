@@ -1,0 +1,84 @@
+name: profiler-hub Version Check
+run-name: profiler-hub-version-check
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/profiler-hub-version-check.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    name: version-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            profilers/profiler-hub
+            .github/workflows
+
+      - name: Check version bump or CHANGELOG update
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -e
+          BASE="origin/${BASE_REF}"
+          git fetch origin "${BASE_REF}"
+
+          INCLUDE_DIFF=$(git diff --name-only "${BASE}...HEAD" -- \
+            'profilers/profiler-hub/include/' | wc -l)
+          if [ "${INCLUDE_DIFF}" -eq 0 ]; then
+            echo "No public header changes - version check not required."
+            exit 0
+          fi
+
+          echo "Public headers changed in this PR:"
+          git diff --name-only "${BASE}...HEAD" -- 'profilers/profiler-hub/include/'
+          echo
+
+          # Escape hatch: any commit subject containing [no-version-bump]
+          if git log "${BASE}..HEAD" --pretty=%s | grep -qF '[no-version-bump]'; then
+            echo "::notice::Version-bump check skipped via [no-version-bump] commit trailer"
+            exit 0
+          fi
+
+          VERSION_REGEX='project\([[:space:]]*profiler-hub[[:space:]]+VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+'
+          OLD=$(git show "${BASE}:profilers/profiler-hub/CMakeLists.txt" \
+            | grep -oE "${VERSION_REGEX}" || true)
+          NEW=$(grep -oE "${VERSION_REGEX}" \
+            profilers/profiler-hub/CMakeLists.txt || true)
+
+          if [ -n "${NEW}" ] && [ "${OLD}" != "${NEW}" ]; then
+            echo "::notice::Version bumped: ${OLD##*VERSION } -> ${NEW##*VERSION }"
+            exit 0
+          fi
+
+          CHANGELOG_DIFF=$(git diff --name-only "${BASE}...HEAD" -- \
+            'profilers/profiler-hub/CHANGELOG.md' | wc -l)
+          if [ "${CHANGELOG_DIFF}" -gt 0 ]; then
+            echo "::notice::CHANGELOG.md updated; version bump may be deferred to release."
+            exit 0
+          fi
+
+          {
+            echo "::error::Public headers under profilers/profiler-hub/include/ changed but no version bump in CMakeLists.txt and no CHANGELOG.md update."
+            echo
+            echo "Pick one of:"
+            echo "  1. Bump 'project(profiler-hub VERSION ...)' in profilers/profiler-hub/CMakeLists.txt"
+            echo "  2. Add an entry under '## [Unreleased]' in profilers/profiler-hub/CHANGELOG.md"
+            echo "  3. Add '[no-version-bump]' to a commit subject if this change is genuinely non-user-facing"
+          }
+          exit 1

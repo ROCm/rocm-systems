@@ -21,9 +21,18 @@ from perfxpert.providers._exceptions import (
     ProviderError,
     TimeoutError,
 )
+from perfxpert.providers._sanitization import redact_paths, sanitize_messages
 from perfxpert.providers.registry import register
 
 _DEFAULT_TIMEOUT = 120.0
+
+
+def _private_url_from_env() -> str:
+    return (
+        os.environ.get("PERFXPERT_LLM_PRIVATE_URL")
+        or os.environ.get("PRIVATE_LLM_ENDPOINT")
+        or ""
+    ).rstrip("/")
 
 
 def _parse_headers(raw: str) -> Dict[str, str]:
@@ -37,7 +46,7 @@ def _parse_headers(raw: str) -> Dict[str, str]:
         except (SyntaxError, ValueError) as literal_error:
             raise ValueError(
                 "PERFXPERT_LLM_PRIVATE_HEADERS contains invalid JSON "
-                f"or Python literal dict: {e}. Value was: {raw[:80]!r}"
+                f"or Python literal dict: {e}. Value redacted because it may contain secrets."
             ) from literal_error
     if not isinstance(obj, dict):
         raise ValueError(f"PERFXPERT_LLM_PRIVATE_HEADERS must be a JSON object, got {type(obj).__name__}")
@@ -62,11 +71,11 @@ class PrivateProvider(Provider):
         timeout: float = _DEFAULT_TIMEOUT,
         **_: Any,
     ) -> None:
-        self._url = (url or os.environ.get("PERFXPERT_LLM_PRIVATE_URL", "")).rstrip("/")
+        self._url = (url.rstrip("/") if url else _private_url_from_env())
         if not self._url:
             raise AuthError(
                 "private",
-                "no endpoint configured (set PERFXPERT_LLM_PRIVATE_URL)",
+                "no endpoint configured (set PERFXPERT_LLM_PRIVATE_URL or PRIVATE_LLM_ENDPOINT)",
             )
         self._model_default = model or os.environ.get("PERFXPERT_LLM_PRIVATE_MODEL") or "default"
         self._api_key = api_key or os.environ.get("PERFXPERT_LLM_PRIVATE_API_KEY") or "dummy"
@@ -95,6 +104,8 @@ class PrivateProvider(Provider):
             return DryRunResponse
 
         model_id = model or self._model_default
+        messages = sanitize_messages(messages)
+        system = redact_paths(system)
         full = [{"role": "system", "content": system}] if system else []
         full.extend(messages)
 
@@ -137,8 +148,8 @@ class PrivateProvider(Provider):
 register(
     "private",
     PrivateProvider,
-    "Private OpenAI-compatible endpoint (PERFXPERT_LLM_PRIVATE_URL required)",
+    "Private OpenAI-compatible endpoint (PERFXPERT_LLM_PRIVATE_URL or PRIVATE_LLM_ENDPOINT required)",
 )
 
 
-__all__ = ["PrivateProvider", "_parse_headers", "_verify_ssl_from_env"]
+__all__ = ["PrivateProvider", "_parse_headers", "_private_url_from_env", "_verify_ssl_from_env"]

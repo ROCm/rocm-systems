@@ -119,9 +119,7 @@ function(hip_gen_exe_target)
     endforeach()
     # add binary to global list of binaries to install
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ${_EXE_NAME})
-    set(_DISCOVER_PROPERTIES
-      SKIP_REGULAR_EXPRESSION "HIP_SKIP_THIS_TEST"
-    )
+    set(_DISCOVER_PROPERTIES "")
     if (DEFINED HIP_TEST_LABELS)
       list(APPEND _DISCOVER_PROPERTIES LABELS "${HIP_TEST_LABELS}")
     endif()

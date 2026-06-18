@@ -15,6 +15,7 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
+#include <cstdint>
 
 #include <map>
 #include <thread>
@@ -24,6 +25,7 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/types.hpp>
 #include <tuple>
+#include <vector>
 
 #include "logger/debug.hpp"
 
@@ -31,22 +33,6 @@
 
 #include <string_view>
 #include <utility>
-
-namespace
-{
-
-void
-cache_region(uint64_t thread_id, const std::string& name, uint64_t start_ts,
-             uint64_t end_ts, const std::string& category)
-{
-    constexpr size_t      NO_CORRELATION_ID = 0;
-    constexpr const char* CALLSTACK         = "{}";
-    constexpr const char* ARGUMENTS         = "";
-    rocprofsys::trace_cache::get_buffer_storage().store(
-        rocprofsys::trace_cache::region_sample{
-            thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
-            end_ts, CALLSTACK, ARGUMENTS, category.c_str() });
-}
 
 struct entry_key
 {
@@ -64,17 +50,41 @@ struct entry_key
     }
 };
 
-using timestamp_t = uint64_t;
+using timestamp_t = std::uint64_t;
 
-thread_local std::map<entry_key, timestamp_t> map_name_to_args;
+struct pending_cache_entry
+{
+    timestamp_t start_ts = 0;
+    std::string args     = {};
+};
+
+inline thread_local std::map<entry_key, std::vector<pending_cache_entry>>
+    map_name_to_args;
+
+namespace
+{
+
+void
+cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
+             std::uint64_t end_ts, const std::string& category,
+             const std::string& args_str = {})
+{
+    constexpr size_t      NO_CORRELATION_ID = 0;
+    constexpr const char* CALLSTACK         = "{}";
+    rocprofsys::trace_cache::get_buffer_storage().store(
+        rocprofsys::trace_cache::region_sample{
+            thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
+            end_ts, CALLSTACK, args_str.c_str(), category.c_str() });
+}
 
 template <typename CategoryT, typename... Args>
 void
-cache_start(const char* name)
+cache_start(const char* name, std::string args_str = {})
 {
     const auto start_ts =
         static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }] = start_ts;
+    map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }].push_back(
+        pending_cache_entry{ start_ts, std::move(args_str) });
 }
 
 template <typename CategoryT>
@@ -83,14 +93,15 @@ cache_stop(const char* name)
 {
     entry_key key{ name, rocprofsys::trait::name<CategoryT>::value };
     auto      x = map_name_to_args.find(key);
-    if(x != map_name_to_args.end())
+    if(x != map_name_to_args.end() && !x->second.empty())
     {
-        auto timestamp = x->second;
-        map_name_to_args.erase(x);
+        auto entry = std::move(x->second.back());
+        x->second.pop_back();
+        if(x->second.empty()) map_name_to_args.erase(x);
 
         const auto end_ts =
             static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-        uint64_t thread_id = 0;
+        std::uint64_t thread_id = 0;
 
         const auto& extended_info =
             rocprofsys::thread_info::get(std::this_thread::get_id());
@@ -102,19 +113,21 @@ cache_stop(const char* name)
                 { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
         }
 
-        cache_region(thread_id, name, timestamp, end_ts,
-                     rocprofsys::trait::name<CategoryT>::value);
+        cache_region(thread_id, name, entry.start_ts, end_ts,
+                     rocprofsys::trait::name<CategoryT>::value, entry.args);
     }
 }
 
 /// Flush all pending cached entries for this thread.
 /// Called during finalization to ensure entries that were started but not stopped
-/// (e.g., main entry point) are written to the trace cache.
+/// (e.g., main entry point) are written to the trace cache. Every pending frame
+/// in each per-key stack is emitted, so recursive/self-nested regions that were
+/// never popped still produce one region per outstanding push.
 inline void
 flush_pending_cached_entries()
 {
     const auto end_ts = static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    uint64_t   thread_id = 0;
+    std::uint64_t thread_id = 0;
 
     const auto& extended_info = rocprofsys::thread_info::get(std::this_thread::get_id());
     if(extended_info.has_value() && extended_info->index_data.has_value())
@@ -125,9 +138,13 @@ flush_pending_cached_entries()
             { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
     }
 
-    for(const auto& [key, start_ts] : map_name_to_args)
+    for(const auto& [key, entry_stack] : map_name_to_args)
     {
-        cache_region(thread_id, key.name, start_ts, end_ts, key.category);
+        for(const auto& entry : entry_stack)
+        {
+            cache_region(thread_id, key.name, entry.start_ts, end_ts, key.category,
+                         entry.args);
+        }
     }
     map_name_to_args.clear();
 }
@@ -159,8 +176,6 @@ using tim::type_list;
 // they should ALWAYS be popped if they were pushed
 // Note: There is a known imbalance in the push/pop counts for category::host when using
 //       OpenMP Tools (OMPT).
-//       In general, for known imbalances, add ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON to the
-//       ctest environment to avoid the CI_THROW check.
 using tracing_count_categories_t =
     type_list<category::host, category::mpi, category::pthread, category::rocm_hip_api,
               category::rocm_hsa_api, category::rocm_rccl>;
@@ -219,12 +234,28 @@ struct category_region : comp::base<category_region<CategoryT>, void>
 
     template <typename... OptsT, typename... Args>
     static void audit(quirk::config<OptsT...>, Args&&...);
+
+    static void start_with_args(std::string_view name, std::string serialized_args);
+
+private:
+    // Shared implementation for start() / start_with_args()
+    template <typename... OptsT, typename... Args>
+    static void start_impl(std::string_view name, std::string cache_args, Args&&...);
 };
 
 template <typename CategoryT>
 template <typename... OptsT, typename... Args>
 void
 category_region<CategoryT>::start(std::string_view name, Args&&... args)
+{
+    start_impl<OptsT...>(name, std::string{}, std::forward<Args>(args)...);
+}
+
+template <typename CategoryT>
+template <typename... OptsT, typename... Args>
+void
+category_region<CategoryT>::start_impl(std::string_view name, std::string cache_args,
+                                       Args&&... args)
 {
     // skip if category is disabled
     if(tracing::category_push_disabled<CategoryT>()) return;
@@ -292,7 +323,20 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
         }
     }
 
-    cache_start<CategoryT>(name.data());
+    cache_start<CategoryT>(name.data(), std::move(cache_args));
+}
+
+// Starts a region and attaches the pre-serialized args to it in a single push.
+// The args ride through start_impl() into the lone cache_start() call, so the
+// name is hashed and the per-thread map is touched exactly once. Because the
+// args are a plain function argument (not a thread-local), there is no
+// re-entrancy/misattribution window and no cross-call ordering contract.
+template <typename CategoryT>
+void
+category_region<CategoryT>::start_with_args(std::string_view name,
+                                            std::string      serialized_args)
+{
+    start_impl(name, std::move(serialized_args));
 }
 
 template <typename CategoryT>
@@ -414,7 +458,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
     start<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
-            int64_t _n = 0;
+            std::int64_t _n = 0;
             ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
                 ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
                 _args, _n++));
@@ -445,7 +489,7 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
     start<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
-            int64_t _n = 0;
+            std::int64_t _n = 0;
             ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
                 ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
                 _args, _n++));

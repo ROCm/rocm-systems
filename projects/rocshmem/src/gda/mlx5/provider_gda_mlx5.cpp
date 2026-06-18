@@ -291,6 +291,25 @@ static inline uint32_t mlx5_calc_flow_label(uint32_t local_qpn, uint32_t remote_
   return static_cast<uint32_t>(v & IB_GRH_FLOWLABEL_MASK);
 }
 
+static inline void mlx5_query_rmac(const mlx5dv_funcs_t& mlx5dv,
+                                   struct ibv_pd* pd, struct ibv_ah_attr* attr,
+                                   uint8_t rmac[ETHERNET_LL_SIZE]) {
+  struct ibv_ah* ah = ibv.create_ah(pd, attr);
+  CHECK_NNULL(ah, "ibv_create_ah");
+
+  mlx5dv_ah mlx5_ah;
+  mlx5dv_obj obj = {};
+  obj.ah.in = ah;
+  obj.ah.out = &mlx5_ah;
+  int err = mlx5dv.init_obj(&obj, MLX5DV_OBJ_AH);
+  CHECK_ZERO(err, "mlx5dv_init_obj (AH)");
+
+  memcpy(rmac, &mlx5_ah.av->rmac, sizeof(uint8_t[ETHERNET_LL_SIZE]));
+
+  err = ibv.destroy_ah(ah);
+  CHECK_ZERO(err, "ibv_destroy_ah");
+}
+
 int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
                               struct ibv_pd* pd, uint16_t sq_depth) {
   const mlx5dv_funcs_t& mlx5dv = *this;
@@ -298,14 +317,13 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
 
   qp.ctx = ctx;
   qp.pd  = pd;
-  qp.ah  = nullptr;
 
   // calculate buffer size needed for WQ + CQ + QP dbrec + CQ dbrec
   mlx5_qp_umem_alloc_info umem_alloc_info{sq_depth};
   // allocate buffer for WQ + CQ + QP dbrec + CQ dbrec
   void* umem_buffer = QPAllocator::malloc(umem_alloc_info.umem_size);
   // register buffer for WQ + CQ + QP dbrec + CQ dbrec
-  qp.umem = mlx5_umem_reg(mlx5dv, ctx, umem_buffer, umem_alloc_info.umem_size);
+  qp.umem = mlx5_umem_reg(mlx5dv, qp.ctx, umem_buffer, umem_alloc_info.umem_size);
 
   // set addresses and SQ depth
   qp.sq       = umem_alloc_info.wq_addr(umem_buffer);
@@ -323,18 +341,18 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
    * using MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED requires rdma-core v45 or later (released March 2023)
    * see https://github.com/linux-rdma/rdma-core/commit/bf550b9fa83374cfed51330760a583d82a7600f4 */
   errno = 0;
-  qp.uar = mlx5dv.devx_alloc_uar(ctx, MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED);
+  qp.uar = mlx5dv.devx_alloc_uar(qp.ctx, MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED);
 
   /* It is recommended that the user upgrade their network stack.
    * However, this is a fall-back mechanism to notify the user of this issue.  */
-  if (NULL == qp.uar && EOPNOTSUPP == errno) {
+  if (!qp.uar && EOPNOTSUPP == errno) {
     fprintf(stderr,
             "[Warning] Cannot provide dedicated DBs to each QP, "
             "rocSHMEM correctness is not guaranteed "
             "MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED is not supported by the installed rdma-core/OFED."
             "Please upgrade network stack to rdma-core v45 or later.\n");
 
-    qp.uar = mlx5dv.devx_alloc_uar(ctx, MLX5DV_UAR_ALLOC_TYPE_BF);
+    qp.uar = mlx5dv.devx_alloc_uar(qp.ctx, MLX5DV_UAR_ALLOC_TYPE_BF);
   }
   CHECK_NNULL(qp.uar, "mlx5dv_devx_alloc_uar");
 
@@ -343,7 +361,7 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
   CHECK_ZERO(err, "mlx5_create_cq");
 
   // create QP
-  err = mlx5_create_qp(mlx5dv, qp, pd);
+  err = mlx5_create_qp(mlx5dv, qp, qp.pd);
   CHECK_ZERO(err, "mlx5_create_qp");
 
   return err;
@@ -397,14 +415,8 @@ int mlx5dv_funcs_t::destroy_qp(mlx5_devx_qp& qp) {
 
   QPAllocator::free(qp.sq);
 
-  if (nullptr != qp.ah) {
-    err = ibv.destroy_ah(qp.ah);
-    CHECK_ZERO(err, "ibv_destroy_ah");
-  }
-
   // clear the object's fields
   qp.ctx         = nullptr;
-  qp.ah          = nullptr;
   qp.pd          = nullptr;
   qp.devx_cq_obj = nullptr;
   qp.devx_qp_obj = nullptr;
@@ -516,13 +528,15 @@ static int mlx5_create_qp(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp, struct
 
 static int mlx5_modify_qp_reset2init(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp,
                                      struct ibv_qp_attr* attr, [[maybe_unused]] int attr_mask) {
+#if !defined(NDEBUG)
   // man 3 ibv_modify_qp
-  [[maybe_unused]] constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
+  constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
                                      IBV_QP_ACCESS_FLAGS;
-  [[maybe_unused]] constexpr unsigned int access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+  constexpr unsigned int access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
                                         IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
   assert((attr_mask & required_attr_mask) == required_attr_mask && "missing required attr");
   assert((attr->qp_access_flags & access_flags) == access_flags && "missing access flags");
+#endif /* !NDEBUG */
 
   rst2init_qp_in  in  = {0};
   rst2init_qp_out out = {0};
@@ -546,13 +560,16 @@ static int mlx5_modify_qp_reset2init(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp&
 }
 
 static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp,
-                                   struct ibv_qp_attr* attr, [[maybe_unused]] int attr_mask, uint32_t gid_type) {
+                                   struct ibv_qp_attr* attr, [[maybe_unused]] int attr_mask,
+                                   uint32_t gid_type) {
+#if !defined(NDEBUG)
   // man 3 ibv_modify_qp
-  [[maybe_unused]] constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
+  constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
                                      IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC |
                                      IBV_QP_MIN_RNR_TIMER;
   assert((attr_mask & required_attr_mask) == required_attr_mask && "missing required attr");
   assert(attr->max_dest_rd_atomic > 0 && "ibv_qp_attr::max_dest_rd_atomic is 0");
+#endif /* !NDEBUG */
 
   init2rtr_qp_in  in  = {0};
   init2rtr_qp_out out = {0};
@@ -605,23 +622,9 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& q
   if (gid_type == IBV_GID_TYPE_ROCE_V1 ||
       gid_type == IBV_GID_TYPE_ROCE_V2) {
     assert(ah_attr->is_global && "ibv_qp_attr::ah_attr::is_global not set, but gid_type is RoCE");
-
     DEVX_SET(ads, primary_addr, eth_prio, ah_attr->sl);
-
-    qp.ah = ibv.create_ah(qp.pd, ah_attr);
-    CHECK_NNULL(qp.ah, "ibv_create_ah");
-
-    struct mlx5dv_obj  dv;
-    struct mlx5dv_ah   dah;
-
-    dv.ah.in = qp.ah;
-    dv.ah.out = &dah;
-
-    int err = mlx5dv.init_obj(&dv, MLX5DV_OBJ_AH);
-    CHECK_ZERO(err, "mlx5dv_init_obj (AH)");
-
-    // remote MAC address gets copied directly
-    memcpy(rmac, &dah.av->rmac, sizeof(dah.av->rmac));
+    // get remote MAC address, copy directly into QP Context
+    mlx5_query_rmac(mlx5dv, qp.pd, ah_attr, static_cast<uint8_t*>(rmac));
   }
 
   // RoCE v2
@@ -635,11 +638,13 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& q
 
 static int mlx5_modify_qp_rtr2rts(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp,
                                   struct ibv_qp_attr* attr, [[maybe_unused]] int attr_mask) {
+#if !defined(NDEBUG)
   // man 3 ibv_modify_qp
-  [[maybe_unused]] constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC |
+  constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC |
                                      IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_TIMEOUT;
   assert((attr_mask & required_attr_mask) == required_attr_mask && "missing required attr");
   assert(attr->max_rd_atomic > 0 && "ibv_qp_attr::max_rd_atomic is 0");
+#endif /* !NDEBUG */
 
   rtr2rts_qp_in  in  = {0};
   rtr2rts_qp_out out = {0};

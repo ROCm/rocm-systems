@@ -238,6 +238,16 @@ __host__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
   HOST_DISPATCH_RET(reduce<PAIR(T, Op)>(team, dest, source, nreduce));
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__host__ int Context::reduce_on_stream(rocshmem_team_t team, T* dest, const T* source,
+                                int nreduce, hipStream_t stream) {
+  if (nreduce == 0) return ROCSHMEM_SUCCESS;
+  ctxHostStats.incStat(NUM_HOST_REDUCE);
+
+  HOST_DISPATCH_RET(reduce_on_stream<PAIR(T, Op)>(team, dest, source, nreduce, stream));
+
+}
+
 template <typename T>
 __host__ void Context::wait_until(T *ivars, int cmp, T val) {
   ctxHostStats.incStat(NUM_HOST_WAIT_UNTIL);

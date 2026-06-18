@@ -443,6 +443,7 @@ void SvmMemoryTestBasic::SetUp(void) {
   hsa_status_t err;
 
   TestBase::SetUp();
+  if (test_skipped_) return;
 
   ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
   ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));

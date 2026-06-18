@@ -6,7 +6,6 @@
 import re
 from pathlib import Path
 
-
 def get_version_info(filepath):
     with open(filepath, "r") as f:
         content = f.read()
@@ -34,16 +33,16 @@ version_major, version_minor, version_patch = get_version_info(
 version_number = f"{version_major}.{version_minor}.{version_patch}"
 
 # -- Project information -----------------------------------------------------
-project = "AMD CUID"
+project = "CUID"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
 # -- General configuration ---------------------------------------------------
 html_theme = "rocm_docs_theme"
 html_theme_options = {"flavor": "rocm"}
-html_title = f"AMD CUID {version_number} documentation"
+html_title = f"CUID {version_number} documentation"
 suppress_warnings = ["etoc.toctree"]
 external_toc_path = "./sphinx/_toc.yml"
 

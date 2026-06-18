@@ -13,8 +13,10 @@
 #include "hipfile.h"
 #include "hipfile-private.h"
 #include "hipfile-warnings.h"
+#include "api_trace/api-trace-internal.h"
 #include "io.h"
 #include "state.h"
+#include "stats.h"
 
 #include <cerrno>
 #include <cstdint>
@@ -26,8 +28,9 @@
 #include <sys/types.h>
 #include <system_error>
 
-using namespace hipFile;
 using namespace std;
+
+namespace hipFile {
 
 /// Catch C++ exceptions from the hipFile code and convert
 /// them into error values that can be returned from public
@@ -78,6 +81,7 @@ try {
         case hipFileHandleTypeOpaqueFD: {
             UnregisteredFile uf{descr->handle.fd};
             *fh = Context<DriverState>::get()->registerFile(std::move(uf));
+            Context<StatsCollection>::get()->fileRegistration();
             return {hipFileSuccess, hipSuccess};
         }
         case hipFileHandleTypeOpaqueWin32:
@@ -113,6 +117,7 @@ hipFileBufRegister(const void *buffer_base, size_t length, int flags)
 try {
     hipFileInit();
     Context<DriverState>::get()->registerBuffer(buffer_base, length, flags);
+    Context<StatsCollection>::get()->bufferRegistration();
     return {hipFileSuccess, hipSuccess};
 }
 catch (const BufferAlreadyRegistered &) {
@@ -385,6 +390,10 @@ try {
     hipFileInit();
     (void)flags; // Unused at this time.
 
+    if (iocbp == nullptr && nr > 0) {
+        return {hipFileInvalidValue, hipSuccess};
+    }
+
     std::shared_ptr<IBatchContext> batch_context = Context<DriverState>::get()->getBatchContext(batch_idp);
     batch_context->submit_operations(iocbp, nr);
 
@@ -606,3 +615,5 @@ try {
 catch (...) {
     return handle_exception();
 }
+
+} // namespace

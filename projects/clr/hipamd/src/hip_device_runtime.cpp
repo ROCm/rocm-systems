@@ -450,8 +450,14 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
       *pi = static_cast<int>(
           g_devices[device]->devices()[0]->info().gpuDirectRdmaWithHipVmmSupported_);
       break;
+    case hipDeviceAttributeHandleTypeFabricSupported:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().fabric_handle_);
+      break;
     case hipDeviceAttributeExpertSchedMode:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().hasExpertSchedMode_);
+      break;
+    case hipDeviceAttributeMaxDynDataPrefetchRegions:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().maxDynDataPrefetchRegions_);
       break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
@@ -600,7 +606,8 @@ hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
 
   // No way to set cache config yet.
 
-  hip::getCurrentDevice()->devices()[0]->UpdateGroupMemCarveout(cacheConfig);
+  hip::getCurrentDevice()->devices()[0]->UpdateGroupMemCarveout(
+      amd::funcCacheToCarveoutPercent(static_cast<uint32_t>(cacheConfig)));
   HIP_RETURN(hipSuccess);
 }
 

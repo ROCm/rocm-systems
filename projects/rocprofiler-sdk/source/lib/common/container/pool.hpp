@@ -39,7 +39,6 @@
 #include <mutex>
 #include <optional>
 #include <queue>
-#include <shared_mutex>
 #include <stdexcept>
 #include <utility>
 
@@ -78,15 +77,15 @@ struct pool
     std::string get_usage_report() const;
 
 private:
-    size_type                 m_count         = 256;
-    std::function<void()>     m_function      = nullptr;
-    mutable std::shared_mutex m_pool_mtx      = {};
-    pool_array_type           m_pool          = {};
-    mutable std::shared_mutex m_available_mtx = {};
-    std::queue<size_type>     m_available     = {};
-    std::atomic<size_type>    m_released      = 0;
-    std::atomic<size_type>    m_reused        = 0;
-    std::atomic<size_type>    m_new_batch     = 0;
+    size_type              m_count         = 256;
+    std::function<void()>  m_function      = nullptr;
+    mutable std::mutex     m_pool_mtx      = {};
+    pool_array_type        m_pool          = {};
+    mutable std::mutex     m_available_mtx = {};
+    std::queue<size_type>  m_available     = {};
+    std::atomic<size_type> m_released      = 0;
+    std::atomic<size_type> m_reused        = 0;
+    std::atomic<size_type> m_new_batch     = 0;
 };
 
 template <typename Tp>
@@ -118,26 +117,21 @@ pool<Tp>::acquire()
 {
     auto _idx = std::optional<size_type>{};
     {
-        auto _read_lk = std::shared_lock<std::shared_mutex>{m_available_mtx};
+        auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
         if(!m_available.empty())
         {
-            _read_lk.unlock();
-            auto _write_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
-            if(!m_available.empty())
+            _idx = m_available.front();
+            m_available.pop();
+            if(m_released > 0)
             {
-                _idx = m_available.front();
-                m_available.pop();
-                if(m_released > 0)
-                {
-                    m_reused++;
-                }
+                m_reused++;
             }
         }
     }
 
     if(_idx.has_value())
     {
-        auto  _read_lk = std::shared_lock<std::shared_mutex>{m_pool_mtx};
+        auto  _read_lk = std::unique_lock<std::mutex>{m_pool_mtx};
         auto& _obj     = m_pool.at(_idx.value());
         ROCP_FATAL_IF(!_obj.acquire()) << fmt::format(
             "Pool object at index {} was expected to be available but was not", _idx.value());
@@ -146,8 +140,8 @@ pool<Tp>::acquire()
 
     // add a new batch
     {
-        auto _write_pool_lk  = std::unique_lock<std::shared_mutex>{m_pool_mtx};
-        auto _write_avail_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
+        auto _write_pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
+        auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
         if(m_available.empty())
         {
             ROCP_INFO << fmt::format(
@@ -169,7 +163,7 @@ pool<Tp>::release(size_type idx)
 {
     if(idx < m_pool.size())
     {
-        auto _write_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
+        auto _write_lk = std::unique_lock<std::mutex>{m_available_mtx};
         ROCP_FATAL_IF(m_pool.at(idx).in_use())
             << fmt::format("Pool object at index {} was expected to be not in use", idx);
         m_available.push(idx);
@@ -194,7 +188,7 @@ template <typename FuncT>
 void
 pool<Tp>::clear(FuncT&& func)
 {
-    auto _write_pool_lk = std::unique_lock<std::shared_mutex>{m_pool_mtx};
+    auto _write_pool_lk = std::unique_lock<std::mutex>{m_pool_mtx};
 
     for(auto& itr : m_pool)
     {
@@ -217,7 +211,7 @@ pool<Tp>::clear(FuncT&& func)
         }
     }
 
-    auto _write_avail_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
+    auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
 
     while(!m_available.empty())
         m_available.pop();
@@ -231,8 +225,8 @@ template <typename Tp>
 std::string
 pool<Tp>::get_usage_report() const
 {
-    auto _read_pool_lk  = std::shared_lock<std::shared_mutex>{m_pool_mtx};
-    auto _read_avail_lk = std::shared_lock<std::shared_mutex>{m_available_mtx};
+    auto _pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
+    auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
     return fmt::format("Usage report for pool (type='{}') :: size={}, available={}, reused={}, "
                        "released={}, batches={}",
                        cxx_demangle(typeid(Tp).name()),

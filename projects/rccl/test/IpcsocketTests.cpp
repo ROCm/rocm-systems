@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 #include <sys/wait.h>
+#include <sys/un.h> // struct sockaddr_un
 #include<proxy.h> 
 #include <comm.h>
 #include <ipcsocket.h>

@@ -3,13 +3,13 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-import glob
 import multiprocessing
 import os
 import re
 import shutil
 import socket
 import sys
+from pathlib import Path
 
 
 def which(cmd, require):
@@ -297,19 +297,16 @@ if __name__ == "__main__":
         )
     finally:
         if "-VV" not in ctest_args:
-            for file in glob.glob(
-                os.path.join(args.binary_dir, "Testing/**"), recursive=True
-            ):
-                if not os.path.isfile(file):
+            for file in Path(args.binary_dir, "Testing").rglob("*"):
+                if not file.is_file():
                     continue
                 print(f"\n\n\n###### Reading {file}... ######\n\n\n")
-                with open(file, "r") as inpf:
-                    fdata = inpf.read()
-                    if "LastTest" not in file and "Coverage" not in file:
-                        print(fdata)
-                    oname = os.path.basename(file)
-                    if oname.endswith(".log"):
-                        oname += ".log"
-                    with open(os.path.join(args.binary_dir, oname), "w") as outf:
-                        print(f"\n\n###### Writing {oname}... ######\n\n")
-                        outf.write(fdata)
+                fdata = file.read_text()
+                if "LastTest" not in str(file) and "Coverage" not in str(file):
+                    print(fdata)
+                oname = file.name
+                if oname.endswith(".log"):
+                    oname += ".log"
+                out_path = Path(args.binary_dir) / oname
+                print(f"\n\n###### Writing {oname}... ######\n\n")
+                out_path.write_text(fdata)

@@ -23,7 +23,6 @@
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
 
 #include <dirent.h>
-#include <pthread.h>
 #include <unistd.h>
 
 #include <algorithm>

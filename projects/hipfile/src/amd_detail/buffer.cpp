@@ -11,7 +11,6 @@
 
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
-#include <limits>
 #include <stdexcept>
 #include <syslog.h>
 #include <utility>
@@ -29,17 +28,16 @@ isValidBufferRegion(void *ptr, size_t length)
         HipMemAddressRange buffer_range = Context<Hip>::get()->hipMemGetAddressRange(ptr);
         uintptr_t          base         = reinterpret_cast<uintptr_t>(buffer_range.base);
 
-        // Overflow check
-        // Do this before the addition, so the sanitizers don't complain
-        // about integer overflow
-        if (length > std::numeric_limits<uintptr_t>::max() - uptr) {
+        if (uptr < base) {
             return false;
         }
 
-        // Don't need to check base + buffer_range.size since
-        // HIP shouldn't give us invalid values
+        uintptr_t offset = uptr - base;
+        if (offset >= buffer_range.size) {
+            return false;
+        }
 
-        if (uptr + length > base + buffer_range.size) {
+        if (length > buffer_range.size - offset) {
             return false;
         }
     }

@@ -201,7 +201,7 @@ target_link_libraries(rocprofiler-sdk-ptl INTERFACE PTL::ptl-static)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(LibElf)
+find_package(LibElf QUIET)
 if(LibElf_FOUND)
     target_link_libraries(rocprofiler-sdk-elf INTERFACE elf::elf)
 else()
@@ -365,11 +365,11 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(rocDecode)
+find_package(rocdecode)
 
-if(rocDecode_FOUND
-   AND rocDecode_INCLUDE_DIR
-   AND EXISTS "${rocDecode_INCLUDE_DIR}/rocdecode/amd_detail/rocdecode_api_trace.h")
+if(rocdecode_FOUND
+   AND rocdecode_INCLUDE_DIR
+   AND EXISTS "${rocdecode_INCLUDE_DIR}/rocdecode/amd_detail/rocdecode_api_trace.h")
     rocprofiler_config_nolink_target(
         rocprofiler-sdk-rocdecode-nolink rocdecode::rocdecode INTERFACE
         ROCPROFILER_SDK_USE_SYSTEM_ROCDECODE=1)
@@ -385,11 +385,11 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(rocJPEG)
+find_package(rocjpeg)
 
-if(rocJPEG_FOUND
-   AND rocJPEG_INCLUDE_DIR
-   AND EXISTS "${rocJPEG_INCLUDE_DIR}/rocjpeg/amd_detail/rocjpeg_api_trace.h")
+if(rocjpeg_FOUND
+   AND rocjpeg_INCLUDE_DIR
+   AND EXISTS "${rocjpeg_INCLUDE_DIR}/rocjpeg/amd_detail/rocjpeg_api_trace.h")
     rocprofiler_config_nolink_target(rocprofiler-sdk-rocjpeg-nolink rocjpeg::rocjpeg
                                      INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=1)
 else()

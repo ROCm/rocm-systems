@@ -4,6 +4,7 @@
 #pragma once
 
 #include "fwd.hpp"
+#include <cstdint>
 
 #include <tuple>
 
@@ -28,7 +29,7 @@ struct function_signature
                        bool _loop = false, bool _info_beg = false,
                        bool _info_end = false);
 
-    function_signature& set_loop_number(uint32_t _n)
+    function_signature& set_loop_number(std::uint32_t _n)
     {
         m_loop_num = _n;
         return *this;
@@ -41,7 +42,7 @@ struct function_signature
     bool                m_loop      = false;
     bool                m_info_beg  = false;
     bool                m_info_end  = false;
-    uint32_t            m_loop_num  = std::numeric_limits<uint32_t>::max();
+    std::uint32_t       m_loop_num  = std::numeric_limits<std::uint32_t>::max();
     location_t          m_row       = { 0, 0 };
     location_t          m_col       = { 0, 0 };
     std::string         m_return    = {};
@@ -57,7 +58,7 @@ struct function_signature
 
     friend bool operator<(const function_signature& lhs, const function_signature& rhs)
     {
-        const auto loop_max = std::numeric_limits<uint32_t>::max();
+        const auto loop_max = std::numeric_limits<std::uint32_t>::max();
         if(lhs.m_loop && !rhs.m_loop) return false;
         if(!lhs.m_loop && rhs.m_loop) return true;
         if(lhs.m_loop_num < loop_max && rhs.m_loop_num == loop_max) return false;

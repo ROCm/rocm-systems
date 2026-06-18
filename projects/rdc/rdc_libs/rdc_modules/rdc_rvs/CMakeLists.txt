@@ -34,9 +34,10 @@ if(BUILD_RVS)
 
     set(RDC_LIB_MODULES ${RDC_LIB_MODULES} ${RDC_RVS_LIB} PARENT_SCOPE)
     add_library(${RDC_RVS_LIB} SHARED ${RDC_RVS_LIB_SRC_LIST} ${RDC_RVS_LIB_INC_LIST})
+    find_package(yaml-cpp REQUIRED)
     target_link_libraries(
         ${RDC_RVS_LIB}
-        PRIVATE ${RDC_LIB} ${BOOTSTRAP_LIB} rvs::rvs pthread dl
+        PRIVATE ${RDC_LIB} ${BOOTSTRAP_LIB} rvs::rvs yaml-cpp pthread dl
     )
     target_include_directories(
         ${RDC_RVS_LIB}

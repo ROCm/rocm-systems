@@ -245,11 +245,18 @@ def _build_sdk_run_config(provider: str) -> Any:
             from openai import AsyncOpenAI  # type: ignore[import-not-found]
             import httpx
 
-            from perfxpert.providers.private_provider import _parse_headers, _verify_ssl_from_env
+            from perfxpert.providers.private_provider import (
+                _parse_headers,
+                _private_url_from_env,
+                _verify_ssl_from_env,
+            )
 
-            base_url = (os.environ.get("PERFXPERT_LLM_PRIVATE_URL") or "").rstrip("/")
+            base_url = _private_url_from_env()
             if not base_url:
-                raise AuthError("private", "no endpoint configured (set PERFXPERT_LLM_PRIVATE_URL)")
+                raise AuthError(
+                    "private",
+                    "no endpoint configured (set PERFXPERT_LLM_PRIVATE_URL or PRIVATE_LLM_ENDPOINT)",
+                )
             try:
                 extra_headers = _parse_headers(os.environ.get("PERFXPERT_LLM_PRIVATE_HEADERS", ""))
             except ValueError as exc:

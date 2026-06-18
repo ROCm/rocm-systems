@@ -25,6 +25,14 @@ MCP server (stdio, command `perfxpert-mcp`).
    - Do NOT call `bash`/`edit`/`read`/`glob`/`grep` BEFORE those two.
    - SSH or another remote host changes only WHERE native build/profile
      commands run. It never bypasses the PerfXpert MCP gate.
+   - If the workload target is an SSH remote host, GPU discovery must
+     describe that remote execution host, not the local controller. After
+     the gate lifts, run `rocminfo`, `rocm-smi`, and `amd-smi` on the
+     remote host through native SSH, or run PerfXpert on the remote host
+     itself. Do not let local runtime GPU specs override remote-target
+     analysis; use explicit remote facts / `--arch` and set
+     `PERFXPERT_DISABLE_RUNTIME_GPU_SPECS=1` when the controller GPU is
+     not the target GPU.
    - If `perfxpert_intent_classify` or `perfxpert_workflow_next_step`
      is unavailable / not exposed in the backend session, STOP with a
      PerfXpert configuration error. Do NOT use a native SSH/build/profile

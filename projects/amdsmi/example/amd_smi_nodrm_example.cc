@@ -92,7 +92,7 @@ int main() {
     for (uint32_t j = 0; j < device_count; j++) {
       // Get device type. Since the amdsmi is initialized with
       // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMDSMI_PROCESSOR_TYPE_AMD_GPU.
-      processor_type_t processor_type = {};
+      amdsmi_processor_type_t processor_type = {};
       ret = amdsmi_get_processor_type(processor_handles[j], &processor_type);
       CHK_AMDSMI_RET(ret)
       if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {

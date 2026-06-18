@@ -10,6 +10,7 @@ from unittest import mock
 import pytest
 
 from perfxpert import analyze as analyze_mod
+from perfxpert.output_config import output_config
 
 
 @pytest.fixture
@@ -129,6 +130,7 @@ def test_execute_agentic_runs_analysis_and_formats_reports(fmt, expected_fragmen
             analyze_mod._execute_agentic(
                 input=fake_input,
                 output_format=fmt,
+                config=output_config(output_file="-"),
                 prompt="why is matmul slow?",
                 llm_provider="openai",
                 enable_llm=True,
@@ -182,7 +184,11 @@ def test_execute_agentic_renders_structured_json_from_analysis_outputs(capsys):
             "perfxpert.analysis.payload.build_analysis_payload",
             return_value=_analysis_payload(),
         ):
-            analyze_mod._execute_agentic(input=fake_input, format="json")
+            analyze_mod._execute_agentic(
+                input=fake_input,
+                format="json",
+                config=output_config(output_file="-"),
+            )
 
     captured = capsys.readouterr()
     import json
@@ -285,6 +291,7 @@ def test_execute_agentic_json_output_parity_across_airgap_and_llm(capsys):
                 input=fake_input,
                 output_format="json",
                 enable_llm=False,
+                config=output_config(output_file="-"),
             )
             airgap_payload = json.loads(capsys.readouterr().out)
 
@@ -293,6 +300,7 @@ def test_execute_agentic_json_output_parity_across_airgap_and_llm(capsys):
                 output_format="json",
                 enable_llm=True,
                 llm_provider="openai",
+                config=output_config(output_file="-"),
             )
             llm_payload = json.loads(capsys.readouterr().out)
 

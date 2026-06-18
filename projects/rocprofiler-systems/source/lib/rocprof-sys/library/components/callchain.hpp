@@ -33,7 +33,7 @@ struct callchain : comp::empty_base
 
     struct record
     {
-        uint64_t                                         timestamp = 0;
+        std::uint64_t                                    timestamp = 0;
         container::static_vector<uintptr_t, stack_depth> data      = {};
 
         bool operator<(const record& rhs) const;
@@ -44,7 +44,7 @@ struct callchain : comp::empty_base
     using value_type     = void;
     using data_t         = container::static_vector<record, 64>;
     using entry_vec_t    = std::vector<entry_type>;
-    using ts_entry_vec_t = std::pair<uint64_t, entry_vec_t>;
+    using ts_entry_vec_t = std::pair<std::uint64_t, entry_vec_t>;
 
     static std::string label();
     static std::string description();

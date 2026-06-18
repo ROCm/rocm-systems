@@ -4,7 +4,7 @@
 
 ARG ROCKY_MAJOR_VERSION=9
 ARG ROCKY_VERSION=${ROCKY_MAJOR_VERSION}.6
-FROM rockylinux/rockylinux:${ROCKY_VERSION}-minimal
+FROM rockylinux/rockylinux:${ROCKY_VERSION}-minimal AS base
 LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 # Brings ROCKY_VERSION in-scope
 ARG ROCKY_MAJOR_VERSION
@@ -61,7 +61,6 @@ EOF
 #   Use gcc13 to match Ubuntu24.
 RUN dnf makecache && \
     dnf install -y \
-        boost-devel \
         clang \
         cmake \
         doxygen \
@@ -71,7 +70,18 @@ RUN dnf makecache && \
         hip-devel \
         libmount-devel \
         llvm-devel \
+        python3.12-devel \
         rpm-build
+
+# Point amdclang++ at the gcc-toolset-13 libstdc++.
+# clang locates its C++ standard library by scanning a fixed set of prefixes
+# (essentially /usr) for the newest GCC; it does NOT consult PATH. The default
+# el9 GCC (11) is older than the GCC 13 used on Ubuntu24/SUSE, and
+# gcc-toolset-13 lives under /opt/rh, which clang's scanner doesn't search on
+# this toolchain. Append --gcc-install-dir to the ROCm config file that
+# amdclang++ auto-loads so it selects the gcc-toolset-13 libstdc++.
+RUN echo '--gcc-install-dir=/opt/rh/gcc-toolset-13/root/usr/lib/gcc/x86_64-redhat-linux/13' \
+        >> /opt/rocm/lib/llvm/bin/rocm.cfg
 
 # Configure system linker for ROCm
 RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf
@@ -80,10 +90,33 @@ RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf
 EOF
 RUN ldconfig
 
+# Add ROCm bin directory to the path
+ENV PATH=/opt/rocm/bin:${PATH}
+
+# Environment Build Arg for ROCm
+ENV ROCM_VERSION="${ROCM_VERSION}"
+
+# .rc and .profile files are not automatically read on non-login,
+# non-interactive shells. Tell Bash to read a minimal .profile
+# when a shell of any type is opened.
+# Uncomment to prefer newer version of GCC.
+RUN echo 'source /opt/rh/gcc-toolset-13/enable' >> ~/.bashrc
+RUN echo 'source ~/.bashrc' >> ~/.bash_profile
+ENV BASH_ENV="~/.bashrc"
+
+# AIS Code Repository Mount Point
+VOLUME /mnt/ais
+
+# Generic Mount point for container to access AIS-capable storage.
+VOLUME /mnt/ais-fs
+
+# ---- Stage 2: NVIDIA (extends base with CUDA SDK) ----
+# The HIP runtime must be present to use hipFile with NVIDIA GPUs,
+# which is why this stage inherits from base rather than a bare CUDA image.
+FROM base AS nvidia
+ARG ROCKY_MAJOR_VERSION=9
+
 # Install a minimal CUDA SDK
-# HIP depends on the ROCm libraries being installed.
-# This means we are unable to have a separate CUDA+HIP image
-# without ROCm.
 RUN curl https://developer.download.nvidia.com/compute/cuda/repos/rhel${ROCKY_MAJOR_VERSION}/x86_64/cuda-rhel${ROCKY_MAJOR_VERSION}.repo \
         -o /etc/yum.repos.d/cuda-rhel${ROCKY_MAJOR_VERSION}.repo && \
     dnf makecache
@@ -99,22 +132,5 @@ RUN dnf module enable -y nvidia-driver:570-open && \
         libcufile-devel-12-9 \
         nvidia-driver-cuda
 
-# Add ROCm and CUDA bin directories to the path
-ENV PATH=/usr/local/cuda/bin:/opt/rocm/bin:${PATH}
-
-# Environment Build Arg for ROCm
-ENV ROCM_VERSION="${ROCM_VERSION}"
-
-# .rc and .profile files are not automatically read on non-login,
-# non-interactive shells. Tell Bash to read a minimal .profile
-# when a shell of any type is opened.
-# Uncomment to prefer newer version of GCC.
-# RUN echo 'source /opt/rh/gcc-toolset-13/enable' >> ~/.bashrc
-RUN echo 'source ~/.bashrc' >> ~/.bash_profile
-ENV BASH_ENV="~/.bashrc"
-
-# AIS Code Repository Mount Point
-VOLUME /mnt/ais
-
-# Generic Mount point for container to access AIS-capable storage.
-VOLUME /mnt/ais-fs
+# Add CUDA bin directory to the path
+ENV PATH=/usr/local/cuda/bin:${PATH}

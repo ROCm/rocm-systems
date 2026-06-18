@@ -1,0 +1,7 @@
+GPU_ID,GUID,Correlation_Id,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value
+1,000091af-b0ff-70ff-8c82-65ab62678124,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444210609381441,2444210609412298,0,GCEA_PRB_REQ_sum,0.0
+1,000091af-b0ff-70ff-8c82-65ab62678124,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444210609381441,2444210609412298,0,GCEA_SARB_DRAM_REQ_PER_VC_sum,1770040.0
+1,000091af-b0ff-70ff-8c82-65ab62678124,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444210611053527,2444210611071000,0,GCEA_PRB_REQ_sum,0.0
+1,000091af-b0ff-70ff-8c82-65ab62678124,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444210611053527,2444210611071000,0,GCEA_SARB_DRAM_REQ_PER_VC_sum,1647860.0
+1,000091af-b0ff-70ff-8c82-65ab62678124,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444210611146351,2444210611163623,0,GCEA_PRB_REQ_sum,0.0
+1,000091af-b0ff-70ff-8c82-65ab62678124,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444210611146351,2444210611163623,0,GCEA_SARB_DRAM_REQ_PER_VC_sum,1648660.0

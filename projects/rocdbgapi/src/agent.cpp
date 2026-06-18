@@ -41,38 +41,11 @@ agent_t::agent_t (amd_dbgapi_agent_id_t agent_id, process_t &process,
                   const architecture_t *architecture,
                   const os_agent_info_t &os_agent_info)
   : handle_object (agent_id), m_os_agent_info (os_agent_info),
-    m_apertures (
-      [architecture] (const os_agent_info_t &info)
-      {
-        if (architecture == nullptr)
-          {
-            /* The dummy agent does not have apertures.  */
-            return std::vector<aperture_t>{};
-          }
-
-        /* We need to find the local and private_lane address spaces.  In a
-           future change, where address spaces are global, we won't need to do
-           this anymore.  */
-        const auto *local = architecture->find_if (
-          [] (const address_space_t &address_space)
-          { return address_space.kind () == address_space_t::kind_t::local; });
-        const auto *private_lane = architecture->find_if (
-          [] (const address_space_t &address_space)
-          {
-            return address_space.kind ()
-                   == address_space_t::kind_t::private_swizzled;
-          });
-        dbgapi_assert (local != nullptr && private_lane != nullptr);
-
-        return std::vector<aperture_t>{
-          { info.local_address_aperture_base,
-            info.local_address_aperture_limit, *local },
-          { info.private_address_aperture_base,
-            info.private_address_aperture_limit, *private_lane },
-          { 0, static_cast<amd_dbgapi_global_address_t> (-1),
-            address_space_t::global () }
-        };
-      }(os_agent_info)),
+    m_apertures ((architecture == nullptr)
+                   ?
+                   /* The dummy agent doesn't have apertures.  */
+                   std::vector<aperture_t>{}
+                   : architecture->get_apertures (os_agent_info)),
     m_architecture (architecture), m_process (process),
     m_memory_cache (
       [this] (agent_address_t address, void *read, const void *write,

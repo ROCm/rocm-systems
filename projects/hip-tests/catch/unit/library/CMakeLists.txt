@@ -4,8 +4,11 @@
 
 set(TEST_SRC
     loadlib_rtc.cc
-    #loadlib_co.cc TODO
+    loadlib_co.cc
     library_negative.cc
+    library_get_global.cc
+    library_get_global_co.cc
+    library_invariants.cc
     hipKernelGetAttribute.cc
     lib_attribute.cc
 )

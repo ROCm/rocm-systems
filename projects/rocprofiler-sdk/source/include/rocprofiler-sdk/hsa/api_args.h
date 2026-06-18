@@ -1514,6 +1514,32 @@ typedef union rocprofiler_hsa_api_args_t
         uint32_t*    event_id;
     } hsa_amd_signal_get_event_id;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
+    struct
+    {
+        hsa_agent_t                                           agent;
+        const hsa_amd_external_semaphore_handle_descriptor_t* desc;
+        hsa_amd_external_semaphore_t*                         out_sem;
+    } hsa_amd_external_semaphore_handle_open;
+    struct
+    {
+        hsa_amd_external_semaphore_t sem;
+    } hsa_amd_external_semaphore_handle_close;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0F
+    struct
+    {
+        hsa_fabric_handle_t*        fabric_handle;
+        hsa_amd_vmem_alloc_handle_t handle;
+        uint64_t                    flags;
+    } hsa_amd_vmem_export_fabric_handle;
+
+    struct
+    {
+        hsa_fabric_handle_t          fabric_handle;
+        hsa_amd_vmem_alloc_handle_t* handle;
+    } hsa_amd_vmem_import_fabric_handle;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 
