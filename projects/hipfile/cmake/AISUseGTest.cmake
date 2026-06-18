@@ -2,8 +2,19 @@
 #
 # SPDX-License-Identifier: MIT
 
+# This module sets up GoogleTest and applies settings to its targets, so it must
+# run exactly once.
+include_guard(GLOBAL)
+
 include(AISSanitizers)
 include(FetchContent)
+
+# GoogleTest's ThreadLocal<T> implementation uses POSIX thread-key APIs
+# (pthread_key_create, pthread_setspecific, etc.). These must be linked
+# explicitly: lld (used by the sanitizer toolchain) errors on the undefined
+# symbols in libgtest.a / libgmock.a, whereas GNU ld resolves them
+# transitively and masks the missing dependency.
+find_package(Threads REQUIRED)
 
 # Decide whether to check for a system GoogleTest install first. When building
 # with the sanitizers, we HAVE to build GoogleTest from source.
@@ -46,6 +57,32 @@ if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
     ais_add_sanitizers(GTest::gtest)
     ais_add_sanitizers(GTest::gmock)
 endif()
+
+# Propagate pthread linkage to anything that links a GTest target, so the
+# individual test CMakeLists files don't each have to add Threads::Threads.
+# Fetched GoogleTest exposes GTest::gtest/GTest::gmock as ALIAS targets, which
+# cannot be modified directly, so resolve to the underlying target first. We
+# use set_property(... APPEND ...) rather than target_link_libraries() so this
+# works uniformly for the IMPORTED targets that a system find_package(GTest)
+# produces as well as the normal targets from a fetched build. A system GTest
+# install may provide gtest without gmock, so only touch targets that exist.
+#
+# A from-source GoogleTest already links Threads::Threads on its targets, so
+# check before appending to avoid a duplicate entry in the link interface.
+foreach(gtest_target GTest::gtest GTest::gmock)
+    if(NOT TARGET ${gtest_target})
+        continue()
+    endif()
+    get_target_property(aliased ${gtest_target} ALIASED_TARGET)
+    if(aliased)
+        set(gtest_target ${aliased})
+    endif()
+    get_target_property(existing_libs ${gtest_target} INTERFACE_LINK_LIBRARIES)
+    if(NOT existing_libs MATCHES "Threads::Threads")
+        set_property(TARGET ${gtest_target} APPEND PROPERTY
+            INTERFACE_LINK_LIBRARIES Threads::Threads)
+    endif()
+endforeach()
 
 include(GoogleTest)
 
