@@ -1042,7 +1042,8 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 // PC correction: build the classification only for stochastic
                 // sampling on a gfx1250 agent (scope the build to agents that can
                 // exhibit the bug; see pc_sampling_pc_correction.hpp).
-                if(tool::get_config().pc_sampling_stochastic)
+                if(tool::get_config().pc_sampling_stochastic &&
+                   tool::get_config().pc_sampling_correction)
                 {
                     const auto* agent = tool_metadata->get_agent(obj_data->rocp_agent);
                     if(agent != nullptr &&
@@ -1134,7 +1135,8 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             // all samples for this code object before unload, so no sample can
             // still need the classification. erase() is a no-op for code objects
             // that were never classified (non-stochastic / non-gfx1250).
-            if(tool::get_config().pc_sampling_stochastic)
+            if(tool::get_config().pc_sampling_stochastic &&
+               tool::get_config().pc_sampling_correction)
             {
                 auto* obj_data =
                     static_cast<tool::rocprofiler_code_object_info_t*>(record.payload);
