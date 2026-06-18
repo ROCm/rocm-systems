@@ -171,7 +171,7 @@ class RocProfCompute:
                         "Block 30 (Memory Bandwidth Analysis) is an experimental "
                         "feature.\n"
                         f'To use "-b {block_input}", you must also specify: '
-                        "--membw-analysis --experimental"
+                        "--experimental --membw-analysis"
                     )
             # Block 21 (PC sampling) is profile-only; analyze auto-detects it
             # from the profiling config yaml.
@@ -180,7 +180,7 @@ class RocProfCompute:
                     console_error(
                         "Block 21 (PC Sampling) is an experimental feature.\n"
                         f'To use "-b {block_input}", you must also specify: '
-                        "--pc-sampling --experimental"
+                        "--experimental --pc-sampling"
                     )
 
         # When --pc-sampling is set, inject "21" into filter_blocks so the
