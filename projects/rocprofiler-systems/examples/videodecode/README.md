@@ -31,7 +31,7 @@ cmake --build <build_dir>
 **As part of the examples suite:**
 
 ```bash
-cmake -B <build_dir> -S <project_root>/examplse/ -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake -B <build_dir> -S <project_root>/examples/ -DCMAKE_PREFIX_PATH=/opt/rocm
 cmake --build <build_dir> --target videodecode
 ```
 
@@ -43,6 +43,16 @@ cmake --build <build_dir> --target videodecode
 
 # Specify GPU and thread count
 ./videodecode -i /path/to/video.mp4 -d 0
+```
+
+### VA drivers (`LIBVA_DRIVERS_PATH`) — only if decode fails
+
+ROCDecode uses the VA stack for hardware decode. On a typical desktop, **libva** finds a driver under the distro’s default paths, so you often need **no** extra variables.
+
+Set **`LIBVA_DRIVERS_PATH`** when decode fails or no VA driver is found. For example, when building with TheRock, point libva at the vendored sysdeps directory:
+
+```bash
+export LIBVA_DRIVERS_PATH="${ROCM_PATH}/lib/rocm_sysdeps/lib"
 ```
 
 ## Profiling with rocprofiler-systems
