@@ -924,7 +924,7 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   // The actual VA mapping is deferred to Map() during hsa_amd_vmem_set_access; this only
   // produces a driver-independent shareable handle.
   (void)va;
-
+  (void)agent;
   // Find BO handle; mem is the BO handle; see AllocateMemory.
   auto bo_handle = FindBOHandle(mem);
   if (!bo_handle.IsValid()) {
