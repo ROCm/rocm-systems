@@ -677,7 +677,9 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   // access policy
   deviceProps.accessPolicyMaxWindowSize = 0;
   // cluster launch
-  deviceProps.clusterLaunch = info.clusterMaxSize_ > 0;
+  // A cluster of size 1 is a regular single-block launch (legal on all GPUs); clusterLaunch
+  // advertises multi-block cluster support, which only devices reporting a max size > 1 have.
+  deviceProps.clusterLaunch = info.clusterMaxSize_ > 1;
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
