@@ -15,7 +15,7 @@ from typing import Any, Optional, Union, cast
 import config
 import utils.utils_profile_csv as csv_ops
 from utils import rocpd_data
-from utils.inject_roctx.core import KNOWN_BACKENDS
+from utils.inject_roctx.constants import KNOWN_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,

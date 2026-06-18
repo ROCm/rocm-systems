@@ -16,11 +16,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Callable, Union
 
-# Backends recognized by install_global_wraps and the "api" alias.
-KNOWN_BACKENDS: tuple[str, ...] = ("torch", "triton")
-
-# The "api" alias selects every supported backend.
-_API_ALIAS = "api"
+from .constants import API_ALIAS, KNOWN_BACKENDS
 
 
 def _missing_range_push(_label: str) -> None:
@@ -206,7 +202,7 @@ def install_global_wraps(backends: Union[str, Iterable[str]] = "") -> None:
 
     expanded: list[str] = []
     for n in names:
-        if n == _API_ALIAS:
+        if n == API_ALIAS:
             expanded.extend(KNOWN_BACKENDS)
         else:
             expanded.append(n)
