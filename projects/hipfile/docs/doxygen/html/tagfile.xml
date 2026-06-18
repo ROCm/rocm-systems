@@ -1,3 +1,1374 @@
 <?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
 <tagfile doxygen_version="1.9.8">
+  <compound kind="struct">
+    <name>hipFileDescr_t</name>
+    <filename>structhipFileDescr__t.html</filename>
+    <member kind="variable">
+      <type>hipFileFileHandleType_t</type>
+      <name>type</name>
+      <anchorfile>structhipFileDescr__t.html</anchorfile>
+      <anchor>a0d07de40d89349d6a9b0ee438e0f9a13</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>int</type>
+      <name>fd</name>
+      <anchorfile>structhipFileDescr__t.html</anchorfile>
+      <anchor>ac702257962fa7591b9e94f8259cfdcae</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>void *</type>
+      <name>hFile</name>
+      <anchorfile>structhipFileDescr__t.html</anchorfile>
+      <anchor>afacc8e36c3cf1a51710d1f9874aca1b6</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>union hipFileDescr_t::@1</type>
+      <name>handle</name>
+      <anchorfile>structhipFileDescr__t.html</anchorfile>
+      <anchor>ad0e5606c93765bab157cbed4d959548b</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>const hipFileFSOps_t *</type>
+      <name>fs_ops</name>
+      <anchorfile>structhipFileDescr__t.html</anchorfile>
+      <anchor>a6ff9243571ab80d434053fc6481d1358</anchor>
+      <arglist></arglist>
+    </member>
+  </compound>
+  <compound kind="struct">
+    <name>hipFileDriverProps_t</name>
+    <filename>structhipFileDriverProps__t.html</filename>
+    <member kind="variable">
+      <type>unsigned</type>
+      <name>major_version</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>a24dc042fa2ec6433b8b8dc71271ca8bc</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>unsigned</type>
+      <name>minor_version</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>aee3b26767ac174df1bf1642507b5d0cd</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>uint64_t</type>
+      <name>poll_thresh_size</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>ad5f6b741f7fd3d1851dd6addf3b55353</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>uint64_t</type>
+      <name>max_direct_io_size</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>a80246b33870d2b3e711538600dedf320</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>unsigned</type>
+      <name>driver_status_flags</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>a6de47db6409288c2398e5b3bdb24ed4c</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>unsigned</type>
+      <name>driver_control_flags</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>a4ba950be8d1c455df66867d56016c21a</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>struct hipFileDriverProps_t::@0</type>
+      <name>nvfs</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>a5134e2ff3f4c449f2715c9d5c1d3b80a</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>unsigned</type>
+      <name>feature_flags</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>a70f048d975811b45e52af33911f7eae2</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>uint64_t</type>
+      <name>max_device_cache_size</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>a0bae31aa0fa94ce64d4f59e87ebb59ea</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>uint64_t</type>
+      <name>per_buffer_cache_size</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>a0fde625024c0c1d5d1b005dda1b05f31</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>uint64_t</type>
+      <name>max_device_pinned_mem_size</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>a7a3f37763d21385a442a54051b95e27a</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>unsigned</type>
+      <name>max_batch_io_count</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>aab7ff5d478231c5dee85e7e759c5ae84</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>unsigned</type>
+      <name>max_batch_io_timeout_msecs</name>
+      <anchorfile>structhipFileDriverProps__t.html</anchorfile>
+      <anchor>aec9f5bf3f3824cb47d00cd8e127a3f58</anchor>
+      <arglist></arglist>
+    </member>
+  </compound>
+  <compound kind="struct">
+    <name>hipFileError_t</name>
+    <filename>structhipFileError__t.html</filename>
+    <member kind="variable">
+      <type>hipFileOpError_t</type>
+      <name>err</name>
+      <anchorfile>structhipFileError__t.html</anchorfile>
+      <anchor>aa8c8bd50f2e3dd2bfb57bcece8cd18cf</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>hipError_t</type>
+      <name>hip_drv_err</name>
+      <anchorfile>structhipFileError__t.html</anchorfile>
+      <anchor>abb54497787f3629a0f7841d8b6360bbc</anchor>
+      <arglist></arglist>
+    </member>
+  </compound>
+  <compound kind="struct">
+    <name>hipFileFSOps_t</name>
+    <filename>structhipFileFSOps__t.html</filename>
+    <member kind="variable">
+      <type>const char *(*</type>
+      <name>fs_type</name>
+      <anchorfile>structhipFileFSOps__t.html</anchorfile>
+      <anchor>a3feee73402466577f9c276392afa51c4</anchor>
+      <arglist>)(void *handle)</arglist>
+    </member>
+    <member kind="variable">
+      <type>int(*</type>
+      <name>getRDMADeviceList</name>
+      <anchorfile>structhipFileFSOps__t.html</anchorfile>
+      <anchor>a372561d2a917382dc005cec49a511cca</anchor>
+      <arglist>)(void *handle, struct sockaddr **hostaddrs)</arglist>
+    </member>
+    <member kind="variable">
+      <type>int(*</type>
+      <name>getRDMADevicePriority</name>
+      <anchorfile>structhipFileFSOps__t.html</anchorfile>
+      <anchor>aa29fc45f4c1a7599e736d12d63de4134</anchor>
+      <arglist>)(void *handle, char *, size_t, hoff_t, struct sockaddr *hostaddr)</arglist>
+    </member>
+    <member kind="variable">
+      <type>ssize_t(*</type>
+      <name>read</name>
+      <anchorfile>structhipFileFSOps__t.html</anchorfile>
+      <anchor>a2102e5b8baa41bacec2804574eb4f2cd</anchor>
+      <arglist>)(void *handle, char *, size_t, hoff_t, hipFileRDMAInfo_t *)</arglist>
+    </member>
+    <member kind="variable">
+      <type>ssize_t(*</type>
+      <name>write</name>
+      <anchorfile>structhipFileFSOps__t.html</anchorfile>
+      <anchor>a5f9d227870badd0b3365aaf548caf972</anchor>
+      <arglist>)(void *handle, const char *, size_t, hoff_t, hipFileRDMAInfo_t *)</arglist>
+    </member>
+  </compound>
+  <compound kind="struct">
+    <name>hipFileIOEvents_t</name>
+    <filename>structhipFileIOEvents__t.html</filename>
+    <member kind="variable">
+      <type>void *</type>
+      <name>cookie</name>
+      <anchorfile>structhipFileIOEvents__t.html</anchorfile>
+      <anchor>af136a1f990e90d9037c15b61254a3476</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>hipFileStatus_t</type>
+      <name>status</name>
+      <anchorfile>structhipFileIOEvents__t.html</anchorfile>
+      <anchor>a0dfa682502febe0483dc0ba23c0ce55f</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>size_t</type>
+      <name>ret</name>
+      <anchorfile>structhipFileIOEvents__t.html</anchorfile>
+      <anchor>a4d9dd5f0dba4d71b82980331ae1e1905</anchor>
+      <arglist></arglist>
+    </member>
+  </compound>
+  <compound kind="struct">
+    <name>hipFileIOParams_t</name>
+    <filename>structhipFileIOParams__t.html</filename>
+    <member kind="variable">
+      <type>hipFileBatchMode_t</type>
+      <name>mode</name>
+      <anchorfile>structhipFileIOParams__t.html</anchorfile>
+      <anchor>afef4b83f55576c3b249f2b1d359854bc</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>void *</type>
+      <name>devPtr_base</name>
+      <anchorfile>structhipFileIOParams__t.html</anchorfile>
+      <anchor>a7ef0702ac03a414b4249bff6bc4863c6</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>int64_t</type>
+      <name>file_offset</name>
+      <anchorfile>structhipFileIOParams__t.html</anchorfile>
+      <anchor>aab753a4ad70b1bb93733301523464723</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>int64_t</type>
+      <name>devPtr_offset</name>
+      <anchorfile>structhipFileIOParams__t.html</anchorfile>
+      <anchor>a2ff3e397cc70f4c5fedda2acf52bc436</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>size_t</type>
+      <name>size</name>
+      <anchorfile>structhipFileIOParams__t.html</anchorfile>
+      <anchor>a1515c32cddd8d4c5c782ff86423bec01</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>struct hipFileIOParams_t::@2::@3</type>
+      <name>batch</name>
+      <anchorfile>structhipFileIOParams__t.html</anchorfile>
+      <anchor>ac42edf450693885704606ebd49459eae</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>union hipFileIOParams_t::@2</type>
+      <name>u</name>
+      <anchorfile>structhipFileIOParams__t.html</anchorfile>
+      <anchor>af8fd22d2c276bd180ad1523369f45835</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>hipFileHandle_t</type>
+      <name>fh</name>
+      <anchorfile>structhipFileIOParams__t.html</anchorfile>
+      <anchor>aa7d3b7b91a86a8c9e1ac711cc4873c68</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>hipFileOpcode_t</type>
+      <name>opcode</name>
+      <anchorfile>structhipFileIOParams__t.html</anchorfile>
+      <anchor>a48738f0c2e7eb273751341addd0a433d</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>void *</type>
+      <name>cookie</name>
+      <anchorfile>structhipFileIOParams__t.html</anchorfile>
+      <anchor>a76275614c9efa13cf191c851755d3d81</anchor>
+      <arglist></arglist>
+    </member>
+  </compound>
+  <compound kind="struct">
+    <name>hipFileRDMAInfo_t</name>
+    <filename>structhipFileRDMAInfo__t.html</filename>
+    <member kind="variable">
+      <type>int</type>
+      <name>version</name>
+      <anchorfile>structhipFileRDMAInfo__t.html</anchorfile>
+      <anchor>a30e7031e56f93c646cb1dd0a3459d811</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>int</type>
+      <name>desc_len</name>
+      <anchorfile>structhipFileRDMAInfo__t.html</anchorfile>
+      <anchor>a494b71d3d4a5eb1a1a486365f9e1916c</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="variable">
+      <type>const char *</type>
+      <name>desc_str</name>
+      <anchorfile>structhipFileRDMAInfo__t.html</anchorfile>
+      <anchor>a59225c327593d0b874560ebc7dd1c354</anchor>
+      <arglist></arglist>
+    </member>
+  </compound>
+  <compound kind="group">
+    <name>core</name>
+    <title>Core Functionality</title>
+    <filename>group__core.html</filename>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_VERSION_MAJOR</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>ga4cf52cfa902232f5955ec3ce2f5dd0f9</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_VERSION_MINOR</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>ga1a76ce3483b0bc2a21abd95f475d3cf5</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_VERSION_PATCH</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gab819fc46c74f1bf1802f92f2e7a547c4</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="typedef">
+      <type>off_t</type>
+      <name>hoff_t</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>ga23a3639a39621fbb7f0503824a896597</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumeration">
+      <type></type>
+      <name>hipFileSizeTConfigParameter_t</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>ga61b534c977c6b14849ab35ec2c6634bf</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamProfileStats</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfaf2c00b1bdbcef026c389292fdde288cf</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamExecutionMaxIOQueueDepth</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfa932e0947444cd2d037f135e5d2af961e</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamExecutionMaxIOThreads</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfa92152ffc04d7c19f3dcb4c6c9dade8b4</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamExecutionMinIOThresholdSizeKB</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfa668f7fa0494bba14991ba65a72943c98</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamExecutionMaxRequestParallelism</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfa143a27b6c9d473c6a81e630b0fef031d</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamPropertiesMaxDirectIOSizeKB</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfa5db255be2ec2cbb30204c66fdf57cf88</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamPropertiesMaxDeviceCacheSizeKB</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfa100218da6f15f3c64fb76313b11ef01a</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamPropertiesPerBufferCacheSizeKB</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfaf2913ca94eb2ba0a2adabc354996154e</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamPropertiesMaxDevicePinnedMemSizeKB</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfa89734449b334d847834592454a0f7aa3</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamPropertiesIOBatchsize</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfa9d0bebc59d70b8bc59767ccff41137cd</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamPollthresholdSizeKB</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfae510448ba6c674cb8faa7203dcdd8f2c</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamPropertiesBatchIOTimeoutMs</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga61b534c977c6b14849ab35ec2c6634bfaf3347004bd380fd294c583c8c80dcc25</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumeration">
+      <type></type>
+      <name>hipFileBoolConfigParameter_t</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>ga514363f710fcc4a2cfe6db96e1c7c2be</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamPropertiesUsePollMode</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2bea98cfc22d2651c8101d322e0c15bf525b</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamPropertiesAllowCompatMode</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2beaee84499ae176a911eef0622f81de7e5e</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamForceCompatMode</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2bea36fc422e5a426b36f7794d04cf94c5e3</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamFsMiscApiCheckAggressive</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2bea39fdd1554aa620d75594be4bd1fa6ed8</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamExecutionParallelIO</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2bea44088559fdf6a56f492459ec706a2112</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamProfileNvtx</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2bea7ae3ac75a34276f5bb97fd2d535de622</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamPropertiesAllowSystemMemory</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2bea65e19435182ad5087a235494956d84dd</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamUsePcip2pdma</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2bea128c79bdfcedb926245d1944b040b1fb</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamPreferIOUring</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2bea54cb66871b95acd711c979cdb7604b00</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamForceOdirectMode</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2bea323bd0c8639e486987273110a7d5fac6</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamSkipTopologyDetection</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2bea1182e666ba3f81f4b0ac4649c3247993</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamStreamMemopsBypass</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga514363f710fcc4a2cfe6db96e1c7c2bea90f67edcd1ce8e58a32d777414f95f6f</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumeration">
+      <type></type>
+      <name>hipFileStringConfigParameter_t</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>ga250a5e8f09ca739df4e964ed494f926d</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamLoggingLevel</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga250a5e8f09ca739df4e964ed494f926da39e552f707bc119a7c66f89626204faf</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamEnvLogfilePath</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga250a5e8f09ca739df4e964ed494f926da69fa273c75531e88a5bacf5760b368e2</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParamLogDir</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gga250a5e8f09ca739df4e964ed494f926da81ba87dcabf382948feed6818a0432ff</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileGetVersion</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gaf56f35fe8dda10aea49a753bdc041dc0</anchor>
+      <arglist>(unsigned *major, unsigned *minor, unsigned *patch)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileGetParameterSizeT</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gad23263dbd72cdfea58cba0210c0aedb5</anchor>
+      <arglist>(hipFileSizeTConfigParameter_t param, size_t *value)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileGetParameterBool</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gacc99176971b55b7ced57335b16d5acfa</anchor>
+      <arglist>(hipFileBoolConfigParameter_t param, bool *value)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileGetParameterString</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>ga32556f265a0d4a74bc6f6e54683d2460</anchor>
+      <arglist>(hipFileStringConfigParameter_t param, char *desc_str, int len)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileSetParameterSizeT</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>ga11b4cff74a6b1ede4c72881b39289a3d</anchor>
+      <arglist>(hipFileSizeTConfigParameter_t param, size_t value)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileSetParameterBool</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>ga503305f4621109b6ad3f6b581c8ee834</anchor>
+      <arglist>(hipFileBoolConfigParameter_t param, bool value)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileSetParameterString</name>
+      <anchorfile>group__core.html</anchorfile>
+      <anchor>gadb78be637f52f26a64b326a69cab97b5</anchor>
+      <arglist>(hipFileStringConfigParameter_t param, const char *desc_str)</arglist>
+    </member>
+  </compound>
+  <compound kind="group">
+    <name>error</name>
+    <title>Errors and Error Handling</title>
+    <filename>group__error.html</filename>
+    <class kind="struct">hipFileError_t</class>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_BASE_ERR</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ga09f07c1b3dbb726593f5b2336fc61ff3</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="define">
+      <type>#define</type>
+      <name>IS_HIPFILE_ERR</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ga53b59dbc5849433e65fda710c42add48</anchor>
+      <arglist>(hip_op_err)</arglist>
+    </member>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_ERRSTR</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ga93aa7116a7a38bd9e050cfcaa40dc2d6</anchor>
+      <arglist>(hip_op_err)</arglist>
+    </member>
+    <member kind="define">
+      <type>#define</type>
+      <name>IS_HIP_DRV_ERR</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ga5e51380b5abb6d7cf7ae50bb8890610b</anchor>
+      <arglist>(hip_err)</arglist>
+    </member>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIP_DRV_ERR</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ga8b787f9a2334ac7d7972fb3288c264f6</anchor>
+      <arglist>(hip_err)</arglist>
+    </member>
+    <member kind="enumeration">
+      <type></type>
+      <name>hipFileOpError_t</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>gaf3bf669c9efb3cd2aceba452316b21cf</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileSuccess</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfad0a00b5e3b419d22f9bd5efb88463dc5</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDriverNotInitialized</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfab3f9a5d629ce71fc7d910fd42e4df20b</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDriverInvalidProps</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa14b729ac29834bbfab9d39e6b060c6a4</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDriverUnsupportedLimit</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa82edb679ba6424972f9145113e5c787f</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDriverVersionMismatch</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa6559be79ae840897fc7362c86b80869b</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDriverVersionReadError</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfaf98bafdd0f5b627a5f6a61b8423880eb</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDriverClosing</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa86ab67dcf95d37d4ac69be4d96da1285</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFilePlatformNotSupported</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa2f90c14bd16ddccbdaf2a2d8b0451a0f</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileIONotSupported</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa7638d30f8058ae0873c8a9d9f0278799</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDeviceNotSupported</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa8e4eb71de6ac529af7529262e87f266e</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDriverError</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfac695ec5e826cc6122944a7357789ddd1</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileHipDriverError</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa7c83fa52118b27ba5d33e1fb2598df2f</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileHipPointerInvalid</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa9d0c81158176a140ac888331cb59871a</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileHipMemoryTypeInvalid</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfae668907b81b0711470d74b41a814d981</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileHipPointerRangeError</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa7a7ac42e6a96d7f150accc2718730b0b</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileHipContextMismatch</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfac67801e76fd2ad2c757bb6159519f353</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileInvalidMappingSize</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa3a179bd1b60552b27676ff12e34e3fd4</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileInvalidMappingRange</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfab2204865b1d4a58dc6e851a6e68636b3</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileInvalidFileType</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa738830a72c0650394a3b48e1edf30fc6</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileInvalidFileOpenFlag</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa805138f009b6a9c44736b029bc1b3b86</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDIONotSet</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfaa2e7e50c87e3dadba4c1ff3b6f8d91b1</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileInvalidValue</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa67b1e357c94d456c6c17b07fd842fb92</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileMemoryAlreadyRegistered</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa0d8eb7f8e2481c08d7022a355a7aa21a</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileMemoryNotRegistered</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa1607026380dffcd99efd48209f3b9319</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFilePermissionDenied</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa8342a332ba2df538602e2b0ac09935c5</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDriverAlreadyOpen</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa3e5cab0702bf24f98151e686f0769bdb</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileHandleNotRegistered</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa70ba8c6375f4b27e207c31ddffb80557</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileHandleAlreadyRegistered</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa4b70336a1bfde0816b5040bef31b5eb2</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDeviceNotFound</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfac2448bbf773425cdfbe003f1b3a3b2db</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileInternalError</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa38f1ec564086c52b516374e5c5d2be3c</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileGetNewFDFailed</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfaaab43c95718724f53f3fa412af756722</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDriverSetupError</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa6eaf18be349227c0946d41ea07eac45b</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileIODisabled</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfaf96ffd8b88497fbfafc5aecc18c411b5</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileBatchSubmitFailed</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfadd6e52e1fc53a390fc9ff0fa88d1559d</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileGPUMemoryPinningFailed</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa67250f950b71bb3c21cc38f0c06b0510</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileBatchFull</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfaf76a6978f9380195e63205d54e7ba288</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileAsyncNotSupported</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfad29b996ae0b0aa86ca0db4543fa621e1</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileIOMaxError</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ggaf3bf669c9efb3cd2aceba452316b21cfa161c277738f11fb6b14c64b3ea7c3700</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API const char *</type>
+      <name>hipFileGetOpErrorString</name>
+      <anchorfile>group__error.html</anchorfile>
+      <anchor>ga24ae5589dfa5b35162175d4bb7dcf988</anchor>
+      <arglist>(hipFileOpError_t status)</arglist>
+    </member>
+  </compound>
+  <compound kind="group">
+    <name>driver</name>
+    <title>GPU IO Driver API</title>
+    <filename>group__driver.html</filename>
+    <class kind="struct">hipFileDriverProps_t</class>
+    <member kind="enumeration">
+      <type></type>
+      <name>hipFileDriverStatusFlags_t</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>ga681d6f7f50380d968eacd1f07d341bd2</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileLustreSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2a4dd501393f610bc67794f8ce9153c8bb</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileWekaFSSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2aa0610e0aa1d449acebba3ea01eaef34e</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileNFSSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2a4506c0c0a8f2acebe74960e646b8eed4</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileGPFSSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2a399efa05aaca3d54bb50f752a32b8b12</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileNVMeSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2a272680505a4021807ad6f0c117a55524</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileNVMeoFSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2a8ab5a79239e364f5c6f4b142d6c12492</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileSCSISupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2aa27a7505a2003aec0f0a0c59e53480ce</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileScaleFluxCSDSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2a44fab13e09ece9d93ae55bf38663ab46</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileNVMeshSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2a3413e69b76796624b0ed3403c5fab08f</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileBeeGFSSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2aa37dba3f5b2c551c9783137cb582d4eb</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileNVMeP2PSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2ae5728bcc7bd594733ba978d8f100b2ae</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileScatefsSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga681d6f7f50380d968eacd1f07d341bd2a207144aca00b5b3afe766b2afc96cefb</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumeration">
+      <type></type>
+      <name>hipFileDriverControlFlags_t</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>ga7660ae3f8d1672064a4b2959b740d200</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileUsePollMode</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga7660ae3f8d1672064a4b2959b740d200a7469f46574ba1451804bac731bb12391</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileAllowCompatMode</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gga7660ae3f8d1672064a4b2959b740d200af2361e0d40989a7f3d29ed0c67f38318</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumeration">
+      <type></type>
+      <name>hipFileFeatureFlags_t</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gab5dce59ad8a703ab448419852d3a70d0</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileDynRoutingSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>ggab5dce59ad8a703ab448419852d3a70d0a6372f1398b74cf9918a9c897e4f86de1</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileBatchIOSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>ggab5dce59ad8a703ab448419852d3a70d0a05bcd9552621e8b9f6fee0e38d985e4a</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileStreamsSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>ggab5dce59ad8a703ab448419852d3a70d0ada2a3f7ae35c1980f34de41a5c223d90</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileParallelIOSupported</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>ggab5dce59ad8a703ab448419852d3a70d0a407a1aacd56567e0c5d2216ae3bcf08f</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileDriverOpen</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>ga971733aa2cfa7b19fd022e412087f709</anchor>
+      <arglist>(void)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileDriverClose</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>ga5df1249bc5d05724c40a38abfde725f1</anchor>
+      <arglist>(void)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API int64_t</type>
+      <name>hipFileUseCount</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>ga980459948fa1587dc7b978bfb359205f</anchor>
+      <arglist>(void)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileDriverGetProperties</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>ga48f630f9b5cd5a31bfa15beb42300d31</anchor>
+      <arglist>(hipFileDriverProps_t *props)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileDriverSetPollMode</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>ga0e87662141622c7acb355a524ca75442</anchor>
+      <arglist>(bool poll, size_t poll_threshold_size)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileDriverSetMaxDirectIOSize</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gae98c0be04983a5f625a3cbe986064a10</anchor>
+      <arglist>(size_t max_direct_io_size)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileDriverSetMaxCacheSize</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gadd9950a52162e3aef5e812c12986f1b1</anchor>
+      <arglist>(size_t max_cache_size)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileDriverSetMaxPinnedMemSize</name>
+      <anchorfile>group__driver.html</anchorfile>
+      <anchor>gab00f453825e8d280e25aaf60ae0d7fd0</anchor>
+      <arglist>(size_t max_pinned_size)</arglist>
+    </member>
+  </compound>
+  <compound kind="group">
+    <name>rdma</name>
+    <title>Userspace RDMA API</title>
+    <filename>group__rdma.html</filename>
+    <subgroup>rdma_flags</subgroup>
+    <class kind="struct">hipFileRDMAInfo_t</class>
+  </compound>
+  <compound kind="group">
+    <name>file</name>
+    <title>File Handle API</title>
+    <filename>group__file.html</filename>
+    <class kind="struct">hipFileFSOps_t</class>
+    <class kind="struct">hipFileDescr_t</class>
+    <member kind="typedef">
+      <type>void *</type>
+      <name>hipFileHandle_t</name>
+      <anchorfile>group__file.html</anchorfile>
+      <anchor>gaba7c9b7f4f8a7a72999457792ba6d175</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumeration">
+      <type></type>
+      <name>hipFileFileHandleType_t</name>
+      <anchorfile>group__file.html</anchorfile>
+      <anchor>gac51b78a5fd15a807924817276dda7023</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileHandleTypeOpaqueFD</name>
+      <anchorfile>group__file.html</anchorfile>
+      <anchor>ggac51b78a5fd15a807924817276dda7023afce75b92284f5bda58cf348b3b41e2bf</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileHandleTypeOpaqueWin32</name>
+      <anchorfile>group__file.html</anchorfile>
+      <anchor>ggac51b78a5fd15a807924817276dda7023acb6a19b4063ffaf0b49431c4f50d1e16</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileHandleTypeUserspaceFS</name>
+      <anchorfile>group__file.html</anchorfile>
+      <anchor>ggac51b78a5fd15a807924817276dda7023a4ce8c61376abf50df2f30b9f7925eb44</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileHandleRegister</name>
+      <anchorfile>group__file.html</anchorfile>
+      <anchor>ga6a172747c4b01d4505e8f8930a32c51d</anchor>
+      <arglist>(hipFileHandle_t *fh, hipFileDescr_t *descr)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API void</type>
+      <name>hipFileHandleDeregister</name>
+      <anchorfile>group__file.html</anchorfile>
+      <anchor>gaf9c3be4cd45d80b5f05909b07906451a</anchor>
+      <arglist>(hipFileHandle_t fh)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileBufRegister</name>
+      <anchorfile>group__file.html</anchorfile>
+      <anchor>ga8ab3e376f9e3ccf025d899c7aea4b8a5</anchor>
+      <arglist>(const void *buffer_base, size_t length, int flags)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileBufDeregister</name>
+      <anchorfile>group__file.html</anchorfile>
+      <anchor>ga77bd8ec54380f96b1ded1f1fd3f7e01f</anchor>
+      <arglist>(const void *buffer_base)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API ssize_t</type>
+      <name>hipFileRead</name>
+      <anchorfile>group__file.html</anchorfile>
+      <anchor>ga34bfada18306482afbd3226d1d20bc2d</anchor>
+      <arglist>(hipFileHandle_t fh, void *buffer_base, size_t size, hoff_t file_offset, hoff_t buffer_offset)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API ssize_t</type>
+      <name>hipFileWrite</name>
+      <anchorfile>group__file.html</anchorfile>
+      <anchor>gaf4cb1d0aa814f46c6dc29b4914c13acf</anchor>
+      <arglist>(hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset, hoff_t buffer_offset)</arglist>
+    </member>
+  </compound>
+  <compound kind="group">
+    <name>batch</name>
+    <title>Batch API</title>
+    <filename>group__batch.html</filename>
+    <class kind="struct">hipFileIOParams_t</class>
+    <class kind="struct">hipFileIOEvents_t</class>
+    <member kind="typedef">
+      <type>void *</type>
+      <name>hipFileBatchHandle_t</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>ga52cfaf95eb59cd28f6f9227956640183</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumeration">
+      <type></type>
+      <name>hipFileOpcode_t</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>ga504f28cf3bbb85edcf0aa00cb0a52be3</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileBatchRead</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>gga504f28cf3bbb85edcf0aa00cb0a52be3a620bef22c4fc94e007fb8142818cb490</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileBatchWrite</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>gga504f28cf3bbb85edcf0aa00cb0a52be3aa271f9dd0c13aecf28201f9a76004ac8</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumeration">
+      <type></type>
+      <name>hipFileStatus_t</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>ga661f3895292b9434b8385cb1ee200843</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileWaiting</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>gga661f3895292b9434b8385cb1ee200843ac45bfcb0946803beb68ff0dbe4b320c3</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFilePending</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>gga661f3895292b9434b8385cb1ee200843a6f4704a49c066f1a5d3013f469d8df83</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileInvalid</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>gga661f3895292b9434b8385cb1ee200843a9e9d24682ce2a8cc995686a1e88c0ea4</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileCanceled</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>gga661f3895292b9434b8385cb1ee200843aac154b7b107bd161470e811aeae0f15a</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileComplete</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>gga661f3895292b9434b8385cb1ee200843adb11487a3613bdf2669e7664cde86830</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileTimeout</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>gga661f3895292b9434b8385cb1ee200843a6135f2020d4d26a4a84037a00109a6c4</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileFailed</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>gga661f3895292b9434b8385cb1ee200843a8488a57e9e083dd3971cd43643f95e8e</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumeration">
+      <type></type>
+      <name>hipFileBatchMode_t</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>gaded56159b3c86ef34af50d052967ccfa</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="enumvalue">
+      <name>hipFileBatch</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>ggaded56159b3c86ef34af50d052967ccfaa146472822c95f899b2d8e6931ea7faa7</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileBatchIOSetUp</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>ga3607d9b971c477b88f25b147cf81bccc</anchor>
+      <arglist>(hipFileBatchHandle_t *batch_idp, unsigned max_nr)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileBatchIOSubmit</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>ga74585926af9295438c44551b6503e3b6</anchor>
+      <arglist>(hipFileBatchHandle_t batch_idp, unsigned nr, hipFileIOParams_t *iocbp, unsigned flags)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileBatchIOGetStatus</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>ga7abffbb53ef12417ec36048f9a18051b</anchor>
+      <arglist>(hipFileBatchHandle_t batch_idp, unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp, struct timespec *timeout)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileBatchIOCancel</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>ga62e504ee27e05d09a16424c17f343352</anchor>
+      <arglist>(hipFileBatchHandle_t batch_idp)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API void</type>
+      <name>hipFileBatchIODestroy</name>
+      <anchorfile>group__batch.html</anchorfile>
+      <anchor>ga5ac132e5597813a50189d51d9de471e4</anchor>
+      <arglist>(hipFileBatchHandle_t batch_idp)</arglist>
+    </member>
+  </compound>
+  <compound kind="group">
+    <name>async</name>
+    <title>Async API</title>
+    <filename>group__async.html</filename>
+    <subgroup>stream_flags</subgroup>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileReadAsync</name>
+      <anchorfile>group__async.html</anchorfile>
+      <anchor>ga52702a41b0567de81f3f9c5b38c4bbf2</anchor>
+      <arglist>(hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_read_p, hipStream_t stream)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileWriteAsync</name>
+      <anchorfile>group__async.html</anchorfile>
+      <anchor>gaaa199f0c582be58b997dfa4a61445dd8</anchor>
+      <arglist>(hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_written_p, hipStream_t stream)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileStreamRegister</name>
+      <anchorfile>group__async.html</anchorfile>
+      <anchor>ga5f38ad063066c47c259188ca0ff5d03d</anchor>
+      <arglist>(hipStream_t stream, unsigned flags)</arglist>
+    </member>
+    <member kind="function">
+      <type>HIPFILE_API hipFileError_t</type>
+      <name>hipFileStreamDeregister</name>
+      <anchorfile>group__async.html</anchorfile>
+      <anchor>ga1ba716d72129f19c8d57fa6d3a30f185</anchor>
+      <arglist>(hipStream_t stream)</arglist>
+    </member>
+  </compound>
+  <compound kind="group">
+    <name>rdma_flags</name>
+    <title>RDMA Characteristic Flags</title>
+    <filename>group__rdma__flags.html</filename>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_RDMA_REGISTER</name>
+      <anchorfile>group__rdma__flags.html</anchorfile>
+      <anchor>gaa12fb91ee4e484171a0c09f08f2cde84</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_RDMA_RELAXED_ORDERING</name>
+      <anchorfile>group__rdma__flags.html</anchorfile>
+      <anchor>ga382654661e87f9e8be3f3cbd5d44d173</anchor>
+      <arglist></arglist>
+    </member>
+  </compound>
+  <compound kind="group">
+    <name>stream_flags</name>
+    <title>Stream registration flags</title>
+    <filename>group__stream__flags.html</filename>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_STREAM_FIXED_BUF_OFFSET</name>
+      <anchorfile>group__stream__flags.html</anchorfile>
+      <anchor>ga7c4c091128c64fb82d63137265964d3c</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_STREAM_FIXED_FILE_OFFSET</name>
+      <anchorfile>group__stream__flags.html</anchorfile>
+      <anchor>ga071a5d9503bcdfd01d713ad5cba879b4</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_STREAM_FIXED_FILE_SIZE</name>
+      <anchorfile>group__stream__flags.html</anchorfile>
+      <anchor>ga649638be90be375d592ed0224f403aba</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_STREAM_PAGE_ALIGNED_INPUTS</name>
+      <anchorfile>group__stream__flags.html</anchorfile>
+      <anchor>ga66a703e5388e3beedae1a592553c5818</anchor>
+      <arglist></arglist>
+    </member>
+    <member kind="define">
+      <type>#define</type>
+      <name>HIPFILE_STREAM_FLAGS_MASK</name>
+      <anchorfile>group__stream__flags.html</anchorfile>
+      <anchor>ga84d98d5bf7d9f58b20837f148b82f2d4</anchor>
+      <arglist></arglist>
+    </member>
+  </compound>
+  <compound kind="page">
+    <name>index</name>
+    <title>hipFile API Reference</title>
+    <filename>index.html</filename>
+    <docanchor file="index.html" title="Contents">contents</docanchor>
+  </compound>
 </tagfile>
