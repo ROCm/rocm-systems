@@ -414,6 +414,7 @@ __device__ __forceinline__ void profiler(int action) {
 }
 
 #ifndef RCCL_DEVICE_TABLE_OMIT
+#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
 template<int Unroll>
 __device__ __forceinline__ constexpr ncclDevFuncPtr_t const* selectFuncTable() {
   if constexpr (Unroll == 1)  return ncclDevFuncTable_1;
@@ -423,6 +424,7 @@ __device__ __forceinline__ constexpr ncclDevFuncPtr_t const* selectFuncTable() {
   else if constexpr (Unroll == 16) return ncclDevFuncTable_16;
   else                             return ncclDevFuncTable_32;
 }
+#endif
 #endif
 
 #ifndef RCCL_DEVICE_TABLE_OMIT
