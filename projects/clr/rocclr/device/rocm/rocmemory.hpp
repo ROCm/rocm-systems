@@ -148,7 +148,7 @@ class Memory : public device::Memory {
   void* deviceMemory_;
 
   // Pointer to the interop device memory, which has an offset from deviceMemory_
-  void* interop_deviceMemory_;
+  void* interop_deviceMemory_ = nullptr;
 
   // Track if this memory is interop, lock, gart, or normal.
   MEMORY_KIND kind_;

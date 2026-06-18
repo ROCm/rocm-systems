@@ -12,8 +12,9 @@
 #include "platform/object.hpp"
 #include "platform/agent.hpp"
 
-#include <vector>
+#include <mutex>
 #include <unordered_map>
+#include <vector>
 
 namespace amd {
 
@@ -199,6 +200,52 @@ class Context : public RuntimeObject {
     deviceQueues_[&dev].defDeviceQueue_ = queue;
   };
 
+ public:
+#ifdef _WIN32
+  // D3D11 interop extension cache: ID3D11Device* (as void*) -> {pExt, pCLExt}
+  // pCLExt is IAmdDxExtCLInterop*, pExt is IAmdDxExt* kept alive as long as pCLExt is used.
+  struct D3D11ExtEntry {
+    void* pExt   = nullptr;   //!< IAmdDxExt*
+    void* pCLExt = nullptr;   //!< IAmdDxExtCLInterop*
+  };
+  void setD3D11Ext(void* d3d11Device, void* pExt, void* pCLExt) {
+    std::lock_guard<std::mutex> lock(d3d11ExtCacheLock_);
+    d3d11ExtCache_[d3d11Device] = {pExt, pCLExt};
+  }
+  void* getD3D11Ext(void* d3d11Device) const {
+    std::lock_guard<std::mutex> lock(d3d11ExtCacheLock_);
+    auto it = d3d11ExtCache_.find(d3d11Device);
+    return (it != d3d11ExtCache_.end()) ? it->second.pCLExt : nullptr;
+  }
+  bool removeD3D11Ext(void* d3d11Device, void** ppExt, void** ppCLExt) {
+    std::lock_guard<std::mutex> lock(d3d11ExtCacheLock_);
+    auto it = d3d11ExtCache_.find(d3d11Device);
+    if (it == d3d11ExtCache_.end()) return false;
+    if (ppExt)   *ppExt   = it->second.pExt;
+    if (ppCLExt) *ppCLExt = it->second.pCLExt;
+    d3d11ExtCache_.erase(it);
+    return true;
+  }
+  void setD3D10Ext(void* d3d10Device, void* pExt, void* pCLExt) {
+    std::lock_guard<std::mutex> lock(d3d10ExtCacheLock_);
+    d3d10ExtCache_[d3d10Device] = {pExt, pCLExt};
+  }
+  void* getD3D10Ext(void* d3d10Device) const {
+    std::lock_guard<std::mutex> lock(d3d10ExtCacheLock_);
+    auto it = d3d10ExtCache_.find(d3d10Device);
+    return (it != d3d10ExtCache_.end()) ? it->second.pCLExt : nullptr;
+  }
+  bool removeD3D10Ext(void* d3d10Device, void** ppExt, void** ppCLExt) {
+    std::lock_guard<std::mutex> lock(d3d10ExtCacheLock_);
+    auto it = d3d10ExtCache_.find(d3d10Device);
+    if (it == d3d10ExtCache_.end()) return false;
+    if (ppExt)   *ppExt   = it->second.pExt;
+    if (ppCLExt) *ppCLExt = it->second.pCLExt;
+    d3d10ExtCache_.erase(it);
+    return true;
+  }
+#endif  // _WIN32
+
  private:
   Info info_;                            //!< Context info structure
   cl_context_properties* properties_;    //!< Original properties
@@ -207,6 +254,12 @@ class Context : public RuntimeObject {
   std::vector<Device*> svmAllocDevice_;  //!< Devices can support SVM allocations
   std::unordered_map<const Device*, DeviceQueueInfo> deviceQueues_;  //!< Device queues mapping
   mutable Monitor ctxLock_;  //!< Lock for the context access
+#ifdef _WIN32
+  std::unordered_map<void*, D3D11ExtEntry> d3d11ExtCache_;
+  mutable std::mutex d3d11ExtCacheLock_;
+  std::unordered_map<void*, D3D11ExtEntry> d3d10ExtCache_;
+  mutable std::mutex d3d10ExtCacheLock_;
+#endif
 };
 
 /*! @}
