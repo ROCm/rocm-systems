@@ -94,6 +94,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Fix documentation and internal config handling that referenced the non-existent
   `ROCPROFSYS_USE_TRACE`. The Perfetto tracing backend is controlled by
   `ROCPROFSYS_TRACE`; setting `ROCPROFSYS_USE_TRACE` had no effect.
+- Fixed a pre-main `rocprof-sys-run` `SIGSEGV` in `rocprofiler_configure()` when
+  profiling OpenMPI GPU-aware MPI workloads.
 
 ### Known issues
 
