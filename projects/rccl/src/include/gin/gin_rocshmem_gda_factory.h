@@ -29,7 +29,7 @@
 #include <stddef.h>
 
 /**
- * @file gin_qp_factory.hpp
+ * @file gin_rocshmem_gda_factory.h
  *
  * @section DESCRIPTION
  * Standalone C-linkage API for creating rocshmem QueuePairs for use by

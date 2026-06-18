@@ -23,7 +23,7 @@
  *****************************************************************************/
 
 /**
- * @file gin_qp_factory.cpp
+ * @file gin_rocshmem_gda_factory.cc
  *
  * Standalone GIN QP factory — creates rocshmem QueuePairs for RCCL's GIN
  * backend without requiring rocshmem_init() or a GDABackend instance.
@@ -38,7 +38,7 @@
  * from their original location.
  */
 
-#include "gin/gin_qp_factory.h"
+#include "gin/gin_rocshmem_gda_factory.h"
 #include <gda/queue_pair.hpp>
 #include <gda/ibv_wrapper.hpp>
 #include <gda/backend_gda.hpp>

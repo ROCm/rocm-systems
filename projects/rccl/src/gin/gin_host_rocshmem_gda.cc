@@ -11,7 +11,7 @@
 #include "bootstrap.h"
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
 
-#include "gin/gin_qp_factory.h"
+#include "gin/gin_rocshmem_gda_factory.h"
 #include <hip/hip_runtime.h>
 
 // Host-side context that wraps the GPU context and IB resources

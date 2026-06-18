@@ -139,7 +139,7 @@ set(SRC_FILES
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_api.h
   include/gin/gin_host_rocshmem_gda.h
-  include/gin/gin_qp_factory.h
+  include/gin/gin_rocshmem_gda_factory.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -414,7 +414,7 @@ set(SRC_FILES
   gin/gin_plugin_rocshmem_api.cc
   gin/gin_host_rocshmem_gda.cc
   gin/gin_plugin_rocshmem_gda.cc
-  gin/gin_qp_factory.cpp
+  gin/gin_rocshmem_gda_factory.cc
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h
   include/latency_profiler/CollTraceFunc.h

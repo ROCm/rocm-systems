@@ -21,7 +21,7 @@
 #include <cstring>
 #include <cassert>
 
-#include <gin/gin_qp_factory.h>
+#include <gin/gin_rocshmem_gda_factory.h>
 #include <nccl_device/gin/rocshmem_gda/queue_pair_device.h>
 
 #define HIP_CHECK(cmd) do {                                      \
