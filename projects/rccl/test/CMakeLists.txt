@@ -309,7 +309,7 @@ if(BUILD_TESTS)
 
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
-  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+  if (ROCM_INSTALL_VERSION VERSION_GREATER_EQUAL "60400")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsFixtures)
 
     set(TEST_FIXTURE_SOURCE_FILES
@@ -476,7 +476,7 @@ if(BUILD_TESTS)
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
   # librccl.so which are only visible in Debug builds (hidden visibility in Release).
-  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+  if (ROCM_INSTALL_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsFixturesDebug)
 
     set(TEST_FIXTURE_DEBUG_SOURCE_FILES
@@ -556,7 +556,7 @@ if(BUILD_TESTS)
   # ARSMI_TEST_BUILD, which gives external linkage to thread_local sysfs root variables
   # so tests can redirect them to a temp directory. No librccl.so symbols needed,
   # so this target works in both Release and Debug builds.
-  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+  if (ROCM_INSTALL_VERSION VERSION_GREATER_EQUAL "60400")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsAltRsmi)
 
     set(TEST_ALTRSMI_SOURCE_FILES
@@ -899,7 +899,7 @@ if(BUILD_TESTS)
         message(WARNING "Skipping test categories for rccl-UnitTests: missing ${_rccl_test_categories_yaml}")
     endif()
 
-    if(ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+    if(ROCM_INSTALL_VERSION VERSION_GREATER_EQUAL "60400")
         set(_rccl_test_categories_fixtures_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_fixtures.yaml")
         if(EXISTS "${_rccl_test_categories_fixtures_yaml}")
             message(STATUS "Applying test categories for rccl-UnitTestsFixtures")
@@ -931,7 +931,7 @@ if(BUILD_TESTS)
         endif()
     endif()
 
-    if(ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+    if(ROCM_INSTALL_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
         set(_rccl_test_categories_fixtures_debug_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_fixtures_debug.yaml")
         if(EXISTS "${_rccl_test_categories_fixtures_debug_yaml}")
             message(STATUS "Applying test categories for rccl-UnitTestsFixturesDebug")
