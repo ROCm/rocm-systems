@@ -1438,6 +1438,18 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   cu->execute_instruction(sr_inst.get(), *wf);
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xDE38BEEFu);
 
+  cu->write_sgpr(sb + 5, util::f32_to_f16(std::ldexp(1.0f, -8)));
+  cu->write_sgpr(sb + 6, 0);
+  cu->write_vgpr(vb + 2, 0, 0xDEADBEEFu);
+
+  // v_cvt_sr_fp8_f16 v2, s5, s6 byte_sel:2 clamp
+  const uint32_t sr_f16_words[] = {0xD774C002U, 0x02000C05U};
+  std::unique_ptr<Instruction> sr_f16_inst(decoder->decode(sr_f16_words));
+  ASSERT_NE(sr_f16_inst, nullptr);
+  ASSERT_EQ(std::string_view(sr_f16_inst->mnemonic()), "v_cvt_sr_fp8_f16");
+  cu->execute_instruction(sr_f16_inst.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xDE38BEEFu);
+
   cu->reset_all_wf();
 }
 

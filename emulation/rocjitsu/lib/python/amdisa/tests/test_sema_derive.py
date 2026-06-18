@@ -873,6 +873,21 @@ class TestDeriveVectorUnary:
         assert 'util::f32_to_fp8_e4m3_sr(s0, seed)' in cpp
         assert 'inst_.opsel' in cpp
 
+    def test_gfx1250_cvt_sr_fp8_f16_clamp_selects_e5m3_encoder(self):
+        cpp = gen_vector_cvt_pk(
+            ['vdst'],
+            ['src0', 'src1'],
+            'vector_cvt_sr_fp8_f16',
+            None,
+            opsel='inst_.opsel',
+            fp8_format_select='inst_.clamp',
+        )
+
+        assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in cpp
+        assert 'inst_.clamp' in cpp
+        assert 'util::f32_to_fp8_e5m3_sr(s0, seed)' in cpp
+        assert 'util::f32_to_fp8_e4m3_sr(s0, seed)' in cpp
+
     def test_cvt_pk_bf16_f32_uses_rne_packing(self):
         sem = derive_semantics('V_CVT_PK_BF16_F32', 'ENC_VOP3')
         assert sem is not None

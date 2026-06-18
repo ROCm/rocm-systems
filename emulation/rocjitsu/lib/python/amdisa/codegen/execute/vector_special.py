@@ -924,7 +924,12 @@ def gen_vector_cvt_pk(
         )
         L.append('    float s0 = util::f16_to_f32(static_cast<uint16_t>(raw));')
         L.append(f'    uint32_t seed = {src[1]}.read_lane(wf, lane);')
-        L.append('    uint8_t result = util::f32_to_fp8_e4m3_sr(s0, seed);')
+        if fp8_format_select is not None:
+            L.append(
+                f'    uint8_t result = ({fp8_format_select}) ? util::f32_to_fp8_e5m3_sr(s0, seed) : util::f32_to_fp8_e4m3_sr(s0, seed);'
+            )
+        else:
+            L.append('    uint8_t result = util::f32_to_fp8_e4m3_sr(s0, seed);')
         L.append(f'    uint32_t dst_byte = ({opsel} >> 2) & 0x3;')
         L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
         L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')

@@ -6110,7 +6110,8 @@ void VCvtSrFp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t raw = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0);
     float s0 = util::f16_to_f32(static_cast<uint16_t>(raw));
     uint32_t seed = src1.read_lane(wf, lane);
-    uint8_t result = util::f32_to_fp8_e4m3_sr(s0, seed);
+    uint8_t result =
+        (inst_.clamp) ? util::f32_to_fp8_e5m3_sr(s0, seed) : util::f32_to_fp8_e4m3_sr(s0, seed);
     uint32_t dst_byte = (inst_.opsel >> 2) & 0x3;
     uint32_t old = vdst.read_lane(wf, lane);
     uint32_t mask = ~(0xFFu << (dst_byte * 8));

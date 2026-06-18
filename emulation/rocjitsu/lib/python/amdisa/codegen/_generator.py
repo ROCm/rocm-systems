@@ -2792,8 +2792,10 @@ class CodeGenerator:
                 opsel = 'inst_.opsel' if 'opsel' in inst_fields else 'inst_.op_sel'
             fp8_format_select = (
                 'inst_.clamp'
-                if cls == 'vector_cvt_pk'
-                and op in ('fp8_f32', 'fp8_f16')
+                if (
+                    (cls == 'vector_cvt_pk' and op in ('fp8_f32', 'fp8_f16'))
+                    or cls == 'vector_cvt_sr_fp8_f16'
+                )
                 and is_vop3
                 and self.isa_spec.arch_name.lower() == 'gfx1250'
                 else None
