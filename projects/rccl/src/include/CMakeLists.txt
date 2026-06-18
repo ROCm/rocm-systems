@@ -105,7 +105,6 @@ set(INCLUDE_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/ionic/ionicdvcore.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ionic/ionicdvsymbols.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ionic/ionicdvwrap.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/nccl_merge_stubs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl_device/comm.h
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl_device/coop.h
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl_device/core.h
@@ -181,7 +180,7 @@ set(INCLUDE_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/nvtx3/nvtxDetail/nvtxInitDefs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/nvtx3/nvtxDetail/nvtxLinkOnce.h
     ${CMAKE_CURRENT_SOURCE_DIR}/nvtx3/nvtxDetail/nvtxTypes.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/proxy_trace/proxy_trace.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/proxy_diag_counters.h
     ${CMAKE_CURRENT_SOURCE_DIR}/plugin/nccl_net.h
     ${CMAKE_CURRENT_SOURCE_DIR}/plugin/nccl_profiler.h
     ${CMAKE_CURRENT_SOURCE_DIR}/plugin/nccl_tuner.h

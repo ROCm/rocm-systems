@@ -6,7 +6,7 @@
  *************************************************************************/
 
 #include "param.h"
-#include "param/param_tmp.h"
+#include "param/param.h"
 #include "debug.h"
 #include "env.h"
 

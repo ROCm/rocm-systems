@@ -9,8 +9,8 @@
 #define PARAM_REGISTRY_H_INCLUDED
 
 #include "nccl.h"
-#include "param/common_tmp.h"
-#include "param/utils_tmp.h"
+#include "param/common.h"
+#include "param/utils.h"
 
 #include <string>
 #include <unordered_map>

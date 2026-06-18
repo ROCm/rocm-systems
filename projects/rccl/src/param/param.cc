@@ -7,7 +7,7 @@
 
 // Parameter definitions for the ncclParam system itself.
 
-#include "param/param_tmp.h"
+#include "param/param.h"
 #include "param/parsers.h"
 #include "debug.h"
 

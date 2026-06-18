@@ -8,7 +8,7 @@
 #ifndef PARAM_UTILS_H_INCLUDED
 #define PARAM_UTILS_H_INCLUDED
 
-#include "param/common_tmp.h"
+#include "param/common.h"
 #include <string>
 #include <algorithm>
 #include <cctype>
