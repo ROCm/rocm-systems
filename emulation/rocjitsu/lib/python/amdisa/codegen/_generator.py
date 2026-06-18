@@ -4977,6 +4977,25 @@ class CodeGenerator:
             self.isa_spec.profile.vop3p_opsel_fields,
         )
 
+    @staticmethod
+    def _operand_encoding_value_expr(
+        opnd_name: str, is_smem: bool, packed_16bit: bool
+    ) -> str:
+        """C++ expression for an operand's raw encoding value.
+
+        SMEM SBASE is encoded in units of 2 SGPRs (raw N names s[2N:2N+1]), so it
+        is scaled here to a real SGPR index. This keeps the operand's
+        register-ref (disassembly, def/use, liveness) consistent with execution,
+        which scales the raw field independently (addr_calc_scalar.h:
+        ``sbase = base + inst.sbase * 2``).
+        """
+        expr = f'reinterpret_cast<const OpEncoding*>(inst)->{opnd_name}'
+        if is_smem and opnd_name == 'sbase':
+            expr = f'({expr} * 2)'
+        if packed_16bit:
+            expr = f'static_cast<unsigned short>({expr})'
+        return expr
+
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
 
@@ -5133,11 +5152,9 @@ class CodeGenerator:
                                 )
                                 else ''
                             )
-                            operand_value = f'reinterpret_cast<const OpEncoding*>(inst)->{opnd.name}'
-                            if packed_16bit_source_arg:
-                                operand_value = (
-                                    f'static_cast<unsigned short>({operand_value})'
-                                )
+                            operand_value = self._operand_encoding_value_expr(
+                                opnd.name, is_smem, bool(packed_16bit_source_arg)
+                            )
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd_size_expr}, '
                                 f'OperandType::{opr_type}, '
