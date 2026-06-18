@@ -36,8 +36,6 @@ from utils.utils_exceptions import (
 from utils.utils_profile import gen_sysinfo, run_prof
 from vendored import yaml
 
-_FRAMEWORK_ENV_VAR = "ROCPROFCOMPUTE_ROCTX_FRAMEWORKS"
-
 # Maps each CLI flag to the backends it enables.
 _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
     "torch_trace": ("torch",),
@@ -53,15 +51,13 @@ def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
     return selected
 
 
-def _build_inject_env(frameworks: set[str], pkg_parent: Path) -> dict[str, str]:
+def _build_inject_env(pkg_parent: Path) -> dict[str, str]:
     """Build the environment overrides for the workload subprocess.
 
-    Returns a dict suitable for run_prof's extra_env. PYTHONPATH is extended
-    rather than replaced.
+    Returns a dict suitable for run_prof's extra_env, extending PYTHONPATH so
+    the launcher can import the inject_roctx package.
     """
     env: dict[str, str] = {}
-    if frameworks:
-        env[_FRAMEWORK_ENV_VAR] = ",".join(sorted(frameworks))
     parent_str = str(pkg_parent)
     existing = os.environ.get("PYTHONPATH", "")
     if parent_str not in existing.split(os.pathsep):
@@ -101,12 +97,15 @@ def _prepare_ml_api_trace_injection(
     is_python: bool,
     script_index: Optional[int],
     skip_flag: Optional[str],
+    frameworks: set[str],
 ) -> Path:
     """Insert the inject_roctx entry point into the workload command.
 
-    Modifies remaining in place. The rewrite depends on the workload type:
-      1. Python interpreter — insert ``-m utils.inject_roctx`` before the script.
-      2. Direct .py script  — prepend ``sys.executable -m utils.inject_roctx``.
+    Modifies remaining in place. The selected frameworks are passed to the
+    launcher as ``--frameworks <names>``, followed by ``--`` and the workload
+    command. The rewrite depends on the workload type:
+      1. Python interpreter — insert the launcher before the script.
+      2. Direct .py script  — prepend ``sys.executable`` and the launcher.
       3. Other executables  — leave the command unchanged and emit a warning.
 
     Returns the package's parent directory for the subprocess PYTHONPATH.
@@ -118,6 +117,14 @@ def _prepare_ml_api_trace_injection(
             "Please verify your installation."
         )
 
+    launcher = [
+        "-m",
+        _INJECT_MODULE,
+        "--frameworks",
+        ",".join(sorted(frameworks)),
+        "--",
+    ]
+
     if is_python:
         if skip_flag:
             console_warning(
@@ -128,9 +135,9 @@ def _prepare_ml_api_trace_injection(
         elif not Path(remaining[script_index]).is_file():
             raise PythonScriptNotFoundError(remaining[script_index])
         else:
-            remaining[script_index:script_index] = ["-m", _INJECT_MODULE]
+            remaining[script_index:script_index] = launcher
     elif resolved_exec_path.suffix in (".py", ".pyw", ".pyc", ".pyo"):
-        remaining[0:0] = [sys.executable, "-m", _INJECT_MODULE]
+        remaining[0:0] = [sys.executable, *launcher]
     else:
         console_warning(
             "Command does not look like a Python entry point, "
@@ -277,10 +284,9 @@ class RocProfCompute_Base:
                     bool(is_python),
                     script_index,
                     skip_flag,
+                    selected_frameworks,
                 )
-                self._inject_env = _build_inject_env(
-                    selected_frameworks, inject_pkg_parent
-                )
+                self._inject_env = _build_inject_env(inject_pkg_parent)
             args.remaining = shlex.join(args.remaining)
         elif not args.attach_pid:
             console_error(

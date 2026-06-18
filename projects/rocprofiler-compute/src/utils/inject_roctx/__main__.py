@@ -4,17 +4,14 @@
 """Internal entry point used by rocprof-compute to launch a workload under
 ROCTX injection.
 
-The backend selection is read from the ROCPROFCOMPUTE_ROCTX_FRAMEWORKS
-environment variable (comma-separated). When unset or empty, no backend is
-installed and the workload runs uninstrumented.
+Invoked as ``python -m utils.inject_roctx --frameworks <names> -- <target.py>
+[args...]``. Backends are given as a comma-separated list; when omitted the
+workload runs uninstrumented.
 """
 
 import importlib
-import os
 import runpy
 import sys
-
-_FRAMEWORK_ENV_VAR = "ROCPROFCOMPUTE_ROCTX_FRAMEWORKS"
 
 
 def _report_recordfn_callback_errors() -> None:
@@ -38,19 +35,27 @@ def _report_recordfn_callback_errors() -> None:
     )
 
 
-if len(sys.argv) < 2:
+# Consume a leading "--frameworks <names>" option and an optional "--" separator.
+args = sys.argv[1:]
+frameworks = ""
+if args and args[0] == "--frameworks":
+    frameworks = args[1] if len(args) > 1 else ""
+    args = args[2:]
+if args and args[0] == "--":
+    args = args[1:]
+
+if not args:
     print(
-        "usage: python -m utils.inject_roctx <target.py> [args...]",
+        "usage: python -m utils.inject_roctx [--frameworks <names>] -- "
+        "<target.py> [args...]",
         file=sys.stderr,
     )
     sys.exit(2)
 
-target_script = sys.argv[1]
-script_args = sys.argv[2:]
+target_script = args[0]
+script_args = args[1:]
 
-importlib.import_module("utils.inject_roctx.core").install_global_wraps(
-    os.environ.get(_FRAMEWORK_ENV_VAR, "")
-)
+importlib.import_module("utils.inject_roctx.core").install_global_wraps(frameworks)
 
 sys.argv = [target_script] + script_args
 # Execute the workload as the top-level program (__name__ == "__main__").
