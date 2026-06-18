@@ -66,9 +66,9 @@ private:
   void analyze(KernelBlockScope blocks);
 
   struct BlockExec {
-    ExecState in = ExecState::Full;   ///< State entering the block.
-    ExecState out = ExecState::Full;  ///< State leaving the block.
-    bool is_entry = false;            ///< No in-scope predecessor.
+    ExecState in = ExecState::Full;  ///< State entering the block.
+    ExecState out = ExecState::Full; ///< State leaving the block.
+    bool is_entry = false;           ///< No in-scope predecessor.
   };
 
   std::vector<BlockExec> states_;

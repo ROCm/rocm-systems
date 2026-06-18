@@ -423,9 +423,9 @@ std::vector<const Instruction *> insts_of(BasicBlock &block) {
 
 TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
   // exec=all-ones; v0=...; exec=narrow; v0=...; end
-  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::DefVgpr0,
-                                   TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0,
-                                   TestOpcode::End});
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::DefVgpr0,
+                         TestOpcode::WriteExecNarrow, TestOpcode::DefVgpr0, TestOpcode::End});
   auto scope = block_scope(blocks);
   ExecMaskAnalysis exec{KernelBlockScope(scope)};
 
