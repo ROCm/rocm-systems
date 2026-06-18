@@ -7,18 +7,9 @@ target_link_libraries(
     pmc-amd-smi-provider-tests
     PUBLIC
         rocprofiler-systems-googletest-library
-        rocprofiler-systems::rocprofiler-systems-headers
-        rocprofiler-systems::rocprofiler-systems-amd-smi-backend
         rocprofiler-systems::rocprofiler-systems-backend-concepts
         rocprofiler-systems::rocprofiler-systems-compile-definitions
-)
-
-target_include_directories(
-    pmc-amd-smi-provider-tests
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        # Reuse mock_backend.hpp from the backend layer tests
-        ${PROJECT_SOURCE_DIR}/source/lib/backends/amd_smi/tests
+        rocprofiler-systems::rocprofiler-systems-headers
 )
 
 # Always enable both feature flags so NIC and SDMA code paths are always tested.

@@ -1,10 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "backends/amd_smi/backend.hpp"
-#include "backends/amd_smi/device.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
-#include "mock_amdsmi_backend.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -13,41 +10,85 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
-using ::testing::_;
-using ::testing::DoAll;
-using ::testing::InSequence;
-using ::testing::IsNull;
-using ::testing::NotNull;
 using ::testing::Return;
-using ::testing::SetArgPointee;
-using ::testing::SetArrayArgument;
 using ::testing::StrictMock;
+using ::testing::Throw;
 
 namespace rocprofsys::pmc::device_providers::amd_smi
 {
 
-namespace bknd    = ::rocprofsys::backends::amd_smi;
-namespace bk_test = ::rocprofsys::backends::amd_smi::testing;
+// ── Mock session ──────────────────────────────────────────────────────────────
+// Mocks the session surface the provider calls — not the underlying AMD SMI
+// C API. This keeps the test isolated to provider logic only.
 
-using MockApi        = StrictMock<bk_test::gmock_backend_api>;
-using factory_t      = bknd::backend_factory<bk_test::mock_backend>;
-using backend_t      = factory_t::backend_t;
-using device_proxy_t = bknd::device<backend_t>;
-using provider_t     = provider<factory_t>;
+struct mock_version
+{
+    std::uint32_t major   = 0;
+    std::uint32_t minor   = 0;
+    std::uint32_t release = 0;
+    const char*   build   = nullptr;
+};
 
-constexpr bk_test::mock_status_t k_ok  = bk_test::mock_backend::STATUS_SUCCESS;
-constexpr bk_test::mock_status_t k_err = 1;
+struct gmock_session
+{
+    MOCK_METHOD(void, initialize, ());
+    MOCK_METHOD(void, shutdown, ());
+    MOCK_METHOD(mock_version, get_lib_version, ());
+    MOCK_METHOD(std::vector<std::uint64_t>, enumerate_gpu_handles, ());
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    MOCK_METHOD(std::vector<std::uint64_t>, enumerate_nic_handles, ());
+#endif
+};
+
+inline std::unique_ptr<gmock_session> g_mock;
+
+struct mock_session
+{
+    void         initialize() { g_mock->initialize(); }
+    void         shutdown() { g_mock->shutdown(); }
+    mock_version get_lib_version() { return g_mock->get_lib_version(); }
+
+    std::vector<std::uint64_t> enumerate_gpu_handles()
+    {
+        return g_mock->enumerate_gpu_handles();
+    }
+
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    std::vector<std::uint64_t> enumerate_nic_handles()
+    {
+        return g_mock->enumerate_nic_handles();
+    }
+#endif
+};
+
+struct mock_factory
+{
+    using backend_t = mock_session;
+
+    static std::shared_ptr<backend_t> create_backend()
+    {
+        return std::make_shared<mock_session>();
+    }
+};
+
+using provider_t = provider<mock_factory>;
 
 // ── Stub device types ─────────────────────────────────────────────────────────
 // provider::get_{gpu,nic}_devices<Device>() constructs:
-//   Device::backend_type(shared_ptr<backend_t>, handle)   ← device ctor
+//   Device::backend_type(shared_ptr<backend_t>, handle)
 //   Device(shared_ptr<Device::backend_type>, index)
-// The stub captures both to let tests inspect what was created.
+// Stubs capture index so tests can verify sequential assignment.
+
+struct stub_proxy
+{
+    stub_proxy(std::shared_ptr<mock_session>, std::uint64_t) {}
+};
 
 struct stub_gpu_device
 {
-    using backend_type = device_proxy_t;
+    using backend_type = stub_proxy;
 
     std::shared_ptr<backend_type> proxy;
     std::size_t                   index;
@@ -60,7 +101,7 @@ struct stub_gpu_device
 
 struct stub_nic_device
 {
-    using backend_type = device_proxy_t;
+    using backend_type = stub_proxy;
 
     std::shared_ptr<backend_type> proxy;
     std::size_t                   index;
@@ -76,25 +117,18 @@ struct stub_nic_device
 class ProviderTest : public ::testing::Test
 {
 protected:
-    void SetUp() override { bk_test::g_mock_backend = std::make_unique<MockApi>(); }
-    void TearDown() override { bk_test::g_mock_backend.reset(); }
+    void SetUp() override { g_mock = std::make_unique<StrictMock<gmock_session>>(); }
+    void TearDown() override { g_mock.reset(); }
 
-    // Expects the init → get_version pair every successful provider ctor triggers.
     void expect_init(std::uint32_t major = 26, std::uint32_t minor = 3,
                      std::uint32_t release = 0, const char* build = "26.3.0")
     {
-        const bk_test::mock_version_t ver{
-            .major = major, .minor = minor, .release = release, .build = build
-        };
-        EXPECT_CALL(*bk_test::g_mock_backend, init()).WillOnce(Return(k_ok));
-        EXPECT_CALL(*bk_test::g_mock_backend, get_version(NotNull()))
-            .WillOnce(DoAll(SetArgPointee<0>(ver), Return(k_ok)));
+        EXPECT_CALL(*g_mock, initialize());
+        EXPECT_CALL(*g_mock, get_lib_version())
+            .WillOnce(Return(mock_version{ major, minor, release, build }));
     }
 
-    void expect_shutdown()
-    {
-        EXPECT_CALL(*bk_test::g_mock_backend, shutdown()).WillOnce(Return(k_ok));
-    }
+    void expect_shutdown() { EXPECT_CALL(*g_mock, shutdown()); }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -125,7 +159,7 @@ TEST_F(ProviderTest, constructor_null_build_string_stored_as_empty)
 
 TEST_F(ProviderTest, constructor_throws_when_initialize_fails)
 {
-    EXPECT_CALL(*bk_test::g_mock_backend, init()).WillOnce(Return(k_err));
+    EXPECT_CALL(*g_mock, initialize()).WillOnce(Throw(std::runtime_error("init failed")));
 
     EXPECT_THROW(provider_t{}, std::runtime_error);
 }
@@ -147,7 +181,7 @@ TEST_F(ProviderTest, destructor_calls_shutdown)
 TEST_F(ProviderTest, explicit_shutdown_calls_backend_shutdown)
 {
     expect_init();
-    expect_shutdown();  // called once from p.shutdown(); destructor is then no-op
+    expect_shutdown();  // called once from p.shutdown(); destructor is then a no-op
 
     provider_t p;
     p.shutdown();
@@ -170,7 +204,7 @@ TEST_F(ProviderTest, shutdown_is_idempotent)
 TEST_F(ProviderTest, move_constructor_produces_exactly_one_shutdown)
 {
     expect_init();
-    expect_shutdown();  // only from p2's destructor; p1's destructor is a no-op
+    expect_shutdown();  // only from p2's destructor; p1 is moved-from
 
     provider_t p1;
     provider_t p2{ std::move(p1) };
@@ -178,19 +212,14 @@ TEST_F(ProviderTest, move_constructor_produces_exactly_one_shutdown)
 
 TEST_F(ProviderTest, move_assignment_shuts_down_overwritten_backend)
 {
-    // Two providers created → two init+version pairs, two shutdowns:
-    // shutdown #1: from move-assignment (p2's old backend released)
-    // shutdown #2: from p2's destructor (carries p1's backend)
-    EXPECT_CALL(*bk_test::g_mock_backend, init()).Times(2).WillRepeatedly(Return(k_ok));
-    const bk_test::mock_version_t ver{
-        .major = 1, .minor = 0, .release = 0, .build = nullptr
-    };
-    EXPECT_CALL(*bk_test::g_mock_backend, get_version(NotNull()))
+    // Two providers → two initialize+get_lib_version pairs.
+    // shutdown #1: move-assignment releases p2's old backend.
+    // shutdown #2: p2's destructor releases p1's backend.
+    EXPECT_CALL(*g_mock, initialize()).Times(2);
+    EXPECT_CALL(*g_mock, get_lib_version())
         .Times(2)
-        .WillRepeatedly(DoAll(SetArgPointee<0>(ver), Return(k_ok)));
-    EXPECT_CALL(*bk_test::g_mock_backend, shutdown())
-        .Times(2)
-        .WillRepeatedly(Return(k_ok));
+        .WillRepeatedly(Return(mock_version{ 1, 0, 0, nullptr }));
+    EXPECT_CALL(*g_mock, shutdown()).Times(2);
 
     provider_t p1;
     provider_t p2;
@@ -201,13 +230,13 @@ TEST_F(ProviderTest, move_assignment_shuts_down_overwritten_backend)
 // get_gpu_devices
 // ─────────────────────────────────────────────────────────────────────────────
 
-TEST_F(ProviderTest, get_gpu_devices_returns_empty_when_no_sockets)
+TEST_F(ProviderTest, get_gpu_devices_returns_empty_when_no_handles)
 {
     expect_init();
     expect_shutdown();
 
-    EXPECT_CALL(*bk_test::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(0U), Return(k_ok)));
+    EXPECT_CALL(*g_mock, enumerate_gpu_handles())
+        .WillOnce(Return(std::vector<std::uint64_t>{}));
 
     provider_t p;
     EXPECT_TRUE(p.get_gpu_devices<stub_gpu_device>().empty());
@@ -218,23 +247,8 @@ TEST_F(ProviderTest, get_gpu_devices_assigns_sequential_indices)
     expect_init();
     expect_shutdown();
 
-    // Use const locals so SetArrayArgument pointers remain valid through the test.
-    const std::uint64_t k_socket  = 42;
-    const std::uint64_t k_procs[] = { 100, 101 };
-
-    InSequence seq;
-    EXPECT_CALL(*bk_test::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
-    EXPECT_CALL(*bk_test::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(1U),
-                        SetArrayArgument<1>(&k_socket, &k_socket + 1), Return(k_ok)));
-    EXPECT_CALL(*bk_test::g_mock_backend,
-                get_processor_handles(k_socket, NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(2U), Return(k_ok)));
-    EXPECT_CALL(*bk_test::g_mock_backend,
-                get_processor_handles(k_socket, NotNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<1>(2U), SetArrayArgument<2>(k_procs, k_procs + 2),
-                        Return(k_ok)));
+    EXPECT_CALL(*g_mock, enumerate_gpu_handles())
+        .WillOnce(Return(std::vector<std::uint64_t>{ 100, 101 }));
 
     provider_t p;
     auto       devices = p.get_gpu_devices<stub_gpu_device>();
@@ -248,27 +262,9 @@ TEST_F(ProviderTest, get_gpu_devices_repeated_call_re_enumerates)
     expect_init();
     expect_shutdown();
 
-    constexpr std::uint64_t k_socket = 10;
-    constexpr std::uint64_t k_proc   = 100;
-
-    // Two separate calls to get_gpu_devices → two socket enumerations.
-    EXPECT_CALL(*bk_test::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
+    EXPECT_CALL(*g_mock, enumerate_gpu_handles())
         .Times(2)
-        .WillRepeatedly(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
-    EXPECT_CALL(*bk_test::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
-        .Times(2)
-        .WillRepeatedly(DoAll(SetArgPointee<0>(1U),
-                              SetArrayArgument<1>(&k_socket, &k_socket + 1),
-                              Return(k_ok)));
-    EXPECT_CALL(*bk_test::g_mock_backend,
-                get_processor_handles(k_socket, NotNull(), IsNull()))
-        .Times(2)
-        .WillRepeatedly(DoAll(SetArgPointee<1>(1U), Return(k_ok)));
-    EXPECT_CALL(*bk_test::g_mock_backend,
-                get_processor_handles(k_socket, NotNull(), NotNull()))
-        .Times(2)
-        .WillRepeatedly(DoAll(SetArgPointee<1>(1U),
-                              SetArrayArgument<2>(&k_proc, &k_proc + 1), Return(k_ok)));
+        .WillRepeatedly(Return(std::vector<std::uint64_t>{ 100 }));
 
     provider_t p;
     EXPECT_EQ(p.get_gpu_devices<stub_gpu_device>().size(), 1U);
@@ -279,13 +275,13 @@ TEST_F(ProviderTest, get_gpu_devices_repeated_call_re_enumerates)
 // get_nic_devices
 // ─────────────────────────────────────────────────────────────────────────────
 
-TEST_F(ProviderTest, get_nic_devices_returns_empty_when_no_sockets)
+TEST_F(ProviderTest, get_nic_devices_returns_empty_when_no_handles)
 {
     expect_init();
     expect_shutdown();
 
-    EXPECT_CALL(*bk_test::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(0U), Return(k_ok)));
+    EXPECT_CALL(*g_mock, enumerate_nic_handles())
+        .WillOnce(Return(std::vector<std::uint64_t>{}));
 
     provider_t p;
     EXPECT_TRUE(p.get_nic_devices<stub_nic_device>().empty());
@@ -296,22 +292,8 @@ TEST_F(ProviderTest, get_nic_devices_assigns_sequential_indices)
     expect_init();
     expect_shutdown();
 
-    const std::uint64_t k_socket = 10;
-    const std::uint64_t k_nics[] = { 300, 301, 302 };
-
-    InSequence seq;
-    EXPECT_CALL(*bk_test::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
-    EXPECT_CALL(*bk_test::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<0>(1U),
-                        SetArrayArgument<1>(&k_socket, &k_socket + 1), Return(k_ok)));
-    EXPECT_CALL(*bk_test::g_mock_backend,
-                get_processor_handles_by_type(k_socket, _, IsNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<3>(3U), Return(k_ok)));
-    EXPECT_CALL(*bk_test::g_mock_backend,
-                get_processor_handles_by_type(k_socket, _, NotNull(), NotNull()))
-        .WillOnce(DoAll(SetArgPointee<3>(3U), SetArrayArgument<2>(k_nics, k_nics + 3),
-                        Return(k_ok)));
+    EXPECT_CALL(*g_mock, enumerate_nic_handles())
+        .WillOnce(Return(std::vector<std::uint64_t>{ 300, 301, 302 }));
 
     provider_t p;
     auto       devices = p.get_nic_devices<stub_nic_device>();

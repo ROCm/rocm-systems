@@ -3,7 +3,7 @@
 
 #include "backends/amd_smi/backend.hpp"
 #include "backends/amd_smi/device.hpp"
-#include "mock_amdsmi_backend.hpp"
+#include "mock_wrapper.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
