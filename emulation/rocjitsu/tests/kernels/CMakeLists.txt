@@ -83,7 +83,7 @@ rj_add_triton_asm_fixture(triton_cdna3_flash_attention_no_async_1024 gfx942)
 rj_add_triton_asm_fixture(triton_cdna3_flash_attention_buffer_async_1024 gfx942)
 
 # Second build of vector_add for gfx90a, used by the DBI hardware-gated
-# smoke test (tests/dbi/hsa_dbi_smoke_test.cpp). Outputs vector_add_gfx90a.o
+# smoke test (tests/dbi/hsa_dbi_nop_asm_test.cpp). Outputs vector_add_gfx90a.o
 # so it coexists with the gfx950 build above. (A single multi-target fat
 # binary would be cleaner but the Executable loader has a pre-existing
 # single-bundle assumption — see executable.cpp::load_hip_fatbin.)

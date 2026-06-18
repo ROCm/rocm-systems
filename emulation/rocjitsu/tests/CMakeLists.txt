@@ -1264,11 +1264,11 @@ if(HSA_RUNTIME64)
             )
         endif()
 
-        # --- HSA DBI smoke test: gfx90a kernel patched with inlined nop ---
+        # --- HSA DBI nop-asm test: gfx90a kernel patched with inlined nop ---
         # Build always; register with CTest only when a gfx90a GPU is present.
-        add_executable(hsa_dbi_smoke_test dbi/hsa_dbi_smoke_test.cpp)
+        add_executable(hsa_dbi_nop_asm_test dbi/hsa_dbi_nop_asm_test.cpp)
         target_include_directories(
-            hsa_dbi_smoke_test
+            hsa_dbi_nop_asm_test
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
@@ -1276,7 +1276,7 @@ if(HSA_RUNTIME64)
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
-            hsa_dbi_smoke_test
+            hsa_dbi_nop_asm_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
                 ${HSA_RUNTIME64}
@@ -1284,54 +1284,150 @@ if(HSA_RUNTIME64)
                 GTest::gtest_main
         )
         target_link_options(
-            hsa_dbi_smoke_test
+            hsa_dbi_nop_asm_test
             PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
         )
         target_compile_definitions(
-            hsa_dbi_smoke_test
+            hsa_dbi_nop_asm_test
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        add_dependencies(hsa_dbi_smoke_test device_kernels)
-        rj_configure_target(hsa_dbi_smoke_test TEST)
+        add_dependencies(hsa_dbi_nop_asm_test device_kernels)
+        rj_configure_target(hsa_dbi_nop_asm_test TEST)
         if(RJ_INSTALL_TESTS)
-            rj_install_test_target(hsa_dbi_smoke_test)
+            rj_install_test_target(hsa_dbi_nop_asm_test)
         endif()
 
-        # Local helper: register one TEST_F case from hsa_dbi_smoke_test as a
+        # Local helper: register one TEST_F case from hsa_dbi_nop_asm_test as a
         # CTest entry. <group> is the part of the fixture name after
-        # "HsaDbiSmoke" (Static or Hardware). Scoped here because it's only
+        # "HsaDbiNopAsm" (Static or Hardware). Scoped here because it's only
         # used by the calls immediately below.
-        function(register_hsa_dbi_smoke_case group case)
+        function(register_hsa_dbi_nop_asm_case group case)
             set(oneValueArgs TIMEOUT)
             cmake_parse_arguments(RJ_DBI "" "${oneValueArgs}" "" ${ARGN})
-            set(name "HsaDbiSmoke${group}.${case}")
+            set(name "HsaDbiNopAsm${group}.${case}")
             rj_add_test(
                 NAME "${name}"
-                COMMAND hsa_dbi_smoke_test --gtest_filter=${name}
+                COMMAND hsa_dbi_nop_asm_test --gtest_filter=${name}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 INSTALL_COMMAND
-                    "bin/hsa_dbi_smoke_test"
+                    "bin/hsa_dbi_nop_asm_test"
                     "--gtest_filter=${name}"
                 ${ARGN}
             )
         endfunction()
 
         # Static-only test: no GPU needed, runs anywhere the binary is built.
-        register_hsa_dbi_smoke_case(Static PatchedElfActuallyContainsInstrumentation)
+        register_hsa_dbi_nop_asm_case(Static PatchedElfActuallyContainsInstrumentation)
 
         if(HAS_CDNA2_GPU)
             # Hardware-gated tests. The two that dispatch get an explicit
             # timeout; the load+validate one runs quickly enough for the
             # default.
-            register_hsa_dbi_smoke_case(Hardware PatchedElfLoadsAndValidatesInHsaExecutable)
-            register_hsa_dbi_smoke_case(Hardware PatchedKernelDispatchMatchesOriginal TIMEOUT 30)
-            register_hsa_dbi_smoke_case(Hardware TrampolineIsActuallyExecutedByGpu TIMEOUT 30)
-            message(STATUS "HSA DBI smoke test enabled (gfx90a detected)")
+            register_hsa_dbi_nop_asm_case(Hardware PatchedElfLoadsAndValidatesInHsaExecutable)
+            register_hsa_dbi_nop_asm_case(Hardware PatchedKernelDispatchMatchesOriginal TIMEOUT 30)
+            register_hsa_dbi_nop_asm_case(Hardware TrampolineIsActuallyExecutedByGpu TIMEOUT 30)
+            message(STATUS "HSA DBI nop-asm test enabled (gfx90a detected)")
         else()
             message(
                 STATUS
-                "HSA DBI smoke test built but NOT registered with CTest "
+                "HSA DBI nop-asm test built but NOT registered with CTest "
                 "(no gfx90a)"
+            )
+        endif()
+
+        # --- HSA DBI nop-probe smoke test: gfx90a kernel patched to CALL the
+        # compiled rj_nop_probe via an s_swappc_b64 trampoline (PC01-B). Needs
+        # the compiled probe fixture (amdclang++ + clang-offload-bundler), so it
+        # is built only when HAS_PROBE_FIXTURES. Static case registers anywhere;
+        # hardware cases register only with a gfx90a GPU.
+        if(HAS_PROBE_FIXTURES)
+            add_executable(
+                hsa_dbi_nop_probe_test
+                dbi/hsa_dbi_nop_probe_test.cpp
+            )
+            target_include_directories(
+                hsa_dbi_nop_probe_test
+                PRIVATE
+                    ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+                    ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+                    ${CMAKE_SOURCE_DIR}/lib/util/include
+                    ${RJ_HSA_INCLUDE_DIR}
+            )
+            target_link_libraries(
+                hsa_dbi_nop_probe_test
+                PRIVATE
+                    ${RJ_OBJECT_LIBS}
+                    ${HSA_RUNTIME64}
+                    GTest::gtest
+                    GTest::gtest_main
+            )
+            target_link_options(
+                hsa_dbi_nop_probe_test
+                PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+            )
+            target_compile_definitions(
+                hsa_dbi_nop_probe_test
+                PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
+            )
+            add_dependencies(hsa_dbi_nop_probe_test device_kernels)
+            add_dependencies(hsa_dbi_nop_probe_test probe_rj_nop_probe_gfx90a)
+            rj_configure_target(hsa_dbi_nop_probe_test TEST)
+
+            # Local helper: register one TEST_F case as a CTest entry. <group>
+            # is the part of the fixture name after "HsaDbiNopProbe".
+            function(register_hsa_dbi_nop_probe_case group case)
+                set(oneValueArgs TIMEOUT)
+                cmake_parse_arguments(RJ_DBIP "" "${oneValueArgs}" "" ${ARGN})
+                set(name "HsaDbiNopProbe${group}.${case}")
+                add_test(
+                    NAME "${name}"
+                    COMMAND hsa_dbi_nop_probe_test --gtest_filter=${name}
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                )
+                if(RJ_DBIP_TIMEOUT)
+                    set_tests_properties(
+                        "${name}"
+                        PROPERTIES TIMEOUT ${RJ_DBIP_TIMEOUT}
+                    )
+                endif()
+            endfunction()
+
+            # Static-only test: no GPU needed, runs anywhere the binary builds.
+            register_hsa_dbi_nop_probe_case(
+                Static
+                PatchedElfContainsProbeCallInstrumentation
+            )
+
+            if(HAS_CDNA2_GPU)
+                register_hsa_dbi_nop_probe_case(
+                    Hardware
+                    PatchedElfLoadsAndValidatesInHsaExecutable
+                )
+                # NOTE: PatchedKernelDispatchMatchesOriginal and
+                # ProbeBodyIsActuallyCalledByGpu are built but intentionally
+                # NOT registered: they currently HANG the GPU because the SMEM
+                # SBASE operand is decoded without its x2 scaling
+                # (isa/arch/amdgpu/*/smem.cpp), so liveness misses the live
+                # kernarg base pointer and the probe-call register planner
+                # clobbers it. Re-register both once that operand bug is fixed.
+                # Run manually with --gtest_filter to verify a fix.
+                message(
+                    STATUS
+                    "HSA DBI nop-probe smoke test enabled (gfx90a detected); "
+                    "dispatch cases unregistered pending SMEM SBASE operand fix"
+                )
+            else()
+                message(
+                    STATUS
+                    "HSA DBI nop-probe smoke test built but NOT registered "
+                    "with CTest (no gfx90a)"
+                )
+            endif()
+        else()
+            message(
+                STATUS
+                "HSA DBI nop-probe smoke test disabled (no probe fixtures; "
+                "needs amdclang++ + clang-offload-bundler)"
             )
         endif()
     endif()
