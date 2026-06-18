@@ -109,8 +109,8 @@ struct ResolvedInstrumentationSite {
   std::vector<uint8_t> original_bytes;
   std::string mnemonic; // Diagnostic/debug only.
 
-  // Index into the deduped probe registry produced by resolve_points()
-  // (ResolvedPoints::probes); nullopt for the inline nop.
+  // Index into the probe registry produced by resolve_points()
+  // (ResolvedPoints::probes); nullopt if no probes
   std::optional<size_t> probe_index;
 
   [[nodiscard]] bool is_probe_call() const { return probe_index.has_value(); }
