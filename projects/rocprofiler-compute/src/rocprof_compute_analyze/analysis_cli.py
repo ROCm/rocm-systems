@@ -16,6 +16,7 @@ from utils.utils_analysis import (
     build_call_trees,
     build_call_trees_with_kernel_ids,
     build_operator_summary,
+    decode_marker_name,
     get_matrix_ops_type,
     process_ml_api_trace_output,
     write_ml_api_trace_consolidated_csv,
@@ -315,10 +316,9 @@ class cli_analysis(OmniAnalyze_Base):
     ) -> None:
         """Set workload.filter_kernel_ids from the backend's operator filter.
 
-        Called in pre_processing *before* load_table_data so that metric
-        evaluation runs once with the correct kernel filter -- the same
-        approach used by -k/--kernel. Operator matches are restricted to the
-        -k/--kernel filter when set. Matched rows are stored in
+        Runs in pre_processing before load_table_data so metric evaluation
+        uses the kernel filter. Operator matches are intersected with the
+        -k/--kernel filter when set, and matched rows are stored in
         workload.matched_ml_api_trace_dfs[backend].
         """
         cli = _BACKEND_CLI[backend]
@@ -357,8 +357,7 @@ class cli_analysis(OmniAnalyze_Base):
 
         pattern_list = parse_operator_patterns(args, cli["filter_attr"])
         all_operators = consolidated_df["Operator_Name"].dropna().unique()
-        # Names may be percent-encoded on the wire ('/' -> '%2F', '%' -> '%25');
-        # match the encoded name and its decoded form so patterns work either way.
+        # Match each name in both its encoded and decoded forms.
         matched_names = [
             str(op).strip()
             for op in all_operators
@@ -366,7 +365,7 @@ class cli_analysis(OmniAnalyze_Base):
                 parser.torch_operator_pattern_matches(p.strip(), candidate)
                 for candidate in {
                     str(op).strip(),
-                    str(op).strip().replace("%2F", "/").replace("%25", "%"),
+                    decode_marker_name(str(op).strip()),
                 }
                 for p in pattern_list
             )

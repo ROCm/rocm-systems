@@ -44,7 +44,7 @@ _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
 }
 
 
-def compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
+def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
     """Return the set of frameworks requested via CLI flags."""
     selected: set[str] = set()
     for flag, frameworks in _FLAG_TO_FRAMEWORKS.items():
@@ -164,7 +164,7 @@ class RocProfCompute_Base:
     def sanitize(self) -> None:
         """Perform sanitization of inputs"""
         args = self.get_args()
-        selected_frameworks = compute_selected_frameworks(args)
+        selected_frameworks = _compute_selected_frameworks(args)
         self._selected_frameworks: set[str] = selected_frameworks
 
         if (

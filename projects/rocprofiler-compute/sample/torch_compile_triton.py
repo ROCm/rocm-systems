@@ -6,7 +6,6 @@ Minimal Triton-in-PyTorch workload (torch.compile / Inductor).
 
 torch.compile lowers the function to generated Triton kernels, so the run
 exercises both the torch and triton backends.
-
 """
 
 import sys

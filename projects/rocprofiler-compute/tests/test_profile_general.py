@@ -3022,7 +3022,7 @@ def test_triton_trace_profile(
     Profiles a Triton FFN workload with --triton-trace, verifies the marker and
     counter CSV outputs contain Triton markers, then runs analyze with
     --list-triton-operators and --triton-operator and checks the call-tree
-    banner, the consolidated api_trace CSV, and the matched and no-match output.
+    banner, the consolidated ml_api_trace CSV, and the matched and no-match output.
     Requires PyTorch, Triton, and a GPU.
     """
     require_triton(gpu=True)
@@ -3090,8 +3090,8 @@ def test_triton_trace_profile(
     # The workload launches a Triton matmul kernel.
     assert "matmul" in list_output, "matmul kernel missing from operator list"
 
-    consolidated_csv = Path(workload_dir) / "api_trace" / "consolidated.csv"
-    assert consolidated_csv.exists(), "consolidated.csv not found in api_trace"
+    consolidated_csv = Path(workload_dir) / "ml_api_trace" / "consolidated.csv"
+    assert consolidated_csv.exists(), "consolidated.csv not found in ml_api_trace"
     df = pd.read_csv(consolidated_csv)
     assert not df.empty, "consolidated.csv is empty"
     assert "Operator_Name" in df.columns, "Operator_Name column missing"

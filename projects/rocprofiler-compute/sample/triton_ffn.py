@@ -14,7 +14,6 @@ Implements one transformer FFN entirely in Triton:
 This exercises five distinct Triton kernels (rmsnorm, matmul, silu, mul, add);
 the matmul kernel is launched from three call sites (the gate, up, and down
 projections).
-
 """
 
 import sys

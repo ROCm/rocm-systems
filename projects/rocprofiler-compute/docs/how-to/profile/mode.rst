@@ -1163,7 +1163,7 @@ frameworks in a single run:
    $ rocprof-compute --experimental profile --name compiled_model --torch-trace --triton-trace -- python train.py
 
 Each captured marker records its originating framework in the ``Backend`` column
-of ``api_trace/consolidated.csv``, so each framework can be analyzed
+of ``ml_api_trace/consolidated.csv``, so each framework can be analyzed
 independently. To enable all supported backends at once, use
 :ref:`--api-trace <api-trace>`.
 
