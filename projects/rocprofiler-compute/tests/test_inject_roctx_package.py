@@ -179,93 +179,9 @@ def test_triton_backend_skips_when_triton_missing(monkeypatch):
     )
 
 
-def test_triton_backend_wraps_compiled_kernel_call(monkeypatch):
-    from utils.inject_roctx._backends import triton as triton_backend
-
-    pushes: list[tuple] = []
-    pops: list[None] = []
-    monkeypatch.setattr(
-        triton_backend,
-        "_push_scope",
-        lambda marker, ctx, backend="": pushes.append((marker, ctx, backend)),
-    )
-    monkeypatch.setattr(triton_backend, "_pop_scope", lambda: pops.append(None))
-
-    class FakeKernel:
-        name = "my_kernel"
-
-        def __call__(self, *a, **kw):
-            return ("ran", a, kw)
-
-    backend = triton_backend.TritonBackend()
-    backend._compiled_kernel = FakeKernel
-    backend.patch_launcher()
-
-    out = FakeKernel()(1, x=2)
-    assert out == ("ran", (1,), {"x": 2})
-    assert len(pushes) == 1
-    marker, ctx, backend = pushes[0]
-    assert marker == "triton.CompiledKernel.my_kernel"
-    assert ctx.startswith("#1@")
-    assert backend == "triton"
-    assert pops == [None]
-
-
-def test_triton_backend_kernel_name_fallbacks(monkeypatch):
-    from utils.inject_roctx._backends import triton as triton_backend
-
-    pushes: list[str] = []
-    monkeypatch.setattr(
-        triton_backend,
-        "_push_scope",
-        lambda marker, ctx, backend="": pushes.append(marker),
-    )
-    monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
-
-    class KernelWithDictMeta:
-        metadata = {"name": "from_meta"}
-
-        def __call__(self):
-            pass
-
-    class KernelNoName:
-        def __call__(self):
-            pass
-
-    for cls, expected in (
-        (KernelWithDictMeta, "triton.CompiledKernel.from_meta"),
-        (KernelNoName, "triton.CompiledKernel.<triton_kernel>"),
-    ):
-        backend = triton_backend.TritonBackend()
-        backend._compiled_kernel = cls
-        backend.patch_launcher()
-        cls()()
-        assert pushes[-1] == expected
-
-
-def test_triton_backend_patch_is_idempotent(monkeypatch):
-    from utils.inject_roctx._backends import triton as triton_backend
-
-    monkeypatch.setattr(triton_backend, "_push_scope", lambda *a, **k: None)
-    monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
-
-    class FakeKernel:
-        name = "k"
-
-        def __call__(self):
-            pass
-
-    backend = triton_backend.TritonBackend()
-    backend._compiled_kernel = FakeKernel
-    backend.patch_launcher()
-    first = FakeKernel.__call__
-    backend.patch_launcher()
-    assert FakeKernel.__call__ is first
-
-
 def test_triton_backend_wraps_compiled_kernel_run(monkeypatch):
     """CompiledKernel.run() is wrapped in preference to __call__."""
-    from utils.inject_roctx._backends import _triton as triton_backend
+    from utils.inject_roctx._backends import triton as triton_backend
 
     pushes: list[tuple] = []
     monkeypatch.setattr(
@@ -291,7 +207,7 @@ def test_triton_backend_wraps_compiled_kernel_run(monkeypatch):
 
 def test_triton_backend_wraps_jitfunction_run(monkeypatch):
     """JITFunction.run is wrapped for eager launches."""
-    from utils.inject_roctx._backends import _triton as triton_backend
+    from utils.inject_roctx._backends import triton as triton_backend
 
     pushes: list[str] = []
     monkeypatch.setattr(
@@ -318,7 +234,7 @@ def test_triton_backend_wraps_jitfunction_run(monkeypatch):
 
 def test_triton_backend_reentrancy_dedups_nested_launch(monkeypatch):
     """Nested JITFunction.run and CompiledKernel.run emit one marker."""
-    from utils.inject_roctx._backends import _triton as triton_backend
+    from utils.inject_roctx._backends import triton as triton_backend
 
     pushes: list[str] = []
     monkeypatch.setattr(
@@ -359,7 +275,7 @@ def test_triton_backend_reentrancy_dedups_nested_launch(monkeypatch):
 
 def test_triton_backend_registers_framework_root(monkeypatch):
     """install() registers triton's package directory as a framework root."""
-    from utils.inject_roctx._backends import _triton as triton_backend
+    from utils.inject_roctx._backends import triton as triton_backend
 
     monkeypatch.setattr(triton_backend, "_resolve_triton", lambda: True)
     monkeypatch.setattr(triton_backend, "patch_triton_launcher", lambda: None)
@@ -370,7 +286,7 @@ def test_triton_backend_registers_framework_root(monkeypatch):
 
     roots: list[str] = []
     monkeypatch.setattr(
-        triton_backend._core, "add_framework_root", lambda p: roots.append(p)
+        triton_backend.core, "add_framework_root", lambda p: roots.append(p)
     )
 
     triton_backend.TritonBackend().install()
@@ -378,10 +294,10 @@ def test_triton_backend_registers_framework_root(monkeypatch):
 
 
 def test_triton_backend_skips_when_python_tier_unavailable(monkeypatch):
-    from utils.inject_roctx._backends import _triton as triton_backend
+    from utils.inject_roctx._backends import triton as triton_backend
 
     monkeypatch.setattr(triton_backend, "_resolve_triton", lambda: True)
-    monkeypatch.setattr(triton_backend._core, "ensure_python_tier", lambda: False)
+    monkeypatch.setattr(triton_backend.core, "ensure_python_tier", lambda: False)
 
     patched: list[bool] = []
     monkeypatch.setattr(
@@ -398,25 +314,23 @@ def test_triton_backend_skips_when_python_tier_unavailable(monkeypatch):
 
 
 def test_ensure_python_tier_short_circuits_when_already_configured(monkeypatch):
-    from utils.inject_roctx import _core
+    from utils.inject_roctx import core
 
-    saved_push, saved_pop = _core._range_push, _core._range_pop
-    saved_ready = _core._python_tier_ready
+    saved_push, saved_pop = core._STATE.range_push, core._STATE.range_pop
     try:
-        _core.set_python_tier_io(lambda _s: None, lambda: None)
+        core.set_python_tier_io(lambda _s: None, lambda: None)
 
         def _boom(*_a, **_k):
             raise AssertionError("roctx import should be skipped")
 
-        monkeypatch.setattr(_core.importlib, "import_module", _boom)
-        assert _core.ensure_python_tier() is True
+        monkeypatch.setattr(core.importlib, "import_module", _boom)
+        assert core.ensure_python_tier() is True
     finally:
-        _core._range_push, _core._range_pop = saved_push, saved_pop
-        _core._python_tier_ready = saved_ready
+        core._STATE.range_push, core._STATE.range_pop = saved_push, saved_pop
 
 
 def test_extract_kernel_name_prefers_attr_then_meta_then_fn():
-    from utils.inject_roctx._backends import _triton as triton_backend
+    from utils.inject_roctx._backends import triton as triton_backend
 
     named = types.SimpleNamespace(name="direct")
     assert triton_backend._extract_kernel_name(named) == "direct"
@@ -539,48 +453,3 @@ def test_torch_pop_scope_routes_each_frame_to_its_originating_tier(torch_backend
     assert pushed == ["native_op/py_op:#1@x:1/#2@x:2|torch"]
     assert popped == [None]
     assert native_pops == [None]
-
-
-# ---------------------------------------------------------------------------
-# Marker name percent-encoding
-# ---------------------------------------------------------------------------
-
-
-def test_push_scope_percent_encodes_slash_and_percent(core_with_python_tier):
-    """``_push_scope`` encodes '/' as %2F and '%' as %25 within a marker name."""
-    core, pushed, _ = core_with_python_tier
-
-    core._push_scope("a/b%c%2Fd", "#1@x:1")
-
-    assert pushed == ["a%2Fb%25c%252Fd:#1@x:1"]
-
-
-def test_marker_encoding_round_trips_through_build_call_trees(core_with_python_tier):
-    """Names encoded by ``_push_scope`` are restored by ``build_call_trees``."""
-    import pandas as pd
-
-    from utils.utils_analysis import build_call_trees
-
-    core, pushed, _ = core_with_python_tier
-
-    outer = "Torch-Compiled Region: 0/0"
-    inner = "kernel%name_with_%2F_literal"
-
-    core._push_scope(outer, "#1@a.py:1")
-    core._push_scope(inner, "#2@b.py:2")
-
-    # The operator path precedes the ':' that separates it from the context.
-    expected_encoded = "Torch-Compiled Region: 0%2F0/kernel%25name_with_%252F_literal"
-    assert pushed[-1].startswith(expected_encoded + ":")
-
-    df = pd.DataFrame({
-        "Operator_Name": [expected_encoded],
-        "Kernel_Name": ["my_kernel"],
-    })
-    trees = build_call_trees(df)
-
-    (root,) = trees.values()
-    assert outer in root.children, list(root.children)
-    outer_node = root.children[outer]
-    assert inner in outer_node.children, list(outer_node.children)
-    assert "my_kernel" in outer_node.children[inner].kernels

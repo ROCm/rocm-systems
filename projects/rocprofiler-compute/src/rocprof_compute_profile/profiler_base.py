@@ -13,7 +13,7 @@ from typing import Any, Optional, Union
 
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.inject_roctx import KNOWN_BACKENDS
+from utils.inject_roctx.constants import KNOWN_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
