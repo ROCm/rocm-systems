@@ -335,6 +335,7 @@ L_INDIRECT_VEC_DONE:
 L_INDIRECT_BYTE_LOOP:
     V_CMP_LT_U64        v[2:3], v[6:7]
     s_cbranch_vccz      L_INDIRECT_BYTE_DONE
+    // EXEC mask progressively narrowed - not restored since s_endpgm follows
     .if (.amdgcn.gfx_generation_number >= 10)
       s_and_b32         exec_lo, exec_lo, vcc_lo
     .else

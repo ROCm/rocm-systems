@@ -330,6 +330,7 @@ L_BROADCAST_VEC_DONE:
 L_BROADCAST_BYTE_LOOP:
     V_CMP_LT_U64        v[6:7], v[10:11]
     s_cbranch_vccz      L_BROADCAST_BYTE_DONE
+    // EXEC mask progressively narrowed - not restored since s_endpgm follows
     .if (.amdgcn.gfx_generation_number >= 10)
       s_and_b32         exec_lo, exec_lo, vcc_lo
     .else

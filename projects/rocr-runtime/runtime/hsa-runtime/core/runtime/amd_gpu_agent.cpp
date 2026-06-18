@@ -493,6 +493,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     AMD_HSA_BITS_SET(header->kernel_code_properties,
                      AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
                      1);
+    // Wave32 for GFX12.5+, wave64 for all others (matches shader compilation)
     AMD_HSA_BITS_SET(header->kernel_code_properties,
                       AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32,
                       (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) ? 1 : 0);

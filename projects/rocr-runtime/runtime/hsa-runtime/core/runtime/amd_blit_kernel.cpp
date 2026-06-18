@@ -1071,6 +1071,8 @@ hsa_status_t BlitKernel::SubmitBroadcastCopyCommand(const void* src, void* const
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
+  // PopulateQueue and ReleaseWriteIndex are void functions that cannot fail,
+  // so the async handler registered above will always fire on kernel completion.
   PopulateQueue(dispatch_index, uintptr_t(kernels_[KernelType::BroadcastCopy].code_buf_), args,
                 total_workitems, core::Signal::Convert(&out_signal));
 
