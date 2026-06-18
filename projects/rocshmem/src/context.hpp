@@ -231,6 +231,9 @@ class Context {
   __device__ void alltoall(rocshmem_team_t team, T* dest, const T* source,
                            int nelems);
 
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest,
+                                   const void* source, int nelems);
+
   template <typename T>
   __device__ void alltoallv(rocshmem_team_t team,
                             T *dest, const size_t dest_nelems[],

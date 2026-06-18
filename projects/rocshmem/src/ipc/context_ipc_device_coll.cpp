@@ -329,5 +329,9 @@ __device__ void IPCContext::broadcastmem_wg(rocshmem_team_t team,
   internal_broadcastmem_wg(dest, source, nelement, pe_root_world, 
                               pe_start, stride, pe_size, p_sync);
 }
+__device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest, 
+                                  const void* source, int nelems) {
+  return ROCSHMEM_ERROR;
+}
 
 }  // namespace rocshmem

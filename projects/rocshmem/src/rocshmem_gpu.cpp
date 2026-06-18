@@ -721,6 +721,11 @@ __device__ void rocshmem_alltoallv_wg(rocshmem_team_t team,
                                                        source, source_nelems, source_displs);
 }
 
+__device__ int rocshmem_alltoallmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, 
+                                         void *dest, const void *source, int nelems){
+  return get_internal_ctx(ctx)->alltoallmem_wave(team, dest, source, nelems);
+}
+
 template <typename T>
 __device__ void rocshmem_fcollect_wg(rocshmem_ctx_t ctx,
                                       rocshmem_team_t team, T *dest,

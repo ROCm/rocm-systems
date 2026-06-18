@@ -785,6 +785,12 @@ __device__ volatile char *ROContext::get_status_flag() {
   return status_addr;
 }
 
+__device__ int ROContext::alltoallmem_wave(rocshmem_team_t team, void* dest, 
+                                  const void* source, int nelems){
+  LOGD_WARN("Alltoallmem not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
 /******************************************************************************
  **************** TILE API STUB IMPLEMENTATION (NOT IMPLEMENTED) **************
  *****************************************************************************/
