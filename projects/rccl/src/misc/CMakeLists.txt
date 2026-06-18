@@ -48,7 +48,6 @@ list(APPEND MISC_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/roctx.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/recorder.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/signals.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/proxy_trace/proxy_trace.cc
     # latency_profiler (RCCL-only)
     ${CMAKE_CURRENT_SOURCE_DIR}/latency_profiler/CollTrace.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/latency_profiler/CollTraceEvent.cc

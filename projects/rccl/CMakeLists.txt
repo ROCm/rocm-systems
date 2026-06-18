@@ -112,15 +112,14 @@ endif()
 option(BUILD_DEBIAN_PACKAGE "Build Debian package" OFF)
 option(BUILD_REDHAT_PACKAGE "Build Redhat package" OFF)
 option(BUILD_TXZ_PACKAGE "Build TXZ package" OFF)
-option(BUILD_CONDA_PACKAGE "Build Conda package" OFF)
 option(BUILD_SRCTXZ_PACKAGE "Build source tarball package" OFF)
-option(BUILD_DOC_PACKAGE "Build documentation package" OFF)
 option(BUILD_PACKAGES "Build all packages" OFF)
 option(VERBOSE "Enable verbose output" OFF)
 option(KEEP "Keep intermediate files" OFF)
 option(DEBUG "Enable debug build" OFF)
 option(ASAN "Enable Address Sanitizer" OFF)
 option(UBSAN "Enable Undefined Behavior Sanitizer" OFF)
+option(TSAN "Enable Thread Sanitizer" OFF)
 option(TRACE "Enable tracing" OFF)
 option(WERROR "Treat warnings as errors" OFF)
 option(PROFAPI "Enable profiling API" ON)
@@ -131,6 +130,7 @@ option(MLX5DV "Enable MLX5DV" OFF)
 option(MAX_EXT_NET_PLUGINS "Maximum external network plugins" 0)
 option(EMIT_LLVM_IR "Generate LLVM IR for device APIs" OFF)
 option(BUILD_NCCL4PY "Enable nccl4py Python bindings targets" OFF)
+option(BUILD_NCCL_EP "Build NCCL EP contrib library" OFF)
 ]]
 include(cmake/NcclCompat.cmake)
 rccl_define_nccl_compat_options()
@@ -182,13 +182,15 @@ option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit test
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 # <<< RCCL-DELTA
 
-# Detect OS
+# Detect OS (use add_compile_definitions so CUDA .cu files get the define when built by NVCC)
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(NCCL_OS_WINDOWS ON)
-    add_definitions(-DNCCL_OS_WINDOWS)
+    add_compile_definitions(NCCL_OS_WINDOWS)
+    # Prevent windows.h from defining min/max macros so std::min/std::max work
+    add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(NCCL_OS_LINUX ON)
-    add_definitions(-DNCCL_OS_LINUX)
+    add_compile_definitions(NCCL_OS_LINUX)
 else()
     message(FATAL_ERROR "Unsupported OS: ${CMAKE_SYSTEM_NAME}")
 endif()
@@ -197,10 +199,10 @@ endif()
 #[[ >>> RCCL-DELTA
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     set(NCCL_COMPILER_MSVC ON)
-    add_definitions(-DNCCL_COMPILER_MSVC)
+    add_compile_definitions(NCCL_COMPILER_MSVC)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set(NCCL_COMPILER_GCC ON)
-    add_definitions(-DNCCL_COMPILER_GCC)
+    add_compile_definitions(NCCL_COMPILER_GCC)
 else()
     message(FATAL_ERROR "Unsupported compiler: ${CMAKE_CXX_COMPILER_ID}")
 endif()
@@ -210,16 +212,22 @@ if("${CMAKE_CXX_COMPILER}" MATCHES ".*amdclang\\+\\+")
   set(COMPILER_EXE_NAME amdclang++)
   set(COMPILER_GREP_STRING "AMD clang version")
   set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $4}'")
+  set(NCCL_COMPILER_GCC ON)
+  add_compile_definitions(NCCL_COMPILER_GCC)
 elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*clang\\+\\+")
   message(STATUS "Compiling with clang++")
   set(COMPILER_EXE_NAME clang++)
   set(COMPILER_GREP_STRING "AMD clang version")
   set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $4}'")
+  set(NCCL_COMPILER_GCC ON)
+  add_compile_definitions(NCCL_COMPILER_GCC)
 elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*hipcc$")
   message(STATUS "Compiling with hipcc")
   set(COMPILER_EXE_NAME hipcc)
   set(COMPILER_GREP_STRING "HIP version")
   set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $3}' | awk -F\"-\" '{ printf $1}'")
+  set(NCCL_COMPILER_GCC ON)
+  add_compile_definitions(NCCL_COMPILER_GCC)
 else()
   message(FATAL_ERROR "RCCL can be built only with hipcc or amdclang++")
 endif()
@@ -324,9 +332,11 @@ add_compile_definitions(
 if(${CUDA_MAJOR} GREATER_EQUAL 13)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CUDA_STANDARD 17)
+    set(CMAKE_CXX_EXTENSIONS OFF)
 else()
     set(CMAKE_CXX_STANDARD 14)
     set(CMAKE_CUDA_STANDARD 14)
+    set(CMAKE_CXX_EXTENSIONS OFF)
 endif()
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -498,7 +508,9 @@ elseif(NCCL_COMPILER_MSVC)
     # /wd4805 disables "unsafe mix of type 'bool' and type 'int'" - intentional bool/int mixing for flags
     # /wd4018 disables "signed/unsigned mismatch" - safe comparisons where signed value is always positive
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3 /wd4267 /wd4244 /wd4996 /wd4146 /wd4197 /wd5105 /wd4805 /wd4018 /FS /Zc:preprocessor")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-extended-lambda -Xptxas -maxrregcount=96 --compress-mode=balance")
+    # --compress-mode=balance is not supported by ptxas in CUDA 13.1 on Windows; omit for compatibility.
+    # -Xcompiler /Zc:preprocessor passes the conformant preprocessor flag to cl.exe when invoked by nvcc
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-extended-lambda --compress-mode=balance --ptxas-options=-maxrregcount=96 -Xcompiler /Zc:preprocessor")
 endif()
 ]] # <<< RCCL-DELTA
 
@@ -509,7 +521,7 @@ if(NCCL_COMPILER_GCC)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -static-libasan")
     endif()
-]] # <<< RCCL-DELTA
+]]
     if(BUILD_ADDRESS_SANITIZER)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -shared-libasan")
@@ -517,11 +529,20 @@ if(NCCL_COMPILER_GCC)
             set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} LINKER:-rpath,${ASAN_RUNTIME_DIR}")
         endif()
     endif()
+# <<< RCCL-DELTA
 
 #[[ >>> RCCL-DELTA
     if(UBSAN)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined")
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=undefined -static-libubsan")
+    endif()
+
+    if(TSAN)
+        if(ASAN)
+            message(FATAL_ERROR "TSAN and ASAN cannot be enabled simultaneously")
+        endif()
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread -static-libtsan")
     endif()
 ]] # <<< RCCL-DELTA
 endif()
@@ -596,9 +617,15 @@ if(MAX_EXT_NET_PLUGINS GREATER 0)
 endif()
 
 #[[ >>> RCCL-DELTA
-add_definitions(-DDOCA_VERBS_USE_CUDA_WRAPPER)
-add_definitions(-DDOCA_VERBS_USE_NET_WRAPPER)
-add_definitions(-DNCCL_GIN_PROXY_ENABLE=1)
+# GIN/DOCA (GDAKI): enable on non-Windows; skip only for Windows platform (no doca_gpunetio / InfiniBand)
+if(NCCL_OS_WINDOWS)
+    # Windows: explicitly disable GIN so all code (host + device) and headers see it as 0
+    add_definitions(-DNCCL_GIN_PROXY_ENABLE=0)
+else()
+    add_definitions(-DDOCA_VERBS_USE_CUDA_WRAPPER)
+    add_definitions(-DDOCA_VERBS_USE_NET_WRAPPER)
+    add_definitions(-DNCCL_GIN_PROXY_ENABLE=1)
+endif()
 ]] # <<< RCCL-DELTA
 if(EMIT_LLVM_IR)
     add_definitions(-DEMIT_LLVM_IR=1)
@@ -889,6 +916,7 @@ set(VERSION_STRING "${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}")
 rocm_setup_version(VERSION ${VERSION_STRING})
 # <<< RCCL-DELTA
 
+if(NCCL_OS_LINUX)
 if(BUILD_PLUGIN_EXAMPLES) # RCCL-DELTA
 add_subdirectory(plugins/mixed/example)
 add_subdirectory(plugins/net/example) # RCCL-DELTA: add_subdirectory(plugins/net)
@@ -896,6 +924,8 @@ add_subdirectory(plugins/profiler/example)
 add_subdirectory(plugins/profiler/proxytrace) # RCCL-DELTA
 add_subdirectory(plugins/tuner/example)
 endif() # RCCL-DELTA
+endif()
+
 add_subdirectory(src)
 
 # NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via
@@ -918,17 +948,10 @@ if(BUILD_TXZ_PACKAGE OR BUILD_PACKAGES)
   add_subdirectory(pkg/txz)
 endif()
 
-if(BUILD_CONDA_PACKAGE OR BUILD_PACKAGES)
-  add_subdirectory(pkg/conda)
-endif()
-
 if(BUILD_SRCTXZ_PACKAGE OR BUILD_PACKAGES)
   add_subdirectory(pkg/srctxz)
 endif()
 
-if(BUILD_DOC_PACKAGE OR BUILD_PACKAGES)
-  add_subdirectory(pkg/doc)
-endif()
 ]] # <<< RCCL-DELTA
 
 # [NCCL CMakeLists.txt L276-281] EMIT_LLVM_IR. Mirrors NCCL closely: add the bindings/ir subdir, wire
@@ -966,6 +989,12 @@ if(BUILD_NCCL4PY)
   endif()
   # <<< RCCL-DELTA
 endif()
+
+#[[ >>> RCCL-DELTA
+if(BUILD_NCCL_EP)
+  add_subdirectory(contrib/nccl_ep)
+endif()
+]] # <<< RCCL-DELTA
 
 ###################### CMake package config for find_package(NCCL) ######################
 #[[ >>> RCCL-DELTA
