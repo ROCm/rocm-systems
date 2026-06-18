@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import types
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -35,18 +36,34 @@ TIER_JIT = "jit"
 
 C_TIER_NAMES = frozenset((TIER_PREBUILT, TIER_JIT))
 
-
-_LAST_LOAD_DIAGNOSTICS: list[tuple[str, str]] = []
-_LAST_LOADED_TIER: Optional[str] = None
-
 _FINGERPRINT_INPUTS = (_SO_SOURCE, _SO_BUILDFILE)
 
 _REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_ROCTX"
 
+_Diagnostics = list[tuple[str, str]]
 
-def _safe_log(level: str, msg: str) -> None:
-    """Log via ``utils.logger`` if importable, otherwise stderr."""
-    _LAST_LOAD_DIAGNOSTICS.append((level, msg))
+
+@dataclass
+class LoadResult:
+    """Outcome of a ``load()`` attempt: the module (or ``None`` for the Python
+    fallback), the tier that produced it, and the diagnostic trail.
+    """
+
+    module: Optional[types.ModuleType]
+    tier: Optional[str]
+    diagnostics: _Diagnostics
+
+
+def _safe_log(
+    level: str,
+    msg: str,
+    diagnostics: Optional[_Diagnostics] = None,
+) -> None:
+    """Log via ``utils.logger`` if importable, otherwise stderr; also append the
+    line to ``diagnostics`` when provided.
+    """
+    if diagnostics is not None:
+        diagnostics.append((level, msg))
     try:
         from utils.logger import console_error, console_log, console_warning
 
@@ -58,20 +75,8 @@ def _safe_log(level: str, msg: str) -> None:
         sys.stderr.write(f"[ml api trace loader] {level.upper()}: {msg}\n")
 
 
-def loaded_tier() -> Optional[str]:
-    """Return the tier that succeeded on the most recent ``load()``."""
-    return _LAST_LOADED_TIER
-
-
-def consume_diagnostics() -> tuple[Optional[str], list[tuple[str, str]]]:
-    """Drain and return ``(tier_loaded, [(level, msg), ...])``."""
-    diagnostics = list(_LAST_LOAD_DIAGNOSTICS)
-    _LAST_LOAD_DIAGNOSTICS.clear()
-    return _LAST_LOADED_TIER, diagnostics
-
-
 def format_load_diagnostic_trail(
-    diagnostics: list[tuple[str, str]],
+    diagnostics: _Diagnostics,
     *,
     max_lines: int = 24,
 ) -> str:
@@ -134,23 +139,27 @@ def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
     return sorted(install_root.glob(pattern))
 
 
-def _try_prebuilt(tag: str) -> Optional[types.ModuleType]:
+def _try_prebuilt(
+    tag: str,
+    diagnostics: Optional[_Diagnostics] = None,
+) -> Optional[types.ModuleType]:
     for so_path in _install_tree_prebuilt_candidates(tag):
         if not so_path.exists():
             continue
         try:
             mod = _import_module_from_path("roctx_recordfn", so_path)
-            _safe_log("log", f"loaded pre-built .so: {so_path}")
+            _safe_log("log", f"loaded pre-built .so: {so_path}", diagnostics)
             return mod
         except Exception as e:
             _safe_log(
                 "warning",
                 f"pre-built .so at {so_path} failed to load: {e}",
+                diagnostics,
             )
     return None
 
 
-def _jit_cache_dir() -> Optional[Path]:
+def _jit_cache_dir(diagnostics: Optional[_Diagnostics] = None) -> Optional[Path]:
     base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
     d = Path(base) / "rocprofiler-compute" / "roctx_recordfn"
     try:
@@ -159,6 +168,7 @@ def _jit_cache_dir() -> Optional[Path]:
         _safe_log(
             "log",
             f"jit cache dir unavailable ({d}): {type(e).__name__}: {e}",
+            diagnostics,
         )
         return None
     return d
@@ -208,20 +218,28 @@ def _explain_cmake_failure(
     )
 
 
-def _log_cmake_failure(phase: str, err: Exception, stderr_tail: str) -> None:
+def _log_cmake_failure(
+    phase: str,
+    err: Exception,
+    stderr_tail: str,
+    diagnostics: Optional[_Diagnostics] = None,
+) -> None:
     """Log a classified cmake failure, including a stderr tail."""
     reason, hint = _explain_cmake_failure(phase, err, stderr_tail or "")
-    _safe_log("log", f"cmake build failed: {reason}: {err}")
+    _safe_log("log", f"cmake build failed: {reason}: {err}", diagnostics)
     if stderr_tail:
         tail = "\n".join(stderr_tail.strip().splitlines()[-12:])
         if tail:
-            _safe_log("log", f"cmake stderr (tail):\n{tail}")
-    _safe_log("log", f"to enable the C++ tier, {hint}")
+            _safe_log("log", f"cmake stderr (tail):\n{tail}", diagnostics)
+    _safe_log("log", f"to enable the C++ tier, {hint}", diagnostics)
 
 
-def _jit_failure_marker(tag: str) -> Optional[Path]:
+def _jit_failure_marker(
+    tag: str,
+    diagnostics: Optional[_Diagnostics] = None,
+) -> Optional[Path]:
     """Return the failure-marker path for ``tag``, or ``None`` if no cache dir."""
-    cache_dir = _jit_cache_dir()
+    cache_dir = _jit_cache_dir(diagnostics)
     if cache_dir is None:
         return None
     return cache_dir / f"roctx_recordfn-{tag}.build-failed"
@@ -232,10 +250,11 @@ def _record_jit_failure(
     err: Exception,
     reason: str = TIER_JIT,
     stderr: str = "",
+    diagnostics: Optional[_Diagnostics] = None,
 ) -> None:
     """Write a failure marker for the JIT tier."""
     try:
-        marker = _jit_failure_marker(tag)
+        marker = _jit_failure_marker(tag, diagnostics)
         if marker is None:
             return
         payload = f"{reason}: {type(err).__name__}: {err}\n"
@@ -248,19 +267,24 @@ def _record_jit_failure(
         _safe_log(
             "log",
             f"jit failure-marker write skipped ({tag}): {type(exc).__name__}: {exc}",
+            diagnostics,
         )
 
 
-def _previous_jit_failure(tag: str) -> Optional[str]:
+def _previous_jit_failure(
+    tag: str,
+    diagnostics: Optional[_Diagnostics] = None,
+) -> Optional[str]:
     """Return the recorded failure summary for ``tag``, if any."""
     try:
-        marker = _jit_failure_marker(tag)
+        marker = _jit_failure_marker(tag, diagnostics)
         if marker is not None and marker.exists():
             return marker.read_text().strip() or None
     except Exception as exc:
         _safe_log(
             "log",
             f"jit failure-marker read skipped ({tag}): {type(exc).__name__}: {exc}",
+            diagnostics,
         )
     return None
 
@@ -278,7 +302,11 @@ def _clear_jit_failure(tag: str) -> None:
         pass
 
 
-def _install_cached_so(src_so: Path, cached_so: Path) -> None:
+def _install_cached_so(
+    src_so: Path,
+    cached_so: Path,
+    diagnostics: Optional[_Diagnostics] = None,
+) -> None:
     """Copy ``src_so`` onto ``cached_so`` for the next-run cache hit."""
     if not src_so.exists():
         return
@@ -288,6 +316,7 @@ def _install_cached_so(src_so: Path, cached_so: Path) -> None:
         _safe_log(
             "log",
             f"jit cache install skipped ({cached_so}): {type(exc).__name__}: {exc}",
+            diagnostics,
         )
 
 
@@ -296,9 +325,14 @@ def _cmake_executable() -> Optional[str]:
     return shutil.which(os.environ.get("CMAKE", "cmake"))
 
 
-def _try_jit(tag: str, *, force_rebuild: bool = False) -> Optional[types.ModuleType]:
+def _try_jit(
+    tag: str,
+    *,
+    force_rebuild: bool = False,
+    diagnostics: Optional[_Diagnostics] = None,
+) -> Optional[types.ModuleType]:
     """Return the cached or freshly cmake-built ``roctx_recordfn`` module."""
-    cache_dir = _jit_cache_dir()
+    cache_dir = _jit_cache_dir(diagnostics)
     if cache_dir is None:
         return None
     cached_so = cache_dir / f"roctx_recordfn-{tag}.so"
@@ -306,12 +340,13 @@ def _try_jit(tag: str, *, force_rebuild: bool = False) -> Optional[types.ModuleT
     if not force_rebuild and cached_so.exists():
         try:
             mod = _import_module_from_path("roctx_recordfn", cached_so)
-            _safe_log("log", f"loaded JIT-cached .so: {cached_so}")
+            _safe_log("log", f"loaded JIT-cached .so: {cached_so}", diagnostics)
             return mod
         except Exception as e:
             _safe_log(
                 "warning",
                 f"JIT-cached .so at {cached_so} failed to load: {e}",
+                diagnostics,
             )
             try:
                 cached_so.unlink()
@@ -322,19 +357,21 @@ def _try_jit(tag: str, *, force_rebuild: bool = False) -> Optional[types.ModuleT
         _safe_log(
             "log",
             f"sources missing under {_SO_SOURCE_DIR}; skipping cmake tier",
+            diagnostics,
         )
         return None
 
     cmake_exe = _cmake_executable()
     if cmake_exe is None:
-        _safe_log("log", "cmake not on PATH; skipping cmake tier")
+        _safe_log("log", "cmake not on PATH; skipping cmake tier", diagnostics)
         return None
 
-    prior = _previous_jit_failure(tag)
+    prior = _previous_jit_failure(tag, diagnostics)
     if prior is not None:
         _safe_log(
             "log",
             f"skipping cmake build (prior failure cached for tag {tag}): {prior}",
+            diagnostics,
         )
         return None
 
@@ -342,8 +379,8 @@ def _try_jit(tag: str, *, force_rebuild: bool = False) -> Optional[types.ModuleT
     try:
         build_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        _log_cmake_failure("setup", e, "")
-        _record_jit_failure(tag, e)
+        _log_cmake_failure("setup", e, "", diagnostics)
+        _record_jit_failure(tag, e, diagnostics=diagnostics)
         return None
 
     configure_argv = [
@@ -363,14 +400,14 @@ def _try_jit(tag: str, *, force_rebuild: bool = False) -> Optional[types.ModuleT
             check=False,
         )
     except OSError as e:
-        _log_cmake_failure("invoke", e, "")
-        _record_jit_failure(tag, e)
+        _log_cmake_failure("invoke", e, "", diagnostics)
+        _record_jit_failure(tag, e, diagnostics=diagnostics)
         return None
 
     if configure.returncode != 0:
         err = RuntimeError(f"cmake configure exited with rc={configure.returncode}")
-        _log_cmake_failure("configure", err, configure.stderr)
-        _record_jit_failure(tag, err, stderr=configure.stderr)
+        _log_cmake_failure("configure", err, configure.stderr, diagnostics)
+        _record_jit_failure(tag, err, stderr=configure.stderr, diagnostics=diagnostics)
         return None
 
     try:
@@ -381,14 +418,14 @@ def _try_jit(tag: str, *, force_rebuild: bool = False) -> Optional[types.ModuleT
             check=False,
         )
     except OSError as e:
-        _log_cmake_failure("invoke", e, "")
-        _record_jit_failure(tag, e)
+        _log_cmake_failure("invoke", e, "", diagnostics)
+        _record_jit_failure(tag, e, diagnostics=diagnostics)
         return None
 
     if build.returncode != 0:
         err = RuntimeError(f"cmake --build exited with rc={build.returncode}")
-        _log_cmake_failure("build", err, build.stderr)
-        _record_jit_failure(tag, err, stderr=build.stderr)
+        _log_cmake_failure("build", err, build.stderr, diagnostics)
+        _record_jit_failure(tag, err, stderr=build.stderr, diagnostics=diagnostics)
         return None
 
     produced = build_dir / f"roctx_recordfn-{tag}.so"
@@ -396,64 +433,66 @@ def _try_jit(tag: str, *, force_rebuild: bool = False) -> Optional[types.ModuleT
         err = RuntimeError(
             f"cmake build succeeded but expected .so missing at {produced}"
         )
-        _log_cmake_failure("missing-output", err, "")
-        _record_jit_failure(tag, err)
+        _log_cmake_failure("missing-output", err, "", diagnostics)
+        _record_jit_failure(tag, err, diagnostics=diagnostics)
         return None
 
-    _install_cached_so(produced, cached_so)
+    _install_cached_so(produced, cached_so, diagnostics)
 
     try:
         mod = _import_module_from_path("roctx_recordfn", cached_so)
     except Exception as e:
-        _log_cmake_failure("load", e, "")
-        _record_jit_failure(tag, e)
+        _log_cmake_failure("load", e, "", diagnostics)
+        _record_jit_failure(tag, e, diagnostics=diagnostics)
         return None
 
     _clear_jit_failure(tag)
     shutil.rmtree(build_dir, ignore_errors=True)
 
-    _safe_log("log", f"cmake-built roctx_recordfn.so for {tag}")
+    _safe_log("log", f"cmake-built roctx_recordfn.so for {tag}", diagnostics)
     return mod
 
 
-def load(force_python_fallback: bool = False) -> Optional[types.ModuleType]:
-    """Return the ``roctx_recordfn`` module, or ``None`` for the Python fallback."""
-    global _LAST_LOADED_TIER
-    _LAST_LOAD_DIAGNOSTICS.clear()
-    _LAST_LOADED_TIER = None
+def load(force_python_fallback: bool = False) -> LoadResult:
+    """Resolve the ``roctx_recordfn`` module and return a ``LoadResult``."""
+    diagnostics: _Diagnostics = []
 
     if force_python_fallback:
-        _safe_log("log", "force_python_fallback=True; declining to load .so")
-        return None
+        _safe_log(
+            "log", "force_python_fallback=True; declining to load .so", diagnostics
+        )
+        return LoadResult(None, None, diagnostics)
 
     tag = compute_tag()
     if tag is None:
-        _safe_log("warning", "torch not importable; using Python-only injector")
-        return None
+        _safe_log(
+            "warning", "torch not importable; using Python-only injector", diagnostics
+        )
+        return LoadResult(None, None, diagnostics)
 
     if os.environ.get(_REBUILD_ENV_VAR) == "1":
         _safe_log(
             "warning",
             f"{_REBUILD_ENV_VAR}=1: bypassing prebuilt and JIT cache, "
             f"forcing fresh build for tag {tag}",
+            diagnostics,
         )
         _clear_jit_failure(tag)
-        mod = _try_jit(tag, force_rebuild=True)
-        if mod is not None:
-            _LAST_LOADED_TIER = TIER_JIT
-        return mod
+        mod = _try_jit(tag, force_rebuild=True, diagnostics=diagnostics)
+        tier = TIER_JIT if mod is not None else None
+        return LoadResult(mod, tier, diagnostics)
 
     for tier_name, step in (
         (TIER_PREBUILT, _try_prebuilt),
         (TIER_JIT, _try_jit),
     ):
-        mod = step(tag)
+        mod = step(tag, diagnostics=diagnostics)
         if mod is not None:
-            _LAST_LOADED_TIER = tier_name
-            return mod
+            return LoadResult(mod, tier_name, diagnostics)
 
     _safe_log(
         "log",
         "no roctx_recordfn .so available; using Python-only injector",
+        diagnostics,
     )
-    return None
+    return LoadResult(None, None, diagnostics)

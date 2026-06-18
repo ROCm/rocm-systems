@@ -75,6 +75,7 @@ class _TorchState:
 
         self.loader_module: Any = None
         self.load_roctx_recordfn: Optional[Callable[..., Any]] = None
+        self.load_diagnostics: list[tuple[str, str]] = []
         self.roctx_recordfn: Any = None
         self.using_c_tier: bool = False
         self.c_tier_initialized: bool = False
@@ -290,12 +291,18 @@ def _initialize_c_tier() -> bool:
         return False
 
     try:
-        _STATE.roctx_recordfn = _STATE.load_roctx_recordfn()
+        result = _STATE.load_roctx_recordfn()
     except Exception as exc:
         console_warning(
             "ml api trace",
             f"loader raised; falling back to Python tier: {exc}",
         )
+        result = None
+
+    if result is not None:
+        _STATE.roctx_recordfn = result.module
+        _STATE.load_diagnostics = result.diagnostics
+    else:
         _STATE.roctx_recordfn = None
 
     if _STATE.roctx_recordfn is not None:
@@ -329,9 +336,8 @@ def _emit_python_tier_fallback_warning() -> None:
     loader_trail = ""
     if _STATE.loader_module is not None:
         try:
-            _tier, diagnostics = _STATE.loader_module.consume_diagnostics()
             loader_trail = _STATE.loader_module.format_load_diagnostic_trail(
-                diagnostics,
+                _STATE.load_diagnostics,
             )
         except Exception:
             loader_trail = ""

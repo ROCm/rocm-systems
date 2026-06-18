@@ -252,7 +252,7 @@ def test_c_tier_names_matches_the_tier_ladder():
 
 
 def test_force_python_fallback_returns_none():
-    assert inject_roctx_loader.load(force_python_fallback=True) is None
+    assert inject_roctx_loader.load(force_python_fallback=True).module is None
 
 
 def test_install_cached_so_overwrites_stale_artifact(tmp_path):
@@ -698,16 +698,16 @@ def test_rebuild_env_var_clears_failure_marker(monkeypatch, tmp_path):
     monkeypatch.setattr(
         inject_roctx_loader,
         "_try_prebuilt",
-        lambda _t: pytest.fail("prebuilt must be skipped under REBUILD"),
+        lambda _t, diagnostics=None: pytest.fail("prebuilt must be skipped"),
     )
     monkeypatch.setattr(
         inject_roctx_loader,
         "_try_jit",
-        lambda _t, force_rebuild=False: sentinel,
+        lambda _t, force_rebuild=False, diagnostics=None: sentinel,
     )
 
     result = inject_roctx_loader.load()
-    assert result is sentinel
+    assert result.module is sentinel
     assert inject_roctx_loader._previous_jit_failure(_FAKE_TAG) is None, (
         "REBUILD must clear the negative cache before the forced rebuild"
     )
@@ -720,11 +720,11 @@ def test_rebuild_env_var_skips_prebuilt_and_forces_jit_rebuild(monkeypatch):
     monkeypatch.setattr(
         inject_roctx_loader,
         "_try_prebuilt",
-        lambda tag: calls.append(("prebuilt", tag)) or None,
+        lambda tag, diagnostics=None: calls.append(("prebuilt", tag)) or None,
     )
     sentinel = object()
 
-    def _jit(tag, force_rebuild=False):
+    def _jit(tag, force_rebuild=False, diagnostics=None):
         calls.append(("jit", tag, force_rebuild))
         return sentinel
 
@@ -732,7 +732,7 @@ def test_rebuild_env_var_skips_prebuilt_and_forces_jit_rebuild(monkeypatch):
     monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
 
     result = inject_roctx_loader.load()
-    assert result is sentinel
+    assert result.module is sentinel
     assert [c[0] for c in calls] == ["jit"], (
         f"expected only _try_jit to fire under REBUILD; saw {calls!r}"
     )
@@ -746,15 +746,15 @@ def test_rebuild_env_var_returns_none_when_build_fails(monkeypatch):
     monkeypatch.setattr(
         inject_roctx_loader,
         "_try_prebuilt",
-        lambda _t: pytest.fail("_try_prebuilt called despite rebuild env var"),
+        lambda _t, diagnostics=None: pytest.fail("_try_prebuilt called"),
     )
     monkeypatch.setattr(
         inject_roctx_loader,
         "_try_jit",
-        lambda _t, force_rebuild=False: None,
+        lambda _t, force_rebuild=False, diagnostics=None: None,
     )
     monkeypatch.setenv(inject_roctx_loader._REBUILD_ENV_VAR, "1")
-    assert inject_roctx_loader.load() is None
+    assert inject_roctx_loader.load().module is None
 
 
 def test_default_load_path_still_tries_prebuilt_first(monkeypatch):
@@ -766,14 +766,14 @@ def test_default_load_path_still_tries_prebuilt_first(monkeypatch):
     monkeypatch.setattr(
         inject_roctx_loader,
         "_try_prebuilt",
-        lambda tag: calls.append("prebuilt") or sentinel,
+        lambda tag, diagnostics=None: calls.append("prebuilt") or sentinel,
     )
     monkeypatch.setattr(
         inject_roctx_loader,
         "_try_jit",
-        lambda tag, force_rebuild=False: calls.append("jit") or None,
+        lambda tag, force_rebuild=False, diagnostics=None: calls.append("jit") or None,
     )
-    assert inject_roctx_loader.load() is sentinel
+    assert inject_roctx_loader.load().module is sentinel
     assert calls == ["prebuilt"], (
         f"expected prebuilt to short-circuit before jit; saw {calls!r}"
     )
@@ -787,15 +787,17 @@ def test_default_load_path_walks_prebuilt_then_jit(monkeypatch):
     monkeypatch.setattr(
         inject_roctx_loader,
         "_try_prebuilt",
-        lambda tag: calls.append("prebuilt") or None,
+        lambda tag, diagnostics=None: calls.append("prebuilt") or None,
     )
     sentinel = object()
     monkeypatch.setattr(
         inject_roctx_loader,
         "_try_jit",
-        lambda tag, force_rebuild=False: calls.append("jit") or sentinel,
+        lambda tag, force_rebuild=False, diagnostics=None: (
+            calls.append("jit") or sentinel
+        ),
     )
-    assert inject_roctx_loader.load() is sentinel
+    assert inject_roctx_loader.load().module is sentinel
     assert calls == ["prebuilt", "jit"], (
         f"expected order prebuilt -> jit, saw {calls!r}"
     )
@@ -804,12 +806,12 @@ def test_default_load_path_walks_prebuilt_then_jit(monkeypatch):
 def test_load_does_not_raise_when_torch_missing(monkeypatch):
     """``load()`` returns ``None`` when ``torch`` is not importable."""
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: None)
-    assert inject_roctx_loader.load() is None
+    assert inject_roctx_loader.load().module is None
 
 
 def test_load_returns_module_or_none_no_raise():
     """``load()`` returns a module exposing the documented API, or ``None``."""
-    mod = inject_roctx_loader.load()
+    mod = inject_roctx_loader.load().module
     if mod is not None:
         for sym in (
             "install",
@@ -823,113 +825,116 @@ def test_load_returns_module_or_none_no_raise():
 
 
 # ---------------------------------------------------------------------------
-# loaded_tier / consume_diagnostics / format_load_diagnostic_trail
+# LoadResult: tier / diagnostics / format_load_diagnostic_trail
 # ---------------------------------------------------------------------------
 
 
-def test_loaded_tier_records_successful_step(monkeypatch):
-    """``loaded_tier()`` reports the name of the tier that returned a module."""
+def test_load_result_records_successful_tier(monkeypatch):
+    """``LoadResult.tier`` reports the name of the tier that returned a module."""
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
     sentinel = object()
-    monkeypatch.setattr(inject_roctx_loader, "_try_prebuilt", lambda _t: None)
+    monkeypatch.setattr(
+        inject_roctx_loader, "_try_prebuilt", lambda _t, diagnostics=None: None
+    )
     monkeypatch.setattr(
         inject_roctx_loader,
         "_try_jit",
-        lambda _t, force_rebuild=False: sentinel,
+        lambda _t, force_rebuild=False, diagnostics=None: sentinel,
     )
-    assert inject_roctx_loader.load() is sentinel
-    assert inject_roctx_loader.loaded_tier() == inject_roctx_loader.TIER_JIT
+    result = inject_roctx_loader.load()
+    assert result.module is sentinel
+    assert result.tier == inject_roctx_loader.TIER_JIT
     assert inject_roctx_loader.TIER_JIT in inject_roctx_loader.C_TIER_NAMES
 
 
-def test_loaded_tier_is_none_when_all_tiers_miss(monkeypatch):
-    """``loaded_tier()`` returns ``None`` when every tier returns ``None``."""
+def test_load_result_tier_is_none_when_all_tiers_miss(monkeypatch):
+    """``LoadResult.tier`` is ``None`` when every tier returns ``None``."""
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
-    monkeypatch.setattr(inject_roctx_loader, "_try_prebuilt", lambda _t: None)
     monkeypatch.setattr(
-        inject_roctx_loader, "_try_jit", lambda _t, force_rebuild=False: None
+        inject_roctx_loader, "_try_prebuilt", lambda _t, diagnostics=None: None
     )
-    assert inject_roctx_loader.load() is None
-    assert inject_roctx_loader.loaded_tier() is None
-
-
-def test_load_resets_diagnostics_on_entry(monkeypatch):
-    """``load()`` clears prior diagnostics on entry."""
-    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
-    monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
-    inject_roctx_loader._LAST_LOAD_DIAGNOSTICS.clear()
-    inject_roctx_loader._LAST_LOAD_DIAGNOSTICS.append(("log", "STALE LINE"))
-
     monkeypatch.setattr(
         inject_roctx_loader,
-        "_try_prebuilt",
-        lambda _t: object(),
+        "_try_jit",
+        lambda _t, force_rebuild=False, diagnostics=None: None,
+    )
+    result = inject_roctx_loader.load()
+    assert result.module is None
+    assert result.tier is None
+
+
+def test_load_returns_independent_diagnostics(monkeypatch):
+    """Each ``load()`` call returns its own diagnostics list."""
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
+    monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
+    monkeypatch.setattr(
+        inject_roctx_loader, "_try_prebuilt", lambda _t, diagnostics=None: object()
     )
     monkeypatch.setattr(
-        inject_roctx_loader, "_try_jit", lambda _t, force_rebuild=False: None
+        inject_roctx_loader,
+        "_try_jit",
+        lambda _t, force_rebuild=False, diagnostics=None: None,
     )
 
-    inject_roctx_loader.load()
-    _tier, diagnostics = inject_roctx_loader.consume_diagnostics()
-    for level, msg in diagnostics:
-        assert "STALE LINE" not in msg, (
-            f"pre-existing diagnostic leaked across load() boundary: ({level}, {msg!r})"
-        )
+    first = inject_roctx_loader.load().diagnostics
+    second = inject_roctx_loader.load().diagnostics
+    assert first is not second, "each load() must return its own diagnostics list"
 
 
-def test_safe_log_tees_into_accumulator(monkeypatch):
-    """Each ``_safe_log`` call appends to ``_LAST_LOAD_DIAGNOSTICS``."""
-    inject_roctx_loader._LAST_LOAD_DIAGNOSTICS.clear()
-    inject_roctx_loader._safe_log("log", "tier A skipped")
-    inject_roctx_loader._safe_log("warning", "tier B failed")
-    inject_roctx_loader._safe_log("log", "final fallback engaged")
+def test_safe_log_appends_to_provided_diagnostics():
+    """Each ``_safe_log`` call appends to the provided diagnostics list."""
+    diagnostics: list[tuple[str, str]] = []
+    inject_roctx_loader._safe_log("log", "tier A skipped", diagnostics)
+    inject_roctx_loader._safe_log("warning", "tier B failed", diagnostics)
+    inject_roctx_loader._safe_log("log", "final fallback engaged", diagnostics)
 
-    captured = list(inject_roctx_loader._LAST_LOAD_DIAGNOSTICS)
-    assert [lvl for lvl, _ in captured] == ["log", "warning", "log"]
-    assert [msg for _, msg in captured] == [
+    assert [lvl for lvl, _ in diagnostics] == ["log", "warning", "log"]
+    assert [msg for _, msg in diagnostics] == [
         "tier A skipped",
         "tier B failed",
         "final fallback engaged",
     ]
 
 
-def test_consume_diagnostics_drains_and_returns_tier(monkeypatch):
-    """``consume_diagnostics`` drains the trail and keeps the tier scalar."""
+def test_load_result_carries_tier_and_diagnostics(monkeypatch):
+    """``load()`` returns the tier scalar and a diagnostics list."""
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
-    monkeypatch.setattr(inject_roctx_loader, "_try_prebuilt", lambda _t: None)
     monkeypatch.setattr(
-        inject_roctx_loader, "_try_jit", lambda _t, force_rebuild=False: object()
+        inject_roctx_loader, "_try_prebuilt", lambda _t, diagnostics=None: None
+    )
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_try_jit",
+        lambda _t, force_rebuild=False, diagnostics=None: object(),
     )
 
-    inject_roctx_loader.load()
-    tier, trail = inject_roctx_loader.consume_diagnostics()
-    assert tier == inject_roctx_loader.TIER_JIT
-    assert isinstance(trail, list)
-
-    tier2, trail2 = inject_roctx_loader.consume_diagnostics()
-    assert tier2 == tier, "tier scalar must persist across drains"
-    assert trail2 == [], "second consume must see no leftover lines"
+    result = inject_roctx_loader.load()
+    assert result.tier == inject_roctx_loader.TIER_JIT
+    assert isinstance(result.diagnostics, list)
 
 
-def test_consume_diagnostics_returns_python_tier_failure_trail(monkeypatch):
+def test_load_result_returns_python_tier_failure_trail(monkeypatch):
     """When every tier misses the trail includes the terminal fallback line."""
     monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
     monkeypatch.delenv(inject_roctx_loader._REBUILD_ENV_VAR, raising=False)
-    monkeypatch.setattr(inject_roctx_loader, "_try_prebuilt", lambda _t: None)
     monkeypatch.setattr(
-        inject_roctx_loader, "_try_jit", lambda _t, force_rebuild=False: None
+        inject_roctx_loader, "_try_prebuilt", lambda _t, diagnostics=None: None
+    )
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_try_jit",
+        lambda _t, force_rebuild=False, diagnostics=None: None,
     )
 
-    inject_roctx_loader.load()
-    tier, trail = inject_roctx_loader.consume_diagnostics()
-    assert tier is None
-    joined = " ".join(msg for _, msg in trail).lower()
+    result = inject_roctx_loader.load()
+    assert result.tier is None
+    joined = " ".join(msg for _, msg in result.diagnostics).lower()
     assert "python-only injector" in joined or "no roctx_recordfn" in joined, (
         f"terminal-fallback line missing from trail: "
-        f"{[(lvl, msg) for lvl, msg in trail]!r}"
+        f"{[(lvl, msg) for lvl, msg in result.diagnostics]!r}"
     )
 
 
