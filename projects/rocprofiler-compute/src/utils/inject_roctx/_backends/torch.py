@@ -918,7 +918,7 @@ DEEP_TENSOR_METHOD_WRAPS_ENV = "ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"
 
 def _deep_tensor_method_wraps_enabled() -> bool:
     value = os.environ.get(DEEP_TENSOR_METHOD_WRAPS_ENV, "").strip().lower()
-    return value in ("1", "true", "yes", "on")
+    return value not in ("0", "false", "no", "off")
 
 
 def _selected_tensor_method_wraps() -> tuple[str, ...]:
@@ -1004,17 +1004,16 @@ def install_function_apply_wrappers() -> bool:
 def install_tensor_method_wrappers() -> None:
     """Wrap selected Tensor methods so inner ATen dispatches inherit the user frame.
 
-    DEEP_TENSOR_METHOD_WRAPS are opt-in via
-    ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=1.
+    DEEP_TENSOR_METHOD_WRAPS are enabled by default; set
+    ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 to disable them.
     """
     wrapped = []
     selected_methods = _selected_tensor_method_wraps()
     if not _deep_tensor_method_wraps_enabled():
         console_log(
             "ml api trace",
-            "Deep tensor method wraps disabled by default; set "
-            f"{DEEP_TENSOR_METHOD_WRAPS_ENV}=1 to enable "
-            f"({', '.join(DEEP_TENSOR_METHOD_WRAPS)}).",
+            f"Deep tensor method wraps disabled via {DEEP_TENSOR_METHOD_WRAPS_ENV}; "
+            f"unset or set to 1 to enable ({', '.join(DEEP_TENSOR_METHOD_WRAPS)}).",
         )
     for method_name in selected_methods:
         fn = getattr(torch.Tensor, method_name, None)

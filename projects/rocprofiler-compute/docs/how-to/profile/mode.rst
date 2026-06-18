@@ -922,6 +922,23 @@ option when profiling a PyTorch workload:
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
+Reducing instrumentation overhead
+---------------------------------
+
+By default, ``--torch-trace`` also wraps the device- and layout-related
+``torch.Tensor`` methods ``to``, ``cpu``, ``cuda``, and ``contiguous``, which
+attribute tensor movement and layout changes to the originating PyTorch call
+site. These methods are called frequently, so wrapping them adds overhead and
+increases the trace size.
+
+Set the ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` environment variable to
+``0`` (or ``false``, ``no``, ``off``) in the workload environment to disable
+these wraps. They are enabled by default.
+
+.. code-block:: shell-session
+
+   $ ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 rocprof-compute --experimental profile --name mnist_torch --torch-trace -- python train.py
+
 Output
 ------
 
