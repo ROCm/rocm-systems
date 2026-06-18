@@ -35,30 +35,62 @@ from ..registry import register
 
 _BACKEND_NAME = "torch"
 
-# Module-level handles populated by TorchBackend.install().
-torch: Any = None
-dist: Any = None
-fc: Any = None
-ProcessGroup: Any = None
-cuda_mod: Any = None
-TorchDispatchMode: Any = None
-Optimizer: Any = None
-Function: Any = None
-nn: Any = None
+
+class _RecordFnHook:
+    def active(self) -> bool:
+        return _STATE.using_c_tier and _STATE.roctx_recordfn is not None
+
+    def push(self, marker: str, context: str, backend: str) -> bool:
+        try:
+            _STATE.roctx_recordfn.push_user_scope(marker, context, backend)
+            return True
+        except Exception:
+            return False
+
+    def pop(self) -> None:
+        try:
+            _STATE.roctx_recordfn.pop_user_scope()
+        except Exception:
+            pass
+
+
+class _TorchState:
+    """Mutable backend state populated by TorchBackend.install().
+
+    Holds the resolved torch module handles, the roctx_recordfn loader and
+    native C++ RecordFunction tier, and the active Python-tier dispatch mode.
+    """
+
+    def __init__(self) -> None:
+        self.torch: Any = None
+        self.dist: Any = None
+        self.fc: Any = None
+        self.process_group: Any = None
+        self.cuda_mod: Any = None
+        self.torch_dispatch_mode: Any = None
+        self.optimizer: Any = None
+        self.function: Any = None
+        self.nn: Any = None
+        self.torch_root: str = ""
+
+        self.loader_module: Any = None
+        self.load_roctx_recordfn: Optional[Callable[..., Any]] = None
+        self.roctx_recordfn: Any = None
+        self.using_c_tier: bool = False
+        self.c_tier_initialized: bool = False
+        self.native_hook: Optional[_RecordFnHook] = None
+
+        self.active_dispatch_mode: Any = None
+
+
+_STATE = _TorchState()
+
+_thread_local = threading.local()
+
 rangePush: Optional[Callable[[str], None]] = None
 rangePop: Optional[Callable[[], None]] = None
 
-_roctx_loader_module: Any = None
-_load_roctx_recordfn: Optional[Callable[..., Any]] = None
-_roctx_recordfn: Any = None
-_USING_C_TIER: bool = False
-_C_TIER_INITIALIZED: bool = False
-_TORCH_ROOT: str = ""
-
-_thread_local = threading.local()
-_active_dispatch_mode: Any = None
-
-# Wire the Python tier via _core and reuse its roctx handles below.
+# Wire the Python tier via core and reuse its roctx handles below.
 _ROCTX_AVAILABLE = core.ensure_python_tier()
 if _ROCTX_AVAILABLE:
     rangePush, rangePop = core.get_python_tier_io()
@@ -110,26 +142,7 @@ PROCESS_GROUP_METHODS = (
 )
 
 
-class _RecordFnHook:
-    def active(self) -> bool:
-        return _USING_C_TIER and _roctx_recordfn is not None
-
-    def push(self, marker: str, context: str, backend: str) -> bool:
-        try:
-            _roctx_recordfn.push_user_scope(marker, context, backend)
-            return True
-        except Exception:
-            return False
-
-    def pop(self) -> None:
-        try:
-            _roctx_recordfn.pop_user_scope()
-        except Exception:
-            pass
-
-
-# The native C++ RecordFunction tier, installed by _initialize_c_tier().
-_native_hook: Optional[_RecordFnHook] = None
+# The native C++ RecordFunction tier is installed by _initialize_c_tier().
 
 
 def _get_tier_stack() -> list[bool]:
@@ -149,7 +162,7 @@ def _push_scope(marker: str, context: str, backend: str = "") -> None:
     tier_stack = _get_tier_stack()
 
     used_native = False
-    hook = _native_hook
+    hook = _STATE.native_hook
     if hook is not None and hook.active():
         try:
             used_native = bool(hook.push(marker, context, backend))
@@ -171,8 +184,8 @@ def _push_scope(marker: str, context: str, backend: str = "") -> None:
         del marker_stack[snapshot_len:]
         del context_stack[snapshot_len:]
         try:
-            if used_native and _native_hook is not None:
-                _native_hook.pop()
+            if used_native and _STATE.native_hook is not None:
+                _STATE.native_hook.pop()
             else:
                 _, range_pop = core.get_python_tier_io()
                 range_pop()
@@ -193,8 +206,8 @@ def _pop_scope() -> None:
 
     used_native = tier_stack.pop()
     try:
-        if used_native and _native_hook is not None:
-            _native_hook.pop()
+        if used_native and _STATE.native_hook is not None:
+            _STATE.native_hook.pop()
         else:
             _, range_pop = core.get_python_tier_io()
             range_pop()
@@ -266,30 +279,28 @@ def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
 
 def _initialize_c_tier() -> bool:
     """Load and install roctx_recordfn.so once per process."""
-    global _roctx_recordfn, _USING_C_TIER, _C_TIER_INITIALIZED, _native_hook
+    if _STATE.c_tier_initialized:
+        return _STATE.using_c_tier
 
-    if _C_TIER_INITIALIZED:
-        return _USING_C_TIER
+    _STATE.c_tier_initialized = True
 
-    _C_TIER_INITIALIZED = True
-
-    if _load_roctx_recordfn is None:
-        _roctx_recordfn = None
-        _USING_C_TIER = False
+    if _STATE.load_roctx_recordfn is None:
+        _STATE.roctx_recordfn = None
+        _STATE.using_c_tier = False
         return False
 
     try:
-        _roctx_recordfn = _load_roctx_recordfn()
+        _STATE.roctx_recordfn = _STATE.load_roctx_recordfn()
     except Exception as exc:
         console_warning(
             "ml api trace",
             f"loader raised; falling back to Python tier: {exc}",
         )
-        _roctx_recordfn = None
+        _STATE.roctx_recordfn = None
 
-    if _roctx_recordfn is not None:
+    if _STATE.roctx_recordfn is not None:
         try:
-            _roctx_recordfn.install()
+            _STATE.roctx_recordfn.install()
             console_log(
                 "ml api trace",
                 (
@@ -297,29 +308,29 @@ def _initialize_c_tier() -> bool:
                     "(global callback; covers every thread)."
                 ),
             )
-            _USING_C_TIER = True
-            _native_hook = _RecordFnHook()
+            _STATE.using_c_tier = True
+            _STATE.native_hook = _RecordFnHook()
             return True
         except Exception as exc:
             console_warning(
                 "ml api trace",
                 f".so install() raised; falling back to Python tier: {exc}",
             )
-            _roctx_recordfn = None
+            _STATE.roctx_recordfn = None
 
-    _USING_C_TIER = False
+    _STATE.using_c_tier = False
     return False
 
 
 def _emit_python_tier_fallback_warning() -> None:
     """Emit one warning when the C++ tier is unavailable."""
-    if _USING_C_TIER:
+    if _STATE.using_c_tier:
         return
     loader_trail = ""
-    if _roctx_loader_module is not None:
+    if _STATE.loader_module is not None:
         try:
-            _tier, diagnostics = _roctx_loader_module.consume_diagnostics()
-            loader_trail = _roctx_loader_module.format_load_diagnostic_trail(
+            _tier, diagnostics = _STATE.loader_module.consume_diagnostics()
+            loader_trail = _STATE.loader_module.format_load_diagnostic_trail(
                 diagnostics,
             )
         except Exception:
@@ -335,6 +346,7 @@ def _emit_python_tier_fallback_warning() -> None:
 
 def patch_distributed_collectives() -> None:
     """Wrap DISTRIBUTED_COLLECTIVE_NAMES + every entry in _functional_collectives."""
+    dist = _STATE.dist
     if dist is None:
         console_warning(
             "ml api trace",
@@ -366,6 +378,7 @@ def patch_distributed_collectives() -> None:
                 f"Could not patch torch.distributed.{fn_name}: {exc}",
             )
 
+    fc = _STATE.fc
     if fc is not None:
         for fn_name in dir(fc):
             if fn_name.startswith("_"):
@@ -407,7 +420,8 @@ def patch_process_group_methods() -> None:
 
     An __init_subclass__ hook covers subclasses registered later.
     """
-    if ProcessGroup is None:
+    process_group = _STATE.process_group
+    if process_group is None:
         return
 
     wrapped_classes: set[type] = set()
@@ -438,10 +452,10 @@ def patch_process_group_methods() -> None:
                     f"Could not patch ProcessGroup.{cls.__name__}.{method_name}: {exc}",
                 )
 
-    _wrap_one(ProcessGroup)
-    _walk_subclasses(ProcessGroup, _wrap_one)
+    _wrap_one(process_group)
+    _walk_subclasses(process_group, _wrap_one)
 
-    existing_isc = ProcessGroup.__init_subclass__
+    existing_isc = process_group.__init_subclass__
     existing_isc_fn = getattr(existing_isc, "__func__", existing_isc)
     if not getattr(existing_isc_fn, "_roctx_pg_subclass_hook", False):
         original_init_subclass = existing_isc
@@ -467,7 +481,7 @@ def patch_process_group_methods() -> None:
 
         init_subclass_hook._roctx_pg_subclass_hook = True
         try:
-            ProcessGroup.__init_subclass__ = classmethod(init_subclass_hook)
+            process_group.__init_subclass__ = classmethod(init_subclass_hook)
         except Exception:
             # C-defined on some builds; per-subclass walk above covers existing.
             pass
@@ -485,6 +499,7 @@ def patch_cuda_graph() -> None:
 
     A replay runs as a single hipGraphLaunch with no per-op records.
     """
+    cuda_mod = _STATE.cuda_mod
     if cuda_mod is None:
         return
 
@@ -524,6 +539,7 @@ def patch_cuda_graph() -> None:
 
 def patch_compile_callable() -> None:
     """Wrap torch.compile and the returned callable so each invocation is bracketed."""
+    torch = _STATE.torch
     original_compile = getattr(torch, "compile", None)
     if original_compile is None:
         return
@@ -631,7 +647,7 @@ def dispatcher_marker_name_for(func: Callable[..., Any]) -> str:
 
 def install_dispatcher_hook() -> str:
     """C++ tier: no-op. Python tier: enter TorchDispatchMode on this thread."""
-    if _USING_C_TIER:
+    if _STATE.using_c_tier:
         console_log(
             "ml api trace",
             "Operator coverage: C++ RecordFunction callback "
@@ -639,15 +655,14 @@ def install_dispatcher_hook() -> str:
         )
         return "c_tier"
 
-    if TorchDispatchMode is None:
+    torch_dispatch_mode = _STATE.torch_dispatch_mode
+    if torch_dispatch_mode is None:
         console_warning(
             "ml api trace",
             "TorchDispatchMode is not importable on this PyTorch build; "
             "per-op coverage will be missing.",
         )
         return "none"
-
-    global _active_dispatch_mode
 
     def start_disp(op_name: str) -> None:
         idx = next_dispatcher_index(op_name)
@@ -676,7 +691,7 @@ def install_dispatcher_hook() -> str:
             if context_stack:
                 context_stack.pop()
 
-    class RoctxDispatchMode(TorchDispatchMode):
+    class RoctxDispatchMode(torch_dispatch_mode):
         def __torch_dispatch__(
             self,
             func: Callable[..., Any],
@@ -708,7 +723,7 @@ def install_dispatcher_hook() -> str:
         console_warning("ml api trace", f"TorchDispatchMode activation failed: {exc}")
         return "none"
 
-    _active_dispatch_mode = mode
+    _STATE.active_dispatch_mode = mode
     console_log(
         "ml api trace",
         "Operator coverage: TorchDispatchMode (Python tier).",
@@ -718,6 +733,7 @@ def install_dispatcher_hook() -> str:
 
 def install_tensor_backward_wrapper() -> None:
     """Wrap torch.Tensor.backward; per-op backward dispatches go to the tier."""
+    torch = _STATE.torch
     if getattr(torch.Tensor.backward, "_roctx_wrapped", False):
         return
 
@@ -799,7 +815,8 @@ def wrap_method_on_subclasses(
 
 def inject_roctx_into_optimizer() -> None:
     """Wrap step() on every torch.optim optimizer."""
-    if Optimizer is None:
+    optimizer = _STATE.optimizer
+    if optimizer is None:
         return
 
     def make_step_wrapper(original_step: Callable[..., Any]) -> Callable[..., Any]:
@@ -824,7 +841,7 @@ def inject_roctx_into_optimizer() -> None:
 
         return step_with_roctx
 
-    wrapped_count = wrap_method_on_subclasses(Optimizer, "step", make_step_wrapper)
+    wrapped_count = wrap_method_on_subclasses(optimizer, "step", make_step_wrapper)
     if wrapped_count > 0:
         console_log(
             "ml api trace",
@@ -932,7 +949,8 @@ def install_function_apply_wrappers() -> bool:
 
     An __init_subclass__ hook wraps subclasses registered later.
     """
-    if Function is None:
+    function = _STATE.function
+    if function is None:
         return False
 
     def stamp_apply(cls: type) -> None:
@@ -969,9 +987,9 @@ def install_function_apply_wrappers() -> bool:
         except Exception:
             return
 
-    _walk_subclasses(Function, stamp_apply)
+    _walk_subclasses(function, stamp_apply)
 
-    existing_isc = Function.__init_subclass__
+    existing_isc = function.__init_subclass__
     existing_isc_fn = getattr(existing_isc, "__func__", existing_isc)
     if getattr(existing_isc_fn, "_roctx_function_subclass_hook", False):
         return True
@@ -997,7 +1015,7 @@ def install_function_apply_wrappers() -> bool:
             )
 
     init_subclass_hook._roctx_function_subclass_hook = True
-    Function.__init_subclass__ = classmethod(init_subclass_hook)
+    function.__init_subclass__ = classmethod(init_subclass_hook)
     return True
 
 
@@ -1007,6 +1025,7 @@ def install_tensor_method_wrappers() -> None:
     DEEP_TENSOR_METHOD_WRAPS are enabled by default; set
     ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 to disable them.
     """
+    torch = _STATE.torch
     wrapped = []
     selected_methods = _selected_tensor_method_wraps()
     if not _deep_tensor_method_wraps_enabled():
@@ -1057,6 +1076,7 @@ def install_extra_structural_wrappers() -> None:
 
     install_tensor_method_wrappers()
 
+    cuda_mod = _STATE.cuda_mod
     if cuda_mod is not None:
         for cls_name in ("Event", "Stream"):
             cls = getattr(cuda_mod, cls_name, None)
@@ -1106,6 +1126,7 @@ def install_extra_structural_wrappers() -> None:
 
 def inject_roctx_into_model() -> None:
     """Wrap nn.Module.__call__ (not forward(), so hooks are covered)."""
+    nn = _STATE.nn
     if nn is None:
         return
     if getattr(nn.Module.__call__, "_roctx_wrapped", False):
@@ -1142,25 +1163,21 @@ def inject_roctx_into_model() -> None:
 
 def using_c_tier() -> bool:
     """Return True if the C++ RecordFunction tier is active."""
-    return _USING_C_TIER
+    return _STATE.using_c_tier
 
 
 def dump_recordfn_stats() -> Optional[dict[str, object]]:
     """Return the .so counters, or None on the Python tier."""
-    if _roctx_recordfn is None:
+    if _STATE.roctx_recordfn is None:
         return None
     try:
-        return _roctx_recordfn.dump_stats()
+        return _STATE.roctx_recordfn.dump_stats()
     except Exception:
         return None
 
 
 def _resolve_torch() -> bool:
-    """Bind module-level torch handles. Returns True if torch is importable."""
-    global torch, dist, fc, ProcessGroup, cuda_mod, TorchDispatchMode
-    global Optimizer, Function, nn
-    global _roctx_loader_module, _load_roctx_recordfn, _TORCH_ROOT
-
+    """Bind the torch handles on _STATE. Returns True if torch is importable."""
     if importlib.util.find_spec("torch._C") is None:
         console_warning(
             "ml api trace",
@@ -1178,68 +1195,68 @@ def _resolve_torch() -> bool:
         )
         return False
 
-    torch = _torch_mod
-    console_log("ml api trace", f"PyTorch version: {torch.__version__}")
+    _STATE.torch = _torch_mod
+    console_log("ml api trace", f"PyTorch version: {_torch_mod.__version__}")
     try:
-        _TORCH_ROOT = str(Path(torch.__file__).resolve().parent) + os.sep
+        _STATE.torch_root = str(Path(_torch_mod.__file__).resolve().parent) + os.sep
     except Exception:
-        _TORCH_ROOT = ""
-    core.add_framework_root(_TORCH_ROOT)
+        _STATE.torch_root = ""
+    core.add_framework_root(_STATE.torch_root)
 
     try:
         import torch.distributed as _dist_mod
 
-        dist = _dist_mod
+        _STATE.dist = _dist_mod
     except Exception:
-        dist = None
+        _STATE.dist = None
     try:
         import torch.distributed._functional_collectives as _fc_mod
 
-        fc = _fc_mod
+        _STATE.fc = _fc_mod
     except Exception:
-        fc = None
+        _STATE.fc = None
     try:
         from torch.distributed.distributed_c10d import ProcessGroup as _PG
 
-        ProcessGroup = _PG
+        _STATE.process_group = _PG
     except Exception:
-        ProcessGroup = None
+        _STATE.process_group = None
     try:
         import torch.cuda as _cuda_mod
 
-        cuda_mod = _cuda_mod
+        _STATE.cuda_mod = _cuda_mod
     except Exception:
-        cuda_mod = None
+        _STATE.cuda_mod = None
     try:
         from torch.utils._python_dispatch import TorchDispatchMode as _TDM
 
-        TorchDispatchMode = _TDM
+        _STATE.torch_dispatch_mode = _TDM
     except Exception:
-        TorchDispatchMode = None
+        _STATE.torch_dispatch_mode = None
     try:
         from torch.optim import Optimizer as _Opt
 
-        Optimizer = _Opt
+        _STATE.optimizer = _Opt
     except Exception:
-        Optimizer = None
+        _STATE.optimizer = None
     try:
         from torch.autograd import Function as _Fn
 
-        Function = _Fn
+        _STATE.function = _Fn
     except Exception:
-        Function = None
+        _STATE.function = None
     try:
         from torch import nn as _nn_mod
 
-        nn = _nn_mod
+        _STATE.nn = _nn_mod
     except Exception:
-        nn = None
+        _STATE.nn = None
     try:
         from . import torch_cpp_loader as _loader_mod
         from .torch_cpp_loader import load as _loader_fn
 
-        _roctx_loader_module = _loader_mod
-        _load_roctx_recordfn = _loader_fn
+        _STATE.loader_module = _loader_mod
+        _STATE.load_roctx_recordfn = _loader_fn
     except Exception as exc:
         console_warning(
             "ml api trace",
