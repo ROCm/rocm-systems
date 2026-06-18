@@ -255,6 +255,7 @@ static const uint32_t TaCounterBlockNumInstances            = 2;
 static const uint32_t TcpCounterBlockNumInstances           = 2;
 static const uint32_t TdCounterBlockNumInstances            = 2;
 static const uint32_t Utcl1CounterBlockNumInstances         = 6;
+static const uint32_t SpCounterBlockNumInstances            = 1;
 
 // Number of block counter registers - Auto-generated from chip_offset_byte.h, edit with extra
 // caution Reference: chip_offset_byte.h (from gfxip header file package)
@@ -293,6 +294,7 @@ static const uint32_t TaCounterBlockNumCounters            = 2;
 static const uint32_t TcpCounterBlockNumCounters           = 8;
 static const uint32_t TdCounterBlockNumCounters            = 2;
 static const uint32_t Utcl1CounterBlockNumCounters         = 4;
+static const uint32_t SpCounterBlockNumCounters            = 4;
 
 // Block counters max event value - Auto-generated from chip_enum.h, edit with extra caution
 // Reference: chip_enum.h (from gfxip header file package)
@@ -326,6 +328,7 @@ static const uint32_t TaCounterBlockMaxEvent            = 254;
 static const uint32_t TcpCounterBlockMaxEvent           = 352;
 static const uint32_t TdCounterBlockMaxEvent            = 271;
 static const uint32_t Utcl1CounterBlockMaxEvent         = 66;
+static const uint32_t SpCounterBlockMaxEvent            = 1023;
 static const uint32_t GcAtcl2CounterBlockMaxEvent       = 77;
 static const uint32_t Gcutcl2FfbmCounterBlockMaxEvent   = 24;
 static const uint32_t Gcutcl2NhttlbCounterBlockMaxEvent = 28;

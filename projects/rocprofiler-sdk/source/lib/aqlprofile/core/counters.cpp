@@ -83,7 +83,8 @@ HandleSQFlagsBlock(Pm4Factory* pm4_factory, const aqlprofile_pmc_event_t& event)
 counter_des_t
 GetCounter(Pm4Factory*                                    pm4_factory,
            EventRequest&                                  event,
-           std::map<block_des_t, uint32_t, lt_block_des>& index_map)
+           std::map<block_des_t, uint32_t, lt_block_des>& index_map,
+           int                                            num_sp_events)
 {
     const GpuBlockInfo* block_info = pm4_factory->GetBlockInfo(event.block_name);
     const block_des_t   block_des  = {block_info->id, event.block_index};
@@ -97,12 +98,9 @@ GetCounter(Pm4Factory*                                    pm4_factory,
         return {visible_id, reg_index, block_des, block_info};
     }
 
-    if(reg_index >= block_info->counter_count)
-        throw std::string("Event is out of block counter registers number limit");
-
     if(event.flags.raw != 0u)
     {
-        if(event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ)
+        if(event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ && reg_index < num_sp_events)
         {
             visible_id = HandleSQFlagsBlock(pm4_factory, event);
         }
@@ -111,6 +109,17 @@ GetCounter(Pm4Factory*                                    pm4_factory,
             throw HSA_STATUS_ERROR_INVALID_ARGUMENT;  // NOLINT(misc-throw-by-value-catch-by-reference)
         }
     }
+
+    if(event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ)
+    {
+        if(reg_index < num_sp_events)
+            reg_index = 2 * reg_index + 1;
+        else
+            reg_index += num_sp_events;
+    }
+
+    if(reg_index >= block_info->counter_count)
+        throw std::runtime_error("Event is out of block counter registers number limit");
 
     ret.first->second++;
     return {visible_id, reg_index, block_des, block_info};
@@ -122,14 +131,18 @@ CountersVec(std::vector<EventRequest>& events, Pm4Factory* pm4_factory)
     pm4_builder::counters_vector                  vec;
     std::map<block_des_t, uint32_t, lt_block_des> index_map;
 
+    int num_sp_events = 0;
     for(auto& event : events)
-        vec.push_back(GetCounter(pm4_factory, event, index_map));
+        num_sp_events += int(event.block_name) == AQLPROFILE_BLOCK_NAME_SP;
+
+    for(auto& event : events)
+        vec.push_back(GetCounter(pm4_factory, event, index_map, num_sp_events));
 
     if(pm4_factory->IsGFX10() && (vec.get_attr() & CounterBlockGRBMAttr) == 0)
     {
         EventRequest grbm_event{0};
         grbm_event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM;
-        vec.push_back(GetCounter(pm4_factory, grbm_event, index_map));
+        vec.push_back(GetCounter(pm4_factory, grbm_event, index_map, 0));
     }
     return vec;
 }

@@ -128,6 +128,7 @@ Mi450Factory::ConstructTable(const AgentInfo* agent_info)
     // SA blocks
     // WGP blocks
     block_table_[__BLOCK_ID_HSA(SQ)]  = &SqcCounterBlockInfo;
+    block_table_[__BLOCK_ID(SP)]      = &SpCounterBlockInfo;
     block_table_[__BLOCK_ID_HSA(TCP)] = &TcpCounterBlockInfo;
 }
 
