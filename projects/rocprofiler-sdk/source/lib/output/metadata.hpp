@@ -49,6 +49,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -154,29 +155,30 @@ struct metadata
     agent_counter_info_map_t          agent_counter_info          = {};
     agent_pc_sample_config_info_map_t agent_pc_sample_config_info = {};
 
-    sdk::buffer_name_info                    buffer_names               = {};
-    sdk::callback_name_info                  callback_names             = {};
-    synced_map<code_object_data_map_t>       code_objects               = {};
-    synced_map<kernel_symbol_data_map_t>     kernel_symbols             = {};
-    synced_map<marker_message_map_t>         marker_messages            = {};
-    synced_map<string_entry_map_t>           string_entries             = {};
-    synced_map<external_corr_id_set_t>       external_corr_ids          = {};
-    synced_map<host_function_info_map_t>     host_functions             = {};
-    synced_map<code_object_load_info_vec_t>  code_object_load           = {};
-    synced_map<kernel_rename_map_t>          kernel_rename_map          = {};
-    att_filenames_map_t                      att_filenames              = {};
-    synced_obj<pc_sampling_stats_t>          pc_sampling_stats          = {};
-    synced_obj<runtime_initialization_set_t> runtime_initialization_set = {};
-    node_info                                node_data                  = {};
-    std::vector<std::string>                 command_line               = {};
+    sdk::buffer_name_info                             buffer_names               = {};
+    sdk::callback_name_info                           callback_names             = {};
+    synced_map<code_object_data_map_t>                code_objects               = {};
+    synced_map<kernel_symbol_data_map_t>              kernel_symbols             = {};
+    synced_map<marker_message_map_t>                  marker_messages            = {};
+    synced_map<std::unordered_map<uint64_t, int32_t>> event_depths               = {};
+    synced_map<string_entry_map_t>                    string_entries             = {};
+    synced_map<external_corr_id_set_t>                external_corr_ids          = {};
+    synced_map<host_function_info_map_t>              host_functions             = {};
+    synced_map<code_object_load_info_vec_t>           code_object_load           = {};
+    synced_map<kernel_rename_map_t>                   kernel_rename_map          = {};
+    att_filenames_map_t                               att_filenames              = {};
+    synced_obj<pc_sampling_stats_t>                   pc_sampling_stats          = {};
+    synced_obj<runtime_initialization_set_t>          runtime_initialization_set = {};
+    node_info                                         node_data                  = {};
+    std::vector<std::string>                          command_line               = {};
 
     metadata() = default;
     metadata(inprocess);
 
-    ~metadata()                   = default;
-    metadata(const metadata&)     = delete;
-    metadata(metadata&&) noexcept = delete;
-    metadata& operator=(const metadata&) = delete;
+    ~metadata()                              = default;
+    metadata(const metadata&)                = delete;
+    metadata(metadata&&) noexcept            = delete;
+    metadata& operator=(const metadata&)     = delete;
     metadata& operator=(metadata&&) noexcept = delete;
 
     // Loads all counters supported on agents. Used by the 'rocprofv3-avail' tool.
@@ -214,12 +216,14 @@ struct metadata
     template <typename Tp>
     Tp get_marker_messages(Tp&&);
 
-    bool     add_marker_message(uint64_t corr_id, std::string&& msg);
-    bool     add_code_object(code_object_info obj);
-    bool     add_kernel_symbol(kernel_symbol_info&& sym);
-    bool     add_host_function(host_function_info&& func);
-    bool     add_string_entry(size_t key, std::string_view str);
-    bool     add_external_correlation_id(uint64_t);
+    bool                   add_marker_message(uint64_t corr_id, std::string&& msg);
+    void                   add_event_depth(uint64_t corr_id, int32_t depth);
+    std::optional<int32_t> get_event_depth(uint64_t corr_id) const;
+    bool                   add_code_object(code_object_info obj);
+    bool                   add_kernel_symbol(kernel_symbol_info&& sym);
+    bool                   add_host_function(host_function_info&& func);
+    bool                   add_string_entry(size_t key, std::string_view str);
+    bool                   add_external_correlation_id(uint64_t);
     bool     add_runtime_initialization(rocprofiler_runtime_initialization_operation_t);
     uint64_t add_kernel_rename_val(std::string_view, uint64_t);
 

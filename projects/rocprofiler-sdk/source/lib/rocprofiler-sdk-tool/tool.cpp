@@ -77,6 +77,7 @@
 #include <rocprofiler-sdk/version.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
+#include "lib/rocprofiler-sdk/marker/range_marker.hpp"
 
 #include <fmt/core.h>
 
@@ -108,7 +109,8 @@
 #include <sys/wait.h>
 
 #if defined(CODECOV) && CODECOV > 0
-extern "C" {
+extern "C"
+{
 extern void
 __gcov_dump(void);
 }
@@ -118,7 +120,8 @@ namespace common = ::rocprofiler::common;
 namespace tool   = ::rocprofiler::tool;
 namespace fs     = ::rocprofiler::common::filesystem;
 
-extern "C" {
+extern "C"
+{
 void
 rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 }
@@ -491,6 +494,10 @@ set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
                                             rocprofiler_user_data_t* external_corr_id,
                                             void*                    user_data)
 {
+    if(tool_metadata)
+        tool_metadata->add_event_depth(internal_corr_id,
+                                       rocprofiler::marker::get_roctx_thread_depth());
+
     // Check whether services are enabled
     const bool kernel_rename_service_enabled =
         kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH &&
@@ -739,6 +746,11 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 user_data->value = ts;
 
+                // stack not yet pushed at PHASE_ENTER; +1 gives depth-of-self
+                CHECK_NOTNULL(tool_metadata)
+                    ->add_event_depth(record.correlation_id.internal,
+                                      rocprofiler::marker::get_roctx_thread_depth() + 1);
+
                 if(marker_data->args.roctxThreadRangeA.message)
                 {
                     CHECK_NOTNULL(tool_metadata)
@@ -766,6 +778,11 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
             if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
             {
                 user_data->value = ts;
+
+                // stack not yet pushed at PHASE_ENTER; +1 gives depth-of-self
+                CHECK_NOTNULL(tool_metadata)
+                    ->add_event_depth(record.correlation_id.internal,
+                                      rocprofiler::marker::get_roctx_thread_depth() + 1);
 
                 if(marker_data->args.roctxProcessRangeA.message)
                 {
@@ -2973,7 +2990,8 @@ wait_pid(pid_t _pid, int _opts = 0)
     return _status;
 }
 
-extern "C" {
+extern "C"
+{
 void
 rocprofv3_set_main(main_func_t main_func) ROCPROFV3_INTERNAL_API;
 

@@ -116,6 +116,12 @@ get_range_process_stack()
 }
 }  // namespace
 
+int32_t
+get_roctx_thread_depth()
+{
+    return static_cast<int32_t>(get_range_thread_stack().size());
+}
+
 template <size_t TableIdx, size_t OpIdx>
 template <typename DataArgsT, typename... Args>
 auto

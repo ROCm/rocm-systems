@@ -292,6 +292,7 @@ CREATE TABLE IF NOT EXISTS
         "category_id" INTEGER,
         "stack_id" INTEGER,
         "parent_stack_id" INTEGER,
+        "stack_depth" INTEGER,
         "correlation_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (category_id) REFERENCES `rocpd_info_category{{uuid}}` (id) ON UPDATE CASCADE
@@ -452,6 +453,7 @@ CREATE TABLE IF NOT EXISTS
         "name_id" INTEGER NOT NULL,
         "address" INTEGER,
         "size" INTEGER NOT NULL,
+        "running_total_bytes" INTEGER,
         "region_name_id" INTEGER,
         "event_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,

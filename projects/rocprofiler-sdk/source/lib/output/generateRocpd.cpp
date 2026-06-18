@@ -241,18 +241,12 @@ read_file(rocpd_sql_engine_t                        engine,
     *static_cast<std::string*>(user_data) = replace_placeholders(schema_content);
 }
 
-rocpd_version_triplet_t
-get_schema_version()
-{
-    return rocpd_version_triplet_t{4, 1, 0};
-}
-
 std::string
 read_schema_file(rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables     = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options       = ROCPD_SQL_OPTIONS_NONE;
-    auto _version       = get_schema_version();  // default schema version
+    auto _version       = rocpd_version_triplet_t{4, 0, 0};  // default schema version
     auto _schema_result = std::string{};
 
     _variables.uuid = get_uuid().c_str();
@@ -519,8 +513,8 @@ namespace
 {
 #define GENERATE_FIELD_ACCESSOR(FUNC_NAME, FIELD_NAME, DATA_TYPE)                                  \
     template <typename Tp, typename Up = Tp>                                                       \
-    auto FUNC_NAME(const Tp& _data, int)                                                           \
-        ->decltype(std::declval<Up>().FIELD_NAME, std::optional<DATA_TYPE>{})                      \
+    auto FUNC_NAME(const Tp& _data, int) -> decltype(std::declval<Up>().FIELD_NAME,                \
+                                                     std::optional<DATA_TYPE>{})                   \
     {                                                                                              \
         return _data.FIELD_NAME;                                                                   \
     }                                                                                              \
@@ -615,16 +609,6 @@ write_rocpd(
         SQLITE3_CHECK(sqlite3_open_v2(
             output_file.c_str(), &conn, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr));
         SQLITE3_CHECK(sqlite3_busy_handler(conn, &sql::busy_handler, nullptr));
-
-        {
-            auto sv = get_schema_version();
-            if(sv.major == 4 && sv.minor >= 1)
-            {
-                // v4.1+: exclusive locking (must precede first transaction) and FK enforcement off
-                execute_raw_sql_statements(conn, "PRAGMA locking_mode = EXCLUSIVE;");
-                execute_raw_sql_statements(conn, "PRAGMA foreign_keys = OFF;");
-            }
-        }
 
         ROCP_ERROR << fmt::format("Opened result file: {} (UUID={})", output_file, uuid_v7);
 
@@ -1094,13 +1078,15 @@ write_rocpd(
                                  ? tool_metadata.get_kernel_symbol(kernel_id)->formatted_kernel_name
                                  : "unknown_kernel";
 
-            auto evt_id = create_event(conn,
-                                       {
-                                           insert_value("category_id", category_ids.at(kind)),
-                                           insert_value("stack_id", corr_id.internal),
-                                           insert_value("parent_stack_id", corr_id.internal),
-                                           insert_value("correlation_id", corr_id.external.value),
-                                       });
+            auto evt_id = create_event(
+                conn,
+                {
+                    insert_value("category_id", category_ids.at(kind)),
+                    insert_value("stack_id", corr_id.internal),
+                    insert_value("parent_stack_id", corr_id.internal),
+                    insert_value("stack_depth", tool_metadata.get_event_depth(corr_id.internal)),
+                    insert_value("correlation_id", corr_id.external.value),
+                });
 
             // Ensure dispatch_evt_ids is large enough
             if(dispatch_evt_ids.size() < dispatch_id + 1)
@@ -1142,57 +1128,30 @@ write_rocpd(
                                  .extdata   = std::nullopt,
                              });
 
+            auto start_id = get_timestamp_id(conn, start_timestamp, phase_enter, track_id);
+            auto end_id   = get_timestamp_id(conn, end_timestamp, phase_exit, track_id);
+
             // Insert into kernel dispatch table
-            auto                sv_kd = get_schema_version();
-            sql::bind_statement stmt;
-            if(sv_kd.major == 4 && sv_kd.minor >= 1)
-            {
-                stmt = get_insert_statement(
-                    "rocpd_kernel_dispatch{{uuid}}",
-                    {
-                        insert_value("id", dispatch_id),
-                        insert_value("track_id", track_id),
-                        insert_value("kernel_id", kernel_id),
-                        insert_value("dispatch_id", dispatch_id),
-                        insert_value("start", start_timestamp),
-                        insert_value("end", end_timestamp),
-                        insert_value("private_segment_size", info.private_segment_size),
-                        insert_value("group_segment_size", info.group_segment_size),
-                        insert_value("workgroup_size_x", workgroup.x),
-                        insert_value("workgroup_size_y", workgroup.y),
-                        insert_value("workgroup_size_z", workgroup.z),
-                        insert_value("grid_size_x", grid.x),
-                        insert_value("grid_size_y", grid.y),
-                        insert_value("grid_size_z", grid.z),
-                        insert_value("region_name_id", string_entries.at(region_name)),
-                        insert_value("event_id", evt_id),
-                    });
-            }
-            else
-            {
-                auto start_id = get_timestamp_id(conn, start_timestamp, phase_enter, track_id);
-                auto end_id   = get_timestamp_id(conn, end_timestamp, phase_exit, track_id);
-                stmt          = get_insert_statement(
-                    "rocpd_kernel_dispatch{{uuid}}",
-                    {
-                        insert_value("id", dispatch_id),
-                        insert_value("track_id", track_id),
-                        insert_value("kernel_id", kernel_id),
-                        insert_value("dispatch_id", dispatch_id),
-                        insert_value("start_id", start_id),
-                        insert_value("end_id", end_id),
-                        insert_value("private_segment_size", info.private_segment_size),
-                        insert_value("group_segment_size", info.group_segment_size),
-                        insert_value("workgroup_size_x", workgroup.x),
-                        insert_value("workgroup_size_y", workgroup.y),
-                        insert_value("workgroup_size_z", workgroup.z),
-                        insert_value("grid_size_x", grid.x),
-                        insert_value("grid_size_y", grid.y),
-                        insert_value("grid_size_z", grid.z),
-                        insert_value("region_name_id", string_entries.at(region_name)),
-                        insert_value("event_id", evt_id),
-                    });
-            }
+            auto stmt = get_insert_statement(
+                "rocpd_kernel_dispatch{{uuid}}",
+                {
+                    insert_value("id", dispatch_id),
+                    insert_value("track_id", track_id),
+                    insert_value("kernel_id", kernel_id),
+                    insert_value("dispatch_id", dispatch_id),
+                    insert_value("start_id", start_id),
+                    insert_value("end_id", end_id),
+                    insert_value("private_segment_size", info.private_segment_size),
+                    insert_value("group_segment_size", info.group_segment_size),
+                    insert_value("workgroup_size_x", workgroup.x),
+                    insert_value("workgroup_size_y", workgroup.y),
+                    insert_value("workgroup_size_z", workgroup.z),
+                    insert_value("grid_size_x", grid.x),
+                    insert_value("grid_size_y", grid.y),
+                    insert_value("grid_size_z", grid.z),
+                    insert_value("region_name_id", string_entries.at(region_name)),
+                    insert_value("event_id", evt_id),
+                });
 
             execute_raw_sql_statements(conn, stmt);
         };
@@ -1296,96 +1255,76 @@ write_rocpd(
         }
     };
 
-    auto insert_memory_copy_data =
-        [&conn, &tool_metadata, &category_ids, &string_entries, node_id, this_ppid, this_pid](
-            const auto& _gen) {
-            auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_copy");
-            size_t copy_idx          = 1;
+    auto insert_memory_copy_data = [&conn,
+                                    &tool_metadata,
+                                    &category_ids,
+                                    &string_entries,
+                                    node_id,
+                                    this_ppid,
+                                    this_pid](const auto& _gen) {
+        auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_copy");
+        size_t copy_idx          = 1;
 
-            for(auto pitr : _gen)
+        for(auto pitr : _gen)
+        {
+            auto _deferred = sql::deferred_transaction{conn};
+            for(auto itr : _gen.get(pitr))
             {
-                auto _deferred = sql::deferred_transaction{conn};
-                for(auto itr : _gen.get(pitr))
-                {
-                    // insert thread info if it doesn't already exist
-                    get_thread_id(itr.thread_id);
+                // insert thread info if it doesn't already exist
+                get_thread_id(itr.thread_id);
 
-                    auto name = tool_metadata.buffer_names.at(itr.kind, itr.operation);
+                auto name = tool_metadata.buffer_names.at(itr.kind, itr.operation);
 
-                    auto evt_id = create_event(
-                        conn,
-                        {
-                            insert_value("category_id", category_ids.at(itr.kind)),
-                            insert_value("stack_id", itr.correlation_id.internal),
-                            insert_value("parent_stack_id", itr.correlation_id.internal),
-                            insert_value("correlation_id", itr.correlation_id.external.value),
-                        });
-
-                    auto track_id = get_track_id(
-                        conn,
-                        track_data{
-                            .nid       = node_id,
-                            .ppid      = this_ppid,
-                            .pid       = this_pid,
-                            .tid       = itr.thread_id,
-                            .agent_id  = tool_metadata.get_agent(itr.dst_agent_id)->node_id,
-                            .queue_id  = std::nullopt,
-                            .stream_id = get_stream_id(itr.stream_id),
-                            .name_id   = std::nullopt,
-                            .extdata   = std::nullopt,
-                        });
-
-                    auto                sv_mc = get_schema_version();
-                    sql::bind_statement mc_stmt;
-                    if(sv_mc.major == 4 && sv_mc.minor >= 1)
+                auto evt_id = create_event(
+                    conn,
                     {
-                        mc_stmt = get_insert_statement(
-                            "rocpd_memory_copy{{uuid}}",
-                            {
-                                insert_value("id", copy_idx++),
-                                insert_value("track_id", track_id),
-                                insert_value("start", itr.start_timestamp),
-                                insert_value("end", itr.end_timestamp),
-                                insert_value("name_id", string_entries.at(name)),
-                                insert_value("dst_agent_id",
-                                             tool_metadata.get_agent(itr.dst_agent_id)->node_id),
-                                insert_value("src_agent_id",
-                                             tool_metadata.get_agent(itr.src_agent_id)->node_id),
-                                insert_value("dst_address", itr.dst_address.value),
-                                insert_value("src_address", itr.src_address.value),
-                                insert_value("size", itr.bytes),
-                                insert_value("event_id", evt_id),
-                            });
-                    }
-                    else
-                    {
-                        auto start_id =
-                            get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
-                        auto end_id =
-                            get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
-                        mc_stmt = get_insert_statement(
-                            "rocpd_memory_copy{{uuid}}",
-                            {
-                                insert_value("id", copy_idx++),
-                                insert_value("track_id", track_id),
-                                insert_value("start_id", start_id),
-                                insert_value("end_id", end_id),
-                                insert_value("name_id", string_entries.at(name)),
-                                insert_value("dst_agent_id",
-                                             tool_metadata.get_agent(itr.dst_agent_id)->node_id),
-                                insert_value("src_agent_id",
-                                             tool_metadata.get_agent(itr.src_agent_id)->node_id),
-                                insert_value("dst_address", itr.dst_address.value),
-                                insert_value("src_address", itr.src_address.value),
-                                insert_value("size", itr.bytes),
-                                insert_value("event_id", evt_id),
-                            });
-                    }
+                        insert_value("category_id", category_ids.at(itr.kind)),
+                        insert_value("stack_id", itr.correlation_id.internal),
+                        insert_value("parent_stack_id", itr.correlation_id.internal),
+                        insert_value("stack_depth",
+                                     tool_metadata.get_event_depth(itr.correlation_id.internal)),
+                        insert_value("correlation_id", itr.correlation_id.external.value),
+                    });
 
-                    execute_raw_sql_statements(conn, mc_stmt);
-                }
+                auto track_id =
+                    get_track_id(conn,
+                                 track_data{
+                                     .nid      = node_id,
+                                     .ppid     = this_ppid,
+                                     .pid      = this_pid,
+                                     .tid      = itr.thread_id,
+                                     .agent_id = tool_metadata.get_agent(itr.dst_agent_id)->node_id,
+                                     .queue_id = std::nullopt,
+                                     .stream_id = get_stream_id(itr.stream_id),
+                                     .name_id   = std::nullopt,
+                                     .extdata   = std::nullopt,
+                                 });
+
+                auto start_id = get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
+                auto end_id   = get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
+
+                auto stmt = get_insert_statement(
+                    "rocpd_memory_copy{{uuid}}",
+                    {
+                        insert_value("id", copy_idx++),
+                        insert_value("track_id", track_id),
+                        insert_value("start_id", start_id),
+                        insert_value("end_id", end_id),
+                        insert_value("name_id", string_entries.at(name)),
+                        insert_value("dst_agent_id",
+                                     tool_metadata.get_agent(itr.dst_agent_id)->node_id),
+                        insert_value("src_agent_id",
+                                     tool_metadata.get_agent(itr.src_agent_id)->node_id),
+                        insert_value("dst_address", itr.dst_address.value),
+                        insert_value("src_address", itr.src_address.value),
+                        insert_value("size", itr.bytes),
+                        insert_value("event_id", evt_id),
+                    });
+
+                execute_raw_sql_statements(conn, stmt);
             }
-        };
+        }
+    };
 
     auto insert_memory_alloc_data = [&conn,
                                      &tool_metadata,
@@ -1396,6 +1335,7 @@ write_rocpd(
                                      this_pid](const auto& _gen) {
         auto address_to_agent_and_size =
             std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
+        auto memory_running_total = std::unordered_map<uint64_t, int64_t>{};
 
         for(auto pitr : _gen)
         {
@@ -1550,12 +1490,25 @@ write_rocpd(
                     ROCP_CI_LOG(WARNING) << "unhandled memory allocation type " << _type;
                 }
 
+                auto _running_total = std::optional<int64_t>{};
+                if(_node_id && _allocation_size)
+                {
+                    auto& acc = memory_running_total[*_node_id];
+                    if(_type == "ALLOC" || _type == "RECLAIM")
+                        acc += static_cast<int64_t>(*_allocation_size);
+                    else if(_type == "FREE")
+                        acc -= static_cast<int64_t>(*_allocation_size);
+                    _running_total = acc;
+                }
+
                 auto evt_id = create_event(
                     conn,
                     {
                         insert_value("category_id", category_ids.at(itr.kind)),
                         insert_value("stack_id", itr.correlation_id.internal),
                         insert_value("parent_stack_id", itr.correlation_id.ancestor),
+                        insert_value("stack_depth",
+                                     tool_metadata.get_event_depth(itr.correlation_id.internal)),
                         insert_value("correlation_id", itr.correlation_id.external.value),
                     });
 
@@ -1572,185 +1525,151 @@ write_rocpd(
                                                  .extdata   = std::nullopt,
                                              });
 
-                auto                sv_ma = get_schema_version();
-                sql::bind_statement ma_stmt;
-                if(sv_ma.major == 4 && sv_ma.minor >= 1)
-                {
-                    ma_stmt =
-                        get_insert_statement("rocpd_memory_allocate{{uuid}}",
-                                             {
-                                                 insert_value("track_id", track_id),
-                                                 insert_value("start", itr.start_timestamp),
-                                                 insert_value("end", itr.end_timestamp),
-                                                 insert_value("name_id", string_entries.at(_name)),
-                                                 insert_value("type", _type),
-                                                 insert_value("level", _level),
-                                                 insert_value("event_id", evt_id),
-                                                 insert_value("address", _address_value),
-                                                 insert_value("size", _allocation_size),
-                                                 insert_value("extdata", _extdata),
-                                             });
-                }
-                else
-                {
-                    auto start_id =
-                        get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
-                    auto end_id = get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
-                    ma_stmt =
-                        get_insert_statement("rocpd_memory_allocate{{uuid}}",
-                                             {
-                                                 insert_value("track_id", track_id),
-                                                 insert_value("start_id", start_id),
-                                                 insert_value("end_id", end_id),
-                                                 insert_value("name_id", string_entries.at(_name)),
-                                                 insert_value("type", _type),
-                                                 insert_value("level", _level),
-                                                 insert_value("event_id", evt_id),
-                                                 insert_value("address", _address_value),
-                                                 insert_value("size", _allocation_size),
-                                                 insert_value("extdata", _extdata),
-                                             });
-                }
+                auto start_id = get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
+                auto end_id   = get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
 
-                execute_raw_sql_statements(conn, ma_stmt);
+                auto stmt =
+                    get_insert_statement("rocpd_memory_allocate{{uuid}}",
+                                         {
+                                             insert_value("track_id", track_id),
+                                             insert_value("start_id", start_id),
+                                             insert_value("end_id", end_id),
+                                             insert_value("name_id", string_entries.at(_name)),
+                                             insert_value("type", _type),
+                                             insert_value("level", _level),
+                                             insert_value("event_id", evt_id),
+                                             insert_value("address", _address_value),
+                                             insert_value("size", _allocation_size),
+                                             insert_value("running_total_bytes", _running_total),
+                                             insert_value("extdata", _extdata),
+                                         });
+
+                execute_raw_sql_statements(conn, stmt);
             }
         }
     };
 
     // new string entries argument types and names can be added to _metadata
-    auto insert_api_data =
-        [&conn, &tool_metadata, &category_ids, &string_entries, node_id, this_ppid, this_pid](
-            const auto& _gen) {
-            for(auto pitr : _gen)
+    auto insert_api_data = [&conn,
+                            &tool_metadata,
+                            &category_ids,
+                            &string_entries,
+                            node_id,
+                            this_ppid,
+                            this_pid](const auto& _gen) {
+        for(auto pitr : _gen)
+        {
+            auto _deferred = sql::deferred_transaction{conn};
+
+            for(auto itr : _gen.get(pitr))
             {
-                auto _deferred = sql::deferred_transaction{conn};
+                auto name = tool_metadata.buffer_names.at(itr.kind, itr.operation);
 
-                for(auto itr : _gen.get(pitr))
+                auto msg = std::string{"{}"};
+                if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API)
                 {
-                    auto name = tool_metadata.buffer_names.at(itr.kind, itr.operation);
-
-                    auto msg = std::string{"{}"};
-                    if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API)
+                    if(static_cast<rocprofiler_tracing_operation_t>(itr.operation) !=
+                       ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxGetThreadId)
                     {
-                        if(static_cast<rocprofiler_tracing_operation_t>(itr.operation) !=
-                           ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxGetThreadId)
-                        {
-                            // check generatePerfetto.cpp and generateOTF2.cpp, and the marker name
-                            // in the view
-                            auto message =
-                                tool_metadata.get_marker_message(itr.correlation_id.internal);
-                            if(!message.empty())
-                            {
-                                msg = get_json_string(
-                                    [](auto& ar, std::string_view _msg) {
-                                        ar(cereal::make_nvp("message", std::string{_msg}));
-                                    },
-                                    name);
-                                name = message;
-                            }
-                        }
-                        else
+                        // check generatePerfetto.cpp and generateOTF2.cpp, and the marker name
+                        // in the view
+                        auto message =
+                            tool_metadata.get_marker_message(itr.correlation_id.internal);
+                        if(!message.empty())
                         {
                             msg = get_json_string(
                                 [](auto& ar, std::string_view _msg) {
                                     ar(cereal::make_nvp("message", std::string{_msg}));
                                 },
                                 name);
+                            name = message;
                         }
-                    }
-
-                    auto args = function_args_t{};
-                    {
-                        auto _record = rocprofiler_record_header_t{
-                            .hash = rocprofiler_record_header_compute_hash(
-                                ROCPROFILER_BUFFER_CATEGORY_TRACING, itr.kind),
-                            .payload = &itr};
-
-                        rocprofiler_iterate_buffer_tracing_record_args(
-                            _record, iterate_args_callback, &args);
-                    }
-
-                    // insert thread info if it doesn't already exist
-                    get_thread_id(itr.thread_id);
-
-                    auto evt_id = create_event(
-                        conn,
-                        {
-                            insert_value("category_id", category_ids.at(itr.kind)),
-                            insert_value("stack_id", itr.correlation_id.internal),
-                            insert_value("parent_stack_id", itr.correlation_id.ancestor),
-                            insert_value("correlation_id", itr.correlation_id.external.value),
-                            insert_value("extdata", msg),
-                        });
-
-                    // insert arguments into rocpd_arg table
-                    for(const auto& arg_info : args)
-                    {
-                        auto demangled_type = common::cxx_demangle(arg_info.arg_type);
-
-                        auto args_stmt =
-                            get_insert_statement("rocpd_arg{{uuid}}",
-                                                 {
-                                                     insert_value("event_id", evt_id),
-                                                     insert_value("position", arg_info.arg_number),
-                                                     insert_value("type", demangled_type),
-                                                     insert_value("name", arg_info.arg_name),
-                                                     insert_value("value", arg_info.arg_value),
-                                                 });
-
-                        execute_raw_sql_statements(conn, args_stmt);
-                    }
-
-                    auto track_id = get_track_id(conn,
-                                                 track_data{
-                                                     .nid       = node_id,
-                                                     .ppid      = this_ppid,
-                                                     .pid       = this_pid,
-                                                     .tid       = itr.thread_id,
-                                                     .agent_id  = std::nullopt,
-                                                     .queue_id  = std::nullopt,
-                                                     .stream_id = std::nullopt,
-                                                     .name_id   = std::nullopt,
-                                                     .extdata   = std::nullopt,
-                                                 });
-
-                    auto                sv_rg = get_schema_version();
-                    sql::bind_statement region_stmt;
-                    if(sv_rg.major == 4 && sv_rg.minor >= 1)
-                    {
-                        region_stmt = get_insert_statement(
-                            "rocpd_region{{uuid}}",
-                            {
-                                insert_value("id", itr.correlation_id.internal),
-                                insert_value("track_id", track_id),
-                                insert_value("name_id", string_entries.at(name)),
-                                insert_value("start", itr.start_timestamp),
-                                insert_value("end", itr.end_timestamp),
-                                insert_value("event_id", evt_id),
-                            });
                     }
                     else
                     {
-                        auto start_id =
-                            get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
-                        auto end_id =
-                            get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
-                        region_stmt = get_insert_statement(
-                            "rocpd_region{{uuid}}",
-                            {
-                                insert_value("id", itr.correlation_id.internal),
-                                insert_value("track_id", track_id),
-                                insert_value("name_id", string_entries.at(name)),
-                                insert_value("start_id", start_id),
-                                insert_value("end_id", end_id),
-                                insert_value("event_id", evt_id),
-                            });
+                        msg = get_json_string(
+                            [](auto& ar, std::string_view _msg) {
+                                ar(cereal::make_nvp("message", std::string{_msg}));
+                            },
+                            name);
                     }
-
-                    execute_raw_sql_statements(conn, region_stmt);
                 }
+
+                auto args = function_args_t{};
+                {
+                    auto _record = rocprofiler_record_header_t{
+                        .hash = rocprofiler_record_header_compute_hash(
+                            ROCPROFILER_BUFFER_CATEGORY_TRACING, itr.kind),
+                        .payload = &itr};
+
+                    rocprofiler_iterate_buffer_tracing_record_args(
+                        _record, iterate_args_callback, &args);
+                }
+
+                // insert thread info if it doesn't already exist
+                get_thread_id(itr.thread_id);
+
+                auto evt_id = create_event(
+                    conn,
+                    {
+                        insert_value("category_id", category_ids.at(itr.kind)),
+                        insert_value("stack_id", itr.correlation_id.internal),
+                        insert_value("parent_stack_id", itr.correlation_id.ancestor),
+                        insert_value("stack_depth",
+                                     tool_metadata.get_event_depth(itr.correlation_id.internal)),
+                        insert_value("correlation_id", itr.correlation_id.external.value),
+                        insert_value("extdata", msg),
+                    });
+
+                // insert arguments into rocpd_arg table
+                for(const auto& arg_info : args)
+                {
+                    auto demangled_type = common::cxx_demangle(arg_info.arg_type);
+
+                    auto args_stmt =
+                        get_insert_statement("rocpd_arg{{uuid}}",
+                                             {
+                                                 insert_value("event_id", evt_id),
+                                                 insert_value("position", arg_info.arg_number),
+                                                 insert_value("type", demangled_type),
+                                                 insert_value("name", arg_info.arg_name),
+                                                 insert_value("value", arg_info.arg_value),
+                                             });
+
+                    execute_raw_sql_statements(conn, args_stmt);
+                }
+
+                auto track_id = get_track_id(conn,
+                                             track_data{
+                                                 .nid       = node_id,
+                                                 .ppid      = this_ppid,
+                                                 .pid       = this_pid,
+                                                 .tid       = itr.thread_id,
+                                                 .agent_id  = std::nullopt,
+                                                 .queue_id  = std::nullopt,
+                                                 .stream_id = std::nullopt,
+                                                 .name_id   = std::nullopt,
+                                                 .extdata   = std::nullopt,
+                                             });
+
+                auto start_id = get_timestamp_id(conn, itr.start_timestamp, phase_enter, track_id);
+                auto end_id   = get_timestamp_id(conn, itr.end_timestamp, phase_exit, track_id);
+
+                auto region_stmt =
+                    get_insert_statement("rocpd_region{{uuid}}",
+                                         {
+                                             insert_value("id", itr.correlation_id.internal),
+                                             insert_value("track_id", track_id),
+                                             insert_value("name_id", string_entries.at(name)),
+                                             insert_value("start_id", start_id),
+                                             insert_value("end_id", end_id),
+                                             insert_value("event_id", evt_id),
+                                         });
+
+                execute_raw_sql_statements(conn, region_stmt);
             }
-        };
+        }
+    };
 
     auto dispatch_to_evt_id = common::container::stable_vector<uint64_t, 512>{};
 

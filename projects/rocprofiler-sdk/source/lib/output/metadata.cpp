@@ -49,6 +49,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -259,7 +260,8 @@ metadata::metadata(inprocess)
  * For each non-CPU agent, this function calls `process_agent_counters` with a null filter,
  * ensuring that all counters supported by that agent are queried and stored in metadata.
  */
-void metadata::init(inprocess)
+void
+metadata::init(inprocess)
 {
     if(inprocess_init) return;
     inprocess_init = true;
@@ -605,6 +607,25 @@ metadata::add_marker_message(uint64_t corr_id, std::string&& msg)
         },
         corr_id,
         std::move(msg));
+}
+
+void
+metadata::add_event_depth(uint64_t corr_id, int32_t depth)
+{
+    event_depths.wlock(
+        [](auto& _data, uint64_t _cid, int32_t _d) { _data.emplace(_cid, _d); }, corr_id, depth);
+}
+
+std::optional<int32_t>
+metadata::get_event_depth(uint64_t corr_id) const
+{
+    return event_depths.rlock(
+        [](const auto& _data, uint64_t _cid) -> std::optional<int32_t> {
+            auto itr = _data.find(_cid);
+            if(itr != _data.end()) return itr->second;
+            return std::nullopt;
+        },
+        corr_id);
 }
 
 bool
