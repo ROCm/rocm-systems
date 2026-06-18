@@ -22,6 +22,10 @@
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 
+extern "C" {
+#include "ualoe_lib/ualoe_lib.h"
+}
+
 #include <dirent.h>
 #include <sys/types.h>
 
@@ -55,6 +59,42 @@ namespace amd::smi {
 
 // Constant for KFD context directory prefix
 static constexpr const char* kContextPrefix = "context_";
+
+AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf,
+                                 AMDSmiDrm& drm)
+    : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU),
+      gpu_id_(gpu_id),
+      path_(path),
+      bdf_(bdf),
+      drm_(drm) {
+  populate_ifoe_fabric_bdf_list();
+  if (has_ifoe_related_bdf() && device_has_ualink()) {
+    auto ifoe_bdf_str = get_ifoe_bdf_string();
+    if (auto ualoe_status = ualoe_open(ifoe_bdf_str.c_str(), &ualoe_handle_); ualoe_status != 0) {
+      ualoe_handle_ = (-1);
+    }
+  }
+}
+
+AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm)
+    : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU), gpu_id_(gpu_id), drm_(drm) {
+  if (check_if_drm_is_supported()) this->get_drm_data();
+
+  populate_ifoe_fabric_bdf_list();
+  if (has_ifoe_related_bdf() && device_has_ualink()) {
+    auto ifoe_bdf_str = get_ifoe_bdf_string();
+    if (auto ualoe_status = ualoe_open(ifoe_bdf_str.c_str(), &ualoe_handle_); ualoe_status != 0) {
+      ualoe_handle_ = (-1);
+    }
+  }
+}
+
+AMDSmiGPUDevice::~AMDSmiGPUDevice() {
+  if (ualoe_handle_ != -1) {
+    ualoe_close(ualoe_handle_);
+    ualoe_handle_ = -1;
+  }
+}
 
 uint32_t AMDSmiGPUDevice::get_gpu_id() const { return gpu_id_; }
 
@@ -190,8 +230,12 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     process_info_cache_map.clear();
 
     status_code = rsmi_compute_process_info_get(nullptr, &cache_ptr->num_running_processes);
-    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) ||
-        (cache_ptr->num_running_processes <= 0)) {
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+      return status_code;
+    }
+    if (cache_ptr->num_running_processes <= 0) {
+      compute_process_list.clear();
+      cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
       return status_code;
     }
 
@@ -211,6 +255,8 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     }
 
     if (cache_ptr->num_running_processes <= 0) {
+      compute_process_list.clear();
+      cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
       return rsmi_status_t::RSMI_STATUS_SUCCESS;  // No processes running
     }
 
