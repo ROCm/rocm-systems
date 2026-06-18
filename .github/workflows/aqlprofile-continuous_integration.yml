@@ -82,7 +82,7 @@ jobs:
       run: |
         ln -s -f /usr/bin/git /usr/local/bin/git
 
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/aqlprofile
         set-safe-directory: true
@@ -152,7 +152,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/aqlprofile
         set-safe-directory: true

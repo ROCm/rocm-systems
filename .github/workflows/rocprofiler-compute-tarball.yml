@@ -80,7 +80,7 @@ jobs:
           apt install -y libdw-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.9'
       - name: Python dependency installs
@@ -113,7 +113,7 @@ jobs:
       INSTALL_DIR: /tmp/foo2
     steps:
       - name: Access tarball
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: tarball-testing
       - name: Expand

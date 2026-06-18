@@ -31,7 +31,7 @@ jobs:
           sparse-checkout: projects/rocprofiler-systems
 
       - name: Use markdownlint-cli2
-        uses: DavidAnson/markdownlint-cli2-action@6b51ade7a9e4a75a7ad929842dd298a3804ebe8b # v23.1.0
+        uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23.2.0
         with:
           globs: "projects/rocprofiler-systems/**/*.md"
 
@@ -55,7 +55,7 @@ jobs:
           sed -i "s|docs/\*\*/\*.md|projects/rocprofiler-systems/docs/**/*.md|g" .spellcheck.yaml
 
       - name: Run spellcheck
-        uses: rojopolis/spellcheck-github-actions@e3cd8e9aec4587ec73bc0e60745aafd45c37aa2e # 0.60.0
+        uses: rojopolis/spellcheck-github-actions@ca94733232ec8328061aea8018dfcb4959857eea # 0.61.0
 
       - name: On fail
         if: failure()
