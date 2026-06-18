@@ -60,15 +60,18 @@ struct KfdDeviceConfig {
   uint64_t unique_id = 0;
   std::string marketing_name;
   uint32_t drm_render_minor = 128;
+  uint32_t revision_id = 0;
+  uint32_t pci_revision_id = 0;
   uint32_t simd_count = 0;
   uint32_t max_waves_per_simd = 10;
-  uint32_t num_shader_engines = 0;
+  uint32_t num_shader_engines = 0; ///< KFD array_count: total shader arrays.
   uint32_t num_shader_arrays_per_engine = 1;
   uint32_t num_cu_per_sh = 0;
   uint32_t simd_per_cu = 4;
   uint32_t wave_front_size = 64;
   uint32_t max_slots_scratch_cu = 32;
   uint64_t local_mem_size = 0;
+  uint32_t vram_type = 6;
   uint32_t lds_size_kb = 64;
   uint32_t mem_width = 4096;
   uint32_t mem_clk_max = 1200;

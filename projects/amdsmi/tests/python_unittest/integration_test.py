@@ -305,16 +305,35 @@ class TestAmdSmiPython(unittest.TestCase):
         self.assertGreaterEqual(len(sockets), 1)
         self.assertLessEqual(len(sockets), self.common.max_num_physical_devices)
 
+        gpu_handles_by_type = []
         for i, socket in enumerate(sockets):
             for processor_name, processor_type, processor_cond in self.common.processor_types:
                 msg = f"\t### amdsmi_get_processor_handles_by_type(socket={socket.value}, processor_type={processor_name}):"
                 try:
                     ret = amdsmi.amdsmi_get_processor_handles_by_type(socket, processor_type)
-                    self.common.print(msg, ret)
+                    handles = ret["processor_handles"]
+                    count = ret["processor_count"]
+                    # Handles are ctypes objects, so print a JSON-safe summary.
+                    self.common.print(
+                        msg,
+                        {"processor_count": count, "processor_handles": [id(h) for h in handles]},
+                    )
+                    # processor_count must match the number of handles returned.
+                    self.assertEqual(count, len(handles))
+                    # Returned handles must be usable amdsmi_processor_handle objects,
+                    # not raw integers.
+                    for handle in handles:
+                        self.assertIsInstance(handle, amdsmi.amdsmi_wrapper.amdsmi_processor_handle)
+                    if processor_name == "AMD_GPU":
+                        gpu_handles_by_type.extend(handles)
                     self.common.check_ret("", "", self.common.PASS)
                 except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                     if self.common.check_ret(msg, e, processor_cond):
                         self.raise_exception = e
+
+        # Regression guard: by-type lookup must enumerate the GPUs present on the
+        # system. A clamped processor_count would silently return an empty list.
+        self.assertEqual(len(gpu_handles_by_type), len(self.common.processors))
 
         if self.raise_exception:
             raise self.raise_exception

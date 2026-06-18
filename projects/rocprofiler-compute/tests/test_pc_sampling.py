@@ -17,17 +17,11 @@ num_devices = 1
 
 
 PC_SAMPLING_HOST_TRAP_FILES = sorted([
-    "ps_file_agent_info.csv",
-    "ps_file_kernel_trace.csv",
-    "ps_file_pc_sampling_host_trap.csv",
     "ps_file_results.json",
     "sysinfo.csv",
 ])
 
 PC_SAMPLING_STOCHASTIC_FILES = sorted([
-    "ps_file_agent_info.csv",
-    "ps_file_kernel_trace.csv",
-    "ps_file_pc_sampling_stochastic.csv",
     "ps_file_results.json",
     "sysinfo.csv",
 ])
@@ -61,8 +55,6 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypat
         "21",
         "--pc-sampling-method",
         "host_trap",
-        "--pc-sampling-interval",
-        "256",
     ]
 
     workload_dir = common.get_output_dir()
@@ -100,8 +92,6 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypa
         "21",
         "--pc-sampling-method",
         "stochastic",
-        "--pc-sampling-interval",
-        "1048576",
     ]
 
     workload_dir = common.get_output_dir()
@@ -147,8 +137,6 @@ def test_multi_rank_pc_sampling_only(
         "21",
         "--pc-sampling-method",
         "host_trap",
-        "--pc-sampling-interval",
-        "256",
     ]
 
     _, stdout, stderr = binary_handler_profile_rocprof_compute(
@@ -192,8 +180,6 @@ def test_multi_rank_warning_pc_sampling_with_counters(
         "2",
         "--pc-sampling-method",
         "host_trap",
-        "--pc-sampling-interval",
-        "256",
     ]
 
     _, stdout, stderr = binary_handler_profile_rocprof_compute(
@@ -237,8 +223,6 @@ def test_pc_sampling_profile_then_analyze(
         "21",
         "--pc-sampling-method",
         "host_trap",
-        "--pc-sampling-interval",
-        "256",
     ]
 
     workload_dir = common.get_output_dir()
@@ -312,11 +296,14 @@ def test_pc_sampling_profile_then_analyze(
 
 
 def test_pc_sampling_with_sol_block(
-    binary_handler_profile_rocprof_compute, monkeypatch
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+    monkeypatch,
 ):
     """
-    Test that PC sampling works with --block 21 and --block 2
-    (PC sampling with counter collection)
+    PC sampling with counter collection (--block 21 2): profiling produces the
+    expected artifacts and analyze renders both counter and PC sampling panels.
     """
     common.require_pc_sampling_gpu()
     monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
@@ -329,8 +316,6 @@ def test_pc_sampling_with_sol_block(
         "2",
         "--pc-sampling-method",
         "host_trap",
-        "--pc-sampling-interval",
-        "256",
     ]
 
     workload_dir = common.get_output_dir()
@@ -353,5 +338,23 @@ def test_pc_sampling_with_sol_block(
 
     assert common.check_file_pattern("- '21'", f"{workload_dir}/profiling_config.yaml")
     assert common.check_file_pattern("- '2'", f"{workload_dir}/profiling_config.yaml")
+
+    # Analyze with a single kernel so the detailed PC sampling table renders.
+    code = binary_handler_analyze_rocprof_compute(
+        [
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel",
+            "0",
+        ],
+    )
+    assert code == 0
+
+    captured = capsys.readouterr()
+    assert "2.1 System Speed-of-Light" in captured.out
+    assert "21. PC Sampling" in captured.out
+    # The "instruction" column header only renders when the table has rows.
+    assert "instruction" in captured.out
 
     common.clean_output_dir(config["cleanup"], workload_dir)

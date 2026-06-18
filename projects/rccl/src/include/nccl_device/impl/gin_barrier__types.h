@@ -25,6 +25,10 @@ struct ncclGinBarrierSession_internal {
   ncclGinBarrierHandle handle;
   int index;
   ncclGinSignal_t signal;
+
+  template<bool EnableTimeout>
+  NCCL_DEVICE_INLINE ncclResult_t syncInternal(Coop, cuda::memory_order ord, ncclGinFenceLevel fence,
+                                               uint64_t timeoutCycles);
 };
 #endif
 

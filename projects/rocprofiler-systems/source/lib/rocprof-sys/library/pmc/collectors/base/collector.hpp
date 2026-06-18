@@ -42,7 +42,7 @@ struct collector
     using device_t          = typename Traits::device_t;
     using device_ptr_t      = typename Traits::device_ptr_t;
     using container_t       = typename Traits::container_t;
-    using driver_t          = typename Traits::driver_t;
+    using backend_t         = typename Traits::backend_t;
 
     // Type aliases from config
     using device_provider = DeviceProvider;

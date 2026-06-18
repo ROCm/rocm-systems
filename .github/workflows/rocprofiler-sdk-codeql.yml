@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-sdk-codeql.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - 'projects/rocprofiler-sdk/**'
       - '!**/*.md'
       - '!**/*.rtf'
@@ -21,6 +22,7 @@ on:
       - develop
     paths:
       - '.github/workflows/rocprofiler-sdk-codeql.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - 'projects/rocprofiler-sdk/**'
       - '!**/*.md'
       - '!**/*.rtf'

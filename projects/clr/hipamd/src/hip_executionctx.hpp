@@ -37,7 +37,7 @@ public:
   int deviceId() const { return deviceId_; }
   /// Underlying hip::Device pointer.
   hip::Device* device() const { return g_devices[deviceId_]; }
-  /// Bitmask of compute units assigned to this context (one bit per CU).
+  /// Bitmask of compute units assigned to this context (one bit per WGP in WGP mode, one bit per CU otherwise).
   const std::vector<uint32_t>& cuMask() const { return cuMask_; }
   /// Number of compute units available in this context.
   uint32_t cuCount() const { return cuCount_; }
@@ -59,6 +59,12 @@ public:
   hipError_t waitEvent(hipEvent_t event);
   /// Copy the matching device resource from the resource descriptor into the output.
   hipError_t getDevResource(hipDevResource* resource, hipDevResourceType type);
+
+  /// Return SM co-scheduling alignment for the given device (2 in WGP mode, 1 otherwise).
+  static uint32_t getSmAlignment(int deviceId);
+
+  /// Return total CU count for device
+  static uint32_t getTotalCuCount(int deviceId);
 
   /// Query the full device resource for a device (all CUs).
   static hipError_t deviceGetDevResource(int device, hipDevResource* resource,
@@ -90,7 +96,7 @@ private:
   uint32_t flags_;                            ///< Context creation flags
   uint32_t cuCount_;                          ///< Number of CUs assigned to this context
   uint64_t ctxId_;                            ///< Unique context identifier
-  std::vector<uint32_t> cuMask_;              ///< Bitmask of assigned CUs
+  std::vector<uint32_t> cuMask_;              ///< Bitmask of assigned WGPs (one bit per WGP)
   DevResourceDesc* resourceDesc_;             ///< Owning pointer to the resource descriptor
 
   std::recursive_mutex lock_;                 ///< Context-level lock
@@ -119,9 +125,10 @@ private:
   /// Populate a remainder resource with leftover CUs, or mark it invalid if none remain.
   static void fillRemainder(hipDevResource* remainder, uint32_t remainingCUs,
                             uint32_t alignment);
-  /// Build a CU bitmask covering a range of CUs from startCU to startCU + count.
+  /// Build a WGP bitmask covering CUs [startCU, startCU+count). Each bit represents
+  /// one WGP (alignment CUs). startCU and count are in CU units.
   static std::vector<uint32_t> buildCuMask(uint32_t startCU, uint32_t count,
-                                           uint32_t totalCUs);
+                                           uint32_t totalCUs, uint32_t alignment = 1);
 };
 
 } // namespace hip

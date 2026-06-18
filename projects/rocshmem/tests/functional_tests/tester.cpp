@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "amo_bitwise_tester.hpp"
+#include "host_rma_tester.hpp"
 #include "amo_extended_tester.hpp"
 #include "amo_standard_tester.hpp"
 #include "default_ctx_primitive_tester.hpp"
@@ -333,6 +334,56 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case PutmemOnStreamTestType:
       test_name = "Putmem_On_Stream";
       testers.push_back(new PutmemOnStreamTester(args));
+      break;
+    case HostPutmemTestType:
+      test_name = "Host_Putmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostGetmemTestType:
+      test_name = "Host_Getmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostAmoFAddTestType:
+      test_name = "Host_Amo_FAdd";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostAmoFCswapTestType:
+      test_name = "Host_Amo_FCswap";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostCtxPutmemTestType:
+      test_name = "Host_Ctx_Putmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostCtxGetmemTestType:
+      test_name = "Host_Ctx_Getmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostIntAmoFAddTestType:
+      test_name = "Host_Int_Amo_FAdd";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostIntAmoFCswapTestType:
+      test_name = "Host_Int_Amo_FCswap";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostAmoAllPesTestType:
+      test_name = "Host_Amo_AllPes";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostAmoSelfTestType:
+      test_name = "Host_Amo_Self";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
     case PutmemSignalOnStreamTestType:
       test_name = "Putmem_Signal_On_Stream";
@@ -878,6 +929,18 @@ bool Tester::peLaunchesKernel() {
     case FenceOrderPutLargeSmallTestType:
     case FenceOrderFanoutTestType:
     case FenceOrderPutWaveNbiChunksTestType:
+      is_launcher = true;
+      break;
+    case HostPutmemTestType:
+    case HostGetmemTestType:
+    case HostAmoFAddTestType:
+    case HostAmoFCswapTestType:
+    case HostCtxPutmemTestType:
+    case HostCtxGetmemTestType:
+    case HostIntAmoFAddTestType:
+    case HostIntAmoFCswapTestType:
+    case HostAmoAllPesTestType:
+    case HostAmoSelfTestType:
       is_launcher = true;
       break;
     default:

@@ -84,6 +84,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_USE_UCX": "domains.parallel.runtimes.ucx",
     # --- Output ---
     "ROCPROFSYS_OUTPUT_PATH": "output.path",
+    "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH": "output.unified_memory_output_path",
     "ROCPROFSYS_TIME_OUTPUT": "output.time_output",
     "ROCPROFSYS_FILE_OUTPUT": "output.file_output",
     "ROCPROFSYS_USE_ROCPD": "output.rocpd_output",

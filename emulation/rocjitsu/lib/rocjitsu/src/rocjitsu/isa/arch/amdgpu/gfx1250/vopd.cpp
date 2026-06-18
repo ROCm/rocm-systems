@@ -141,8 +141,25 @@ bool Vopd::is_float32_op(uint16_t op) {
   }
 }
 
+bool Vopd::is_float64_op(uint16_t op) {
+  switch (op) {
+  case kVopdAddF64:
+  case kVopdMulF64:
+  case kVopdMinNumF64:
+  case kVopdMaxNumF64:
+  case kVopdFmacF64:
+    return true;
+  default:
+    return false;
+  }
+}
+
 uint32_t Vopd::apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx) {
   return (neg_bits & (1u << src_idx)) ? (value ^ 0x80000000u) : value;
+}
+
+uint64_t Vopd::apply_neg64(uint64_t value, uint8_t neg_bits, uint8_t src_idx) {
+  return (neg_bits & (1u << src_idx)) ? (value ^ 0x8000000000000000ULL) : value;
 }
 
 uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
@@ -152,6 +169,37 @@ uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
     result |= ((truth_table >> idx) & 1u) << bit;
   }
   return result;
+}
+
+uint64_t Vopd::execute_slot64(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane) {
+  uint64_t src0 = apply_neg64(slot.src0->read_lane64(wf, lane), slot.neg, 0);
+  uint64_t src1 = apply_neg64(slot.src1->read_lane64(wf, lane), slot.neg, 1);
+
+  switch (slot.op) {
+  case kVopdAddF64: {
+    double result = std::bit_cast<double>(src0) + std::bit_cast<double>(src1);
+    return std::bit_cast<uint64_t>(result);
+  }
+  case kVopdMulF64: {
+    double result = std::bit_cast<double>(src0) * std::bit_cast<double>(src1);
+    return std::bit_cast<uint64_t>(result);
+  }
+  case kVopdMinNumF64: {
+    double result = std::fmin(std::bit_cast<double>(src0), std::bit_cast<double>(src1));
+    return std::bit_cast<uint64_t>(result);
+  }
+  case kVopdMaxNumF64: {
+    double result = std::fmax(std::bit_cast<double>(src0), std::bit_cast<double>(src1));
+    return std::bit_cast<uint64_t>(result);
+  }
+  case kVopdFmacF64: {
+    double result = std::fma(std::bit_cast<double>(src0), std::bit_cast<double>(src1),
+                             std::bit_cast<double>(slot.dst->read_lane64(wf, lane)));
+    return std::bit_cast<uint64_t>(result);
+  }
+  default:
+    throw util::UnimplementedInst(op_name(slot.op));
+  }
 }
 
 uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane) {
@@ -272,16 +320,18 @@ Vopd::Vopd(const MachineInst *inst)
     uint16_t vsrcy2 = static_cast<uint16_t>((word2_ >> 16) & 0xFF);
     uint16_t vdsty = static_cast<uint16_t>((word2_ >> 24) & 0xFF);
 
-    dstx_ = Operand(32, OperandType::OPR_VGPR, vdstx);
-    dsty_ = Operand(32, OperandType::OPR_VGPR, vdsty);
-    srcx0_ = make_src0(32, true, false, 0, srcx0);
-    srcy0_ = make_src0(32, true, false, 0, srcy0);
-    srcx1_ = Operand(32, OperandType::OPR_VGPR, vsrcx1);
-    srcy1_ = Operand(32, OperandType::OPR_VGPR, vsrcy1);
+    uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
+    uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
+    dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
+    dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
+    srcx0_ = make_src0(x_bits, true, false, 0, srcx0);
+    srcy0_ = make_src0(y_bits, true, false, 0, srcy0);
+    srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
+    srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
     srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
-                                       : Operand(32, OperandType::OPR_VGPR, vsrcx2);
+                                       : Operand(x_bits, OperandType::OPR_VGPR, vsrcx2);
     srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcy2)
-                                       : Operand(32, OperandType::OPR_VGPR, vsrcy2);
+                                       : Operand(y_bits, OperandType::OPR_VGPR, vsrcy2);
   } else {
     format_ = Format::VopdXy;
     encoding_id_ = 0x32;
@@ -302,12 +352,14 @@ Vopd::Vopd(const MachineInst *inst)
       literal_ = word2_;
     }
 
-    dstx_ = Operand(32, OperandType::OPR_VGPR, vdstx);
-    dsty_ = Operand(32, OperandType::OPR_VGPR, vdsty);
-    srcx0_ = make_src0(32, false, has_literal_, literal_, srcx0);
-    srcy0_ = make_src0(32, false, has_literal_, literal_, srcy0);
-    srcx1_ = Operand(32, OperandType::OPR_VGPR, vsrcx1);
-    srcy1_ = Operand(32, OperandType::OPR_VGPR, vsrcy1);
+    uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
+    uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
+    dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
+    dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
+    srcx0_ = make_src0(x_bits, false, has_literal_, literal_, srcx0);
+    srcy0_ = make_src0(y_bits, false, has_literal_, literal_, srcy0);
+    srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
+    srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
   }
 
   dstx_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
@@ -363,6 +415,7 @@ void Vopd::init_operands() {
   const auto add_slot_sources = [&](const Slot &slot) {
     switch (slot.op) {
     case kVopdFmacF32:
+    case kVopdFmacF64:
       add_src(slot.dst);
       add_src(slot.src0);
       add_src(slot.src1);
@@ -432,10 +485,20 @@ void Vopd::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t x_result = execute_slot(x_, wf, lane);
-    uint32_t y_result = execute_slot(y_, wf, lane);
-    x_.dst->write_lane(wf, lane, x_result);
-    y_.dst->write_lane(wf, lane, y_result);
+    bool x64 = is_float64_op(x_.op);
+    bool y64 = is_float64_op(y_.op);
+    uint64_t x_result64 = x64 ? execute_slot64(x_, wf, lane) : 0;
+    uint64_t y_result64 = y64 ? execute_slot64(y_, wf, lane) : 0;
+    uint32_t x_result32 = x64 ? 0 : execute_slot(x_, wf, lane);
+    uint32_t y_result32 = y64 ? 0 : execute_slot(y_, wf, lane);
+    if (x64)
+      x_.dst->write_lane64(wf, lane, x_result64);
+    else
+      x_.dst->write_lane(wf, lane, x_result32);
+    if (y64)
+      y_.dst->write_lane64(wf, lane, y_result64);
+    else
+      y_.dst->write_lane(wf, lane, y_result32);
   }
 }
 

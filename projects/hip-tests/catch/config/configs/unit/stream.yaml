@@ -53,6 +53,8 @@ stream:
     tags: [callback]
   Unit_hipStreamAttachMemAsync_Negative:
     <<: *level_2
+    # Asan test disabled temporarily until PR #5287 is merged
+    disabled: [asan]
     tags: [memory]
   Unit_hipStreamAttachMemAsync_UseCase:
     <<: *level_2

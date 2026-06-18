@@ -667,8 +667,9 @@ is_attachment_library_registered()
 {
     for(const auto& itr : registered)
     {
-        if(std::string_view{ itr->common_name } ==
-           supported_library_trait<ROCP_REG_ROCATTACH>::common_name)
+        if(itr.has_value() &&
+           std::string_view{ itr->common_name } ==
+               supported_library_trait<ROCP_REG_ROCATTACH>::common_name)
         {
             return true;
         }

@@ -62,8 +62,8 @@ add_executable(rocjpeg-demo)
 target_sources(rocjpeg-demo PRIVATE rocjpeg.cpp)
 
 find_package(Threads REQUIRED)
-find_package(rocJPEG REQUIRED)
+find_package(rocjpeg REQUIRED)
 target_link_libraries(
     rocjpeg-demo
     PRIVATE Threads::Threads hsa-runtime64 rocprofiler-sdk::tests-common-library
-            rocprofiler-sdk::tests-build-flags rocJPEG::rocJPEG)
+            rocprofiler-sdk::tests-build-flags rocjpeg::rocjpeg)

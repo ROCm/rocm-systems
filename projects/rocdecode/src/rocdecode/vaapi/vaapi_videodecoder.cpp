@@ -721,23 +721,27 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         ComputePartition current_compute_partition = (gpu_uuids_to_compute_partition_map_.find(gpu_uuid) != gpu_uuids_to_compute_partition_map_.end()) ? gpu_uuids_to_compute_partition_map_[gpu_uuid] : kSpx;
         GetDrmNodeOffset(va_contexts_[va_ctx_idx].hip_dev_prop.name, va_contexts_[va_ctx_idx].device_id, visible_devices, current_compute_partition, offset);
 
-        std::string drm_node = "/dev/dri/renderD";
-        int render_node_id = (gpu_uuids_to_render_nodes_map_.find(gpu_uuid) != gpu_uuids_to_render_nodes_map_.end()) ? gpu_uuids_to_render_nodes_map_[gpu_uuid] : 128;
-        drm_node += std::to_string(render_node_id + offset);
+        std::ostringstream oss;
+        for (const auto& entry : gpu_uuids_to_render_nodes_map_) {
+            oss << "\n  " << entry.first << ": " << entry.second;
+        }
+        std::string render_nodes_map_str = oss.str();
 
         if (g_rocdec_logger.GetLogLevel() >= kRocDecLogInfo) {
-            std::ostringstream oss;
-            oss << '{';
-            bool first = true;
-            for (const auto& entry : gpu_uuids_to_render_nodes_map_) {
-                if (!first) oss << ", ";
-                oss << entry.first << ": " << entry.second;
-                first = false;
-            }
-            oss << '}';
-            InfoLog(g_rocdec_logger, "gpu_uuids_to_render_nodes_map_: " + oss.str());
+            InfoLog(g_rocdec_logger, "gpu_uuids_to_render_nodes_map_:" + render_nodes_map_str);
             InfoLog(g_rocdec_logger, "Selected GPU UUID: " + gpu_uuid);
         }
+
+        std::string drm_node = "/dev/dri/renderD";
+        auto it = gpu_uuids_to_render_nodes_map_.find(gpu_uuid);
+        if (it == gpu_uuids_to_render_nodes_map_.end()) {
+            ErrorLog(g_rocdec_logger, "GPU UUID: " + gpu_uuid + " received from HIP does not match any GPU UUID retrieved from sysfs. "
+                                      "This likely indicates a setup issue. Available render nodes map: " + render_nodes_map_str);
+            va_contexts_.pop_back();
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_DEVICE_INVALID;
+        }
+        drm_node += std::to_string(it->second + offset);
 
         rocdec_status = InitVAAPI(va_ctx_idx, drm_node);
         if (rocdec_status != ROCDEC_SUCCESS) {
