@@ -5,7 +5,6 @@
 
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/bundled/format.h>
 #include <spdlog/fmt/fmt.h>
 
 #include <algorithm>
@@ -19,7 +18,6 @@
 #include <string>
 #include <string_view>
 #include <sys/resource.h>
-#include <system_error>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -252,19 +250,18 @@ public:
      * @param cpu_count Number of online CPUs. Sizes buffers and opens
      *        per-CPU sysfs file handles for frequency reading.
      */
-    explicit backend()
-    : m_cpu_count(get_cpu_count())
-    , m_stat_buffer(
-          std::max(DEFAULT_STAT_BUFFER_SIZE, (m_cpu_count * BYTES_PER_STAT_LINE) + 256))
+    explicit backend(size_t cpu_count)
+    : m_stat_buffer(
+          std::max(DEFAULT_STAT_BUFFER_SIZE, (cpu_count * BYTES_PER_STAT_LINE) + 256))
     , m_statm_buffer(STATM_BUFFER_SIZE)
     , m_freq_buffer(SYSFS_FREQ_BUFFER_SIZE)
     {
-        for(size_t i = 0; i < m_cpu_count; ++i)
+        for(size_t i = 0; i < cpu_count; ++i)
         {
             const auto path =
                 fmt::format("/sys/devices/system/cpu/cpu{}/cpufreq/scaling_cur_freq", i);
-            unique_file file_handle{ std::fopen(path.c_str(), "r") };
-            if(file_handle) m_sysfs_freq_fds.emplace(i, std::move(file_handle));
+            unique_file fd{ std::fopen(path.c_str(), "r") };
+            if(fd) m_sysfs_freq_fds.emplace(i, std::move(fd));
         }
         m_use_sysfs_freq  = !m_sysfs_freq_fds.empty();
         m_socket_topology = read_socket_topology(cpu_count);
@@ -328,24 +325,24 @@ public:
     }
 
 private:
-    [[nodiscard]] static std::string_view read_file(unique_file&       file_handle,
-                                                    const char*        path,
+    [[nodiscard]] static std::string_view read_file(unique_file& fd, const char* path,
                                                     std::vector<char>& buffer)
     {
-        if(!file_handle)
+        if(!fd)
         {
-            file_handle.reset(std::fopen(path, "r"));
-            if(!file_handle)
+            fd.reset(std::fopen(path, "r"));
+            if(!fd)
             {
                 LOG_DEBUG("Failed to open {}", path);
                 return {};
             }
         }
-        std::rewind(file_handle.get());
+        std::rewind(fd.get());
 
-        const auto bytes = std::fread(buffer.data(), 1, buffer.size(), file_handle.get());
+        const auto bytes = std::fread(buffer.data(), 1, buffer.size(), fd.get());
+        if(bytes == 0) return {};
 
-        return std::string_view{ (bytes == 0) ? "" : buffer.data(), bytes };
+        return { buffer.data(), bytes };
     }
 
     [[nodiscard]] std::map<size_t, float> read_sysfs_frequencies()
@@ -358,23 +355,14 @@ private:
                 std::fread(m_freq_buffer.data(), 1, m_freq_buffer.size(), fd.get());
             if(bytes == 0) continue;
 
-            std::uint64_t khz = 0;
-            const auto [_, err_code] =
+            unsigned long khz = 0;
+            const auto [p, e] =
                 std::from_chars(m_freq_buffer.data(), m_freq_buffer.data() + bytes, khz);
-            if(err_code == std::errc())
-            {
-                result[cpu_id] = static_cast<float>(khz) * KHZ_TO_MHZ;
-            }
+            if(e == std::errc()) result[cpu_id] = static_cast<float>(khz) * KHZ_TO_MHZ;
         }
         return result;
     }
 
-    [[nodiscard]] static size_t get_cpu_count() noexcept
-    {
-        return static_cast<size_t>(std::max(0L, sysconf(_SC_NPROCESSORS_ONLN)));
-    }
-
-    size_t                        m_cpu_count = 0;
     unique_file                   m_proc_stat_fd;
     unique_file                   m_proc_statm_fd;
     std::map<size_t, unique_file> m_sysfs_freq_fds;
@@ -392,7 +380,7 @@ struct backend_factory
 {
     using backend_t = backend;
 
-    static std::shared_ptr<backend_t> create(size_t cpu_count)
+    static std::shared_ptr<backend_t> create_backend(size_t cpu_count)
     {
         return std::make_shared<backend_t>(cpu_count);
     }

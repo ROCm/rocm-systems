@@ -8,16 +8,6 @@
 namespace rocprofsys::pmc::collectors
 {
 
-template <typename T>
-concept collector_type = requires(T& _c, std::int64_t _ts) {
-    _c.setup();
-    _c.config();
-    _c.sample(_ts);
-    _c.post_process();
-    _c.shutdown();
-    _c.pause(_ts);
-};
-
 /**
  * @brief Type-erased collector slice - non-owning view of any collector type.
  *
@@ -58,7 +48,7 @@ public:
      * methods)
      * @param obj Reference to the collector object (must outlive the slice)
      */
-    template <collector_type T>
+    template <typename T>
     explicit collector_slice(T& obj)
     : m_object{ &obj }
     , m_setup_impl{ [](void* ptr) { static_cast<T*>(ptr)->setup(); } }

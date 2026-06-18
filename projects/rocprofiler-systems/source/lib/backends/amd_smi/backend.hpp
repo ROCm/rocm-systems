@@ -4,6 +4,8 @@
 #pragma once
 
 #include "backends/amd_smi/sdma_feature.hpp"
+
+#include <concepts>
 #include <cstdint>
 #include <memory>
 
@@ -189,7 +191,10 @@ struct backend_factory
      * @brief Create a new backend instance.
      * @return Shared pointer to the backend instance.
      */
-    static std::shared_ptr<backend_t> create() { return std::make_shared<backend_t>(); }
+    static std::shared_ptr<backend_t> create_backend()
+    {
+        return std::make_shared<backend_t>();
+    }
 };
 
 }  // namespace rocprofsys::backends::amd_smi

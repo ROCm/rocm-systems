@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "backends/concepts/backend_factory.hpp"
 #include "backends/procfs/backend.hpp"
 #include "logger/debug.hpp"
 
@@ -27,19 +26,16 @@ namespace rocprofsys::pmc::device_providers::procfs
  *
  * @tparam BackendFactory Factory for creating procfs backend instances.
  */
-template <backends::concepts::backend_factory BackendFactory>
+template <typename BackendFactory>
 class provider
 {
 public:
     using backend_t = typename BackendFactory::backend_t;
 
     provider()
-    : m_backend(BackendFactory::create())
-    {
-        m_cpu_count = m_backend->get_cpu_count();
-        LOG_INFO("Detected {} CPU socket(s), {} online CPUs",
-                 m_backend->get_socket_count(), m_cpu_count);
-    }
+    : m_cpu_count(static_cast<size_t>(std::max(0L, sysconf(_SC_NPROCESSORS_ONLN))))
+    , m_backend(BackendFactory::create_backend(m_cpu_count))
+    {}
 
     ~provider() = default;
 
@@ -79,7 +75,7 @@ private:
  *
  * @tparam BackendFactory Factory type for creating procfs backend instances.
  */
-template <backends::concepts::backend_factory BackendFactory>
+template <typename BackendFactory>
 struct provider_factory
 {
     using provider_t = provider<BackendFactory>;

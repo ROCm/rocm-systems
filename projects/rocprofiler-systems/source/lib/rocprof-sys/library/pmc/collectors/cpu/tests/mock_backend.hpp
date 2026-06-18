@@ -95,7 +95,8 @@ struct mock_backend_factory
 
     static std::shared_ptr<backend_t> s_mock_backend;
 
-    static std::shared_ptr<backend_t> create([[maybe_unused]] size_t cpu_count = 0)
+    static std::shared_ptr<backend_t> create_backend(
+        [[maybe_unused]] size_t cpu_count = 0)
     {
         return s_mock_backend;
     }

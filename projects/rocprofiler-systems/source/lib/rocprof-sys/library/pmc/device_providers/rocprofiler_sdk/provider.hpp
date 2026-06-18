@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "backends/concepts/backend_factory.hpp"
 #include "backends/rocprofiler_sdk/backend.hpp"
 #include "core/agent.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
@@ -23,7 +22,7 @@
 namespace rocprofsys::pmc::device_providers::rocprofiler_sdk
 {
 
-template <backends::concepts::backend_factory BackendFactory>
+template <typename BackendFactory>
 class provider
 {
 public:
@@ -32,7 +31,7 @@ public:
 
     provider(const std::vector<std::shared_ptr<agent>>&           agent_list,
              const collectors::gpu_perf_counter::enabled_metrics& enabled)
-    : m_backend_api{ BackendFactory::create() }
+    : m_backend_api{ BackendFactory::create_backend() }
     {
         configure_agents(agent_list, enabled);
     }
