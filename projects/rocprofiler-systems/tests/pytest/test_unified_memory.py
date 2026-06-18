@@ -33,6 +33,10 @@ def unified_memory_environment() -> dict[str, str]:
         "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING": "ON",
         "ROCPROFSYS_USE_AMD_SMI": "OFF",
         "HSA_XNACK": "1",
+        # Force the legacy (non-inline) HSA queue intercept path.
+        # Queue interposition changes in https://github.com/ROCm/rocm-systems/pull/5219
+        # seems to be causing hangs in the CI.
+        "ROCPROFILER_QUEUE_INTERPOSITION": "0",
     }
 
 

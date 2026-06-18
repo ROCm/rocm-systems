@@ -46,6 +46,10 @@ def transpose_env() -> dict[str, str]:
     return {
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation,hsa_api",
         "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,mem_usage,gfx_clock,mem_clock",
+        # Force the legacy (non-inline) HSA queue intercept path.
+        # Queue interposition changes in https://github.com/ROCm/rocm-systems/pull/5219
+        # seems to be causing hangs in the CI.
+        "ROCPROFILER_QUEUE_INTERPOSITION": "0",
     }
 
 
