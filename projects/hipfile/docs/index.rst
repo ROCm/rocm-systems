@@ -44,15 +44,8 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
       * :doc:`hipFile ais-stats tool <reference/hipFile-ais-stats-tool>`
       * :doc:`hipFile environment variables <reference/hipFile-environment-variables>`
       * :doc:`cuFile compatibility <reference/hipFile-cuFile-compatibility>`
-      * API reference
-         * :doc:`/reference/api-synchronous-io`
-         * :doc:`/reference/api-driver`
-         * :doc:`/reference/api-file-and-buffer`
-         * :doc:`/reference/api-async`
-         * :doc:`/reference/api-batch`
-         * :doc:`/reference/api-errors`
-         * :doc:`/reference/api-python`
-
+      * :doc:`hipFile API reference <reference/hipFile-api-reference>`
+      
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
