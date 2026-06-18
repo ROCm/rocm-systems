@@ -10,6 +10,9 @@ on:
       package_version:
         type: string
         required: true
+      therock_ref:
+        type: string
+        required: true
       cmake_options:
         type: string
 
@@ -41,7 +44,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 685f8c3b89006309b34a7c16de17e841400f0d76 # 2025-05-29 commit
+          ref: ${{ inputs.therock_ref }}
 
       - name: Install python deps
         run: |
@@ -139,6 +142,7 @@ jobs:
       artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: ruby-linux-slurm-scale-runner
       artifact_run_id: ${{ github.run_id }}
+      therock_ref: ${{ inputs.therock_ref }}
 
   therock-test-linux-single-node:
     name: "Test single-node"
@@ -151,3 +155,4 @@ jobs:
       artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: linux-gfx942-8gpu-ossci-rocm
       artifact_run_id: ${{ github.run_id }}
+      therock_ref: ${{ inputs.therock_ref }}

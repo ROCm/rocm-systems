@@ -10,6 +10,9 @@ on:
       package_version:
         type: string
         required: true
+      therock_ref:
+        type: string
+        required: true
       test_runs_on:
         type: string
         default: "linux-gfx942-1gpu-core42-ossci-rocm"
@@ -44,7 +47,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: c90e6caf0700096d2f19b4f1ddcd43d6b9b584fa # 2026-06-15
+          ref: ${{ inputs.therock_ref }}
 
       - name: Install python deps
         run: |
@@ -134,3 +137,4 @@ jobs:
       amdgpu_families: "gfx94X-dcgpu"
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
+      therock_ref: ${{ inputs.therock_ref }}
