@@ -98,6 +98,8 @@ INSTANTIATE_TEST_SUITE_P(
         SmemCase{ROCJITSU_CODE_ARCH_CDNA3, "cdna3", kCdnaSLoadDwordx2, "s_load_dwordx2"},
         SmemCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4", kCdnaSLoadDwordx2, "s_load_dwordx2"},
         SmemCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", kRdna4SLoadB64, "s_load_b64"}),
-    [](const ::testing::TestParamInfo<SmemCase> &info) { return std::string(info.param.arch_name); });
+    [](const ::testing::TestParamInfo<SmemCase> &info) {
+      return std::string(info.param.arch_name);
+    });
 
 } // namespace
