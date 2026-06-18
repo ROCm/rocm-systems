@@ -55,12 +55,11 @@ const auto get_metadata_filepath = [](const int& ppid, const int& pid) {
 };
 
 template <typename Type>
+    requires type_traits::supported_cache_type<Type>
 __attribute__((always_inline)) inline constexpr size_t
 get_size(Type&& val)
 {
     using DecayedType = std::decay_t<Type>;
-    static_assert(type_traits::is_supported_type_v<DecayedType>,
-                  "Unsupported type in get_size");
 
     if constexpr(type_traits::is_string_view_v<DecayedType> ||
                  type_traits::is_vector_v<DecayedType> ||
@@ -93,12 +92,11 @@ get_size(Type&& val, Types&&... vals)
 }
 
 template <typename Type>
+    requires type_traits::supported_cache_type<Type>
 __attribute__((always_inline)) inline void
 store_value(const Type& value, std::uint8_t* buffer, size_t& position)
 {
     using DecayedType = std::decay_t<Type>;
-    static_assert(type_traits::is_supported_type_v<DecayedType>,
-                  "Unsupported type in store_value");
 
     auto* dest = buffer + position;
 
@@ -140,12 +138,11 @@ store_value(std::uint8_t* buffer, const Types&... values)
 }
 
 template <typename Type>
+    requires type_traits::supported_cache_type<Type>
 __attribute__((always_inline)) inline static void
 parse_value(std::uint8_t*& data_pos, Type& arg)
 {
     using DecayedType = std::decay_t<Type>;
-    static_assert(type_traits::is_supported_type_v<DecayedType>,
-                  "Unsupported type in parse_value");
 
     if constexpr(type_traits::is_string_view_v<DecayedType>)
     {

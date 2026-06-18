@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 include(AISAddExecutable)
-include(AISUseGTest)
 find_package(Threads REQUIRED)
 
 set(SHARED_SOURCE_FILES

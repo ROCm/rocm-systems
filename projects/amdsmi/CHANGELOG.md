@@ -51,6 +51,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added the new types to `amdsmi_link_types` as part of support for NICs
 
 ### Changed
+
+- **Fixed `amd-smi static --clock` csv and human_readable formatting to output frequency 
+levels as strings instead of dictionary objects**.  
+
 - **Deprecated `amdsmi_get_gpu_vram_vendor()` in favor of `amdsmi_get_gpu_vram_info()`**.  
   - `amdsmi_get_gpu_vram_vendor` is slated for removal in a future ROCm release. It now emits a `DeprecationWarning` from the Python interface and functions as a wrapper of `amdsmi_get_gpu_vram_info()`.
 

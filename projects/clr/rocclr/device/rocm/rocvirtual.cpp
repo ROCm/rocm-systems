@@ -1542,6 +1542,15 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
         const uint16_t hdr = static_cast<uint16_t>(validFullHeaders[i]);
         const uint8_t pktType =
             extractAqlBits(hdr, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
+        const uint8_t amdFormat = static_cast<uint8_t>((validFullHeaders[i] >> 16) & 0xFF);
+        // Classify purely from the packet header/type fields: ext-kernel-dispatch
+        // packets can be emitted opportunistically (e.g. cluster-dimension launches)
+        // regardless of the global ext_dispatch_packet_ setting.
+        const bool isBaseKernelDispatch = (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH);
+        const bool isKernelDispatch =
+            isBaseKernelDispatch ||
+            (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+             amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
         if (timestamp_ != nullptr) {
           // When pre_patched, skip any slot whose completion_signal was already
           // written by ApplyHwEventPatches (non-zero means pre-patched).
@@ -1549,22 +1558,23 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
           if (!has_prepatched_signal) {
             slot->completion_signal =
                 Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true);
-            if (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-              if (amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+            if (isKernelDispatch) {
+              // reserved2 correlation-id stamping is only valid for the base
+              // hsa_kernel_dispatch_packet_t layout; the ext packet has a
+              // different field at that offset.
+              if (isBaseKernelDispatch && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
                 slot->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
               }
               Barriers().GetLastSignal()->flags_.isPacketDispatch_ = true;
             }
-          } else if (has_prepatched_signal &&
-                     pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH &&
+          } else if (has_prepatched_signal && isBaseKernelDispatch &&
                      amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
             slot->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
           }
         }
         if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
              IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
-            kernelNames != nullptr && i < kernelNames->size() &&
-            pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+            kernelNames != nullptr && i < kernelNames->size() && isKernelDispatch) {
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u",
                   (*kernelNames)[i]->c_str(), dev().index());
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,

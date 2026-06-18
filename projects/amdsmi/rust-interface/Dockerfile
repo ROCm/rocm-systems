@@ -17,6 +17,9 @@ RUN apt update --yes \
             git \
             libclang-dev \
             libdrm-dev \
+            libmnl-dev \
+            libnl-3-dev \
+            libnl-genl-3-dev \
             pkg-config \
         && apt clean \
         && rm -rf /var/cache/apt/ /var/lib/apt/lists/*

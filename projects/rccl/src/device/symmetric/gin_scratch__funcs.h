@@ -225,7 +225,7 @@ NCCL_DEVICE_INLINE void ncclGinInboxA2ASession<Coop, ginBackendMask>::postSends(
     int nElts = getEltCount(i, peer);
     this->gin.put(this->team, peer,
       /*dst=*/this->getBufSymPtr(monoStep), /*src=*/(ncclSymPtr<char>)srcPtr,
-      /*size=*/nElts*(int)sizeof(decltype(srcPtr)::ElementType),
+      /*size=*/nElts*(int)sizeof(typename decltype(srcPtr)::ElementType),
       ncclGin_SignalInc{this->getR2RSignal(monoStep)},
       getCompletion(i, peer));
   }
