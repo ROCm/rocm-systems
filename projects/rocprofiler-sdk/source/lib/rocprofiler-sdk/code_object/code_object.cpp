@@ -432,29 +432,29 @@ read_code_object_file(int fd)
     struct stat info = {};
     if(fd < 0)
     {
-        ROCP_INFO << "loaded code object file descriptor is invalid: " << fd;
+        ROCP_CI_LOG(WARNING) << "loaded code object file descriptor is invalid: " << fd;
         return {};
     }
 
     if(::fstat(fd, &info) != 0)
     {
         auto err = errno;
-        ROCP_INFO << "failed to stat loaded code object file descriptor " << fd << ": "
-                  << std::strerror(err);
+        ROCP_CI_LOG(WARNING) << "failed to stat loaded code object file descriptor " << fd << ": "
+                             << std::strerror(err);
         return {};
     }
 
     if(info.st_size <= 0)
     {
-        ROCP_INFO << "loaded code object file descriptor " << fd
-                  << " did not report a positive size";
+        ROCP_CI_LOG(WARNING) << "loaded code object file descriptor " << fd
+                             << " did not report a positive size";
         return {};
     }
 
     if(static_cast<uintmax_t>(info.st_size) > std::numeric_limits<size_t>::max())
     {
-        ROCP_INFO << "loaded code object file descriptor " << fd
-                  << " is too large to read: " << info.st_size;
+        ROCP_CI_LOG(WARNING) << "loaded code object file descriptor " << fd
+                             << " is too large to read: " << info.st_size;
         return {};
     }
 
@@ -471,8 +471,8 @@ read_code_object_file(int fd)
         {
             if(errno == EINTR) continue;
             auto err = errno;
-            ROCP_INFO << "failed to read loaded code object file descriptor " << fd << ": "
-                      << std::strerror(err);
+            ROCP_CI_LOG(WARNING) << "failed to read loaded code object file descriptor " << fd
+                                 << ": " << std::strerror(err);
             return {};
         }
         if(nread == 0) break;
@@ -481,8 +481,8 @@ read_code_object_file(int fd)
 
     if(offset != buffer.size())
     {
-        ROCP_INFO << "short read on loaded code object file descriptor " << fd << ": expected "
-                  << buffer.size() << " bytes, read " << offset;
+        ROCP_CI_LOG(WARNING) << "short read on loaded code object file descriptor " << fd
+                             << ": expected " << buffer.size() << " bytes, read " << offset;
     }
 
     buffer.resize(offset);
@@ -496,15 +496,16 @@ get_loaded_code_object_symbol_map(const rocprofiler_callback_tracing_code_object
     {
         if(data.memory_base == 0 || data.memory_size == 0)
         {
-            ROCP_WARNING << "loaded memory code object has invalid storage: memory_base="
-                         << data.memory_base << ", memory_size=" << data.memory_size;
+            ROCP_CI_LOG(WARNING) << "loaded memory code object has invalid storage: memory_base="
+                                 << data.memory_base << ", memory_size=" << data.memory_size;
             return {};
         }
 
         // The loader reports memory_size as uint64_t while COMGR takes a size_t byte count.
         if(data.memory_size > std::numeric_limits<size_t>::max())
         {
-            ROCP_INFO << "loaded memory code object is too large to parse: " << data.memory_size;
+            ROCP_CI_LOG(WARNING) << "loaded memory code object is too large to parse: "
+                                 << data.memory_size;
             return {};
         }
 

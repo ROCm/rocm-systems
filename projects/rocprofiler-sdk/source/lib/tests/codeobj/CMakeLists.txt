@@ -6,8 +6,7 @@ rocprofiler_deactivate_clang_tidy()
 
 add_executable(codeobj-library-tests)
 
-set(CODEOBJ_LIB_TEST_SOURCES "codeobj_library_test.cpp" "funcmap_test.cpp"
-                             "kpack_code_object_test.cpp")
+set(CODEOBJ_LIB_TEST_SOURCES "codeobj_library_test.cpp" "funcmap_test.cpp")
 
 target_sources(codeobj-library-tests PRIVATE ${CODEOBJ_LIB_TEST_SOURCES})
 
@@ -36,11 +35,6 @@ find_program(
     HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
     PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
     PATH_SUFFIXES bin llvm/bin NO_CACHE)
-
-find_package(rocm-kpack QUIET CONFIG)
-if(NOT TARGET rocm::rocm_kpack)
-    find_package(rocm-kpack QUIET CONFIG PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm)
-endif()
 
 # The arch only matters for compilation, not execution -- the test only parses DWARF debug
 # info from the resulting ELF.  Any valid arch works here.
@@ -126,15 +120,6 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-elf)
-
-if(TARGET rocm::rocm_kpack)
-    target_link_libraries(codeobj-library-tests PRIVATE rocm::rocm_kpack)
-    target_compile_definitions(codeobj-library-tests
-                               PRIVATE ROCPROFILER_TEST_HAS_ROCM_KPACK=1)
-else()
-    target_compile_definitions(codeobj-library-tests
-                               PRIVATE ROCPROFILER_TEST_HAS_ROCM_KPACK=0)
-endif()
 
 rocprofiler_add_unit_test(
     TARGET codeobj-library-tests
