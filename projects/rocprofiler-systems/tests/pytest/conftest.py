@@ -1301,9 +1301,7 @@ def _ctest_generate_tests(
                 labels.add(f"{marker.name}[{args_str}]")
 
         # Inject tier (quick/standard/comprehensive/full) and arch-exclude
-        # labels from tests/test_categories.yaml.  The tier check consults
-        # `labels` so heavy markers (mpi, lulesh, ...) opt the test out of
-        # the relevant tiers.
+        # labels from test_categories.yaml
         labels |= _resolve_tier_labels(test_name, labels)
         labels |= _resolve_arch_exclude_labels(test_name)
 

@@ -50,14 +50,8 @@ set_target_properties(
 )
 
 # test_categories.yaml drives tier (quick/standard/comprehensive/full) and
-# arch-exclude label injection at CTest-generate time (see tests/pytest/
-# conftest.py:_load_test_categories).
-#
-# Copy at CONFIGURE time so the YAML is at its expected build-tree location
-# before any build target runs - the generate-pytest-ctests target does not
-# depend on `copy-test-files`, so a build-time copy alone could race and
-# leave _load_test_categories() silently degrading to "no tier labels".
-# The build-time copy below also picks up edits without re-running cmake.
+# arch-exclude label injection at CTest-generate time (see _load_test_categories
+in conftest.py).
 set(ROCPROFSYS_TEST_CATEGORIES_YAML ${CMAKE_CURRENT_LIST_DIR}/test_categories.yaml)
 configure_file(
     ${ROCPROFSYS_TEST_CATEGORIES_YAML}
@@ -121,8 +115,7 @@ if(ROCPROFSYS_INSTALL_TESTING)
             DESTINATION share/rocprofiler-systems/tests
             COMPONENT rocprofiler-systems-tests
     )
-    # Test categories policy (informational / debuggable - the labels
-    # themselves are baked into the generated CTestTestfile.cmake).
+    # Test categories policy
     install(
         FILES ${ROCPROFSYS_TEST_CATEGORIES_YAML}
         DESTINATION share/rocprofiler-systems/tests
