@@ -10,6 +10,7 @@
 #include "hip_internal.hpp"
 
 #include <cstdint>
+#include <mutex>
 
 #if defined(HIP_ROCPROFILER_REGISTER) && HIP_ROCPROFILER_REGISTER > 0
 #include <rocprofiler-register/rocprofiler-register.h>
@@ -1557,15 +1558,39 @@ template <typename Tp> void ToolsInit(Tp* table) {
 #endif
 }
 
+template <typename Tp> bool& IsToolsInitActive() {
+  thread_local auto active = false;
+  return active;
+}
+
+template <typename Tp> struct ScopedToolsInit {
+  ScopedToolsInit() { IsToolsInitActive<Tp>() = true; }
+  ~ScopedToolsInit() { IsToolsInitActive<Tp>() = false; }
+};
+
 template <typename Tp> Tp& GetDispatchTableImpl() {
   // using a static inside a function prevents static initialization fiascos
+  static auto base_dispatch_table = Tp{};
   static auto dispatch_table = Tp{};
+  static auto dispatch_table_once = std::once_flag{};
+  static auto tools_init_once = std::once_flag{};
 
   // Change all the function pointers to point to the HIP runtime implementation functions
-  UpdateDispatchTable(&dispatch_table);
+  std::call_once(dispatch_table_once, []() {
+    UpdateDispatchTable(&base_dispatch_table);
+    dispatch_table = base_dispatch_table;
+  });
 
-  // Profiler Registration, may wrap the function pointers
-  ToolsInit(&dispatch_table);
+  // Profiler registration may load user tooling whose constructors call back into HIP compiler
+  // APIs. Let same-thread reentry use the base HIP table instead of re-entering this call_once.
+  if (!IsToolsInitActive<Tp>()) {
+    std::call_once(tools_init_once, []() {
+      auto guard = ScopedToolsInit<Tp>{};
+      ToolsInit(&dispatch_table);
+    });
+  } else {
+    return base_dispatch_table;
+  }
 
   return dispatch_table;
 }
@@ -1582,16 +1607,13 @@ template <typename Tp> Tp& GetDispatchTableImpl() {
 #define NO_VECTORIZE
 #endif
 NO_VECTORIZE const HipDispatchTable* GetHipDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipDispatchTable>();
-  return _v;
+  return &GetDispatchTableImpl<HipDispatchTable>();
 }
 NO_VECTORIZE const HipCompilerDispatchTable* GetHipCompilerDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipCompilerDispatchTable>();
-  return _v;
+  return &GetDispatchTableImpl<HipCompilerDispatchTable>();
 }
 const HipToolsDispatchTable* GetHipToolsDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipToolsDispatchTable>();
-  return _v;
+  return &GetDispatchTableImpl<HipToolsDispatchTable>();
 }
 }  // namespace hip
 
