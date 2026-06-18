@@ -30,6 +30,8 @@ from utils.utils_analysis import (
     merge_counters_spatial_multiplex,
 )
 from utils.utils_common import (
+    PC_SAMPLING_BLOCK_IDS,
+    canonical_config_arch,
     get_uuid,
     is_only_pc_sampling,
     load_panel_configs,
@@ -88,10 +90,56 @@ class OmniAnalyze_Base:
     def get_profiling_config(self) -> dict[str, Any]:
         return self._profiling_config
 
+    def pc_sampling_collected(self) -> bool:
+        """True when PC sampling is among the collected blocks."""
+        config = getattr(self, "_profiling_config", {})
+        return any(
+            block in PC_SAMPLING_BLOCK_IDS for block in config.get("filter_blocks", [])
+        )
+
     def pc_sampling_only(self) -> bool:
-        """True when profiling collected only PC sampling (block 21)."""
+        """True when every collected block is PC sampling."""
         config = getattr(self, "_profiling_config", {})
         return is_only_pc_sampling(config.get("filter_blocks", []))
+
+    def load_pc_sampling_tool_data(
+        self, workload_path: str
+    ) -> Optional[dict[str, Any]]:
+        """Return parsed PC sampling tool data, or None when not collected."""
+        if not self.pc_sampling_collected():
+            return None
+        return file_io.load_pc_sampling_results(str(workload_path))
+
+    def build_pc_sampling_only_workload(
+        self,
+        workload: schema.Workload,
+        dir_path: str,
+        args: argparse.Namespace,
+        tool_data: Optional[dict[str, Any]],
+        filter_nodes: Optional[list[str]] = None,
+    ) -> None:
+        """Build dispatch scaffolding and tables for a run without counters."""
+        workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(tool_data)
+        workload.raw_pmc = workload.raw_pmc.rename(
+            columns={"Dispatch_Id": "Dispatch_ID"}
+        )
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+            df_in=workload.raw_pmc,
+            raw_data_dir=str(dir_path),
+            filter_gpu_ids=workload.filter_gpu_ids,
+            filter_dispatch_ids=workload.filter_dispatch_ids,
+            filter_nodes=(
+                filter_nodes if filter_nodes is not None else workload.filter_nodes
+            ),
+            time_unit=args.time_unit,
+            kernel_verbose=args.kernel_verbose,
+        )
+        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+        parser.load_non_mertrics_table(
+            workload, dir_path, args, pc_sampling_tool_data=tool_data
+        )
+        parser.nullify_unevaluated_metric_values(workload)
 
     def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs
@@ -117,6 +165,7 @@ class OmniAnalyze_Base:
         list_stats: bool,
         filter_metrics: Optional[list[str]],
         sys_info: pd.Series,
+        profiling_config: dict[str, Any],
     ) -> dict[str, schema.ArchConfig]:
         single_panel_config = file_io.is_single_panel_config(
             config_dir, self.__supported_archs
@@ -126,8 +175,11 @@ class OmniAnalyze_Base:
         if list_stats:
             ac.panel_configs = TOP_STATS_BUILD_IN_CONFIG
         else:
+            config_arch = canonical_config_arch(arch) or arch
             arch_panel_config = [
-                config_dir if single_panel_config else str(f"{config_dir}/{arch}")
+                config_dir
+                if single_panel_config
+                else str(Path(config_dir) / config_arch)
             ]
             # Use restructured perf metrics in TUI analyze mode
             if self.get_args().tui and arch in ["gfx942", "gfx950"]:
@@ -141,9 +193,12 @@ class OmniAnalyze_Base:
                 )
             ac.panel_configs = load_panel_configs(arch_panel_config)
 
-        # TODO: filter_metrics should/might be one per arch
         parser.build_dfs(
-            arch_configs=ac, filter_metrics=filter_metrics, sys_info=sys_info
+            arch_configs=ac,
+            filter_metrics=filter_metrics,
+            sys_info=sys_info,
+            profiling_config=profiling_config,
+            arch=arch,
         )
         self._arch_configs[arch] = ac
         return self._arch_configs
@@ -186,7 +241,7 @@ class OmniAnalyze_Base:
         for path_info in args.path:
             sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
-                sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+                sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
                 arch = sys_info.iloc[0]["gpu_arch"]
                 self.generate_configs(
                     arch,
@@ -194,6 +249,7 @@ class OmniAnalyze_Base:
                     args.list_stats,
                     args.filter_metrics,
                     sys_info.iloc[0],
+                    getattr(self, "_profiling_config", {}),
                 )
 
         self.load_options(normalization_filter)
@@ -206,7 +262,7 @@ class OmniAnalyze_Base:
             w = schema.Workload()
             sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
-                w.sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+                w.sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
                 if not getattr(args, "no_roof", False):
                     # Validate roofline CSV before loading
 

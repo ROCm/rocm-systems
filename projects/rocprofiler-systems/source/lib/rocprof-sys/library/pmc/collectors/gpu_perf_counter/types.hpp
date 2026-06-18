@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "backends/rocprofiler_sdk/types.hpp"
+
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/fmt/ranges.h>
 
@@ -17,25 +19,13 @@
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
-using counter_id_t = std::uint64_t;
+// Data types are owned by the backend layer (the producer); re-exported here so
+// pmc consumers keep their existing pmc::collectors::gpu_perf_counter::* spellings.
+namespace backend = ::rocprofsys::backends::rocprofiler_sdk;
 
-struct dimension_position
-{
-    std::string name;
-    size_t      position{ 0 };
-};
-
-struct counter_metadata
-{
-    counter_id_t                    counter_id{ 0 };
-    std::string                     name;
-    std::string                     description;
-    std::string                     block;
-    std::string                     expression;
-    bool                            is_constant = false;
-    bool                            is_derived  = false;
-    std::vector<dimension_position> dimensions;
-};
+using backend::counter_id_t;
+using backend::counter_metadata;
+using backend::dimension_position;
 
 struct counter_value
 {

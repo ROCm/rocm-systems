@@ -1,5 +1,0 @@
-pmc:  SPI_RA_WVLIM_STALL_CSN SPI_SWC_CSC_WR
-
-gpu:
-range:
-kernel:

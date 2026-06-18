@@ -11,6 +11,7 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -24,6 +25,7 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -70,10 +72,10 @@ env:
   ENABLE_AQLPROFILE_BUILD: "true"
   ENABLE_ROCDECODE_BUILD: "true"
   ENABLE_ROCJPEG_BUILD: "true"
-  INSTALL_NIGHTLY_ROCM: "true"
 
 jobs:
   code-coverage:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     permissions:
       contents: write
@@ -216,7 +218,6 @@ jobs:
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
         enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
         enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
-        install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
         ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
         ccache-variant: ccache
 

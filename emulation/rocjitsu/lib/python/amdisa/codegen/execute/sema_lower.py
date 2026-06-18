@@ -74,15 +74,15 @@ class OperandMap:
             # Prefer the operand's own declared bit size so mixed-width
             # instructions (e.g. the f64<->32-bit conversions, where one side is
             # 64-bit and the other 32-bit) get the correct per-operand lane
-            # width instead of a single instruction-level dtype width. Only the
-            # 64-bit case matters for read_lane64/write_lane64 selection; every
-            # narrower size (8/16/32) reads/writes through the 32-bit path.
+            # width instead of a single instruction-level dtype width. 64-bit
+            # selects read_lane64/write_lane64; 16-bit is also preserved so
+            # true16 lowering can merge the selected half of a 32-bit lane.
             if explicit_width is not None:
-                return 64 if explicit_width == 64 else 32
+                return explicit_width
             size = op_widths.get(name) if op_widths else None
             if size is None:
                 return width
-            return 64 if size == 64 else 32
+            return size
 
         src_reg_classes = src_reg_classes or {}
         dst_reg_classes = dst_reg_classes or {}
@@ -121,6 +121,7 @@ class LoweringContext:
     true16_dst_reg: str | None = None
     true16_src_raw: str | None = None
     vector_sgpr_once: bool = False
+    clear_false_lane_mask_writes: bool = True
 
 
 _INFIX_OPS: dict[SemaNodeKind, str] = {
@@ -164,8 +165,12 @@ _STD_MATH: dict[SemaNodeKind, str] = {
     SemaNodeKind.SIN: 'std::sin',
     SemaNodeKind.COS: 'std::cos',
     SemaNodeKind.LOG2: 'std::log2',
-    SemaNodeKind.FLOOR: 'std::floor',
-    SemaNodeKind.TRUNC: 'std::trunc',
+    # floor/trunc go through util:: wrappers that quiet a signaling NaN so the
+    # generated scalar bodies agree with the SIMD fast paths (and the GPU) under
+    # gcc, whose glibc floorf/truncf pass sNaN through unquieted (clang's
+    # roundss/roundsd quiet it). See util::floor_scalar in util/simd.h.
+    SemaNodeKind.FLOOR: 'util::floor_scalar',
+    SemaNodeKind.TRUNC: 'util::trunc_scalar',
 }
 
 
@@ -250,16 +255,27 @@ def _vcc_init_expr(ctx: LoweringContext) -> str:
     return '0'
 
 
+def _write_vcc_mask_to_explicit_dst(dst: str) -> str:
+    # Keep this wave32/wave64 mask-width rule in sync with simd_glue.h and
+    # vector_cmp.py.
+    return (
+        f'if (wf.wf_size() <= 32)\n'
+        f'    {dst}.write_scalar(wf, static_cast<uint32_t>(vcc));\n'
+        f'  else\n'
+        f'    {dst}.write_scalar64(wf, vcc);'
+    )
+
+
 def _vcc_write_stmt(ctx: LoweringContext) -> str:
     """Return the C++ statement to write back the vcc local variable."""
     if ctx.vcc_dst and ctx.vcc_dst != '__vcc__':
-        return f'{ctx.vcc_dst}.write_scalar64(wf, vcc);'
+        return _write_vcc_mask_to_explicit_dst(ctx.vcc_dst)
     if ctx.vcc_dst == '__vcc__':
         return 'wf.set_vcc(vcc);'
     if ctx.operand_map:
         dst = ctx.operand_map.dst(0)
         if dst:
-            return f'{dst.name}.write_scalar64(wf, vcc);'
+            return _write_vcc_mask_to_explicit_dst(dst.name)
     return 'wf.set_vcc(vcc);'
 
 
@@ -306,6 +322,7 @@ def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
             true16_dst_reg=ctx.true16_dst_reg,
             true16_src_raw=ctx.true16_src_raw,
             vector_sgpr_once=ctx.vector_sgpr_once,
+            clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
         )
         lines.extend(_lower_stmt(node.children[1], inner_ctx))
         lines.append(f'{_indent(ctx)}}}')
@@ -378,12 +395,18 @@ def _lower_assign(node: SemaNode, ctx: LoweringContext) -> list[str]:
             idx = _lower_expr(lhs_node.children[1], ctx)
             rhs = _lower_expr(rhs_node, ctx)
             ind = _indent(ctx)
-            return [
+            lines = [
                 f'{ind}if ({rhs})',
                 f'{ind}  {ctx.vcc_var} |= (1ULL << {idx});',
-                f'{ind}else',
-                f'{ind}  {ctx.vcc_var} &= ~(1ULL << {idx});',
             ]
+            if ctx.clear_false_lane_mask_writes:
+                lines.extend(
+                    [
+                        f'{ind}else',
+                        f'{ind}  {ctx.vcc_var} &= ~(1ULL << {idx});',
+                    ]
+                )
+            return lines
         if arr.kind == SemaNodeKind.ID and arr.id_name in ('MEM', 'LDS'):
             idx = _lower_expr(lhs_node.children[1], ctx)
             rhs = _lower_expr(rhs_node, ctx)
@@ -431,6 +454,7 @@ def _lower_if(node: SemaNode, ctx: LoweringContext) -> list[str]:
         true16_dst_reg=ctx.true16_dst_reg,
         true16_src_raw=ctx.true16_src_raw,
         vector_sgpr_once=ctx.vector_sgpr_once,
+        clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
     )
 
     if len(children) == 2:
@@ -481,6 +505,7 @@ def _lower_for(node: SemaNode, ctx: LoweringContext) -> list[str]:
         true16_dst_reg=ctx.true16_dst_reg,
         true16_src_raw=ctx.true16_src_raw,
         vector_sgpr_once=ctx.vector_sgpr_once,
+        clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
     )
 
     init_str = (
@@ -507,6 +532,23 @@ def _lower_declare(node: SemaNode, ctx: LoweringContext) -> list[str]:
     return []
 
 
+def _lower_less_greater_once(node: SemaNode, ctx: LoweringContext) -> str | None:
+    if node.kind != SemaNodeKind.LOR or len(node.children) != 2:
+        return None
+
+    left, right = node.children
+    if {left.kind, right.kind} != {SemaNodeKind.LT, SemaNodeKind.GT}:
+        return None
+    if len(left.children) != 2 or len(right.children) != 2:
+        return None
+    if left.children != right.children:
+        return None
+
+    lhs = _lower_expr(left.children[0], ctx)
+    rhs = _lower_expr(left.children[1], ctx)
+    return f'([&]() {{ auto a = {lhs}; auto b = {rhs}; return (a < b) || (a > b); }}())'
+
+
 def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower an expression node to a C++ expression string."""
     kind = node.kind
@@ -518,6 +560,8 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         return _lower_id(node, ctx)
 
     if kind in _INFIX_OPS:
+        if (expr := _lower_less_greater_once(node, ctx)) is not None:
+            return expr
         lhs = _lower_expr(node.children[0], ctx)
         rhs = _lower_expr(node.children[1], ctx)
         op = _INFIX_OPS[kind]
@@ -855,6 +899,17 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
         if binding.bit_width == 64:
             return f'{name}.read_lane64(wf, lane)'
         value = f'{name}.read_lane(wf, lane)'
+        if (
+            tag == 'D'
+            and ctx.true16_dst_select is not None
+            and ((node.ty and node.ty.size == 16) or binding.bit_width == 16)
+        ):
+            if ctx.true16_dst_reg is not None:
+                value = (
+                    'wf.cu().read_vgpr(wf.vgpr_alloc().base + '
+                    f'({ctx.true16_dst_reg}), lane)'
+                )
+            return f'(({ctx.true16_dst_select}) != 0 ? ({value} >> 16) : {value})'
         if tag != 'D' and idx in ctx.true16_src_selects:
             select = ctx.true16_src_selects[idx]
             return f'(({select}) != 0 ? ({value} >> 16) : {value})'
@@ -974,7 +1029,9 @@ def _lower_dst_write(
             if binding.bit_width == 64:
                 return [f'{_indent(ctx)}{name}.write_scalar64(wf, {rhs});']
             return [f'{_indent(ctx)}{name}.write_scalar(wf, {rhs});']
-        if lhs_ty and lhs_ty.size == 16 and ctx.true16_dst_select is not None:
+        if ctx.true16_dst_select is not None and (
+            (lhs_ty and lhs_ty.size == 16) or binding.bit_width == 16
+        ):
             selected_rhs = rhs
             if ctx.true16_src_raw is not None or ctx.true16_src_select is not None:
                 true16_rhs = ctx.true16_src_raw or raw_rhs
@@ -1066,7 +1123,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     '(v < 0 ? (0u - static_cast<uint32_t>(v))'
     ' : static_cast<uint32_t>(v)); }}()',
     'rndne': 'std::nearbyint({0})',
-    'ceil': 'std::ceil({0})',
+    'ceil': 'util::ceil_scalar({0})',
     'exp2': 'amdgpu::transcendental::exp_f32({0})',
     'bcnt': 'static_cast<uint32_t>(std::popcount({0}))',
     'bcnt1': 'static_cast<uint32_t>(std::popcount({0}))',
@@ -1106,7 +1163,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' return s == 0 ? static_cast<uint32_t>(-1)'
     ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
     'cls': '[&]() {{ int32_t sv = static_cast<int32_t>({0});'
-    ' if (sv == 0 || sv == -1) return 32u;'
+    ' if (sv == 0 || sv == -1) return 31u;'
     ' uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);'
     ' return static_cast<uint32_t>(std::countl_zero(u)) - 1u; }}()',
     'wqm': '[&]() {{ uint32_t s = {0}; uint32_t r = 0;'
@@ -1373,12 +1430,14 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' uint32_t offset = field & 31u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return 0u;'
+    ' if (offset + width > 32) width = 32 - offset;'
     ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
     ' return (base >> offset) & mask; }}()',
     'bfe_i32': '[&]() {{ uint32_t base = {0}, field = {1};'
     ' uint32_t offset = field & 31u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return 0u;'
+    ' if (offset + width > 32) width = 32 - offset;'
     ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
     ' uint32_t extracted = (base >> offset) & mask;'
     ' if (width < 32 && (extracted & (1u << (width - 1))))'
@@ -1389,6 +1448,7 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' uint32_t offset = field & 63u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return static_cast<uint64_t>(0);'
+    ' if (offset + width > 64) width = 64 - offset;'
     ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
     ' return (base >> offset) & mask; }}()',
     'bfe_i64': '[&]() {{ uint64_t base = {0};'
@@ -1396,6 +1456,7 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' uint32_t offset = field & 63u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return static_cast<int64_t>(0);'
+    ' if (offset + width > 64) width = 64 - offset;'
     ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
     ' uint64_t extracted = (base >> offset) & mask;'
     ' if (width < 64 && (extracted & (1ULL << (width - 1))))'

@@ -443,6 +443,10 @@ class Command : public Event {
    */
   virtual void submit(device::VirtualDevice& device) = 0;
 
+  //! True only for marker commands; lets the device layer keep its coalescing
+  //! window across markers while resetting it for any other (intervening) command.
+  virtual bool isMarkerCommand() const { return false; }
+
   //! Release the resources associated with this event.
   virtual void releaseResources();
 
@@ -1497,6 +1501,10 @@ class ExternalSemaphoreCmd : public Command {
 class Marker : public Command {
   device::Signal* ipc_completion_signal_ = nullptr;
   device::Signal* ipc_dep_signal_ = nullptr;
+  //! Monotonic client (HIP) coalesce identity for detecting consecutive records;
+  //! a non-zero value also opts the record into coalescing. 0 = not coalesceable.
+  uint64_t coalesce_event_ = 0;
+  bool synced_since_record_ = false;  //!< Client synced the event since its last record
 
  public:
   //! Create a new Marker
@@ -1514,6 +1522,15 @@ class Marker : public Command {
   void setIpcDepSignal(device::Signal* s) { ipc_dep_signal_ = s; }
   device::Signal* ipcDepSignal() const { return ipc_dep_signal_; }
 
+  //! Coalescing metadata set by the client layer (opaque to rocclr). A non-zero
+  //! coalesceEvent() both identifies the event and marks the record eligible.
+  void setCoalesceEvent(uint64_t id) { coalesce_event_ = id; }
+  uint64_t coalesceEvent() const { return coalesce_event_; }
+  void setSyncedSinceRecord(bool v) { synced_since_record_ = v; }
+  bool syncedSinceRecord() const { return synced_since_record_; }
+
+  bool isMarkerCommand() const override { return true; }
+
   //! The actual command implementation.
   virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }
 };
@@ -1523,6 +1540,13 @@ class AccumulateCommand : public Command {
   //! Kernel names and timestamps list for activity profiling
   std::vector<const std::string*> kernelNames_;
   const std::vector<const std::string*>* kernelNamesRef_ = nullptr;
+  //! Optional owner of the borrowed kernel-name strings (e.g. the GraphExec
+  //! whose nodes own them). Retained while this command lives so the strings
+  //! outlive ReportActivity(), which runs at the end of setStatus(CL_COMPLETE)
+  //! -- after OnLaunchComplete() may have dropped the launch's reference. This
+  //! ties the strings' lifetime to the consumer (this command) rather than to
+  //! the graph launch, with no string copies. Set via the constructor.
+  ReferenceCountedObject* kernelNamesOwner_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
@@ -1531,10 +1555,21 @@ class AccumulateCommand : public Command {
   bool owns_hw_events_ = true;
 
  public:
-  //! Create a new Marker
+  //! Create a new accumulate command. kernelNamesOwner, when given, is the
+  //! object that owns the borrowed kernel-name strings (e.g. the GraphExec);
+  //! it is retained for the command's whole lifetime and released in the
+  //! destructor, so the borrowed strings stay valid through ReportActivity()
+  //! even after OnLaunchComplete() drops the launch's reference -- with no
+  //! string copies.
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
-                    const Event* waitingEvent = nullptr)
-      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
+                    const Event* waitingEvent = nullptr,
+                    ReferenceCountedObject* kernelNamesOwner = nullptr)
+      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent),
+        kernelNamesOwner_(kernelNamesOwner) {
+    if (kernelNamesOwner_ != nullptr) {
+      kernelNamesOwner_->retain();
+    }
+  }
 
   //! Destructor - release all retained HW events
   virtual ~AccumulateCommand();
@@ -1570,7 +1605,9 @@ class AccumulateCommand : public Command {
     kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
   }
 
-  //! Set kernel names by reference
+  //! Set kernel names by reference (cheap; borrows the caller's vector and
+  //! strings). Safe only while that storage outlives this command. Used on the
+  //! hot path when no profiler is active, where the names are never read.
   void setKernelNamesRef(const std::vector<const std::string*>* kernelNames) {
     kernelNamesRef_ = kernelNames;
   }
@@ -2100,6 +2137,29 @@ class SvmPrefetchBatchAsyncCommand : public Command {
   size_t count_;                              //!< Number of prefetch operations
 };
 
+class SvmDiscardBatchAsyncCommand : public Command {
+ public:
+  SvmDiscardBatchAsyncCommand(HostQueue& queue, std::vector<void*>& dev_ptrs,
+                              std::vector<size_t>& sizes)
+      : Command(queue, 1),
+        dev_ptrs_(std::move(dev_ptrs)),
+        sizes_(std::move(sizes)),
+        count_(dev_ptrs_.size()) {
+    assert(sizes_.size() == count_ && "sizes vector must match dev_ptrs size");
+  }
+
+  virtual void submit(device::VirtualDevice& device) { device.SubmitSvmDiscardBatchAsync(*this); }
+
+  void* const* DevicePointers() const { return dev_ptrs_.data(); }
+  const size_t* Sizes() const { return sizes_.data(); }
+  size_t Count() const { return count_; }
+
+ private:
+  std::vector<void*> dev_ptrs_;  //!< Array of device pointers to memory for discard
+  std::vector<size_t> sizes_;    //!< Array of sizes for discard
+  size_t count_;                 //!< Number of discard operations
+};
+
 /*! \brief  A virtual map memory command.
  *
  */
@@ -2172,6 +2232,7 @@ union ComputeCommand {
   VirtualMapCommand cmd27;
   BatchMemoryOperationCommand cmd28;
   SvmPrefetchBatchAsyncCommand cmd29;
+  SvmDiscardBatchAsyncCommand cmd30;
   ComputeCommand() {}
   ~ComputeCommand() {}
 };

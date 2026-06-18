@@ -57,6 +57,8 @@ add_executable(
     decode_execute_benchmark.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
+    mfma_simd_benchmark.cpp
+    wmma_simd_benchmark.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -92,6 +94,7 @@ add_executable(
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
     simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
     simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp
+    simd_correctness/vop3_cvt_pk_f32_rdna_correctness_test.cpp
     simd_correctness/vop3_ternary_fp_simd_correctness_test.cpp
     simd_correctness/vop3_fmac_simd_correctness_test.cpp
     simd_correctness/vop3_ldexp_simd_correctness_test.cpp
@@ -104,7 +107,16 @@ add_executable(
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
     data_types_test.cpp
+    drm_info_layout_test.cpp
 )
+if(RJ_ENABLE_EXPENSIVE_CHECKS)
+    target_sources(
+        rocjitsu_tests
+        PRIVATE
+            simd_correctness/mfma_simd_exact_test.cpp
+            simd_correctness/wmma_simd_exact_test.cpp
+    )
+endif()
 target_link_libraries(
     rocjitsu_tests
     PRIVATE
@@ -118,7 +130,10 @@ target_link_libraries(
 rj_configure_target(rocjitsu_tests TEST)
 
 include(GoogleTest)
-gtest_discover_tests(rocjitsu_tests)
+# Benchmarks are timing tools, not correctness tests; keep them out of the
+# default ctest run (invoke them directly via
+# ./rocjitsu_tests --gtest_filter='*Benchmark*').
+gtest_discover_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
 
 add_executable(
     rj_dbt_translate_smoke_test
@@ -169,9 +184,7 @@ set(RJ_KMD_PRELOAD_ENV
 find_program(
     ROCMINFO_EXECUTABLE
     NAMES rocminfo
-    HINTS ${CMAKE_SOURCE_DIR}/.venv
-    ENV ROCM_PATH
-    /opt/rocm
+    HINTS "${ROCM_PATH}"
     PATH_SUFFIXES bin
     DOC "Path to the rocminfo executable"
 )
@@ -233,13 +246,7 @@ endif()
 
 # --- HSA init test (requires ROCm HSA runtime + CLI launcher) ---
 
-find_library(
-    HSA_RUNTIME64
-    hsa-runtime64
-    PATHS /opt/rocm/lib
-    ENV ROCM_PATH
-    PATH_SUFFIXES lib
-)
+find_library(HSA_RUNTIME64 hsa-runtime64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
 if(HSA_RUNTIME64)
     get_filename_component(RJ_HSA_LIBRARY_DIR "${HSA_RUNTIME64}" DIRECTORY)
     get_filename_component(RJ_HSA_ROCM_ROOT "${RJ_HSA_LIBRARY_DIR}" DIRECTORY)
@@ -281,10 +288,7 @@ if(HSA_RUNTIME64)
         find_program(
             ROCM_AGENT_ENUM
             rocm_agent_enumerator
-            HINTS
-            ENV ROCM_PATH
-            ${RJ_HSA_ROCM_ROOT}
-            /opt/rocm
+            HINTS "${ROCM_PATH}"
             PATH_SUFFIXES bin
         )
         set(HAS_DBT_VECTOR_ADD_GPU FALSE)
@@ -531,13 +535,7 @@ endif()
 
 # --- HIP tests (requires hipcc + CLI launcher) ---
 
-find_program(
-    HIPCC_EXECUTABLE
-    hipcc
-    PATHS /opt/rocm/bin
-    ENV ROCM_PATH
-    PATH_SUFFIXES bin
-)
+find_program(HIPCC_EXECUTABLE hipcc PATHS "${ROCM_PATH}" PATH_SUFFIXES bin)
 if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
@@ -612,13 +610,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test(hip_ds_transpose_acc_test)
 
     # --- RCCL collective test ---
-    find_library(
-        RCCL_LIB
-        rccl
-        PATHS /opt/rocm/lib
-        ENV ROCM_PATH
-        PATH_SUFFIXES lib
-    )
+    find_library(RCCL_LIB rccl PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
     if(RCCL_LIB)
         rj_add_hip_test(hip_rccl_test EXTRA_LIBS ${RCCL_LIB})
         message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
@@ -682,13 +674,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     endif()
 
     # --- rocBLAS GEMM test ---
-    find_library(
-        ROCBLAS_LIB
-        rocblas
-        PATHS /opt/rocm/lib
-        ENV ROCM_PATH
-        PATH_SUFFIXES lib
-    )
+    find_library(ROCBLAS_LIB rocblas PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
     if(ROCBLAS_LIB)
         rj_add_hip_test(hip_gemm_test EXTRA_LIBS ${ROCBLAS_LIB})
         rj_add_hip_test(hip_gemm_test_cdna3 ARCH gfx942 SOURCE hip_gemm_test.cpp EXTRA_LIBS ${ROCBLAS_LIB})

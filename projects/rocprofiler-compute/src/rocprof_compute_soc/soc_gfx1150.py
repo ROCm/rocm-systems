@@ -1,0 +1,54 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+import argparse
+from typing import Optional
+
+from rocprof_compute_soc.soc_base import OmniSoC_Base
+from utils.logger import demarcate
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.specs import MachineSpecs
+
+
+class gfx1150_soc(OmniSoC_Base):
+    def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
+        super().__init__(args, mspec)
+        self.set_arch("gfx1150")
+        self.set_compatible_profilers(["rocprofv3", "rocprofiler-sdk"])
+        # Per IP block max number of simultaneous counters. GFX IP Blocks
+        # RDNA3.5 perfmon config - fallback to gfx11xx defaults if not defined
+        try:
+            self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1150"))
+        except KeyError:
+            # Fallback to RDNA3 defaults if gfx1150 not defined
+            self.set_perfmon_config({
+                "SQ": 16,
+                "SQC": 8,
+                "TCP": 4,
+                "GL1C": 4,
+                "GL2C": 4,
+                "SPI": 6,
+                "GRBM": 2,
+            })
+
+        # Set arch specific specs for RDNA3.5
+        # These values may need adjustment based on actual hardware
+        self._mspec.l2_banks = 8  # Typical for APU
+        self._mspec.lds_banks_per_cu = 32  # Standard RDNA3.5 LDS config
+        self._mspec.pipes_per_gpu = 2  # APU typically has fewer pipes
+
+    # -----------------------
+    # Required child methods
+    # -----------------------
+    @demarcate
+    def profiling_setup(self) -> Optional[list[str]]:
+        """Perform any SoC-specific setup prior to profiling."""
+        super().profiling_setup()
+        # Performance counter filtering
+        filter_blocks = self.perfmon_filter()
+        return filter_blocks
+
+    @demarcate
+    def post_profiling(self) -> None:
+        """Perform any SoC-specific post profiling activities."""
+        super().post_profiling()

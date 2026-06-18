@@ -2,21 +2,30 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-import json
 import re
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional
 
 import pandas as pd
 
 from utils import schema
-from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import gen_counter_list
-from utils.pattern_matching import PatternMatcherEngine
+from utils.pattern_matching import fnmatch_glob_matches
+from utils.pc_sampling_analysis import (
+    SOURCE_LINE_MISSING,
+    aggregate_pc_sample_records,
+    detect_pc_sampling_method,
+    enrich_with_metadata,
+    load_pc_sample_records,
+)
 from utils.specs import MachineSpecs
 from utils.utils_common import (
+    METRIC_ID_RE,
     SUPPORTED_FIELD,
+    convert_filter_blocks_to_panel_ids,
+    convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
     normalize_filter_to_str_list,
 )
@@ -36,23 +45,21 @@ PMC_KERNEL_TOP_TABLE_ID: int = 1
 # 002 is ID of pmc_dispatch_info.csv table
 PMC_DISPATCH_INFO_TABLE_ID: int = 2
 
-PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
-
 
 @demarcate
 def build_dfs(
     arch_configs: schema.ArchConfig,
     filter_metrics: Optional[list[str]],
     sys_info: pd.Series,
+    profiling_config: dict[str, Any],
+    arch: Optional[str] = None,
 ) -> None:
+    """Build a dataframe template for each table in each panel. Analyze-mode
+    filter_metrics overrides profile-mode filter_blocks; tables that fail the
+    active filter are omitted from arch_configs.dfs. Alias tokens (e.g. "lds",
+    "roofline") in either filter are resolved against arch's panel aliases.
     """
-    Build dataframe for each type of data source within each panel.
 
-    Each dataframe will be used as a template to load data with each run later.
-    For now, support "metric_table" and "raw_csv_table". Otherwise, put an empty df.
-    """
-
-    # TODO: more error checking for filter_metrics!!
     simple_box = {
         "Min": ["MIN(", ")"],
         "Q1": ["QUANTILE(", ", 0.25)"],
@@ -61,9 +68,23 @@ def build_dfs(
         "Max": ["MAX(", ")"],
     }
 
-    dfs = {}
-    dfs_type = {}
-    metric_counters = {}
+    dfs: dict[int, pd.DataFrame] = {}
+    dfs_type: dict[int, str] = {}
+    dfs_expressions: dict[int, list[str]] = {}
+    metric_counters: dict[str, list[str]] = {}
+
+    if filter_metrics:
+        numeric_tokens = [t for t in filter_metrics if METRIC_ID_RE.match(str(t))]
+        alias_tokens = [t for t in filter_metrics if not METRIC_ID_RE.match(str(t))]
+        user_metric_filter: Optional[list[str]] = numeric_tokens or None
+        profile_panel_filter: set[int] = convert_filter_blocks_to_panel_ids(
+            alias_tokens, arch
+        )
+    else:
+        user_metric_filter = None
+        profile_panel_filter = convert_filter_blocks_to_panel_ids(
+            profiling_config.get("filter_blocks", []), arch
+        )
 
     arch_configs.panel_configs = expand_placeholder_ranges(
         arch_configs.panel_configs, sys_info
@@ -71,128 +92,183 @@ def build_dfs(
 
     for panel_id, panel in arch_configs.panel_configs.items():
         for data_source in panel["data source"]:
-            for type, data_config in data_source.items():
-                if type == "metric_table":
-                    headers = ["Metric_ID"]
-                    data_source_idx = str(data_config["id"] // 100)
+            for table_type, data_config in data_source.items():
+                table_id = data_config["id"]
+                file_data_source_idx = str(table_id // 100)
 
-                    if (
-                        "cli_style" in data_config
-                        and data_config["cli_style"] == "simple_box"
+                if table_type == "metric_table":
+                    df, expressions = _build_metric_table_df(
+                        panel=panel,
+                        data_config=data_config,
+                        simple_box=simple_box,
+                        panel_id=panel_id,
+                        user_metric_filter=user_metric_filter,
+                        profile_panel_filter=profile_panel_filter,
+                        metric_counters=metric_counters,
+                    )
+                    # Filter excluded every metric in this panel; skip the empty table.
+                    if data_config["metric"] and df.empty:
+                        continue
+                    dfs_expressions[table_id] = expressions
+
+                elif table_type == "raw_csv_table":
+                    if not _metric_passes_filter(
+                        metric_id=file_data_source_idx,
+                        panel_id=panel_id,
+                        data_source_idx=file_data_source_idx,
+                        user_metric_filter=user_metric_filter,
+                        profile_panel_filter=profile_panel_filter,
                     ):
-                        headers.append(data_config["header"]["metric"])
-                        for k in simple_box.keys():
-                            headers.append(k)
-
-                        for key, tile in data_config["header"].items():
-                            if key != "metric" and key != "expr":
-                                headers.append(tile)
-                    else:
-                        headers.append(data_config["header"]["metric"])
-                        for key, tile in data_config["header"].items():
-                            if key != "metric":
-                                headers.append(tile)
-
-                    # Only add Metrics Description column if it is defined in the panel
-                    if "metrics_description" in panel:
-                        headers.append("Description")
-
-                    df = pd.DataFrame(columns=headers)
-
-                    for i, (key, entries) in enumerate(data_config["metric"].items()):
-                        data_source_idx = (
-                            f"{data_config['id'] // 100}.{data_config['id'] % 100}"
+                        continue
+                    if data_config.get("columnwise"):
+                        df = pd.DataFrame(
+                            [data_config["source"]],
+                            columns=["from_csv_columnwise"],
                         )
-                        metric_idx = f"{data_source_idx}.{i}"
-                        eqn_content = []
-
-                        if (
-                            (not filter_metrics)
-                            or (
-                                metric_idx in filter_metrics
-                            )  # no filter  # metric in filter
-                            or
-                            # the whole table in filter
-                            (data_source_idx in filter_metrics)
-                            or
-                            # the whole IP block in filter
-                            (str(panel_id // 100) in filter_metrics)
-                        ):
-                            values = [metric_idx, key]
-
-                            if (
-                                "cli_style" in data_config
-                                and data_config["cli_style"] == "simple_box"
-                            ):
-                                for k, v in entries.items():
-                                    if k == "expr":
-                                        for bv in simple_box.values():
-                                            values.append(bv[0] + v + bv[1])
-                                    else:
-                                        if k != "alias":
-                                            values.append(v)
-                            else:
-                                for k, v in entries.items():
-                                    if k != "alias":
-                                        values.append(v)
-                                        eqn_content.append(v)
-
-                            if "alias" in entries.keys():
-                                values.append(entries["alias"])
-
-                            if "metrics_description" in panel:
-                                values.append(panel["metrics_description"].get(key, ""))
-
-                            df_new_row = pd.DataFrame([values], columns=headers)
-                            df = pd.concat([df, df_new_row])
-
-                        # generate mapping of counters and metrics
-                        filtered_counters = {}
-                        formula_visited = False
-
-                        for formula in eqn_content:
-                            if formula is not None and formula != "None":
-                                visited, counters = gen_counter_list(formula)
-                                if visited:
-                                    formula_visited = True
-                                for counter in counters:
-                                    filtered_counters[counter] = None
-
-                        if filtered_counters or formula_visited:
-                            metric_counters[key] = list(filtered_counters)
-
-                    df.set_index("Metric_ID", inplace=True)
-                elif type == "raw_csv_table":
-                    data_source_idx = str(data_config["id"] // 100)
-                    if (
-                        (not filter_metrics)
-                        or (data_source_idx == "0")  # no filter
-                        or (data_source_idx in filter_metrics)
-                    ):
-                        if "columnwise" in data_config and data_config["columnwise"]:
-                            df = pd.DataFrame(
-                                [data_config["source"]], columns=["from_csv_columnwise"]
-                            )
-                        else:
-                            df = pd.DataFrame(
-                                [data_config["source"]], columns=["from_csv"]
-                            )
                     else:
-                        df = pd.DataFrame()
-                elif type == "pc_sampling_table":
-                    data_source_idx = str(data_config["id"] // 100)
+                        df = pd.DataFrame([data_config["source"]], columns=["from_csv"])
+
+                elif table_type == "pc_sampling_table":
+                    if not _metric_passes_filter(
+                        metric_id=file_data_source_idx,
+                        panel_id=panel_id,
+                        data_source_idx=file_data_source_idx,
+                        user_metric_filter=user_metric_filter,
+                        profile_panel_filter=profile_panel_filter,
+                    ):
+                        continue
                     df = pd.DataFrame(
                         [data_config["source"]], columns=["from_pc_sampling"]
                     )
+
                 else:
                     df = pd.DataFrame()
 
-                dfs[data_config["id"]] = df
-                dfs_type[data_config["id"]] = type
+                dfs[table_id] = df
+                dfs_type[table_id] = table_type
 
-    setattr(arch_configs, "dfs", dfs)
-    setattr(arch_configs, "dfs_type", dfs_type)
-    setattr(arch_configs, "metric_counters", metric_counters)
+    arch_configs.dfs = dfs
+    arch_configs.dfs_type = dfs_type
+    arch_configs.dfs_expressions = dfs_expressions
+    arch_configs.metric_counters = metric_counters
+
+
+def _metric_passes_filter(
+    metric_id: str,
+    panel_id: int,
+    data_source_idx: str,
+    user_metric_filter: Optional[list[str]],
+    profile_panel_filter: set[int],
+) -> bool:
+    """Return True if a metric or table identified by metric_id passes the
+    active filter. metric_id is the file-level id for raw_csv / pc_sampling
+    tables, or the per-metric id (e.g. "2.1.0") for metric_table rows.
+    """
+    if panel_id <= 100 or data_source_idx == "0":
+        return True
+    if user_metric_filter is None and not profile_panel_filter:
+        return True
+    if user_metric_filter and (
+        metric_id in user_metric_filter
+        or data_source_idx in user_metric_filter
+        or str(panel_id // 100) in user_metric_filter
+    ):
+        return True
+    if profile_panel_filter:
+        file_id, _, _ = convert_metric_id_to_panel_info(metric_id)
+        return int(file_id) in profile_panel_filter
+    return False
+
+
+def _build_metric_table_df(
+    panel: dict[str, Any],
+    data_config: dict[str, Any],
+    simple_box: dict[str, list[str]],
+    panel_id: int,
+    user_metric_filter: Optional[list[str]],
+    profile_panel_filter: set[int],
+    metric_counters: dict[str, list[str]],
+) -> tuple[pd.DataFrame, list[str]]:
+    """Build the metric_table dataframe and its list of formula strings for
+    data_config, dropping rows the active filter excludes. Updates
+    metric_counters in place.
+    """
+    table_id = data_config["id"]
+    table_data_source_idx = f"{table_id // 100}.{table_id % 100}"
+    is_simple_box = data_config.get("cli_style") == "simple_box"
+
+    headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
+    header_keys: set[str] = set(data_config["header"]) - {"metric", "expr"}
+    if is_simple_box:
+        headers.extend(simple_box)
+        for key, tile in data_config["header"].items():
+            if key != "metric" and key != "expr":
+                headers.append(tile)
+    else:
+        for key, tile in data_config["header"].items():
+            if key != "metric":
+                headers.append(tile)
+    if "metrics_description" in panel:
+        headers.append("Description")
+
+    rows: list[list[Any]] = []
+    expressions: list[str] = []
+    metric_entries = data_config["metric"]
+    for i, (key, entries) in enumerate(metric_entries.items()):
+        metric_idx = f"{table_data_source_idx}.{i}"
+
+        if not _metric_passes_filter(
+            metric_id=metric_idx,
+            panel_id=panel_id,
+            data_source_idx=table_data_source_idx,
+            user_metric_filter=user_metric_filter,
+            profile_panel_filter=profile_panel_filter,
+        ):
+            continue
+
+        values: list[Any] = [metric_idx, key]
+        eqn_content: list[Any] = []
+        if is_simple_box:
+            for k, v in entries.items():
+                if k == "expr":
+                    for bv in simple_box.values():
+                        values.append(bv[0] + v + bv[1])
+                    eqn_content.append(v)
+                elif k not in {"coll_level", "alias"} and k in header_keys:
+                    values.append(v)
+        else:
+            for k, v in entries.items():
+                if k not in {"coll_level", "alias"} and k in header_keys:
+                    values.append(v)
+                    eqn_content.append(v)
+        expressions.extend(
+            v for v in eqn_content if isinstance(v, str) and v and v != "None"
+        )
+
+        if "alias" in entries:
+            values.append(entries["alias"])
+        if "metrics_description" in panel:
+            values.append(panel["metrics_description"].get(key, ""))
+
+        rows.append(values)
+
+        filtered_counters: dict[str, None] = {}
+        formula_visited = False
+        for formula in eqn_content:
+            if formula is None or formula == "None":
+                continue
+            visited, counters = gen_counter_list(formula)
+            if visited:
+                formula_visited = True
+            for counter in counters:
+                filtered_counters[counter] = None
+
+        if filtered_counters or formula_visited:
+            metric_counters[key] = list(filtered_counters)
+
+    df = pd.DataFrame(rows, columns=headers)
+    df.set_index("Metric_ID", inplace=True)
+    return df, expressions
 
 
 @demarcate
@@ -322,325 +398,69 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
     return df
 
 
-def find_key_recursively(
-    data: Union[dict, list], search_key: str
-) -> Union[list, dict, None]:
-    """
-    Recursively search for the search_key in the given data
-    (which can be a dict or list).
-    If the key is found, returns the value as a DataFrame.
-    """
-    if isinstance(data, dict):
-        for key, value in data.items():
-            if key == search_key:
-                return value
-            elif isinstance(value, (dict, list)):
-                result = find_key_recursively(value, search_key)
-                if result:
-                    return result
-    elif isinstance(data, list):
-        for item in data:
-            result = find_key_recursively(item, search_key)
-            if result:
-                return result
-    return None  # Return None if the key was not found
-
-
-def search_key_in_json(file_path: Path, search_key: str) -> Union[list, dict, None]:
-    # FIXME:
-    #   Load the entire JSON into memory.
-    #   Should not use for large file.
-    with open(file_path, encoding="utf-8") as file:
-        data = json.load(file)
-        found = find_key_recursively(data, search_key)
-        if found is None:
-            console_error(f'Key "{search_key}" not found in the JSON file.')
-        return found
-
-
-def search_pc_sampling_record(
-    records: Union[list[dict], dict],
-) -> Optional[list[tuple]]:
-    """
-    Search PC sampling records.
-
-    Group by (code_object_id, code_object_offset, inst_index), and aggregate
-    counts, stall reasons, and dispatch IDs.
-
-    Returns:
-        A sorted list of tuples:
-        (
-            code_object_id,
-            code_object_offset,
-            inst_index,
-            total_count,
-            count_issued,
-            count_stalled,
-            sorted_stall_reasons,
-            sorted_dispatch_ids,
-        )
-    """
-
-    if not records:
-        console_warning("PC sampling: no pc sampling record found!")
-        return None
-
-    # records should always be a list of dict
-    if isinstance(records, dict):
-        records = [records]
-
-    rocp_inst_not_issued_prefix_len = len(PC_SAMPLING_NOT_ISSUE_PREFIX)
-
-    stall_reason_keys = {
-        "NONE": 0,
-        # No instruction available in the instruction cache.
-        "NO_INSTRUCTION_AVAILABLE": 0,
-        "ALU_DEPENDENCY": 0,  # ALU dependency not resolved.
-        "WAITCNT": 0,
-        "INTERNAL_INSTRUCTION": 0,  # Wave executes an internal instruction.
-        "BARRIER_WAIT": 0,
-        "ARBITER_NOT_WIN": 0,  # The instruction did not win the arbiter.
-        "ARBITER_WIN_EX_STALL": 0,
-        # Arbiter issued an instruction, but the execution pipe
-        # pushed it back from execution.
-        "OTHER_WAIT": 0,
-        # Other types of wait (e.g., wait for XNACK acknowledgment).
-        "SLEEP_WAIT": 0,
-        "LAST": 0,
-    }
-
-    grouped_data: dict[tuple, list] = {}
-
-    for item in records:
-        record = item.get("record", {})
-        pc_info = record.get("pc", {})
-
-        code_object_id = pc_info.get("code_object_id")
-        code_object_offset = pc_info.get("code_object_offset")
-        inst_index = item.get("inst_index")
-        dispatch_id = record.get("dispatch_id")
-
-        if None in (code_object_id, code_object_offset, inst_index):
-            continue
-
-        key = (code_object_id, code_object_offset, inst_index)
-
-        snapshot = record.get("snapshot", {})
-        issued = record.get("wave_issued", False)
-
-        if key not in grouped_data:
-            grouped_data[key] = [0, 0, 0, {}, set()]
-
-        entry = grouped_data[key]
-
-        # Update counts
-        entry[0] += 1  # total_count
-        if issued:
-            entry[1] += 1  # count_issued
-        else:
-            entry[2] += 1  # count_stalled
-            stall_reason = snapshot.get("stall_reason")
-            if stall_reason and len(stall_reason) > rocp_inst_not_issued_prefix_len:
-                reason_key = stall_reason[rocp_inst_not_issued_prefix_len:]
-                if reason_key in stall_reason_keys:
-                    entry[3][reason_key] = entry[3].get(reason_key, 0) + 1
-
-        # Add dispatch_id if valid
-        if dispatch_id is not None:
-            entry[4].add(dispatch_id)
-
-    if not grouped_data:
-        console_warning("PC sampling: no pc sampling record found!")
-        return None
-
-    # Convert to sorted list of tuples:
-    sorted_counts = sorted(
-        [
-            (
-                code_object_id,
-                code_object_offset,
-                inst_index,
-                info[0],  # total_count
-                info[1],  # count_issued
-                info[2],  # count_stalled
-                sorted(
-                    ((k, v) for k, v in info[3].items() if v > 0),
-                    key=lambda item: item[1],
-                    reverse=True,
-                ),  # sorted stall reasons
-                sorted(info[4]),  # sorted dispatch_ids list
-            )
-            for (
-                code_object_id,
-                code_object_offset,
-                inst_index,
-            ), info in grouped_data.items()
-        ],
-        key=lambda x: (x[0], x[1], x[2]),
-    )
-
-    return sorted_counts
-
-
 @demarcate
 def load_pc_sampling_data_per_kernel(
     method: str,
-    file_name: Path,
-    csv_file_name: Path,
-    kernel_name: str,
+    tool_data: dict[str, Any],
     sorting_type: str,
+    kernel_name: Optional[str] = None,
 ) -> pd.DataFrame:
-    """
-    Load PC sampling raw data from json file with given method and kernel name,
-    count pc sampling and sort it in the order of compiled asm and associate with
-    kernel source code if available,
-    then return df.
+    """Build the detailed per-instruction PC sampling table from *tool_data*.
+
+    Filtered to *kernel_name* when given, otherwise every kernel's rows.
 
     :param method: "host_trap" or "stochastic".
-    :type method: str
-    :param file_name: The pc sampling json file.
-    :type file_name: Path
-    :param kernel_name: The kernel name to be filtered out.
-    :type kernel_name: str
+    :param tool_data: The parsed ``rocprofiler-sdk-tool[0]`` dict.
     :param sorting_type: "offset" or "count".
-    :type sorting_type: str
-    :return: The counted and reordering pc sampling info.
-    :rtype: pd.DataFrame:
+    :param kernel_name: Kernel to filter to, or None for all kernels.
     """
-    # Load kernel trace CSV with kernel info
-    kernel_trace_df = pd.read_csv(
-        csv_file_name, usecols=["Dispatch_Id", "Kernel_Id", "Kernel_Name"]
-    )
-    console_debug(
-        f"PC sampling: loaded kernel trace with {len(kernel_trace_df)} entries"
-    )
-
-    # Filter kernels matching requested kernel_name
-    matching_kernels = kernel_trace_df[kernel_trace_df["Kernel_Name"] == kernel_name]
-    if matching_kernels.empty:
-        console_warning(f"PC sampling: cannot find kernel '{kernel_name}' in CSV")
+    kernel_context = f"kernel '{kernel_name}'" if kernel_name else "all kernels"
+    pc_samples = tool_data["buffer_records"][
+        "pc_sample_host_trap" if method == "host_trap" else "pc_sample_stochastic"
+    ]
+    if not pc_samples:
+        console_warning(f"PC sampling: no pc samples found for {kernel_context}.")
         return pd.DataFrame()
 
-    # Extract raw PC sampling records from JSON
-    pc_sample_key_loc = (
-        search_key_in_json(file_name, "pc_sample_host_trap")
-        if method == "host_trap"
-        else search_key_in_json(file_name, "pc_sample_stochastic")
+    instructions = tool_data["strings"]["pc_sample_instructions"]
+    comments = tool_data["strings"]["pc_sample_comments"]
+    if not instructions or not comments:
+        console_warning(
+            "PC sampling: instruction or comment string table is empty for "
+            f"{kernel_context}."
+        )
+        return pd.DataFrame()
+
+    records_df = load_pc_sample_records(tool_data)
+    aggregated_df = aggregate_pc_sample_records(
+        records_df,
+        group_by=["code_object_id", "code_object_offset", "kernel_id"],
     )
-
-    if not pc_sample_key_loc:
-        console_warning("PC sampling: can not find pc sample.")
-        return pd.DataFrame()
-
-    # Get processed sampling data grouped by (code_object_id, offset, inst_index)
-    records = search_pc_sampling_record(pc_sample_key_loc)
-    if not records:
-        console_warning("PC sampling: no records found in PC sampling data.")
-        return pd.DataFrame()
-
-    # Flatten records by dispatch_id to create one row per dispatch ID
-    rows = []
-    for (
-        code_object_id,
-        offset,
-        inst_index,
-        count,
-        count_issued,
-        count_stalled,
-        stall_reasons,
-        dispatch_ids,
-    ) in records:
-        for dispatch_id in dispatch_ids:
-            rows.append({
-                "dispatch_id": dispatch_id,
-                "code_object_id": code_object_id,
-                "offset": offset,
-                "inst_index": inst_index,
-                "count": count,
-                "count_issued": count_issued,
-                "count_stalled": count_stalled,
-                "stall_reason": stall_reasons,
-            })
-
-    df = pd.DataFrame(rows)
+    df = enrich_with_metadata(
+        aggregated_df,
+        tool_data,
+        attach={"instruction", "source_line", "kernel_name"},
+    )
     if df.empty:
-        console_warning("PC sampling: no records found after flattening dispatch IDs.")
+        console_warning("PC sampling: no records found in PC sampling data.")
         return df
 
-    # Map dispatch_id to kernel info (Kernel_Id and Kernel_Name)
-    dispatch_to_kernel = kernel_trace_df.set_index("Dispatch_Id")[
-        ["Kernel_Id", "Kernel_Name"]
-    ]
-
-    # Map dispatch_id to kernel info (Kernel_Id and Kernel_Name)
-    df["kernel_id"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Id"])
-    df["kernel_name"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Name"])
-
-    # Drop dispatch_id
-    df.drop(columns=["dispatch_id"], inplace=True)
-
-    def merge_stall_reasons(
-        stall_reason_series: list[Optional[list[tuple[str, int]]]],
-    ) -> list[tuple[str, int]]:
-        """
-        Function to merge stall_reason lists (list of dicts -> merged & sorted dict)
-        """
-        merged_counts = {}
-
-        for entry in stall_reason_series:
-            if not entry:
-                continue
-            # Each entry is a list of (key, count) tuples
-            for k, v in entry:
-                if v > 0:
-                    merged_counts[k] = merged_counts.get(k, 0) + v
-
-        # Return sorted list of tuples by descending count
-        return sorted(merged_counts.items(), key=lambda item: item[1], reverse=True)
-
-    # Group and aggregate
-    df = df.groupby(["code_object_id", "offset", "kernel_id"], as_index=False).agg({
-        "inst_index": "first",
-        "count": "sum",
-        "count_issued": "sum",
-        "count_stalled": "sum",
-        "stall_reason": merge_stall_reasons,
-        "kernel_name": "first",
-    })
-
-    # Filter DataFrame to only include rows matching the requested kernel_name
-    df = df[df["kernel_name"] == kernel_name]
-
-    # Convert offset column to hex string for display, keep original numeric for sorting
-    df["offset"] = df["offset"].apply(lambda x: hex(x))
-
-    # Load PC sampling instructions from JSON (if available)
-    pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
-    df["instruction"] = (
-        df["inst_index"].apply(
-            lambda x: (
-                pc_sample_instructions[x] if x < len(pc_sample_instructions) else None
-            )
-        )
-        if pc_sample_instructions
-        else None
+    df = df.rename(
+        columns={"code_object_offset": "offset", "kernel_name": "Kernel_Name"}
     )
 
-    # Load source code comments (if available)
-    pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
-    df["source_line"] = (
-        df["inst_index"].apply(
-            lambda x: (
-                f".../{Path(pc_sample_comments[x]).name}"
-                if x < len(pc_sample_comments)
-                else None
-            )
-        )
-        if pc_sample_comments
-        else None
-    )
+    if kernel_name is not None:
+        df = df[df["Kernel_Name"] == kernel_name]
+        if df.empty:
+            console_warning(f"PC sampling: cannot find kernel '{kernel_name}'")
+            return df
 
-    # Sorting and returning relevant columns depending on method and sorting_type
+    # Project stall_reason as a descending list[(reason, count)].
+    df["stall_reason"] = df["stall_reason"].apply(_stall_reason_dict_to_list)
+    df["source_line"] = df["source_line"].apply(_trim_source_line)
+
+    # Sort on the numeric offset (lexicographic hex order is wrong), then
+    # format offset as hex for display.
     if sorting_type == "offset":
         df_sorted = df.sort_values(by=["code_object_id", "offset"])
     elif sorting_type == "count":
@@ -651,114 +471,51 @@ def load_pc_sampling_data_per_kernel(
         )
         return pd.DataFrame()
 
-    columns_to_return = (
-        [
-            "source_line",
-            "instruction",
-            "code_object_id",
-            "offset",
-            "count",
-        ]
-        if method == "host_trap"
-        else [
-            "source_line",
-            "instruction",
-            "code_object_id",
-            "offset",
-            "count",
-            "count_issued",
-            "count_stalled",
-            "stall_reason",
-        ]
-    )
+    df_sorted["offset"] = df_sorted["offset"].apply(hex)
 
+    # Stochastic adds issue/stall detail on top of the host_trap columns.
+    shared_columns = ["source_line", "instruction", "code_object_id", "offset", "count"]
+    stochastic_only_columns = ["count_issued", "count_stalled", "stall_reason"]
+    columns_to_return = shared_columns + (
+        stochastic_only_columns if method == "stochastic" else []
+    )
+    columns_to_return.append("Kernel_Name")
     return df_sorted[columns_to_return]
-    # might support sort by stall reason in the future
 
 
 @demarcate
 def load_pc_sampling_data(
-    workload: schema.Workload, dir_path: str, file_prefix: str, sorting_type: str
+    workload: schema.Workload,
+    file_prefix: str,
+    sorting_type: str,
+    tool_data: Optional[dict[str, Any]],
 ) -> pd.DataFrame:
-    """
-    Load PC sampling raw data, filter and sort it by specified conditions,
-    then return df.
-    """
+    """Return the detailed per-instruction table for a single kernel or all.
 
-    if not file_prefix or file_prefix.lower() == "none":
+    Thin dispatcher over :func:`load_pc_sampling_data_per_kernel`: detects the
+    method, then builds the table for all kernels (no ``-k``) or a single
+    kernel (one ``-k``). The output schema is identical either way. Callers
+    pass the already-parsed *tool_data*.
+    """
+    if not file_prefix or file_prefix.lower() == "none" or tool_data is None:
         return pd.DataFrame()
 
-    pc_sampling_method = None
-
-    # NB:
-    #  - The default file name is subject to changes from rocprofv3
-    #  - Prioritize stochastic
-    #  - Alternatively, we could check pc_sampling_method in json
-    stochastic_path = Path(dir_path) / f"{file_prefix}_pc_sampling_stochastic.csv"
-    host_trap_path = Path(dir_path) / f"{file_prefix}_pc_sampling_host_trap.csv"
-    json_file_path = Path(dir_path) / f"{file_prefix}_results.json"
-    csv_kernel_trace_file_path = Path(dir_path) / f"{file_prefix}_kernel_trace.csv"
-
-    if not csv_kernel_trace_file_path.exists():
-        console_warning(f"PC sampling: can not read {csv_kernel_trace_file_path}")
-        return pd.DataFrame()
-
-    if stochastic_path.exists():
-        pc_sampling_method = "stochastic"
-        csv_file_path = stochastic_path
-    elif host_trap_path.exists():
-        pc_sampling_method = "host_trap"
-        csv_file_path = host_trap_path
-    else:
+    pc_sampling_method = detect_pc_sampling_method(tool_data)
+    if pc_sampling_method is None:
         console_warning(
             f"PC sampling: can not detect pc sampling method for {file_prefix}"
         )
         return pd.DataFrame()
 
-    # No kernel filter, return grouped and sorted csv dir_pathectly
+    # No kernel filter: return every kernel's rows.
     if not workload.filter_kernel_ids:
-        # Load instruction CSV
-        df = pd.read_csv(csv_file_path)
-
-        # Load kernel trace CSV
-        kernel_trace_df = pd.read_csv(csv_kernel_trace_file_path)
-
-        # Merge on Correlation_Id (instruction CSV) and Dispatch_Id (kernel trace CSV)
-        merged_df = df.merge(
-            kernel_trace_df[["Dispatch_Id", "Kernel_Name", "Kernel_Id"]],
-            how="left",
-            left_on="Correlation_Id",
-            right_on="Dispatch_Id",
+        return load_pc_sampling_data_per_kernel(
+            pc_sampling_method,
+            tool_data,
+            sorting_type,
         )
 
-        # Group by Instruction_Comment and aggregate
-        grouped_counts = (
-            merged_df
-            .groupby("Instruction_Comment")
-            .agg(
-                count=("Instruction_Comment", "count"),
-                instruction=("Instruction", "first"),
-                Kernel_Id=("Kernel_Id", "first"),
-                Kernel_Name=("Kernel_Name", "first"),
-            )
-            .reset_index()
-            .rename(columns={"Instruction_Comment": "source_line"})
-        )
-        grouped_counts = grouped_counts[
-            [
-                "source_line",
-                "Kernel_Name",
-                "instruction",
-                "count",
-            ]
-        ]
-        grouped_counts["source_line"] = grouped_counts["source_line"].apply(
-            lambda x: f".../{Path(x).name}" if isinstance(x, str) and x else x
-        )
-
-        return grouped_counts.sort_values(by="count", ascending=False)
-
-    elif len(workload.filter_kernel_ids) > 1:
+    if len(workload.filter_kernel_ids) > 1:
         console_error(
             "PC sampling supports single kernel only! Please specify -k with "
             "single kernel.",
@@ -766,33 +523,39 @@ def load_pc_sampling_data(
         )
         return pd.DataFrame()
 
-    elif len(workload.filter_kernel_ids) == 1:
-        if not json_file_path.exists():
-            console_warning(f"PC sampling: can not read {json_file_path}")
-            return pd.DataFrame()
-        else:
-            kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-            kernel_index = workload.filter_kernel_ids[0]
-
-            if kernel_index >= len(kernel_top_df):
-                console_warning(
-                    f"Kernel index {kernel_index} is out of bounds. "
-                    f"kernel_top table has only {len(kernel_top_df)} rows."
-                )
-                return pd.DataFrame()
-
-            kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
-
-            return load_pc_sampling_data_per_kernel(
-                pc_sampling_method,
-                json_file_path,
-                csv_kernel_trace_file_path,
-                kernel_name,
-                sorting_type,
-            )
-    else:
-        console_warning("PC sampling: No data")
+    # Exactly one kernel filter.
+    kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
+    kernel_index = workload.filter_kernel_ids[0]
+    if kernel_index >= len(kernel_top_df):
+        console_warning(
+            f"Kernel index {kernel_index} is out of bounds. "
+            f"kernel_top table has only {len(kernel_top_df)} rows."
+        )
         return pd.DataFrame()
+
+    kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
+    return load_pc_sampling_data_per_kernel(
+        pc_sampling_method,
+        tool_data,
+        sorting_type,
+        kernel_name,
+    )
+
+
+def _stall_reason_dict_to_list(
+    stall_reason: Optional[dict[str, int]],
+) -> list[tuple[str, int]]:
+    """Convert a {reason: count} dict to a descending list[(reason, count)]."""
+    if not stall_reason:
+        return []
+    return sorted(stall_reason.items(), key=lambda item: item[1], reverse=True)
+
+
+def _trim_source_line(source_line: str) -> str:
+    """Show only the trailing path component of a real source line."""
+    if source_line == SOURCE_LINE_MISSING:
+        return source_line
+    return f".../{Path(source_line).name}"
 
 
 def nullify_unevaluated_metric_values(
@@ -820,7 +583,10 @@ def nullify_unevaluated_metric_values(
 
 @demarcate
 def load_non_mertrics_table(
-    workload: schema.Workload, dir_path: str, args: argparse.Namespace
+    workload: schema.Workload,
+    dir_path: str,
+    args: argparse.Namespace,
+    pc_sampling_tool_data: Optional[dict[str, Any]] = None,
 ) -> None:
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
@@ -842,12 +608,6 @@ def load_non_mertrics_table(
                     f"Couldn't load {csv_file.name}. "
                     "This may result in missing analysis data."
                 )
-        # NB: Special case for sysinfo. Probably room for improvement in this whole
-        # function design
-        elif "from_csv_columnwise" in df.columns and id == 101:
-            tmp[df_id] = workload.sys_info.transpose()
-            # All transposed columns should be marked with a general header
-            tmp[df_id].columns = ["Info"]
         elif "from_csv_columnwise" in df.columns:
             # NB:
             #   Another way might be doing transpose in tty like metric_table.
@@ -867,20 +627,17 @@ def load_non_mertrics_table(
         elif "from_pc_sampling" in df.columns:
             tmp[df_id] = load_pc_sampling_data(
                 workload,
-                dir_path,
                 df.loc[0, "from_pc_sampling"],
                 args.pc_sampling_sorting_type,
+                pc_sampling_tool_data,
             )
 
     workload.dfs.update(tmp)
 
 
-torch_operator_matcher = PatternMatcherEngine(mode="glob-hierarchy")
-
-
 def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
     """Return True if *pattern* glob-matches *operator_name* hierarchy path."""
-    return torch_operator_matcher.matches(pattern, operator_name)
+    return fnmatch_glob_matches(pattern, operator_name)
 
 
 @demarcate
@@ -889,7 +646,9 @@ def load_table_data(
     dir_path: str,
     is_gui: bool,
     args: argparse.Namespace,
+    dfs_expressions: dict[int, list[str]],
     skip_kernel_top: bool = False,
+    pc_sampling_tool_data: Optional[dict[str, Any]] = None,
 ) -> None:
     """
     - Load data for all "raw_csv_table"
@@ -897,11 +656,12 @@ def load_table_data(
     - Calculate mertric value for all "metric_table"
     """
     if not skip_kernel_top:
-        load_non_mertrics_table(workload, dir_path, args)
+        load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
 
     eval_metric(
         workload.dfs,
         workload.dfs_type,
+        dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
         apply_filters(workload, dir_path, is_gui, args.debug),

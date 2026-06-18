@@ -43,7 +43,7 @@ static ncclResult_t ginRocshmemGdaDevices(int* ndev) {
   return ncclSuccess;
 }
 
-static ncclResult_t ginRocshmemGdaGetProperties(int dev, ncclNetProperties_v11_t* props) {
+static ncclResult_t ginRocshmemGdaGetProperties(int dev, ncclNetProperties_v12_t* props) {
   memset(props, 0, sizeof(*props));
   props->name = const_cast<char*>("rocshmem_gda");
   props->pciPath = nullptr;

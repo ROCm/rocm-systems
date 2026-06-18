@@ -4,6 +4,7 @@
 #ifndef UTIL_DATA_TYPES_H_
 #define UTIL_DATA_TYPES_H_
 
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstddef>
@@ -170,6 +171,108 @@ inline uint16_t f32_to_bf16(float val) {
   return static_cast<uint16_t>(f >> 16);
 }
 
+namespace detail {
+
+#if defined(UTIL_HAS_X86_F16C)
+/// x86 specialization: bf16->f32 is a zero-extend + 16-bit left shift, so it
+/// needs no F16C, only the wide integer ops. AVX-512 does 16/instr, AVX2 8.
+inline void bf16_to_f32_block_arch(const uint16_t *src, float *dst, size_t n, size_t &i) {
+#if defined(__AVX512F__)
+  for (; i + 16 <= n; i += 16) {
+    __m512i w =
+        _mm512_cvtepu16_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(src + i)));
+    _mm512_storeu_ps(&dst[i], _mm512_castsi512_ps(_mm512_slli_epi32(w, 16)));
+  }
+#endif
+#if defined(__AVX2__)
+  for (; i + 8 <= n; i += 8) {
+    __m256i w = _mm256_cvtepu16_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(src + i)));
+    _mm256_storeu_ps(&dst[i], _mm256_castsi256_ps(_mm256_slli_epi32(w, 16)));
+  }
+#endif
+}
+#else
+/// Portable fallback: no vector advance; the scalar shift loop in
+/// bf16_to_f32_block does all the work (and trivially auto-vectorizes).
+inline void bf16_to_f32_block_arch(const uint16_t *, float *, size_t, size_t &) {}
+#endif
+
+} // namespace detail
+
+/// @brief Convert `n` contiguous BFloat16 values to float.
+///
+/// The bf16->f32 widening is exact (zero-extend into the low mantissa bits),
+/// so the vector and scalar paths are bit-identical for every input including
+/// NaN payloads. Hot path: MFMA/WMMA bf16 input gather.
+inline void bf16_to_f32_block(const uint16_t *src, float *dst, size_t n) {
+  size_t i = 0;
+  detail::bf16_to_f32_block_arch(src, dst, n, i);
+  for (; i < n; ++i)
+    dst[i] = bf16_to_f32(src[i]);
+}
+
+namespace detail {
+
+#if defined(UTIL_HAS_X86_F16C)
+/// x86 specialization: i8->i32 / u8->i32 are plain sign-/zero-extends, no
+/// F16C needed. AVX-512 does 16/instr, AVX2 8.
+inline void i8_to_i32_block_arch(const int8_t *src, int32_t *dst, size_t n, size_t &i) {
+#if defined(__AVX512F__)
+  for (; i + 16 <= n; i += 16)
+    _mm512_storeu_si512(
+        reinterpret_cast<__m512i *>(&dst[i]),
+        _mm512_cvtepi8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(src + i))));
+#endif
+#if defined(__AVX2__)
+  for (; i + 8 <= n; i += 8)
+    _mm256_storeu_si256(
+        reinterpret_cast<__m256i *>(&dst[i]),
+        _mm256_cvtepi8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(src + i))));
+#endif
+}
+inline void u8_to_i32_block_arch(const uint8_t *src, int32_t *dst, size_t n, size_t &i) {
+#if defined(__AVX512F__)
+  for (; i + 16 <= n; i += 16)
+    _mm512_storeu_si512(
+        reinterpret_cast<__m512i *>(&dst[i]),
+        _mm512_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(src + i))));
+#endif
+#if defined(__AVX2__)
+  for (; i + 8 <= n; i += 8)
+    _mm256_storeu_si256(
+        reinterpret_cast<__m256i *>(&dst[i]),
+        _mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(src + i))));
+#endif
+}
+#else
+/// Portable fallback: no vector advance; the scalar extend loops below do all
+/// the work (and trivially auto-vectorize).
+inline void i8_to_i32_block_arch(const int8_t *, int32_t *, size_t, size_t &) {}
+inline void u8_to_i32_block_arch(const uint8_t *, int32_t *, size_t, size_t &) {}
+#endif
+
+} // namespace detail
+
+/// @brief Sign-extend `n` contiguous int8 values to int32.
+///
+/// Exact widening, so vector and scalar paths are bit-identical for every
+/// input. Hot path: integer MFMA/WMMA i8 input gather.
+inline void i8_to_i32_block(const int8_t *src, int32_t *dst, size_t n) {
+  size_t i = 0;
+  detail::i8_to_i32_block_arch(src, dst, n, i);
+  for (; i < n; ++i)
+    dst[i] = static_cast<int32_t>(src[i]);
+}
+
+/// @brief Zero-extend `n` contiguous uint8 values to int32 (unsigned iu8 WMMA).
+inline void u8_to_i32_block(const uint8_t *src, int32_t *dst, size_t n) {
+  size_t i = 0;
+  detail::u8_to_i32_block_arch(src, dst, n, i);
+  for (; i < n; ++i)
+    dst[i] = static_cast<int32_t>(src[i]);
+}
+
+/// @brief Convert a float to 16-bit BFloat16 with round-to-nearest-even.
 inline uint16_t f32_to_bf16_rne(float val) {
   uint32_t f = std::bit_cast<uint32_t>(val);
   if ((f & 0x7f800000u) != 0x7f800000u) {
@@ -414,8 +517,52 @@ inline uint8_t f32_to_bf8_e5m2_sr(float val, uint32_t seed) {
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
 }
 
-// ---- Generalized SR + OCP MX helpers (used by gfx1250 WMMA) ----
+namespace detail {
 
+/// 256-entry fp8/bf8 -> f32 tables filled from the scalar converters, so every
+/// entry (including the NaN payloads) is bit-exact with the per-element path
+/// by construction.
+inline const float *fp8_e4m3_lut() {
+  static const auto lut = [] {
+    std::array<float, 256> t{};
+    for (uint32_t i = 0; i < 256; ++i)
+      t[i] = fp8_e4m3_to_f32(static_cast<uint8_t>(i));
+    return t;
+  }();
+  return lut.data();
+}
+
+inline const float *bf8_e5m2_lut() {
+  static const auto lut = [] {
+    std::array<float, 256> t{};
+    for (uint32_t i = 0; i < 256; ++i)
+      t[i] = bf8_e5m2_to_f32(static_cast<uint8_t>(i));
+    return t;
+  }();
+  return lut.data();
+}
+
+} // namespace detail
+
+/// @brief Convert `n` contiguous E4M3 FP8 bytes to float via the lookup table.
+///
+/// Bit-exact with fp8_e4m3_to_f32 for every code. The scalar gather loop is
+/// enough to amortize the per-element converter cost on the MFMA/WMMA bulk
+/// hoists (no vector path needed; works on every target).
+inline void fp8_e4m3_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::fp8_e4m3_lut();
+  for (size_t i = 0; i < n; ++i)
+    dst[i] = lut[src[i]];
+}
+
+/// @brief Convert `n` contiguous E5M2 BF8 bytes to float via the lookup table.
+inline void bf8_e5m2_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::bf8_e5m2_lut();
+  for (size_t i = 0; i < n; ++i)
+    dst[i] = lut[src[i]];
+}
+
+// ---- Generalized SR + OCP MX helpers (used by gfx1250 WMMA) ----
 inline uint32_t f32_to_binary_float_sr(float val, uint32_t seed, uint32_t exp_bits,
                                        uint32_t mant_bits, int32_t bias, int32_t max_exp,
                                        int32_t min_exp, uint32_t nan_code, uint32_t inf_code) {

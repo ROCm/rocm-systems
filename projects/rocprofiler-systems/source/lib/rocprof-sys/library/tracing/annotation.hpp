@@ -53,13 +53,11 @@ ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_VOID_P, void*)
 #undef ROCPROFSYS_DEFINE_ANNOTATION_TYPE
 
 template <typename Np, typename Tp>
+    requires(!std::is_same<std::remove_pointer_t<concepts::unqualified_type_t<Np>>,
+                           rocprofsys_annotation_t>::value)
 auto
-add_perfetto_annotation(
-    perfetto_event_context_t& ctx, Np&& _name, Tp&& _val, std::int64_t _idx = -1,
-    std::enable_if_t<
-        !std::is_same<std::remove_pointer_t<concepts::unqualified_type_t<Np>>,
-                      rocprofsys_annotation_t>::value,
-        int> = 0)
+add_perfetto_annotation(perfetto_event_context_t& ctx, Np&& _name, Tp&& _val,
+                        std::int64_t _idx = -1)
 {
     using named_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Np>>>;
     using value_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Tp>>>;
@@ -116,7 +114,7 @@ add_perfetto_annotation(
     {
         _get_dbg()->set_pointer_value(reinterpret_cast<std::uint64_t>(_val));
     }
-    else if constexpr(concepts::can_stringify<value_type>::value)
+    else if constexpr(concepts::string_like<value_type>)
     {
         _get_dbg()->set_string_value(fmt::format("{}", std::forward<Tp>(_val)));
     }
@@ -205,38 +203,28 @@ struct annotate<perfetto_event_context_t, Tp>
 {
     auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
     {
-        return sfinae(obj, 0, _ctx);
+        if constexpr(requires { obj.annotate(_ctx); })
+        {
+            return obj.annotate(_ctx);
+        }
+        else
+        {
+            using value_type = typename Tp::value_type;
+            if constexpr(!std::is_void_v<value_type>)
+            {
+                auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);
+                for(size_t i = 0; i < std::get<0>(_obj_data); ++i)
+                {
+                    auto&& _label = std::get<1>(_obj_data).at(i);
+                    auto&& _value = std::get<2>(_obj_data).at(i);
+                    ::rocprofsys::tracing::add_perfetto_annotation(_ctx, _label, _value);
+                }
+            }
+            (void) _ctx;
+        }
     }
 
 private:
-    //  If the component has a annotate(...) member function
-    template <typename T>
-    static auto sfinae(T&                        obj, int,
-                       perfetto_event_context_t& _ctx) -> decltype(obj.annotate(_ctx))
-    {
-        static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
-        return obj.annotate(_ctx);
-    }
-
-    //  If the component does not have a annotate(...) member function
-    template <typename T>
-    static void sfinae(T& obj, long, perfetto_event_context_t& _ctx)
-    {
-        static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
-        using value_type = typename T::value_type;
-        if constexpr(!std::is_void<value_type>::value)
-        {
-            auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);
-            for(size_t i = 0; i < std::get<0>(_obj_data); ++i)
-            {
-                auto&& _label = std::get<1>(_obj_data).at(i);
-                auto&& _value = std::get<2>(_obj_data).at(i);
-                ::rocprofsys::tracing::add_perfetto_annotation(_ctx, _label, _value);
-            }
-        }
-        (void) _ctx;
-    }
-
     template <typename T, typename DataT>
     static auto sfinae_data(T& obj, int)
         -> decltype(std::tuple<size_t, std::vector<std::string>, DataT>(obj.get().size(),

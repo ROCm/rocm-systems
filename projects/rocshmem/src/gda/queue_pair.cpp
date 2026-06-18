@@ -59,10 +59,10 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   nonfetching_atomic_lkey = mr_nonfetching_atomic->lkey;
   fetching_atomic_lkey = mr_fetching_atomic->lkey;
 
-  int deviceId;
-  CHECK_HIP(hipGetDevice(&deviceId));
   static int wf_size = 0;
   if (wf_size == 0) {
+    int deviceId;
+    CHECK_HIP(hipGetDevice(&deviceId));
     hipDeviceProp_t prop;
     CHECK_HIP(hipGetDeviceProperties(&prop, deviceId));
     wf_size = prop.warpSize;
