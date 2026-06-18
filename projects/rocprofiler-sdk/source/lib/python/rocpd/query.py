@@ -88,19 +88,16 @@ def export_sqlite_query(
 
         if not _pandas_available:
             if normalized_format in _stdlib_formats:
-                sys.stderr.write(
+                libpyrocpd.rocpd_log_warning(
                     "Module 'pandas' not found. Install it with: pip install pandas. Using fallback path.\n"
                 )
-                sys.stderr.flush()
                 return _export_without_pandas(
                     conn, query, params, normalized_format, export_path, **kwargs
                 )
             else:
-                sys.stderr.write(
-                    f"Export format '{normalized_format}' requires pandas. "
-                    "Install it with: pip install pandas\n"
+                libpyrocpd.rocpd_log_error(
+                    f"Export format '{normalized_format}' requires pandas. Install it with: pip install pandas\n"
                 )
-                sys.stderr.flush()
                 return None
 
         # 1) Run the query via pandas
