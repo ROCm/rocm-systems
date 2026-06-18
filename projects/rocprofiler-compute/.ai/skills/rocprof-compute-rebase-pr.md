@@ -1,14 +1,12 @@
----
-description: Rebase a PR branch onto origin/rocprofiler-compute-develop for a clean linear history.
----
-
 # Rebase PR onto origin/rocprofiler-compute-develop
+
+Follow **[`AGENTS.md`](../../AGENTS.md)** and the full redirect chain it references.
 
 ## Goal
 
 Cherry-pick the user's commits onto the latest `origin/rocprofiler-compute-develop` so the PR has a clean, linear history. Only the user's own commits should appear in the PR — no merge commits, no commits from other contributors.
 
-> **Note:** We call this "rebasing" but the procedure is actually reset + cherry-pick. A true `git rebase` is impractical when the base branch has dozens or hundreds of new commits.
+> **Note:** We call this "rebasing" but the procedure is actually reset + cherry-pick. A true `git rebase` is impractical when the branch history contains merge commits that cause cascading conflicts.
 
 ## Steps
 
@@ -18,6 +16,7 @@ Cherry-pick the user's commits onto the latest `origin/rocprofiler-compute-devel
 
 2. **Ensure the PR base branch is `rocprofiler-compute-develop`.**
    - Run: `gh pr view --json number,baseRefName` (uses the current branch).
+   - If the command fails (no open PR), tell the user to create a PR first or proceed without this check if they confirm.
    - If `baseRefName` is NOT `rocprofiler-compute-develop`, tell the user:
      > The PR base is currently `<baseRefName>`. Please change it to `rocprofiler-compute-develop` on GitHub:
      > PR page → Edit (next to title) → base dropdown → select `rocprofiler-compute-develop` → Save.
@@ -46,6 +45,3 @@ Cherry-pick the user's commits onto the latest `origin/rocprofiler-compute-devel
 8. **Force-push.**
    - Run: `git push --force-with-lease origin <branch-name>`
    - Tell the user: the PR on GitHub may take some time to sync — the file-changed count and diff may not immediately reflect the rebase.
-
-9. **Final check.**
-   - Run: `git log --oneline origin/rocprofiler-compute-develop..HEAD` one more time to confirm.
