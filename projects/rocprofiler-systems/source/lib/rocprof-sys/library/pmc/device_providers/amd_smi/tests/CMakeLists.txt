@@ -9,6 +9,7 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems::rocprofiler-systems-headers
         rocprofiler-systems::rocprofiler-systems-amd-smi-backend
+        rocprofiler-systems::rocprofiler-systems-backend-concepts
         rocprofiler-systems::rocprofiler-systems-compile-definitions
 )
 

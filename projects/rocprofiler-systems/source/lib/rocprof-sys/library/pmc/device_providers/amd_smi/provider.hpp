@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "backends/concepts/backend_factory.hpp"
 #include "library/pmc/common/types.hpp"
 
-#include <concepts>
 #include <cstddef>
 #include <memory>
 #include <utility>
@@ -14,41 +14,29 @@
 namespace rocprofsys::pmc::device_providers::amd_smi
 {
 
+namespace concepts
+{
+
 /**
- * @brief Concept that a BackendFactory template argument must satisfy.
- *
- * Enumerates every expression @c provider<F> evaluates on the factory and on
- * the session it produces, so a mismatch is caught at the template boundary
- * rather than deep inside the provider body.
- *
- * Checked expressions:
- *  - @c F::backend_t          — the session type
- *  - @c F::create_backend()   — returns @c shared_ptr<backend_t>
- *  - @c sess.initialize()     — lifecycle init (may throw)
- *  - @c sess.shutdown()       — lifecycle teardown
- *  - @c sess.get_lib_version() — version query used in constructor
- *  - @c sess.enumerate_gpu_handles() — GPU handle enumeration
- *  - @c sess.enumerate_nic_handles() — NIC handle enumeration (AINIC builds only)
+ * @brief AMD SMI-specific factory concept — extends the generic backend_factory
+ * with the session interface this provider calls at runtime.
  */
 template <typename F>
-concept backend_factory_contract =
-    requires { typename F::backend_t; } &&
-    requires {
-        { F::create_backend() } -> std::same_as<std::shared_ptr<typename F::backend_t>>;
-    } &&
-    requires(typename F::backend_t sess) {
-        { sess.initialize() };
-        { sess.shutdown() };
-        { sess.get_lib_version() };
-        { sess.enumerate_gpu_handles() };
-    }
+concept factory = ::rocprofsys::backends::concepts::backend_factory<F> &&
+                  requires(typename F::backend_t sess) {
+                      { sess.initialize() };
+                      { sess.shutdown() };
+                      { sess.get_lib_version() };
+                      { sess.enumerate_gpu_handles() };
+                  }
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    &&
-    requires(typename F::backend_t sess) {
-        { sess.enumerate_nic_handles() };
-    }
+                  &&
+                  requires(typename F::backend_t sess) {
+                      { sess.enumerate_nic_handles() };
+                  }
 #endif
 ;
+}  // namespace concepts
 
 /**
  * @brief AMD SMI device provider for initialization and device enumeration.
@@ -63,7 +51,7 @@ concept backend_factory_contract =
  *
  * @tparam BackendFactory  Provides @c backend_t and @c create_backend().
  */
-template <backend_factory_contract BackendFactory>
+template <concepts::factory BackendFactory>
 class provider
 {
     std::shared_ptr<typename BackendFactory::backend_t> m_backend_api;
@@ -190,7 +178,7 @@ public:
 /**
  * @brief Factory for creating AMD SMI provider instances.
  */
-template <backend_factory_contract BackendFactory>
+template <concepts::factory BackendFactory>
 struct provider_factory
 {
     using provider_t = provider<BackendFactory>;
