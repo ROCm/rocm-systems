@@ -826,13 +826,13 @@ hsa_status_t XdnaDriver::ExportMemoryHandle(const core::Agent& agent, const core
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
-    auto bo_handle = FindBOHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)));
-    if (!bo_handle.IsValid()) {
+    // handle.handle is the kernel BO handle populated by CreateShareableHandle.
+    if (!handle.IsValid()) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
 
     drm_prime_handle export_params = {};
-    export_params.handle = bo_handle.handle;
+    export_params.handle = handle.handle;
     export_params.flags = DRM_RDWR;
     export_params.fd = -1;
     hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &export_params);
@@ -921,6 +921,10 @@ hsa_status_t XdnaDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem
 hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                                const core::Agent& agent,
                                                core::DriverMemoryHandle* handle, uint64_t* offset) {
+  // The actual VA mapping is deferred to Map() during hsa_amd_vmem_set_access; this only
+  // produces a driver-independent shareable handle.
+  (void)va;
+
   // Find BO handle; mem is the BO handle; see AllocateMemory.
   auto bo_handle = FindBOHandle(mem);
   if (!bo_handle.IsValid()) {
@@ -945,17 +949,9 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return err;
   }
 
-  // Map memory to the virtual address.
-  void* mapped_ptr = mmap(va, size, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_SHARED, fd_,
-                          get_bo_info_args.map_offset);
-  if (mapped_ptr == MAP_FAILED) {
-    close(params.fd);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-
   handle->handle = bo_handle.handle;
   handle->dmabuf_fd = params.fd;
-  handle->mmap_offset = 0;
+  handle->mmap_offset = get_bo_info_args.map_offset;
   handle->size = size;
   *offset = 0;
 
