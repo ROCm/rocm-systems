@@ -3921,16 +3921,32 @@ class CodeGenerator:
         self._append_wait_counter_type(L, 'global_load_async_to_lds')
         L.append('  d->lds_dst = true;')
         L.append('  d->lds_per_lane_addr = true;')
+        L.append('  d->lds_base = wf.lds_base();')
+        if sem.name.startswith('CLUSTER_LOAD_ASYNC_TO_LDS_'):
+            L.append('  d->cluster_multicast = true;')
+            L.append(
+                '  d->cluster_mcast_mask = wf.m0() & amdgpu::kClusterMulticastMask;'
+            )
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
+        L.append(
+            '  // VGLOBAL async-to-LDS applies ioffset to both source and LDS destination.'
+        )
+        L.append(
+            '  int64_t lds_offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);'
+        )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vdst')};")
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
+        L.append('    uint32_t lane_lds_addr = cu.read_vgpr(lds_addr_base, lane);')
         L.append(
-            '    d->per_lane_lds_addr[lane] = wf.lds_base() + cu.read_vgpr(lds_addr_base, lane);'
+            '    d->per_lane_lds_addr[lane] = static_cast<uint32_t>(static_cast<int64_t>(wf.lds_base()) +'
+        )
+        L.append(
+            '                                            static_cast<int64_t>(lane_lds_addr) + lds_offset);'
         )
         L.append('  }')
         L.append('  set_data(std::move(d));')
