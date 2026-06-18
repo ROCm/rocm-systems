@@ -29,8 +29,13 @@ test_categories:
       - test_import_guard
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
     # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
+      - test_inject_roctx_loader
+      - test_soc_base
+      - test-pc-sampling-collector
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -85,8 +90,13 @@ test_categories:
       - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
     # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
+      - test_inject_roctx_loader
+      - test_soc_base
+      - test-pc-sampling-collector
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -140,8 +150,13 @@ test_categories:
       - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
     # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
+      - test_inject_roctx_loader
+      - test_soc_base
+      - test-pc-sampling-collector
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -195,8 +210,13 @@ test_categories:
       - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
     # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
+      - test_inject_roctx_loader
+      - test_soc_base
+      - test-pc-sampling-collector
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
