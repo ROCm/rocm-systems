@@ -275,8 +275,8 @@ typedef union rocprofiler_thread_trace_decoder_event_payload_t
     uint64_t code_object_id;
     struct
     {
-        int cluster_id;
-        int barrier_id;
+        int32_t cluster_id;
+        int32_t barrier_id;
     } cluster_barrier;
 } rocprofiler_thread_trace_decoder_event_payload_t;
 
