@@ -25,8 +25,7 @@ pytestmark = [
 # `ls` cannot be used as the config-invalid target as it has no instrumentable
 # functions in the executable itself, so the instrumented process never
 # initializes the runtime far enough to validate the config and abort
-# on the unknown setting. The instrumenter alone only emits a warning.
-# The hard failure comes from the instrumented child's runtime, which `ls` never reaches.
+# on the unknown setting
 @pytest.fixture
 def config_target(rocprof_config) -> str:
     """Get the target executable for config tests."""
@@ -42,8 +41,6 @@ def config_target(rocprof_config) -> str:
 # =============================================================================
 # Configuration file tests
 # =============================================================================
-
-TARGET = "parallel-overhead"
 
 
 class TestConfig(RocprofsysTest):
