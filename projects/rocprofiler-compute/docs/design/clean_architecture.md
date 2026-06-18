@@ -13,8 +13,7 @@ forcing profiling, analysis, CLI, TUI, WebUI, and utility code to change with it
 Profile data storage is becoming more varied:
 
 - ROCPD `.db` is expected to become the default profile output.
-- Profiler Hub (formerly SNA) is expected to become another source of profile
-  data.
+- Native tool writes counter data directly into a SQLite database via profiler-hub
 - Parquet is a possible future option for large workloads.
 - Ensure pmc_perf.csv continued use for existing user and developer workflows.
 
@@ -175,7 +174,7 @@ flowchart LR
     pd --> csv
 ```
 
-## Follow-up: Profiler Hub And Future Formats
+## Follow-up: Default rocpd, Future Formats
 
 Once the boundary is stable, new formats and mechanisms land as implementation
 changes behind it rather than as edits spread across the codebase!
