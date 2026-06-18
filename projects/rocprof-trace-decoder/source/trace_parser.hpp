@@ -82,7 +82,8 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         uint64_t me,
         uint64_t pipe,
         uint64_t is_ext,
-        uint64_t wg
+        uint64_t wg,
+        uint64_t cluster = 0
     )
     {
         this->pc = pc;
@@ -96,6 +97,7 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->pipe_id = pipe & 0xF;
         this->is_ext = is_ext;
         this->workgroup_id = wg & 0x7F;
+        this->cluster_id = cluster & 0x1F;
         this->_rsvd = 0;
     }
     occupancy_info_t(
@@ -108,7 +110,8 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         uint64_t me,
         uint64_t pipe,
         uint64_t is_ext,
-        uint64_t wg
+        uint64_t wg,
+        uint64_t cluster = 0
     )
     {
         this->pc = pc;
@@ -122,6 +125,7 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->pipe_id = pipe & 0xF;
         this->is_ext = is_ext;
         this->workgroup_id = wg & 0x7F;
+        this->cluster_id = cluster & 0x1F;
         this->_rsvd = 0;
     }
 };
@@ -165,7 +169,8 @@ struct WaveDataInternal : public rocprofiler_thread_trace_decoder_wave_t
         bool exbarw,
         uint8_t me = 0,
         uint8_t pipe = 0,
-        uint8_t wg = 0
+        uint8_t wg = 0,
+        uint8_t cluster = 0
     )
     {
         this->cu = (uint8_t) cu;
@@ -175,6 +180,7 @@ struct WaveDataInternal : public rocprofiler_thread_trace_decoder_wave_t
 
         this->dispatcher = (uint8_t) (((me & 0x7) << 4) | (pipe & 0xF));
         this->workgroup_id = wg;
+        this->cluster_id = cluster;
         this->reserved = 0;
         this->size = sizeof(rocprofiler_thread_trace_decoder_wave_t);
 

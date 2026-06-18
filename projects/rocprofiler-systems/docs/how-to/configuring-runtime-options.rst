@@ -366,6 +366,14 @@ setting is on -- you do not need to add ``kfd_events`` to
    export HSA_XNACK=1
    export ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON
 
+By default, unified-memory reports are written next to the active trace backend
+output. Set ``ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH`` to write
+``unified_memory`` reports to a dedicated directory:
+
+.. code-block:: shell
+
+   export ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH=ump-output
+
 For a step-by-step workflow with examples and sample output, see
 :doc:`Unified memory profiling <./unified-memory-profiling>`.
 

@@ -293,6 +293,7 @@ endif()
 
 # Add the testing directories
 if(BUILD_TESTING)
+    include(AISUseGTest)
     add_subdirectory(test)
 endif()
 if(BUILD_TESTING AND AIS_BUILD_AMD_DETAIL)
@@ -318,4 +319,9 @@ endif()
 # Set up installs (must come AFTER target creation)
 #-----------------------------------------------------------------------------
 include(AISUseROCmCMake)
+# AISInstallTests must precede AISInstall: it registers the "tests" CPack
+# component, which rocm_create_package() (invoked from AISInstall) consumes.
+if(BUILD_TESTING)
+    include(AISInstallTests)
+endif()
 include(AISInstall)

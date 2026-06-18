@@ -9,6 +9,7 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -22,6 +23,7 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -324,8 +326,8 @@ jobs:
       matrix:
         system:
           - { os: 'rhel-8.8', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'rhel-9.5', runner: 'linux-gfx950-1gpu-ccs-ossci-rocm', gpu: 'mi355', gpu-target: 'gfx950', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'sles-15.6', runner: 'linux-gfx950-1gpu-ccs-ossci-rocm', gpu: 'mi355', gpu-target: 'gfx950', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'rhel-9.5', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'sles-15.6', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
     runs-on: ${{ matrix.system.runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest

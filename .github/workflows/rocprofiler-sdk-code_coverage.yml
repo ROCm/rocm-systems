@@ -11,6 +11,7 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -24,6 +25,7 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'

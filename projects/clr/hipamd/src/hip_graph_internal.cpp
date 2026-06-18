@@ -1452,6 +1452,16 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
         size_t j = i;
         while (j < segment.nodes.size() && segment.nodes[j]->GraphCaptureEnabled()) {
           auto& currentNode = segment.nodes[j];
+          // Empty nodes are pure dependency points — no GPU commands or markers.
+          // Cross-stream ordering is handled by BuildSyncPlan barrier packets.
+          if (currentNode->GetType() == hipGraphNodeTypeEmpty) {
+            const size_t rangeIndex = newBatch.nodeRanges.size();
+            newBatch.nodeRanges.push_back({newBatch.dispatchPackets.size(), 0, true});
+            newBatch.nodeToRangeIndex[currentNode] = rangeIndex;
+            currentSegBatch.node_capture_status[j] = true;
+            ++j;
+            continue;
+          }
           // Capture packets for this node
           std::vector<uint8_t*> nodePackets;
           std::vector<const std::string*> nodeKernelNames;
@@ -1488,8 +1498,10 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
           ++j;
         }
 
-        // Add the batch containing all consecutive captured nodes and advance outer index
-        currentSegBatch.packet_batches.push_back(std::move(newBatch));
+        // Add the batch if it contains packets or captured zero-packet nodes (e.g. EMPTY).
+        if (!newBatch.dispatchPackets.empty() || !newBatch.nodeRanges.empty()) {
+          currentSegBatch.packet_batches.push_back(std::move(newBatch));
+        }
         i = j - 1;  // for-loop will ++i to j
       } else {
         // Non-capturable node
@@ -1894,7 +1906,13 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   // Single AccumulateCommand on launch_stream manages all HW event lifetimes
   // and serves as the dispatch anchor for all segments across all streams.
-  auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
+  // Pass `this` as the kernel-names owner: the command borrows kernel-name
+  // strings owned by this graph's nodes (via setKernelNamesRef during dispatch)
+  // and reads them in ReportActivity() at completion, after OnLaunchComplete()
+  // drops the launch's reference. Tying the GraphExec's lifetime to the command
+  // keeps those strings valid through the report (no copies). We already hold a
+  // launch reference here, so the retain in the constructor needs no trim lock.
+  auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr, this);
 
   // Register HW events with graph_accumulate so profiling can read them.
   for (auto& hw_event : segment_hw_events) {
@@ -2001,9 +2019,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
   // attach_signal=true asks the dispatcher to give the last packet a real
   // completion signal (via Barriers().ActiveSignal) so a downstream
   // uncaptured node — typically an SDMA memcpy on a different engine — can
-  // wait on it directly through HwQueueTracker::WaitingSignal, avoiding
-  // the otherwise-required pre/post Marker barriers around the uncaptured
-  // node.
+  // wait on it directly through HwQueueTracker::WaitingSignal.
   auto dispatchCurrentBatch = [&](bool attach_signal = false) -> hipError_t {
     if (!segBatch || batchIndex >= segBatch->packet_batches.size()) {
       return hipSuccess;
@@ -2141,19 +2157,9 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
         if (status != hipSuccess) return status;
       }
     } else {
-      // Node doesn't support capture - execute individually.
-      // Flat dispatch bypasses the Barriers() tracker (ActiveSignal is skipped).
-      // Enqueue Markers before and after the non-captured node to:
-      //   Before: resync the Barriers() tracker so releaseGpuMemoryFence/WaitCurrent
-      //           can track queue progress for the node's internal operations.
-      //   After:  ensure the node's commands (e.g. host node blocking callbacks) are
-      //           fully flushed to the HW queue before the next flat batch is
-      //           dispatched, which writes directly to the HW queue.
-      auto pre_marker = new amd::Marker(*stream, kMarkerDisableFlush, {});
-      if (pre_marker != nullptr) {
-        pre_marker->enqueue();
-        pre_marker->release();
-      }
+      // Node doesn't support capture - execute individually. Upstream flat batches
+      // hand off via attach_signal (SDMA memcpy) or BuildSyncPlan dep barriers;
+      // no pre/post Markers needed around the uncaptured node.
       if (DEBUG_HIP_GRAPH_DOT_PRINT) {
         node->stream_id_ = stream->GetStreamId();
         node->hw_queue_id_ = stream->getQueueID();
@@ -2162,11 +2168,6 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
       status = node->CreateCommand(node->GetQueue());
       if (status != hipSuccess) return status;
       node->EnqueueCommands(stream);
-      auto post_marker = new amd::Marker(*stream, kMarkerDisableFlush, {});
-      if (post_marker != nullptr) {
-        post_marker->enqueue();
-        post_marker->release();
-      }
     }
   }
 

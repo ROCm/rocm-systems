@@ -5,6 +5,7 @@
  */
 
 #include <hip/hip_runtime.h>
+#include <set>
 #include "hip_internal.hpp"
 #include "hip_vm.hpp"
 namespace hip {
@@ -283,17 +284,37 @@ hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocat
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // Re-interpret the ga handle and set the mapped flag
+  // Re-interpret the ga handle.
   hip::GenericAllocation* ga = reinterpret_cast<hip::GenericAllocation*>(handle);
+
+  // Pick the owning device. The backend self-classifies the remaining failure
+  // causes (missing/invalid VA reservation, out-of-bounds range) via cl_int
+  // return codes, so the HIP layer keeps only the checks the backend cannot
+  // perform: the device-id index guard and size-vs-granularity alignment.
+
+  // Owner device id must index g_devices[] safely before any backend call.
+  size_t owner_dev_id = ga->GetProperties().location.id;
+  if (owner_dev_id >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  amd::Device* dev = g_devices[owner_dev_id]->devices()[0];
+
+  // The backend does not validate size-vs-granularity alignment; a misaligned
+  // size would otherwise fail in the HW map and surface as OOM instead of the
+  // correct invalid-value.
+  size_t granularity = dev->info().virtualMemAllocGranularityMinimum_;
+  if (granularity != 0 && (size % granularity) != 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   ga->retain();
 
-  auto& queue = *g_devices[ga->GetProperties().location.id]->NullStream();
-  // Map the physical address to virtual address
-  amd::Command* cmd = new amd::VirtualMapCommand(queue, amd::Command::EventWaitList{}, ptr, size,
-                                                 &ga->asAmdMemory());
-  cmd->enqueue();
-  cmd->awaitCompletion();
-  cmd->release();
+  // Direct synchronous path, do not wait on streams or other work
+  cl_int cl_err = dev->virtualMap(ptr, size, &ga->asAmdMemory());
+  if (cl_err != CL_SUCCESS) {
+    ga->release();
+    HIP_RETURN(ConvertCLErrorIntoHIPError(cl_err));
+  }
 
   HIP_RETURN(hipSuccess);
 }
@@ -440,30 +461,93 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
     HIP_RETURN(status);
   }
 
-  // Unmap all sub-buffers in the range
+  // Direct synchronous path; synchronize all devices with access to memory.
+  //
+  // Pass 1 (validate, no mutation): walk every sub-buffer in [ptr, ptr+size)
+  // and verify it has the bookkeeping the unmap loop will rely on. Bailing
+  // here avoids leaving the range in an inconsistent half-unmapped state
+  // (some sub-buffers already torn down, others still mapped). Simultaneously
+  // collect the union of owner devices and access devices so we only walk
+  // the chain once.
+  std::set<int> sync_device_ids;
+  {
+    amd::Memory* it = vaddr_sub_obj;
+    address end_addr = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) + size;
+    while (it && NextSubBufferPtr(it) <= end_addr) {
+      amd::Memory* phys_mem_obj = it->getUserData().phys_mem_obj;
+      if (phys_mem_obj == nullptr) {
+        LogPrintfError("hipMemUnmap: sub_obj at %p missing phys_mem_obj", it->getSvmPtr());
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      auto* ga = reinterpret_cast<hip::GenericAllocation*>(phys_mem_obj->getUserData().data);
+      if (ga == nullptr) {
+        LogPrintfError("hipMemUnmap: sub_obj at %p has null ga", it->getSvmPtr());
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      size_t owner_id = ga->GetProperties().location.id;
+      if (owner_id >= g_devices.size()) {
+        LogPrintfError("hipMemUnmap: sub_obj at %p has out-of-range owner id %zu",
+                       it->getSvmPtr(), owner_id);
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      sync_device_ids.insert(static_cast<int>(owner_id));
+
+      // Probe each device's access at THIS sub-buffer's VA. The previous
+      // implementation only probed `ptr`, which missed any device whose
+      // access window covers a strictly-interior sub-range.
+      void* sub_va = it->getSvmPtr();
+      for (size_t dev_idx = 0; dev_idx < g_devices.size(); ++dev_idx) {
+        amd::Device::VmmAccess access_flags = amd::Device::VmmAccess::kNone;
+        if (g_devices[dev_idx]->devices()[0]->GetMemAccess(sub_va, &access_flags) &&
+            access_flags != amd::Device::VmmAccess::kNone) {
+          sync_device_ids.insert(static_cast<int>(dev_idx));
+        }
+      }
+
+      it = amd::MemObjMap::FindMemObj(NextSubBufferPtr(it));
+    }
+  }
+
+  // Pass 2: SyncAllStreams once per device in the union BEFORE the sub-buffer
+  // loop, so the unmap doesn't race in-flight access-device work.
+  for (int dev_id : sync_device_ids) {
+    g_devices[dev_id]->SyncAllStreams();
+  }
+
+  // Pass 3: Sub-buffer unmap loop. Pass 1 validated every entry, so the only
+  // remaining failure mode here is a HW virtualUnmap failure.
+  cl_int first_cl_err = CL_SUCCESS;
   address end_address = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) + size;
   while (vaddr_sub_obj && NextSubBufferPtr(vaddr_sub_obj) <= end_address) {
     amd::Memory* phys_mem_obj = vaddr_sub_obj->getUserData().phys_mem_obj;
-    if (phys_mem_obj == nullptr) {
-      HIP_RETURN(hipErrorInvalidValue);
-    }
-
-    // Save next_ptr before enqueue — submitVirtualMap releases sub_obj
-    address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
-
-    amd::Command* cmd = new amd::VirtualMapCommand(
-        *hip::getCurrentDevice()->NullStream(), amd::Command::EventWaitList{},
-        vaddr_sub_obj->getSvmPtr(), vaddr_sub_obj->getSize(), nullptr);
-    cmd->enqueue();
-    cmd->awaitCompletion();
-    cmd->release();
-    // restore the original pa of the generic allocation
     hip::GenericAllocation* ga =
         reinterpret_cast<hip::GenericAllocation*>(phys_mem_obj->getUserData().data);
+    void* sub_va = vaddr_sub_obj->getSvmPtr();
+    size_t sub_size = vaddr_sub_obj->getSize();
+    address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
+
+    // Each sub-buffer is unmapped by the device that owns its physical backing.
+    amd::Device* sub_dev = g_devices[ga->GetProperties().location.id]->devices()[0];
+    cl_int cl_err = sub_dev->virtualUnmap(sub_va, sub_size);
+    if (cl_err != CL_SUCCESS) {
+      LogPrintfError("hipMemUnmap: virtualUnmap failed for va: %p", sub_va);
+      if (first_cl_err == CL_SUCCESS) {
+        first_cl_err = cl_err;
+      }
+      vaddr_sub_obj = amd::MemObjMap::FindMemObj(next_ptr);
+      continue;
+    }
+
+    // Release the ga ref only on successful HW unmap.
     ga->release();
 
-    // sub_obj already released in submitVirtualMap after HW unmap
+    // sub_obj already released inside UnmapMemObjBookkeeping (called from
+    // virtualUnmap on success).
     vaddr_sub_obj = amd::MemObjMap::FindMemObj(next_ptr);
+  }
+
+  if (first_cl_err != CL_SUCCESS) {
+    HIP_RETURN(ConvertCLErrorIntoHIPError(first_cl_err));
   }
 
   HIP_RETURN(hipSuccess);

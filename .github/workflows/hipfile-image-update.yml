@@ -45,8 +45,8 @@ jobs:
     # latest-rocm<ver> images post-merge, but the nightly target moves daily, so
     # nightly images are refreshed by hipfile-image-update-nightly.yml (daily and
     # on Dockerfile-change merge) instead. Keep this matrix in sync with
-    # hipfile-ci-toplevel.yml's SUPPORTED_PLATFORMS/ROCM_VERSIONS/MATRIX_INCLUDE
-    # for the non-nightly rows.
+    # hipfile-ci-toplevel.yml's SUPPORTED_PLATFORMS/ROCM_VERSIONS/MATRIX_EXCLUDE
+    # (and MATRIX_INCLUDE if used) for the non-nightly rows.
     strategy:
       matrix:
         supported_platforms:

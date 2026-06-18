@@ -2139,6 +2139,51 @@ inline static hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes
 }
 #endif
 
+#if CUDA_VERSION >= 13020
+inline static hipError_t hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes,
+                                                 size_t count, unsigned long long flags,
+                                                 hipStream_t stream) {
+  return hipCUDAErrorTohipError(
+      cudaMemDiscardBatchAsync(dev_ptrs, sizes, count, flags, stream));
+}
+
+inline static hipError_t hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes,
+                                                    size_t count, unsigned long long flags,
+                                                    hipStream_t stream) {
+  return hipCUResultTohipError(
+      cuMemDiscardBatchAsync(dptrs, sizes, count, flags, (CUstream)stream));
+}
+
+inline static hipError_t hipMemDiscardAndPrefetchBatchAsync(
+    void** dptrs, size_t* sizes, size_t count,
+    hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs,
+    size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
+  return hipCUDAErrorTohipError(
+      cudaMemDiscardAndPrefetchBatchAsync(dptrs, sizes, count, prefetchLocs,
+                                          prefetchLocIdxs, numPrefetchLocs, flags, stream));
+}
+
+inline static hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(
+    hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+    hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs,
+    size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
+  CUmemLocation* cuLocs = (CUmemLocation*)malloc(numPrefetchLocs * sizeof(CUmemLocation));
+  if (cuLocs == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+  for (size_t i = 0; i < numPrefetchLocs; i++) {
+    cuLocs[i].id = prefetchLocs[i].id;
+    cuLocs[i].type = (CUmemLocationType)prefetchLocs[i].type;
+  }
+  hipError_t err = hipCUResultTohipError(
+      cuMemDiscardAndPrefetchBatchAsync(dptrs, sizes, count, cuLocs,
+                                        prefetchLocIdxs, numPrefetchLocs, flags,
+                                        (CUstream)stream));
+  free(cuLocs);
+  return err;
+}
+#endif
+
 inline static hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                                          hipMemLocation location) {
 #if CUDA_VERSION >= 13000

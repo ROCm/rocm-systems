@@ -32,10 +32,16 @@ block_backtrace_samples();
 void
 unblock_backtrace_samples();
 
+template <typename Tp>
+concept sampling_scope = std::is_same_v<Tp, tim::scope::thread_scope> ||
+                         std::is_same_v<Tp, tim::scope::process_scope>;
+
 template <typename Tp = tim::scope::thread_scope>
+    requires sampling_scope<Tp>
 void pause(Tp = {});
 
 template <typename Tp = tim::scope::thread_scope>
+    requires sampling_scope<Tp>
 void resume(Tp = {});
 
 void block_signals(std::set<int> = {});

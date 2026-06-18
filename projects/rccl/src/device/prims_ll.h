@@ -12,9 +12,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     public PrimitivesWithoutDirect<Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc>> {
 
   // In the case of Fan::MaxRecv == 0, we need to force MaxRecv to 1 for this to compile
-  // This is because of a recv buffer which is allocated to MaxRecv length in send-only cases
+  // This is because of a recv buffer which is allocated to MaxRecv length in send-only cases.
   static constexpr int MaxRecv = Fan::MaxRecv > 1 ? Fan::MaxRecv : 1;
+#if defined(NCCL_OS_WINDOWS)
+  // MSVC rejects zero-length arrays; clamp to 1 on Windows only.
+  static constexpr int MaxSend = Fan::MaxSend > 1 ? Fan::MaxSend : 1;
+#else
   static constexpr int MaxSend = Fan::MaxSend;
+#endif
   static constexpr int Input=0, Output=1, Acc=2;
   RedOp redOp;
   const int tid;
@@ -209,8 +214,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     // System scope store that bypasses the hardware caches, should generate global_store_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950.
     __builtin_amdgcn_global_store_b128((v4u_gptr) dst->v, i4.v4u, RCCL_SYSTEM_SYNCSCOPE);
     #else
+#if defined(__gfx1200__) ||  defined(__gfx1201__)
+    __hip_atomic_store((u64_gptr) dst->v,   i4.v[0], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    __hip_atomic_store((u64_gptr) dst->v+1, i4.v[1], __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
     *((u64_gptr) dst->v) = *((u64_gptr) i4.v);
     *((u64_gptr) dst->v+1) = *((u64_gptr) i4.v+1);
+#endif
     #endif
 #if defined(__gfx950__) && ROCM_VERSION < 70002
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, ""); // flush cache on gfx950 if ROCr fix for hipHostMallocUncached is not available (ROCm version < 7.0.2)
