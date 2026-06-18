@@ -220,20 +220,19 @@ namespace impl {
       nextBit = (nextBit < (laneId & ~(warpSize - 1))) ? laneId : nextBit;
       bPermute<isPrimitiveType, permuteType, kNumOfPermutes>(permuteResult, result, nextBit);
 
-
       if (insideLanes) {
         if constexpr (!isPrimitiveType) {
           Val toReturn;
-          toReturn = op(*reinterpret_cast<Val*>(result), *reinterpret_cast<Val*>(permuteResult));
+          toReturn = op(*reinterpret_cast<Val*>(permuteResult), *reinterpret_cast<Val*>(result));
         __builtin_memcpy(result, &toReturn, sizeof(Val));
         } else if constexpr (sizeof(Val) == 4 || sizeof(Val) == 2) {
-          result = op(result, permuteResult);
+          result = op(permuteResult, result);
         } else if constexpr (sizeof(Val) == 8) {
           Val tmp;
           unsigned long long rhs =
               (static_cast<unsigned long long>(permuteResult[1]) << 32) | permuteResult[0];
           __builtin_memcpy(&tmp, result, sizeof(Val));
-          tmp = op(tmp, *reinterpret_cast<Val*>(&rhs));
+          tmp = op(*reinterpret_cast<Val*>(&rhs), tmp);
           __builtin_memcpy(result, &tmp, sizeof(Val));
         }
       }

@@ -825,12 +825,15 @@ void aggregateCoopTiles(AggregationType aggType, const std::index_sequence<TileS
   aggregateCoopTiles<Op, T>(aggType, remainingTiles);
 }
 
-template <bool Coalesced, class Op, class T, int WarpSize>
+template <bool Coalesced, class Op, class T, int MaxTileSize>
 void runAggregationRandomForType(AggregationType aggType)
 {
   if constexpr (Coalesced) {
     aggregateForTypeAndOp<0, Op, T>(aggType);
-  } else if constexpr (WarpSize <= 32) {
+  } else if constexpr (MaxTileSize <= 4) {
+    std::index_sequence<1, 2, 4> tileSizes;
+    aggregateCoopTiles<Op, T>(aggType, tileSizes);
+  } else if constexpr (MaxTileSize <= 32) {
     std::index_sequence<1, 2, 4, 8, 16, 32> tileSizes;
     aggregateCoopTiles<Op, T>(aggType, tileSizes);
   } else {
@@ -891,6 +894,12 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Custom_Op)
   } else {
     runAggregationRandomForType<false, MaxOfAbsolute<int>, int, 64>(AggregationType::Reduce);
   }
+}
+
+HIP_TEST_CASE(Unit_Thread_Block_Tile_Scan_Custom_Op)
+{
+  // only using 4 to avoid long long overflows
+  runAggregationRandomForType<false, NonCommutativeOp<long long>, long long, 4>(AggregationType::InclusiveScan);
 }
 
 struct Vector {

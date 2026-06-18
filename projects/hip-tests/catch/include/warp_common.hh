@@ -248,6 +248,14 @@ struct MaxOfAbsolute {
   }
 };
 
+template <class T>
+struct NonCommutativeOp {
+  T __host__ __device__ operator()(T i, T j)
+  {
+    return std::abs(i) * j;
+  }
+};
+
 // typeid(T).name() does seem to return a very descriptive name for primitive types,
 // at least on clang, so we roll out an equivalent
 template<class T>
@@ -303,6 +311,8 @@ const char* opToString()
 #endif
   else if constexpr (std::is_same<Op, MaxOfAbsolute<T>>::value)
     return "MaxOfAbsolute";
+  else if constexpr (std::is_same<Op, NonCommutativeOp<T>>::value)
+    return "NonCommutativeOp";
   else {
     return "unknown operator";
   }
@@ -564,11 +574,11 @@ T calculateExpected(T* output,
       if (mask & (1ull << i)) {
         if (initialized) {
           if (inclusive) {
-            result = op(input[i], result);
+            result = op(result, input[i]);
             output[i] = result;
           } else {
             output[i] = result;
-            result = op(input[i], result);
+            result = op(result, input[i]);
           }
         } else {
           result = input[i];
