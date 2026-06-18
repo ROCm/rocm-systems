@@ -41,6 +41,15 @@ set(TEST_SRC
     hipMemRelease.cc
     hipMemUnmap.cc)
 
+find_package(MPI QUIET)
+if(MPI_FOUND AND UNIX)
+  set(TEST_SRC
+      ${TEST_SRC}
+      hipMemFabricHandle.cc)
+  set(VMM_LINKER_LIBS MPI::MPI_CXX)
+endif()
+
 hip_add_exe_to_target(NAME VirtualMemoryManagementTest
   TEST_SRC ${TEST_SRC}
-  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
+  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC}
+  LINKER_LIBS ${VMM_LINKER_LIBS})
