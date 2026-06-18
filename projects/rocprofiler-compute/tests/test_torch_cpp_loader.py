@@ -985,14 +985,23 @@ def test_python_fallback_path_still_works_without_so(monkeypatch):
     monkeypatch.setattr(inject_roctx_loader, "load", lambda **kw: None)
     if "utils.inject_roctx" in sys.modules:
         del sys.modules["utils.inject_roctx"]
-    inject_roctx = importlib.import_module("utils.inject_roctx")
+    importlib.import_module("utils.inject_roctx")
     try:
+        from utils.inject_roctx import core
         from utils.inject_roctx._backends import torch as _torch_backend
 
         assert _torch_backend.using_c_tier() is False
         assert _torch_backend.dump_recordfn_stats() is None
-        inject_roctx._push_scope("py.tier.test", "#1@test:1")
-        inject_roctx._pop_scope()
+
+        pushed: list[str] = []
+        original_io = core.get_python_tier_io()
+        core.set_python_tier_io(push=pushed.append, pop=lambda: None)
+        try:
+            core._push_scope("py.tier.test", "#1@test:1")
+            core._pop_scope()
+        finally:
+            core.set_python_tier_io(*original_io)
+        assert pushed, "Python-tier rangePush was not invoked in fallback mode"
     finally:
         sys.modules.pop("utils.inject_roctx", None)
 
@@ -1006,13 +1015,15 @@ def test_python_fallback_uses_python_dispatch_sentinel(monkeypatch):
     monkeypatch.setattr(inject_roctx_loader, "load", lambda **kw: None)
     if "utils.inject_roctx" in sys.modules:
         del sys.modules["utils.inject_roctx"]
-    inject_roctx = importlib.import_module("utils.inject_roctx")
+    importlib.import_module("utils.inject_roctx")
     try:
+        from utils.inject_roctx import core
+
         monkeypatch.setattr("inspect.currentframe", lambda: None)
-        assert inject_roctx.resolve_user_caller_location() == "python.dispatch:0"
+        assert core.resolve_user_caller_location() == "python.dispatch:0"
         import inspect as _stdlib_inspect
 
-        src = _stdlib_inspect.getsource(inject_roctx)
+        src = _stdlib_inspect.getsource(core)
         assert "dispatcher:0" not in src, "legacy 'dispatcher:0' sentinel still present"
     finally:
         sys.modules.pop("utils.inject_roctx", None)
@@ -1035,18 +1046,20 @@ def test_import_does_not_apply_global_patches(monkeypatch):
         "compile": getattr(_torch, "compile", None),
     }
 
-    inject_roctx = importlib.import_module("utils.inject_roctx")
+    importlib.import_module("utils.inject_roctx")
     try:
         post = {
             "compile": getattr(_torch, "compile", None),
         }
+        from utils.inject_roctx import core
+
         for sym in (
             "install_global_wraps",
             "_push_scope",
             "_pop_scope",
             "resolve_user_caller_location",
         ):
-            assert hasattr(inject_roctx, sym), f"public symbol missing: {sym}"
+            assert hasattr(core, sym), f"core symbol missing: {sym}"
         from utils.inject_roctx._backends import torch as _torch_backend
 
         for sym in (
