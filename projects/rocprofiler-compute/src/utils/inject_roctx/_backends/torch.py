@@ -23,18 +23,15 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from utils.inject_roctx import _core
-from utils.inject_roctx._core import (
-    _marker_only_init_wrapper,
-    _walk_subclasses,
+from utils.inject_roctx import core
+from utils.inject_roctx.core import (
     get_context_stack,
     get_marker_stack,
     resolve_user_caller_location,
-    roctx_wrapper,
 )
 from utils.logger import console_log, console_warning
 
-from . import register
+from ..registry import register
 
 _BACKEND_NAME = "torch"
 
@@ -62,9 +59,9 @@ _thread_local = threading.local()
 _active_dispatch_mode: Any = None
 
 # Wire the Python tier via _core and reuse its roctx handles below.
-_ROCTX_AVAILABLE = _core.ensure_python_tier()
+_ROCTX_AVAILABLE = core.ensure_python_tier()
 if _ROCTX_AVAILABLE:
-    rangePush, rangePop = _core.get_python_tier_io()
+    rangePush, rangePop = core.get_python_tier_io()
 
 
 # torch.distributed.* collectives; entries not listed here are not wrapped.
@@ -160,8 +157,8 @@ def _push_scope(marker: str, context: str, backend: str = "") -> None:
             used_native = False
 
     if not used_native:
-        full = _core.compose_marker(marker, context, backend)
-        range_push, _ = _core.get_python_tier_io()
+        full = core.compose_marker(marker, context, backend)
+        range_push, _ = core.get_python_tier_io()
         range_push(full)
 
     snapshot_len = len(tier_stack)
@@ -177,7 +174,7 @@ def _push_scope(marker: str, context: str, backend: str = "") -> None:
             if used_native and _native_hook is not None:
                 _native_hook.pop()
             else:
-                _, range_pop = _core.get_python_tier_io()
+                _, range_pop = core.get_python_tier_io()
                 range_pop()
         except Exception:
             pass
@@ -199,13 +196,72 @@ def _pop_scope() -> None:
         if used_native and _native_hook is not None:
             _native_hook.pop()
         else:
-            _, range_pop = _core.get_python_tier_io()
+            _, range_pop = core.get_python_tier_io()
             range_pop()
     finally:
         if marker_stack:
             marker_stack.pop()
         if context_stack:
             context_stack.pop()
+
+
+# Structural wrappers for entry points the ATen dispatcher does not record.
+
+
+def roctx_wrapper(
+    func: Callable[..., Any],
+    name: Optional[str] = None,
+    backend: str = "",
+) -> Callable[..., Any]:
+    """Wrap func so each call emits a ROCTX range. Idempotent.
+
+    A non-empty backend attributes the scope to that backend.
+    """
+    if getattr(func, "_roctx_wrapped", False):
+        return func
+    func_name = name or func.__name__
+    call_counter = {"count": 0}
+
+    @wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> object:
+        call_counter["count"] += 1
+        location = resolve_user_caller_location()
+        _push_scope(func_name, f"#{call_counter['count']}@{location}", backend=backend)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            _pop_scope()
+
+    wrapper._roctx_wrapped = True
+    return wrapper
+
+
+def _marker_only_init_wrapper(name: str, backend: str = "") -> Callable[..., Any]:
+    """Build an __init__ that emits a ROCTX range, then calls object.__init__.
+
+    Used for classes whose construction occurs in __new__ (e.g. cuda.Event,
+    cuda.Stream).
+    """
+    call_counter = {"count": 0}
+
+    def marker_only_init(self: object, *args: Any, **kwargs: Any) -> None:
+        call_counter["count"] += 1
+        location = resolve_user_caller_location()
+        _push_scope(name, f"#{call_counter['count']}@{location}", backend=backend)
+        try:
+            return object.__init__(self)
+        finally:
+            _pop_scope()
+
+    marker_only_init._roctx_wrapped = True
+    return marker_only_init
+
+
+def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
+    """Apply `fn` to every (transitive) subclass of `cls`."""
+    for sub in cls.__subclasses__():
+        fn(sub)
+        _walk_subclasses(sub, fn)
 
 
 def _initialize_c_tier() -> bool:
@@ -301,8 +357,6 @@ def patch_distributed_collectives() -> None:
                     fn,
                     f"torch.distributed.{fn_name}",
                     backend=_BACKEND_NAME,
-                    push=_push_scope,
-                    pop=_pop_scope,
                 ),
             )
             wrapped.append(fn_name)
@@ -332,8 +386,6 @@ def patch_distributed_collectives() -> None:
                         fn,
                         f"torch.distributed._functional_collectives.{fn_name}",
                         backend=_BACKEND_NAME,
-                        push=_push_scope,
-                        pop=_pop_scope,
                     ),
                 )
                 wrapped.append(f"_functional_collectives.{fn_name}")
@@ -377,8 +429,6 @@ def patch_process_group_methods() -> None:
                     fn,
                     marker,
                     backend=_BACKEND_NAME,
-                    push=_push_scope,
-                    pop=_pop_scope,
                 )
                 setattr(cls, method_name, wrapped)
                 wrapped_method_count["count"] += 1
@@ -455,8 +505,6 @@ def patch_cuda_graph() -> None:
                 fn,
                 marker,
                 backend=_BACKEND_NAME,
-                push=_push_scope,
-                pop=_pop_scope,
             )
             setattr(cls, method_name, wrapped)
             wrapped_methods.append(method_name)
@@ -800,8 +848,6 @@ def wrap_module_function(
         fn,
         marker_name,
         backend=_BACKEND_NAME,
-        push=_push_scope,
-        pop=_pop_scope,
     )
     try:
         setattr(module, attr_name, wrapped)
@@ -981,8 +1027,6 @@ def install_tensor_method_wrappers() -> None:
                 fn,
                 f"torch.Tensor.{method_name}",
                 backend=_BACKEND_NAME,
-                push=_push_scope,
-                pop=_pop_scope,
             )
             setattr(torch.Tensor, method_name, wrapped_fn)
             wrapped.append(method_name)
@@ -1029,16 +1073,12 @@ def install_extra_structural_wrappers() -> None:
                     cls.__init__ = _marker_only_init_wrapper(
                         f"torch.cuda.{cls_name}",
                         backend=_BACKEND_NAME,
-                        push=_push_scope,
-                        pop=_pop_scope,
                     )
                 else:
                     wrapped_init = roctx_wrapper(
                         init,
                         f"torch.cuda.{cls_name}",
                         backend=_BACKEND_NAME,
-                        push=_push_scope,
-                        pop=_pop_scope,
                     )
                     cls.__init__ = wrapped_init
                 wrapped.append(f"torch.cuda.{cls_name}")
@@ -1145,7 +1185,7 @@ def _resolve_torch() -> bool:
         _TORCH_ROOT = str(Path(torch.__file__).resolve().parent) + os.sep
     except Exception:
         _TORCH_ROOT = ""
-    _core.add_framework_root(_TORCH_ROOT)
+    core.add_framework_root(_TORCH_ROOT)
 
     try:
         import torch.distributed as _dist_mod
@@ -1196,15 +1236,15 @@ def _resolve_torch() -> bool:
     except Exception:
         nn = None
     try:
-        from . import _torch_cpp_loader as _loader_mod
-        from ._torch_cpp_loader import load as _loader_fn
+        from . import torch_cpp_loader as _loader_mod
+        from .torch_cpp_loader import load as _loader_fn
 
         _roctx_loader_module = _loader_mod
         _load_roctx_recordfn = _loader_fn
     except Exception as exc:
         console_warning(
             "ml api trace",
-            f"_torch_cpp_loader unavailable; falling back to Python tier: {exc}",
+            f"torch_cpp_loader unavailable; falling back to Python tier: {exc}",
         )
 
     return True
@@ -1220,7 +1260,7 @@ class TorchBackend:
         if not _ROCTX_AVAILABLE:
             console_warning(
                 "ml api trace",
-                f"ROCTX bindings not found in {_core.roctx_candidate_paths()}; "
+                f"ROCTX bindings not found in {core.roctx_candidate_paths()}; "
                 "skipping torch instrumentation.",
             )
             return

@@ -19,7 +19,7 @@ _FRAMEWORK_ENV_VAR = "ROCPROFCOMPUTE_ROCTX_FRAMEWORKS"
 
 def _report_recordfn_callback_errors() -> None:
     """Warn if the C++ RecordFunction tier swallowed callback exceptions."""
-    torch_backend = sys.modules.get("utils.inject_roctx._backends._torch")
+    torch_backend = sys.modules.get("utils.inject_roctx._backends.torch")
     if torch_backend is None:
         return
     stats = torch_backend.dump_recordfn_stats()
@@ -48,7 +48,7 @@ if len(sys.argv) < 2:
 target_script = sys.argv[1]
 script_args = sys.argv[2:]
 
-importlib.import_module("utils.inject_roctx").install_global_wraps(
+importlib.import_module("utils.inject_roctx.core").install_global_wraps(
     os.environ.get(_FRAMEWORK_ENV_VAR, "")
 )
 

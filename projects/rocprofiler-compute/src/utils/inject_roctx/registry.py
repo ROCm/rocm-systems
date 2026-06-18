@@ -3,13 +3,15 @@
 
 """Backend registry for inject_roctx.
 
-Backends are discovered by importing ._<name> on demand. Each backend
-module must call register at import time.
+Backends are discovered by importing _backends.<name> on demand. Each
+backend module must call register at import time.
 """
 
 import importlib
 from collections.abc import Iterable
 from typing import Protocol
+
+_BACKENDS_PKG = f"{__package__}._backends"
 
 
 class Backend(Protocol):
@@ -40,10 +42,11 @@ def install_many(names: Iterable[str]) -> None:
         seen.add(name)
         try:
             if name not in _REGISTRY:
-                importlib.import_module(f"._{name}", __package__)
+                importlib.import_module(f".{name}", _BACKENDS_PKG)
             if name not in _REGISTRY:
                 raise RuntimeError(
-                    f"module ._{name} loaded but did not register {name!r}"
+                    f"module {_BACKENDS_PKG}.{name} loaded "
+                    f"but did not register {name!r}"
                 )
             _REGISTRY[name].install()
         except Exception as exc:

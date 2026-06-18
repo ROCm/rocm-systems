@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for utils.inject_roctx._backends._torch_cpp_loader. No GPU.
+"""Unit tests for utils.inject_roctx._backends.torch_cpp_loader. No GPU.
 CMake build is end-to-end in test_torch_trace_coverage; this file stubs the
 loader to pin contracts: tier order, cache fingerprint, REBUILD env var,
 no-ninja policy.
@@ -13,7 +13,7 @@ import sys
 import common  # noqa: F401
 import pytest
 
-from utils.inject_roctx._backends import _torch_cpp_loader as inject_roctx_loader
+from utils.inject_roctx._backends import torch_cpp_loader as inject_roctx_loader
 
 _FAKE_TAG = "py3.12_torch2.9_src000000000000"
 
@@ -118,7 +118,7 @@ def test_cmake_and_runtime_compute_identical_fingerprint():
     snippet = (
         "import sys, pathlib; "
         f"sys.path.insert(0, str(pathlib.Path('{cmake_dir}/../..').resolve())); "
-        "from utils.inject_roctx._backends._torch_cpp_loader "
+        "from utils.inject_roctx._backends.torch_cpp_loader "
         "import _source_fingerprint; "
         "print(_source_fingerprint())"
     )
@@ -982,7 +982,7 @@ def test_python_fallback_path_still_works_without_so(monkeypatch):
         del sys.modules["utils.inject_roctx"]
     inject_roctx = importlib.import_module("utils.inject_roctx")
     try:
-        from utils.inject_roctx._backends import _torch as _torch_backend
+        from utils.inject_roctx._backends import torch as _torch_backend
 
         assert _torch_backend.using_c_tier() is False
         assert _torch_backend.dump_recordfn_stats() is None
@@ -1042,7 +1042,7 @@ def test_import_does_not_apply_global_patches(monkeypatch):
             "resolve_user_caller_location",
         ):
             assert hasattr(inject_roctx, sym), f"public symbol missing: {sym}"
-        from utils.inject_roctx._backends import _torch as _torch_backend
+        from utils.inject_roctx._backends import torch as _torch_backend
 
         for sym in (
             "install_function_apply_wrappers",

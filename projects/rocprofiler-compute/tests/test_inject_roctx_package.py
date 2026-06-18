@@ -2,8 +2,8 @@
 # SPDX-License-Identifier:  MIT
 
 """Unit tests for the ``utils.inject_roctx`` public surface:
-``install_global_wraps``, ``_backends.install_many``, ``TritonBackend``, and
-``_core._push_scope`` / ``_pop_scope``."""
+``core.install_global_wraps``, ``registry.install_many``, ``TritonBackend``,
+and ``core._push_scope`` / ``_pop_scope``."""
 
 import importlib
 import sys
@@ -19,20 +19,20 @@ import pytest
 
 @pytest.fixture
 def captured_install(monkeypatch):
-    """Replace ``_backends.install_many`` with a recorder."""
-    from utils.inject_roctx import _backends as backends_pkg
+    """Replace ``registry.install_many`` with a recorder."""
+    from utils.inject_roctx import registry as registry_pkg
 
     calls: list[list[str]] = []
 
     def _record(names):
         calls.append(list(names))
 
-    monkeypatch.setattr(backends_pkg, "install_many", _record)
+    monkeypatch.setattr(registry_pkg, "install_many", _record)
     return calls
 
 
 def test_install_global_wraps_empty_inputs_are_noop(captured_install):
-    from utils.inject_roctx import install_global_wraps
+    from utils.inject_roctx.core import install_global_wraps
 
     install_global_wraps("")
     install_global_wraps([])
@@ -40,52 +40,52 @@ def test_install_global_wraps_empty_inputs_are_noop(captured_install):
 
 
 def test_install_global_wraps_single_name(captured_install):
-    from utils.inject_roctx import install_global_wraps
+    from utils.inject_roctx.core import install_global_wraps
 
     install_global_wraps("torch")
     assert captured_install == [["torch"]]
 
 
 def test_install_global_wraps_comma_split_with_whitespace(captured_install):
-    from utils.inject_roctx import install_global_wraps
+    from utils.inject_roctx.core import install_global_wraps
 
     install_global_wraps("torch , , triton")
     assert captured_install == [["torch", "triton"]]
 
 
 def test_install_global_wraps_iterable_input(captured_install):
-    from utils.inject_roctx import install_global_wraps
+    from utils.inject_roctx.core import install_global_wraps
 
     install_global_wraps(["torch", "triton"])
     assert captured_install == [["torch", "triton"]]
 
 
 def test_install_global_wraps_api_alias_expands(captured_install):
-    from utils.inject_roctx import install_global_wraps
+    from utils.inject_roctx.core import install_global_wraps
 
     install_global_wraps("api")
     assert captured_install == [["torch", "triton"]]
 
 
 def test_install_global_wraps_api_alongside_explicit_name(captured_install):
-    from utils.inject_roctx import install_global_wraps
+    from utils.inject_roctx.core import install_global_wraps
 
     install_global_wraps("api,torch")
     assert captured_install == [["torch", "triton", "torch"]]
 
 
 # ---------------------------------------------------------------------------
-# _backends.install_many
+# registry.install_many
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 def fresh_registry(monkeypatch):
     """Provide an isolated registry for ``install_many`` tests."""
-    from utils.inject_roctx import _backends as backends_pkg
+    from utils.inject_roctx import registry as registry_pkg
 
-    monkeypatch.setattr(backends_pkg, "_REGISTRY", {})
-    return backends_pkg
+    monkeypatch.setattr(registry_pkg, "_REGISTRY", {})
+    return registry_pkg
 
 
 def _make_backend(name, install_fn=None):
@@ -141,8 +141,7 @@ def test_install_many_warns_when_module_does_not_register(fresh_registry, monkey
     warnings: list[tuple] = []
     monkeypatch.setattr("utils.logger.console_warning", lambda *a: warnings.append(a))
 
-    pkg_name = fresh_registry.__name__
-    fake_name = f"{pkg_name}._ghost"
+    fake_name = "utils.inject_roctx._backends.ghost"
     sys.modules[fake_name] = types.ModuleType(fake_name)
     try:
         fresh_registry.install_many(["ghost"])
@@ -158,7 +157,7 @@ def test_install_many_warns_when_module_does_not_register(fresh_registry, monkey
 
 
 def test_triton_backend_skips_when_triton_missing(monkeypatch):
-    from utils.inject_roctx._backends import _triton as triton_backend
+    from utils.inject_roctx._backends import triton as triton_backend
 
     real_find_spec = importlib.util.find_spec
 
@@ -181,7 +180,7 @@ def test_triton_backend_skips_when_triton_missing(monkeypatch):
 
 
 def test_triton_backend_wraps_compiled_kernel_call(monkeypatch):
-    from utils.inject_roctx._backends import _triton as triton_backend
+    from utils.inject_roctx._backends import triton as triton_backend
 
     pushes: list[tuple] = []
     pops: list[None] = []
@@ -212,7 +211,7 @@ def test_triton_backend_wraps_compiled_kernel_call(monkeypatch):
 
 
 def test_triton_backend_kernel_name_fallbacks(monkeypatch):
-    from utils.inject_roctx._backends import _triton as triton_backend
+    from utils.inject_roctx._backends import triton as triton_backend
 
     pushes: list[str] = []
     monkeypatch.setattr(
@@ -243,7 +242,7 @@ def test_triton_backend_kernel_name_fallbacks(monkeypatch):
 
 
 def test_triton_backend_patch_is_idempotent(monkeypatch):
-    from utils.inject_roctx._backends import _triton as triton_backend
+    from utils.inject_roctx._backends import triton as triton_backend
 
     monkeypatch.setattr(triton_backend, "_push_scope", lambda *a, **k: None)
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
@@ -262,44 +261,44 @@ def test_triton_backend_patch_is_idempotent(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _core push/pop
+# core push/pop
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 def core_with_python_tier():
-    """Return ``_core`` wired to in-memory push/pop sinks with empty stacks."""
-    from utils.inject_roctx import _core
+    """Return ``core`` wired to in-memory push/pop sinks with empty stacks."""
+    from utils.inject_roctx import core
 
     pushed: list[str] = []
     popped: list[None] = []
-    _core.set_python_tier_io(push=pushed.append, pop=lambda: popped.append(None))
+    core.set_python_tier_io(push=pushed.append, pop=lambda: popped.append(None))
     for attr in ("marker_stack", "context_stack"):
-        if hasattr(_core._thread_local, attr):
-            delattr(_core._thread_local, attr)
-    return _core, pushed, popped
+        if hasattr(core._thread_local, attr):
+            delattr(core._thread_local, attr)
+    return core, pushed, popped
 
 
 @pytest.fixture
 def torch_backend_tiers():
-    """Return ``_torch`` wired to in-memory Python-tier sinks with empty stacks."""
-    from utils.inject_roctx import _core
-    from utils.inject_roctx._backends import _torch
+    """Return the torch backend wired to in-memory Python-tier sinks."""
+    from utils.inject_roctx import core
+    from utils.inject_roctx._backends import torch as torch_mod
 
     pushed: list[str] = []
     popped: list[None] = []
-    _core.set_python_tier_io(push=pushed.append, pop=lambda: popped.append(None))
+    core.set_python_tier_io(push=pushed.append, pop=lambda: popped.append(None))
     for attr in ("marker_stack", "context_stack"):
-        if hasattr(_core._thread_local, attr):
-            delattr(_core._thread_local, attr)
-    if hasattr(_torch._thread_local, "tier_stack"):
-        delattr(_torch._thread_local, "tier_stack")
-    saved_hook = _torch._native_hook
-    _torch._native_hook = None
+        if hasattr(core._thread_local, attr):
+            delattr(core._thread_local, attr)
+    if hasattr(torch_mod._thread_local, "tier_stack"):
+        delattr(torch_mod._thread_local, "tier_stack")
+    saved_hook = torch_mod._native_hook
+    torch_mod._native_hook = None
     try:
-        yield _torch, pushed, popped
+        yield torch_mod, pushed, popped
     finally:
-        _torch._native_hook = saved_hook
+        torch_mod._native_hook = saved_hook
 
 
 def test_push_scope_appends_backend_suffix(core_with_python_tier):
