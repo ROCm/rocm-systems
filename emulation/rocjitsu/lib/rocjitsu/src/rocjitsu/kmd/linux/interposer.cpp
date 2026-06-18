@@ -72,19 +72,27 @@ using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedDriver;
 using rocjitsu::Sysfs;
 
-static int connect_to_daemon() {
-  auto path = rocjitsu::rpc_default_socket_path();
-  int sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  if (sock < 0)
-    return -1;
+static int try_connect(int sock, const std::string &path) {
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;
   path.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
-  if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
-    syscall(SYS_close, sock);
+  return connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
+}
+
+static int connect_to_daemon(const std::string &runtime_dir) {
+  int sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (sock < 0)
     return -1;
-  }
-  return sock;
+
+  if (try_connect(sock, runtime_dir + "/daemon.sock") == 0)
+    return sock;
+
+  auto fallback = rocjitsu::rpc_default_socket_path();
+  if (try_connect(sock, fallback) == 0)
+    return sock;
+
+  syscall(SYS_close, sock);
+  return -1;
 }
 
 namespace {
@@ -219,6 +227,12 @@ public:
                : nullptr;
   }
 
+  const std::string &invocation_runtime_dir() {
+    if (invocation_runtime_dir_.empty())
+      invocation_runtime_dir_ = rocjitsu::rpc_invocation_runtime_dir(getpid());
+    return invocation_runtime_dir_;
+  }
+
   std::string remote_topology_path() {
     std::lock_guard lock(remote_mutex_);
     RemoteDriver *active_remote = remote_.load(std::memory_order_acquire);
@@ -261,7 +275,7 @@ public:
       retain_remote_open();
       return active_remote;
     }
-    int sock = connect_to_daemon();
+    int sock = connect_to_daemon(invocation_runtime_dir());
     if (sock < 0)
       return nullptr;
     if (!active_remote) {
@@ -437,7 +451,7 @@ public:
     std::lock_guard lock(init_mutex_);
     if (!rj_vm_.load(std::memory_order_acquire)) {
       in_construction = true;
-      auto cfg_file = rocjitsu::rpc_default_config_file_path();
+      auto cfg_file = invocation_runtime_dir() + "/config_path";
       char cfg_buf[4096]{};
       int cfg_fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0));
       if (cfg_fd < 0) {
@@ -541,6 +555,7 @@ private:
   std::unordered_map<int, uint32_t> drm_fds_;
   std::unordered_map<void *, int> handle_to_drm_fd_;
   std::unordered_set<int> kfd_dup_fds_;
+  std::string invocation_runtime_dir_;
 
   alignas(16) static uint8_t storage_[];
 };

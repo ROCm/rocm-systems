@@ -209,7 +209,7 @@ static void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::sto
 
 static volatile sig_atomic_t g_listen_fd = -1;
 
-static int run_daemon_server(const char *config_path) {
+static int run_daemon_server(const char *config_path, const std::string &socket_path = {}) {
   rj_vm_t *vm = nullptr;
   if (rj_vm_create(config_path, RJ_VM_MODE_DAEMON, &vm) != ROCJITSU_STATUS_SUCCESS) {
     std::cerr << std::format("rocjitsu: failed to create VM from {}\n", config_path);
@@ -218,7 +218,7 @@ static int run_daemon_server(const char *config_path) {
 
   std::jthread engine_thread([vm]() { rj_vm_run(vm, nullptr); });
 
-  auto sock_path = rpc_default_socket_path();
+  auto sock_path = socket_path.empty() ? rpc_default_socket_path() : socket_path;
   std::filesystem::create_directories(std::filesystem::path(sock_path).parent_path());
   unlink(sock_path.c_str());
 
@@ -305,8 +305,8 @@ static std::string find_interposer_lib() {
   return {};
 }
 
-static bool write_config_file(const std::string &config_path) {
-  auto cfg_file = rpc_default_config_file_path();
+static bool write_config_file(const std::string &config_path, pid_t pid) {
+  auto cfg_file = rpc_invocation_config_file_path(pid);
   std::filesystem::create_directories(std::filesystem::path(cfg_file).parent_path());
   std::ofstream ofs(cfg_file);
   if (!ofs)
@@ -315,11 +315,9 @@ static bool write_config_file(const std::string &config_path) {
   return ofs.good();
 }
 
-static void cleanup_runtime_files() {
-  auto cfg_file = rpc_default_config_file_path();
-  unlink(cfg_file.c_str());
-  auto sock_file = rpc_default_socket_path();
-  unlink(sock_file.c_str());
+static void cleanup_runtime_files(pid_t pid) {
+  std::error_code ec;
+  std::filesystem::remove_all(rpc_invocation_runtime_dir(pid), ec);
 }
 
 static void print_usage() {
@@ -402,6 +400,8 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  pid_t my_pid = getpid();
+
   if (attach_mode) {
     auto sock_path = rpc_default_socket_path();
     if (!std::filesystem::exists(sock_path)) {
@@ -409,6 +409,9 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   } else if (daemon_mode) {
+    auto sock_path = rpc_invocation_socket_path(my_pid);
+    std::filesystem::create_directories(rpc_invocation_runtime_dir(my_pid));
+
     pid_t daemon_pid = fork();
     if (daemon_pid < 0) {
       std::cerr << std::format("rocjitsu: fork failed: {}\n", strerror(errno));
@@ -417,10 +420,9 @@ int main(int argc, char *argv[]) {
 
     if (daemon_pid == 0) {
       prctl(PR_SET_PDEATHSIG, SIGTERM);
-      return run_daemon_server(abs_config.c_str());
+      return run_daemon_server(abs_config.c_str(), sock_path);
     }
 
-    auto sock_path = rpc_default_socket_path();
     for (int i = 0; i < 300; ++i) {
       if (std::filesystem::exists(sock_path))
         break;
@@ -433,7 +435,7 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   } else {
-    if (!write_config_file(abs_config)) {
+    if (!write_config_file(abs_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";
       return 1;
     }
@@ -443,6 +445,6 @@ int main(int argc, char *argv[]) {
   execvp(app_argv[0], app_argv);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
-  cleanup_runtime_files();
+  cleanup_runtime_files(my_pid);
   return 1;
 }
