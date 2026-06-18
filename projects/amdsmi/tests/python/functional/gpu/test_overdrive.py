@@ -30,7 +30,7 @@ import common.common as common
 from common.common import amdsmi
 
 
-class TestGpuPerf(unittest.TestCase):
+class TestGpuOverdrive(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.common = common.Common(common.verbose)
@@ -102,8 +102,8 @@ class TestGpuPerf(unittest.TestCase):
     def test_set_gpu_perf_level(self):
         self.common.print_func_name("")
 
-        dev_perf_level_current = self.common.dev_perf_levels[0][1]
-        dev_perf_level_current_cond = self.common.dev_perf_levels[0][2]
+        dev_perf_level_current = common.DEV_PERF_LEVELS[0][1]
+        dev_perf_level_current_cond = common.DEV_PERF_LEVELS[0][2]
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
             msg = f"\t### amdsmi_get_gpu_perf_level(gpu={i}):"
@@ -111,7 +111,7 @@ class TestGpuPerf(unittest.TestCase):
                 dev_perf_level_name_current = amdsmi.amdsmi_get_gpu_perf_level(gpu)
                 items = dev_perf_level_name_current.split("_")
                 level_name_current = items[-1]
-                for name, level, cond in self.common.dev_perf_levels:
+                for name, level, cond in common.DEV_PERF_LEVELS:
                     if name == level_name_current:
                         dev_perf_level_current = level
                         dev_perf_level_current_cond = cond
@@ -122,11 +122,7 @@ class TestGpuPerf(unittest.TestCase):
                 self.common.print(msg, e)
                 continue
 
-            for (
-                dev_perf_level_name,
-                dev_perf_level,
-                dev_perf_level_cond,
-            ) in self.common.dev_perf_levels:
+            for dev_perf_level_name, dev_perf_level, dev_perf_level_cond in common.DEV_PERF_LEVELS:
                 msg = f"\t### amdsmi_set_gpu_perf_level(gpu={i}, dev_perf_level={dev_perf_level_name}):"
                 try:
                     ret = amdsmi.amdsmi_set_gpu_perf_level(gpu, dev_perf_level)
@@ -197,7 +193,7 @@ class TestGpuPerf(unittest.TestCase):
 
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_get_gpu_reg_table_info=amdsmi.amdsmi_get_gpu_reg_table_info,
-            reg_type=self.common.reg_types,
+            reg_type=common.REG_TYPES,
         )
         return
 
@@ -205,8 +201,8 @@ class TestGpuPerf(unittest.TestCase):
         self.common.print_func_name("")
         self.common.Test_Per_GPU_With_Two_Enums(
             amdsmi_get_gpu_volt_metric=amdsmi.amdsmi_get_gpu_volt_metric,
-            voltage_type=self.common.voltage_types,
-            voltage_metric=self.common.voltage_metrics,
+            voltage_type=common.VOLTAGE_TYPES,
+            voltage_metric=common.VOLTAGE_METRICS,
         )
         return
 
@@ -223,12 +219,8 @@ class TestGpuPerf(unittest.TestCase):
 
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
-            for clk_type_name, _, clk_cond in self.common.clk_types:
-                for (
-                    clk_limit_type_name,
-                    clk_limit_type,
-                    clk_limit_cond,
-                ) in self.common.clk_limit_types:
+            for clk_type_name, _, clk_cond in common.CLK_TYPES:
+                for clk_limit_type_name, clk_limit_type, clk_limit_cond in common.CLK_LIMIT_TYPES:
                     msg = f"\t### amdsmi_set_gpu_clk_limit(gpu={i}, clk_type={clk_type_name}, clk_limit_type={clk_limit_type_name}, value={value}):"
                     try:
                         amdsmi.amdsmi_set_gpu_clk_limit(
@@ -262,7 +254,7 @@ class TestGpuPerf(unittest.TestCase):
 
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
-            for _, clk_type, clk_cond in self.common.clk_types:
+            for _, clk_type, clk_cond in common.CLK_TYPES:
                 msg = f"\t### amdsmi_set_gpu_clk_range(gpu={i}, min_clk_value={min_clk_value}, max_clk_value={max_clk_value}, clk_type={clk_type}):"
                 try:
                     amdsmi.amdsmi_set_gpu_clk_range(gpu, min_clk_value, max_clk_value, clk_type)
@@ -289,8 +281,8 @@ class TestGpuPerf(unittest.TestCase):
 
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
-            for freq_ind_name, freq_ind, freq_ind_cond in self.common.freq_inds:
-                for clk_type_name, clk_type, clk_cond in self.common.clk_types:
+            for freq_ind_name, freq_ind, freq_ind_cond in common.FREQ_INDS:
+                for clk_type_name, clk_type, clk_cond in common.CLK_TYPES:
                     msg = f"\t### amdsmi_set_gpu_od_clk_info(gpu={i}, freq_ind={freq_ind_name}, value={value}, clk_type={clk_type_name}):"
                     try:
                         amdsmi.amdsmi_set_gpu_od_clk_info(gpu, freq_ind, value, clk_type)
