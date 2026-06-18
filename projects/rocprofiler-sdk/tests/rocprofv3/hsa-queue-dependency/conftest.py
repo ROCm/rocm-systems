@@ -52,6 +52,12 @@ def pytest_addoption(parser):
         action="store",
         help="Path to Perfetto trace file.",
     )
+    parser.addoption(
+        "--queue-create-function",
+        action="store",
+        default="hsa_queue_create",
+        help="Expected HSA queue creation API function.",
+    )
 
 
 @pytest.fixture
@@ -89,3 +95,8 @@ def json_data(request):
 def pftrace_data(request):
     filename = request.config.getoption("--pftrace-input")
     return PerfettoReader(filename).read()[0]
+
+
+@pytest.fixture
+def queue_create_function(request):
+    return request.config.getoption("--queue-create-function")

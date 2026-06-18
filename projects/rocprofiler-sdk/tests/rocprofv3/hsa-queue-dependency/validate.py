@@ -26,7 +26,7 @@ import sys
 import pytest
 
 
-def test_hsa_api_trace(hsa_trace_input_data):
+def test_hsa_api_trace(hsa_trace_input_data, queue_create_function):
     functions = []
     correlation_ids = []
     for row in hsa_trace_input_data:
@@ -60,7 +60,7 @@ def test_hsa_api_trace(hsa_trace_input_data):
 
     functions = list(functions)
     assert "hsa_shut_down" in functions
-    assert functions.count("hsa_queue_create") == num_queue_create_calls
+    assert functions.count(queue_create_function) == num_queue_create_calls
     assert functions.count("hsa_queue_destroy") == num_queue_destroy_calls
     assert functions.count("hsa_memory_free") == num_hsa_mem_free_calls
     assert functions.count("hsa_signal_create") == num_hsa_signal_create_calls
@@ -120,7 +120,7 @@ def test_kernel_trace_json(json_data):
         assert dispatch["end_timestamp"] >= dispatch["start_timestamp"]
 
 
-def test_hsa_api_trace_json(json_data):
+def test_hsa_api_trace_json(json_data, queue_create_function):
     data = json_data["rocprofiler-sdk-tool"]
     functions = []
     correlation_ids = []
@@ -169,7 +169,7 @@ def test_hsa_api_trace_json(json_data):
 
     functions = list(functions)
     assert "hsa_shut_down" in functions
-    assert functions.count("hsa_queue_create") == num_queue_create_calls
+    assert functions.count(queue_create_function) == num_queue_create_calls
     assert functions.count("hsa_queue_destroy") == num_queue_destroy_calls
     assert functions.count("hsa_memory_free") == num_hsa_mem_free_calls
     assert functions.count("hsa_signal_create") == num_hsa_signal_create_calls

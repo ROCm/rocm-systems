@@ -112,9 +112,20 @@ get_queue_registry()
     return *_v;
 }
 
+ignored_queue_registry_t&
+get_ignored_queue_registry()
+{
+    static auto*& _v = common::static_object<ignored_queue_registry_t>::construct();
+    return *_v;
+}
+
 queue_state_ptr_t
 lookup_queue_state(const hsa_queue_t* queue, bool create_if_missing)
 {
+    if(get_ignored_queue_registry().rlock(
+           [](const auto& registry, const auto* q) { return registry.count(q) > 0; }, queue))
+        return queue_state_ptr_t{};
+
     auto _state = get_queue_registry().rlock([&](const auto& registry) -> queue_state_ptr_t {
         if(auto it = registry.find(queue); it != registry.end()) return it->second;
         return queue_state_ptr_t{};
@@ -503,7 +514,7 @@ write_interceptor(Queue*                                queue,
         }
     }};
 
-    using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
+    using packet_writer_fn_t = std::function<void(packet_vector_t&&)>;
 
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v](
                                     const rocprofiler_packet* _packets,
@@ -814,6 +825,7 @@ std::shared_ptr<QueueState>
 create_queue_state(const hsa_queue_t* queue, bool overwrite)
 {
     if(!queue) return nullptr;
+    unignore_queue_state(queue);
 
     // this is needed for OpenMP target offload which, unlike HIP, does not automatically enable
     // profiler for queues it creates.
@@ -855,12 +867,25 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite)
 void
 destroy_queue_state(const hsa_queue_t* queue)
 {
+    get_ignored_queue_registry().wlock([&](auto& map) { map.erase(queue); });
     get_queue_registry().wlock(
         [&](auto& map, const auto* _queue_v) {
             auto itr = map.find(_queue_v);
             if(itr != map.end()) map.erase(itr);
         },
         queue);
+}
+
+void
+ignore_queue_state(const hsa_queue_t* queue)
+{
+    get_ignored_queue_registry().wlock([&](auto& map) { map.emplace(queue); });
+}
+
+void
+unignore_queue_state(const hsa_queue_t* queue)
+{
+    get_ignored_queue_registry().wlock([&](auto& map) { map.erase(queue); });
 }
 
 namespace
@@ -1055,6 +1080,7 @@ interposition_fini()
     signal_pool_fini();
 
     get_queue_registry().wlock([](auto& map) { map.clear(); });
+    get_ignored_queue_registry().wlock([](auto& map) { map.clear(); });
 }
 }  // namespace queue_interposition
 }  // namespace hsa

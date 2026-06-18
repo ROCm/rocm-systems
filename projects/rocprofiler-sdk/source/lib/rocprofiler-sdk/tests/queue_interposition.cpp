@@ -90,6 +90,23 @@ TEST(queue_interposition, registry_insert_and_lookup)
     EXPECT_EQ(after_removal, nullptr);
 }
 
+TEST(queue_interposition, ignored_queue_is_not_dynamically_discovered)
+{
+    amd_queue_t queue{};
+    queue.hsa_queue.base_address    = nullptr;
+    queue.hsa_queue.size            = 64;
+    queue.hsa_queue.doorbell_signal = hsa_signal_t{.handle = 1};
+
+    const auto* queue_ptr = &queue.hsa_queue;
+
+    ignore_queue_state(queue_ptr);
+    EXPECT_EQ(lookup_queue_state(queue_ptr, true), nullptr);
+
+    destroy_queue_state(queue_ptr);
+    EXPECT_NE(lookup_queue_state(queue_ptr, true), nullptr);
+    destroy_queue_state(queue_ptr);
+}
+
 TEST(queue_interposition, doorbell_map_insert_and_lookup)
 {
     // Create a dummy queue for testing

@@ -51,12 +51,23 @@ add_executable(multiqueue_testapp)
 target_sources(multiqueue_testapp PRIVATE multiqueue_app.cpp)
 target_compile_options(multiqueue_testapp PRIVATE -W -Wall -Wextra -Wshadow -Werror)
 
+add_executable(multiqueue_amd_queue_create_testapp)
+target_sources(multiqueue_amd_queue_create_testapp PRIVATE multiqueue_app.cpp)
+target_compile_definitions(multiqueue_amd_queue_create_testapp
+                           PRIVATE ROCPROFILER_TEST_USE_AMD_QUEUE_CREATE=1)
+target_compile_options(multiqueue_amd_queue_create_testapp PRIVATE -W -Wall -Wextra -Wshadow
+                                                                   -Werror)
+
 find_package(Threads REQUIRED)
 target_link_libraries(multiqueue_testapp PRIVATE stdc++fs Threads::Threads)
+target_link_libraries(multiqueue_amd_queue_create_testapp PRIVATE stdc++fs Threads::Threads)
 
 find_package(rocprofiler-sdk REQUIRED)
 target_link_libraries(multiqueue_testapp PRIVATE rocprofiler-sdk::rocprofiler-sdk
-                                                 rocprofiler-sdk::tests-common-library)
+                                                  rocprofiler-sdk::tests-common-library)
+target_link_libraries(multiqueue_amd_queue_create_testapp
+                      PRIVATE rocprofiler-sdk::rocprofiler-sdk
+                              rocprofiler-sdk::tests-common-library)
 
 find_package(
     hsa-runtime64
@@ -70,5 +81,7 @@ find_package(
     ${ROCM_PATH})
 
 target_link_libraries(multiqueue_testapp PRIVATE hsa-runtime64::hsa-runtime64)
+target_link_libraries(multiqueue_amd_queue_create_testapp PRIVATE hsa-runtime64::hsa-runtime64)
 
 add_dependencies(multiqueue_testapp generate_hsaco_targets)
+add_dependencies(multiqueue_amd_queue_create_testapp generate_hsaco_targets)

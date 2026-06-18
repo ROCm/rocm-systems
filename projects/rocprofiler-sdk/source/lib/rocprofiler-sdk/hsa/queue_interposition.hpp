@@ -33,6 +33,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace rocprofiler
 {
@@ -72,6 +73,9 @@ using queue_state_ptr_t = std::shared_ptr<QueueState>;
 using queue_registry_t =
     common::Synchronized<std::unordered_map<const hsa_queue_t*, queue_state_ptr_t>>;
 
+/// Thread-safe set of queues that must not be dynamically discovered.
+using ignored_queue_registry_t = common::Synchronized<std::unordered_set<const hsa_queue_t*>>;
+
 /**
  * @brief Get the global queue registry singleton
  *
@@ -82,6 +86,9 @@ using queue_registry_t =
  */
 queue_registry_t&
 get_queue_registry();
+
+ignored_queue_registry_t&
+get_ignored_queue_registry();
 
 /**
  * @brief Look up QueueState by HSA queue pointer
@@ -203,6 +210,12 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite = false);
  */
 void
 destroy_queue_state(const hsa_queue_t* queue);
+
+void
+ignore_queue_state(const hsa_queue_t* queue);
+
+void
+unignore_queue_state(const hsa_queue_t* queue);
 
 /**
  * @brief Check if queue interposition has been installed

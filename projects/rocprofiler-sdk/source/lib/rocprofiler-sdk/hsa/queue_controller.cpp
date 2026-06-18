@@ -32,7 +32,9 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <algorithm>
+#include <cstddef>
 #include <memory>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -108,9 +110,176 @@ create_queue(hsa_agent_t        agent,
 hsa_status_t
 destroy_queue(hsa_queue_t* hsa_queue)
 {
-    if(get_queue_controller()) get_queue_controller()->destroy_queue(hsa_queue);
+    if(auto* controller = get_queue_controller())
+        return destroy_queue_with_runtime_fallback(
+            *controller, hsa_queue, controller->get_core_table().hsa_queue_destroy_fn);
     return HSA_STATUS_SUCCESS;
 }
+
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+bool
+is_supported_agent(const QueueController& controller,
+                   hsa_agent_t            agent,
+                   const AgentCache**     agent_info)
+{
+    for(const auto& [_, itr] : controller.get_supported_agents())
+    {
+        if(itr.get_hsa_agent().handle == agent.handle)
+        {
+            if(agent_info) *agent_info = &itr;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool
+is_compute_desc(const hsa_amd_queue_create_desc_t& desc)
+{
+    return desc.engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE;
+}
+
+bool
+is_zero(const void* data, size_t size)
+{
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    return std::all_of(bytes, bytes + size, [](uint8_t byte) { return byte == 0; });
+}
+
+bool
+is_valid_old_queue_type(hsa_queue_type32_t type)
+{
+    return type == HSA_QUEUE_TYPE_MULTI || type == HSA_QUEUE_TYPE_SINGLE ||
+           type == HSA_QUEUE_TYPE_COOPERATIVE;
+}
+
+void
+register_queue(QueueController& controller, hsa_queue_t** queue_ptr, std::unique_ptr<Queue> queue)
+{
+    controller.serializer(queue.get()).wlock([&](auto& serializer) {
+        serializer.add_queue(queue_ptr, *queue);
+    });
+    controller.add_queue(*queue_ptr, std::move(queue));
+}
+
+hsa_status_t
+create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs)
+{
+    auto* controller = CHECK_NOTNULL(get_queue_controller());
+    auto  raw_create = controller->get_ext_table().hsa_amd_queue_create_fn;
+    if(!raw_create) return HSA_STATUS_ERROR_NOT_INITIALIZED;
+
+    const AgentCache* agent_info = nullptr;
+    if(!is_supported_agent(*controller, agent, &agent_info))
+    {
+        if(descs)
+        {
+            for(uint32_t i = 0; i < num_descs; ++i)
+                descs[i].queue = nullptr;
+        }
+
+        auto status = raw_create(agent, descs, num_descs);
+        if(descs && queue_interposition::supports_queue_interposition())
+        {
+            for(uint32_t i = 0; i < num_descs; ++i)
+            {
+                if(descs[i].queue) queue_interposition::ignore_queue_state(descs[i].queue);
+            }
+        }
+        return status;
+    }
+
+    if(!descs || num_descs == 0) return raw_create(agent, descs, num_descs);
+
+    if(queue_interposition::supports_queue_interposition())
+    {
+        auto old_intercept_compatible_desc = std::vector<bool>{};
+        old_intercept_compatible_desc.reserve(num_descs);
+        for(uint32_t i = 0; i < num_descs; ++i)
+        {
+            descs[i].queue = nullptr;
+            old_intercept_compatible_desc.emplace_back(
+                !should_ignore_inline_amd_queue_create_desc(descs[i]));
+        }
+
+        auto status = raw_create(agent, descs, num_descs);
+        for(uint32_t i = 0; i < num_descs; ++i)
+        {
+            auto& desc = descs[i];
+            if(!desc.queue) continue;
+
+            if(!old_intercept_compatible_desc[i])
+            {
+                queue_interposition::ignore_queue_state(desc.queue);
+                if(is_compute_desc(desc))
+                    ROCP_WARNING
+                        << "hsa_amd_queue_create compute descriptor is not in the tested old "
+                           "intercept compatibility envelope; creating it without queue "
+                           "interception";
+                continue;
+            }
+
+            // TODO: Expand inline adoption after descriptor features outside the old
+            // intercept API envelope have tests and compatibility guarantees.
+            auto new_queue = std::make_unique<Queue>(*agent_info,
+                                                     controller->get_core_table(),
+                                                     controller->get_ext_table(),
+                                                     desc.queue,
+                                                     [](write_interceptor_t, void*) {});
+            register_queue(*controller, &desc.queue, std::move(new_queue));
+            ROCP_INFO << "created queue for HSA agent handle " << agent.handle;
+        }
+        return status;
+    }
+
+    auto first_error  = HSA_STATUS_SUCCESS;
+    auto record_error = [&first_error](hsa_status_t status) {
+        if(first_error == HSA_STATUS_SUCCESS && status != HSA_STATUS_SUCCESS) first_error = status;
+    };
+
+    for(uint32_t i = 0; i < num_descs; ++i)
+    {
+        auto& desc = descs[i];
+        desc.queue = nullptr;
+
+        uint32_t   queue_size_packets = 0;
+        const auto old_intercept_compatible =
+            is_amd_queue_create_desc_old_intercept_compatible(desc, &queue_size_packets);
+
+        if(old_intercept_compatible)
+        {
+            // TODO: The legacy Queue constructor still fatals on intercept-create/profiler
+            // registration failures. Fully preserving per-descriptor batch partial-failure
+            // semantics requires a non-fatal factory or ROCR descriptor-aware intercept-create.
+            auto new_queue = std::make_unique<Queue>(*agent_info,
+                                                     queue_size_packets,
+                                                     desc.engine.compute.type,
+                                                     desc.callback,
+                                                     desc.callback_data,
+                                                     desc.engine.compute.private_segment_size,
+                                                     UINT32_MAX,
+                                                     controller->get_core_table(),
+                                                     controller->get_ext_table(),
+                                                     &desc.queue);
+            register_queue(*controller, &desc.queue, std::move(new_queue));
+            ROCP_INFO << "created queue for HSA agent handle " << agent.handle;
+            continue;
+        }
+
+        if(is_compute_desc(desc))
+        {
+            ROCP_WARNING << "hsa_amd_queue_create compute descriptor is not representable by the "
+                            "legacy intercept API; creating it without queue interception";
+        }
+        auto status = raw_create(agent, &desc, 1);
+        if(status == HSA_STATUS_SUCCESS && desc.queue)
+            queue_interposition::ignore_queue_state(desc.queue);
+        record_error(status);
+    }
+
+    return first_error;
+}
+#endif
 
 constexpr rocprofiler_agent_t default_agent =
     rocprofiler_agent_t{.size                       = sizeof(rocprofiler_agent_t),
@@ -268,20 +437,40 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
     queue_interposition::create_queue_state(id);
 }
 
-void
+bool
 QueueController::destroy_queue(hsa_queue_t* id)
 {
-    if(!id) return;
+    if(!id) return false;
 
     const auto* queue = get_queue(*id);
 
     // return if queue does not exist
-    if(!queue) return;
+    if(!queue) return false;
 
+    if(queue_interposition::supports_queue_interposition())
+        queue_interposition::interposition_sync();
     queue_interposition::destroy_queue_state(id);
     queue->sync();
     if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
     _queues.wlock([&](auto& map) { map.erase(id); });
+    return true;
+}
+
+hsa_status_t
+destroy_queue_with_runtime_fallback(QueueController& controller,
+                                    hsa_queue_t*     hsa_queue,
+                                    hsa_status_t (*raw_destroy)(hsa_queue_t*))
+{
+    if(controller.destroy_queue(hsa_queue))
+    {
+        if(queue_interposition::supports_queue_interposition() && raw_destroy)
+            return raw_destroy(hsa_queue);
+        return HSA_STATUS_SUCCESS;
+    }
+
+    queue_interposition::unignore_queue_state(hsa_queue);
+    if(raw_destroy) return raw_destroy(hsa_queue);
+    return HSA_STATUS_SUCCESS;
 }
 
 ClientID
@@ -369,9 +558,55 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         {
             core_table.hsa_queue_create_fn  = hsa::create_queue;
             core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+            constexpr auto hsa_amd_queue_create_offset =
+                offsetof(AmdExtTable, hsa_amd_queue_create_fn);
+            if(ext_table.version.minor_id >=
+                   hsa_amd_queue_create_offset + sizeof(ext_table.hsa_amd_queue_create_fn) &&
+               ext_table.hsa_amd_queue_create_fn)
+                ext_table.hsa_amd_queue_create_fn = hsa::create_amd_queue;
+#endif
         }
     }
 }
+
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+bool
+is_amd_queue_create_desc_old_intercept_compatible(const hsa_amd_queue_create_desc_t& desc,
+                                                  uint32_t* queue_size_packets)
+{
+    // Structural filter only. Runtime/intercept-create still validate agent-specific queue
+    // constraints, including whether a given compute queue type is supported for this agent.
+    if(desc.version != HSA_AMD_QUEUE_CREATE_DESC_VERSION) return false;
+    if(desc.flags != HSA_AMD_QUEUE_CREATE_SYSTEM_MEM) return false;
+    if(desc.engine_type != HSA_AMD_QUEUE_ENGINE_COMPUTE) return false;
+    if(!is_zero(desc.reserved_header, sizeof(desc.reserved_header))) return false;
+    if(!is_zero(desc.reserved, sizeof(desc.reserved))) return false;
+    if(desc.traffic_class != 0) return false;
+    if(desc.priority != HSA_AMD_QUEUE_PRIORITY_NORMAL) return false;
+
+    const auto& compute = desc.engine.compute;
+    if(!is_valid_old_queue_type(compute.type)) return false;
+    if(compute.cu_mask != nullptr || compute.cu_mask_count != 0) return false;
+    if(!is_zero(compute.reserved, sizeof(compute.reserved))) return false;
+
+    if(desc.queue_size_bytes == 0 || (desc.queue_size_bytes & (desc.queue_size_bytes - 1)) != 0)
+        return false;
+    if(desc.queue_size_bytes % sizeof(hsa_kernel_dispatch_packet_t) != 0) return false;
+
+    const auto packet_count = desc.queue_size_bytes / sizeof(hsa_kernel_dispatch_packet_t);
+    if(packet_count < 3) return false;
+
+    if(queue_size_packets) *queue_size_packets = packet_count;
+    return true;
+}
+
+bool
+should_ignore_inline_amd_queue_create_desc(const hsa_amd_queue_create_desc_t& desc)
+{
+    return !is_amd_queue_create_desc_old_intercept_compatible(desc);
+}
+#endif
 
 const Queue*
 QueueController::get_queue(const hsa_queue_t& _hsa_queue) const

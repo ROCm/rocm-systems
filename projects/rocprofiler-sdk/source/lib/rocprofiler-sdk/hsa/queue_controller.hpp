@@ -58,7 +58,7 @@ public:
 
     // Called to add a queue that was created by the user program
     void add_queue(hsa_queue_t*, std::unique_ptr<Queue>);
-    void destroy_queue(hsa_queue_t*);
+    bool destroy_queue(hsa_queue_t*);
 
     // Add callback to queues associated with the agent. Returns a client
     // id that can be used by callers to remove the callback. If no agent
@@ -124,6 +124,20 @@ get_queue_controller();
 
 bool
 enable_queue_intercept();
+
+hsa_status_t
+destroy_queue_with_runtime_fallback(QueueController& controller,
+                                    hsa_queue_t*     queue,
+                                    hsa_status_t (*raw_destroy)(hsa_queue_t*));
+
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+bool
+is_amd_queue_create_desc_old_intercept_compatible(const hsa_amd_queue_create_desc_t& desc,
+                                                  uint32_t* queue_size_packets = nullptr);
+
+bool
+should_ignore_inline_amd_queue_create_desc(const hsa_amd_queue_create_desc_t& desc);
+#endif
 
 void
 queue_controller_init(HsaApiTable* table);

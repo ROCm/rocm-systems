@@ -96,16 +96,7 @@ main()
     memset(b, 1, 64 * sizeof(uint32_t));
 
     // Create queue in gpu agent and prepare a kernel dispatch packet
-    hsa_queue_t* queue1 = nullptr;
-    status              = hsa_queue_create(obj.gpu[0].agent,
-                              1024,
-                              HSA_QUEUE_TYPE_SINGLE,
-                              nullptr,
-                              nullptr,
-                              UINT32_MAX,
-                              UINT32_MAX,
-                              &queue1);
-    RET_IF_HSA_ERR(status)
+    hsa_queue_t* queue1 = obj.create_compute_queue(obj.gpu[0].agent, 1024);
 
     // Create a signal with a value of 1 and attach it to the first kernel
     // dispatch packet
@@ -193,16 +184,7 @@ main()
     }
 
     // Create queue 2
-    hsa_queue_t* queue2 = nullptr;
-    status              = hsa_queue_create(obj.gpu[0].agent,
-                              1024,
-                              HSA_QUEUE_TYPE_SINGLE,
-                              nullptr,
-                              nullptr,
-                              UINT32_MAX,
-                              UINT32_MAX,
-                              &queue2);
-    RET_IF_HSA_ERR(status)
+    hsa_queue_t* queue2 = obj.create_compute_queue(obj.gpu[0].agent, 1024);
 
     // Create barrier-AND packet that is enqueued in queue 2
     {

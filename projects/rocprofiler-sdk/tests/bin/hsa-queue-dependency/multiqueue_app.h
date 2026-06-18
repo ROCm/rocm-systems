@@ -25,6 +25,7 @@
 #include "common/filesystem.hpp"
 
 #include <hsa/hsa.h>
+#include <hsa/hsa_api_trace_version.h>
 #include <hsa/hsa_ext_amd.h>
 
 #include <dlfcn.h>
@@ -230,6 +231,40 @@ public:
         hsa_signal_store_screlease(queue->doorbell_signal, write);
 
         return true;
+    }
+
+    static hsa_queue_t* create_compute_queue(hsa_agent_t agent, uint32_t packet_count)
+    {
+        hsa_queue_t* queue = nullptr;
+#if defined(ROCPROFILER_TEST_USE_AMD_QUEUE_CREATE)
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+        hsa_amd_queue_create_desc_t desc{};
+        desc.version             = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
+        desc.flags               = HSA_AMD_QUEUE_CREATE_SYSTEM_MEM;
+        desc.engine_type         = HSA_AMD_QUEUE_ENGINE_COMPUTE;
+        desc.queue_size_bytes    = packet_count * sizeof(hsa_kernel_dispatch_packet_t);
+        desc.priority            = HSA_AMD_QUEUE_PRIORITY_NORMAL;
+        desc.engine.compute.type = HSA_QUEUE_TYPE_SINGLE;
+        desc.engine.compute.private_segment_size = HSA_AMD_PRIVATE_SEGMENT_SIZE_DEFAULT;
+
+        auto status = hsa_amd_queue_create(agent, &desc, 1);
+        RET_IF_HSA_ERR(status)
+        queue = desc.queue;
+#    else
+#        error hsa_amd_queue_create test requires HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+#    endif
+#else
+        auto status = hsa_queue_create(agent,
+                                       packet_count,
+                                       HSA_QUEUE_TYPE_SINGLE,
+                                       nullptr,
+                                       nullptr,
+                                       UINT32_MAX,
+                                       UINT32_MAX,
+                                       &queue);
+        RET_IF_HSA_ERR(status)
+#endif
+        return queue;
     }
 
     static void* hsa_malloc(size_t size, const Device::Memory& mem)
