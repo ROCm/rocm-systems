@@ -65,9 +65,8 @@ SKIP_RETURN_CODE = 77
 # The DEFAULT_TIMEOUT is used as the "run_test" timeout and
 # the CTEST_TIMEOUT_BUFFER is a fixed amount added to handle subtests + flush + teardown
 # CTests set their timeout to DEFAULT_TIMEOUT + CTEST_TIMEOUT_BUFFER
-# The timeout marker only overwrites DEFAULT_TIMEOUT, not CTEST_TIMEOUT_BUFFER
 DEFAULT_TIMEOUT = 300
-CTEST_TIMEOUT_BUFFER = 60
+CTEST_TIMEOUT_BUFFER = 30  # Not overridable
 
 # Accepted runner types when using parametrized "mode" marker
 ROCPROFSYS_RUNNER_CLASSES = {
@@ -100,7 +99,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     """Add custom command-line options."""
     group = parser.getgroup("rocprofsys", "rocprofiler-systems test options")
     group.addoption(
-        "--show-config-only",  # Used by "rocprofiler-systems-pytest-config" test
+        "--show-config-only",  # Only used by "rocprofiler-systems-pytest-config" test
         action="store_true",
         default=False,
         help="Show the test configuration and exit without running any tests",
@@ -436,9 +435,9 @@ def pytest_collection_modifyitems(config, items) -> None:
     # "Skip" markers are left for runtime evaluation
     for item in items:
         base_modifications(item)
-        if "build_only" in item.keywords and not rocprof_config.is_installed:
+        if "build_only" in item.keywords and rocprof_config.is_installed:
             item.add_marker(
-                pytest.mark.skip(reason="Test is not run in build mode (build_only)")
+                pytest.mark.skip(reason="Test only runs in build mode (build_only)")
             )
         if "gpu" in item.keywords:
             _msg = gpu_unavailable_reason()
