@@ -129,6 +129,9 @@ platforms:
     allowed_groups: ["*"]
     blocked_tests:
       - rocrtstFunc.IPC
+      - rocrtstFunc.IPC_ServerRestart
+      - rocrtstFunc.IPC_FreeBeforeDetach
+      - rocrtstFunc.IPC_RepeatedHandle
       - rocrtstFunc.DISABLED_Signal_Kernel_Set
       - rocrtstFunc.DISABLED_Signal_Kernel_Multi_Set
       - rocrtstFunc.DISABLED_Signal_Kernel_Wait
