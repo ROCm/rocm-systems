@@ -14,20 +14,15 @@
 #include "gin/gin_host.h"
 #include "plugin/nccl_net.h"
 
-struct ncclDevrState;
-
 // Init context: allocated by init(), populated by ncclGinRocshmemSetInitContext()
 // after init() succeeds, passed to connect() as ctx parameter.
 struct ginRocshmemInitCtx {
-  struct ncclDevrState *devrState;
-  void *bootstrap;
+  struct ncclComm *comm;
 };
 
 // Set RCCL-internal state into the plugin init context.
 // Called from gin.cc immediately after a rocshmem plugin's init() succeeds.
-void ncclGinRocshmemSetInitContext(void *initCtx,
-                                   struct ncclDevrState *devrState,
-                                   void *bootstrap);
+void ncclGinRocshmemSetInitContext(void *initCtx, struct ncclComm *comm);
 
 // The built-in plugin instances
 extern ncclGin_t ncclGinRocshmemApiPlugin;

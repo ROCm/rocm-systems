@@ -128,7 +128,7 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
     else if (comm->ginContext &&
              (pluginLib->ncclGin == &ncclGinRocshmemApiPlugin ||
               pluginLib->ncclGin == &ncclGinRocshmemGdaPlugin)) {
-      ncclGinRocshmemSetInitContext(comm->ginContext, &comm->devrState, comm->bootstrap);
+      ncclGinRocshmemSetInitContext(comm->ginContext, comm);
     }
 #endif
   }

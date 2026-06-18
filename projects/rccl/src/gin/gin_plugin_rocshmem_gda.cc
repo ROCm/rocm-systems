@@ -27,9 +27,9 @@
 struct ginRocshmemGdaCollCtx {
   int nranks;
   int rank;
-  void *bootstrap;
+  struct ncclComm *comm;
   rocshmem_gin_qp_set_t qpSet;
-  void **gpu_qp_ptrs;  // GPU array of QueuePair*, from rocshmem_gin_create_qps
+  void **gpu_qp_ptrs;
 };
 
 // ginCtx: per-context state, returned by createContext()
@@ -112,11 +112,11 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
   auto *cctx = new ginRocshmemGdaCollCtx{};
   cctx->nranks = nranks;
   cctx->rank = rank;
-  cctx->bootstrap = ictx->bootstrap;
+  cctx->comm = ictx->comm;
 
   // Create QPs during connect (like GDAKI creates IB connections in connect)
   int rc = rocshmem_gin_create_qps(nranks, rank,
-                                    ginGdaBootstrapAllgather, cctx->bootstrap,
+                                    ginGdaBootstrapAllgather, cctx->comm->bootstrap,
                                     &cctx->qpSet, &cctx->gpu_qp_ptrs);
   if (rc != 0) {
     WARN("GIN rocshmem-gda: failed to create QPs");
@@ -187,8 +187,8 @@ static ncclResult_t ginRocshmemGdaRegMrSym(void* collComm, void* data, size_t si
   rkeys_buf[cctx->rank] = rkey;
   vas_buf[cctx->rank] = (uintptr_t)data;
 
-  bootstrapAllGather(cctx->bootstrap, rkeys_buf, sizeof(uint32_t));
-  bootstrapAllGather(cctx->bootstrap, vas_buf, sizeof(uintptr_t));
+  bootstrapAllGather(cctx->comm->bootstrap, rkeys_buf, sizeof(uint32_t));
+  bootstrapAllGather(cctx->comm->bootstrap, vas_buf, sizeof(uintptr_t));
 
   // Copy rkeys and VAs to GPU arrays
   if (hipMalloc(&mh->rkeys_dev, sizeof(uint32_t) * cctx->nranks) != hipSuccess ||
@@ -300,8 +300,8 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_v1
     rkeys_buf[ctx->rank] = sigRkey;
     raddrs_buf[ctx->rank] = (uintptr_t)ctx->gpuCtxHost.signals;
 
-    bootstrapAllGather(cctx->bootstrap, rkeys_buf, sizeof(uint32_t));
-    bootstrapAllGather(cctx->bootstrap, raddrs_buf, sizeof(uintptr_t));
+    bootstrapAllGather(cctx->comm->bootstrap, rkeys_buf, sizeof(uint32_t));
+    bootstrapAllGather(cctx->comm->bootstrap, raddrs_buf, sizeof(uintptr_t));
 
     (void)hipMemcpy(ctx->gpuCtxHost.signal_rkeys, rkeys_buf,
                     sizeof(uint32_t) * ctx->nRanks, hipMemcpyHostToDevice);

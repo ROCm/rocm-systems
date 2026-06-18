@@ -29,8 +29,7 @@
 struct ginRocshmemCollCtx {
   int nranks;
   int rank;
-  struct ncclDevrState *devrState;
-  void *bootstrap;
+  struct ncclComm *comm;
 };
 
 // ginCtx: per-context state, returned by createContext(), passed to operations
@@ -63,12 +62,9 @@ struct ginRocshmemListenCtx {
 // Init context setter (called from gin.cc after init succeeds)
 ///////////////////////////////////////////////////////////////////////////////
 
-void ncclGinRocshmemSetInitContext(void *initCtx,
-                                   struct ncclDevrState *devrState,
-                                   void *bootstrap) {
+void ncclGinRocshmemSetInitContext(void *initCtx, struct ncclComm *comm) {
   struct ginRocshmemInitCtx *ctx = (struct ginRocshmemInitCtx *)initCtx;
-  ctx->devrState = devrState;
-  ctx->bootstrap = bootstrap;
+  ctx->comm = comm;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -117,8 +113,7 @@ static ncclResult_t ginRocshmemConnect(void* ctx, void* handles[], int nranks, i
   auto* cctx = new ginRocshmemCollCtx;
   cctx->nranks = nranks;
   cctx->rank = rank;
-  cctx->devrState = ictx->devrState;
-  cctx->bootstrap = ictx->bootstrap;
+  cctx->comm = ictx->comm;
   *collComm = cctx;
   return ncclSuccess;
 }
@@ -227,7 +222,7 @@ static ncclResult_t ginRocshmemRegMrSym(void* collComm, void* data, size_t size,
                                          int type, uint64_t mrFlags,
                                          void** mhandle, void** ginHandle) {
   struct ginRocshmemCollCtx *cctx = (struct ginRocshmemCollCtx *)collComm;
-  struct ncclDevrState *devr = cctx->devrState;
+  struct ncclDevrState *devr = &cctx->comm->devrState;
   struct ginRocshmemMemHandle *mh = NULL;
 
   NCCLCHECK(ncclCalloc(&mh, 1));
