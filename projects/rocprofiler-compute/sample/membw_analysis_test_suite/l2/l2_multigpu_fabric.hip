@@ -25,14 +25,14 @@
 //
 // Run (profile GPU 0 while it accesses GPU 1's memory):
 //   # Read from remote:
-//   rocprof-compute profile -n fabric_read --membw-analysis --experimental --no-roof -- ./l2_multigpu_fabric read
+//   rocprof-compute profile -n fabric_read --experimental --membw-analysis --no-roof -- ./l2_multigpu_fabric read
 //   # Write to remote:
-//   rocprof-compute profile -n fabric_write --membw-analysis --experimental --no-roof -- ./l2_multigpu_fabric write
+//   rocprof-compute profile -n fabric_write --experimental --membw-analysis --no-roof -- ./l2_multigpu_fabric write
 //   # Read+Write:
-//   rocprof-compute profile -n fabric_rw --membw-analysis --experimental --no-roof -- ./l2_multigpu_fabric
+//   rocprof-compute profile -n fabric_rw --experimental --membw-analysis --no-roof -- ./l2_multigpu_fabric
 //
 // Analyze:
-//   rocprof-compute analyze -p <profiled_result_path> --membw-analysis --experimental
+//   rocprof-compute analyze -p <profiled_result_path> --experimental --membw-analysis
 
 #include <hip/hip_runtime.h>
 #include <iostream>
