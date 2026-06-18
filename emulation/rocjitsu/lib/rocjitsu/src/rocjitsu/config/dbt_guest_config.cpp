@@ -16,6 +16,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unistd.h>
 
 namespace rocjitsu {
 namespace config {
@@ -135,9 +136,17 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
 }
 
 std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
-  std::ifstream file(rocjitsu::rpc_default_config_file_path());
-  if (!file.is_open())
-    return std::nullopt;
+  // The launcher writes the config-path handoff file into its per-PID invocation
+  // directory. The DBT HSA hook runs inside the exec'd app, which inherits the
+  // launcher's PID via execvp, so it locates the file with getpid(). Fall back to
+  // the well-known location for attach / daemon-only scenarios that use it.
+  std::string handoff = rocjitsu::rpc_invocation_config_file_path(getpid());
+  std::ifstream file(handoff);
+  if (!file.is_open()) {
+    file.open(rocjitsu::rpc_default_config_file_path());
+    if (!file.is_open())
+      return std::nullopt;
+  }
 
   std::string path;
   std::getline(file, path);

@@ -257,6 +257,25 @@ inline std::string rpc_default_config_file_path() {
   return rpc_default_runtime_dir() + "/config_path";
 }
 
+/// @brief Per-invocation runtime directory scoped by PID.
+/// @details The CLI creates <runtime_dir>/<pid>/ before execvp, so the
+/// interposer can locate the correct config/socket using getpid(). Forked
+/// children inherit the parent's cached directory to reconnect to the same
+/// daemon instance.
+inline std::string rpc_invocation_runtime_dir(pid_t pid) {
+  return rpc_default_runtime_dir() + "/" + std::to_string(pid);
+}
+
+/// @brief Per-invocation daemon socket path scoped by PID.
+inline std::string rpc_invocation_socket_path(pid_t pid) {
+  return rpc_invocation_runtime_dir(pid) + "/daemon.sock";
+}
+
+/// @brief Per-invocation config-path handoff file scoped by PID.
+inline std::string rpc_invocation_config_file_path(pid_t pid) {
+  return rpc_invocation_runtime_dir(pid) + "/config_path";
+}
+
 } // namespace rocjitsu
 
 #endif // ROCJITSU_KMD_LINUX_RPC_H_

@@ -87,22 +87,42 @@ using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedKfd;
 using rocjitsu::Sysfs;
 
-static int connect_to_daemon() {
-  auto path = rocjitsu::rpc_default_socket_path();
-  int sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  if (sock < 0)
-    return -1;
+namespace {
+
+/// @brief Attempt to connect @p sock to the AF_UNIX socket at @p path.
+/// @returns 0 on success; -1 with errno set on failure (socket left open).
+int try_connect(int sock, const std::string &path) {
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;
   path.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
-  if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
-    rocjitsu::libc_passthrough().close(sock);
-    return -1;
-  }
-  return sock;
+  return connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
 }
 
-namespace {
+/// @brief Connect to the daemon for this invocation's per-PID runtime directory.
+/// @details Connects to <runtime_dir>/daemon.sock. Only when that per-PID
+/// directory does not exist (attach / daemon-only clients that share the
+/// well-known location) does it fall back to rpc_default_socket_path(). The
+/// fallback is gated on dir-absence rather than connect-failure so a daemon-mode
+/// app is never silently cross-connected to an unrelated daemon at the shared
+/// well-known socket if its own daemon's socket is transiently unavailable.
+int connect_to_daemon(const std::string &runtime_dir) {
+  int sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (sock < 0)
+    return -1;
+
+  if (try_connect(sock, runtime_dir + "/daemon.sock") == 0)
+    return sock;
+
+  // Fall back to the well-known socket only for invocations that never created a
+  // per-PID directory (attach / daemon-only). access() goes through the real libc
+  // so it does not re-enter this interposer's own path hooks.
+  if (rocjitsu::libc_passthrough().access(runtime_dir.c_str(), F_OK) != 0 &&
+      try_connect(sock, rocjitsu::rpc_default_socket_path()) == 0)
+    return sock;
+
+  rocjitsu::libc_passthrough().close(sock);
+  return -1;
+}
 
 /// @brief Convert a kernel-style driver ioctl result into the libc ioctl(2)
 /// return/`errno` contract.
@@ -118,12 +138,12 @@ int kfd_ioctl_ret(int r) {
   return r;
 }
 
-/// @brief Return the child-process rocjitsu config path.
+/// @brief Read the child-process rocjitsu config path from @p cfg_file.
 ///
-/// @details The launcher writes the config path to the shared runtime file for
-/// both local simulation and DBT guest mode.
-std::optional<std::string> child_config_path() {
-  auto cfg_file = rocjitsu::rpc_default_config_file_path();
+/// @details The launcher writes the config path to a runtime file (per-PID
+/// invocation directory) that the interposer reads back for both local
+/// simulation and DBT guest mode.
+std::optional<std::string> child_config_path(const std::string &cfg_file) {
   char cfg_buf[4096]{};
   auto &real = rocjitsu::libc_passthrough();
   int cfg_fd = real.openat(AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0);
@@ -180,6 +200,16 @@ public:
 
   static void init() {
     new (storage_) InterposerContext();
+    // Resolve the per-PID invocation directory once here, in the library
+    // constructor: this runs single-threaded before any app code (and thus before
+    // any app fork). Eager init closes two hazards of a lazy accessor: (1) a data
+    // race — invocation_runtime_dir() is called from paths holding different locks
+    // (remote_mutex_ vs init_mutex_); (2) an empty-at-fork window — a child the app
+    // forks inherits this populated string and reconnects to the parent's daemon,
+    // instead of recomputing rpc_invocation_runtime_dir(child_pid) and missing it.
+    // Assigned before resolve() (which flips real().ready() true, the gate every
+    // interposed entry point checks) so no reader can observe an empty value.
+    ctx.invocation_runtime_dir_ = rocjitsu::rpc_invocation_runtime_dir(getpid());
     real().resolve();
   }
 
@@ -249,6 +279,13 @@ public:
                ? active_remote
                : nullptr;
   }
+
+  /// @brief The per-PID invocation runtime directory for this process image.
+  /// @details Populated once in init() before any thread or app fork, so this is
+  /// a lock-free immutable read. A forked app child inherits the parent's value
+  /// (reset_after_fork() intentionally does not clear it) and thus reconnects to
+  /// the same daemon rather than recomputing a dir under its own PID.
+  const std::string &invocation_runtime_dir() const { return invocation_runtime_dir_; }
 
   // No lock needed: the snapshot keeps the RemoteDriver alive, and its handshake
   // metadata (topology/drm paths, gpu_info) is immutable after open() — close()
@@ -346,7 +383,7 @@ public:
       // cannot clear it before the caller uses it.
       return {active_remote, fd};
     }
-    int sock = connect_to_daemon();
+    int sock = connect_to_daemon(invocation_runtime_dir());
     if (sock < 0)
       return {};
     // Build the driver and open its KFD connection BEFORE publishing remote_.
@@ -791,7 +828,8 @@ public:
     std::lock_guard lock(init_mutex_);
     if (active_driver_.load(std::memory_order_acquire) == nullptr) {
       in_construction = true;
-      std::optional<std::string> cfg_path = child_config_path();
+      std::optional<std::string> cfg_path =
+          child_config_path(invocation_runtime_dir() + "/config_path");
       if (!cfg_path) {
         util::Logger::debug_print("rocjitsu: no child config path");
         in_construction = false;
@@ -903,6 +941,7 @@ private:
   /// recorded only if a reference was actually acquired, so track/untrack stay
   /// balanced and can never over-release or resurrect the wrong connection.
   std::unordered_map<int, DupBackend> kfd_dup_fds_;
+  std::string invocation_runtime_dir_;
 
   alignas(16) static uint8_t storage_[];
 };

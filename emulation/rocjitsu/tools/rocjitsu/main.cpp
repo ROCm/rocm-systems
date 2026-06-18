@@ -252,7 +252,7 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
 
 volatile sig_atomic_t g_listen_fd = -1;
 
-int run_daemon_server(const char *config_path) {
+int run_daemon_server(const char *config_path, const std::string &socket_path = {}) {
   rj_vm_t *vm = nullptr;
   if (rj_vm_create(config_path, RJ_VM_MODE_DAEMON, &vm) != ROCJITSU_STATUS_SUCCESS) {
     std::cerr << std::format("rocjitsu: failed to create VM from {}\n", config_path);
@@ -261,7 +261,7 @@ int run_daemon_server(const char *config_path) {
 
   std::jthread engine_thread([vm]() { rj_vm_run(vm, nullptr); });
 
-  auto sock_path = rpc_default_socket_path();
+  auto sock_path = socket_path.empty() ? rpc_default_socket_path() : socket_path;
   std::filesystem::create_directories(std::filesystem::path(sock_path).parent_path());
   unlink(sock_path.c_str());
 
@@ -386,8 +386,8 @@ void prepend_env_path(const char *name, const std::string &value) {
   setenv(name, value.c_str(), 1);
 }
 
-bool write_config_file(const std::string &config_path) {
-  auto cfg_file = rpc_default_config_file_path();
+bool write_config_file(const std::string &config_path, pid_t pid) {
+  auto cfg_file = rpc_invocation_config_file_path(pid);
   std::filesystem::create_directories(std::filesystem::path(cfg_file).parent_path());
   std::ofstream ofs(cfg_file);
   if (!ofs)
@@ -396,11 +396,38 @@ bool write_config_file(const std::string &config_path) {
   return ofs.good();
 }
 
-void cleanup_runtime_files() {
-  auto cfg_file = rpc_default_config_file_path();
-  unlink(cfg_file.c_str());
-  auto sock_file = rpc_default_socket_path();
-  unlink(sock_file.c_str());
+void cleanup_runtime_files(pid_t pid) {
+  std::error_code ec;
+  std::filesystem::remove_all(rpc_invocation_runtime_dir(pid), ec);
+}
+
+// Best-effort reap of per-PID runtime dirs left behind by prior invocations that
+// exited via execvp (which never returns, so cleanup_runtime_files does not run).
+// Each numeric <pid> subdir of the runtime root is removed if that PID is no
+// longer alive, so a recycled PID cannot inherit a stale config_path/daemon.sock.
+void reap_stale_runtime_dirs() {
+  // Advance the iterator with an error_code (not the throwing operator++): another
+  // launcher may remove_all an entry concurrently, and a throw here would abort the
+  // launcher before exec. Best-effort — any filesystem error just ends the scan.
+  std::error_code ec;
+  std::filesystem::directory_iterator it(rpc_default_runtime_dir(), ec);
+  const std::filesystem::directory_iterator end;
+  for (; !ec && it != end; it.increment(ec)) {
+    const std::string name = it->path().filename().string();
+    if (!std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c); }))
+      continue;
+    pid_t pid = 0;
+    auto [ptr, err] = std::from_chars(name.data(), name.data() + name.size(), pid);
+    if (err != std::errc{} || ptr != name.data() + name.size() || pid <= 0)
+      continue;
+    // kill(pid, 0) probes existence without signalling: ESRCH means the process
+    // is gone and its runtime dir is safe to reclaim. EPERM/success mean it is
+    // still alive (possibly another user's PID), so leave it alone.
+    if (kill(pid, 0) != 0 && errno == ESRCH) {
+      std::error_code rm_ec;
+      std::filesystem::remove_all(it->path(), rm_ec);
+    }
+  }
 }
 
 struct KfdGpuOrdinal {
@@ -684,6 +711,11 @@ int main(int argc, char *argv[]) {
 
   bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
 
+  // Reclaim per-PID runtime dirs orphaned by prior runs (execvp never returns, so
+  // those invocations could not clean up after themselves). Done for every mode,
+  // including daemon-only, before this invocation creates its own directory.
+  reap_stale_runtime_dirs();
+
   if (daemon_mode && !has_app)
     return run_daemon_server(abs_config.c_str());
 
@@ -716,6 +748,8 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  pid_t my_pid = getpid();
+
   if (attach_mode) {
     auto sock_path = rpc_default_socket_path();
     if (!std::filesystem::exists(sock_path)) {
@@ -723,6 +757,9 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   } else if (daemon_mode) {
+    auto sock_path = rpc_invocation_socket_path(my_pid);
+    std::filesystem::create_directories(rpc_invocation_runtime_dir(my_pid));
+
     pid_t daemon_pid = fork();
     if (daemon_pid < 0) {
       std::cerr << std::format("rocjitsu: fork failed: {}\n", strerror(errno));
@@ -731,10 +768,9 @@ int main(int argc, char *argv[]) {
 
     if (daemon_pid == 0) {
       prctl(PR_SET_PDEATHSIG, SIGTERM);
-      return run_daemon_server(abs_config.c_str());
+      return run_daemon_server(abs_config.c_str(), sock_path);
     }
 
-    auto sock_path = rpc_default_socket_path();
     for (int i = 0; i < 300; ++i) {
       if (std::filesystem::exists(sock_path))
         break;
@@ -747,7 +783,7 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   } else {
-    if (!write_config_file(abs_config)) {
+    if (!write_config_file(abs_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";
       return 1;
     }
@@ -765,6 +801,6 @@ int main(int argc, char *argv[]) {
   execvp(app_argv[0], app_argv);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
-  cleanup_runtime_files();
+  cleanup_runtime_files(my_pid);
   return 1;
 }
