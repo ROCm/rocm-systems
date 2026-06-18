@@ -513,12 +513,12 @@ def test_calc_expressions_noise_clamp():
 
 
 # =============================================================================
-# _derive_pop_values tests
+# _derive_pct_of_peak_values tests
 # =============================================================================
 
 
-class TestDerivePopValues:
-    """Tests for db_analysis._derive_pop_values."""
+class TestDerivePctOfPeakValues:
+    """Tests for db_analysis._derive_pct_of_peak_values."""
 
     def _make_values_df(
         self,
@@ -537,20 +537,20 @@ class TestDerivePopValues:
             data["kernel_name"] = kernel_names
         return pd.DataFrame(data)
 
-    def test_pop_true_metric_appends_pct_of_peak_row(self):
-        """A pop-enabled metric produces one new Pct of Peak row."""
+    def test_pct_of_peak_true_metric_appends_percent_of_peak_row(self):
+        """A pct_of_peak-enabled metric produces one new Percent of Peak row."""
         values_df = self._make_values_df(
             metric_ids=["1.1", "1.1"],
             value_names=["Avg", "Peak"],
             values=[50.0, 200.0],
         )
-        new_rows = db_analysis._derive_pop_values({"1.1"}, values_df)
+        new_rows = db_analysis._derive_pct_of_peak_values({"1.1"}, values_df)
         assert len(new_rows) == 1
-        assert new_rows[0]["value_name"] == "Pct of Peak"
+        assert new_rows[0]["value_name"] == "Percent of Peak"
         assert new_rows[0]["value"] == pytest.approx(25.0)
 
     def test_multi_kernel_produces_one_row_per_kernel(self):
-        """Calling once per kernel produces one Pct of Peak row per kernel."""
+        """Calling once per kernel produces one Percent of Peak row per kernel."""
         kernel_a_df = self._make_values_df(
             metric_ids=["1.1", "1.1"],
             value_names=["Avg", "Peak"],
@@ -563,21 +563,21 @@ class TestDerivePopValues:
             values=[60.0, 300.0],
             kernel_names=["kernel_b", "kernel_b"],
         )
-        rows_a = db_analysis._derive_pop_values({"1.1"}, kernel_a_df)
-        rows_b = db_analysis._derive_pop_values({"1.1"}, kernel_b_df)
+        rows_a = db_analysis._derive_pct_of_peak_values({"1.1"}, kernel_a_df)
+        rows_b = db_analysis._derive_pct_of_peak_values({"1.1"}, kernel_b_df)
         assert len(rows_a) == 1
         assert rows_a[0]["value"] == pytest.approx(50.0)  # 100/200*100
         assert len(rows_b) == 1
         assert rows_b[0]["value"] == pytest.approx(20.0)  # 60/300*100
 
-    def test_pop_false_metric_produces_no_pct_row(self):
-        """A metric not in pop_metric_ids produces no Pct of Peak row."""
+    def test_pct_of_peak_false_metric_produces_no_pct_row(self):
+        """A metric not in pct_of_peak_metric_ids produces no Percent of Peak row."""
         values_df = self._make_values_df(
             metric_ids=["1.1", "1.1"],
             value_names=["Avg", "Peak"],
             values=[50.0, 100.0],
         )
-        new_rows = db_analysis._derive_pop_values(set(), values_df)
+        new_rows = db_analysis._derive_pct_of_peak_values(set(), values_df)
         assert new_rows == []
 
     def test_incomplete_data_skips_metric(self):
@@ -593,7 +593,9 @@ class TestDerivePopValues:
             ),
         ]
         for incomplete_values in incomplete_cases:
-            new_rows = db_analysis._derive_pop_values({"1.1"}, incomplete_values)
+            new_rows = db_analysis._derive_pct_of_peak_values(
+                {"1.1"}, incomplete_values
+            )
             assert new_rows == []
 
 
