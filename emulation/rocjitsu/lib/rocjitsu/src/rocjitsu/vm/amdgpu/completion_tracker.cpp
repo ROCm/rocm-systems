@@ -30,7 +30,9 @@ void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
           os << std::format("CT: wg_complete d={} wg={} completed={}/{}", dispatch_id, wg_id,
                             entry.completed_wgs, entry.total_wgs);
         });
-        drain_completions(queues);
+        // Completion callbacks can run from CU worker threads. The CP drains
+        // completions after dispatch fan-out rejoins, keeping cache flushes and
+        // signal firing on the CP path.
         return;
       }
     }
