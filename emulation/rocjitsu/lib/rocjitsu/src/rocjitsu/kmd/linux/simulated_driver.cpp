@@ -287,7 +287,7 @@ int SimulatedDriver::open() {
 
   std::lock_guard<std::mutex> lk(process_mutex_);
   if (!daemon_mode_ && local_process_id_ != 0 && processes_.contains(local_process_id_)) {
-    processes_[local_process_id_]->event_state_.reset();
+    processes_[local_process_id_]->retain_open();
     return fd_;
   }
   uint32_t pid = next_process_id_++;
@@ -450,6 +450,23 @@ uint32_t SimulatedDriver::open_process(pid_t client_pid) {
   return pid;
 }
 
+void SimulatedDriver::retain_local_open() {
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  if (local_process_id_ == 0)
+    return;
+  auto it = processes_.find(local_process_id_);
+  if (it != processes_.end())
+    it->second->retain_open();
+}
+
+uint32_t SimulatedDriver::local_open_ref_count() const {
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  if (local_process_id_ == 0)
+    return 0;
+  auto it = processes_.find(local_process_id_);
+  return it != processes_.end() ? it->second->open_ref_count() : 0;
+}
+
 int SimulatedDriver::close() { return close(local_process_id_); }
 
 int SimulatedDriver::close(uint32_t process_id) {
@@ -461,7 +478,7 @@ int SimulatedDriver::close(uint32_t process_id) {
     auto it = processes_.find(process_id);
     if (it == processes_.end())
       return 0;
-    if (daemon_mode_ && it->second->client_pid() > 0 && !it->second->release_open())
+    if (!it->second->release_open())
       return 0;
     extracted = std::move(it->second);
     processes_.erase(it);

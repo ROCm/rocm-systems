@@ -16,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
 #include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <mutex>
 #include <shared_mutex>
@@ -59,7 +60,17 @@ public:
 
   uint32_t open_ref_count() const { return open_ref_count_.load(std::memory_order_relaxed); }
   void retain_open() { open_ref_count_.fetch_add(1, std::memory_order_relaxed); }
-  bool release_open() { return open_ref_count_.fetch_sub(1, std::memory_order_acq_rel) == 1; }
+
+  /// @brief Drop one open reference; returns true when the last one is released.
+  /// @details Asserts on underflow: every release must pair with a prior open or
+  /// retain. An unbalanced release means an fd reference (primary or dup) was
+  /// tracked without retaining, which would otherwise wrap the count and leak
+  /// the process forever.
+  bool release_open() {
+    uint32_t prev = open_ref_count_.fetch_sub(1, std::memory_order_acq_rel);
+    assert(prev > 0 && "KfdProcess open refcount underflow");
+    return prev == 1;
+  }
 
   /// @brief GPU memory allocation descriptor.
   struct GpuAllocation {

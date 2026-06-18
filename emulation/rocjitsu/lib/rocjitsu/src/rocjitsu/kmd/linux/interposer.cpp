@@ -264,20 +264,46 @@ public:
   void track_dup(int fd) {
     if (fd < 0 || is_kfd_primary(fd))
       return;
-    std::lock_guard lock(fd_mutex_);
-    kfd_dup_fds_.insert(fd);
+    bool newly_tracked = false;
+    {
+      std::lock_guard lock(fd_mutex_);
+      newly_tracked = kfd_dup_fds_.insert(fd).second;
+    }
+    // Each live KFD fd (primary + every dup) holds one local-mode open
+    // reference, so the process is torn down only when the last fd closes.
+    // No-op in remote mode (no local process to retain).
+    if (newly_tracked)
+      if (auto *d = driver())
+        d->retain_local_open();
   }
 
   void untrack_dup(int fd) {
     if (fd < 0)
       return;
-    std::lock_guard lock(fd_mutex_);
-    kfd_dup_fds_.erase(fd);
+    bool was_tracked = false;
+    {
+      std::lock_guard lock(fd_mutex_);
+      was_tracked = kfd_dup_fds_.erase(fd) != 0;
+    }
+    if (was_tracked)
+      if (auto *d = driver())
+        d->close();
   }
 
   void clear_dups() {
-    std::lock_guard lock(fd_mutex_);
-    kfd_dup_fds_.clear();
+    size_t released = 0;
+    {
+      std::lock_guard lock(fd_mutex_);
+      released = kfd_dup_fds_.size();
+      kfd_dup_fds_.clear();
+    }
+    // Drop the references the cleared dups were holding. Used on remote
+    // teardown (driver() is null → no-op) and when a fresh open() rebinds the
+    // local process; in the latter case the just-opened reference is preserved
+    // because clear_dups runs before any new dups are tracked.
+    if (auto *d = driver())
+      for (size_t i = 0; i < released; ++i)
+        d->close();
   }
 
   int close_remote() {
@@ -721,9 +747,8 @@ int close(int fd) {
     return static_cast<int>(InterposerContext::real.close(fd));
   }
   if (auto *drv = InterposerContext::ctx.lookup(fd)) {
-    int rc = drv->close();
-    InterposerContext::ctx.clear_dups();
-    return rc;
+    drv->close();
+    return 0;
   }
   if (InterposerContext::ctx.owns_fd(fd))
     return 0;
