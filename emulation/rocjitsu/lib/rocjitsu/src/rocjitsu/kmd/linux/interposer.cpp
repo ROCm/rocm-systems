@@ -197,17 +197,6 @@ public:
     return (fd >= 0 && fd == remote_kfd_fd_ && remote_) ? remote_ : nullptr;
   }
 
-  /// @brief Tear down the cached daemon connection after a remote close.
-  /// @details ROCR opens "/dev/kfd", closes it, then reopens it during
-  /// hsa_init(). RemoteDriver::close() has already dropped its socket, so the
-  /// cached handle is dead. Clear it so the next open("/dev/kfd") reconnects
-  /// instead of reusing the closed connection.
-  void reset_remote() {
-    delete remote_;
-    remote_ = nullptr;
-    remote_kfd_fd_ = -1;
-  }
-
   /// @brief Get the daemon's sysfs topology directory path.
   /// @returns The topology path string, or empty if not connected.
   std::string remote_topology_path() {
@@ -644,11 +633,8 @@ int openat64(int dirfd, const char *path, int flags, ...) {
 
 int close(int fd) {
   assert(InterposerContext::real.ready());
-  if (auto *remote = InterposerContext::ctx.remote_lookup(fd)) {
-    int rc = remote->close();
-    InterposerContext::ctx.reset_remote();
-    return rc;
-  }
+  if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
+    return remote->close();
   InterposerContext::ctx.untrack_sysfs(fd);
   if (InterposerContext::ctx.untrack_drm(fd)) {
     InterposerContext::real.close(fd);
