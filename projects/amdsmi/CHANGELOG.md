@@ -51,7 +51,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added the new types to `amdsmi_link_types` as part of support for NICs
 
 ### Changed
+
+- **Fixed `amd-smi static --clock` csv and human_readable formatting to output frequency 
+levels as strings instead of dictionary objects**.  
+
 - **Deprecated `amdsmi_get_gpu_vram_vendor()` in favor of `amdsmi_get_gpu_vram_info()`**.  
+  - `amdsmi_get_gpu_vram_vendor` is slated for removal in a future ROCm release. It now emits a `DeprecationWarning` from the Python interface and functions as a wrapper of `amdsmi_get_gpu_vram_info()`.
 
 - **Renamed "AINIC version" to "ionic version" in `amd-smi version` output**.  
   - The label now correctly reflects that it shows the ionic kernel driver version.
@@ -62,13 +67,20 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Corrected invalid AMD SMI status-code names in exception messages and documentation**.  
+  - Some `AmdSmiLibraryException` messages and API documentation entries were misspelled; they now use the correct `AMDSMI_STATUS_*` names.
+
+- **Fixed a crash in `amdsmi_get_gpu_vram_vendor()` and made `amdsmi_get_gpu_vram_info()` resilient to DRM failures**.  
+  - `amdsmi_get_gpu_vram_vendor()` now validates the output buffer and only writes it on success, fixing a null-pointer dereference on the not-supported path.
+  - `amdsmi_get_gpu_vram_info()` now reads the VRAM vendor from sysfs first and treats the DRM ioctl (VRAM type/bit width/bandwidth) as best effort, so the vendor is still returned when the DRM path is unavailable.
+
 - **Fixed AMD GPU manufacturer name display in `amd-smi static --board`**.  
   - The CLI now displays the canonical vendor name `Advanced Micro Devices, Inc. [AMD/ATI]` when the board manufacturer name is reported as the raw AMD PCI vendor ID (`0x1002`) because the host `pci.ids` lookup is unavailable. The C and Python APIs continue to return the raw value unchanged.
   - Standardized the hardcoded AMD vendor string on the canonical `pci.ids` spelling (with the comma) so `VENDOR_NAME` and `MANUFACTURER_NAME` are consistent with `lspci`.
 
-- **Fixed `amdsmi_get_gpu_cper_entries()` crash (`free(): invalid pointer` / `SIGABRT`) when the CPER node reports zero bytes**.  
-  - debugfs CPER nodes (`/sys/kernel/debug/dri/<N>/amdgpu_ring_cper`) report `st_size == 0` because their content is generated on read. The previous `std::ifstream`-based read allocated a zero-byte buffer and left an STL `basic_filebuf` whose destructor could perform an invalid free across the library boundary when `libamd_smi.so` is `LD_PRELOAD`-ed alongside a different host libstdc++ (the device-metrics-exporter / `gpuagent` scenario), aborting the process and zeroing all GPU metrics.
-  - Reverted the CPER file read to POSIX `open`/`read`/`close`, which performs no STL allocation across the library boundary and returns `AMDSMI_STATUS_FILE_ERROR` cleanly on zero-byte or short reads. The file descriptor is now closed on every exit path, also fixing a latent fd leak on the short-read branch.
+- **Fixed `amd-smi ras --cper` / `amdsmi_get_gpu_cper_entries()` crash (`free(): invalid pointer` / `SIGABRT`)** when `libamd_smi.so` is `LD_PRELOAD`-ed under a host with a different libstdc++ (for example, device-metrics-exporter / `gpuagent`).
+
+- **Fixed `amd-smi ras --cper` failing with `AMDSMI_STATUS_FILE_ERROR` on an empty CPER ring**. An empty ring (no RAS records) now reports no CPER records; `amdsmi_get_gpu_cper_entries()` returns `AMDSMI_STATUS_SUCCESS` with `entry_count == 0`.
 
 - **Fixed `amdsmi_init()` aborting entirely when CPU/ESMI initialization fails**.  
   - `populate_amd_cpus()` treated an `esmi_init()` failure (non-AMD CPU, missing/unsupported energy or HSMP driver, or a CPU/SMU in a bad state) as fatal, causing all of `amdsmi_init()` to fail so GPU and NIC functionality became unusable. ESMI/CPU discovery is now non-fatal and is skipped on failure, mirroring the NIC discovery paths.
@@ -102,12 +114,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ## amd_smi_lib for ROCm 7.13.0
 
 ### Added
-
-- **Added `--sort-by-pid` flag and `amdsmi_get_gpu_process_list_by_pid()` API**.  
-  - New C API `amdsmi_get_gpu_process_list_by_pid()` aggregates process info across all GPUs and returns results keyed by PID, with per-GPU breakdowns for memory, engine usage, and occupancy.
-  - New structs: `amdsmi_proc_gpu_entry_t`, `amdsmi_proc_info_by_pid_t`.
-  - New `--sort-by-pid` CLI flag for `amd-smi process` and `amd-smi monitor --process` groups output by PID instead of GPU.
-  - New Python interface function `amdsmi_get_gpu_process_list_by_pid()`.
 
 - **Added APU metrics support (table versions 2.4 and 3.0)**.  
   - New `amdsmi_apu_metrics_t` struct accessible via `amdsmi_gpu_metrics_t.apu_metrics` pointer (non-null when APU-specific metrics are available).

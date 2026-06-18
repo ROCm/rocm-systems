@@ -6,7 +6,7 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
-#include <dlfcn.h>
+#include "os.h"
 #include "debug.h"
 #include "checks.h"
 #include "nccl_tuner.h"
@@ -27,12 +27,13 @@ static ncclResult_t ncclTuner_init(void** context, uint64_t commId, size_t nRank
                                    ncclNvlDomainInfo_v5_t* nvlDomainInfo, ncclTunerConstants_t* /*constants*/) {
   NCCLCHECK(ncclTuner_v3->init(nRanks, nNodes, logfn, context));
   ncclTuner.getCollInfo = ncclTuner_getCollInfo;
+  ncclTuner.getChunkSize = NULL;
   ncclTuner.finalize = ncclTuner_finalize;
   return ncclSuccess;
 }
 
 ncclTuner_t* getNcclTuner_v3(void* lib) {
-  ncclTuner_v3 = (ncclTuner_v3_t*)dlsym(lib, "ncclTunerPlugin_v3");
+  ncclTuner_v3 = (ncclTuner_v3_t*)ncclOsDlsym(lib, "ncclTunerPlugin_v3");
   if (ncclTuner_v3) {
     ncclTuner.name = ncclTuner_v3->name;
     ncclTuner.init = ncclTuner_init;

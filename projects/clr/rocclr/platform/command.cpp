@@ -63,6 +63,14 @@ Event::~Event() {
 
 // ================================================================================================
 AccumulateCommand::~AccumulateCommand() {
+  // Drop the kernel-names owner pin taken in the constructor (e.g. the
+  // GraphExec). Done first so it always runs, regardless of the owns_hw_events_
+  // early return. Releasing here -- after ReportActivity() has read the names --
+  // is what makes the borrowed kernel-name strings safe without copying them.
+  if (kernelNamesOwner_ != nullptr) {
+    kernelNamesOwner_->release();
+    kernelNamesOwner_ = nullptr;
+  }
   // When an external owner (e.g. the graph signal pool) reclaims the signals,
   // do not destroy them here.
   if (!owns_hw_events_) {

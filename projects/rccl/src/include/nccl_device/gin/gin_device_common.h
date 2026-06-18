@@ -8,6 +8,7 @@
 #ifndef _NCCL_GIN_DEVICE_COMMON_H_
 #define _NCCL_GIN_DEVICE_COMMON_H_
 
+#include <stdint.h>
 #include "../net_device.h"
 #include "../utility.h"
 #include "gin_device_host_common.h"
@@ -40,6 +41,16 @@ enum ncclGinOptFlags {
   (((NCCL_GIN_PROXY_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_PROXY | \
    ((NCCL_GIN_GDAKI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GDAKI)
 
+// Resource sharing mode for a given ncclGin/ncclGin_C *instance*.
+// This mode is selected at construction time and is carried by the ncclGin
+// object, then copied into ncclGinCtx for each call. It is not stored as
+// persistent per-context state in the communicator (i.e., different ncclGin
+// instantiations that target the same contextIndex may use different modes).
+enum ncclGinResourceSharingMode : uint8_t {
+  NCCL_GIN_RESOURCE_SHARING_GPU = 0,
+  NCCL_GIN_RESOURCE_SHARING_CTA = 1,
+};
+
 struct ncclGinCtx {
   unsigned backendMask;
   ncclNetDeviceType backend;
@@ -47,6 +58,7 @@ struct ncclGinCtx {
   int nRanks;
   void* handle;
   int contextId;
+  uint8_t resourceSharingMode;
 };
 
 template <unsigned backendMask>
@@ -77,6 +89,27 @@ struct ncclGinSignalDescriptor {
 };
 
 #if NCCL_CHECK_CUDACC
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_Wait {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinRequest_t& outRequest, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, cuda::memory_order ord, uint32_t* abortFlag);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_FlushAsync {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, uint32_t peer, ncclGinRequest_t* outRequest, uint32_t optFlags);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_Get {
+  template <typename Coop>
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop coop, int peer, ncclGinWindow_t remoteWin, size_t remoteOff,
+                                      ncclGinWindow_t localWin, size_t localOff, size_t bytes,
+                                      bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault);
+};
+
 template <ncclNetDeviceType backend>
 struct ncclGinApi_Put {
   template <typename Coop>
@@ -107,6 +140,7 @@ template <ncclNetDeviceType backend>
 struct ncclGinApi_GetSignalPtr {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx, int peer, ncclGinSignal_t signalId);
 };
+
 template <ncclNetDeviceType backend>
 struct ncclGinApi_GetCounterPtr {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx, int peer, ncclGinCounter_t counterId);

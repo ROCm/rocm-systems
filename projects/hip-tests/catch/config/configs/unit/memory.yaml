@@ -804,6 +804,7 @@ memory:
   Unit_hipMemcpyBatchAsync_H2D_Functional: *level_2
   Unit_hipMemcpyBatchAsync_D2H_Functional: *level_2
   Unit_hipMemcpyBatchAsync_H2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_swap_cp: *level_2
   Unit_hipMemcpyBatchAsync_NegativeTsts:
     <<: *level_2
     tags: [transfer]
@@ -2232,7 +2233,8 @@ memory:
   Unit_hipStreamAttachMemAsync_Negative_Parameters:
     <<: *level_2
     # Below tests soft hang in stress test on 13/09/23
-    disabled: [amd_wsl]
+    # Asan test disabled temporarily until PR #5287 is merged
+    disabled: [amd_wsl, asan]
     tags: [query]
   Unit_hipMemGetAddressRange_Positive:
     <<: *level_2
