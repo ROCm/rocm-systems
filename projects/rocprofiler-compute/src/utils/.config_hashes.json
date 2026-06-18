@@ -9,7 +9,7 @@
         "0400_roofline.yaml": "d7479d29eb5f5d025a3ef9061be0a644",
         "0500_command_processor_cpc.yaml": "ef7ab3e5c1c7d2734e9412359f10588f",
         "0600_workgroup_manager_spi.yaml": "ae6639ef51f606b2a5dc6f7950359098",
-        "0700_workgroup_processor.yaml": "986f539c436ddf856af07c73eadace58",
+        "0700_workgroup_processor.yaml": "17bc4881f175d37d19b62a964f729629",
         "0900_l0_cache.yaml": "b50bde49c53e43a14fa95753f4f54f38",
         "1100_l1_cache.yaml": "73d5a19add6b7b551260445a481b9947",
         "1300_l2_cache.yaml": "8ed9ab39b2307f1f2d8662ea88ed5c7b",

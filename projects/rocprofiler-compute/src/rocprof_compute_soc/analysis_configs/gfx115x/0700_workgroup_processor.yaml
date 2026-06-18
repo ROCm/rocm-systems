@@ -345,9 +345,9 @@ Panel Config:
       These cover hardware approximations such as sin, cos, and log on the vector
       ALU.
     Instructions - Dual VALU (VOPD): >-
-      Dual-issue VALU instructions executed in wave32 mode
-      (SQ_INSTS_DUAL_VALU_WAVE32) per normalization unit. The VOPD encoding pairs
-      two independent VALU operations that issue in the same cycle.
+      The number of dual-issue VALU instructions issued in wave32 mode per
+      normalization unit. The VOPD encoding pairs two independent VALU operations
+      that issue in the same cycle.
     Instructions - VMEM: >-
       Number of vector memory instructions executed, including global, buffer, and
       texture operations. High VMEM counts relative to VALU may indicate memory-bound
