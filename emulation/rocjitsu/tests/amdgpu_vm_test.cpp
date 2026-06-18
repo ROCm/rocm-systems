@@ -7,6 +7,7 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -20,10 +21,12 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -167,6 +170,63 @@ TEST(GpuMemoryTest, SparsePages) {
   EXPECT_EQ(mem->read32(0x0), 42u);
   EXPECT_EQ(mem->read32(0x100000), 99u);
   EXPECT_EQ(mem->read32(0x50000), 0u);
+}
+
+TEST(GpuMemoryTest, UnregisterInvalidatesThreadLocalTranslationCaches) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> page{};
+  page[kOffset] = 0x5a;
+  process.map_pages(kBaseVa, page.data(), page.size(), amdgpu::Mtype::UC);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          &process.page_table_generation_);
+
+  EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), page.data());
+  EXPECT_EQ(memory.read8(kAddr, kPid), page[kOffset]);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+
+  memory.unregister_process(kPid);
+
+  EXPECT_EQ(memory.resolve_host_ptr(kAddr, kPid), nullptr);
+  EXPECT_EQ(memory.pte_mtype(kAddr, kPid), amdgpu::Mtype::RW);
+}
+
+TEST(GpuMemoryTest, ReusedMemoryInstanceInvalidatesThreadLocalTranslationCaches) {
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint64_t kOffset = 0x123;
+  constexpr uint64_t kAddr = kBaseVa + kOffset;
+  alignas(amdgpu::GpuMemory) unsigned char storage[sizeof(amdgpu::GpuMemory)];
+
+  KfdProcess first_process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
+  first_page[kOffset] = 0x11;
+  first_process.map_pages(kBaseVa, first_page.data(), first_page.size(), amdgpu::Mtype::UC);
+
+  auto *first_memory = new (storage) amdgpu::GpuMemory("memory");
+  first_memory->register_process(kPid, &first_process.page_table_, &first_process.page_table_mutex_,
+                                 &first_process.page_table_generation_);
+  EXPECT_EQ(first_memory->read8(kAddr, kPid), first_page[kOffset]);
+  EXPECT_EQ(first_memory->pte_mtype(kAddr, kPid), amdgpu::Mtype::UC);
+  first_memory->~GpuMemory();
+
+  KfdProcess second_process(kPid);
+  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  second_page[kOffset] = 0x22;
+  second_process.map_pages(kBaseVa, second_page.data(), second_page.size(), amdgpu::Mtype::CC);
+
+  auto *second_memory = new (storage) amdgpu::GpuMemory("memory");
+  second_memory->register_process(kPid, &second_process.page_table_,
+                                  &second_process.page_table_mutex_,
+                                  &second_process.page_table_generation_);
+  EXPECT_EQ(second_memory->read8(kAddr, kPid), second_page[kOffset]);
+  EXPECT_EQ(second_memory->pte_mtype(kAddr, kPid), amdgpu::Mtype::CC);
+  second_memory->~GpuMemory();
 }
 
 TEST(VmLifecycleTest, CreateAndDestroy) {

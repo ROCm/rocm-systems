@@ -42,6 +42,8 @@ class ProfiledExecutionPluginGroup : public ExecutionPluginGroup {
 public:
   ProfiledExecutionPluginGroup() : start_time_(Clock::now()) {}
 
+  bool requires_serial_execution() const override { return true; }
+
   void onInit() {
     if (auto *s = build_composite_sink("profile.log"))
       sink_ = s;

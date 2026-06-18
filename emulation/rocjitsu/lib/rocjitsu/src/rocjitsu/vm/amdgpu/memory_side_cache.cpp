@@ -12,18 +12,19 @@ namespace rocjitsu {
 namespace amdgpu {
 
 void MemorySideCache::send_backing(uint64_t addr, uint8_t *data, uint32_t size,
-                                   simdojo::MessageOp op) {
+                                   simdojo::MessageOp op, uint32_t vmid) {
   assert(req_ != nullptr && "MemorySideCache: req_ not set");
   auto msg = std::make_unique<simdojo::Message>();
   auto &hdr = msg->header();
   hdr.addr = addr;
   hdr.size_bytes = size;
   hdr.op = op;
+  hdr.vmid = vmid;
   msg->set_payload(reinterpret_cast<uintptr_t>(data));
   req_->send(std::move(msg));
 }
 
-void MemorySideCache::ensure_line(uint64_t addr) {
+void MemorySideCache::ensure_line(uint64_t addr, uint32_t vmid) {
   if (cache_.lookup(addr))
     return;
 
@@ -36,15 +37,15 @@ void MemorySideCache::ensure_line(uint64_t addr) {
     static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
     uint64_t evicted_addr = (evicted.tag << (LINE_SIZE_BITS + SET_INDEX_BITS)) |
                             (static_cast<uint64_t>(CacheStore::set_index(addr)) << LINE_SIZE_BITS);
-    send_backing(evicted_addr, evicted_data, LINE_SIZE, simdojo::MessageOp::WRITE);
+    send_backing(evicted_addr, evicted_data, LINE_SIZE, simdojo::MessageOp::WRITE, vmid);
   }
 
   uint8_t line_buf[LINE_SIZE];
-  send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::READ);
+  send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::READ, vmid);
   cache_.fill_line(addr, line_buf);
 }
 
-void MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size) {
+void MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid) {
   uint32_t copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
@@ -52,13 +53,13 @@ void MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size) {
     const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
 
     std::lock_guard<std::mutex> lock(stripes_[stripe_index(ea)]);
-    ensure_line(ea);
+    ensure_line(ea, vmid);
     cache_.read_line(ea, dst + copied, line_offset, chunk);
     copied += chunk;
   }
 }
 
-void MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32_t size) {
+void MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid) {
   uint32_t copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
@@ -66,7 +67,7 @@ void MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32_t size) {
     const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
 
     std::lock_guard<std::mutex> lock(stripes_[stripe_index(ea)]);
-    ensure_line(ea);
+    ensure_line(ea, vmid);
     cache_.write_line(ea, src + copied, line_offset, chunk);
 
     simdojo::CacheTag *tag = nullptr;

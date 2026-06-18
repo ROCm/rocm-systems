@@ -9,6 +9,7 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -466,6 +467,24 @@ TEST(ExecutionPluginTest, NoPluginNoCrash) {
   PluginFixture f;
   const uint32_t code[] = {S_NOP, S_ENDPGM};
   f.run_kernel(code, 2);
+}
+
+TEST(ExecutionPluginTest, PluginHooksForceSerialCpuDispatch) {
+  {
+    PluginFixture f;
+    f.cp()->set_dispatch_threads(8);
+    auto pg = std::make_shared<ExecutionPluginGroup>();
+    pg->add(std::make_unique<OrderingPlugin>());
+    f.soc->set_plugin_group(pg);
+    EXPECT_EQ(f.cp()->dispatch_threads(), 1u);
+  }
+
+  {
+    PluginFixture f;
+    f.cp()->set_dispatch_threads(8);
+    f.soc->set_plugin_group(std::make_shared<ProfiledExecutionPluginGroup>());
+    EXPECT_EQ(f.cp()->dispatch_threads(), 1u);
+  }
 }
 
 // -- Ordering tests ----------------------------------------------------------

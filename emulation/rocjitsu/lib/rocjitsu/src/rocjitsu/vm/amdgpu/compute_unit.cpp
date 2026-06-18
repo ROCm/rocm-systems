@@ -21,10 +21,15 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -111,7 +116,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   if (slot >= config_.num_wf_slots)
     return nullptr;
 
-  int32_t sgpr_base = sgpr_file_.allocate(sgprs);
+  int32_t sgpr_base = sgpr_file_.allocate(sgprs, /*clear=*/false);
   if (sgpr_base < 0)
     return nullptr;
 
@@ -127,10 +132,8 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   std::memset(vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
               vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
 
-  // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
-  // arguments from L2/memory rather than stale lines from a prior kernel.
-  // On real hardware, the driver issues s_dcache_inv at kernel launch.
-  l1_scalar_.invalidate_all();
+  // Per-CU cache invalidation (L1 scalar + instruction-fetch + decoded-inst)
+  // is done once per dispatch in begin_workgroup(), not per wavefront here.
 
   auto *wf = wfs_[slot].get();
   wf->wg_id_ = wg_id;
@@ -166,6 +169,7 @@ size_t ComputeUnitCore::num_wfs() const {
 
 void ComputeUnitCore::reset_all_wf() {
   lds_pinned_clusters_.clear();
+  invalidate_inst_fetch_cache();
   for (auto &w : wfs_) {
     if (w->sgpr_alloc().count > 0) {
       sgpr_file_.free(w->sgpr_alloc().base);
@@ -204,7 +208,8 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
   auto key = wg_key(dispatch_id, wg_id);
   auto it = active_wgs_.find(key);
   if (it != active_wgs_.end() && --it->second == 0) {
-    plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
+    if (plugin_hooks_enabled_)
+      plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
     active_wgs_.erase(it);
     if (cp_)
       cp_->notify_wg_complete(dispatch_id, wg_id);
@@ -257,7 +262,8 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
-  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
+  if (plugin_hooks_enabled_)
+    plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
 
   if (inst->data()->tag() == GLOBAL_MEM && shared_aperture_base_ != 0) {
     auto &d = *inst->data_as<VectorMemState>();
@@ -327,7 +333,8 @@ void ComputeUnitCore::update_wf_states() {
       for (auto &w2 : wfs_)
         if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() == WfState::BARRIER)
           barrier_wfs.push_back(w2.get());
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
+      if (plugin_hooks_enabled_)
+        plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
@@ -340,27 +347,38 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   uint32_t vmid = active->process_id();
 
   rj_code_binary_inst_t words[4];
-  for (int i = 0; i < 4; ++i)
-    words[i] = memory_->fetch32(active->pc + i * 4, vmid);
+  fetch_instruction_words(active->pc, vmid, words);
 
   active->trace_inst_count_++;
 
+  // Decoded-instruction cache lookup (see decode_cache_). On a hit the cache
+  // owns the Instruction (owns_inst stays false); on a miss we decode and own
+  // it until it is either cached (non-memory) or freed/routed.
+  const uint64_t issue_pc = active->pc;
+  DecodeCacheLine &dline = decode_cache_[inst_cache_index(issue_pc, vmid)];
+
   Instruction *inst = nullptr;
-  try {
-    inst = decoder_->decode(words);
-  } catch (const util::InvalidInst &e) {
-    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(InvalidInst) pc=0x",
-                     std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
-                     ",0x", words[3], "]", std::dec, " what=", e.what());
-    active->halt();
-    return;
-  }
-  if (!inst) {
-    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(null decode) pc=0x",
-                     std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
-                     ",0x", words[3], "]", std::dec);
-    active->halt();
-    return;
+  bool owns_inst = false;
+  if (dline.inst && dline.pc == issue_pc && dline.vmid == vmid) {
+    inst = dline.inst.get();
+  } else {
+    try {
+      inst = decoder_->decode(words);
+    } catch (const util::InvalidInst &e) {
+      util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(InvalidInst) pc=0x",
+                       std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x",
+                       words[2], ",0x", words[3], "]", std::dec, " what=", e.what());
+      active->halt();
+      return;
+    }
+    if (!inst) {
+      util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(null decode) pc=0x",
+                       std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x",
+                       words[2], ",0x", words[3], "]", std::dec);
+      active->halt();
+      return;
+    }
+    owns_inst = true;
   }
 
   int inst_size_signed = inst->size();
@@ -389,7 +407,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     }
   }
 
-  plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
+  if (plugin_hooks_enabled_)
+    plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
 
   {
     auto mn = std::string_view(inst->mnemonic());
@@ -401,14 +420,16 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
                         (static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx + 1)) << 32);
       if (target == 0) {
         active->halt();
-        delete inst;
+        if (owns_inst)
+          delete inst;
         return;
       }
     }
   }
 
   execute_instruction(inst, *active);
-  plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
+  if (plugin_hooks_enabled_)
+    plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->num_vgprs_ > 0) {
@@ -427,15 +448,44 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   }
 
   if (inst->is_memory_op()) {
+    // Memory ops carry per-execution state and are owned by the memory pipeline
+    // after issue; never cached. (owns_inst is always true here.)
     if (inst->data() && inst->data()->tag() == GLOBAL_MEM) {
       auto *d = inst->data_as<VectorMemState>();
       d->issue_pc = active->pc;
     }
     route_memory_inst(inst, *active);
-  } else
-    delete inst;
+  } else if (owns_inst) {
+    // Freshly decoded, immutable, no per-exec state: cache it for reuse instead
+    // of freeing. Evicts any prior occupant of this line.
+    dline.pc = issue_pc;
+    dline.vmid = vmid;
+    dline.inst.reset(inst);
+  }
+  // else: cache hit on a non-memory instruction — the cache still owns it.
 
   active->pc += inst_size;
+}
+
+void ComputeUnitCore::fetch_instruction_words(uint64_t pc, uint32_t vmid, uint32_t words[4]) {
+  auto &line = inst_fetch_cache_[inst_cache_index(pc, vmid)];
+  if (line.valid && line.pc == pc && line.vmid == vmid) {
+    std::memcpy(words, line.words.data(), sizeof(line.words));
+    return;
+  }
+
+  memory_->read_block(pc, reinterpret_cast<uint8_t *>(words), sizeof(line.words), vmid);
+  line.pc = pc;
+  line.vmid = vmid;
+  std::memcpy(line.words.data(), words, sizeof(line.words));
+  line.valid = true;
+}
+
+void ComputeUnitCore::invalidate_inst_fetch_cache() {
+  for (auto &line : inst_fetch_cache_)
+    line.valid = false;
+  for (auto &line : decode_cache_)
+    line.inst.reset();
 }
 
 bool ComputeUnitCore::step() {

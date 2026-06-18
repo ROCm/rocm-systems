@@ -38,8 +38,8 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
     // This also sets up on_idle callbacks from CUs to CP::check_all_idle().
     for (uint32_t c = 0; c < se->num_compute_units(); ++c)
       cp_->add_compute_unit(se->compute_unit(c));
-    // Register the SE's SPI with the CP so ace_dispatch_all() can use the
-    // interleaved SPI path for cross-workgroup spin-wait resolution.
+    // Register the SE's SPI with the CP so its dispatch loop can drive
+    // wavefront execution through the SPI worker pools.
     cp_->add_spi(&se->spi());
     shader_engines_.push_back(se.get());
     add_child(std::move(se));

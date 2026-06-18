@@ -16,12 +16,15 @@
 
 #include <cerrno>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <link.h>
 #include <stop_token>
+#include <string>
 #include <string_view>
 #include <sys/mman.h>
 #include <sys/prctl.h>
@@ -303,6 +306,67 @@ static std::string find_interposer_lib() {
   return {};
 }
 
+static bool is_sanitizer_runtime(std::string_view basename) {
+  for (std::string_view needle : {"libclang_rt.asan", "libclang_rt.tsan", "libclang_rt.ubsan",
+                                  "libasan.", "libtsan.", "libubsan."}) {
+    if (basename.find(needle) != std::string_view::npos)
+      return true;
+  }
+  return false;
+}
+
+static void append_preload_entry(std::vector<std::string> &entries, std::string entry) {
+  if (entry.empty())
+    return;
+  for (auto &existing : entries) {
+    if (existing == entry)
+      return;
+  }
+  entries.push_back(std::move(entry));
+}
+
+static std::vector<std::string> loaded_sanitizer_runtimes() {
+  std::vector<std::string> entries;
+  dl_iterate_phdr(
+      [](dl_phdr_info *info, size_t, void *data) {
+        auto *entries = static_cast<std::vector<std::string> *>(data);
+        if (!info->dlpi_name || !*info->dlpi_name)
+          return 0;
+        std::string path(info->dlpi_name);
+        auto basename = std::filesystem::path(path).filename().string();
+        if (is_sanitizer_runtime(basename))
+          append_preload_entry(*entries, std::move(path));
+        return 0;
+      },
+      &entries);
+  return entries;
+}
+
+static std::string build_ld_preload(const std::string &interposer_lib) {
+  auto entries = loaded_sanitizer_runtimes();
+  append_preload_entry(entries, interposer_lib);
+
+  if (const char *existing = std::getenv("LD_PRELOAD")) {
+    std::string_view preload(existing);
+    while (!preload.empty()) {
+      auto pos = preload.find(':');
+      auto entry = preload.substr(0, pos);
+      append_preload_entry(entries, std::string(entry));
+      if (pos == std::string_view::npos)
+        break;
+      preload.remove_prefix(pos + 1);
+    }
+  }
+
+  std::string result;
+  for (auto &entry : entries) {
+    if (!result.empty())
+      result += ':';
+    result += entry;
+  }
+  return result;
+}
+
 static bool write_config_file(const std::string &config_path) {
   auto cfg_file = rpc_default_config_file_path();
   std::filesystem::create_directories(std::filesystem::path(cfg_file).parent_path());
@@ -437,7 +501,8 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  setenv("LD_PRELOAD", lib_path.c_str(), 1);
+  auto preload = build_ld_preload(lib_path);
+  setenv("LD_PRELOAD", preload.c_str(), 1);
   execvp(app_argv[0], app_argv);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));

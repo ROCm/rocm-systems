@@ -228,6 +228,21 @@ void Topology::partition_manual(uint32_t num_partitions,
     partitions_[pid].total_weight += comp->weight();
   }
 
+  // A link endpoint may be owned by a component that is not part of the topology
+  // tree (e.g. a standalone backing controller wired in after construction).
+  // collect_all_components() never visits it, so it still has
+  // INVALID_PARTITION_ID — which would index partitions_ out of bounds in
+  // classify_links(). Place any such component on partition 0.
+  for (auto &link : links_) {
+    for (Component *owner : {link->src()->owner(), link->dst()->owner()}) {
+      if (owner && owner->partition_id() >= num_partitions) {
+        owner->set_partition_id(0);
+        partitions_[0].components.push_back(owner);
+        partitions_[0].total_weight += owner->weight();
+      }
+    }
+  }
+
   classify_links();
 }
 

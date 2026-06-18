@@ -6,6 +6,7 @@
 
 #include "simdojo/components/memory_interface.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -135,6 +136,11 @@ public:
   void vector_load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                    uint32_t num_elems, uint8_t *dst, uint32_t base_offset = 0) {
     uint32_t stride = num_elems * elem_size;
+    uint32_t bulk_base = 0;
+    if (contiguous_full_wave_access(addrs, lane_mask, stride, base_offset, bulk_base)) {
+      std::memcpy(dst, &data_[bulk_base], static_cast<size_t>(64) * stride);
+      return;
+    }
     for (uint32_t lane = 0; lane < 64; ++lane) {
       if (!(lane_mask & (1ULL << lane)))
         continue;
@@ -154,6 +160,11 @@ public:
   void vector_store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                     uint32_t num_elems, const uint8_t *src, uint32_t base_offset = 0) {
     uint32_t stride = num_elems * elem_size;
+    uint32_t bulk_base = 0;
+    if (contiguous_full_wave_access(addrs, lane_mask, stride, base_offset, bulk_base)) {
+      std::memcpy(&data_[bulk_base], src, static_cast<size_t>(64) * stride);
+      return;
+    }
     for (uint32_t lane = 0; lane < 64; ++lane) {
       if (!(lane_mask & (1ULL << lane)))
         continue;
@@ -181,6 +192,28 @@ public:
   uint8_t *data() { return data_.data(); }
 
 private:
+  bool contiguous_full_wave_access(const uint64_t *addrs, uint64_t lane_mask, uint32_t stride,
+                                   uint32_t base_offset, uint32_t &bulk_base) const {
+    if (stride == 0)
+      return false;
+    if (lane_mask != ~uint64_t{0})
+      return false;
+
+    uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[0])) + base_offset;
+    uint64_t total = static_cast<uint64_t>(stride) * 64u;
+    if (base > data_.size() || total > data_.size() - base)
+      return false;
+
+    for (uint32_t lane = 1; lane < 64; ++lane) {
+      uint64_t lane_addr = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
+      if (lane_addr != base + static_cast<uint64_t>(lane) * stride)
+        return false;
+    }
+
+    bulk_base = static_cast<uint32_t>(base);
+    return true;
+  }
+
   std::vector<uint8_t> data_;
 };
 
