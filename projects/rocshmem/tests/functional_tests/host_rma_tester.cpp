@@ -303,6 +303,79 @@ void HostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
       break;
     }
 
+    // status={0,1,0,1}: PE 0 writes indices 0,2; PE 1 waits on those two (skips 1,3).
+    // Also exercises wait_until_all_vector with per-element vals and same status mask.
+    case HostWaitUntilAllStatusTestType: {
+      const int status[WAIT_NELEMS] = {0, 1, 0, 1};
+      long vals_arr[WAIT_NELEMS];
+      for (size_t i = 0; i < WAIT_NELEMS; i++) vals_arr[i] = static_cast<long>(i + 1);
+      if (my_pe == 0) {
+        rocshmem_long_atomic_add(wait_buf + 0, vals_arr[0], peer);
+        rocshmem_long_atomic_add(wait_buf + 2, vals_arr[2], peer);
+        rocshmem_quiet();
+      } else {
+        rocshmem_long_wait_until_all(wait_buf, WAIT_NELEMS, status,
+                                     ROCSHMEM_CMP_NE, 0L);
+        rocshmem_long_wait_until_all_vector(wait_buf, WAIT_NELEMS, status,
+                                            ROCSHMEM_CMP_EQ, vals_arr);
+      }
+      break;
+    }
+
+    // status={1,0,0,0}: PE 0 writes index 1; PE 1 waits for any (skips index 0).
+    // Also exercises wait_until_any_vector with same status mask.
+    case HostWaitUntilAnyStatusTestType: {
+      const int status[WAIT_NELEMS] = {1, 0, 0, 0};
+      long vals_arr[WAIT_NELEMS];
+      for (size_t i = 0; i < WAIT_NELEMS; i++) vals_arr[i] = static_cast<long>(i + 1);
+      if (my_pe == 0) {
+        rocshmem_long_atomic_add(wait_buf + 1, vals_arr[1], peer);
+        rocshmem_quiet();
+      } else {
+        p2p_result_idx = rocshmem_long_wait_until_any(wait_buf, WAIT_NELEMS,
+                                                       status, ROCSHMEM_CMP_NE, 0L);
+        size_t vec_idx = rocshmem_long_wait_until_any_vector(wait_buf, WAIT_NELEMS,
+                                                              status, ROCSHMEM_CMP_EQ,
+                                                              vals_arr);
+        if (p2p_result_idx != vec_idx) {
+          std::cerr << "[PE " << my_pe << "] WaitUntilAnyStatus: scalar idx="
+                    << p2p_result_idx << " vector idx=" << vec_idx << " mismatch\n";
+          rocshmem_global_exit(1);
+        }
+      }
+      break;
+    }
+
+    // status={1,0,0,1}: PE 0 writes index 2; PE 1 waits for some (skips 0 and 3).
+    // Also exercises wait_until_some_vector with same status mask.
+    case HostWaitUntilSomeStatusTestType: {
+      const int status[WAIT_NELEMS] = {1, 0, 0, 1};
+      long vals_arr[WAIT_NELEMS];
+      for (size_t i = 0; i < WAIT_NELEMS; i++) vals_arr[i] = static_cast<long>(i + 1);
+      size_t indices[WAIT_NELEMS];
+      size_t vec_indices[WAIT_NELEMS];
+      if (my_pe == 0) {
+        rocshmem_long_atomic_add(wait_buf + 2, vals_arr[2], peer);
+        rocshmem_quiet();
+      } else {
+        p2p_result_ncompleted = rocshmem_long_wait_until_some(wait_buf, WAIT_NELEMS,
+                                                               indices, status,
+                                                               ROCSHMEM_CMP_NE, 0L);
+        p2p_result_idx = (p2p_result_ncompleted > 0) ? indices[0] : SIZE_MAX;
+        size_t vec_ncompleted = rocshmem_long_wait_until_some_vector(wait_buf, WAIT_NELEMS,
+                                                                      vec_indices, status,
+                                                                      ROCSHMEM_CMP_EQ,
+                                                                      vals_arr);
+        if (vec_ncompleted == 0 || vec_indices[0] != p2p_result_idx) {
+          std::cerr << "[PE " << my_pe << "] WaitUntilSomeStatus: scalar idx="
+                    << p2p_result_idx << " vector idx="
+                    << (vec_ncompleted > 0 ? vec_indices[0] : SIZE_MAX) << " mismatch\n";
+          rocshmem_global_exit(1);
+        }
+      }
+      break;
+    }
+
     default:
       break;
   }
@@ -510,6 +583,52 @@ void HostRmaTester::verifyResults(size_t size) {
             wait_buf[p2p_result_idx] != vals_arr[p2p_result_idx]) {
           std::cerr << "[PE " << my_pe << "] WaitUntilSomeVector: ncompleted="
                     << p2p_result_ncompleted << " idx=" << p2p_result_idx << "\n";
+          rocshmem_global_exit(1);
+        }
+      }
+      break;
+
+    // status={0,1,0,1}: only indices 0 and 2 were written and waited on.
+    case HostWaitUntilAllStatusTestType:
+      if (my_pe == 1) {
+        for (size_t i : {0u, 2u}) {
+          long expected = static_cast<long>(i + 1);
+          if (wait_buf[i] != expected) {
+            std::cerr << "[PE " << my_pe << "] WaitUntilAllStatus: wait_buf[" << i
+                      << "] expected " << expected << " got " << wait_buf[i] << "\n";
+            rocshmem_global_exit(1);
+          }
+        }
+      }
+      break;
+
+    // status={1,0,0,0}: PE 0 wrote index 1; returned idx must be 1.
+    case HostWaitUntilAnyStatusTestType:
+      if (my_pe == 1) {
+        if (p2p_result_idx != 1) {
+          std::cerr << "[PE " << my_pe << "] WaitUntilAnyStatus: expected idx=1 got "
+                    << p2p_result_idx << "\n";
+          rocshmem_global_exit(1);
+        }
+        if (wait_buf[1] != 2L) {
+          std::cerr << "[PE " << my_pe << "] WaitUntilAnyStatus: wait_buf[1] expected 2 got "
+                    << wait_buf[1] << "\n";
+          rocshmem_global_exit(1);
+        }
+      }
+      break;
+
+    // status={1,0,0,1}: PE 0 wrote index 2; returned idx must be 2.
+    case HostWaitUntilSomeStatusTestType:
+      if (my_pe == 1) {
+        if (p2p_result_ncompleted == 0 || p2p_result_idx != 2) {
+          std::cerr << "[PE " << my_pe << "] WaitUntilSomeStatus: expected idx=2 got "
+                    << p2p_result_idx << " ncompleted=" << p2p_result_ncompleted << "\n";
+          rocshmem_global_exit(1);
+        }
+        if (wait_buf[2] != 3L) {
+          std::cerr << "[PE " << my_pe << "] WaitUntilSomeStatus: wait_buf[2] expected 3 got "
+                    << wait_buf[2] << "\n";
           rocshmem_global_exit(1);
         }
       }

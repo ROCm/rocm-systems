@@ -432,6 +432,21 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (BackendType::IPC_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
+    case HostWaitUntilAllStatusTestType:
+      test_name = "Host_Wait_Until_All_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyStatusTestType:
+      test_name = "Host_Wait_Until_Any_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeStatusTestType:
+      test_name = "Host_Wait_Until_Some_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
     case PutmemSignalOnStreamTestType:
       test_name = "Putmem_Signal_On_Stream";
       testers.push_back(new PutmemSignalOnStreamTester(args));
@@ -1026,6 +1041,9 @@ bool Tester::peLaunchesKernel() {
     case HostWaitUntilAllVectorTestType:
     case HostWaitUntilAnyVectorTestType:
     case HostWaitUntilSomeVectorTestType:
+    case HostWaitUntilAllStatusTestType:
+    case HostWaitUntilAnyStatusTestType:
+    case HostWaitUntilSomeStatusTestType:
       is_launcher = true;
       break;
     default:

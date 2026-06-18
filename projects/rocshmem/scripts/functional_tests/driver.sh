@@ -160,6 +160,9 @@ declare -A TEST_NUMBERS=(
   ["host_wait_until_all_vector"]="143"
   ["host_wait_until_any_vector"]="144"
   ["host_wait_until_some_vector"]="145"
+  ["host_wait_until_all_status"]="146"
+  ["host_wait_until_any_status"]="147"
+  ["host_wait_until_some_status"]="148"
 )
 
 # Detect which runtime to use
@@ -781,6 +784,9 @@ TestHostRma() { #AIROCSHMEM-419
   ExecTest  "host_wait_until_all_vector" 2        1      1
   ExecTest  "host_wait_until_any_vector" 2        1      1
   ExecTest  "host_wait_until_some_vector" 2       1      1
+  ExecTest  "host_wait_until_all_status" 2        1      1
+  ExecTest  "host_wait_until_any_status" 2        1      1
+  ExecTest  "host_wait_until_some_status" 2       1      1
   # Concurrency tests — configurable PE count (IPC_HOST_NPES, default 4)
   ExecTest  "host_amo_all_pes"    $npes    1      1
   ExecTest  "host_amo_self"       $npes    1      1
