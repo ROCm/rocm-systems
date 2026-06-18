@@ -50,6 +50,9 @@ device:
   Unit_hipDeviceSetCacheConfig_Positive_Basic:
     <<: *level_2
     tags: [config]
+  Unit_hipDeviceSetCacheConfig_Positive_Carveout:
+    <<: *level_2
+    tags: [config]
   Unit_hipDeviceGetCacheConfig_Positive_Default:
     <<: *level_2
     tags: [config]
@@ -60,7 +63,7 @@ device:
     <<: *level_2
     # Disabling tests which no longer behave the same on nvidia platform
     disabled: [nvidia_windows]
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipDeviceSynchronize_Functional:
     <<: *level_2
     # Disabling tests which no longer behave the same on nvidia platform
@@ -95,13 +98,13 @@ device:
     tags: [multigpu, query]
   Unit_hipGetDeviceProperties_ArchPropertiesTst:
     <<: *level_2
-    tags: [query]
+    tags: [query, smoke]
   Unit_hipGetDeviceProperties_NegTst:
     <<: *level_2
     tags: [query]
   Unit_hipRuntimeGetVersion_Positive:
     <<: *level_2
-    tags: [init]
+    tags: [init, smoke]
   Unit_hipRuntimeGetVersion_Negative:
     <<: *level_2
     tags: [init]
@@ -113,7 +116,7 @@ device:
     tags: [config]
   Unit_hipGetSetDeviceFlags_SetThenGet:
     <<: *level_2
-    tags: [config]
+    tags: [config, smoke]
   Unit_hipGetSetDeviceFlags_Threaded:
     <<: *level_2
     tags: [config]
@@ -128,7 +131,7 @@ device:
     tags: [config]
   Unit_hipSetDevice_BasicSetGet:
     <<: *level_2
-    tags: [query]
+    tags: [query, smoke]
   Unit_hipGetSetDevice_MultiThreaded:
     <<: *level_2
     tags: [query]
@@ -159,12 +162,12 @@ device:
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_UUID_setEnv_Thread:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_hipDeviceAPUCheck:
     <<: *level_2
@@ -301,7 +304,7 @@ device:
     tags: [config]
   Unit_hipInit_Positive:
     <<: *level_2
-    tags: [init]
+    tags: [init, smoke]
   Unit_hipInit_Negative:
     <<: *level_2
     # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
@@ -310,7 +313,7 @@ device:
     tags: [init]
   Unit_hipDriverGetVersion_Positive:
     <<: *level_2
-    tags: [init]
+    tags: [init, smoke]
   Unit_hipDriverGetVersion_Negative:
     <<: *level_2
     tags: [init]
@@ -370,7 +373,7 @@ device:
     <<: *level_2
     # (amd_linux) SWDEV-511679 : Below tests fail in stress test
     # (amd_wsl) Note: hsa_amd_ipc_ is dummy
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
   Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process:
     <<: *level_2
     # Note: Windows disabled

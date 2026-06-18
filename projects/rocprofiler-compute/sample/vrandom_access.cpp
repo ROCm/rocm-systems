@@ -33,8 +33,6 @@ __global__ void randomAccessKernel(int *d_data, int N, unsigned int *d_seeds)
 
 int main()
 {
-    hipError_t hip_status;
-
     const int N = 1 << 24; // Try 16M elements to exceed cache
     size_t size = N * sizeof(int);
 
@@ -64,9 +62,13 @@ int main()
     dim3 blockSize(64);
     dim3 gridSize((N + blockSize.x - 1) / blockSize.x);
 
-    // Launch kernel
-    hipLaunchKernelGGL(randomAccessKernel, gridSize, blockSize, 0, 0, d_data, N, d_seeds);
-    hip_status = hipDeviceSynchronize();
+    // Repeat the launch so the profile is robust.
+    const int kIters = 30;
+    for (int i = 0; i < kIters; ++i)
+    {
+        hipLaunchKernelGGL(randomAccessKernel, gridSize, blockSize, 0, 0, d_data, N, d_seeds);
+    }
+    HIP_ASSERT(hipDeviceSynchronize());
 
     HIP_ASSERT(hipMemcpy(h_data.data(), d_data, size, hipMemcpyDeviceToHost));
 

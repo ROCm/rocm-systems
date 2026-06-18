@@ -618,7 +618,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.virtualMemAllocGranularityMinimum_ =
       static_cast<size_t>(palProp.gpuMemoryProperties.virtualMemAllocGranularity);
   info_.virtualMemAllocGranularityRecommended_ =
-      static_cast<size_t>(palProp.gpuMemoryProperties.virtualMemAllocGranularity);
+      static_cast<size_t>(palProp.gpuMemoryProperties.largePageSizeInBytes);
   info_.vgprAllocGranularity_ = palProp.gfxipProperties.shaderCore.vgprAllocGranularity;
   info_.vgprsPerSimd_ = palProp.gfxipProperties.shaderCore.vgprsPerSimd;
   info_.availableVGPRs_ = palProp.gfxipProperties.shaderCore.numAvailableVgprs;

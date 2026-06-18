@@ -118,6 +118,10 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_qp->lkey = htobe32(nic.heap_mr->lkey);
   gpu_qp->qp_num = qp.qpn;
   gpu_qp->inline_threshold = inline_threshold;
+
+  /* Base Heap information */
+  gpu_qp->base_heap = (uintptr_t) heap.get_local_heap_base();
+  gpu_qp->base_heap_size = heap.get_size();
 }
 
 }  // namespace rocshmem

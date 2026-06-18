@@ -30,7 +30,6 @@
 #include "util.hpp"
 
 #include <cxxabi.h>
-#include <cstring>
 #include <fstream>
 
 namespace rocprofiler
@@ -39,8 +38,6 @@ namespace att_wrapper
 {
 struct trace_data_t
 {
-    uint8_t*  data{nullptr};
-    uint64_t  size{0};
     ToolData* tool{nullptr};
 
     int gfxip = 0;
@@ -144,8 +141,6 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
         auto&   wave           = reinterpret_cast<wave_t*>(trace_events)[wave_n];
         int64_t prev_inst_time = wave.begin_time;
 
-        WaveFile(tool.config, wave);
-
         for(size_t j = 0; j < wave.instructions_size; j++)
         {
             auto& inst = wave.instructions_array[j];
@@ -159,6 +154,8 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
             line.idle += std::max<int64_t>(inst.time - prev_inst_time, 0);
             prev_inst_time = std::max(prev_inst_time, inst.time + inst.duration);
         }
+
+        WaveFile(tool.config, wave);
     }
 
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
@@ -168,67 +165,13 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
 }
 
-uint64_t
-copy_trace_data(uint8_t** buffer, uint64_t* buffer_size, void* userdata)
-{
-    trace_data_t& data = *reinterpret_cast<trace_data_t*>(userdata);
-    *buffer_size       = data.size;
-    *buffer            = data.data;
-    data.size          = 0;
-    return *buffer_size;
-}
-
-rocprofiler_thread_trace_decoder_status_t
-isa_callback(char*     isa_instruction,
-             uint64_t* isa_memory_size,
-             uint64_t* isa_size,
-             pcinfo_t  pc,
-             void*     userdata)
-{
-    C_API_BEGIN
-    CHECK_TRUE(userdata);
-    trace_data_t& trace_data = *reinterpret_cast<trace_data_t*>(userdata);
-    CHECK_TRUE(trace_data.tool);
-    ToolData& tool = *trace_data.tool;
-
-    std::shared_ptr<Instruction> instruction{nullptr};
-
-    try
-    {
-        CodeLine& line = tool.get(pc);
-        instruction    = line.code_line;
-    } catch(std::exception& e)
-    {
-        if (!supress) WARNING(pc.code_object_id << ":" << pc.address << ' ' << e.what());
-        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
-    }
-
-    if(!instruction.get()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    {
-        size_t tmp_isa_size = *isa_size;
-        *isa_size           = instruction->inst.size();
-
-        if(*isa_size > tmp_isa_size) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
-    }
-
-    memcpy(isa_instruction, instruction->inst.data(), *isa_size);
-    *isa_memory_size = instruction->size;
-
-    C_API_END
-    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
-}
-
-ToolData::ToolData(const std::vector<char>& _data, WaveConfig& _config)
+ToolData::ToolData(const std::vector<char>& _data, WaveConfig& _config, rocprof_trace_decoder_handle_t decoder)
 : cfile(_config.code)
 , config(_config)
 {
-    trace_data_t data{.data = (uint8_t*) _data.data(),
-                      .size = _data.size(),
-                      .tool = this};
+    trace_data_t data{.tool = this};
 
-    auto status = rocprof_trace_decoder_parse_data(copy_trace_data, get_trace_data, isa_callback, &data);
-    CHECK_DECODER(status);
+    CHECK_DECODER(rocprof_trace_decoder_parse(decoder, _data.data(), _data.size(), get_trace_data, &data));
     if (std::getenv("AM_DONT_CHECK") != nullptr) return;
 
     CHECK_TRUE(data.gfxip >= 9 && data.gfxip <= 12);
@@ -271,22 +214,25 @@ ToolData::get(pcinfo_t _pc)
 
     // Attempt to disassemble full kernel
     try {
-        rocprofiler::sdk::codeobj::segment::CodeobjTableTranslator symbol_table;
+        rocprof_trace_decoder::codeobj::CodeobjTableTranslator symbol_table;
         for(auto& [vaddr, symbol] : cfile->table->getSymbolMap(_pc.code_object_id))
             symbol_table.insert({symbol.vaddr, symbol.mem_size, _pc.code_object_id});
 
-        auto addr_range = symbol_table.find_codeobj_in_range(_pc.address);
+        rocprof_trace_decoder::codeobj::address_range_t addr_range;
+        if(!symbol_table.find_codeobj_in_range(_pc.address, addr_range))
+            throw std::out_of_range("No code object found for address");
+
         try
         {
-            auto symbol = cfile->table->getSymbolMap(_pc.code_object_id).at(addr_range.address);
+            auto symbol = cfile->table->getSymbolMap(_pc.code_object_id).at(addr_range.addr);
             auto pair   = KernelName{symbol.name, demangle(symbol.name)};
-            cfile->kernel_names.emplace(pcinfo_t{addr_range.address, _pc.code_object_id}, pair);
+            cfile->kernel_names.emplace(pcinfo_t{addr_range.addr, _pc.code_object_id}, pair);
         } catch(...)
         {
-            WARNING("Could not find kernel symbol for " << _pc.code_object_id << ':' << addr_range.address);
+            WARNING("Could not find kernel symbol for " << _pc.code_object_id << ':' << addr_range.addr);
         }
 
-        for(auto addr = addr_range.address; addr < addr_range.address + addr_range.size;)
+        for(auto addr = addr_range.addr; addr < addr_range.addr + addr_range.size;)
         {
             pcinfo_t info{.address = addr, .code_object_id = addr_range.id};
             auto& cline = *(isa_map.emplace(info, std::make_unique<CodeLine>()).first->second);

@@ -20,7 +20,8 @@ TOOLS_DIR = SCRIPT_DIR
 SOC_ROOT = REPO_ROOT / "src" / "rocprof_compute_soc"
 ANALYSIS_CONFIGS = SOC_ROOT / "analysis_configs"
 
-TEMPLATE_FILE = ANALYSIS_CONFIGS / "gfx9_config_template.yaml"
+GFX9_TEMPLATE = ANALYSIS_CONFIGS / "gfx9_config_template.yaml"
+GFX11_TEMPLATE = ANALYSIS_CONFIGS / "gfx11_config_template.yaml"
 HASH_JSON = REPO_ROOT / "src" / "utils" / ".config_hashes.json"
 BACKUP_DIR = SCRIPT_DIR / "backups"
 
@@ -108,7 +109,15 @@ def main():
     if not VERIFY_SCRIPT.exists():
         fatal("verify_against_config_template.py not found")
 
-    rc = run([PYTHON, VERIFY_SCRIPT, ANALYSIS_CONFIGS, TEMPLATE_FILE])
+    rc = run([
+        PYTHON,
+        VERIFY_SCRIPT,
+        ANALYSIS_CONFIGS,
+        "--gfx9-template",
+        GFX9_TEMPLATE,
+        "--gfx11-template",
+        GFX11_TEMPLATE,
+    ])
     if rc != 0:
         fatal("Template / architecture verification failed")
 
@@ -145,7 +154,15 @@ def main():
                 sys.exit(rc)
 
             # Re-verify after apply
-            rc = run([PYTHON, VERIFY_SCRIPT, ANALYSIS_CONFIGS, TEMPLATE_FILE])
+            rc = run([
+                PYTHON,
+                VERIFY_SCRIPT,
+                ANALYSIS_CONFIGS,
+                "--gfx9-template",
+                GFX9_TEMPLATE,
+                "--gfx11-template",
+                GFX11_TEMPLATE,
+            ])
             sys.exit(rc)
 
         sys.exit(0)
@@ -167,7 +184,12 @@ def main():
             sys.exit(0)
 
         # Back up the things we mutate
-        backup_path = backup([ANALYSIS_CONFIGS, TEMPLATE_FILE, HASH_JSON])
+        backup_path = backup([
+            ANALYSIS_CONFIGS,
+            GFX9_TEMPLATE,
+            GFX11_TEMPLATE,
+            HASH_JSON,
+        ])
 
         try:
             # 1) Update template
@@ -178,7 +200,7 @@ def main():
                 PYTHON,
                 PARSE_TEMPLATE_SCRIPT,
                 new_arch_dir,
-                TEMPLATE_FILE,
+                GFX9_TEMPLATE,
                 "--latest-arch",
                 new_latest,
             ])
@@ -211,7 +233,15 @@ def main():
                         f.unlink()
 
             # 3) Re-verify everything against updated template
-            rc = run([PYTHON, VERIFY_SCRIPT, ANALYSIS_CONFIGS, TEMPLATE_FILE])
+            rc = run([
+                PYTHON,
+                VERIFY_SCRIPT,
+                ANALYSIS_CONFIGS,
+                "--gfx9-template",
+                GFX9_TEMPLATE,
+                "--gfx11-template",
+                GFX11_TEMPLATE,
+            ])
             if rc != 0:
                 raise RuntimeError("Post-promotion verification failed")
 
@@ -242,7 +272,10 @@ def main():
 
         except Exception as e:
             print(f"\nERROR: {e}")
-            restore(backup_path, [ANALYSIS_CONFIGS, TEMPLATE_FILE, HASH_JSON])
+            restore(
+                backup_path,
+                [ANALYSIS_CONFIGS, GFX9_TEMPLATE, GFX11_TEMPLATE, HASH_JSON],
+            )
             sys.exit(1)
 
     # --------------------------------------------------------

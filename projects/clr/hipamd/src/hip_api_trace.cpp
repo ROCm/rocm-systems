@@ -870,6 +870,8 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
 hipError_t hipLibraryUnload(hipLibrary_t library);
 hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name);
 hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library);
+hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name);
+hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name);
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library);
 hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
@@ -890,6 +892,34 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
                                  hipDevice_t dev);
 hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
 hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
+hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+                             unsigned int flags);
+hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
+                                        unsigned int flags, int priority);
+hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
+                                   hipDevResourceType type);
+hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
+                                        const hipDevResource* input,
+                                        hipDevResource* remainder,
+                                        unsigned int flags, unsigned int minCount);
+hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
+                                 const hipDevResource* input, hipDevResource* remainder,
+                                 unsigned int flags,
+                                 hipDevSmResourceGroupParams* groupParams);
+hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* desc,
+                                       hipDevResource* resources,
+                                       unsigned int nbResources);
+hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device);
+hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
+                                          hipDevResourceType type);
+hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId);
+hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
+                                    hipDevResourceType type);
+hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event);
+hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 }  // namespace hip
 
 namespace hip {
@@ -1273,6 +1303,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipOccupancyMaxActiveClusters_fn = hip::hipOccupancyMaxActiveClusters;
   ptrDispatchTable->hipOccupancyMaxPotentialClusterSize_fn =
       hip::hipOccupancyMaxPotentialClusterSize;
+  ptrDispatchTable->hipLibraryGetGlobal_fn = hip::hipLibraryGetGlobal;
+  ptrDispatchTable->hipLibraryGetManaged_fn = hip::hipLibraryGetManaged;
   ptrDispatchTable->hipPeekAtLastError_fn = hip::hipPeekAtLastError;
   ptrDispatchTable->hipPointerGetAttribute_fn = hip::hipPointerGetAttribute;
   ptrDispatchTable->hipPointerGetAttributes_fn = hip::hipPointerGetAttributes;
@@ -1452,6 +1484,21 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipKernelGetAttribute_fn = hip::hipKernelGetAttribute;
   ptrDispatchTable->hipKernelSetAttribute_fn = hip::hipKernelSetAttribute;
   ptrDispatchTable->hipKernelGetFunction_fn = hip::hipKernelGetFunction;
+  ptrDispatchTable->hipGreenCtxCreate_fn = hip::hipGreenCtxCreate;
+  ptrDispatchTable->hipExecutionCtxDestroy_fn = hip::hipExecutionCtxDestroy;
+  ptrDispatchTable->hipExecutionCtxStreamCreate_fn = hip::hipExecutionCtxStreamCreate;
+  ptrDispatchTable->hipDeviceGetDevResource_fn = hip::hipDeviceGetDevResource;
+  ptrDispatchTable->hipDevSmResourceSplitByCount_fn = hip::hipDevSmResourceSplitByCount;
+  ptrDispatchTable->hipDevSmResourceSplit_fn = hip::hipDevSmResourceSplit;
+  ptrDispatchTable->hipDevResourceGenerateDesc_fn = hip::hipDevResourceGenerateDesc;
+  ptrDispatchTable->hipDeviceGetExecutionCtx_fn = hip::hipDeviceGetExecutionCtx;
+  ptrDispatchTable->hipExecutionCtxGetDevResource_fn = hip::hipExecutionCtxGetDevResource;
+  ptrDispatchTable->hipExecutionCtxGetDevice_fn = hip::hipExecutionCtxGetDevice;
+  ptrDispatchTable->hipExecutionCtxGetId_fn = hip::hipExecutionCtxGetId;
+  ptrDispatchTable->hipStreamGetDevResource_fn = hip::hipStreamGetDevResource;
+  ptrDispatchTable->hipExecutionCtxRecordEvent_fn = hip::hipExecutionCtxRecordEvent;
+  ptrDispatchTable->hipExecutionCtxSynchronize_fn = hip::hipExecutionCtxSynchronize;
+  ptrDispatchTable->hipExecutionCtxWaitEvent_fn = hip::hipExecutionCtxWaitEvent;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2157,6 +2204,25 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipMemPrefetchBatchAsync_fn, 517);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
 HIP_ENFORCE_ABI(HipDispatchTable, hipOccupancyMaxPotentialClusterSize_fn, 518);
 HIP_ENFORCE_ABI(HipDispatchTable, hipOccupancyMaxActiveClusters_fn, 519);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 28
+HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxCreate_fn, 520);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxDestroy_fn, 521);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxStreamCreate_fn, 522);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetDevResource_fn, 523);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDevSmResourceSplitByCount_fn, 524);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDevSmResourceSplit_fn, 525);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDevResourceGenerateDesc_fn, 526);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetExecutionCtx_fn, 527);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxGetDevResource_fn, 528);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxGetDevice_fn, 529);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxGetId_fn, 530);
+HIP_ENFORCE_ABI(HipDispatchTable, hipStreamGetDevResource_fn, 531);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxRecordEvent_fn, 532);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxSynchronize_fn, 533);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxWaitEvent_fn, 534);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetGlobal_fn, 535);
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetManaged_fn, 536);
 
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
@@ -2164,9 +2230,9 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipOccupancyMaxActiveClusters_fn, 519);
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 520)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 537)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 27,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 29,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

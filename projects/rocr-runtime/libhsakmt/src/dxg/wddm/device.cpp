@@ -152,6 +152,8 @@ bool WDDMDevice::QuerySegmentInfo()
 
     SegmentInfo info;
     info.segment_id = i;
+    info.is_aperture = seg.Aperture;
+    info.is_system_memory = seg.SegmentProperties.SystemMemory;
 
     if (seg.Aperture) {
       info.kind = SegmentKind::kAperture;
@@ -239,19 +241,43 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
 
     *available_bytes = LocalHeapSize() - usedVis - usedInv;
   } else {
-    // APU - NonLocal memory
-    if (!FindSegmentId(SegmentKind::kSystemMemory, &segmentId))
+    // APU: the shared-system-memory budget is exposed as aperture segments
+    // with the SystemMemory bit set (collapsed to kAperture above), so
+    // FindSegmentId(kSystemMemory) always missed. Sum BytesResident across
+    // every aperture+system_memory segment for the residency footprint.
+    const uint64_t budget = NonLocalHeapSize();
+    if (budget == 0) {
+      // No budget from WKMI — bail rather than underflow VramAvail.
       return HSA_STATUS_ERROR;
+    }
 
-    memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-    stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    stats.AdapterLuid = adapter_luid_;
-    stats.QuerySegment.SegmentId = segmentId;
-    ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-    if (ret == 0)
-      usedNonLocal = stats.QueryResult.SegmentInformation.BytesResident;
+    bool found_any = false;
+    bool queried_any = false;
+    for (const auto& seg_info : segment_infos_) {
+      if (!seg_info.is_aperture || !seg_info.is_system_memory) {
+        continue;
+      }
+      found_any = true;
 
-    *available_bytes = NonLocalHeapSize() - usedNonLocal;
+      memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
+      stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+      stats.AdapterLuid = adapter_luid_;
+      stats.QuerySegment.SegmentId = seg_info.segment_id;
+      ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+      if (ret != 0) {
+        continue;
+      }
+      queried_any = true;
+      usedNonLocal += stats.QueryResult.SegmentInformation.BytesResident;
+    }
+
+    if (!found_any || !queried_any) {
+      return HSA_STATUS_ERROR;
+    }
+
+    // Virtual apertures can double-count residency — saturate at zero
+    // instead of underflowing.
+    *available_bytes = (usedNonLocal >= budget) ? 0 : (budget - usedNonLocal);
   }
 
   return HSA_STATUS_SUCCESS;
@@ -527,13 +553,34 @@ bool WDDMDevice::CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr) {
   return false;
 }
 
-void WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
+bool WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
   D3DKMT_DESTROYSYNCHRONIZATIONOBJECT args = {0};
   args.hSyncObject = handle;
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTDestroySynchronizationObject(&args));
-  if (ret != STATUS_SUCCESS)
+  if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
+    return false;
+  }
+  return true;
+}
+
+bool WDDMDevice::OpenSyncobjFromNtHandle(void *nt_handle,
+                                         D3DKMT_HANDLE *out_handle) {
+  if (nt_handle == nullptr || out_handle == nullptr) return false;
+
+  D3DKMT_OPENSYNCOBJECTFROMNTHANDLE2 args = {0};
+  args.hNtHandle = nt_handle;
+  args.hDevice = device_;
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTOpenSyncObjectFromNtHandle2(&args));
+  if (ret != STATUS_SUCCESS) {
+    pr_err("D3DKMTOpenSyncObjectFromNtHandle2 failed: 0x%x\n", ret);
+    return false;
+  }
+
+  *out_handle = args.hSyncObject;
+  return true;
 }
 
 void WDDMDevice::InitCmdbufInfo(void) {

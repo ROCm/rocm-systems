@@ -6,7 +6,9 @@
 
 /**
  * @file SuspendResumeMPITests.cpp
- * @brief Multi-process tests for ncclCommMemSuspend / ncclCommMemResume / ncclCommMemStats.
+ * @brief Multi-process tests for the suspend/resume feature -- both the
+ *        internal ncclCommMemSuspend/Resume/Stats path and the public
+ *        ncclCommSuspend/Resume/MemStats API.
  *
  * The single-process unit-test suite in `test/mem_manager/MemManagerTests.cpp`
  * covers all early-return error paths, `ncclCommMemStats`, and the manager
@@ -33,30 +35,40 @@
  * not the allocator. If the runtime really lacks raw VMM, hipMemCreate fails
  * with an explicit HIP error code instead of a misleading version skip.
  *
- * Two suites:
+ * Suites:
  *   - MemManagerAnyRanks - each rank runs the same local Suspend/Resume
  *     scenario in lockstep. The cross-rank bootstrapBarrier inside
  *     ncclCommMemSuspend / ncclCommMemResume keeps all ranks in sync, so
  *     every test in this suite passes on any np >= 1.
  *   - MemManagerTwoRank   - peer-coupled scenarios that need exactly 2 ranks
  *     (rank 0 exporter, rank 1 importer).
+ *   - SuspendResumeBasic / MemStats / CollectiveIntegrity / Lifecycle / Group
+ *     / ArgValidation / MemStatsValidation - public API tests for
+ *     ncclCommSuspend / ncclCommResume / ncclCommMemStats. Need np >= 2.
  *
  * Run (a single mpirun -np 2 invocation runs the entire file):
- *   mpirun -np 2 ./rccl-UnitTestsMPI --gtest_filter='MemManager*'
+ *   mpirun -np 2 ./rccl-UnitTestsMPI --gtest_filter='MemManager*:SuspendResume*'
  *
- * Or, if you want to focus on one suite:
+ * Or, if you want to focus on one group of suites:
  *   mpirun -np 1 ./rccl-UnitTestsMPI --gtest_filter='MemManagerAnyRanks.*'
  *   mpirun -np 2 ./rccl-UnitTestsMPI --gtest_filter='MemManagerTwoRank.*'
+ *   mpirun -np 2 ./rccl-UnitTestsMPI --gtest_filter='SuspendResume*'
  */
 
+#include "DeviceBufferHelpers.hpp"
 #include "MPITestBase.hpp"
+#include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <iomanip>
+#include <iostream>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -68,6 +80,8 @@
 #include "proxy.h"
 
 using namespace MPITestConstants;
+using namespace RCCLTestGuards;
+using namespace RCCLTestHelpers;
 
 // ---------------------------------------------------------------------------
 // VMM helpers
@@ -97,7 +111,7 @@ void allocateVmmPosixFd(int dev, size_t requestedSize, VmmAlloc* out)
     prop.type                            = hipMemAllocationTypePinned;
     prop.location.type                   = hipMemLocationTypeDevice;
     prop.location.id                     = dev;
-    prop.requestedHandleTypes            = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
     prop.allocFlags.gpuDirectRDMACapable = 1;
 
     size_t granularity = 0;
@@ -137,7 +151,7 @@ void reserveVaOnly(int dev, size_t requestedSize, VmmAlloc* out)
     prop.type                            = hipMemAllocationTypePinned;
     prop.location.type                   = hipMemLocationTypeDevice;
     prop.location.id                     = dev;
-    prop.requestedHandleTypes            = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
     prop.allocFlags.gpuDirectRDMACapable = 1;
 
     size_t granularity = 0;
@@ -155,14 +169,21 @@ void reserveVaOnly(int dev, size_t requestedSize, VmmAlloc* out)
     out->handle = 0;
 }
 
-// Tear down whatever Resume / the test left mapped at out->pdev. Safe whether
-// the entry is in the Active state (mapped) or Released state (unmapped) -
-// hipMemUnmap returns an error on a reserved-but-unmapped VA which we ignore.
+// Mirrors ncclCuMemFree: recover the live handle from the VA (cached
+// a->handle is stale after Suspend/Resume). Retain bumps refcount by 1, so
+// release twice. Reserved-but-unmapped VA falls through to AddressFree.
 void releaseVmm(VmmAlloc* a)
 {
     if (a == nullptr || a->pdev == 0) return;
-    (void)hipMemUnmap(a->pdev, a->size);
-    if (a->handle != 0) (void)hipMemRelease(a->handle);
+
+    hipMemGenericAllocationHandle_t live = 0;
+    if (hipMemRetainAllocationHandle(&live, a->ptr) == hipSuccess) {
+        (void)hipMemRelease(live);
+        (void)hipMemUnmap(a->pdev, a->size);
+        (void)hipMemRelease(live);
+    } else {
+        (void)hipMemUnmap(a->pdev, a->size);
+    }
     (void)hipMemAddressFree(a->pdev, a->size);
     a->pdev   = 0;
     a->handle = 0;
@@ -196,23 +217,109 @@ void verifyCanaryReadback(void* ptr, size_t size, uint8_t pattern, const std::st
                     << " not preserved";
 }
 
-// Cleanup pattern shared by every test that does Track + later Untrack on a
-// VMM entry that may have gone through Suspend/Resume:
-//   - Resume installs a NEW handle into entry->handle (the original one we
-//     created via hipMemCreate is long gone after Suspend's hipMemRelease).
-//   - ncclMemUntrack drops the linked-list entry but does NOT unmap or release
-//     anything HIP-side.
-// So we snapshot the live handle out of the entry FIRST, then Untrack, then
-// releaseVmm() with that handle.
+// ncclMemUntrack + releaseVmm. Mirrors the ncclCudaFree pattern.
 void untrackAndRelease(struct ncclComm* comm, void* ptr, VmmAlloc* a)
 {
-    ncclMemManager* mgr = comm->memManager;
-    ASSERT_NE(mgr, nullptr);
-    ncclDynMemEntry* entry = mgr->entries;
-    while (entry != nullptr && entry->ptr != ptr) entry = entry->next;
-    if (entry != nullptr) a->handle = entry->handle;
-    ASSERT_EQ(ncclMemUntrack(mgr, ptr, a->size), ncclSuccess);
+    ASSERT_NE(comm, nullptr);
+    ASSERT_NE(comm->memManager, nullptr);
+    ASSERT_EQ(ncclMemUntrack(comm->memManager, ptr, a->size), ncclSuccess);
     releaseVmm(a);
+}
+
+// Snapshot of manager state taken before the test adds its own entries.
+// With NCCL_CUMEM_ENABLE=1 a freshly created comm already tracks internal
+// RCCL allocations (proxy P2P buffers, channel buffers etc.), so absolute
+// counters/sizes can't be asserted directly - tests must check deltas.
+struct MgrBaseline
+{
+    int      numEntries     = 0;
+    uint64_t cpuBackupUsage = 0;
+    uint64_t total          = 0;
+    uint64_t persist        = 0;
+    uint64_t suspendBytes   = 0;
+};
+
+MgrBaseline captureBaseline(struct ncclComm* comm)
+{
+    MgrBaseline b{};
+    EXPECT_NE(comm, nullptr);
+    EXPECT_NE(comm->memManager, nullptr);
+    b.numEntries     = comm->memManager->numEntries;
+    b.cpuBackupUsage = comm->memManager->cpuBackupUsage;
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemTotal,   &b.total),        ncclSuccess);
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemPersist, &b.persist),      ncclSuccess);
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemSuspend, &b.suspendBytes), ncclSuccess);
+    return b;
+}
+
+// Run one Suspend/Resume cycle to learn how much CPU backup the comm's
+// internal Offload entries consume - tests with their own Offload Track must
+// add their size on top of this baseline when checking cpuBackupUsage.
+uint64_t captureInternalOffloadCpuBackup(struct ncclComm* comm)
+{
+    EXPECT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
+    uint64_t v = comm->memManager->cpuBackupUsage;
+    EXPECT_EQ(ncclCommMemResume(comm), ncclSuccess);
+    return v;
+}
+
+// Find the entry tracking `ptr`. With internals tracked it's no longer
+// guaranteed to be at manager->entries[0].
+ncclDynMemEntry* findEntryByPtr(struct ncclComm* comm, void* ptr)
+{
+    for (auto* e = comm->memManager->entries; e != nullptr; e = e->next) {
+        if (e->ptr == ptr) return e;
+    }
+    return nullptr;
+}
+
+// Snapshot of GPU + CPU memory usage at one point in a Suspend/Resume cycle.
+// Combines what the manager tracks (ncclCommMemStats + cpuBackupUsage) with
+// what the OS reports for the process (hipMemGetInfo) so the caller can see
+// both bookkeeping and actual physical impact of Suspend/Resume.
+struct MemFootprint
+{
+    uint64_t mgrTotal        = 0;  // ncclStatGpuMemTotal     (bytes)
+    uint64_t mgrPersist      = 0;  // ncclStatGpuMemPersist   (bytes)
+    uint64_t mgrSuspendable  = 0;  // ncclStatGpuMemSuspend   (bytes)
+    uint64_t mgrSuspended    = 0;  // ncclStatGpuMemSuspended (0 / 1 flag)
+    uint64_t cpuBackupUsage  = 0;  // manager->cpuBackupUsage (bytes)
+    size_t   gpuFree         = 0;  // hipMemGetInfo free      (bytes)
+    size_t   gpuTotal        = 0;  // hipMemGetInfo total     (bytes)
+    size_t   gpuUsedByProc   = 0;  // gpuTotal - gpuFree      (bytes)
+};
+
+MemFootprint captureMemFootprint(struct ncclComm* comm)
+{
+    MemFootprint f{};
+    EXPECT_NE(comm, nullptr);
+    EXPECT_NE(comm->memManager, nullptr);
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemTotal,     &f.mgrTotal),       ncclSuccess);
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemPersist,   &f.mgrPersist),     ncclSuccess);
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemSuspend,   &f.mgrSuspendable), ncclSuccess);
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemSuspended, &f.mgrSuspended),   ncclSuccess);
+    f.cpuBackupUsage = comm->memManager->cpuBackupUsage;
+    EXPECT_EQ(hipMemGetInfo(&f.gpuFree, &f.gpuTotal), hipSuccess);
+    f.gpuUsedByProc = (f.gpuTotal > f.gpuFree) ? (f.gpuTotal - f.gpuFree) : 0;
+    return f;
+}
+
+// Pretty-print one footprint line. Kept on std::cout so the host test wrapper
+// captures it the same way as gtest's own output. Drop these prints (and the
+// helpers above) once we no longer need to eyeball the numbers.
+void printMemFootprint(int rank, const char* tag, const MemFootprint& f)
+{
+    constexpr double MiB = 1024.0 * 1024.0;
+    std::cout << "[MemFootprint rank=" << rank << "] " << tag << '\n'
+              << "    mgr.Total       = " << std::fixed << std::setprecision(2)
+              << (f.mgrTotal       / MiB) << " MiB\n"
+              << "    mgr.Persist     = " << (f.mgrPersist     / MiB) << " MiB\n"
+              << "    mgr.Suspendable = " << (f.mgrSuspendable / MiB) << " MiB\n"
+              << "    mgr.Suspended   = " << f.mgrSuspended << '\n'
+              << "    cpuBackupUsage  = " << (f.cpuBackupUsage / MiB) << " MiB\n"
+              << "    gpu.UsedByProc  = " << (f.gpuUsedByProc  / MiB) << " MiB"
+              << " (free " << (f.gpuFree / MiB)
+              << " / total " << (f.gpuTotal / MiB) << " MiB)" << std::endl;
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +463,8 @@ TEST_F(MemManagerAnyRanks, SuspendResume_LocalOffload_DataPreserved)
     ncclComm_t comm = getActiveCommunicator();
     ASSERT_NE(comm->memManager, nullptr);
 
+    const uint64_t internalOffload = captureInternalOffloadCpuBackup(comm);
+
     VmmAlloc a{};
     allocateVmmPosixFd(comm->cudaDev, 64 * 1024, &a);
 
@@ -363,19 +472,17 @@ TEST_F(MemManagerAnyRanks, SuspendResume_LocalOffload_DataPreserved)
                            hipMemHandleTypePosixFileDescriptor, ncclMemOffload),
               ncclSuccess);
 
-    // Pre-fill device buffer with a recognisable pattern so we can verify that
-    // Suspend's D2H copy and Resume's H2D restore round-trip the bytes.
     std::vector<uint8_t> pattern(a.size);
     for (size_t i = 0; i < a.size; i++) pattern[i] = static_cast<uint8_t>(i * 31u);
     ASSERT_EQ(hipMemcpy(a.ptr, pattern.data(), a.size, hipMemcpyHostToDevice), hipSuccess);
 
     ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
 
-    ncclDynMemEntry* entry = comm->memManager->entries;
+    ncclDynMemEntry* entry = findEntryByPtr(comm, a.ptr);
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(entry->state, ncclDynMemStateReleased);
     EXPECT_NE(entry->cpuBackup, nullptr);
-    EXPECT_EQ(comm->memManager->cpuBackupUsage, a.size);
+    EXPECT_EQ(comm->memManager->cpuBackupUsage, internalOffload + a.size);
 
     ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
     EXPECT_EQ(entry->state, ncclDynMemStateActive);
@@ -386,14 +493,15 @@ TEST_F(MemManagerAnyRanks, SuspendResume_LocalOffload_DataPreserved)
     ASSERT_EQ(hipMemcpy(roundtrip.data(), a.ptr, a.size, hipMemcpyDeviceToHost), hipSuccess);
     EXPECT_EQ(std::memcmp(roundtrip.data(), pattern.data(), a.size), 0);
 
-    ASSERT_EQ(ncclMemUntrack(comm->memManager, a.ptr, a.size), ncclSuccess);
-    releaseVmm(&a);
+    untrackAndRelease(comm, a.ptr, &a);
 }
 
 TEST_F(MemManagerAnyRanks, SuspendResume_PersistUntouched)
 {
     ncclComm_t comm = getActiveCommunicator();
     ASSERT_NE(comm->memManager, nullptr);
+
+    const MgrBaseline base = captureBaseline(comm);
 
     constexpr size_t persistSize = 8192;
     void* persistPtr             = reinterpret_cast<void*>(0xDEADBEEF00ULL);
@@ -404,13 +512,13 @@ TEST_F(MemManagerAnyRanks, SuspendResume_PersistUntouched)
 
     uint64_t persistBefore = 0;
     ASSERT_EQ(ncclCommMemStats(comm, ncclStatGpuMemPersist, &persistBefore), ncclSuccess);
-    EXPECT_EQ(persistBefore, persistSize);
+    EXPECT_EQ(persistBefore - base.persist, persistSize);
 
     ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
 
     uint64_t persistAfter = 0;
     ASSERT_EQ(ncclCommMemStats(comm, ncclStatGpuMemPersist, &persistAfter), ncclSuccess);
-    EXPECT_EQ(persistAfter, persistSize);
+    EXPECT_EQ(persistAfter - base.persist, persistSize);
 
     uint64_t suspended = 0;
     ASSERT_EQ(ncclCommMemStats(comm, ncclStatGpuMemSuspended, &suspended), ncclSuccess);
@@ -449,6 +557,79 @@ TEST_F(MemManagerAnyRanks, MemStats_FlipsAcrossSuspendResume)
     ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
     ASSERT_EQ(ncclCommMemStats(comm, ncclStatGpuMemSuspended, &suspended), ncclSuccess);
     EXPECT_EQ(suspended, 0u);
+}
+
+// Capture and print the memory footprint at three checkpoints: before Suspend,
+// after Suspend, after Resume. Allocates a handful of real VMM buffers as
+// ncclMemOffload so Suspend actually moves bytes to CPU and frees the GPU
+// backing - otherwise the gpu.UsedByProc delta would be invisible.
+//
+// The test is non-strict on absolute numbers (other ranks share the GPU on
+// shared boxes, internal RCCL allocations vary per build) and instead checks
+// the invariants we care about across the cycle:
+//   - mgr.Suspended  flips 0 -> 1 -> 0.
+//   - cpuBackupUsage rises during Suspend, drops to baseline on Resume.
+//   - gpu.UsedByProc is lower after Suspend than before, and recovers on
+//     Resume to within a small slack of the pre-Suspend value.
+TEST_F(MemManagerAnyRanks, MemoryFootprint_BeforeSuspendAfterSuspendAfterResume)
+{
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_NE(comm->memManager, nullptr);
+
+    // Allocate enough Offload buffers to make the GPU-memory drop on Suspend
+    // visible against general device noise (other processes, driver pools).
+    constexpr int    kNumBuffers = 4;
+    constexpr size_t kBufBytes   = 4u * 1024u * 1024u;  // 4 MiB each, 16 MiB total
+    constexpr uint8_t kPattern   = 0xC7;
+
+    std::vector<VmmAlloc> bufs(kNumBuffers);
+    for (int i = 0; i < kNumBuffers; ++i) {
+        allocateVmmPosixFd(comm->cudaDev, kBufBytes, &bufs[i]);
+        ASSERT_EQ(ncclMemTrack(comm->memManager, bufs[i].ptr, bufs[i].size, bufs[i].handle,
+                               hipMemHandleTypePosixFileDescriptor, ncclMemOffload),
+                  ncclSuccess);
+        ASSERT_EQ(hipMemset(bufs[i].ptr, kPattern, bufs[i].size), hipSuccess);
+    }
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    MemFootprint before = captureMemFootprint(comm);
+    //printMemFootprint(comm->rank, "BEFORE SUSPEND", before);
+
+    ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
+
+    MemFootprint suspended = captureMemFootprint(comm);
+    //printMemFootprint(comm->rank, "AFTER SUSPEND ", suspended);
+
+    ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
+
+    MemFootprint resumed = captureMemFootprint(comm);
+    //printMemFootprint(comm->rank, "AFTER RESUME  ", resumed);
+
+    EXPECT_EQ(before.mgrSuspended,    0u);
+    EXPECT_EQ(suspended.mgrSuspended, 1u);
+    EXPECT_EQ(resumed.mgrSuspended,   0u);
+
+    EXPECT_GE(suspended.cpuBackupUsage,
+              before.cpuBackupUsage + static_cast<uint64_t>(kNumBuffers) * kBufBytes)
+        << "Suspend must back up at least our Offload buffers to CPU";
+    EXPECT_EQ(resumed.cpuBackupUsage, before.cpuBackupUsage);
+
+    EXPECT_LT(suspended.gpuUsedByProc, before.gpuUsedByProc)
+        << "Suspend should free GPU backing for Scratch + Offload entries";
+
+    // Resume must restore the exact pre-Suspend footprint: manager-tracked
+    // totals don't change at all across the cycle (entries stay in the list,
+    // only `state` toggles), and real GPU usage measured by hipMemGetInfo
+    // returns to baseline once cuMemCreate + cuMemMap re-back the released VAs.
+    EXPECT_EQ(resumed.mgrTotal,       before.mgrTotal);
+    EXPECT_EQ(resumed.mgrPersist,     before.mgrPersist);
+    EXPECT_EQ(resumed.mgrSuspendable, before.mgrSuspendable);
+    EXPECT_EQ(resumed.gpuUsedByProc,  before.gpuUsedByProc)
+        << "Resume must restore the exact GPU memory footprint";
+
+    for (int i = 0; i < kNumBuffers; ++i) {
+        untrackAndRelease(comm, bufs[i].ptr, &bufs[i]);
+    }
 }
 
 // ===========================================================================
@@ -662,25 +843,26 @@ TEST_F(MemManagerTwoRank, SuspendResume_PeerExportImport_RoundtripCanary)
 // Stress / coverage tests for AnyRanks (np >= 1)
 // ===========================================================================
 
-// A: empty manager - no entries tracked, but Suspend/Resume must still drive
-// all the bootstrap barriers and toggle the released flag. Catches a corner
-// case where Pass 1 / Pass 2 / Step 1 / Step 4 loops crash on a null entries
-// pointer (manager->entries == nullptr from start).
+// A: no user-tracked entries. Suspend/Resume must drive the bootstrap barriers
+// + flip released without inventing or losing entries. Pre-CUMEM the manager
+// was always empty here; with NCCL_CUMEM_ENABLE=1 internal entries exist, so
+// we check that the entry count and cpuBackup are preserved across the cycle.
 TEST_F(MemManagerAnyRanks, EmptyManager_SuspendResume_NoOp)
 {
     ncclComm_t comm = getActiveCommunicator();
     ASSERT_NE(comm->memManager, nullptr);
-    ASSERT_EQ(comm->memManager->entries, nullptr);
-    ASSERT_EQ(comm->memManager->numEntries, 0);
+    const MgrBaseline base = captureBaseline(comm);
 
     ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
     EXPECT_EQ(comm->memManager->released, 1);
-    EXPECT_EQ(comm->memManager->entries, nullptr) << "Suspend must not invent entries";
+    EXPECT_EQ(comm->memManager->numEntries, base.numEntries)
+        << "Suspend must not invent or lose entries";
 
     ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
     EXPECT_EQ(comm->memManager->released, 0);
-    EXPECT_EQ(comm->memManager->entries, nullptr) << "Resume must not invent entries";
-    EXPECT_EQ(comm->memManager->cpuBackupUsage, 0u);
+    EXPECT_EQ(comm->memManager->numEntries, base.numEntries)
+        << "Resume must not invent or lose entries";
+    EXPECT_EQ(comm->memManager->cpuBackupUsage, base.cpuBackupUsage);
 }
 
 // B: Persist + Scratch + Offload tracked together. Suspend / Resume releases
@@ -694,6 +876,8 @@ TEST_F(MemManagerAnyRanks, MixedMemTypes_StatsConsistent)
 {
     ncclComm_t comm = getActiveCommunicator();
     ASSERT_NE(comm->memManager, nullptr);
+
+    const MgrBaseline base = captureBaseline(comm);
 
     constexpr size_t  kPersistReq  = 8 * 1024;
     constexpr size_t  kScratchReq  = 256 * 1024;
@@ -728,42 +912,39 @@ TEST_F(MemManagerAnyRanks, MixedMemTypes_StatsConsistent)
         return v;
     };
 
-    const uint64_t expectedTotal   = persistVmm.size + scratchVmm.size + offloadVmm.size;
-    const uint64_t expectedPersist = persistVmm.size;
-    const uint64_t expectedDynamic = scratchVmm.size + offloadVmm.size;
+    const uint64_t deltaTotal   = persistVmm.size + scratchVmm.size + offloadVmm.size;
+    const uint64_t deltaPersist = persistVmm.size;
+    const uint64_t deltaDynamic = scratchVmm.size + offloadVmm.size;
 
-    EXPECT_EQ(readStat(ncclStatGpuMemTotal),     expectedTotal);
-    EXPECT_EQ(readStat(ncclStatGpuMemPersist),   expectedPersist);
-    EXPECT_EQ(readStat(ncclStatGpuMemSuspend),   expectedDynamic);
+    EXPECT_EQ(readStat(ncclStatGpuMemTotal)   - base.total,        deltaTotal);
+    EXPECT_EQ(readStat(ncclStatGpuMemPersist) - base.persist,      deltaPersist);
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspend) - base.suspendBytes, deltaDynamic);
     EXPECT_EQ(readStat(ncclStatGpuMemSuspended), 0u);
 
     ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
 
-    // Tracked sizes don't change across Suspend - the entries are still in the
-    // linked list, just with state == Released. Persist counter is independent.
-    EXPECT_EQ(readStat(ncclStatGpuMemTotal),     expectedTotal);
-    EXPECT_EQ(readStat(ncclStatGpuMemPersist),   expectedPersist);
-    EXPECT_EQ(readStat(ncclStatGpuMemSuspend),   expectedDynamic);
+    EXPECT_EQ(readStat(ncclStatGpuMemTotal)   - base.total,        deltaTotal);
+    EXPECT_EQ(readStat(ncclStatGpuMemPersist) - base.persist,      deltaPersist);
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspend) - base.suspendBytes, deltaDynamic);
     EXPECT_EQ(readStat(ncclStatGpuMemSuspended), 1u);
 
     ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
-    EXPECT_EQ(readStat(ncclStatGpuMemTotal),     expectedTotal);
-    EXPECT_EQ(readStat(ncclStatGpuMemPersist),   expectedPersist);
-    EXPECT_EQ(readStat(ncclStatGpuMemSuspend),   expectedDynamic);
+    EXPECT_EQ(readStat(ncclStatGpuMemTotal)   - base.total,        deltaTotal);
+    EXPECT_EQ(readStat(ncclStatGpuMemPersist) - base.persist,      deltaPersist);
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspend) - base.suspendBytes, deltaDynamic);
     EXPECT_EQ(readStat(ncclStatGpuMemSuspended), 0u);
 
-    // Persist physical memory must still be readable with its canary intact.
     verifyCanaryReadback(persistVmm.ptr, persistVmm.size, kPersistByte,
                          "persist after Suspend/Resume");
 
     untrackAndRelease(comm, scratchVmm.ptr, &scratchVmm);
     untrackAndRelease(comm, offloadVmm.ptr, &offloadVmm);
-    // Persist isn't in the linked list - Untrack only adjusts the counter.
     ASSERT_EQ(ncclMemUntrack(comm->memManager, persistVmm.ptr, persistVmm.size),
               ncclSuccess);
     releaseVmm(&persistVmm);
 
-    EXPECT_EQ(readStat(ncclStatGpuMemTotal), 0u);
+    EXPECT_EQ(readStat(ncclStatGpuMemTotal),   base.total);
+    EXPECT_EQ(readStat(ncclStatGpuMemPersist), base.persist);
 }
 
 // C: multiple Suspend/Resume cycles on the same Offload buffer. Verifies that
@@ -773,6 +954,8 @@ TEST_F(MemManagerAnyRanks, MultipleSuspendResumeCycles_DataPreserved)
 {
     ncclComm_t comm = getActiveCommunicator();
     ASSERT_NE(comm->memManager, nullptr);
+
+    const uint64_t internalOffload = captureInternalOffloadCpuBackup(comm);
 
     constexpr size_t  kSize    = 64 * 1024;
     constexpr int     kCycles  = 5;
@@ -795,12 +978,12 @@ TEST_F(MemManagerAnyRanks, MultipleSuspendResumeCycles_DataPreserved)
         SCOPED_TRACE("cycle=" + std::to_string(cycle));
 
         ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
-        EXPECT_EQ(comm->memManager->cpuBackupUsage, a.size)
-            << "Suspend must allocate exactly one CPU backup";
+        EXPECT_EQ(comm->memManager->cpuBackupUsage, internalOffload + a.size)
+            << "Suspend must allocate one CPU backup per Offload entry";
 
         ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
         EXPECT_EQ(comm->memManager->cpuBackupUsage, 0u)
-            << "Resume must free the CPU backup after restore";
+            << "Resume must free every CPU backup after restore";
 
         std::vector<uint8_t> readback(a.size, 0u);
         ASSERT_EQ(hipMemcpy(readback.data(), a.ptr, a.size, hipMemcpyDeviceToHost),
@@ -820,16 +1003,18 @@ TEST_F(MemManagerAnyRanks, Suspend_LargeNumberOfEntries_AllRestored)
     ncclComm_t comm = getActiveCommunicator();
     ASSERT_NE(comm->memManager, nullptr);
 
+    const MgrBaseline base            = captureBaseline(comm);
+    const uint64_t    internalOffload = captureInternalOffloadCpuBackup(comm);
+
     constexpr int kNumEntries = 32;
     constexpr int kNumOffload = 8;  // first kNumOffload are Offload, rest are Scratch
 
     std::vector<VmmAlloc> entries(kNumEntries);
     std::vector<uint8_t>  canaries(kNumEntries);
-    uint64_t              expectedDynamicBytes = 0;
-    uint64_t              expectedOffloadBytes = 0;
+    uint64_t              testDynamicBytes = 0;
+    uint64_t              testOffloadBytes = 0;
 
     for (int i = 0; i < kNumEntries; ++i) {
-        // Mix sizes from 4 KiB to ~256 KiB - granularity rounding still applies.
         size_t requested = (4 * 1024) + (i * 8 * 1024);
         allocateVmmPosixFd(comm->cudaDev, requested, &entries[i]);
 
@@ -842,21 +1027,19 @@ TEST_F(MemManagerAnyRanks, Suspend_LargeNumberOfEntries_AllRestored)
                                entries[i].handle,
                                hipMemHandleTypePosixFileDescriptor, type),
                   ncclSuccess);
-        expectedDynamicBytes += entries[i].size;
-        if (isOffload) expectedOffloadBytes += entries[i].size;
+        testDynamicBytes += entries[i].size;
+        if (isOffload) testOffloadBytes += entries[i].size;
     }
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-    EXPECT_EQ(comm->memManager->numEntries, kNumEntries);
+    EXPECT_EQ(comm->memManager->numEntries - base.numEntries, kNumEntries);
 
     ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
-    EXPECT_EQ(comm->memManager->cpuBackupUsage, expectedOffloadBytes)
-        << "CPU backup pool must equal sum of Offload sizes";
+    EXPECT_EQ(comm->memManager->cpuBackupUsage, internalOffload + testOffloadBytes)
+        << "CPU backup pool must equal sum of all Offload sizes (internal + test)";
 
     ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
     EXPECT_EQ(comm->memManager->cpuBackupUsage, 0u);
 
-    // Every Offload entry must come back with its canary preserved. Scratch
-    // entries lose data by design - just check the VA is mapped + writable.
     for (int i = 0; i < kNumEntries; ++i) {
         SCOPED_TRACE("entry=" + std::to_string(i));
         if (i < kNumOffload) {
@@ -872,10 +1055,10 @@ TEST_F(MemManagerAnyRanks, Suspend_LargeNumberOfEntries_AllRestored)
         EXPECT_EQ(ncclCommMemStats(comm, s, &v), ncclSuccess);
         return v;
     };
-    EXPECT_EQ(readStat(ncclStatGpuMemSuspend), expectedDynamicBytes);
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspend) - base.suspendBytes, testDynamicBytes);
 
     for (auto& e : entries) untrackAndRelease(comm, e.ptr, &e);
-    EXPECT_EQ(comm->memManager->numEntries, 0);
+    EXPECT_EQ(comm->memManager->numEntries, base.numEntries);
 }
 
 // E: Persist physical memory must survive Suspend/Resume completely untouched
@@ -886,6 +1069,9 @@ TEST_F(MemManagerAnyRanks, Persist_PhysicalMemoryUntouched)
 {
     ncclComm_t comm = getActiveCommunicator();
     ASSERT_NE(comm->memManager, nullptr);
+
+    const MgrBaseline base            = captureBaseline(comm);
+    const uint64_t    internalOffload = captureInternalOffloadCpuBackup(comm);
 
     constexpr size_t  kSize   = 32 * 1024;
     constexpr uint8_t kCanary = 0xE7;
@@ -900,14 +1086,13 @@ TEST_F(MemManagerAnyRanks, Persist_PhysicalMemoryUntouched)
                            ncclMemPersist),
               ncclSuccess);
 
-    EXPECT_EQ(comm->memManager->numEntries, 0)
+    EXPECT_EQ(comm->memManager->numEntries, base.numEntries)
         << "Persist must not enter the linked list (only counter)";
 
     ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
-    EXPECT_EQ(comm->memManager->cpuBackupUsage, 0u)
-        << "Persist must NOT be CPU-backed up";
+    EXPECT_EQ(comm->memManager->cpuBackupUsage, internalOffload)
+        << "Persist must NOT contribute to CPU backup pool";
 
-    // VA must still be live - manager skipped it, so handle/map are untouched.
     verifyCanaryReadback(persistVmm.ptr, persistVmm.size, kCanary, "persist mid-suspend");
 
     ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
@@ -974,10 +1159,15 @@ TEST_F(MemManagerTwoRank, Multiple_PeerEntries_RoundtripCanary)
     ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
     ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
 
+    // Look up each test-owned import explicitly. With NCCL_CUMEM_ENABLE=1 the
+    // manager also tracks ~64 internal peer-imports from src/transport/p2p.cc
+    // (P2P proxy setup), so we cannot count by `isImportedFromPeer` alone.
     int activeCount = 0;
-    for (auto* e = comm->memManager->entries; e != nullptr; e = e->next) {
-        EXPECT_EQ(e->state, ncclDynMemStateActive);
+    for (int i = 0; i < kNumBuffers; ++i) {
+        auto* e = findEntryByPtr(comm, imports[i].ptr);
+        ASSERT_NE(e, nullptr) << "Import #" << i << " missing from manager";
         EXPECT_TRUE(e->isImportedFromPeer);
+        EXPECT_EQ(e->state, ncclDynMemStateActive);
         ++activeCount;
     }
     EXPECT_EQ(activeCount, kNumBuffers);
@@ -1001,11 +1191,11 @@ TEST_F(MemManagerTwoRank, Bidirectional_PeerExchange_RoundtripCanary)
     int rank = comm->rank;
     int peer = 1 - rank;
 
+    const MgrBaseline base = captureBaseline(comm);
+
     constexpr size_t kSize       = 64 * 1024;
     const     uint8_t myCanary   = (rank == 0) ? 0xD1 : 0xD2;
     const     uint8_t peerCanary = (rank == 0) ? 0xD2 : 0xD1;
-    // One tag per sender so the two bootstrapSends can race in flight without
-    // collision at the bootstrap layer.
     const int myExportTag   = 0xC0FFEE0 + rank;
     const int peerExportTag = 0xC0FFEE0 + peer;
 
@@ -1014,9 +1204,6 @@ TEST_F(MemManagerTwoRank, Bidirectional_PeerExchange_RoundtripCanary)
     ASSERT_EQ(hipMemset(myExport.ptr, myCanary, myExport.size), hipSuccess);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-    // Send my export's metadata BEFORE the recv to avoid deadlock - both ranks
-    // do the same so each side's bootstrapSend buffers up at the bootstrap
-    // layer until the matching bootstrapRecv fires.
     exportAndShipMeta(comm, myExport, peer, ncclMemOffload, myExportTag);
 
     VmmAlloc peerImport{};
@@ -1024,8 +1211,8 @@ TEST_F(MemManagerTwoRank, Bidirectional_PeerExchange_RoundtripCanary)
     verifyCanaryReadback(peerImport.ptr, peerImport.size, peerCanary,
                          "primary import of peer's buffer");
 
-    EXPECT_EQ(comm->memManager->numEntries, 2)
-        << "Each rank should now own 1 local + 1 imported entry";
+    EXPECT_EQ(comm->memManager->numEntries - base.numEntries, 2)
+        << "Each rank should add 1 local + 1 imported entry on top of baseline";
 
     ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
     ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
@@ -1037,11 +1224,9 @@ TEST_F(MemManagerTwoRank, Bidirectional_PeerExchange_RoundtripCanary)
     untrackAndRelease(comm, peerImport.ptr, &peerImport);
 }
 
-// H: rank 0 exports 2 buffers, but rank 1 only does a real import for the
-// FIRST one - the second is a synthetic stale import that points at a fake
-// ownerPtr (nothing actually exported with that VA). Resume Step 4 must
-// successfully match buffer #0 (positive branch) AND skip-with-WARN buffer
-// #1 (negative branch), in the SAME matching-loop pass.
+// Rank 1 has 1 real peer-import + 1 stale (fake ownerPtr). Per RCCL divergence
+// (mem_manager.cc:905), Step 4 partial-success: real -> Active, stale stays
+// Released, ncclCommMemResume returns ncclSystemError.
 TEST_F(MemManagerTwoRank, PartialPeerImport_MixedMatch)
 {
     ncclComm_t comm = getActiveCommunicator();
@@ -1093,16 +1278,24 @@ TEST_F(MemManagerTwoRank, PartialPeerImport_MixedMatch)
     }
 
     ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
-    ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
+    // Per RCCL divergence: stale's no-match -> ncclSystemError. Real import is
+    // still re-imported successfully in the same pass (partial-success).
+    EXPECT_EQ(ncclCommMemResume(comm), ncclSystemError)
+        << "Stale no-match peer-import must surface ncclSystemError";
+    EXPECT_EQ(comm->memManager->released, 1)
+        << "Partial-failure must leave manager in suspended state";
 
-    int activeCount   = 0;
-    int releasedCount = 0;
-    for (auto* e = comm->memManager->entries; e != nullptr; e = e->next) {
-        if      (e->state == ncclDynMemStateActive)   ++activeCount;
-        else if (e->state == ncclDynMemStateReleased) ++releasedCount;
-    }
-    EXPECT_EQ(activeCount,   1) << "Resume must match-and-restore exactly the real import";
-    EXPECT_EQ(releasedCount, 1) << "Stale entry must remain Released (no-match WARN branch)";
+    // Look up the two test-owned entries explicitly. With NCCL_CUMEM_ENABLE=1
+    // the manager also tracks ~64 internal peer-imports (proxy P2P from
+    // src/transport/p2p.cc:325,380) so we cannot count by isImportedFromPeer.
+    auto* realEntry  = findEntryByPtr(comm, realImport.ptr);
+    auto* staleEntry = findEntryByPtr(comm, stale.ptr);
+    ASSERT_NE(realEntry,  nullptr);
+    ASSERT_NE(staleEntry, nullptr);
+    EXPECT_EQ(realEntry->state,  ncclDynMemStateActive)
+        << "Real import must be re-imported despite stale's failure";
+    EXPECT_EQ(staleEntry->state, ncclDynMemStateReleased)
+        << "Stale entry must stay Released (no-match branch)";
 
     verifyCanaryReadback(realImport.ptr, realImport.size, kCanary,
                          "real import survived mixed-match Resume");
@@ -1110,6 +1303,692 @@ TEST_F(MemManagerTwoRank, PartialPeerImport_MixedMatch)
     ASSERT_EQ(ncclMemUntrack(comm->memManager, stale.ptr, stale.size), ncclSuccess);
     releaseVmm(&stale);
     untrackAndRelease(comm, realImport.ptr, &realImport);
+}
+
+// ============================================================================
+// Public API tests (ncclCommSuspend / ncclCommResume / ncclCommMemStats).
+//
+// The internal ncclCommMemSuspend/Resume/Stats path is exercised in detail by
+// the MemManagerAnyRanks / MemManagerTwoRank suites above (peer export/import
+// canary, manager state machine, etc). The suites below target the public API:
+//
+//  - ncclCommSuspend(comm, NCCL_SUSPEND_MEM)
+//  - ncclCommResume(comm)
+//  - ncclCommMemStats(comm, stat, &value)
+//
+// Coverage matrix:
+//
+//  Happy paths
+//    - SuspendResumeBasic.BasicCycle              one Suspend -> Resume round-trip
+//    - SuspendResumeBasic.MultipleCycles          5 back-to-back cycles
+//    - SuspendResumeBasic.BarrierSync             rank 0 sleeps before suspend;
+//                                                 every rank should observe the
+//                                                 cross-rank bootstrap barrier
+//    - SuspendResumeMemStats.BeforeAndAfter       ncclStatGpuMem* across the
+//                                                 active/suspended/resumed
+//                                                 transitions
+//    - SuspendResumeMemStats.Conservation         total + suspended bytes is
+//                                                 conserved across a Suspend
+//    - SuspendResumeCollectiveIntegrity.AllReduceAfterResume
+//                                                 AllReduce produces correct
+//                                                 result after Suspend/Resume
+//    - SuspendResumeCollectiveIntegrity.AllReduceTwoCycles
+//                                                 same after multiple cycles
+//    - SuspendResumeCollectiveIntegrity.AllReduceP2pAutoMark
+//                                                 verifies that p2p collectives
+//                                                 auto-mark exported buffers via
+//                                                 ncclDynMemMarkExportToPeer
+//                                                 (Bucket 1)
+//    - SuspendResumeLifecycle.DestroyWhileSuspended
+//                                                 ncclCommDestroy succeeds on a
+//                                                 still-suspended comm (drains
+//                                                 pending tasks + manager
+//                                                 destruction frees released VAs)
+//    - SuspendResumeGroup.AtomicSuspend           ncclGroupStart() + Suspend +
+//                                                 ncclGroupEnd() drains the
+//                                                 pending suspend task
+//    - SuspendResumeGroup.AtomicResume            same for Resume
+//    - SuspendResumeGroup.MixedSuspendResume      Suspend + Resume in the same
+//                                                 group leaves the comm active
+//
+//  Argument validation (no bootstrap barrier reached, so individual ranks can
+//  fail without deadlocking peers)
+//    - SuspendResumeArgValidation.ZeroFlags       Suspend(comm, 0) is rejected
+//    - SuspendResumeArgValidation.UnknownFlagsRejected  bogus high bits rejected
+//    - SuspendResumeArgValidation.DoubleSuspend   Suspend twice -> 2nd rejected
+//    - SuspendResumeArgValidation.ResumeWhenActive Resume on active comm rejected
+//    - SuspendResumeArgValidation.DoubleResume    Resume twice -> 2nd rejected
+//    - SuspendResumeMemStatsValidation.NullValuePtr  NULL output pointer rejected
+//    - SuspendResumeMemStatsValidation.UnknownStat   bogus enum value rejected
+// ============================================================================
+
+namespace SuspendResumeTestConfig
+{
+constexpr int    kMinRanks        = 2;     // multi-rank tests need >= 2
+constexpr size_t kAllReduceCount  = 1024;  // 4 KiB float buffer
+constexpr float  kEpsilon         = 1e-3f;
+constexpr int    kMultiCycleCount = 5;
+constexpr int    kBarrierSleepMs  = 200;   // rank-0 stagger time
+} // namespace SuspendResumeTestConfig
+
+using namespace SuspendResumeTestConfig;
+
+/**
+ * @class SuspendResumePublicAPITestBase
+ * @brief Shared fixture for all public-API suspend/resume MPI tests.
+ *
+ * Wraps MPITestBase and adds a convenience accessor for ncclCommMemStats and
+ * a self-checking AllReduce helper.
+ */
+class SuspendResumePublicAPITestBase : public MPITestBase
+{
+protected:
+    // Read one ncclCommMemStat as uint64_t. Fails the test on any non-success
+    // return so callers can use the value directly.
+    uint64_t readStat(ncclComm_t comm, ncclCommMemStat_t stat)
+    {
+        uint64_t v = ~uint64_t{0};
+        ncclResult_t r = ncclCommMemStats(comm, stat, &v);
+        EXPECT_EQ(r, ncclSuccess) << "ncclCommMemStats failed for stat " << (int)stat;
+        return v;
+    }
+
+    // Run an AllReduce with float-sum and verify each element equals
+    // sum(1..nranks) = nranks * (nranks + 1) / 2. Returns true on success.
+    bool runAllReduceAndVerify(ncclComm_t comm, hipStream_t stream)
+    {
+        const size_t n     = kAllReduceCount;
+        const int    rank  = MPIEnvironment::world_rank;
+        const int    nrnks = MPIEnvironment::world_size;
+
+        void* sendbuf = nullptr;
+        void* recvbuf = nullptr;
+        if (hipMalloc(&sendbuf, n * sizeof(float)) != hipSuccess) return false;
+        if (hipMalloc(&recvbuf, n * sizeof(float)) != hipSuccess)
+        {
+            (void)hipFree(sendbuf);
+            return false;
+        }
+        auto sendGuard = makeDeviceBufferAutoGuard(sendbuf);
+        auto recvGuard = makeDeviceBufferAutoGuard(recvbuf);
+
+        if (initializeBufferWithPattern<float>(
+                sendbuf, n,
+                [rank](size_t) { return static_cast<float>(rank + 1); }) != hipSuccess)
+            return false;
+        if (zeroInitializeBuffer<float>(recvbuf, n) != hipSuccess) return false;
+
+        if (ncclAllReduce(sendbuf, recvbuf, n, ncclFloat32, ncclSum, comm, stream)
+            != ncclSuccess)
+            return false;
+        if (hipStreamSynchronize(stream) != hipSuccess) return false;
+
+        const float expected = static_cast<float>(nrnks * (nrnks + 1) / 2);
+        return verifyBufferData<float>(
+            recvbuf, n,
+            [expected](size_t) { return expected; },
+            0,
+            static_cast<double>(kEpsilon * expected));
+    }
+};
+
+// ----------------------------------------------------------------------------
+// 1. Basic happy-path tests
+// ----------------------------------------------------------------------------
+
+class SuspendResumeBasic : public SuspendResumePublicAPITestBase {};
+
+TEST_F(SuspendResumeBasic, BasicCycle)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended))
+        << "Newly initialized comm must report not-suspended";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    EXPECT_EQ(1u, readStat(comm, ncclStatGpuMemSuspended))
+        << "After Suspend, ncclStatGpuMemSuspended must be 1";
+
+    // ncclStatGpuMemSuspend == totalScratch + totalOffload of *tracked* entries
+    // With NCCL_CUMEM_ENABLE=0 the comm's internal allocations are not
+    // VMM-backed so the count is legitimately zero; with CUMEM=1 it is > 0.
+    uint64_t suspBytes = readStat(comm, ncclStatGpuMemSuspend);
+    TEST_INFO("Rank %d ncclStatGpuMemSuspend after Suspend = %llu bytes",
+              MPIEnvironment::world_rank, (unsigned long long)suspBytes);
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended))
+        << "After Resume, ncclStatGpuMemSuspended must be 0";
+}
+
+TEST_F(SuspendResumeBasic, MultipleCycles)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    for (int i = 0; i < kMultiCycleCount; ++i)
+    {
+        TEST_INFO("Cycle %d: Suspend", i);
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+        EXPECT_EQ(1u, readStat(comm, ncclStatGpuMemSuspended)) << "cycle " << i;
+
+        TEST_INFO("Cycle %d: Resume", i);
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+        EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended)) << "cycle " << i;
+    }
+}
+
+TEST_F(SuspendResumeBasic, BarrierSync)
+{
+    // Rank 0 stages a deliberate delay before calling Suspend. Without the
+    // bootstrapBarrier inside ncclCommMemSuspend, the other ranks would return
+    // immediately and the elapsed time on those ranks would be much smaller
+    // than rank 0's. With the barrier wired up correctly, every rank must
+    // observe at least kBarrierSleepMs of elapsed wall-clock between the
+    // (cross-rank) start of the call and its return.
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    auto t0 = std::chrono::steady_clock::now();
+
+    if (MPIEnvironment::world_rank == 0)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(kBarrierSleepMs));
+    }
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    auto t1 = std::chrono::steady_clock::now();
+
+    auto elapsed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+
+    // Generous slack: this is a synchronization assertion, not a microbenchmark.
+    // Without a barrier, non-zero ranks would typically observe < 10 ms.
+    EXPECT_GE(elapsed_ms, kBarrierSleepMs / 2)
+        << "Rank " << MPIEnvironment::world_rank
+        << ": Suspend returned in " << elapsed_ms
+        << " ms (rank 0 staged a " << kBarrierSleepMs
+        << " ms delay; expected the barrier to hold every rank)";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+}
+
+// ----------------------------------------------------------------------------
+// 2. Memory-statistics correctness
+// ----------------------------------------------------------------------------
+
+class SuspendResumeMemStats : public SuspendResumePublicAPITestBase {};
+
+TEST_F(SuspendResumeMemStats, BeforeAndAfter)
+{
+    // ncclCommMemStats reads per-type counters on the memory manager.
+    // The counters cover *tracked* allocations only. With NCCL_CUMEM_ENABLE=0
+    // RCCL skips tracking on most internal allocations so all counters
+    // legitimately read zero; the suspended boolean still toggles. With
+    // CUMEM=1, counters are non-zero and persist across the suspend boundary
+    // (Suspend doesn't change totalScratch/totalOffload -- it only flips
+    // released).
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    uint64_t totalActive = readStat(comm, ncclStatGpuMemTotal);
+    uint64_t suspActive  = readStat(comm, ncclStatGpuMemSuspend);
+    uint64_t persActive  = readStat(comm, ncclStatGpuMemPersist);
+    uint64_t isSusActive = readStat(comm, ncclStatGpuMemSuspended);
+    EXPECT_EQ(isSusActive, 0u) << "fresh comm must not be suspended";
+    EXPECT_EQ(totalActive, persActive + suspActive)
+        << "Total = persist + (scratch+offload) invariant";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+
+    uint64_t totalSusp = readStat(comm, ncclStatGpuMemTotal);
+    uint64_t suspSusp  = readStat(comm, ncclStatGpuMemSuspend);
+    uint64_t isSusSusp = readStat(comm, ncclStatGpuMemSuspended);
+    EXPECT_EQ(isSusSusp, 1u) << "after Suspend, suspended boolean must be 1";
+    EXPECT_EQ(totalSusp, totalActive)
+        << "Suspend does not change tracked byte counters (mirrors NCCL)";
+    EXPECT_EQ(suspSusp, suspActive)
+        << "Suspend does not change scratch/offload byte counters";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+
+    uint64_t totalResumed = readStat(comm, ncclStatGpuMemTotal);
+    uint64_t isSusResumed = readStat(comm, ncclStatGpuMemSuspended);
+    EXPECT_EQ(isSusResumed, 0u);
+    EXPECT_EQ(totalResumed, totalActive)
+        << "Resume does not change tracked byte counters either";
+
+    TEST_INFO("rank %d: total=%llu persist=%llu suspendable=%llu "
+              "[scratch+offload] (CUMEM gates whether non-zero)",
+              MPIEnvironment::world_rank,
+              (unsigned long long)totalActive,
+              (unsigned long long)persActive,
+              (unsigned long long)suspActive);
+}
+
+TEST_F(SuspendResumeMemStats, Conservation)
+{
+    // ncclCommMemStats reports per-type byte counters; Suspend doesn't move
+    // bytes between persist / scratch / offload buckets, it only flips the
+    // released boolean. So Total = Persist + (Scratch+Offload) holds in every
+    // state, and Total/Persist/Suspend are constant across a Suspend->Resume
+    // round-trip. (CPU backup memory used by ncclMemOffload entries is tracked
+    // separately on manager->cpuBackupUsage and not part of the public stats.)
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    uint64_t totalA = readStat(comm, ncclStatGpuMemTotal);
+    uint64_t persA  = readStat(comm, ncclStatGpuMemPersist);
+    uint64_t suspA  = readStat(comm, ncclStatGpuMemSuspend);
+    EXPECT_EQ(totalA, persA + suspA);
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    uint64_t totalS = readStat(comm, ncclStatGpuMemTotal);
+    uint64_t persS  = readStat(comm, ncclStatGpuMemPersist);
+    uint64_t suspS  = readStat(comm, ncclStatGpuMemSuspend);
+    EXPECT_EQ(totalS, totalA);
+    EXPECT_EQ(persS,  persA);
+    EXPECT_EQ(suspS,  suspA);
+    EXPECT_EQ(totalS, persS + suspS);
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+
+    uint64_t totalR = readStat(comm, ncclStatGpuMemTotal);
+    EXPECT_EQ(totalR, totalA);
+}
+
+// ----------------------------------------------------------------------------
+// 3. Collective integrity across a suspend/resume cycle
+// ----------------------------------------------------------------------------
+
+class SuspendResumeCollectiveIntegrity : public SuspendResumePublicAPITestBase
+{
+protected:
+    void SetUp() override
+    {
+        SuspendResumePublicAPITestBase::SetUp();
+        if (!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 — skipped";
+        }
+    }
+};
+
+TEST_F(SuspendResumeCollectiveIntegrity, AllReduceAfterResume)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    EXPECT_TRUE(runAllReduceAndVerify(comm, stream))
+        << "AllReduce baseline failed before any Suspend";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+
+    EXPECT_TRUE(runAllReduceAndVerify(comm, stream))
+        << "AllReduce produced wrong values after Suspend/Resume cycle";
+}
+
+TEST_F(SuspendResumeCollectiveIntegrity, AllReduceTwoCycles)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    EXPECT_TRUE(runAllReduceAndVerify(comm, stream)) << "baseline AllReduce";
+
+    for (int i = 0; i < 2; ++i)
+    {
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+
+        EXPECT_TRUE(runAllReduceAndVerify(comm, stream))
+            << "AllReduce wrong after cycle " << i;
+    }
+}
+
+// Regression: ncclP2pImportShareableBuffer (and the intra-PID different-GPU
+// branch in p2pMap) must call ncclMemTrackImportFromPeer so the importer side
+// of every cuMem-backed proxy buffer is visible to ncclMemManager. Without
+// this wiring Resume Step 4 has nothing to re-import: after Suspend the owner
+// rebuilds its physical pages, but the importer's local VA stays mapped to
+// the OLD physical pages, owner/importer drift apart, and the next collective
+// hangs in hipStreamSynchronize waiting on flags that never converge across
+// the diverged buffers.
+//
+// We catch the bug structurally instead of as a hang:
+//   1. Force p2p proxy connections via a warm-up AllReduce.
+//   2. Walk manager->entries and require >= 1 entry with isImportedFromPeer
+//      and a non-zero live handle. Pre-fix this set is empty under CUMEM=1;
+//      post-fix every cross-PID p2p connection adds one.
+//   3. Suspend/Resume and verify that those imported entries return Active
+//      with rebuilt (still non-zero) handles and a non-stale ownerPtr.
+TEST_F(SuspendResumeCollectiveIntegrity, P2pPeerImports_TrackedAndRebuilt)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    ASSERT_NE(comm->memManager, nullptr);
+
+    EXPECT_TRUE(runAllReduceAndVerify(comm, stream))
+        << "warm-up AllReduce must succeed before peer-import inspection";
+
+    auto countPeerImports = [&](int* nActive, int* nReleased) {
+        *nActive = *nReleased = 0;
+        std::lock_guard<std::mutex> lk(comm->memManager->lock);
+        for (auto* e = comm->memManager->entries; e != nullptr; e = e->next) {
+            if (!e->isImportedFromPeer) continue;
+            if (e->state == ncclDynMemStateActive)        (*nActive)++;
+            else if (e->state == ncclDynMemStateReleased) (*nReleased)++;
+        }
+    };
+
+    int activeBefore = 0, releasedBefore = 0;
+    countPeerImports(&activeBefore, &releasedBefore);
+    EXPECT_EQ(releasedBefore, 0)
+        << "no entry should be Released while comm is unsuspended";
+    EXPECT_GT(activeBefore, 0)
+        << "ncclP2pImportShareableBuffer must register every cross-PID p2p "
+           "import via ncclMemTrackImportFromPeer (regression: 0 imports "
+           "tracked => Resume Step 4 is a no-op => post-Resume collectives "
+           "hang on stale peer mappings)";
+
+    if (activeBefore == 0) return;
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+
+    int activeMid = 0, releasedMid = 0;
+    countPeerImports(&activeMid, &releasedMid);
+    EXPECT_EQ(activeMid, 0)
+        << "Suspend must move every peer-imported entry to Released";
+    EXPECT_EQ(releasedMid, activeBefore)
+        << "Suspend must Release exactly the entries that were Active before";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+
+    int activeAfter = 0, releasedAfter = 0;
+    countPeerImports(&activeAfter, &releasedAfter);
+    EXPECT_EQ(releasedAfter, 0)
+        << "Resume must rebuild every peer-imported entry";
+    EXPECT_EQ(activeAfter, activeBefore)
+        << "Resume must restore the same number of peer-imported entries";
+
+    {
+        std::lock_guard<std::mutex> lk(comm->memManager->lock);
+        for (auto* e = comm->memManager->entries; e != nullptr; e = e->next) {
+            if (!e->isImportedFromPeer) continue;
+            EXPECT_NE(e->ptr, nullptr) << "imported VA must be preserved";
+            EXPECT_NE(e->desc.imported.ownerPtr, nullptr)
+                << "ownerPtr must survive Suspend/Resume so Step 4 can match";
+            // handle == 0 is legal for the intra-PID different-GPU branch
+            // (handle pre-released by p2pMap), so we don't assert non-zero
+            // here. The cross-PID branch will have a fresh non-zero handle.
+        }
+    }
+
+    EXPECT_TRUE(runAllReduceAndVerify(comm, stream))
+        << "post-Resume AllReduce must complete (no hang on stale imports)";
+}
+
+TEST_F(SuspendResumeCollectiveIntegrity, AllReduceP2pAutoMark)
+{
+    // Bucket 1 invariant: p2pSendProxySetup / p2pRecvProxySetup pass req->peerRank
+    // into ncclP2pAllocateShareableBuffer, which in turn calls
+    // ncclDynMemMarkExportToPeer on every cuMem-allocated proxy buffer. After
+    // Suspend, the manager's Step 3 in ncclCommMemResume re-exports those
+    // buffers to the same peer using the recorded peerRank, so the post-Resume
+    // AllReduce can rebuild peer mappings without manual MarkExport calls.
+    //
+    // This test exercises the full path end-to-end: an AllReduce that uses the
+    // p2p transport must continue to work after a full Suspend/Resume cycle.
+    // If peerRank is lost this test still passes when CUMEM=0
+    // (no peer marking happens at all) but exposes the regression
+    // as a SIGSEGV during Resume Step 4 with CUMEM=1 + nRanks >= 2.
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    // Warm-up AllReduce so the p2p proxy buffers are actually allocated and
+    // marked for export before we suspend.
+    EXPECT_TRUE(runAllReduceAndVerify(comm, stream)) << "warm-up AllReduce";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+
+    EXPECT_TRUE(runAllReduceAndVerify(comm, stream))
+        << "AllReduce broken after Suspend/Resume - peer-export marking "
+           "regression?";
+}
+
+// ----------------------------------------------------------------------------
+// 4. Lifecycle: destroy while suspended
+// ----------------------------------------------------------------------------
+
+class SuspendResumeLifecycle : public SuspendResumePublicAPITestBase
+{
+protected:
+    // We tear down our own comm in this test rather than relying on the base
+    // class, so that we drive ncclCommDestroy from a suspended state.
+    void TearDown() override
+    {
+        // Skip MPITestBase::TearDown's cleanupTestCommunicator since the test
+        // already destroyed it.
+        test_comm_   = nullptr;
+        test_stream_ = nullptr;
+    }
+};
+
+TEST_F(SuspendResumeLifecycle, DestroyWhileSuspended)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    EXPECT_EQ(1u, readStat(comm, ncclStatGpuMemSuspended));
+
+    // Tear the comm down without resuming. commFree drains pending suspend/resume
+    // tasks and ncclMemManagerDestroy reclaims VAs of Released entries, so the
+    // destructor walk must not SIGSEGV.
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(comm));
+    test_comm_ = nullptr;
+    if (stream != nullptr)
+    {
+        (void)hipStreamDestroy(stream);
+        test_stream_ = nullptr;
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 5. Group context (Bucket 3): Suspend/Resume inside ncclGroupStart/End
+// ----------------------------------------------------------------------------
+
+class SuspendResumeGroup : public SuspendResumePublicAPITestBase {};
+
+TEST_F(SuspendResumeGroup, AtomicSuspend)
+{
+    // ncclCommSuspend always wraps the body in
+    // ncclGroupStartInternal/EndInternal, so a user-level
+    // ncclGroupStart/Suspend/ncclGroupEnd nesting must still drain the pending
+    // suspend task and leave the comm in the suspended state.
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+
+    EXPECT_EQ(1u, readStat(comm, ncclStatGpuMemSuspended))
+        << "Suspend inside a group must drain in groupLaunch";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended));
+}
+
+TEST_F(SuspendResumeGroup, AtomicResume)
+{
+    // Same as AtomicSuspend but for Resume.
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    EXPECT_EQ(1u, readStat(comm, ncclStatGpuMemSuspended));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended))
+        << "Resume inside a group must drain in groupLaunch";
+}
+
+TEST_F(SuspendResumeGroup, MixedSuspendResume)
+{
+    // Suspend + Resume in the same group: groupLaunch drains suspendTaskQueue
+    // first, then resumeTaskQueue, so the net effect is "active" again.
+    // The RCCL pre-check in ncclCommResume_impl accepts this case because at
+    // the moment Resume is called there is still a Suspend task pending in
+    // suspendTaskQueue (i.e. the comm is "going to be suspended" — not
+    // currently active in the sense of the validation).
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended))
+        << "After Suspend+Resume in the same group, comm must be active";
+}
+
+// ----------------------------------------------------------------------------
+// 6. Argument validation / corner cases
+//
+// Each of these returns from inside ncclCommSuspend/Resume/MemStats BEFORE the
+// bootstrapBarrier is reached, so individual ranks failing the call do not
+// leave their peers blocked on a barrier.
+// ----------------------------------------------------------------------------
+
+class SuspendResumeArgValidation : public SuspendResumePublicAPITestBase {};
+
+TEST_F(SuspendResumeArgValidation, ZeroFlags)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    ASSERT_MPI_EQ(ncclInvalidArgument, ncclCommSuspend(comm, 0));
+
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended))
+        << "rejected Suspend should not transition the comm";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+}
+
+TEST_F(SuspendResumeArgValidation, UnknownFlagsRejected)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    ASSERT_MPI_EQ(ncclInvalidArgument, ncclCommSuspend(comm, 0xffff));
+    ASSERT_MPI_EQ(ncclInvalidArgument,
+                  ncclCommSuspend(comm, NCCL_SUSPEND_MEM | 0x80));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+}
+
+TEST_F(SuspendResumeArgValidation, DoubleSuspend)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+
+    // Second suspend rejects on every rank before reaching the barrier
+    // (state check sees comm->memManager->released==1).
+    ASSERT_MPI_EQ(ncclInvalidUsage, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended));
+}
+
+TEST_F(SuspendResumeArgValidation, ResumeWhenActive)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    // Resume on an already-active comm rejects before any barrier.
+    ASSERT_MPI_EQ(ncclInvalidUsage, ncclCommResume(comm));
+
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended))
+        << "rejected Resume should not transition the comm";
+}
+
+TEST_F(SuspendResumeArgValidation, DoubleResume)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+
+    // Second resume rejects: comm is no longer suspended.
+    ASSERT_MPI_EQ(ncclInvalidUsage, ncclCommResume(comm));
+
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended));
+}
+
+// ----- ncclCommMemStats validation --------------------------------------
+
+class SuspendResumeMemStatsValidation : public SuspendResumePublicAPITestBase {};
+
+TEST_F(SuspendResumeMemStatsValidation, NullValuePtr)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    EXPECT_EQ(ncclInvalidArgument,
+              ncclCommMemStats(comm, ncclStatGpuMemTotal, nullptr));
+    EXPECT_EQ(ncclInvalidArgument,
+              ncclCommMemStats(comm, ncclStatGpuMemSuspend, nullptr));
+}
+
+TEST_F(SuspendResumeMemStatsValidation, UnknownStat)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t comm = getActiveCommunicator();
+
+    uint64_t v = 0;
+    EXPECT_EQ(ncclInvalidArgument,
+              ncclCommMemStats(comm, static_cast<ncclCommMemStat_t>(999), &v));
+    EXPECT_EQ(ncclInvalidArgument,
+              ncclCommMemStats(comm, static_cast<ncclCommMemStat_t>(-1), &v));
 }
 
 #endif // MPI_TESTS_ENABLED

@@ -1,19 +1,20 @@
 /*************************************************************************
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_SOCKET_H_
 #define NCCL_SOCKET_H_
 
 #include "nccl.h"
-#include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <netdb.h>
 #include <fcntl.h>
 #include <poll.h>
+#include "os.h"
 
 #define MAX_IFS 16
 #define MAX_IF_NAME_SIZE 16
@@ -53,8 +54,8 @@ enum ncclSocketType {
 };
 
 struct ncclSocket {
-  int fd;
-  int acceptFd;
+  ncclSocketDescriptor socketDescriptor;
+  ncclSocketDescriptor acceptSocketDescriptor;
   int errorRetries;
   union ncclSocketAddress addr;
   volatile uint32_t* abortFlag;
@@ -66,6 +67,9 @@ struct ncclSocket {
   int customRetry;
   int finalizeCounter; // Used to keep track of initial handshake for async sockets.
   char finalizeBuffer[sizeof(uint64_t)]; // Used to keep track of initial handshake for async sockets.
+#ifdef NCCL_OS_WINDOWS
+  int socketBlockingMode;  // 0 - blocking mode; 1 - non-blocking mode
+#endif
 };
 
 struct ncclSocketOp {
@@ -88,7 +92,7 @@ ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddre
 // Create a listening socket. sock->addr can be pre-filled with IP & port info. sock->fd is set after a successful call
 ncclResult_t ncclSocketListen(struct ncclSocket* sock);
 ncclResult_t ncclSocketGetAddr(struct ncclSocket* sock, union ncclSocketAddress* addr);
-// Connect to sock->addr. sock->fd is set after a successful call.
+// Connect to sock->addr. sock->socketDescriptor is set after a successful call.
 ncclResult_t ncclSocketConnect(struct ncclSocket* sock);
 // Return socket connection state.
 ncclResult_t ncclSocketReady(struct ncclSocket* sock, int *running);
@@ -100,6 +104,7 @@ ncclResult_t ncclSocketSetFd(int fd, struct ncclSocket* sock);
 #define NCCL_SOCKET_SEND 0
 #define NCCL_SOCKET_RECV 1
 
+int ncclEnvSocketFamily(void);
 ncclResult_t ncclSocketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int* closed = NULL);
 ncclResult_t ncclSocketWait(int op, struct ncclSocket* sock, void* ptr, int size, int* offset);
 ncclResult_t ncclSocketSend(struct ncclSocket* sock, void* ptr, int size);
@@ -109,4 +114,5 @@ ncclResult_t ncclSocketMultiOp(struct ncclSocketOp* ops, int numOps);
 ncclResult_t ncclSocketTryRecv(struct ncclSocket* sock, void* ptr, int size, int* closed, bool blocking);
 ncclResult_t ncclSocketShutdown(struct ncclSocket* sock, int how);
 ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait = false);
+uint16_t ncclSocketToPort(union ncclSocketAddress *addr);
 #endif

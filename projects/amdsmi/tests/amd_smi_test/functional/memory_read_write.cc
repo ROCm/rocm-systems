@@ -234,7 +234,7 @@ void TestMemoryReadWrite::Run(void) {
                 << std::endl;
 
       // Convert to GB for display
-      const long page_size = sysconf(_SC_PAGESIZE);
+      const double page_size = static_cast<double>(sysconf(_SC_PAGESIZE));
       double gb =
           (static_cast<double>(ttm_info.current_pages) * page_size) / (1024.0 * 1024.0 * 1024.0);
       std::cout << "\t**Current TTM Size: " << gb << " GB" << std::endl;

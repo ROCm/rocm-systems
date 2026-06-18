@@ -605,7 +605,9 @@ public:
     tid(tid), nthreads(nthreads), wid(tid%WARP_SIZE), group(group), threadsPerBlock(blockDim.x),
     stepLines(ncclShmem.comm.buffSizes[NCCL_PROTO_LL]/NCCL_STEPS/sizeof(ncclLLFifoLine)) {
 #ifdef ENABLE_WARP_SPEED
-    auto *channel = &ncclShmem.warpChannel[threadIdx.x / WARP_SIZE];
+    auto *channel = ncclShmem.warpComm
+        ? &ncclShmem.warpChannel[threadIdx.x / WARP_SIZE]
+        : &ncclShmem.channel;
 #else
     auto *channel = &ncclShmem.channel;
 #endif

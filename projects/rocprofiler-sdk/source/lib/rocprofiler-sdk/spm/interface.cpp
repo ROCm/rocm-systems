@@ -23,10 +23,6 @@
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 #include "lib/common/static_object.hpp"
 
-#include <fmt/format.h>
-
-#include <cstdint>
-
 namespace rocprofiler
 {
 namespace spm

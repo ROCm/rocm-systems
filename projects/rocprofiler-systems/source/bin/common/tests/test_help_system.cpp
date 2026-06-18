@@ -317,3 +317,52 @@ TEST_F(help_system_test, topic_filter_ansi_tracing_section)
     // Should not include debug section
     EXPECT_EQ(output.find("--monochrome"), std::string::npos);
 }
+
+// ============================================================================
+// "See also" relations audit
+// ----------------------------------------------------------------------------
+// get_related_topics_map() references topics by name. Every referenced
+// topic MUST exist either in get_help_topic_map() (group topics) or in
+// get_domain_help_map() (domain topics). A typo would silently make
+// --help=<topic> in the footer dead-end with "Unknown topic" — the same
+// failure mode as the shipped --freq/--cputime/--realtime stale entries.
+// ============================================================================
+
+TEST_F(help_system_test, see_also_references_valid_topics_only)
+{
+    const auto& relations  = get_related_topics_map();
+    const auto& group_map  = get_help_topic_map();
+    const auto& domain_map = get_domain_help_map();
+
+    auto is_valid_topic = [&](std::string_view name) {
+        return group_map.count(std::string{ name }) > 0 ||
+               domain_map.count(std::string{ name }) > 0;
+    };
+
+    for(const auto& [topic, related] : relations)
+    {
+        EXPECT_TRUE(is_valid_topic(topic))
+            << "Source topic '" << topic
+            << "' in get_related_topics_map() is not a known topic";
+        for(const auto& target : related)
+            EXPECT_TRUE(is_valid_topic(target))
+                << "Related topic '" << target << "' (under '" << topic
+                << "') is not a known topic";
+    }
+}
+
+TEST_F(help_system_test, see_also_footer_emits_for_known_topic)
+{
+    std::ostringstream oss;
+    print_see_also("tracing", oss);
+    auto out = oss.str();
+    EXPECT_NE(out.find("See also"), std::string::npos);
+    EXPECT_NE(out.find("--help=rocm"), std::string::npos);
+}
+
+TEST_F(help_system_test, see_also_footer_silent_for_unknown_topic)
+{
+    std::ostringstream oss;
+    print_see_also("nonexistent-topic", oss);
+    EXPECT_TRUE(oss.str().empty());
+}

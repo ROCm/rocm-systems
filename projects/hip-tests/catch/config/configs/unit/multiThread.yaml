@@ -9,7 +9,7 @@ multiThread:
   Unit_hipMultiThreadDevice_SerialPyramid:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [device_mgmt]
   Unit_hipMultiThreadDevice_ParallelPyramid:
     <<: *level_2

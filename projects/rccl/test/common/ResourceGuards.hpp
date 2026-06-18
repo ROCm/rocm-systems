@@ -324,6 +324,19 @@ struct NcclRegHandleDeleter
     }
 };
 
+// Returns the MPI world rank as a string for diagnostic messages.
+// Tries OpenMPI, MPICH/PMIx, and SLURM env vars in order.
+inline const char* getMpiRankStr()
+{
+    for(const char* var : {"OMPI_COMM_WORLD_RANK", "PMI_RANK", "PMIX_RANK", "SLURM_PROCID"})
+    {
+        const char* val = std::getenv(var);
+        if(val)
+            return val;
+    }
+    return "?";
+}
+
 // Wrapper functions for AutoGuard (void-returning cleanup functions)
 inline void hipFreeWrapper(void* ptr)
 {
@@ -348,7 +361,8 @@ inline void hipStreamDestroyWrapper(hipStream_t stream)
         if(err != hipSuccess)
         {
             fprintf(stderr,
-                    "WARNING: hipStreamDestroy failed in destructor: %s (stream=%p)\n",
+                    "WARNING: rank %s: hipStreamDestroy failed: %s (stream=%p)\n",
+                    getMpiRankStr(),
                     hipGetErrorString(err),
                     static_cast<void*>(stream));
         }
@@ -378,7 +392,8 @@ inline void ncclCommDestroyWrapper(ncclComm_t comm)
         if(result != ncclSuccess)
         {
             fprintf(stderr,
-                    "WARNING: ncclCommDestroy failed in destructor: %s (comm=%p)\n",
+                    "WARNING: rank %s: ncclCommDestroy failed: %s (comm=%p)\n",
+                    getMpiRankStr(),
                     ncclGetErrorString(result),
                     static_cast<void*>(comm));
         }

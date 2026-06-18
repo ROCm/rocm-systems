@@ -4,162 +4,80 @@
 
 .. _rdc-install:
 
-******************
-RDC installation
-******************
+***********************************
+Install ROCm Data Center Tool (RDC)
+***********************************
 
-RDC is part of the AMD ROCm software and available on the distributions supported by AMD ROCm. This topic provides information required to install RDC from prebuilt packages and source.
+Before you begin, verify that your system is supported. For more information,
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
-Prerequisites
-==============
+For advanced workflows, source builds, or custom configurations, see
+:doc:`./handbook`.
 
-To install RDC from source, ensure that your system meets the following requirements:
+.. _install-rocm:
 
-- **Supported platforms:** See the `list of ROCm-supported operating systems and GPUs <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
+Install the ROCm Core SDK
+=========================
 
-- **Dependencies:**
+RDC is included with the ROCm Core SDK on Linux. For the most complete
+installation, we recommend that developers use the ``amdrocm-core-sdk`` meta
+package.
 
-  - CMake >= 3.15
+For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
+selector panel on that page to view instructions appropriate for your system
+environment.
 
-  - g++ (5.4.0)
+.. _install-base:
 
-  - gRPC and protoc
+Install RDC on Linux
+====================
 
-  - libcap-dev
+Alternatively, if you want to install RDC without additional ROCm libraries and
+tools, install the ``amdrocm-rdc`` package. This includes the RDC, base ROCm
+runtime components, and system dependencies.
 
-  - :doc:`AMD ROCm platform <rocm:index>` including:
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+   install dependencies and configure GPU access permissions.
 
-    - :doc:`AMDSMI library <amdsmi:index>`
-    - `ROCK kernel driver <https://github.com/ROCm/ROCK-Kernel-Driver>`_
+2. Install the RDC package that matches your desired ROCm version.
+   Package names use the following format:
 
-  For building latest documentation:
+   .. code-block:: shell-session
 
-  - Doxygen (1.8.11)
+      amdrocm-rdc<rocm_version>
 
-  - LaTeX (pdfTeX 3.14159265-2.6-1.40.16)
+   Where ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+   suffix to install the latest available version.
 
-  .. code-block:: shell
+   For example, to install the latest RDC package release for supported GPU
+   architectures:
 
-    $ sudo apt install libcap-dev
-    $ sudo apt install -y doxygen
+   .. tab-set::
 
-Build RDC from source
-======================
+      .. tab-item:: Debian-based distros
 
-The following sections provide steps to build RDC from source.
+         .. code-block:: bash
 
-Build gRPC and Protoc
-----------------------
+            sudo apt install amdrocm-rdc
 
-gRPC and Protoc must be built from source as the prebuilt packages are not available for the same. Here are the steps:
+      .. tab-item:: RHEL-based distros
 
-1. Install the required tools:
+         .. code-block:: bash
 
-   .. code-block:: shell
+            sudo dnf install amdrocm-rdc
 
-    sudo apt-get update
-    sudo apt-get install automake make g++ unzip build-essential autoconf libtool pkg-config libgflags-dev libgtest-dev clang libc++-dev curl libcap-dev
+      .. tab-item:: SLES
 
-2. Clone and build gRPC:
+         .. code-block:: bash
 
-   .. code-block:: shell
+            sudo zypper install amdrocm-rdc
 
-    git clone -b v1.67.1 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
-    cd grpc
-    export GRPC_ROOT=/opt/grpc
-    cmake -B build \
-        -DgRPC_INSTALL=ON \
-        -DgRPC_BUILD_TESTS=OFF \
-        -DBUILD_SHARED_LIBS=ON \
-        -DCMAKE_INSTALL_PREFIX="$GRPC_ROOT" \
-        -DCMAKE_INSTALL_LIBDIR=lib \
-        -DCMAKE_BUILD_TYPE=Release
-    make -C build -j $(nproc)
-    sudo make -C build install
-    echo "$GRPC_ROOT" | sudo tee /etc/ld.so.conf.d/grpc.conf
-    sudo ldconfig
-    cd ..
+.. _install-nightly:
 
-Build RDC
------------
+Install a nightly build
+=======================
 
-1. Clone the RDC repository:
-
-   .. code-block:: shell
-
-    git clone https://github.com/ROCm/rocm-systems --recursive
-    cd rocm-systems/projects/rdc
-
-2. Configure the build:
-
-   .. code-block:: shell
-
-    cmake -B build -DGRPC_ROOT="$GRPC_ROOT"
-
-3. You can also enable the following optional features:
-
-   - ROCm profiler:
-
-     .. code-block:: shell
-
-        cmake -B build -DBUILD_PROFILER=ON
-
-   - ROCm Validation Suite (RVS):
-
-     .. code-block:: shell
-
-        cmake -B build -DBUILD_RVS=ON
-
-   - RDC library only (without ``rdci`` and ``rdcd``):
-
-     .. code-block:: shell
-
-        cmake -B build -DBUILD_STANDALONE=OFF
-
-   - RDC library without ROCm runtime:
-
-     .. code-block:: shell
-
-        cmake -B build -DBUILD_RUNTIME=OFF
-
-4. Build and install:
-
-   .. code-block:: shell
-
-    make -C build -j $(nproc)
-    sudo make -C build install
-
-5. Update system library path:
-
-   .. code-block:: shell
-
-    export RDC_LIB_DIR=/opt/rocm/lib/rdc
-    export GRPC_LIB_DIR="/opt/grpc/lib"
-    echo "${RDC_LIB_DIR}" | sudo tee /etc/ld.so.conf.d/x86_64-librdc_client.conf
-    echo "${GRPC_LIB_DIR}" | sudo tee -a /etc/ld.so.conf.d/x86_64-librdc_client.conf
-    sudo ldconfig
-
-Installing RDC using prebuilt packages
-=======================================
-
-RDC is packaged as part of the ROCm software repository. To install RDC using prebuilt package, first :doc:`install the AMD ROCm software <rocm-install-on-linux:index>`, then use the following instructions:
-
-.. tab-set::
-
-    .. tab-item:: Ubuntu
-        :sync: ubuntu-tab
-
-        .. code-block:: shell
-
-            $ sudo apt-get install rdc
-            # or, to install a specific version
-            $ sudo apt-get install rdc<x.y.z>
-
-    .. tab-item:: SLES
-        :sync: sles-tab
-
-        .. code-block:: shell
-
-            $ sudo zypper install rdc
-            # or, to install a specific version
-            $ sudo zypper install rdc<x.y.z>
+The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
+nightly builds for the ROCm Core SDK and its components, including RDC. See
+`Nightly release status
+<https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.

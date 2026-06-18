@@ -86,6 +86,7 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
@@ -150,6 +151,32 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
         ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
         ASSERT_TRUE(state.schedInit);
         EXPECT_EQ(state.activeTotTokens, 0) << "unequal weights: after one full round active tokens must be 0";
+    }
+
+    // Forward rank-1 gtest failures to rank 0 so the test's exit code reflects them.
+    // (rank 1 has its default gtest listeners detached by main_mpi.cpp.)
+    {
+        int total_failed = 0; std::string msg;
+        if (rank == 1) {
+            auto* r = ::testing::UnitTest::GetInstance()->current_test_info()->result();
+            for (int i = 0; i < r->total_part_count(); i++) {
+                const auto& p = r->GetTestPartResult(i);
+                if (p.failed()) { total_failed++; msg += std::string("  - ") + (p.summary() ? p.summary() : "") + "\n"; }
+            }
+            int len = (int)msg.size();
+            MPI_Send(&total_failed, 1, MPI_INT, 0, 9620, MPI_COMM_WORLD);
+            MPI_Send(&len,          1, MPI_INT, 0, 9621, MPI_COMM_WORLD);
+            if (len > 0) MPI_Send(msg.data(), len, MPI_CHAR, 0, 9622, MPI_COMM_WORLD);
+        } else if (rank == 0) {
+            int len = 0;
+            MPI_Recv(&total_failed, 1, MPI_INT, 1, 9620, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&len,          1, MPI_INT, 1, 9621, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if (len > 0) {
+                msg.assign(len, '\0');
+                MPI_Recv(msg.data(), len, MPI_CHAR, 1, 9622, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                ADD_FAILURE() << "rank 1 reported " << total_failed << " failure(s):\n" << msg;
+            }
+        }
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -655,6 +682,7 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
@@ -739,6 +767,31 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
         EXPECT_EQ(consumed, kPhase) << "phase 3: expected " << kPhase << " WRR selections";
     }
 
+    // Forward rank-1 gtest failures to rank 0 (default listeners detached on non-zero ranks).
+    {
+        int total_failed = 0; std::string msg;
+        if (rank == 1) {
+            auto* r = ::testing::UnitTest::GetInstance()->current_test_info()->result();
+            for (int i = 0; i < r->total_part_count(); i++) {
+                const auto& p = r->GetTestPartResult(i);
+                if (p.failed()) { total_failed++; msg += std::string("  - ") + (p.summary() ? p.summary() : "") + "\n"; }
+            }
+            int len = (int)msg.size();
+            MPI_Send(&total_failed, 1, MPI_INT, 0, 9630, MPI_COMM_WORLD);
+            MPI_Send(&len,          1, MPI_INT, 0, 9631, MPI_COMM_WORLD);
+            if (len > 0) MPI_Send(msg.data(), len, MPI_CHAR, 0, 9632, MPI_COMM_WORLD);
+        } else if (rank == 0) {
+            int len = 0;
+            MPI_Recv(&total_failed, 1, MPI_INT, 1, 9630, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&len,          1, MPI_INT, 1, 9631, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if (len > 0) {
+                msg.assign(len, '\0');
+                MPI_Recv(msg.data(), len, MPI_CHAR, 1, 9632, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                ADD_FAILURE() << "rank 1 reported " << total_failed << " failure(s):\n" << msg;
+            }
+        }
+    }
+
     MPI_Barrier(MPI_COMM_WORLD);
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
@@ -760,6 +813,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
@@ -868,6 +922,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 

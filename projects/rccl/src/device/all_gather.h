@@ -22,7 +22,9 @@ namespace {
 #endif
 #ifdef ENABLE_WARP_SPEED
     int warp = threadIdx.x / WARP_SIZE;
-    ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
+    ncclRing *ring = ncclShmem.warpComm
+        ? &ncclShmem.warpChannel[warp].ring
+        : &ncclShmem.channel.ring;
 #else
     ncclRing *ring = &ncclShmem.channel.ring;
 #endif
@@ -172,7 +174,7 @@ namespace {
       inputBuf = inputBuf + partOffset;
       outputBuf = outputBuf + partOffset + ringRanks[0] * count;
       reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>
-        (tid - workNthreads, nthreads - workNthreads, work->redOpArg, &work->redOpArg, false, 1, (void**)&inputBuf, 1, (void**)&outputBuf, partCount);
+        (tid - workNthreads, nthreads - workNthreads, work->redOpArg, false, 1, (void**)&inputBuf, 1, (void**)&outputBuf, partCount);
     }
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
     // we have to wait for all warps before we can proceed to the next work;
@@ -353,7 +355,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
               /*MultimemSrcs,MinSrcs,MaxSrcs=*/MultimemSrcs, 1, 1,
               /*MultimemDsts=*/MultimemDsts, 0 + MultimemDsts + MinDsts, 1 + MaxDsts,
               /*PreOpSrcs=*/0>
-              (tid, tn, 0, nullptr, false,
+              (tid, tn, 0, false,
                 /*nSrcs=*/1, [=]__device__(int s/*==0*/) -> void* {
               return (char*)srcPtrs[src] + railAllOffset;
             },
@@ -577,7 +579,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
                     /*MultimemSrcs,MinSrcs,MaxSrcs=*/0,1,1,
                     /*MultimemDsts=*/0, 0+MinDsts, 1+MaxDsts,
                     /*PreOpSrcs=*/0>
-            (tid, tn, 0, nullptr, false,
+            (tid, tn, 0, false,
              /*nSrcs=*/1, [=]__device__(int s/*==0*/) -> void* {
                return work->regUsed && (recvDirectFlag & NCCL_P2P_READ) ? (char*)srcPtrs[src] + userOneBeg : (char*)srcPtrs[src] + railAllOffset;
              },

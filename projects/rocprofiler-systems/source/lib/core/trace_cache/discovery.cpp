@@ -143,7 +143,7 @@ merge_perfetto_files()
     auto _filename      = config::get_perfetto_output_filename();
     auto _output_folder = tim::filepath::dirname(_filename);
     auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-    auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
+    auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{});
 
     if(!_script_dir.empty())
         _script_path = fmt::format("{}/{}", _script_dir, _script_path);

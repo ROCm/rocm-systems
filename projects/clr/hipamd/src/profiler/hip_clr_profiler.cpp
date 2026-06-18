@@ -137,16 +137,28 @@ static std::atomic<bool>        g_chunk_thread_stop{false};
 
 // ================================================================================================
 hipApiRecordExt* AllocChunk() {
-  void* raw = ::operator new[](kChunkSize * sizeof(hipApiRecordExt));
-  hipApiRecordExt* chunk = static_cast<hipApiRecordExt*>(raw);
-  std::memset(chunk, 0, kChunkSize * sizeof(hipApiRecordExt));
-  return chunk;
+  // The slab is intentionally left uninitialised.  Zeroing the whole ~2.5 MB
+  // slab here (a single memset) stalls the launching thread for ~0.5-0.7 ms at
+  // every chunk boundary, which shows up as periodic gaps in the CPU *and* GPU
+  // timelines.  Instead each record is cleared individually when its slot is
+  // handed out in HipGetActiveRecordExt (~0.07 us/record), spreading that cost
+  // evenly across execution.  Only records that are actually handed out get
+  // cleared, so the finalizer must free exactly that many (see
+  // HipClrProfilerFinalizer) — the uninitialised tail of the last chunk is
+  // never walked for owned pointers.
+  return static_cast<hipApiRecordExt*>(
+      ::operator new[](kChunkSize * sizeof(hipApiRecordExt)));
 }
 
 // ================================================================================================
-void FreeChunk(hipApiRecordExt* chunk) {
+// Frees the owned resources (spill list + kernel_args blobs) of the first
+// `count` records, then releases the slab.  `count` must be the number of
+// records actually handed out for this chunk: records past that point were
+// never cleared by HipGetActiveRecordExt and hold uninitialised pointers that
+// must not be dereferenced.
+void FreeChunk(hipApiRecordExt* chunk, size_t count = kChunkSize) {
   if (!chunk) return;
-  for (size_t i = 0; i < kChunkSize; ++i) {
+  for (size_t i = 0; i < count; ++i) {
     // Free spill node kernel_args blobs and the nodes themselves.
     // All kernel_args blobs are owned: single launches by HipCaptureKernelArgsExt,
     // graph launches by a copy made in fill_dispatch_info.
@@ -285,6 +297,7 @@ static HipCopyKindExt ToCopyKindExt(uint32_t cl_kind) {
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE:   return HIP_COPY_KIND_BUFFER_TO_IMAGE_EXT;
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER:   return HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT;
     case CL_COMMAND_FILL_BUFFER:            return HIP_COPY_KIND_FILL_EXT;
+    case ROCCLR_COMMAND_BATCH_COPY_BUFFER:  return HIP_COPY_KIND_BATCH_EXT;
     default:                                return HIP_COPY_KIND_UNKNOWN_EXT;
   }
 }
@@ -519,6 +532,7 @@ static const char* CopyKindName(uint32_t kind) {
     case HIP_COPY_KIND_BUFFER_TO_IMAGE_EXT: return "BufferToImage";
     case HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT: return "ImageToBuffer";
     case HIP_COPY_KIND_FILL_EXT:            return "Fill";
+    case HIP_COPY_KIND_BATCH_EXT:           return "Batch_Copy";
     default:                                return "Unknown";
   }
 }
@@ -701,7 +715,7 @@ void WriteJsonTraceImpl(const char* filepath) {
       // emit_host_arrow: draw ph:s/ph:t dep arrow from CPU event to this GPU op.
       //   For graph launches only the first op gets the host arrow; subsequent nodes
       //   are connected via node→node graph arrows instead.
-      struct GpuOpInfo { uint64_t tid; double ts; bool has_ts; };
+      struct GpuOpInfo { uint64_t tid; double ts; double dur; bool has_ts; };
       auto emit_gpu_op = [&](const hipGpuActivityExt& gop, hipStream_t stream,
                              bool emit_host_arrow = true) -> GpuOpInfo {
         uint32_t op_idx  = gop.op < 3 ? gop.op : 3;
@@ -734,7 +748,7 @@ void WriteJsonTraceImpl(const char* filepath) {
         if (has_ts && emit_host_arrow)
           trace << ",\n{\"ph\":\"s\",\"id\":" << fid
                 << ",\"pid\":1024,\"tid\":" << rec.thread_id
-                << ",\"ts\":" << s_time << ",\"name\":\"dep\"}";
+                << ",\"ts\":" << (s_time + dur_us) << ",\"name\":\"dep\"}";
         // GPU X event.
         trace << ",\n{\"name\":\"" << gpu_name
               << "\",\"ph\":\"X\",\"pid\":" << gop.device_id
@@ -846,7 +860,7 @@ void WriteJsonTraceImpl(const char* filepath) {
         }
 
         device_gpu_tids[static_cast<int>(gop.device_id)].insert(gpu_tid);
-        return GpuOpInfo{gpu_tid, gpu_ts, has_ts};
+        return GpuOpInfo{gpu_tid, gpu_ts, gpu_dur, has_ts};
       };
 
       // Op-1 lives directly in rec.gpu; ops 2..N are in the spill linked list.
@@ -863,7 +877,7 @@ void WriteJsonTraceImpl(const char* filepath) {
             trace << ",\n{\"ph\":\"s\",\"id\":" << gfid
                   << ",\"pid\":" << rec.gpu.device_id
                   << ",\"tid\":" << prev.tid
-                  << ",\"ts\":" << prev.ts << ",\"name\":\"graph\",\"cat\":\"graph\"}";
+                  << ",\"ts\":" << (prev.ts + prev.dur) << ",\"name\":\"graph\",\"cat\":\"graph\"}";
             trace << ",\n{\"ph\":\"f\",\"bp\":\"e\",\"id\":" << gfid
                   << ",\"pid\":" << rec.gpu.device_id
                   << ",\"tid\":" << cur.tid
@@ -1612,14 +1626,14 @@ static void PfChunkCallback(const hipApiRecordExt* records, uint32_t count, uint
       cpu_anns.push_back({iid_stream, buf});
     }
 
-    // CPU→GPU outflow
-    std::vector<uint64_t> cpu_out;
     auto cfit = chunk_cpu_gpu_fid.find(rec.chunk_id);
-    if (cfit != chunk_cpu_gpu_fid.end()) cpu_out.push_back(cfit->second);
 
     uint64_t name_iid = g_pf_evt_iid.count(rec.api_name) ? g_pf_evt_iid[rec.api_name] : 0;
     EmitSliceSorted(sorted_pkts, cpu_uuid, ts_ns, dur_ns, rec.api_name,
-                    name_iid, cat_hip, cpu_anns, cpu_out, {});
+                    name_iid, cat_hip, cpu_anns, {}, {});
+    // CPU→GPU flow arrow sourced at CPU event END time (dispatch point)
+    if (cfit != chunk_cpu_gpu_fid.end())
+      EmitFlowEventSorted(sorted_pkts, cpu_uuid, ts_ns + dur_ns, cfit->second, true);
 
     if (rec.gpu.gpu_op_count == 0) continue;
 
@@ -2107,7 +2121,7 @@ void WriteProtoTraceImpl(const char* filepath) {
     for (auto& kv : g_kernel_names) intern_evt(kv.second);
   }
   // GPU copy: all possible CopyKindName values
-  for (int k = 0; k <= 12; ++k) intern_evt(CopyKindName(static_cast<uint32_t>(k)));
+  for (int k = 0; k <= 13; ++k) intern_evt(CopyKindName(static_cast<uint32_t>(k)));
   intern_evt("Barrier");
   // Memory alloc names: "0xADDR (SIZE unit)"
   for (auto& kv : alloc_map) {
@@ -2169,9 +2183,7 @@ void WriteProtoTraceImpl(const char* filepath) {
       uint64_t ts_ns    = rec.start_ns;
       uint64_t dur_ns   = (rec.end_ns > rec.start_ns) ? (rec.end_ns - rec.start_ns) : 1;
 
-      std::vector<uint64_t> cpu_out;
       auto cfit = cpu_gpu_flow.find(slot);
-      if (cfit != cpu_gpu_flow.end()) cpu_out.push_back(cfit->second);
 
       std::vector<std::pair<uint64_t,std::string>> cpu_anns;
       {
@@ -2195,7 +2207,10 @@ void WriteProtoTraceImpl(const char* filepath) {
         }
       }
       EmitSliceSorted(sorted_pkts, cpu_uuid, ts_ns, dur_ns, rec.api_name,
-                      intern_evt(rec.api_name), kCatHip, cpu_anns, cpu_out, {});
+                      intern_evt(rec.api_name), kCatHip, cpu_anns, {}, {});
+      // CPU→GPU flow arrow sourced at CPU event END time (dispatch point)
+      if (cfit != cpu_gpu_flow.end())
+        EmitFlowEventSorted(sorted_pkts, cpu_uuid, ts_ns + dur_ns, cfit->second, true);
 
       // GPU op slices
       auto ctoit = cpu_gpu_target_ord.find(slot);
@@ -2291,16 +2306,16 @@ void WriteProtoTraceImpl(const char* filepath) {
         auto gnif = graph_node_in_flows.find(slot * 1000 + op_ord);
         if (gnif != graph_node_in_flows.end()) in_flows_vec.push_back(gnif->second);
 
-        // Graph node→node: this op sends to next node
-        std::vector<uint64_t> out_flows_vec;
+        // Graph node→node: this op sends to next node (arrow from op END)
         auto gnof = graph_node_out_flows.find(slot * 1000 + op_ord);
-        if (gnof != graph_node_out_flows.end()) out_flows_vec.push_back(gnof->second);
 
         ++op_ord;
 
         uint64_t gpu_name_iid = intern_evt(gpu_name);
         EmitSliceSorted(sorted_pkts, gpu_uuid, g_ts, g_dur, gpu_name,
-                        gpu_name_iid, kCatGpu, gpu_anns, out_flows_vec, in_flows_vec);
+                        gpu_name_iid, kCatGpu, gpu_anns, {}, in_flows_vec);
+        if (gnof != graph_node_out_flows.end())
+          EmitFlowEventSorted(sorted_pkts, gpu_uuid, g_ts + g_dur, gnof->second, true);
       };
 
       if (rec.gpu.gpu_op_count > 0) {
@@ -2402,7 +2417,15 @@ static void ProfilerAtExit() {
 
 struct HipClrProfilerFinalizer {
   ~HipClrProfilerFinalizer() {
-    for (auto* chunk : g_records) FreeChunk(chunk);
+    // Records are cleared on hand-out (not at chunk alloc), so only the records
+    // that were actually allocated are initialised.  Free exactly those; the
+    // uninitialised tail of the final chunk must not be walked for owned ptrs.
+    size_t total = g_rec_counter.load(std::memory_order_acquire);
+    for (size_t c = 0; c < g_records.size(); ++c) {
+      size_t base  = c * kChunkSize;
+      size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
+      FreeChunk(g_records[c], valid);
+    }
   }
 } g_finalizer;
 
@@ -2581,6 +2604,12 @@ hipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
   }
 
   hipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
+  // Clear the record on actual allocation. AllocChunk no longer zeroes the slab
+  // (that batched memset stalled the hot path); doing it per-record here spreads
+  // the cost (~0.07 us) and leaves every field — including the gpu sub-struct
+  // and owned pointers — in the same zero-initialised state the GPU callback and
+  // trace writers expect. Reserved fields are cleared too; not worth special-casing.
+  std::memset(rec, 0, sizeof(*rec));
   rec->api_name    = (api_id < kHipApiNamesCountExt) ? kHipApiNamesExt[api_id] : "unknown";
   rec->_flags_u64  = 0;
   rec->chunk_id    = g_next_chunk_id.fetch_add(1, std::memory_order_relaxed);

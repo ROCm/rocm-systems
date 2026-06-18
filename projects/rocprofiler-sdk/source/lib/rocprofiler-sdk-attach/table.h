@@ -26,7 +26,7 @@
 #include "code_object_registration.h"
 #include "queue_registration.h"
 
-#define ROCATTACH_API_TABLE_VERSION_MAJOR 0
+#define ROCATTACH_API_TABLE_VERSION_MAJOR 1
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -35,8 +35,10 @@ typedef int (*rocprofiler_attach_iterate_all_queues_t)(rocprof_attach_queue_iter
 typedef int (*rocprofiler_attach_set_write_interceptor_t)(hsa_queue_t*, write_interceptor_t, void*);
 typedef int (*rocprofiler_attach_iterate_all_code_objects_t)(rocprof_attach_code_object_iterator_t,
                                                              void*);
-typedef void (*rocprofiler_attach_notify_new_queue_t)(hsa_queue_t*, hsa_agent_t, void*);
-typedef void (*rocprofiler_attach_notify_new_code_object_t)(hsa_executable_t, void*);
+typedef int (*rocprofiler_attach_add_code_object_cb_t)(rocprofiler_attach_code_object_cb_t, void*);
+typedef int (*rocprofiler_attach_remove_code_object_cb_t)(rocprofiler_attach_code_object_cb_t);
+typedef int (*rocprofiler_attach_add_queue_cb_t)(rocprofiler_attach_queue_cb_t, void*);
+typedef int (*rocprofiler_attach_remove_queue_cb_t)(rocprofiler_attach_queue_cb_t);
 
 struct RocAttachDispatchTable
 {
@@ -45,8 +47,10 @@ struct RocAttachDispatchTable
     rocprofiler_attach_iterate_all_queues_t       rocprofiler_attach_iterate_all_queues;
     rocprofiler_attach_set_write_interceptor_t    rocprofiler_attach_set_write_interceptor;
     rocprofiler_attach_iterate_all_code_objects_t rocprofiler_attach_iterate_all_code_objects;
-    rocprofiler_attach_notify_new_queue_t         rocprofiler_attach_notify_new_queue;
-    rocprofiler_attach_notify_new_code_object_t   rocprofiler_attach_notify_new_code_object;
+    rocprofiler_attach_add_code_object_cb_t       rocprofiler_attach_add_code_object_cb;
+    rocprofiler_attach_remove_code_object_cb_t    rocprofiler_attach_remove_code_object_cb;
+    rocprofiler_attach_add_queue_cb_t             rocprofiler_attach_add_queue_cb;
+    rocprofiler_attach_remove_queue_cb_t          rocprofiler_attach_remove_queue_cb;
 };
 
 ROCPROFILER_EXTERN_C_FINI

@@ -221,12 +221,14 @@ private:
         auto* _data = m_buffer->data();
         memset(_data + m_head, std::numeric_limits<std::uint8_t>::max(),
                buffer_size - m_head);
-        *reinterpret_cast<TypeIdentifierEnum*>(_data + m_head) =
-            TypeIdentifierEnum::fragmented_space;
+
+        const TypeIdentifierEnum tag = TypeIdentifierEnum::fragmented_space;
+        std::memcpy(_data + m_head, &tag, sizeof(TypeIdentifierEnum));
 
         size_t remaining_bytes = buffer_size - m_head - header_size<TypeIdentifierEnum>;
-        *reinterpret_cast<size_t*>(_data + m_head + sizeof(TypeIdentifierEnum)) =
-            remaining_bytes;
+        std::memcpy(_data + m_head + sizeof(TypeIdentifierEnum), &remaining_bytes,
+                    sizeof(size_t));
+
         m_head = 0;
     }
 

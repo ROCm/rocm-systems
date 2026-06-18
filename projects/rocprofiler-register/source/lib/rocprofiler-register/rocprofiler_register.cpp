@@ -564,19 +564,37 @@ rocp_add_registered_library_api_table(const char*                        common_
                              lib_version,
                              api_tables_len);
 
+    constexpr auto rocattach_name = supported_library_trait<ROCP_REG_ROCATTACH>::common_name;
+    const bool     is_rocattach   = (std::string_view{ common_name } == rocattach_name);
+
+    auto _tables = std::vector<void*>{};
+    _tables.reserve(api_tables_len);
+    for(uint64_t i = 0; i < api_tables_len; ++i)
+        _tables.emplace_back(api_tables[i]);
+
+    auto _entry = registered_library_api_table{
+        false, common_name, import_func, lib_version, std::move(_tables), instance_val
+    };
+
+    if(is_rocattach)
+    {
+        // Insert rocattach at index 0 so that rocp_invoke_registrations always propagates
+        // it before any other API table. Shift existing entries right to make room.
+        auto* end = registered.begin();
+        while(end != registered.end() && *end)
+            ++end;
+        if(end == registered.end()) return nullptr;
+        for(auto* itr = end; itr != registered.begin(); --itr)
+            *itr = std::move(*(itr - 1));
+        registered[0] = std::move(_entry);
+        return registered.data();
+    }
+
     for(auto& itr : registered)
     {
         if(!itr)
         {
-            auto _tables = std::vector<void*>{};
-            _tables.reserve(api_tables_len);
-            for(uint64_t i = 0; i < api_tables_len; ++i)
-                _tables.emplace_back(api_tables[i]);
-
-            itr = registered_library_api_table{
-                false,       common_name,        import_func,
-                lib_version, std::move(_tables), instance_val
-            };
+            itr = std::move(_entry);
             return &itr;
         }
     }

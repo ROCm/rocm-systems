@@ -30,8 +30,8 @@ public:
 
     void shutdown();
 
-    void register_region_pauser_resume_callbacks(callback_t resume_callback,
-                                                 callback_t pause_callback);
+    void register_region_pause_resume_callbacks(callback_t resume_callback,
+                                                callback_t pause_callback);
 
     bool region_filter_active() const
     {
@@ -43,8 +43,8 @@ public:
 
     void handle_range_start(std::uint64_t range_id, const char* message);
     void handle_range_stop(std::uint64_t range_id);
-    void handle_pause();
-    void handle_resume();
+    void handle_pause(std::uint64_t tid);
+    void handle_resume(std::uint64_t tid);
 
 private:
     std::set<std::string, std::less<>> m_trace_regions;

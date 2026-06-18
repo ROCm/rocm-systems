@@ -13,3 +13,4 @@
 .vscode/
 /.rocshmem-worktree
 /projects/cuid/_build
+build/

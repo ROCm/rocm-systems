@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/code_object/hsa/kernel_symbol.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -223,7 +224,7 @@ enum amd_kernel_code_property_t
 uint32_t
 arch_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
 {
-    if(name == "gfx90a" || name.find("gfx94") == 0)
+    if(name == "gfx90a" || name.find("gfx94") == 0 || name.find("gfx95") == 0)
         return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc3,
                                  AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET) +
                 1) *
@@ -243,7 +244,7 @@ accum_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
 {
     if(name == "gfx908")
         return arch_vgpr_count(name, kernel_code);
-    else if(name == "gfx90a" || name.find("gfx94") == 0)
+    else if(name == "gfx90a" || name.find("gfx94") == 0 || name.find("gfx95") == 0)
         return ((AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
                                   AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) +
                  1) *
@@ -976,16 +977,19 @@ executable_freeze(hsa_executable_t executable, const char* options)
     return rocprofiler::code_object::executable_freeze_internal(executable);
 }
 
-hsa_status_t
-executable_destroy(hsa_executable_t executable)
+// Performs all SDK bookkeeping for an executable being destroyed (unload notifications,
+// kernel object map cleanup, code object / executable list cleanup) without calling the
+// underlying HSA destroy function.  Called from both the HSA-hook path and the attach
+// destruction callback path.
+void
+executable_destroy_internal(hsa_executable_t executable)
 {
-    // Serialize all executable_destroy calls to prevent:
-    // 1. Concurrent access to code objects in shutdown()
-    // 2. Use-after-free when multiple threads destroy same executable
-    // 3. Race on end_notified flags (now atomic, but still need serialization for callbacks)
     auto _lk = std::unique_lock{get_destroy_mutex()};
 
-    if(is_shutdown.load(std::memory_order_acquire)) return HSA_STATUS_SUCCESS;
+    if(is_shutdown.load(std::memory_order_acquire))
+    {
+        return;
+    }
 
     auto _unloaded = shutdown(executable);
 
@@ -1007,7 +1011,10 @@ executable_destroy(hsa_executable_t executable)
         CHECK_NOTNULL(get_code_objects())->wlock([executable](code_object_array_t& data) {
             for(auto& itr : data)
             {
-                if(itr->hsa_executable.handle == executable.handle) itr.reset();
+                if(itr->hsa_executable.handle == executable.handle)
+                {
+                    itr.reset();
+                }
             }
             data.erase(std::remove_if(
                            data.begin(), data.end(), [](auto& itr) { return (itr == nullptr); }),
@@ -1026,7 +1033,16 @@ executable_destroy(hsa_executable_t executable)
                        data.end());
         });
     }
+}
 
+hsa_status_t
+executable_destroy(hsa_executable_t executable)
+{
+    // Serialize all executable_destroy calls to prevent:
+    // 1. Concurrent access to code objects in shutdown()
+    // 2. Use-after-free when multiple threads destroy same executable
+    // 3. Race on end_notified flags (now atomic, but still need serialization for callbacks)
+    executable_destroy_internal(executable);
     return CHECK_NOTNULL(get_destroy_function())(executable);
 }
 
@@ -1093,6 +1109,11 @@ shutdown(hsa_executable_t executable)
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
 
     auto _unloaded = code_object::get_unloaded_code_objects(executable);
+
+    // Code-object unload callbacks often invalidate tool-side kernel symbol metadata. Drain inline
+    // queue-interposition completion records first so pending dispatch records are delivered while
+    // that metadata is still valid.
+    ::rocprofiler::hsa::queue_interposition::interposition_sync();
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
     constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CODE_OBJECT_LOAD;
@@ -1175,17 +1196,25 @@ get_attach_table()
 }
 
 void
-iterate_attach_code_object(hsa_executable_t executable, void*)
+attach_code_object_event(hsa_executable_t                       executable,
+                         rocprofiler_attach_code_object_phase_t phase,
+                         void* /*data*/)
 {
-    executable_freeze_internal(executable);
+    if(phase == ROCPROFILER_ATTACH_CODE_OBJECT_CREATED)
+    {
+        executable_freeze_internal(executable);
+    }
+    else
+    {
+        executable_destroy_internal(executable);
+    }
 }
 
 void
 load_attach_code_objects()
 {
     auto* attach_table = CHECK_NOTNULL(*(get_attach_table()));
-    attach_table->rocprofiler_attach_iterate_all_code_objects(iterate_attach_code_object, nullptr);
-    attach_table->rocprofiler_attach_notify_new_code_object = iterate_attach_code_object;
+    attach_table->rocprofiler_attach_add_code_object_cb(attach_code_object_event, nullptr);
 }
 
 }  // namespace

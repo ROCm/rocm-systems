@@ -1,0 +1,376 @@
+# rccl-UnitTestsMPI — shared/ctest schema (requires ENABLE_MPI_TESTS at configure time).
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+#
+# Tiers:
+#   quick — broad MPI smoke (P2P, SHM, NET, NetIB, ImplicitLaunchOrder, UBR, GraphCapture).
+#   quick_env_* — smoke env-overlays (narrow pattern set under non-default env).
+#   standard — same test_patterns as comprehensive; lighter env.
+#   comprehensive — same test_patterns as standard; adds env (rank logs, implicit launch order,
+#     P2P/SHM CE memcpy flags).
+#   full_base — same patterns/env as comprehensive; auto algorithm/protocol selection.
+#   full_base / full_pow2_* — label "full" + full_regression for CI.
+#   full_pow2_* — narrowed to the collective-issuing subset of MPI tests, run under
+#     forced (NCCL_ALGO, NCCL_PROTO) combinations. The other MPI suites (raw send/recv
+#     P2P/SHM/Net transport tests and direct net-plugin tests) never consult algo/proto,
+#     so re-running them under forced env vars adds runtime without coverage.
+#     Matrix: (Ring, Tree) x (Simple, LL, LL128). LL128 categories also set
+#     RCCL_LL128_FORCE_ENABLE=1 to bypass topo-based gating
+#     (LL128 string parsing itself is not compile-gated).
+#     Rank count from the job (e.g. NGPU); np in {1,2,4,8} for pow2.
+
+test_categories:
+  quick:
+    description: "MPI smoke — P2P, SHM, NET, NetIB, ImplicitLaunchOrder, UBR, and GraphCapture coverage."
+    test_patterns:
+      - "P2pMPITest.*"
+      - "ShmMPITest.*"
+      - "NetTransportMPITest.*"
+      - "NetIbMPITest.*"
+      - "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
+      - "UBR_AllReduce.OutOfPlace_MultiNode"
+      - "UBR_AllGather.OutOfPlace_MultiNode"
+      - "UBR_ReduceScatter.OutOfPlace_MultiNode"
+      - "UBR_Broadcast.NonZeroRoot_MultiNode"
+      - "UBR_AllToAll.OutOfPlace_MultiNode"
+      - "UBR_SendRecv.RingPattern_MultiNode"
+      - "UBR_AllToAllStress.InterleavedMultiSize_MultiNode"
+      - "UBR_AllToAllStress.InterleavedWithSplitComm_MultiNode"
+      - "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode"
+      - "UBR_ConcurrentRegHang.*SHOULD_WORK"
+      - "GraphCapture_AllToAll.MultiNode"
+      - "GraphCapture_AllReduce.MultiNode"
+    exclude_windows: &mpi_exclude_windows
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "mpi"
+    env_variables: &mpi_quick_env
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_LAUNCH_MODE=GROUP"
+      - "NCCL_DMABUF_ENABLE=1"
+      - "NCCL_LOCAL_REGISTER=1"
+      - "NCCL_LEGACY_CUDA_REGISTER=1"
+      - "NCCL_GRAPH_REGISTER=1"
+  quick_env_shm_ce_memcpy_send:
+    description: "Shared-memory CE memcpy on send side (mode 1, locality 1)."
+    test_patterns:
+      - "ShmMPITest.ShmWithMemcpyTest"
+    exclude_windows: *mpi_exclude_windows
+    labels: &mpi_quick_labels
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "mpi"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_LAUNCH_MODE=GROUP"
+      - "NCCL_SHM_DISABLE=0"
+      - "NCCL_SHM_USE_CUDA_MEMCPY=1"
+      - "NCCL_SHM_MEMCPY_MODE=1"
+      - "NCCL_SHM_LOCALITY=1"
+  quick_env_shm_ce_memcpy_recv:
+    description: "Shared-memory CE memcpy on recv side (mode 2, locality 2)."
+    test_patterns:
+      - "ShmMPITest.ShmWithMemcpyTest"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_LAUNCH_MODE=GROUP"
+      - "NCCL_SHM_DISABLE=0"
+      - "NCCL_SHM_USE_CUDA_MEMCPY=1"
+      - "NCCL_SHM_MEMCPY_MODE=2"
+      - "NCCL_SHM_LOCALITY=2"
+  quick_env_shm_ce_memcpy_both_simple:
+    description: "Shared-memory CE memcpy on both sides under Simple protocol (mode 3)."
+    test_patterns:
+      - "ShmMPITest.ShmWithMemcpyTest"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_LAUNCH_MODE=GROUP"
+      - "NCCL_SHM_DISABLE=0"
+      - "NCCL_SHM_USE_CUDA_MEMCPY=1"
+      - "NCCL_SHM_MEMCPY_MODE=3"
+      - "NCCL_SHM_LOCALITY=1"
+      - "NCCL_PROTO=Simple"
+  quick_env_p2p_workflow:
+    description: "P2P workflow with explicit P2P enabled and CUDA memcpy."
+    test_patterns:
+      - "P2pMPITest.P2pWorkflow"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_LAUNCH_MODE=GROUP"
+      - "NCCL_P2P_USE_CUDA_MEMCPY=1"
+      - "NCCL_LEGACY_CUDA_REGISTER=1"
+      - "NCCL_P2P_DISABLE=0"
+  quick_env_p2p_ipc_small_buffer:
+    description: "P2P IPC registration with very small buffer and SHM disabled."
+    test_patterns:
+      - "P2pMPITest.P2pIpcBufferRegistration_VerySmallBuffer"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_LAUNCH_MODE=GROUP"
+      - "NCCL_P2P_USE_CUDA_MEMCPY=1"
+      - "NCCL_LEGACY_CUDA_REGISTER=1"
+      - "NCCL_SHM_DISABLE=1"
+      - "NCCL_LOCAL_REGISTER=1"
+  quick_env_net_graph_register:
+    description: "Multinode net transport with graph buffer registration."
+    test_patterns:
+      - "NetTransportMPITest.NetGraphRegisterBufferTest"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_LAUNCH_MODE=GROUP"
+      - "NCCL_NET_SHARED_COMMS=1"
+      - "NCCL_NET_SHARED_BUFFERS=1"
+      - "NCCL_IB_DISABLE=0"
+      - "NCCL_LEGACY_CUDA_REGISTER=1"
+      - "NCCL_GRAPH_REGISTER=1"
+  quick_env_netib_xfer_trace:
+    description: "InfiniBand transfer suite under TRACE-level NET/INIT logging."
+    test_patterns:
+      - "NetIbMPITest.SimpleSendRecv:NetIbMPITest.SendRecvMultipleSizes:NetIbMPITest.LargeTransfer:NetIbMPITest.SendRecvDifferentMemoryTypes:NetIbMPITest.SendRecvMultipleSizesFusion:NetIbMPITest.MultipleOutstandingSendRecv"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=TRACE"
+      - "NCCL_DEBUG_SUBSYS=NET,INIT"
+      - "NCCL_LAUNCH_MODE=GROUP"
+      - "NCCL_DMABUF_ENABLE=1"
+  quick_env_netib_xfer_log_ranks:
+    description: "InfiniBand SimpleSendRecv with all-rank logging."
+    test_patterns:
+      - "NetIbMPITest.SimpleSendRecv"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=TRACE"
+      - "NCCL_DEBUG_SUBSYS=NET,INIT"
+      - "NCCL_LAUNCH_MODE=GROUP"
+      - "NCCL_DMABUF_ENABLE=1"
+      - "RCCL_MPI_LOG_ALL_RANKS=1"
+  standard:
+    description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
+    test_patterns: &mpi_all_patterns
+      - "P2pMPITest.*"
+      - "NetTransportMPITest.*"
+      - "ShmMPITest.*"
+      - "NetIbMPITest.*"
+      - "ImplicitLaunchOrderMPITest.*"
+      - "UBR_AllReduce.*"
+      - "UBR_AllGather.*"
+      - "UBR_ReduceScatter.*"
+      - "UBR_Broadcast.*"
+      - "UBR_AllToAll.*"
+      - "UBR_SendRecv.*"
+      - "UBR_AllToAllStress.*"
+      - "UBR_ConcurrentRegHang.*SHOULD_WORK"
+      - "GraphCapture_AllToAll.*"
+      - "GraphCapture_AllReduce.*"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "mpi"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+  comprehensive:
+    description: "MPI exhaustive — same suites as standard; env enables implicit launch, CE memcpy paths, and verbose rank logs."
+    test_patterns: *mpi_all_patterns
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "mpi"
+    env_variables: &mpi_comprehensive_env
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_MPI_LOG_ALL_RANKS=1"
+      - "NCCL_LAUNCH_ORDER_IMPLICIT=1"
+      # P2pMPITests / ShmMPITests: enable CE memcpy sub-paths (default off in transport NCCL_PARAM).
+      - "NCCL_P2P_USE_CUDA_MEMCPY=1"
+      - "NCCL_SHM_USE_CUDA_MEMCPY=1"
+  comprehensive_disable_env:
+    description: "MPI env-disabled sanity check — runs only ImplicitLaunchOrderMPITest.MultiCommunicatorChain* with RCCL_MPI_LOG_ALL_RANKS=0 and NCCL_LAUNCH_ORDER_IMPLICIT=0 to verify behavior when these env knobs are off."
+    test_patterns:
+      - "ImplicitLaunchOrderMPITest.MultiCommunicatorChain*"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "mpi"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_MPI_LOG_ALL_RANKS=0"
+      - "NCCL_LAUNCH_ORDER_IMPLICIT=0"
+  full_base:
+    description: "Same patterns and env as comprehensive — auto algorithm/protocol selection (no NCCL_PROTO / NCCL_ALGO)."
+    test_patterns: *mpi_all_patterns
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "mpi"
+      - "full"
+      - "full_regression"
+    env_variables: *mpi_comprehensive_env
+  full_disable_env:
+    description: "MPI env-disabled sanity check (full tier) — runs only ImplicitLaunchOrderMPITest.MultiCommunicatorChain* with RCCL_MPI_LOG_ALL_RANKS=0 and NCCL_LAUNCH_ORDER_IMPLICIT=0 to verify behavior when these env knobs are off."
+    test_patterns:
+      - "ImplicitLaunchOrderMPITest.MultiCommunicatorChain*"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "mpi"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_MPI_LOG_ALL_RANKS=0"
+      - "NCCL_LAUNCH_ORDER_IMPLICIT=0"
+  full_pow2_ring_simple:
+    description: "Collective subset under forced Ring + Simple. Run with np in {1,2,4,8} for pow2 rank sweep. Patterns narrowed to tests that issue NCCL collectives — algo/proto have no effect on raw send/recv or net-plugin tests."
+    test_patterns: &mpi_collective_patterns
+      - "P2pMPITest.P2pWithMemcpyTest"
+      - "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "mpi"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_MPI_LOG_ALL_RANKS=1"
+      - "NCCL_LAUNCH_ORDER_IMPLICIT=1"
+      - "NCCL_P2P_USE_CUDA_MEMCPY=1"
+      - "NCCL_SHM_USE_CUDA_MEMCPY=1"
+      - "NCCL_PROTO=Simple"
+      - "NCCL_ALGO=Ring"
+  full_pow2_tree_simple:
+    description: "Collective subset under forced Tree + Simple. Run with np in {1,2,4,8} for pow2 rank sweep."
+    test_patterns: *mpi_collective_patterns
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "mpi"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_MPI_LOG_ALL_RANKS=1"
+      - "NCCL_LAUNCH_ORDER_IMPLICIT=1"
+      - "NCCL_P2P_USE_CUDA_MEMCPY=1"
+      - "NCCL_SHM_USE_CUDA_MEMCPY=1"
+      - "NCCL_PROTO=Simple"
+      - "NCCL_ALGO=Tree"
+  full_pow2_ring_ll:
+    description: "Collective subset under forced Ring + LL. Run with np in {1,2,4,8} for pow2 rank sweep."
+    test_patterns: *mpi_collective_patterns
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "mpi"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_MPI_LOG_ALL_RANKS=1"
+      - "NCCL_LAUNCH_ORDER_IMPLICIT=1"
+      - "NCCL_P2P_USE_CUDA_MEMCPY=1"
+      - "NCCL_SHM_USE_CUDA_MEMCPY=1"
+      - "NCCL_PROTO=LL"
+      - "NCCL_ALGO=Ring"
+  full_pow2_tree_ll:
+    description: "Collective subset under forced Tree + LL. Run with np in {1,2,4,8} for pow2 rank sweep."
+    test_patterns: *mpi_collective_patterns
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "mpi"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_MPI_LOG_ALL_RANKS=1"
+      - "NCCL_LAUNCH_ORDER_IMPLICIT=1"
+      - "NCCL_P2P_USE_CUDA_MEMCPY=1"
+      - "NCCL_SHM_USE_CUDA_MEMCPY=1"
+      - "NCCL_PROTO=LL"
+      - "NCCL_ALGO=Tree"
+  full_pow2_ring_ll128:
+    description: "Collective subset under forced Ring + LL128. Run with np in {1,2,4,8} for pow2 rank sweep. Requires LL128-capable build (HIP >= 6.1.33591); RCCL_LL128_FORCE_ENABLE=1 bypasses topo-based gating."
+    test_patterns: *mpi_collective_patterns
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "mpi"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_MPI_LOG_ALL_RANKS=1"
+      - "NCCL_LAUNCH_ORDER_IMPLICIT=1"
+      - "NCCL_P2P_USE_CUDA_MEMCPY=1"
+      - "NCCL_SHM_USE_CUDA_MEMCPY=1"
+      - "RCCL_LL128_FORCE_ENABLE=1"
+      - "NCCL_PROTO=LL128"
+      - "NCCL_ALGO=Ring"
+  full_pow2_tree_ll128:
+    description: "Collective subset under forced Tree + LL128. Run with np in {1,2,4,8} for pow2 rank sweep. Requires LL128-capable build (HIP >= 6.1.33591); RCCL_LL128_FORCE_ENABLE=1 bypasses topo-based gating."
+    test_patterns: *mpi_collective_patterns
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "mpi"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_MPI_LOG_ALL_RANKS=1"
+      - "NCCL_LAUNCH_ORDER_IMPLICIT=1"
+      - "NCCL_P2P_USE_CUDA_MEMCPY=1"
+      - "NCCL_SHM_USE_CUDA_MEMCPY=1"
+      - "RCCL_LL128_FORCE_ENABLE=1"
+      - "NCCL_PROTO=LL128"
+      - "NCCL_ALGO=Tree"
+
+execution_settings:
+  mpi_launch:
+    executable: mpirun
+    np: "${NGPU}"
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 1200
+    quick_env_shm_ce_memcpy_send: 1200
+    quick_env_shm_ce_memcpy_recv: 1200
+    quick_env_shm_ce_memcpy_both_simple: 1200
+    quick_env_p2p_workflow: 1200
+    quick_env_p2p_ipc_small_buffer: 1200
+    quick_env_net_graph_register: 1200
+    quick_env_netib_xfer_trace: 1200
+    quick_env_netib_xfer_log_ranks: 1200
+    standard: 1200
+    comprehensive: 1200
+    comprehensive_disable_env: 1200
+    full_base: 1200
+    full_disable_env: 1200
+    full_pow2_ring_simple: 1200
+    full_pow2_tree_simple: 1200
+    full_pow2_ring_ll: 1200
+    full_pow2_tree_ll: 1200
+    full_pow2_ring_ll128: 1200
+    full_pow2_tree_ll128: 1200

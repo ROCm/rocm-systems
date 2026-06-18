@@ -10,7 +10,9 @@
 #include "hip_global.hpp"
 
 #include <cstring>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "hip/hip_runtime.h"
 #include "hip/hip_runtime_api.h"
@@ -97,6 +99,12 @@ class DynCO : public CodeObject {
   hipError_t loadCodeObject(const char* fname, const void* image = nullptr);
   hipModule_t getModule() const { return module_; };
 
+  // Device the code object was loaded for at construction. Callers that key
+  // per-device caches (e.g., LibraryContainer::kernels_) must use this and
+  // not ihipGetDevice(): the active device may differ at use time, but the
+  // loaded module is single-device.
+  int getDeviceId() const { return device_id_; }
+
   // Gets GlobalVar/Functions from a dynamically loaded code object
   hipError_t getDynFunc(hipFunction_t* hfunc, const std::string& func_name);
   hipError_t getFuncCount(unsigned int* count);
@@ -116,6 +124,18 @@ class DynCO : public CodeObject {
     }
     return hipSuccess;
   }
+
+  // Common entry point used by both hipModuleGetGlobal and hipLibraryGetGlobal.
+  // Returns the managed host pointer if name is a __managed__ var, otherwise the
+  // device pointer of the __device__ global. hipErrorNotFound if name is missing.
+  hipError_t GetGlobal(const std::string& name, void** dptr, size_t* bytes);
+
+  // Strict managed-only lookup used by hipLibraryGetManaged.
+  // hipErrorNotFound if name is missing or not DVK_Managed.
+  hipError_t GetManaged(const std::string& name, void** dptr, size_t* bytes);
+
+  // Names of all loaded kernel functions; used by LibraryContainer::EnumerateKernels.
+  std::vector<std::string> getFunctionNames();
 
  private:
   int device_id_;
@@ -168,8 +188,11 @@ class StatCO : public CodeObject {
   // Resize device-specific data structures for all registered functions and variables
   void ResizeForDevices(size_t device_count);
 
+  // Iterate all registered fat binary data pointers — for HRR capture post-registration sweep.
+  void ForEachFatBinaryBlob(void (*cb)(const void*)) const;
+
  private:
-  std::recursive_mutex sclock_;            //!< Guards Static Code object
+  mutable std::recursive_mutex sclock_;    //!< Guards Static Code object
   const PlatformState& owner_;             //!< Reference to owning PlatformState
   //! Populated during __hipRegisterFatBinary
   std::unordered_map<const void*, FatBinaryInfo*> modules_;

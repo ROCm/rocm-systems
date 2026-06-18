@@ -32,6 +32,7 @@
 #include "envvar.hpp"
 #include "util.hpp"
 #include "log.hpp"
+#include "sdma_policy.hpp"
 #include "memfabric/pod_detection.hpp"
 
 namespace rocshmem {
@@ -267,6 +268,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
     ipcDetectPattern(shm_ranks.data(), shm_size);
     CHECK_HIP(hipMemcpy(pes_with_ipc_avail, shm_ranks.data(), shm_size * sizeof(int), hipMemcpyHostToDevice));
   }
+
 }
 
 __host__ void IpcOnImpl::ipcHostStop() {
@@ -284,5 +286,26 @@ __host__ void IpcOnImpl::ipcHostStop() {
   }
 }
 
+
+#if defined(USE_SDMA)
+
+__host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+                                       MPI_Comm thread_comm) {
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm);
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank);
+}
+
+__host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+                                       TcpBootstrap *bootstrap) {
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap);
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank);
+}
+
+__host__ void IpcSdmaImpl::ipcHostStop() {
+  sdmaImpl_.sdmaHostStop();
+  IpcOnImpl::ipcHostStop();
+}
+
+#endif  // USE_SDMA
 
 }  // namespace rocshmem

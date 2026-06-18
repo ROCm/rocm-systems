@@ -2551,6 +2551,14 @@ rocprofiler-sdk:
       - gfx1152
       block: SQ
       event: 173
+  - name: SQ_INSTS_DUAL_VALU_WAVE32
+    description: The number of dual-issue VALU (VOPD) instructions issued in Wave32 mode.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1151
+      block: SQ
+      event: 178
   - name: SQ_ITEMS
     description: Number of valid items per wave. This value is returned on a per-SE (aggregate of values in SIMDs in the SE)
       basis.
@@ -4042,6 +4050,13 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       expression: reduce(SQ_INSTS_WAVE32_LDS_PARAM_LOAD,sum)
+  - name: SQ_INSTS_DUAL_VALU_WAVE32_sum
+    description: ''
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1151
+      expression: reduce(SQ_INSTS_DUAL_VALU_WAVE32,sum)
   - name: SQ_ITEMS_sum
     description: ''
     properties: []

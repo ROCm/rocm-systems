@@ -1,0 +1,387 @@
+# rccl-UnitTests — shared/ctest schema.
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+#
+# Tiers:
+#   quick — smoke (curated patterns, tighter UT_*).
+#   quick_env_* — smoke env-overlays (narrow pattern set under non-default env).
+#   standard — broad (Suite.*, bounded UT_*).
+#   comprehensive — same patterns as standard; longer timeouts; wider UT_* sweeps
+#     (UT_DATATYPES/UT_REDOPS all use harness defaults).
+#   full_* - forced NCCL_PROTO / NCCL_ALGO.
+#
+# Related:
+#   test_categories_fixtures.yaml
+#   test_categories_fixtures_debug.yaml
+#   test_categories_altrsmi.yaml
+#   test_categories_mpi.yaml
+#
+# full_base — same patterns and harness as comprehensive;
+#   no NCCL_PROTO / NCCL_ALGO (auto tuning).
+# full_pow2_* — pow2 GPU counts {1,2,4,8} under forced (NCCL_ALGO, NCCL_PROTO).
+#   Matrix: (Ring, Tree) x (Simple, LL, LL128).
+#   LL128 categories also set RCCL_LL128_FORCE_ENABLE=1 so the protocol is exercised
+#   even on configurations where topo-based detection would not auto-enable it
+#   (LL128 string parsing itself is not compile-gated, but selection requires
+#   topo->ll128Enabled, which the force-enable env overrides).
+
+test_categories:
+  quick:
+    description: "Smoke / precheck — fast run, broad functionality, curated cases and tight UT_* env."
+    test_patterns:
+      - "AllReduce.OutOfPlace" # With quick env: RCCL_LOG_ROCTX, UT_MAX_GPUS, UT_PROCESS_MASK.
+      - "AllReduce.OutOfPlaceGraph"
+      - "AllReduce.InPlace"
+      - "AllReduce.InPlaceGraph"
+      - "AllReduce.ManagedMem"
+      - "AllReduce.Channels"
+      - "AllReduce.ManagedMemGraph"
+      - "AllReduce.PreMultScalar"
+      - "AllReduce.UserBufferRegistration"
+      - "AllReduce.ManagedMemUserBufferRegistration"
+      - "AllGather.OutOfPlace"
+      - "AllGather.OutOfPlaceGraph"
+      - "AllGather.InPlace"
+      - "AllGather.InPlaceGraph"
+      - "AllGather.ManagedMem"
+      - "AllGather.ManagedMemGraph"
+      - "AllGather.UserBufferRegistration"
+      - "AllGather.ManagedMemUserBufferRegistration"
+      - "AlltoAll.OutOfPlace"
+      - "AlltoAll.OutOfPlaceGraph"
+      - "AlltoAll.ManagedMem"
+      - "AlltoAll.ManagedMemGraph"
+      - "AlltoAllv.OutOfPlace"
+      - "AlltoAllv.OutOfPlaceGraph"
+      - "Broadcast.OutOfPlace"
+      - "Broadcast.OutOfPlaceGraph"
+      - "Broadcast.InPlace"
+      - "Broadcast.InPlaceGraph"
+      - "Broadcast.ManagedMem"
+      - "Broadcast.ManagedMemGraph"
+      - "Gather.OutOfPlace"
+      - "Gather.OutOfPlaceGraph"
+      - "Gather.InPlace"
+      - "Gather.InPlaceGraph"
+      - "Gather.ManagedMem"
+      - "Gather.ManagedMemGraph"
+      - "Scatter.OutOfPlace"
+      - "Scatter.OutOfPlaceGraph"
+      - "Scatter.InPlace"
+      - "Scatter.InPlaceGraph"
+      - "Scatter.ManagedMem"
+      - "Scatter.ManagedMemGraph"
+      - "Reduce.OutOfPlace"
+      - "Reduce.OutOfPlaceGraph"
+      - "Reduce.InPlace"
+      - "Reduce.InPlaceGraph"
+      - "Reduce.ManagedMem"
+      - "Reduce.ManagedMemGraph"
+      - "ReduceScatter.OutOfPlace"
+      - "ReduceScatter.OutOfPlaceGraph"
+      - "ReduceScatter.InPlace"
+      - "ReduceScatter.InPlaceGraph"
+      - "ReduceScatter.ManagedMem"
+      - "ReduceScatter.ManagedMemGraph"
+      - "SendRecv.SinglePairs"
+      - "SendRecv.UserBufferRegister"
+      - "GroupCall.Identical"
+      - "GroupCall.Different"
+      - "GroupCall.Multistream"
+      - "GroupCall.MixedDataType"
+      - "GroupCall.MultiGroupCall"
+      - "NonBlocking.SingleCalls"
+      - "Standalone.SplitComms_RankCheck"
+      - "Standalone.SplitComms_OneColor"
+      - "Standalone.SplitComms_Reduce"
+      - "Standalone.RegressionTiming"
+      - "Standalone.StackSize"
+      - "Standalone.CommCuDevice_Check"
+      - "Standalone.SplitComms_RankCheck_Basic_Failure"
+      - "AllReduce.BiasInt8_Sum"
+      - "AllReduce.BiasInt8_Max"
+      - "AllReduce.BiasInt8_Min"
+      - "AllReduce.BiasInt8_Prod"
+      - "AllReduce.BiasUint8_Sum"
+      - "AllReduce.BiasUint8_Max"
+      - "AllReduce.BiasUint8_Min"
+      - "AllReduce.BiasUint8_Prod"
+      - "AllReduce.BiasInt32_Sum"
+      - "AllReduce.BiasInt32_Max"
+      - "AllReduce.BiasInt32_Min"
+      - "AllReduce.BiasInt32_Prod"
+      - "AllReduce.BiasUint32_Sum"
+      - "AllReduce.BiasUint32_Max"
+      - "AllReduce.BiasUint32_Min"
+      - "AllReduce.BiasUint32_Prod"
+      - "AllReduce.BiasInt64_Sum"
+      - "AllReduce.BiasInt64_Max"
+      - "AllReduce.BiasInt64_Min"
+      - "AllReduce.BiasInt64_Prod"
+      - "AllReduce.BiasUint64_Sum"
+      - "AllReduce.BiasUint64_Max"
+      - "AllReduce.BiasUint64_Min"
+      - "AllReduce.BiasUint64_Prod"
+      - "AllReduce.BiasFloat32_Sum"
+      - "AllReduce.BiasFloat32_Max"
+      - "AllReduce.BiasFloat32_Min"
+      - "AllReduce.BiasFloat32_Prod"
+      - "AllReduce.BiasFloat64_Sum"
+      - "AllReduce.BiasFloat64_Max"
+      - "AllReduce.BiasFloat64_Min"
+      - "AllReduce.BiasFloat64_Prod"
+      - "AlltoAll.Channels"
+      - "Register.ProcessIsolatedRegisterTests"
+      - "Recorder.ParseBinary"
+      - "Recorder.ParseJson"
+      - "Recorder.VerifyMultithread"
+      - "ProxyTraceTestFixture.nonEmptySingleton"
+      - "ProxyTraceTestFixture.addTraceOp"
+      - "ProxyTraceTestFixture.getMapSizeMB"
+      - "ProxyTraceTestFixture.updateTraceOp"
+      - "ProxyTraceTestFixture.updateTraceOp2"
+      - "CollTraceUtilsTest.aggregateResultsTest"
+      - "CollTraceUtilsTest.EventQueueOperationTest"
+      - "CollTraceUtilsTest.EventQueueMultiThreadTest"
+      - "CollTraceUtilsTest.getSizeMbTest"
+      - "AllReduce.ROCTX"
+    exclude_windows: &unit_tests_exclude_windows
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_LOG_ROCTX=1"
+      - "UT_MAX_GPUS=2"
+      - "UT_PROCESS_MASK=2"
+  quick_env_thread_name:
+    description: "AlltoAll graph capture under NCCL_SET_THREAD_NAME=1."
+    test_patterns:
+      - "AlltoAll.OutOfPlaceGraph*"
+    exclude_windows: *unit_tests_exclude_windows
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+    env_variables:
+      - "NCCL_DEBUG=VERSION"
+      - "NCCL_DEBUG_SUBSYS=ALL"
+      - "NCCL_SET_THREAD_NAME=1"
+      - "UT_MAX_GPUS=2"
+      - "UT_PROCESS_MASK=2"
+  quick_env_debug_subsystems:
+    description: "AlltoAll graph capture under TRACE-level logging across all subsystems."
+    test_patterns:
+      - "AlltoAll.OutOfPlaceGraph*"
+    exclude_windows: *unit_tests_exclude_windows
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+    env_variables:
+      - "NCCL_DEBUG=TRACE"
+      - "NCCL_DEBUG_FILE=cdcvg.dbg"
+      - "NCCL_DEBUG_SUBSYS=INIT,COLL,P2P,SHM,NET,GRAPH,TUNING,ENV,ALLOC,CALL,PROXY,NVLS,BOOTSTRAP,REG,PROFILE,RAS,VERBS"
+      - "UT_MAX_GPUS=2"
+      - "UT_PROCESS_MASK=2"
+  standard:
+    description: "Broad PR/merge regression — all suites (Suite.*), wide but bounded dtypes/redops and GPUs."
+    test_patterns: &all_patterns
+      - "AllGather.*"
+      - "AllReduce.*"
+      - "AlltoAll.*"
+      - "AlltoAllv.*"
+      - "Broadcast.*"
+      - "Gather.*"
+      - "Scatter.*"
+      - "Reduce.*"
+      - "ReduceScatter.*"
+      - "SendRecv.*"
+      - "GroupCall.*"
+      - "NonBlocking.*"
+      - "Standalone.*"
+      - "Register.*"
+      - "Recorder.*"
+      - "ProxyTraceTestFixture.*"
+      - "CollTraceUtilsTest.*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_LOG_ROCTX=1"
+      - "UT_MIN_GPUS=2"
+      - "UT_MAX_GPUS=8"
+      - "UT_POW2_GPUS=1"
+      - "UT_DATATYPES=ncclInt8,ncclUint8,ncclInt32,ncclUint32,ncclInt64,ncclUint64,ncclFloat32,ncclFloat64"
+      - "UT_REDOPS=sum,prod,max,min"
+  comprehensive:
+    description: "Exhaustive for rccl-UnitTests — every case per suite (Suite.*), comprehensive harness sweeps, longest timeout."
+    test_patterns: *all_patterns
+    exclude_windows: *unit_tests_exclude_windows
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+    env_variables: &unit_tests_comprehensive_env
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_LOG_ROCTX=1"
+      - "UT_MIN_GPUS=1"
+      - "UT_MAX_GPUS=8"
+      - "UT_POW2_GPUS=0"
+      - "UT_DATATYPES=all"
+      - "UT_REDOPS=all"
+  full_base:
+    description: "Same patterns and harness as comprehensive — exhaustive sweeps with auto algorithm/protocol selection (no NCCL_PROTO / NCCL_ALGO)."
+    test_patterns: *all_patterns
+    exclude_windows: *unit_tests_exclude_windows
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+    env_variables: *unit_tests_comprehensive_env
+  full_pow2_ring_simple:
+    description: "Exhaustive patterns — pow2 GPU counts 1–8 only (1,2,4,8); forces Ring + Simple (typical RDMA-friendly path)."
+    test_patterns: &pow2_list
+      - "AllReduce.*:-AllReduce.UserBufferRegistration:-AllReduce.ManagedMemUserBufferRegistration:-AllReduce.ROCTX"
+      - "Reduce.*"
+      - "Broadcast.*"
+      - "Scatter.*"
+      - "Gather.*"
+      - "ReduceScatter.*"
+      - "AllGather.*:-AllGather.UserBufferRegistration:-AllGather.ManagedMemUserBufferRegistration"
+      - "AlltoAll.*"
+      - "SendRecv.*"
+      - "GroupCall.*"
+      - "AlltoAllv.*"
+      - "NonBlocking.SingleCalls"
+    exclude_windows: *unit_tests_exclude_windows
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_LOG_ROCTX=1"
+      - "UT_MIN_GPUS=1"
+      - "UT_MAX_GPUS=8"
+      - "UT_POW2_GPUS=1"
+      - "UT_DATATYPES=all"
+      - "UT_REDOPS=all"
+      - "NCCL_PROTO=Simple"
+      - "NCCL_ALGO=Ring"
+  full_pow2_tree_simple:
+    description: "Exhaustive patterns — pow2 GPU counts 1–8 only (1,2,4,8); forces Tree + Simple."
+    test_patterns: *pow2_list
+    exclude_windows: *unit_tests_exclude_windows
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_LOG_ROCTX=1"
+      - "UT_MIN_GPUS=1"
+      - "UT_MAX_GPUS=8"
+      - "UT_POW2_GPUS=1"
+      - "UT_DATATYPES=all"
+      - "UT_REDOPS=all"
+      - "NCCL_PROTO=Simple"
+      - "NCCL_ALGO=Tree"
+  full_pow2_ring_ll:
+    description: "Exhaustive patterns — pow2 GPU counts 1–8 only (1,2,4,8); forces Ring + LL."
+    test_patterns: *pow2_list
+    exclude_windows: *unit_tests_exclude_windows
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_LOG_ROCTX=1"
+      - "UT_MIN_GPUS=1"
+      - "UT_MAX_GPUS=8"
+      - "UT_POW2_GPUS=1"
+      - "UT_DATATYPES=all"
+      - "UT_REDOPS=all"
+      - "NCCL_PROTO=LL"
+      - "NCCL_ALGO=Ring"
+  full_pow2_tree_ll:
+    description: "Exhaustive patterns — pow2 GPU counts 1–8 only (1,2,4,8); forces Tree + LL."
+    test_patterns: *pow2_list
+    exclude_windows: *unit_tests_exclude_windows
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_LOG_ROCTX=1"
+      - "UT_MIN_GPUS=1"
+      - "UT_MAX_GPUS=8"
+      - "UT_POW2_GPUS=1"
+      - "UT_DATATYPES=all"
+      - "UT_REDOPS=all"
+      - "NCCL_PROTO=LL"
+      - "NCCL_ALGO=Tree"
+  full_pow2_ring_ll128:
+    description: "Exhaustive patterns — pow2 GPU counts 1–8 only (1,2,4,8); forces Ring + LL128. Requires LL128-capable build (HIP >= 6.1.33591); RCCL_LL128_FORCE_ENABLE=1 bypasses topo-based gating."
+    test_patterns: *pow2_list
+    exclude_windows: *unit_tests_exclude_windows
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_LOG_ROCTX=1"
+      - "UT_MIN_GPUS=1"
+      - "UT_MAX_GPUS=8"
+      - "UT_POW2_GPUS=1"
+      - "UT_DATATYPES=all"
+      - "UT_REDOPS=all"
+      - "RCCL_LL128_FORCE_ENABLE=1"
+      - "NCCL_PROTO=LL128"
+      - "NCCL_ALGO=Ring"
+  full_pow2_tree_ll128:
+    description: "Exhaustive patterns — pow2 GPU counts 1–8 only (1,2,4,8); forces Tree + LL128. Requires LL128-capable build (HIP >= 6.1.33591); RCCL_LL128_FORCE_ENABLE=1 bypasses topo-based gating."
+    test_patterns: *pow2_list
+    exclude_windows: *unit_tests_exclude_windows
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_LOG_ROCTX=1"
+      - "UT_MIN_GPUS=1"
+      - "UT_MAX_GPUS=8"
+      - "UT_POW2_GPUS=1"
+      - "UT_DATATYPES=all"
+      - "UT_REDOPS=all"
+      - "RCCL_LL128_FORCE_ENABLE=1"
+      - "NCCL_PROTO=LL128"
+      - "NCCL_ALGO=Tree"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 1200
+    quick_env_thread_name: 1200
+    quick_env_debug_subsystems: 1200
+    standard: 3600
+    comprehensive: 7200
+    full_base: 7200
+    full_pow2_ring_simple: 7200
+    full_pow2_tree_simple: 7200
+    full_pow2_ring_ll: 7200
+    full_pow2_tree_ll: 7200
+    full_pow2_ring_ll128: 7200
+    full_pow2_tree_ll128: 7200

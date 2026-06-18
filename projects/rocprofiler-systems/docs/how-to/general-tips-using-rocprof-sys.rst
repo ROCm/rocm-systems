@@ -12,6 +12,9 @@ the :doc:`ROCm Systems Profiler glossary <../reference/rocprof-sys-glossary>`.
 * Use ``rocprof-sys-avail`` to look up configuration settings, hardware counters, and data collection components
 
   * Use the ``-d`` flag for descriptions
+  * Use ``--list-domains`` to see the available ROCm domains that expose operation lists
+  * Use ``--list-operations <domain>`` to see the operations available for a specific domain
+    (for example, ``rocprof-sys-avail --list-operations ompt``)
 
 * Generate a default configuration with ``rocprof-sys-avail -G ${HOME}/.rocprof-sys.cfg`` and adjust it
   to the desired default behavior

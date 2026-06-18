@@ -36,7 +36,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         profiling_options = [
             # v3 requires output directory argument
             "-d",
-            f"{self.get_args().path}/out",
+            f"{self.get_args().output_directory}/out",
             trace_option,
             "--output-format",
             args.format_rocprof_output,

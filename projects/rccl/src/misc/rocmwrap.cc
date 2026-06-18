@@ -44,6 +44,16 @@ CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DE
 
 static int ncclCuMemSupported = 0;
 
+// cuMem VMM API availability by HIP/driver version.
+#define NCCL_CUMEM_NATIVE_MIN_VERSION   71260540
+#define NCCL_CUMEM_BACKPORT_MIN_VERSION 70051831
+#define NCCL_CUMEM_BACKPORT_MAX_VERSION 70060000
+
+#define NCCL_CUMEM_VERSION_SUPPORTED(version)                  \
+  ((version) >= NCCL_CUMEM_NATIVE_MIN_VERSION ||               \
+   ((version) >= NCCL_CUMEM_BACKPORT_MIN_VERSION &&            \
+    (version) < NCCL_CUMEM_BACKPORT_MAX_VERSION))
+
 #define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
 
 static int ncclGetKernelVersionCode() {
@@ -71,9 +81,13 @@ int ncclIsCuMemSupported() {
     supported = 0;
   }
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 71260540) {
-    WARN("cuMem support requires HIP_VERSION >= 7.12.60540");
-    supported = 0;
+  {
+    // Block scope prevents the goto in CUDACHECKGOTO from jumping over the bool initialization.
+    bool cuMemSupported = NCCL_CUMEM_VERSION_SUPPORTED(cudaDriverVersion);
+    if (!cuMemSupported) {
+      WARN("cuMem support requires HIP_VERSION >= 7.12.60540 (or ROCm 7.0.2.x backport)");
+      supported = 0;
+    }
   }
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
   if (CUPFN(cuMemCreate) == NULL) supported = 0;
@@ -91,8 +105,14 @@ error:
 }
 
 int ncclCuMemEnable() {
+#if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
   int param = ncclParamCuMemEnable();
   return param >= 0 ? param : (param == -2 && ncclCuMemSupported);
+#else
+  if (ncclParamCuMemEnable() > 0)
+    WARN("NCCL_CUMEM_ENABLE=1 is set but cuMem VMM APIs are unavailable in this build (HIP_VERSION=%d); disabling cuMem", HIP_VERSION);
+  return 0;
+#endif
 }
 
 static int ncclCumemHostEnable = -1;
@@ -130,10 +150,12 @@ int ncclCuMemHostEnable() {
       CUCHECK(cuDeviceGet(&currentDev, cudaDev));
       CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, hipDeviceAttributeHostNumaId, currentDev));
       if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
-      prop.location.type = hipMemLocationTypeHostNuma;
+      // CLR rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
+      prop.location.type = hipMemLocationTypeHost;
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.requestedHandleTypes = ncclCuMemHandleType;
-      prop.location.id = cpuNumaNodeId;
+      // HIP/CLR requires host id to be 0. cpuNumaNodeId can exceed GPU count and fail.
+      prop.location.id = 0;  // ignored on the Host path
       CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
       size = 1;
       ALIGN_SIZE(size, granularity);
@@ -176,6 +198,8 @@ static void initOnceFunc() {
   if (hsaLib == NULL) {
     WARN("Failed to find ROCm runtime library in %s (RCCL_ROCR_PATH=%s)", ncclCudaPath, ncclCudaPath);
     goto error;
+  } else {
+    INFO(NCCL_INIT, "Using ROCr runtime at %s%s", path, ncclCudaPath ? " (RCCL_ROCR_PATH set)" : "");
   }
 
   /*

@@ -591,32 +591,28 @@ ncclResult_t ncclTopoGetXmlFromSys(struct ncclXmlNode* pciNode, struct ncclXml* 
   const char* busId;
   NCCLCHECK(xmlGetAttr(pciNode, "busid", &busId));
   char* path = NULL;
-  ncclDebugNoWarn = NCCL_GRAPH;
-  getPciPath(busId, &path);
-  ncclDebugNoWarn = 0;
+  NOWARN(getPciPath(busId, &path), NCCL_GRAPH);
 
   if (path) {
     NCCLCHECK(ncclTopoSetAttrFromSys(pciNode, path, "class", "class"));
   }
   int index;
-  ncclDebugNoWarn = NCCL_GRAPH;
-  NCCLCHECK(xmlGetAttrIndex(pciNode, "vendor", &index));
+  NCCLCHECKNOWARN(xmlGetAttrIndex(pciNode, "vendor", &index), NCCL_GRAPH);
   if (index == -1) {
-    if (path) ncclTopoSetAttrFromSys(pciNode, path, "vendor", "vendor");
+    if (path) NOWARN(ncclTopoSetAttrFromSys(pciNode, path, "vendor", "vendor"), NCCL_GRAPH);
   }
-  NCCLCHECK(xmlGetAttrIndex(pciNode, "device", &index));
+  NCCLCHECKNOWARN(xmlGetAttrIndex(pciNode, "device", &index), NCCL_GRAPH);
   if (index == -1) {
-    if (path) ncclTopoSetAttrFromSys(pciNode, path, "device", "device");
+    if (path) NOWARN(ncclTopoSetAttrFromSys(pciNode, path, "device", "device"), NCCL_GRAPH);
   }
-  NCCLCHECK(xmlGetAttrIndex(pciNode, "subsystem_vendor", &index));
+  NCCLCHECKNOWARN(xmlGetAttrIndex(pciNode, "subsystem_vendor", &index), NCCL_GRAPH);
   if (index == -1) {
-    if (path) ncclTopoSetAttrFromSys(pciNode, path, "subsystem_vendor", "subsystem_vendor");
+    if (path) NOWARN(ncclTopoSetAttrFromSys(pciNode, path, "subsystem_vendor", "subsystem_vendor"), NCCL_GRAPH);
   }
-  NCCLCHECK(xmlGetAttrIndex(pciNode, "subsystem_device", &index));
+  NCCLCHECKNOWARN(xmlGetAttrIndex(pciNode, "subsystem_device", &index), NCCL_GRAPH);
   if (index == -1) {
-    if (path) ncclTopoSetAttrFromSys(pciNode, path, "subsystem_device", "subsystem_device");
+    if (path) NOWARN(ncclTopoSetAttrFromSys(pciNode, path, "subsystem_device", "subsystem_device"), NCCL_GRAPH);
   }
-  ncclDebugNoWarn = 0;
   NCCLCHECK(xmlGetAttrIndex(pciNode, "link_speed", &index));
   if (index == -1) {
     if (path) {
@@ -658,7 +654,7 @@ ncclResult_t ncclTopoGetXmlFromSys(struct ncclXmlNode* pciNode, struct ncclXml* 
   NCCLCHECK(xmlGetAttr(pciNode, "vendor", &vendor));
   if (vendor != NULL && strcmp(vendor, "0x1000") == 0) { // BCM switch, look for P2P connections
     int nlinks;
-    char* peers;
+    char* peers = NULL;
     NCCLCHECK(getBcmLinks(busId, &nlinks, &peers));
     for (int l=0; l<nlinks; l++) {
       char* target = peers+l*BUSID_SIZE;
@@ -669,6 +665,7 @@ ncclResult_t ncclTopoGetXmlFromSys(struct ncclXmlNode* pciNode, struct ncclXml* 
         NCCLCHECK(xmlSetAttr(linkNode, "target", target));
       }
     }
+    free(peers);
   }
 
   struct ncclXmlNode* parent = pciNode->parent;
@@ -980,9 +977,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
       const char* busId;
       NCCLCHECK(xmlGetAttr(sub, "target", &busId));
       char* path;
-      ncclDebugNoWarn = NCCL_GRAPH;
-      getPciPath(busId, &path);
-      ncclDebugNoWarn = 0;
+      NOWARN(getPciPath(busId, &path), NCCL_GRAPH);
       if (path == NULL || strcmp(busId, "fffffff:ffff:ff") == 0) {
         // Remote NVLink device is not visible inside this VM. Assume NVSwitch.
         NCCLCHECK(xmlSetAttr(sub, "tclass", "0x068000"));
@@ -1042,8 +1037,8 @@ ncclResult_t ncclTopoGetSubsystem(const char* sysPath, char* subSys) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclTopoFillNet(struct ncclXml* xml, const char* pciPath, const char* netName, struct ncclXmlNode** netNode, struct ncclXmlNode* forceParent) {
-  NCCLCHECK(xmlFindTagKv(xml, "net", netNode, "name", netName));
+ncclResult_t ncclTopoFillNet(struct ncclXml* xml, const char* tagName, const char* pciPath, const char* netName, struct ncclXmlNode** netNode, struct ncclXmlNode* forceParent) {
+  NCCLCHECK(xmlFindTagKv(xml, tagName, netNode, "name", netName));
 
   if (*netNode != NULL) return ncclSuccess;
 
@@ -1084,7 +1079,7 @@ ncclResult_t ncclTopoFillNet(struct ncclXml* xml, const char* pciPath, const cha
 
   // We know that this net does not exist yet (we searched for it at the
   // beginning of this function), so we can add it.
-  NCCLCHECK(xmlAddNode(xml, nicNode, "net", netNode));
+  NCCLCHECK(xmlAddNode(xml, nicNode, tagName, netNode));
   NCCLCHECK(xmlSetAttr(*netNode, "name", netName));
   return ncclSuccess;
 }
@@ -1097,7 +1092,7 @@ ncclResult_t ncclTopoTrimXmlRec(struct ncclXmlNode* node, int* keep) {
     *keep = 1;
   } else {
     // Copy nSubs and subs as they could change as we trim recursively.
-    struct ncclXmlNode* subs[MAX_SUBS];
+    struct ncclXmlNode** subs = (struct ncclXmlNode**)malloc(MAX_SUBS * sizeof(struct ncclXmlNode*));
     int nSubs = node->nSubs;
     memcpy(subs, node->subs, node->nSubs*sizeof(struct ncclXmlNode*));
     *keep = 0;
@@ -1106,6 +1101,7 @@ ncclResult_t ncclTopoTrimXmlRec(struct ncclXmlNode* node, int* keep) {
       NCCLCHECK(ncclTopoTrimXmlRec(subs[s], &k));
       *keep += k;
     }
+    free(subs);
     // Remove node if it has no children and no keep attribute
     if (*keep == 0 && // Trim PCI switches, CPUs with no used GPU/NIC under them, or pruned NICs
         (strcmp(node->name, "pci") == 0 || strcmp(node->name, "cpu") == 0 || strcmp(node->name, "nic") == 0 || strcmp(node->name, "net") == 0)) {

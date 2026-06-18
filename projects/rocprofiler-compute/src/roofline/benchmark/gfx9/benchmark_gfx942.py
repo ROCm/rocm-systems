@@ -16,16 +16,10 @@ from . import benchmark_gfx9_base
 # Bench_gfx942 Class
 # =============================================================================
 class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
-    def __init__(self, device_ids: list) -> None:
-        super().__init__(device_ids)
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+        super().__init__(device_id, cache_sizes)
 
         self.unsupported_data_types = ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"]
-
-        self.cache_kernel_selector = {
-            "L1": "Cache_bw<float, 32 * 1024, 256>",
-            "L2": "Cache_bw<float, 4 * 1024 * 1024, 256>",
-            "MALL": "Cache_bw<float, 64 * 1024 * 1024, 256>",
-        }
 
         self.matrix_ops = {
             "F4": 0,
@@ -37,12 +31,6 @@ class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
             "BF16": 16384,
             "I8": 32768,
             "F64": 2048,
-        }
-
-        self.cache_sizes = {
-            "L1": 32 * 1024,
-            "L2": 4 * 1024 * 1024,
-            "MALL": 64 * 1024 * 1024,
         }
 
     # -----------------------------------------------------------------------------

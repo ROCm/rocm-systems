@@ -1,0 +1,10 @@
+jobs:
+- pmc:
+  - SQC_ICACHE_HITS_sum
+  - SQC_ICACHE_MISSES_sum
+  - SQ_WAVES_sum
+  - SQ_WAIT_IFETCH
+  - SQ_WAIT_BARRIER
+  - SQ_WAIT_CNT_ANY
+  - SQ_INSTS_VALU_sum
+  - SQ_INSTS_LDS_sum

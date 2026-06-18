@@ -24,19 +24,33 @@ namespace rocjitsu {
 namespace amdgpu {
 namespace transcendental {
 
+/// @brief Flush f32 denormals to sign-preserving zero.
+///
+/// @details AMD transcendental micro-ops always operate in FTZ mode
+/// regardless of the shader's denorm mode.  This helper reproduces
+/// that behaviour for rcp, rsq, exp, and log.
+inline float flush_denorm_f32(float x) {
+  uint32_t bits = std::bit_cast<uint32_t>(x);
+  if ((bits & 0x7F800000u) == 0 && (bits & 0x007FFFFFu) != 0)
+    return std::copysign(0.0f, x);
+  return x;
+}
+
 /// @brief 1.0 / x (single-precision reciprocal, ~0.5 ULP).
 inline float rcp_f32(float x) {
+  x = flush_denorm_f32(x);
   if (std::isnan(x))
     return x;
   if (x == 0.0f)
     return std::copysign(std::numeric_limits<float>::infinity(), x);
   if (std::isinf(x))
     return std::copysign(0.0f, x);
-  return 1.0f / x;
+  return flush_denorm_f32(1.0f / x);
 }
 
 /// @brief 1.0 / sqrt(x) (single-precision reciprocal square root, ~1 ULP).
 inline float rsq_f32(float x) {
+  x = flush_denorm_f32(x);
   if (std::isnan(x))
     return x;
   if (x == 0.0f)
@@ -45,7 +59,7 @@ inline float rsq_f32(float x) {
     return std::numeric_limits<float>::quiet_NaN();
   if (std::isinf(x))
     return 0.0f;
-  return 1.0f / std::sqrt(x);
+  return flush_denorm_f32(1.0f / std::sqrt(x));
 }
 
 /// @brief sqrt(x) (single-precision square root, correctly-rounded).
@@ -59,6 +73,7 @@ inline float sqrt_f32(float x) {
 
 /// @brief log2(x) (single-precision base-2 logarithm, ~1 ULP).
 inline float log_f32(float x) {
+  x = flush_denorm_f32(x);
   if (std::isnan(x))
     return x;
   if (x == 0.0f)
@@ -72,13 +87,14 @@ inline float log_f32(float x) {
 
 /// @brief 2^x (single-precision base-2 exponential, ~1 ULP).
 inline float exp_f32(float x) {
+  x = flush_denorm_f32(x);
   if (std::isnan(x))
     return x;
   if (x == -std::numeric_limits<float>::infinity())
     return 0.0f;
   if (x == std::numeric_limits<float>::infinity())
     return std::numeric_limits<float>::infinity();
-  return std::exp2(x);
+  return flush_denorm_f32(std::exp2(x));
 }
 
 /// @brief sin(2*pi*x) (single-precision, ~1 ULP).
@@ -101,6 +117,13 @@ inline float cos_f32(float x) {
     return std::numeric_limits<float>::quiet_NaN();
   constexpr float TWO_PI = 6.283185307179586476925286766559f;
   return std::cos(x * TWO_PI);
+}
+
+/// @brief Hyperbolic tangent (single-precision, correctly-rounded libm reference).
+inline float tanh_f32(float x) {
+  if (std::isnan(x))
+    return x;
+  return std::tanh(x);
 }
 
 /// @brief 1.0 / x (double-precision reciprocal, ~1 ULP).

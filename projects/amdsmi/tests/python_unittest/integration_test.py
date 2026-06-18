@@ -42,16 +42,8 @@ import common
 verbose = common.VERBOSITY_NORMAL
 
 
-amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
-if not os.path.exists(amdsmi_path):
-    raise FileNotFoundError(
-        f'AMDSMI_PATH "{amdsmi_path}" does not exist. Please set the correct path in your environment.'
-    )
-sys.path.append(amdsmi_path)
-try:
-    import amdsmi
-except ImportError as exc:
-    raise ImportError(f"Could not import {amdsmi_path}") from exc
+# common.py owns path resolution, sys.path setup, and amdsmi loading — borrow the reference.
+from common import amdsmi
 
 
 class TestAmdSmiInit(unittest.TestCase):
@@ -1549,24 +1541,15 @@ if __name__ == "__main__":
     elif any(a in ("-v", "-vv", "--verbose") for a in sys.argv):
         verbose = common.VERBOSITY_VERBOSE
 
-    # If no -k or --keyword argument is given, print all available tests.
-    # Do this before the -h check so the test list appears above unittest's help output.
-    if not ("-k" in sys.argv or "--keyword" in sys.argv):
-        if verbose > common.VERBOSITY_QUIET:
-            common.print_tests(__name__)
-
     # Skip legend/title/"Running" preamble when the user just wants help text.
     if "-h" in sys.argv or "--help" in sys.argv:
-        unittest.main()
+        common.print_unittest_help()
+        common.print_amdsmi_path_help()
+        sys.exit(0)
 
-    # Only show the dot-character legend when not in verbose mode; in verbose
-    # mode each test prints its own result line so the dot legend is irrelevant.
-    if verbose < common.VERBOSITY_VERBOSE:
-        common.print_legend()
-
-    if verbose > common.VERBOSITY_QUIET:
-        print(f"AMD SMI Integration Tests\n")
-        print("Running tests...\n")
+    if "-l" in sys.argv or "--list" in sys.argv:
+        common.print_tests(__name__)
+        sys.exit(0)
 
     # Detect if ran without sudo or root privileges
     if os.geteuid() != 0:
@@ -1576,6 +1559,15 @@ if __name__ == "__main__":
         )
         print("Please relaunch with elevated privileges.\n", file=sys.stderr)
         sys.exit(1)
+
+    # Only show the dot-character legend when not in verbose mode; in verbose
+    # mode each test prints its own result line so the dot legend is irrelevant.
+    if verbose < common.VERBOSITY_VERBOSE:
+        common.print_legend()
+
+    if verbose > common.VERBOSITY_QUIET:
+        print(f"AMD SMI Integration Tests\n")
+        print("Running tests...\n")
 
     # WARNING: Future developers! Please read. :)
     # Avoid per-test ASIC skipping because:
@@ -1612,7 +1604,9 @@ if __name__ == "__main__":
     #       self.assertEqual(e.get_error_code(), amdsmi.AmdSmiStatus.AMDSMI_STATUS_NOT_SUPPORTED)
     # ---------------------------------------------------------------------------
 
-    runner = unittest.TextTestRunner(verbosity=common.make_runner_verbosity(verbose))
+    runner = common.GTestSummaryRunner(
+        stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose)
+    )
 
     common.expand_glob_k_arg(globals())
     unittest.main(testRunner=runner)

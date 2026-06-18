@@ -2,9 +2,6 @@ System Speed-of-Light:
   VALU FLOPs:
     rst: 'The total floating-point operations executed per second on the :ref:`VALU <desc-valu>`. This is also presented as a percent of the peak theoretical FLOPs achievable on the specific accelerator. Note: this does not include any floating-point operations from :ref:`MFMA <desc-mfma>` instructions.'
     unit: GFLOP/s
-  VALU IOPs:
-    rst: 'The total integer operations executed per second on the :ref:`VALU <desc-valu>`. This is also presented as a percent of the peak theoretical IOPs achievable on the specific accelerator. Note: this does not include any integer operations from :ref:`MFMA <desc-mfma>` instructions.'
-    unit: GIOP/s
   MFMA FLOPs (F8):
     rst: 'The total number of 8-bit brain floating point :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 16-bit brain floating point operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical F8 MFMA operations achievable on the specific accelerator. It is supported on AMD Instinct MI300 series and later only.'
     unit: GFLOP/s
@@ -345,9 +342,6 @@ Compute Speed-of-Light:
   VALU FLOPs:
     rst: 'The total floating-point operations executed per second on the :ref:`VALU <desc-valu>`. This is also presented as a percent of the peak theoretical FLOPs achievable on the specific accelerator. Note: this does not include any floating-point operations from :ref:`MFMA <desc-mfma>` instructions.'
     unit: GFLOPs
-  VALU IOPs:
-    rst: 'The total integer operations executed per second on the :ref:`VALU <desc-valu>`. This is also presented as a percent of the peak theoretical IOPs achievable on the specific accelerator. Note: this does not include any integer operations from :ref:`MFMA <desc-mfma>` instructions.'
-    unit: GIOPs
   MFMA FLOPs (BF16):
     rst: 'The total number of 16-bit brain floating point :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 16-bit brain floating point operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical BF16 MFMA operations achievable on the specific accelerator.'
     unit: GFLOPs

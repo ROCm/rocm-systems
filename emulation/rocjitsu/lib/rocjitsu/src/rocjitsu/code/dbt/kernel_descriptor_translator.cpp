@@ -15,6 +15,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "util/bit.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -25,7 +26,11 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <optional>
+#include <string>
+#include <unordered_set>
+#include <utility>
 
 namespace rocjitsu {
 
@@ -201,16 +206,24 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
                                             size_t strtab_size) {
   if (sym.st_size != sizeof(KD))
     return false;
-  // Named descriptors conventionally end in ".kd"; stripped or unnamed symbol
-  // tables are accepted by size so DBT still works on minimized objects.
+
+  // AMDHSA kernel descriptors are global object symbols. Size alone is not a
+  // durable signal because unrelated data objects can also be 64 bytes.
+  if (elf_symbol_type(sym.st_info) != kElfSymbolTypeObject ||
+      elf_symbol_bind(sym.st_info) != kElfSymbolBindGlobal)
+    return false;
+
+  // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global
+  // object is ambiguous, so require the ABI suffix instead of treating stripped
+  // or minimized symbol records as descriptors.
   if (strtab == nullptr || strtab_size == 0 || sym.st_name == 0)
-    return true;
+    return false;
   if (sym.st_name >= strtab_size)
     return false;
 
   const char *name = strtab + sym.st_name;
-  const size_t len = std::strlen(name);
-  return len < 3 || std::strcmp(name + len - 3, ".kd") == 0;
+  const size_t len = strnlen(name, strtab_size - sym.st_name);
+  return len > 3 && std::strcmp(name + len - 3, ".kd") == 0;
 }
 
 [[nodiscard]] std::optional<uint64_t> text_vaddr_for_section(uint64_t text_offset,
@@ -222,6 +235,31 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
       return shdr[i].sh_addr;
   }
   return std::nullopt;
+}
+
+[[nodiscard]] uint64_t executable_code_range_size(uint64_t text_vaddr, uint64_t text_size,
+                                                  const Elf64_Ehdr &ehdr, const Elf64_Shdr *shdr) {
+  constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();
+  if (text_vaddr > max_u64 - text_size)
+    return 0;
+
+  uint64_t code_end = text_vaddr + text_size;
+
+  // DBT places expansion bodies in .rj_translations and addresses them as a
+  // .text-relative continuation. Include executable sections at or after .text
+  // so a redirected kernel descriptor entry can still be parsed.
+  for (int i = 0; i < ehdr.e_shnum; ++i) {
+    constexpr uint64_t executable_load_flags = SHF_ALLOC | SHF_EXECINSTR;
+    if ((shdr[i].sh_flags & executable_load_flags) != executable_load_flags)
+      continue;
+    if (shdr[i].sh_addr < text_vaddr)
+      continue;
+    if (shdr[i].sh_addr > max_u64 - shdr[i].sh_size)
+      continue;
+    code_end = std::max(code_end, shdr[i].sh_addr + shdr[i].sh_size);
+  }
+
+  return code_end - text_vaddr;
 }
 
 using KernelDescriptorVisitor = std::function<void(uint64_t descriptor_file_offset,
@@ -240,7 +278,11 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   auto text_vaddr = text_vaddr_for_section(text_offset, text_size, *ehdr, shdr);
   if (!text_vaddr)
     return;
+  const uint64_t code_range_size = executable_code_range_size(*text_vaddr, text_size, *ehdr, shdr);
 
+  // .symtab and .dynsym may both describe the same descriptor. Translation is
+  // keyed by descriptor bytes, so visit each file offset once.
+  std::unordered_set<uint64_t> seen_descriptor_offsets;
   for (int i = 0; i < ehdr->e_shnum; ++i) {
     if (shdr[i].sh_type != SHT_SYMTAB && shdr[i].sh_type != SHT_DYNSYM)
       continue;
@@ -273,6 +315,8 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
           shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
       if (file_off + sizeof(KD) > image.size())
         continue;
+      if (!seen_descriptor_offsets.insert(file_off).second)
+        continue;
 
       const auto *desc = reinterpret_cast<const KD *>(image.data() + file_off);
       const int64_t entry_vaddr_signed =
@@ -280,7 +324,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
       if (entry_vaddr_signed < 0)
         continue;
       const uint64_t entry_vaddr = static_cast<uint64_t>(entry_vaddr_signed);
-      if (entry_vaddr < *text_vaddr || entry_vaddr >= *text_vaddr + text_size)
+      if (entry_vaddr < *text_vaddr || entry_vaddr >= *text_vaddr + code_range_size)
         continue;
 
       const uint64_t entry_text_offset = entry_vaddr - *text_vaddr;
@@ -468,15 +512,24 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
 // Descriptor translation.
 // -----------------------------------------------------------------------------
 
-[[nodiscard]] uint32_t clamp_granulated(uint32_t value, uint32_t max_value,
-                                        std::vector<std::string> &warnings, const char *field_name,
-                                        bool &supported) {
+void append_descriptor_error(KdTranslation &result, std::string message) {
+  result.diagnostics.push_back({.severity = DiagnosticSeverity::Error,
+                                .kind = DiagnosticKind::KernelDescriptor,
+                                .guest_offset = std::nullopt,
+                                .mnemonic = {},
+                                .message = std::move(message),
+                                .required_work = {}});
+  result.supported = false;
+}
+
+[[nodiscard]] uint32_t clamp_granulated(uint32_t value, uint32_t max_value, KdTranslation &result,
+                                        const char *field_name) {
   if (value <= max_value)
     return value;
 
-  warnings.push_back(std::string(field_name) +
-                     " exceeds descriptor field width; resource virtualization is not implemented");
-  supported = false;
+  append_descriptor_error(
+      result, std::string(field_name) +
+                  " exceeds descriptor field width; resource virtualization is not implemented");
   return max_value;
 }
 
@@ -498,9 +551,9 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.target_wave_size = result.host_wavefront_size;
   result.force_wave64 = is_rdna_arch(host_arch) && result.target_wave_size == 64;
   if (result.guest_wavefront_size != result.host_wavefront_size) {
-    result.warnings.push_back("guest and host wavefront sizes differ; descriptor was translated "
-                              "but instruction-level wave-size emulation is not implemented");
-    result.supported = false;
+    append_descriptor_error(result,
+                            "guest and host wavefront sizes differ; descriptor was translated "
+                            "but instruction-level wave-size emulation is not implemented");
   }
 
   // CDNA MFMA kernels may address accumulator registers through a separate
@@ -509,6 +562,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   // The descriptor translator records the first unified VGPR index that must be
   // reserved for those remapped accumulator registers.
   result.accvgpr_base = accum_vgpr_base(src, guest_arch);
+  result.target_accvgpr_base = result.accvgpr_base;
 
   // Descriptor ABI fixes that require instructions, not bitfield changes, are
   // emitted as prologue words. CodeObjectPatcher decides where to place them and
@@ -527,28 +581,67 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
 
   const uint32_t guest_vgpr_granulated =
       AMDHSA_BITS_GET(src.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-  result.guest_vgpr_count =
+  result.guest_vgpr_allocation_count =
       granulated_count_to_registers(guest_vgpr_granulated, guest_vgpr_granularity);
+  if (arch_has_accvgpr(guest_arch) && result.accvgpr_base != 0 &&
+      result.guest_vgpr_allocation_count > result.accvgpr_base) {
+    result.guest_agpr_count = result.guest_vgpr_allocation_count - result.accvgpr_base;
+  }
+  result.guest_vgpr_count = result.guest_vgpr_allocation_count - result.guest_agpr_count;
 
-  // Start from the guest's required VGPR allocation. Then grow it for semantic
-  // lowering requirements: AccVGPR unification needs enough unified VGPRs to
-  // cover the remapped accumulator window, and instruction lowering may request
-  // additional scratch temporaries through options.minimum_vgprs.
+  // Start from the guest's ordinary VGPR count. Keep the descriptor allocation
+  // count separate: CDNA kernels with AccVGPRs encode a unified allocation end
+  // in COMPUTE_PGM_RSRC1, but liveness and scratch allocation need the ordinary
+  // VGPR count only.
+  //
+  // - CDNA-to-RDNA unifies AccVGPRs into the ordinary VGPR namespace, so the
+  //   target needs enough VGPRs to cover the remapped accumulator window.
+  //
+  // - CDNA-to-CDNA keeps a real AccVGPR bank. On GFX90A/GFX942/GFX950 the
+  //   ACCUM_OFFSET descriptor field selects where that bank starts in the
+  //   unified register file. If a semantic lowering needs new ordinary VGPRs
+  //   at or above the original offset, merely increasing ordinary VGPRs is not enough:
+  //   those temporary VGPRs would alias a0, a1, ... at runtime. Move the
+  //   accumulator base up and preserve the original accumulator-window size.
+  //
+  // - instruction lowering may request additional scratch temporaries through
+  //   options.minimum_vgprs.
   uint32_t required_vgprs = result.guest_vgpr_count;
+  result.target_agpr_count = arch_has_accvgpr(host_arch) ? result.guest_agpr_count : 0;
+  uint32_t required_vgpr_allocation = result.guest_vgpr_allocation_count;
   if (arch_has_accvgpr(guest_arch) && !arch_has_accvgpr(host_arch) && result.accvgpr_base != 0)
-    required_vgprs = std::max(required_vgprs, result.accvgpr_base + result.guest_vgpr_count);
+    required_vgprs = std::max(required_vgprs, result.accvgpr_base + result.guest_agpr_count);
   required_vgprs = std::max(required_vgprs, options.minimum_vgprs);
+  if (arch_has_accvgpr(guest_arch) && arch_has_accvgpr(host_arch) &&
+      uses_gfx90a_accum_offset(host_arch) && result.accvgpr_base != 0) {
+    if (result.target_agpr_count != 0 && options.minimum_vgprs > result.accvgpr_base) {
+      result.target_accvgpr_base = util::align_up(options.minimum_vgprs, 4u);
+      if (result.target_accvgpr_base > 256) {
+        append_descriptor_error(result,
+                                "required AccVGPR offset exceeds GFX90A descriptor field range; "
+                                "AccVGPR base virtualization is not implemented");
+      }
+    }
+  }
+  if (arch_has_accvgpr(host_arch) && result.target_agpr_count != 0) {
+    required_vgpr_allocation =
+        std::max(required_vgprs, result.target_accvgpr_base + result.target_agpr_count);
+  } else {
+    required_vgpr_allocation = required_vgprs;
+  }
   result.host_vgpr_count = required_vgprs;
+  result.host_vgpr_allocation_count = required_vgpr_allocation;
   result.target_vgpr_count = required_vgprs;
-  if (arch_max_vgprs(host_arch) != 0 && required_vgprs > arch_max_vgprs(host_arch)) {
-    result.warnings.push_back("required VGPR count exceeds target limit; spill tiers are not "
-                              "implemented for this descriptor");
-    result.supported = false;
+  result.target_vgpr_allocation_count = required_vgpr_allocation;
+  if (arch_max_vgprs(host_arch) != 0 && required_vgpr_allocation > arch_max_vgprs(host_arch)) {
+    append_descriptor_error(result,
+                            "required VGPR allocation exceeds target limit; spill tiers are "
+                            "not implemented for this descriptor");
   }
 
   result.target_vgpr_granulated = clamp_granulated(
-      register_count_to_granulated(required_vgprs, host_vgpr_granularity), kMaxVgprGranulatedField,
-      result.warnings, "GRANULATED_WORKITEM_VGPR_COUNT", result.supported);
+      register_count_to_granulated(required_vgpr_allocation, host_vgpr_granularity),
+      kMaxVgprGranulatedField, result, "GRANULATED_WORKITEM_VGPR_COUNT");
 
   // SGPR counts are also stored as a granulated value, but the descriptor
   // granularity is fixed at eight SGPRs for the architectures handled here.
@@ -561,16 +654,15 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.host_sgpr_count = std::max(result.guest_sgpr_count, options.minimum_sgprs);
   result.target_sgpr_count = result.host_sgpr_count;
   if (arch_max_sgprs(host_arch) != 0 && result.host_sgpr_count > arch_max_sgprs(host_arch)) {
-    result.warnings.push_back("required SGPR count exceeds target limit; spill tiers are not "
-                              "implemented for this descriptor");
-    result.supported = false;
+    append_descriptor_error(result, "required SGPR count exceeds target limit; spill tiers are not "
+                                    "implemented for this descriptor");
   }
 
   if (!uses_gfx10_plus_rsrc3(host_arch)) {
     result.target_sgpr_granulated = register_count_to_granulated(result.host_sgpr_count, 8);
     result.target_sgpr_granulated =
-        clamp_granulated(result.target_sgpr_granulated, kMaxSgprGranulatedField, result.warnings,
-                         "GRANULATED_WAVEFRONT_SGPR_COUNT", result.supported);
+        clamp_granulated(result.target_sgpr_granulated, kMaxSgprGranulatedField, result,
+                         "GRANULATED_WAVEFRONT_SGPR_COUNT");
   }
 
   // LDS/private sizes are copied from the source descriptor and extended by
@@ -608,6 +700,18 @@ std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
       });
 
   return translations;
+}
+
+std::optional<KdTranslation> KernelDescriptorTranslator::translate_descriptor(
+    std::span<const uint8_t> image, uint64_t descriptor_file_offset, uint64_t entry_text_offset,
+    const KernelDescriptorTranslationOptions &options) const {
+  if (descriptor_file_offset > image.size() || image.size() - descriptor_file_offset < sizeof(KD))
+    return std::nullopt;
+
+  KD desc{};
+  std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
+  return translate_one_descriptor(guest_arch_, host_arch_, descriptor_file_offset,
+                                  entry_text_offset, desc, options);
 }
 
 } // namespace rocjitsu

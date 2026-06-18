@@ -79,7 +79,7 @@ TEST_F(CodeobjTableTranslatorTest, FindCodeobjInRangeSuccess)
 
     EXPECT_TRUE(translator.find_codeobj_in_range(1050, out));
     EXPECT_EQ(out.id, 1);
-    EXPECT_EQ(out.vbegin, 1000);
+    EXPECT_EQ(out.addr, 1000);
 
     EXPECT_TRUE(translator.find_codeobj_in_range(2100, out));
     EXPECT_EQ(out.id, 2);
@@ -148,7 +148,7 @@ TEST_F(CodeobjTableTranslatorTest, ClearCacheAfterModification)
 
 TEST_F(CodeobjTableTranslatorTest, ToPcV2ReturnsValidPc)
 {
-    pcinfo_t pc = translator.ToPcV2(1050);
+    pcinfo_t pc = ToPcV2(translator, 1050);
     EXPECT_EQ(pc.code_object_id, 1);
     EXPECT_EQ(pc.address, 50); // Offset from base
 }
@@ -156,7 +156,7 @@ TEST_F(CodeobjTableTranslatorTest, ToPcV2ReturnsValidPc)
 TEST_F(CodeobjTableTranslatorTest, ToPcV2ReturnsInvalidPcForOutOfRange)
 {
     // When PC is not in any code object, returns raw address with code_object_id=0
-    pcinfo_t pc = translator.ToPcV2(500);
+    pcinfo_t pc = ToPcV2(translator, 500);
     EXPECT_EQ(pc.code_object_id, 0);
     EXPECT_EQ(pc.address, 500); // Raw address preserved
 }
@@ -164,12 +164,12 @@ TEST_F(CodeobjTableTranslatorTest, ToPcV2ReturnsInvalidPcForOutOfRange)
 TEST_F(CodeobjTableTranslatorTest, ToPcV2AtBoundary)
 {
     // Test at exact start of range
-    pcinfo_t pc_start = translator.ToPcV2(1000);
+    pcinfo_t pc_start = ToPcV2(translator, 1000);
     EXPECT_EQ(pc_start.code_object_id, 1);
     EXPECT_EQ(pc_start.address, 0);
 
     // Test at end boundary (should be out of range - returns raw address)
-    pcinfo_t pc_end = translator.ToPcV2(1100);
+    pcinfo_t pc_end = ToPcV2(translator, 1100);
     EXPECT_EQ(pc_end.code_object_id, 0);
     EXPECT_EQ(pc_end.address, 1100); // Raw address preserved
 }

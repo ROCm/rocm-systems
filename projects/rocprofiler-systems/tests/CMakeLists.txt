@@ -24,6 +24,7 @@ set(ROCPROFSYS_PYTHON_VALIDATION_FILES
     ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
+    ${CMAKE_CURRENT_LIST_DIR}/validate-unified-memory.py
 )
 
 set(ROCPROFSYS_TEST_SCRIPTS

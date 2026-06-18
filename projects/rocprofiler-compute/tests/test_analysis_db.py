@@ -3,12 +3,34 @@
 
 """Unit tests for analysis_db.py static methods."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 
 from rocprof_compute_analyze.analysis_db import db_analysis
+from utils import schema
+from utils.metrics.noise_clamper import (
+    clear_noise_clamp_warnings,
+    get_noise_clamp_warnings,
+)
+
+
+def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
+    """Build an arch_config with a metric_table carrying one VALU row."""
+    metric_df = pd.DataFrame(
+        {
+            "Metric": [metric_name],
+            "Value": ["unused_expression"],
+            peak_col: ["unused_peak_expression"],
+        },
+        index=pd.Index(["1.1"], name="Metric_ID"),
+    )
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {201: metric_df}
+    arch_config.dfs_type = {201: "metric_table"}
+    return arch_config
+
 
 # =============================================================================
 # db_analysis.evaluate() tests
@@ -23,10 +45,10 @@ def test_evaluate_parse_false_basic_expressions():
     })
     sys_info = {"numCUs": 64, "clock_speed": 1500}
 
-    # Test raw_pmc_df['pmc_perf'] substitution
+    # Test raw_pmc_df -> pmc_df substitution on flat single-index columns
     result = db_analysis.evaluate(
         "test_metric",
-        "raw_pmc_df['pmc_perf']['Counter1']",
+        "raw_pmc_df['Counter1']",
         pmc_df,
         sys_info,
         parse=False,
@@ -47,7 +69,7 @@ def test_evaluate_parse_false_basic_expressions():
     # Test expression with helper function
     result = db_analysis.evaluate(
         "test_metric",
-        "to_sum(raw_pmc_df['pmc_perf']['Counter1'])",
+        "to_sum(raw_pmc_df['Counter1'])",
         pmc_df,
         sys_info,
         parse=False,
@@ -114,7 +136,7 @@ def test_evaluate_none_and_na_handling():
     pmc_df_nan = pd.DataFrame({"Counter1": [np.nan, np.nan, np.nan]})
     result = db_analysis.evaluate(
         "test_metric",
-        "to_sum(raw_pmc_df['pmc_perf']['Counter1'])",
+        "to_sum(raw_pmc_df['Counter1'])",
         pmc_df_nan,
         sys_info,
         parse=False,
@@ -125,7 +147,7 @@ def test_evaluate_none_and_na_handling():
     pmc_df_mixed = pd.DataFrame({"Counter1": [10, np.nan, 30]})
     result = db_analysis.evaluate(
         "test_metric",
-        "raw_pmc_df['pmc_perf']['Counter1']",
+        "raw_pmc_df['Counter1']",
         pmc_df_mixed,
         sys_info,
         parse=False,
@@ -138,7 +160,7 @@ def test_evaluate_none_and_na_handling():
     # Exceptions return None gracefully
     result = db_analysis.evaluate(
         "test_metric",
-        "raw_pmc_df['pmc_perf']['NonExistent']",
+        "raw_pmc_df['NonExistent']",
         pmc_df,
         sys_info,
         parse=False,
@@ -165,9 +187,9 @@ def test_evaluate_with_none_in_formula_does_not_nullify_valid_result():
     # when condition is met for at least some values
     result = db_analysis.evaluate(
         "test_metric",
-        "(raw_pmc_df['pmc_perf']['Counter1'] / "
-        "raw_pmc_df['pmc_perf']['Counter2'].where("
-        "raw_pmc_df['pmc_perf']['Counter2'] != 0, None))",
+        "(raw_pmc_df['Counter1'] / "
+        "raw_pmc_df['Counter2'].where("
+        "raw_pmc_df['Counter2'] != 0, None))",
         pmc_df,
         sys_info,
         parse=False,
@@ -187,6 +209,47 @@ def test_evaluate_with_none_in_formula_does_not_nullify_valid_result():
     assert result == 10
 
 
+def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
+    """
+    Divide-by-zero (x/0 -> inf, 0/0 -> NaN) emits a numpy RuntimeWarning
+    that is captured and logged via console_debug. The misleading
+    "missing counter data" console_warning must not fire.
+    """
+    pmc_df = pd.DataFrame({"Counter1": [10, 20, 30]})
+    sys_info = {}
+
+    cases = [
+        # x/0 yields scalar inf; evaluate() collapses to None
+        "to_sum(raw_pmc_df['Counter1']) / 0",
+        # 0/0 yields scalar NaN; evaluate() collapses to None
+        "(to_sum(raw_pmc_df['Counter1']) * 0) / 0",
+    ]
+
+    for expr in cases:
+        with (
+            patch(
+                "rocprof_compute_analyze.analysis_db.console_warning"
+            ) as mock_warning,
+            patch("rocprof_compute_analyze.analysis_db.console_debug") as mock_debug,
+        ):
+            result = db_analysis.evaluate(
+                "test_metric",
+                expr,
+                pmc_df,
+                sys_info,
+                parse=False,
+            )
+
+        assert result is None, f"Expected None for '{expr}', got {result}"
+
+        mock_warning.assert_not_called()
+        debug_msgs = [str(call) for call in mock_debug.call_args_list]
+        assert any("RuntimeWarning" in m for m in debug_msgs), (
+            f"Expected RuntimeWarning in console_debug output for '{expr}', "
+            f"got {debug_msgs}"
+        )
+
+
 # =============================================================================
 # db_analysis.calc_builtin_vars() tests
 # =============================================================================
@@ -200,7 +263,7 @@ def test_calc_builtin_vars_processes_per_xcd_first():
     pmc_df = pd.DataFrame({
         "Counter1": [100, 200],
     })
-    sys_info = {"base_value": 10}
+    sys_info = {"base_value": 10, "gpu_arch": "gfx942"}
 
     # Mock BUILD_IN_VARS with dependency chain:
     # - PER_XCD_VAR: computed from base_value
@@ -210,7 +273,16 @@ def test_calc_builtin_vars_processes_per_xcd_first():
         "DERIVED_VAR": "$PER_XCD_VAR + 5",  # Depends on PER_XCD_VAR -> 25
     }
 
-    with patch("rocprof_compute_analyze.analysis_db.BUILD_IN_VARS", mock_builtin_vars):
+    with (
+        patch(
+            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+            return_value="MI300",
+        ),
+        patch(
+            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
+    ):
         result = db_analysis.calc_builtin_vars(pmc_df, sys_info)
 
     # Verify PER_XCD var was computed
@@ -228,7 +300,7 @@ def test_calc_builtin_vars_with_dataframe_expressions():
     pmc_df = pd.DataFrame({
         "Counter1": [10, 20, 30],
     })
-    sys_info = {"multiplier": 2}
+    sys_info = {"multiplier": 2, "gpu_arch": "gfx942"}
 
     # Use SUPPORTED_CALL function names (SUM -> to_sum via CodeTransformer)
     mock_builtin_vars = {
@@ -236,7 +308,16 @@ def test_calc_builtin_vars_with_dataframe_expressions():
         "SCALED_TOTAL": "$TOTAL_COUNT * $multiplier",  # 120
     }
 
-    with patch("rocprof_compute_analyze.analysis_db.BUILD_IN_VARS", mock_builtin_vars):
+    with (
+        patch(
+            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+            return_value="MI300",
+        ),
+        patch(
+            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
+    ):
         db_analysis.calc_builtin_vars(pmc_df, sys_info)
 
     assert sys_info["TOTAL_COUNT"] == 60
@@ -254,18 +335,20 @@ def test_calc_dataframe_expressions_applies_evaluate_to_rows():
         "Counter1": [10, 20, 30],
         "Counter2": [1, 2, 3],
     })
-    sys_info = {"scale": 100}
+    sys_info = {"scale": 100, "gpu_arch": "gfx942"}
 
     expression_df = pd.DataFrame({
         "metric_id": ["1.1", "1.2"],
         "value_name": ["sum", "scaled"],
         "value": [
-            "to_sum(raw_pmc_df['pmc_perf']['Counter1'])",
+            "to_sum(raw_pmc_df['Counter1'])",
             "ammolite__scale * 2",
         ],
     })
 
-    with patch("rocprof_compute_analyze.analysis_db.BUILD_IN_VARS", {}):
+    with patch(
+        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
+    ):
         result = db_analysis.calc_dataframe_expressions(pmc_df, sys_info, expression_df)
 
     assert isinstance(result, pd.Series)
@@ -277,7 +360,7 @@ def test_calc_dataframe_expressions_applies_evaluate_to_rows():
 def test_calc_dataframe_expressions_with_builtin_vars():
     """Test that calc_dataframe_expressions calls calc_builtin_vars first."""
     pmc_df = pd.DataFrame({"Counter1": [10, 20, 30]})
-    sys_info = {"base": 5}
+    sys_info = {"base": 5, "gpu_arch": "gfx942"}
 
     # Expression references a builtin var that gets computed
     mock_builtin_vars = {
@@ -293,9 +376,239 @@ def test_calc_dataframe_expressions_with_builtin_vars():
         ],
     })
 
-    with patch("rocprof_compute_analyze.analysis_db.BUILD_IN_VARS", mock_builtin_vars):
+    with (
+        patch(
+            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+            return_value="MI300",
+        ),
+        patch(
+            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
+    ):
         result = db_analysis.calc_dataframe_expressions(pmc_df, sys_info, expression_df)
 
     assert result.iloc[0] == 51
     # None from evaluate becomes NaN in pandas Series
     assert pd.isna(result.iloc[1])
+
+
+# =============================================================================
+# Noise-clamp warning + summary tests
+# =============================================================================
+
+
+def test_calc_expressions_noise_clamp():
+    """Variance warnings fire only at workload level, summary once per workload.
+
+    - evaluate(emit_variance_warnings=True) emits the per-metric warning when
+      to_noise_clamp advances the global counter; the False kwarg stays silent.
+    - calc_expressions emits exactly one variance warning per workload
+      (kernel-level pass is silent) and calls print_noise_clamp_summary once.
+    """
+    workload_path = "/fake/workload"
+    noise_clamp_expression = (
+        "to_noise_clamp(to_min(raw_pmc_df['DIFF']), to_max(raw_pmc_df['REF']))"
+    )
+    # Two distinct kernels so groupby yields two kernel-level evaluate calls
+    # in addition to one workload-level call. Without the kwarg gate the
+    # unguarded code would emit three warnings; with the gate, exactly one.
+    pmc_df = pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b"],
+        "DIFF": [-100.0, -100.0],
+        "REF": [1000.0, 1000.0],
+    })
+    expression_template = pd.DataFrame({
+        "metric_id": ["1.1"],
+        "value_name": ["clamped"],
+        "value": [noise_clamp_expression],
+    })
+    sys_info_df = pd.DataFrame([{"placeholder": 1, "gpu_arch": "gfx942"}])
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pmc_df_per_workload = {workload_path: pmc_df}
+    analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
+    analyzer._roofline_ceilings_per_workload = {workload_path: {}}
+    analyzer._runs = {workload_path: MagicMock(sys_info=sys_info_df)}
+    analyzer._arch_configs = MagicMock()
+
+    # Direct evaluate kwarg behavior.
+    clear_noise_clamp_warnings()
+    with patch(
+        "rocprof_compute_analyze.analysis_db.console_warning"
+    ) as console_warning_mock:
+        db_analysis.evaluate(
+            "direct_test",
+            noise_clamp_expression,
+            pmc_df,
+            {},
+            emit_variance_warnings=True,
+        )
+        variance_warning_calls = [
+            warning_call
+            for warning_call in console_warning_mock.call_args_list
+            if "Variance corrected for metric: direct_test" in warning_call.args[0]
+        ]
+        assert len(variance_warning_calls) == 1
+        assert get_noise_clamp_warnings()["count"] >= 1
+
+    clear_noise_clamp_warnings()
+    with patch(
+        "rocprof_compute_analyze.analysis_db.console_warning"
+    ) as console_warning_mock:
+        db_analysis.evaluate(
+            "direct_test_off",
+            noise_clamp_expression,
+            pmc_df,
+            {},
+            emit_variance_warnings=False,
+        )
+        assert get_noise_clamp_warnings()["count"] >= 1
+        variance_warning_calls = [
+            warning_call
+            for warning_call in console_warning_mock.call_args_list
+            if "Variance corrected for metric:" in warning_call.args[0]
+        ]
+        assert variance_warning_calls == []
+
+    # calc_expressions per-workload bracket.
+    clear_noise_clamp_warnings()
+    with (
+        patch("rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}),
+        patch(
+            "rocprof_compute_analyze.analysis_db.console_warning"
+        ) as console_warning_mock,
+        patch(
+            "rocprof_compute_analyze.analysis_db.print_noise_clamp_summary"
+        ) as print_noise_clamp_summary_mock,
+        patch.object(db_analysis, "validate_dual_issue_metrics"),
+    ):
+        analyzer.calc_expressions()
+
+    variance_warning_calls = [
+        warning_call
+        for warning_call in console_warning_mock.call_args_list
+        if "Variance corrected for metric:" in warning_call.args[0]
+    ]
+    assert len(variance_warning_calls) == 1
+    assert "1.1 - clamped" in variance_warning_calls[0].args[0]
+    print_noise_clamp_summary_mock.assert_called_once()
+    assert get_noise_clamp_warnings()["count"] >= 1
+
+
+# =============================================================================
+# Dual-issue VALU validation tests
+# =============================================================================
+
+
+def test_validate_dual_issue_metrics_emits_warning_above_peak():
+    """Long-format VALU Utilization above peak triggers the dual-issue warning."""
+    arch_config = make_dual_issue_arch_config("VALU Utilization")
+    workload_values_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Peak"],
+        "value": [150.0, 100.0],
+    })
+    pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
+
+    with patch("utils.metrics.common.console_warning") as console_warning_mock:
+        db_analysis.validate_dual_issue_metrics(
+            pmc_df,
+            {"gpu_arch": "gfx942"},
+            workload_values_df,
+            arch_config,
+        )
+
+    console_warning_mock.assert_called_once()
+    msg = console_warning_mock.call_args.args[0]
+    assert "VALU Utilization can go up to 200%" in msg
+
+
+def test_validate_dual_issue_metrics_silent_below_peak():
+    """Below-peak VALU Utilization stays silent."""
+    arch_config = make_dual_issue_arch_config("VALU Utilization")
+    workload_values_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Peak"],
+        "value": [80.0, 100.0],
+    })
+    pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
+
+    with patch("utils.metrics.common.console_warning") as console_warning_mock:
+        db_analysis.validate_dual_issue_metrics(
+            pmc_df,
+            {"gpu_arch": "gfx942"},
+            workload_values_df,
+            arch_config,
+        )
+
+    console_warning_mock.assert_not_called()
+
+
+def test_validate_dual_issue_metrics_uses_peak_empirical_fallback():
+    """Peak (Empirical) wins when present; falls back to Peak otherwise."""
+    arch_config = make_dual_issue_arch_config(
+        "VALU FLOPs (F64)", peak_col="Peak (Empirical)"
+    )
+    workload_values_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Peak (Empirical)"],
+        "value": [600.0, 400.0],
+    })
+    pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
+
+    with patch("utils.metrics.common.console_warning") as console_warning_mock:
+        db_analysis.validate_dual_issue_metrics(
+            pmc_df,
+            {"gpu_arch": "gfx942"},
+            workload_values_df,
+            arch_config,
+        )
+
+    console_warning_mock.assert_called_once()
+    msg = console_warning_mock.call_args.args[0]
+    assert "VALU FLOPs can exceed the peak value" in msg
+
+
+def test_validate_dual_issue_metrics_appends_valu2_suffix_on_gfx950():
+    """gfx950 with non-zero SQ_ACTIVE_INST_VALU2 appends the confirmation."""
+    arch_config = make_dual_issue_arch_config("VALU Utilization")
+    workload_values_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Peak"],
+        "value": [150.0, 100.0],
+    })
+    pmc_df = pd.DataFrame({"SQ_ACTIVE_INST_VALU2": [1, 2, 3]})
+
+    with patch("utils.metrics.common.console_warning") as console_warning_mock:
+        db_analysis.validate_dual_issue_metrics(
+            pmc_df,
+            {"gpu_arch": "gfx950"},
+            workload_values_df,
+            arch_config,
+        )
+
+    msg = console_warning_mock.call_args.args[0]
+    assert "Dual-issue activity detected via SQ_ACTIVE_INST_VALU2 counter" in msg
+
+
+def test_validate_dual_issue_metrics_skips_non_metric_table_dfs():
+    """dfs entries whose dfs_type is not metric_table are ignored."""
+    arch_config = make_dual_issue_arch_config("VALU Utilization")
+    arch_config.dfs_type = {201: "raw_csv_table"}
+    workload_values_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Peak"],
+        "value": [150.0, 100.0],
+    })
+    pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
+
+    with patch("utils.metrics.common.console_warning") as console_warning_mock:
+        db_analysis.validate_dual_issue_metrics(
+            pmc_df,
+            {"gpu_arch": "gfx942"},
+            workload_values_df,
+            arch_config,
+        )
+
+    console_warning_mock.assert_not_called()

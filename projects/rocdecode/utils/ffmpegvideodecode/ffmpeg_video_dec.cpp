@@ -357,7 +357,7 @@ int FFMpegVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
             RocdecSeiMessage *sei_message = sei_message_display_q_[pDispInfo->picture_index].sei_message;
             if (fp_sei_) {
                 for (uint32_t i = 0; i < sei_num_messages; i++) {
-                    if (codec_id_ == rocDecVideoCodec_AVC || rocDecVideoCodec_HEVC) {
+                    if (codec_id_ == rocDecVideoCodec_AVC || codec_id_ == rocDecVideoCodec_HEVC) {
                         switch (sei_message[i].sei_message_type) {
                             case SEI_TYPE_TIME_CODE: {
                                 //todo:: check if we need to write timecode

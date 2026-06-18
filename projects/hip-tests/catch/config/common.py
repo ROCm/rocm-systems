@@ -12,7 +12,6 @@ NON_UNIT_GROUPS = [
     "ABM",
     "multiproc",
     "performance",
-    "perftests",
     "stress",
     "TypeQualifiers",
 ]

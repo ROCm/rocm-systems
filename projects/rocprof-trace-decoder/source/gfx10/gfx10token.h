@@ -26,7 +26,7 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include "common.hpp"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 #include "token_types.h"
 #include "trace_parser.hpp"
 
@@ -61,7 +61,10 @@ union wstart_type
             .pipe = pipe,
             .me = me,
             .count = count,
-            .isExt = 0};
+            .isExt = 0,
+            .wgid = 0,
+            .last = 0,
+            .dynvgpr = 0};
     }
 };
 } // namespace gfx10
@@ -471,7 +474,9 @@ class NaviTokenGenerator : public TokenGenerator
 public:
     NaviTokenGenerator(const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time) :
     TokenGenerator(_buffer, size, _globaltime, _base_time)
-    {}
+    {
+        realtime.reserve(65536);
+    }
 
     virtual gfx10::Token next() = 0;
     bool bufferPadded() { return bit_ptr + 64 < 8 * BUFFER_SIZE; }

@@ -72,6 +72,7 @@ def save_hash_db(hash_file: Path, data: dict) -> None:
     hash_path.parent.mkdir(parents=True, exist_ok=True)
     with open(hash_path, "w") as f:
         json.dump(data, f, indent=2, sort_keys=True)
+        f.write("\n")
 
 
 def detect_changes(configs_dir: Path, hash_file: Path) -> dict:

@@ -2,7 +2,7 @@
 stream:
   Unit_hipStreamCreate_default:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipStreamCreate_Negative:
     <<: *level_2
     tags: [lifecycle]
@@ -58,7 +58,7 @@ stream:
     <<: *level_2
     tags: [memory]
     # disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
   Unit_hipStreamCreateWithFlags_Negative_NullStream:
     <<: *level_2
     tags: [lifecycle]
@@ -103,7 +103,7 @@ stream:
     tags: [lifecycle]
   Unit_hipStreamDestroy_Default:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipStreamDestroy_Negative_NullStream:
     <<: *level_2
     tags: [lifecycle]
@@ -148,7 +148,7 @@ stream:
     <<: *level_2
     # Note: TDR (pass)
     disabled: [amd_wsl]
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipStreamSynchronize_NullStreamSynchronization:
     <<: *level_2
     # (amd_windows) mlsejenkins_Window_Failures_on_gfx1201
@@ -170,7 +170,7 @@ stream:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream:
     <<: *level_2
     # Note: TDR (pass)
@@ -205,7 +205,7 @@ stream:
   Unit_hipLaunchHostFunc_streams:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [callback]
   Unit_hipLaunchHostFunc_multistreams:
     <<: *level_2
@@ -328,7 +328,7 @@ stream:
   Unit_hipExtStreamCreateWithCUMask_NegTst:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [properties]
   Unit_hipStreamAddCallback_MultipleThreads:
     <<: *level_2
@@ -338,7 +338,7 @@ stream:
     tags: [synchronization]
   Unit_hipStreamWaitEvent_Default:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipStreamWaitEvent_DifferentStreams:
     <<: *level_2
     # Note: Windows disabled
@@ -368,17 +368,17 @@ stream:
   Unit_hipStreamQuery_spt_WithFinishedWork:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [synchronization, streamperthread]
   Unit_hipStreamQuery_spt_NegativeCases:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [synchronization, streamperthread]
   Unit_hipStreamQuery_spt_WithPendingWork:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [synchronization, streamperthread]
   Unit_hipStreamSynchronize_spt_EmptyStream:
     <<: *level_2
@@ -386,12 +386,12 @@ stream:
   Unit_hipStreamSynchronize_spt_FinishWork:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [synchronization, streamperthread]
   Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [synchronization, streamperthread]
   Unit_hipStreamBatchMemOp_Negative_Tests:
     <<: *level_2

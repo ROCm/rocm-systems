@@ -451,8 +451,7 @@ SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
 }
 
 void SCmpLtF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_lt_f32_sopc(*this, wf);
 }
 
 SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
@@ -475,8 +474,7 @@ SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
 }
 
 void SCmpLtF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_lt_f16_sopc(*this, wf);
 }
 
 SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
@@ -499,8 +497,7 @@ SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
 }
 
 void SCmpEqF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_eq_f32_sopc(*this, wf);
 }
 
 SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
@@ -523,8 +520,7 @@ SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
 }
 
 void SCmpEqF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_eq_f16_sopc(*this, wf);
 }
 
 SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
@@ -547,8 +543,7 @@ SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
 }
 
 void SCmpLeF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_le_f32_sopc(*this, wf);
 }
 
 SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
@@ -571,8 +566,7 @@ SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
 }
 
 void SCmpLeF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_le_f16_sopc(*this, wf);
 }
 
 SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
@@ -595,8 +589,7 @@ SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
 }
 
 void SCmpGtF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_gt_f32_sopc(*this, wf);
 }
 
 SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
@@ -619,8 +612,7 @@ SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
 }
 
 void SCmpGtF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_gt_f16_sopc(*this, wf);
 }
 
 SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
@@ -643,8 +635,7 @@ SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
 }
 
 void SCmpLgF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_lg_f32_sopc(*this, wf);
 }
 
 SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
@@ -667,8 +658,7 @@ SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
 }
 
 void SCmpLgF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_lg_f16_sopc(*this, wf);
 }
 
 SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
@@ -691,8 +681,7 @@ SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
 }
 
 void SCmpGeF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_ge_f32_sopc(*this, wf);
 }
 
 SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
@@ -715,8 +704,7 @@ SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
 }
 
 void SCmpGeF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_ge_f16_sopc(*this, wf);
 }
 
 SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
@@ -738,8 +726,7 @@ SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
 }
 
 void SCmpOF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_o_f32_sopc(*this, wf);
 }
 
 SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
@@ -761,8 +748,7 @@ SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
 }
 
 void SCmpOF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_o_f16_sopc(*this, wf);
 }
 
 SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
@@ -784,8 +770,7 @@ SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
 }
 
 void SCmpUF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_u_f32_sopc(*this, wf);
 }
 
 SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
@@ -807,8 +792,7 @@ SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
 }
 
 void SCmpUF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_u_f16_sopc(*this, wf);
 }
 
 SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
@@ -831,8 +815,7 @@ SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
 }
 
 void SCmpNgeF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_nge_f32_sopc(*this, wf);
 }
 
 SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
@@ -855,8 +838,7 @@ SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
 }
 
 void SCmpNgeF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_nge_f16_sopc(*this, wf);
 }
 
 SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
@@ -879,8 +861,7 @@ SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
 }
 
 void SCmpNlgF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_nlg_f32_sopc(*this, wf);
 }
 
 SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
@@ -903,8 +884,7 @@ SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
 }
 
 void SCmpNlgF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_nlg_f16_sopc(*this, wf);
 }
 
 SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
@@ -927,8 +907,7 @@ SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
 }
 
 void SCmpNgtF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_ngt_f32_sopc(*this, wf);
 }
 
 SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
@@ -951,8 +930,7 @@ SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
 }
 
 void SCmpNgtF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_ngt_f16_sopc(*this, wf);
 }
 
 SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
@@ -975,8 +953,7 @@ SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
 }
 
 void SCmpNleF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_nle_f32_sopc(*this, wf);
 }
 
 SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
@@ -999,8 +976,7 @@ SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
 }
 
 void SCmpNleF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_nle_f16_sopc(*this, wf);
 }
 
 SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
@@ -1023,8 +999,7 @@ SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
 }
 
 void SCmpNeqF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_neq_f32_sopc(*this, wf);
 }
 
 SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
@@ -1047,8 +1022,7 @@ SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
 }
 
 void SCmpNeqF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_neq_f16_sopc(*this, wf);
 }
 
 SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
@@ -1071,8 +1045,7 @@ SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
 }
 
 void SCmpNltF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_nlt_f32_sopc(*this, wf);
 }
 
 SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
@@ -1095,8 +1068,7 @@ SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
 }
 
 void SCmpNltF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_cmp_nlt_f16_sopc(*this, wf);
 }
 
 } // namespace rdna4

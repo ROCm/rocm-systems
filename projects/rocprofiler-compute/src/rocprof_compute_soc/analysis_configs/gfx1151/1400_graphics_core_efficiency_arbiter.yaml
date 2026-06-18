@@ -1,0 +1,209 @@
+# =============================================================================
+# RDNA3.5 (gfx1151) - Graphics Core Efficiency Arbiter (GCEA) performance metrics
+# =============================================================================
+# GCEA (Graphics Core Efficiency Arbiter) interfaces to system memory (DRAM).
+# For APUs, this connects to system memory (DDR5/LPDDR5) instead of HBM
+# =============================================================================
+
+Panel Config:
+  id: 1400
+  title: Graphics Core Efficiency Arbiter (GCEA)
+  data source:
+  # =========================================================================
+  # GCEA DRAM (System Memory) Read Interface
+  # =========================================================================
+  - metric_table:
+      id: 1401
+      title: "DRAM Read Interface"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        DRAM Read Requests:
+          avg: SUM(GCEA_RDRAM_REQ_PER_CLIGRP_sum) / SUM($denom)
+          min: MIN(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
+          max: MAX(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Read Chained Requests:
+          avg: SUM(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum) / SUM($denom)
+          min: MIN(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          max: MAX(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Read Banks Active:
+          avg: SUM(GCEA_RDRAM_NUM_BANKS_VLD_sum) / SUM($denom)
+          min: MIN(GCEA_RDRAM_NUM_BANKS_VLD_sum / $denom)
+          max: MAX(GCEA_RDRAM_NUM_BANKS_VLD_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Read Size (32B increments):
+          avg: SUM(GCEA_RDRAM_SIZE_REQ_sum) / SUM($denom)
+          min: MIN(GCEA_RDRAM_SIZE_REQ_sum / $denom)
+          max: MAX(GCEA_RDRAM_SIZE_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+
+  # =========================================================================
+  # GCEA DRAM (System Memory) Write Interface
+  # =========================================================================
+  - metric_table:
+      id: 1402
+      title: "DRAM Write Interface"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        DRAM Write Requests:
+          avg: SUM(GCEA_WDRAM_REQ_PER_CLIGRP_sum) / SUM($denom)
+          min: MIN(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
+          max: MAX(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Write Chained Requests:
+          avg: SUM(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum) / SUM($denom)
+          min: MIN(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          max: MAX(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Write Banks Active:
+          avg: SUM(GCEA_WDRAM_NUM_BANKS_VLD_sum) / SUM($denom)
+          min: MIN(GCEA_WDRAM_NUM_BANKS_VLD_sum / $denom)
+          max: MAX(GCEA_WDRAM_NUM_BANKS_VLD_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Write Size (32B increments):
+          avg: SUM(GCEA_WDRAM_SIZE_REQ_sum) / SUM($denom)
+          min: MIN(GCEA_WDRAM_SIZE_REQ_sum / $denom)
+          max: MAX(GCEA_WDRAM_SIZE_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+
+  # =========================================================================
+  # GCEA Arbiter Statistics
+  # =========================================================================
+  - metric_table:
+      id: 1404
+      title: "System Arbiter (SARB)"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        SARB Busy:
+          avg: SUM(100 * GCEA_SARB_BUSY) / SUM(GCEA_ALWAYS_COUNT)
+          min: MIN(100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT)
+          max: MAX(100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT)
+          unit: Percent
+        SARB Stalled:
+          avg: SUM(100 * GCEA_SARB_STALLED) / SUM(GCEA_ALWAYS_COUNT)
+          min: MIN(100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT)
+          max: MAX(100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT)
+          unit: Percent
+        SARB Starving:
+          avg: SUM(100 * GCEA_SARB_STARVING) / SUM(GCEA_ALWAYS_COUNT)
+          min: MIN(100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT)
+          max: MAX(100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT)
+          unit: Percent
+        SARB Total Requests:
+          avg: SUM(GCEA_SARB_REQ_PER_VC_sum) / SUM($denom)
+          min: MIN(GCEA_SARB_REQ_PER_VC_sum / $denom)
+          max: MAX(GCEA_SARB_REQ_PER_VC_sum / $denom)
+          unit: (Count + $normUnit)
+        SARB DRAM Requests:
+          avg: SUM(GCEA_SARB_DRAM_REQ_PER_VC_sum) / SUM($denom)
+          min: MIN(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
+          max: MAX(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
+          unit: (Count + $normUnit)
+
+  # =========================================================================
+  # GCEA Return Interface
+  # =========================================================================
+  - metric_table:
+      id: 1405
+      title: "Return Interface"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Read Returns:
+          avg: SUM(GCEA_RRET_VLD_sum) / SUM($denom)
+          min: MIN(GCEA_RRET_VLD_sum / $denom)
+          max: MAX(GCEA_RRET_VLD_sum / $denom)
+          unit: (Count + $normUnit)
+        Write Returns:
+          avg: SUM(GCEA_WRET_VLD_sum) / SUM($denom)
+          min: MIN(GCEA_WRET_VLD_sum / $denom)
+          max: MAX(GCEA_WRET_VLD_sum / $denom)
+          unit: (Count + $normUnit)
+        Probe Requests:
+          avg: SUM(GCEA_PRB_REQ_sum) / SUM($denom)
+          min: MIN(GCEA_PRB_REQ_sum / $denom)
+          max: MAX(GCEA_PRB_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+
+  metrics_description:
+    DRAM Read Requests: >-
+      Number of read requests sent to system memory. RDNA 3.5 APUs use DDR5/LPDDR5 system
+      memory. High read request counts indicate memory-intensive workloads that may be
+      bandwidth limited.
+    DRAM Read Chained Requests: >-
+      Number of sequential read request chains to system memory. Chained requests combine
+      multiple sequential accesses for better memory efficiency. High chain counts indicate
+      good memory access patterns.
+    DRAM Read Banks Active: >-
+      Number of system memory banks with pending read requests. More active banks enable
+      better memory-level parallelism. Low bank utilization may indicate suboptimal access
+      patterns limiting bandwidth.
+    DRAM Read Size (32B increments): >-
+      Total volume of read data transferred from system memory. This metric helps quantify
+      memory read bandwidth consumption. Compare with theoretical bandwidth to assess
+      memory utilization.
+    DRAM Write Requests: >-
+      Number of write requests sent to system memory. High write request counts indicate
+      write-intensive workloads. Combined with read requests, this shows total memory
+      traffic.
+    DRAM Write Chained Requests: >-
+      Number of sequential write request chains to system memory. Chained writes combine
+      sequential stores for better efficiency. High chain counts indicate good write
+      access patterns.
+    DRAM Write Banks Active: >-
+      Number of system memory banks with pending write requests. Higher bank utilization
+      enables better write bandwidth. Low values may indicate access pattern issues.
+    DRAM Write Size (32B increments): >-
+      Total volume of write data transferred to system memory. This quantifies memory
+      write bandwidth consumption. High values indicate write-intensive workloads.
+    SARB Busy: >-
+      Percentage of cycles the System Arbiter is actively processing memory requests.
+      High busy percentage indicates significant off-chip memory traffic. This is a
+      key indicator of memory-bound behavior.
+    SARB Stalled: >-
+      Percentage of cycles the System Arbiter has requests but cannot make progress
+      due to downstream backpressure. High stall rates indicate memory bandwidth
+      saturation or system memory contention.
+    SARB Starving: >-
+      Percentage of cycles the System Arbiter has no requests to process. High starvation
+      indicates compute-bound workloads or effective caching reducing memory traffic.
+    SARB Total Requests: >-
+      Total memory requests processed by the System Arbiter. This represents all traffic
+      between the GPU caches and system memory interface, including reads, writes,
+      and atomics.
+    SARB DRAM Requests: >-
+      Memory requests specifically destined for system memory (DRAM). This excludes
+      requests serviced by other system components. High counts indicate memory-intensive
+      workloads.
+    Read Returns: >-
+      Number of completed read operations returning data from system memory. Each return
+      delivers requested data to the GPU caches. High counts indicate successful memory
+      read traffic.
+    Write Returns: >-
+      Number of completed write acknowledgements from system memory. Each return confirms
+      successful data write. High counts indicate write-intensive workloads completing
+      successfully.
+    Probe Requests: >-
+      Number of cache coherency probe operations. These occur when external agents or
+      system components require cache synchronization. High counts may indicate coherency
+      traffic impacting performance.

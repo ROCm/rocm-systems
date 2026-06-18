@@ -24,17 +24,22 @@ application that lets you view results from your preferred web browser.
 
    See the :doc:`/reference/faq` for more details on SSH tunneling.
 
+.. note::
+
+   The standalone GUI analyzer is an experimental feature. You must include the
+   ``--experimental`` flag to enable it.
+
 Launch the standalone GUI analyzer
 ==================================
 
-To launch the ROCm Compute Profiler GUI analyzer, include the ``--gui`` flag with your
+To launch the ROCm Compute Profiler GUI analyzer, include the ``--experimental --gui`` flags with your
 desired analysis command.
 
 For example:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --gui
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --experimental --gui
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -68,7 +73,7 @@ At this point, you can launch your web browser of choice and navigate to
 .. tip::
 
    To launch the standalone GUI analyzer web app on a port other than ``8050``,
-   include the optional argument ``--gui <desired port>``.
+   include the ``--experimental`` flag along with ``--gui <desired port>``.
 
 When no filters are applied, you'll see five basic sections derived from your
 application's profiling data:

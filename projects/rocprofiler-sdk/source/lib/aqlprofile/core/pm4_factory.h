@@ -38,6 +38,7 @@
 #include "lib/aqlprofile/core/aql_profile.hpp"
 #include "lib/aqlprofile/core/aql_profile_exception.h"
 #include "lib/aqlprofile/def/gpu_block_info.h"
+#include "lib/common/environment.hpp"
 #include "lib/aqlprofile/pm4/cmd_builder.h"
 #include "lib/aqlprofile/pm4/pmc_builder.h"
 #include "lib/aqlprofile/pm4/spm_builder.h"
@@ -61,6 +62,9 @@ GetAgentInfo(aqlprofile_agent_handle_t agent_id);
 aqlprofile_agent_handle_t
 RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info);
 
+aqlprofile_agent_handle_t
+RegisterAgent(const aqlprofile_agent_info_v2_t* agent_info);
+
 // GPU enumeration
 enum gpu_id_t
 {
@@ -74,6 +78,7 @@ enum gpu_id_t
     GFX11_GPU_ID,    // generic Gfx11 id
     GFX115X_GPU_ID,  // Gfx11.5x id
     GFX12_GPU_ID,    // generic Gfx12 id
+    MI450_GPU_ID,    // Mi450 GPU id
 };
 
 // Block info map class
@@ -167,6 +172,8 @@ public:
     virtual bool IsGFX12() const { return false; }
     // Return number of XCC on the GPU
     uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
+    // Return number of XCC per AID
+    uint32_t GetXccPerAid() const { return agent_info_->xcc_per_aid; }
 
     // SPM specific
     virtual uint32_t GetSpmSampleDelayMax() { return 0; }
@@ -238,6 +245,14 @@ public:
     virtual int GetAccumLowID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
     virtual int GetAccumHiID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
 
+    // Return GPU id for a given gfxip string. Pure mapping function; the
+    // instance-side GetGpuId() above returns the cached value resolved by
+    // this lookup at factory-construction time. Exposed for callers that
+    // need chip-family dispatch before a Pm4Factory exists -- e.g.
+    // populate_cu_bitmap_from_drm() gating the GFX11+ DRM bitmap fetch in
+    // pm4_factory.cpp without re-implementing the gfxip -> gpu_id_t table.
+    static gpu_id_t GetGpuId(std::string_view);
+
 protected:
     explicit Pm4Factory(const BlockInfoMap& map)
     : concurrent_mode_(concurrent_create_mode_)
@@ -304,8 +319,8 @@ private:
     static Pm4Factory* Mi300Create(const AgentInfo* agent_info);
     // Create MI350 factory
     static Pm4Factory* Mi350Create(const AgentInfo* agent_info);
-    // Return GPU id for a given agent
-    static gpu_id_t GetGpuId(std::string_view);
+    // Create MI450 factory
+    static Pm4Factory* Mi450Create(const AgentInfo* agent_info);
 
     static bool CheckConcurrent(const profile_t* profile);
 
@@ -326,8 +341,9 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
     instances_t::iterator it  = ret.first;
 
     concurrent_create_mode_ = concurrent;
-    static bool spm_kfd     = getenv("ROCP_SPM_KFD_MODE") != nullptr;
-    spm_kfd_mode_           = spm_kfd;
+    // Check presence, not value (even empty string means "enabled")
+    static bool spm_kfd = rocprofiler::common::get_env_optional("ROCP_SPM_KFD_MODE").has_value();
+    spm_kfd_mode_       = spm_kfd;
 
     // Create a factory implementation for the GPU id
     if(ret.second)
@@ -348,6 +364,7 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
             case MI200_GPU_ID: it->second = Mi200Create(agent_info); break;
             case MI300_GPU_ID: it->second = Mi300Create(agent_info); break;
             case MI350_GPU_ID: it->second = Mi350Create(agent_info); break;
+            case MI450_GPU_ID: it->second = Mi450Create(agent_info); break;
             default: throw aql_profile_exc_val<gpu_id_t>("GPU id error", gpu_id);
         }
     }
@@ -443,6 +460,7 @@ Pm4Factory::GetGpuId(std::string_view gfx_ip)
         {"gfx10", GFX10_GPU_ID},
         {"gfx115", GFX115X_GPU_ID},
         {"gfx11", GFX11_GPU_ID},
+        {"gfx125", MI450_GPU_ID},
         {"gfx12", GFX12_GPU_ID},
     };
 

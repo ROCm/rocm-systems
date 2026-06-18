@@ -25,46 +25,51 @@ ROCprofiler-SDK uses a companion library called `AQLprofile <https://rocm.docs.a
 The documentation is structured as follows:
 
 .. grid:: 2
-  :gutter: 3
+   :gutter: 3
 
-  .. grid-item-card:: Install
+   .. grid-item-card:: Install
 
-    * :ref:`installing-rocprofiler-sdk`
+      * :doc:`Install ROCprofiler-SDK <install/install>`
+      * :doc:`Build from source <install/build>`
 
-  .. grid-item-card:: Quick Reference
+   .. grid-item-card:: Quick Reference
 
-    * :ref:`quick-guide`
+      * :ref:`quick-guide`
+      * :ref:`cli-options`
 
-  .. grid-item-card:: How to
+   .. grid-item-card:: How to
 
-    * :doc:`Samples <how-to/samples>`
-    * :ref:`using-rocprofv3`
-    * :ref:`using-rocprofv3-avail`
-    * :ref:`rocprofv3_process_attachment`
-    * :ref:`using-rocpd-output-format`
-    * :ref:`using-rocprofiler-sdk-roctx`
-    * :ref:`using-rocprofv3-with-mpi`
-    * :ref:`using-rocprofv3-with-openmp`
-    * :ref:`using-pc-sampling`
-    * :ref:`cdna3-cdna4-pc-sampling`
-    * :ref:`using-thread-trace`
+      * :ref:`using-rocprofv3`
+      * :ref:`rocprofv3-advanced-options`
+      * :ref:`kernel-naming-filtering`
+      * :ref:`rocprofv3-io-options`
+      * :ref:`using-rocprofv3-avail`
+      * :ref:`rocprofv3_process_attachment`
+      * :ref:`using-rocpd-output-format`
+      * :ref:`using-rocprofiler-sdk-roctx`
+      * :ref:`using-rocprofv3-with-mpi`
+      * :ref:`using-rocprofv3-with-openmp`
+      * :ref:`using-pc-sampling`
+      * :ref:`cdna3-cdna4-pc-sampling`
+      * :ref:`using-thread-trace`
+      * :doc:`Samples <how-to/samples>`
 
-  .. grid-item-card:: API reference
+   .. grid-item-card:: API reference
 
-    * :doc:`Tool library <api-reference/tool_library>`
-    * :ref:`runtime-intercept-tables`
-    * :doc:`Process attachment <api-reference/process_attachment>`
-    * :doc:`Buffered services <api-reference/buffered_services>`
-    * :doc:`Callback services <api-reference/callback_services>`
-    * :doc:`Counter collection services <api-reference/counter_collection_services>`
-    * :doc:`PC sampling <api-reference/pc_sampling>`
-    * :doc:`ROCprof Trace Decoder <api-reference/thread_trace>`
-    * :doc:`ROCprofiler-SDK API <api-reference/rocprofiler-sdk_api_reference>`
-    * :doc:`ROCTx API <api-reference/rocprofiler-sdk-roctx_api_reference>`
+      * :doc:`Tool library <api-reference/tool_library>`
+      * :ref:`runtime-intercept-tables`
+      * :doc:`Process attachment <api-reference/process_attachment>`
+      * :doc:`Buffered services <api-reference/buffered_services>`
+      * :doc:`Callback services <api-reference/callback_services>`
+      * :doc:`Counter collection services <api-reference/counter_collection_services>`
+      * :doc:`PC sampling <api-reference/pc_sampling>`
+      * :doc:`ROCprof Trace Decoder <api-reference/thread_trace>`
+      * :doc:`ROCprofiler-SDK API <api-reference/rocprofiler-sdk_api_reference>`
+      * :doc:`ROCTx API <api-reference/rocprofiler-sdk-roctx_api_reference>`
 
-  .. grid-item-card:: Conceptual
+   .. grid-item-card:: Conceptual
 
-    * :ref:`comparing-with-legacy-tools`
+      * :ref:`comparing-with-legacy-tools`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

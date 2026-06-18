@@ -130,14 +130,14 @@ struct collector
         auto new_end = std::remove_if(
             m_device_entries.begin(), m_device_entries.end(),
             [this, timestamp](const device_entry& entry) {
-                auto _timestamp = static_cast<std::uint64_t>(timestamp);
+                const auto _timestamp = static_cast<std::uint64_t>(timestamp);
 
                 try
                 {
-                    auto _metrics =
+                    const auto& _metrics =
                         Traits::get_metrics(entry.device, m_enabled_metrics, _timestamp);
-                    auto _device_id   = entry.device->get_index();
-                    auto _device_name = entry.device->get_name();
+                    const auto  _device_id   = entry.device->get_index();
+                    const auto& _device_name = entry.device->get_name();
 
                     CacheApi::store_sample(_device_id, _device_name, m_enabled_metrics,
                                            entry.supported_metrics, _metrics, _timestamp);

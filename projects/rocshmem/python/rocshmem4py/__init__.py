@@ -25,6 +25,7 @@ __author__ = "Advanced Micro Devices, Inc."
 try:
     # Keep this import list aligned with src/rocshmem4py.cc host bindings.
     from _rocshmem4py import (
+        hip_device_synchronize,
         rocshmem_init,
         rocshmem_finalize,
         rocshmem_hipmodule_init,
@@ -34,6 +35,11 @@ try:
         rocshmem_team_n_pes,
         rocshmem_malloc,
         rocshmem_free,
+        rocshmem_calloc,
+        rocshmem_align,
+        rocshmem_buffer_register,
+        rocshmem_buffer_unregister,
+        rocshmem_buffer_unregister_all,
         rocshmem_ptr,
         rocshmem_barrier_all,
         rocshmem_barrier_all_on_stream,
@@ -49,9 +55,23 @@ try:
         rocshmem_getmem_on_stream,
         rocshmem_putmem_signal_on_stream,
         rocshmem_signal_wait_until_on_stream,
-        rocshmem_int_atomic_fetch_add,
-        rocshmem_long_atomic_fetch_add,
-        rocshmem_int_atomic_compare_swap,
+        TeamConfig,
+        rocshmem_sync_all,
+        rocshmem_sync_all_on_stream,
+        # TODO: rocshmem_ctx_{create,destroy,fence,quiet} to be added later
+        # due to IPC no-MPI HostInterface aborting on non-MPI WindowInfo
+        # rocshmem_ctx_create,
+        # rocshmem_ctx_destroy,
+        # rocshmem_ctx_fence,
+        # rocshmem_ctx_quiet,
+        rocshmem_alltoallmem_on_stream,
+        rocshmem_broadcastmem_on_stream,
+        rocshmem_query_thread,
+        rocshmem_global_exit,
+        rocshmem_dump_stats,
+        rocshmem_reset_stats,
+        rocshmem_get_device_ctx,
+        # Constants
         ROCSHMEM_SUCCESS,
         ROCSHMEM_SIGNAL_SET,
         ROCSHMEM_SIGNAL_ADD,
@@ -69,14 +89,125 @@ except ImportError as e:
         "the rocSHMEM library path."
     ) from e
 
-ROCSHMEM_TEAM_INVALID = -1
+
+# Distinct Python sentinels for the two special team handles.  Both are
+# translated by the C binding's resolve_team_handle():
+#   ROCSHMEM_TEAM_WORLD   ==  0  -> host::ROCSHMEM_TEAM_WORLD (runtime ptr)
+#   ROCSHMEM_TEAM_INVALID == -1  -> rocshmem_team_t(nullptr) (rocSHMEM ABI)
 ROCSHMEM_TEAM_WORLD = 0
+ROCSHMEM_TEAM_INVALID = -1
+_SPECIAL_TEAM_HANDLES = {ROCSHMEM_TEAM_INVALID, ROCSHMEM_TEAM_WORLD}
+
+
+# ---------------------------------------------------------------------------
+# Team APIs (registry + tracked split/destroy)
+# ---------------------------------------------------------------------------
+
+# Live-team registry: every successful split_strided adds the new handle
+# here so finalize_with_torch can drain leaks before rocshmem_finalize.
+_live_teams: set = set()
+
+
+def _team_split_strided_tracked(parent, start, stride, size,
+                                config=None, mask=0):
+    """Tracked variant of rocshmem_team_split_strided.
+
+    Records every successfully created team handle in ``_live_teams`` so
+    finalize_with_torch can destroy any leaked teams before
+    rocshmem_finalize.  Returns ``(status, team_handle)`` matching the
+    raw pybind signature.  Callers that intentionally bypass this wrapper
+    via ``_rocshmem4py.rocshmem_team_split_strided`` own the returned team
+    handle and must destroy it themselves.
+
+    Translates the rocSHMEM ABI INVALID return (C ``nullptr`` ==
+    Python ``0``) to the Python sentinel ``ROCSHMEM_TEAM_INVALID``
+    (``-1``) so callers can distinguish a non-member return from
+    ``ROCSHMEM_TEAM_WORLD``.  Without this translation, a non-member of
+    a child split and a successful WORLD-equivalent call would both
+    look like ``0`` to Python.
+    """
+    from _rocshmem4py import rocshmem_team_split_strided as _raw
+    status, team = _raw(parent, start, stride, size, config, mask)
+    if team == 0:
+        return status, ROCSHMEM_TEAM_INVALID
+    if status == ROCSHMEM_SUCCESS and team not in _SPECIAL_TEAM_HANDLES:
+        _live_teams.add(team)
+    return status, team
+
+
+def _team_destroy_tracked(team):
+    """Tracked variant of rocshmem_team_destroy.
+
+    Removes the handle from the live-team registry on destroy.  Calling
+    on an unknown handle is a no-op (matches rocshmem_team_destroy
+    behavior for ROCSHMEM_TEAM_{INVALID,WORLD,SHARED}).
+    """
+    if team in _SPECIAL_TEAM_HANDLES:
+        return
+    from _rocshmem4py import rocshmem_team_destroy as _raw
+    _raw(team)
+    _live_teams.discard(team)
+
+
+# Public names always go through the tracked variants.  Direct callers of
+# _rocshmem4py.rocshmem_team_split_strided bypass the registry by design
+# (e.g. tests that intentionally exercise the raw API); those callers own
+# any returned team handle and must destroy it themselves.
+rocshmem_team_split_strided = _team_split_strided_tracked
+rocshmem_team_destroy = _team_destroy_tracked
+
+from _rocshmem4py import rocshmem_team_translate_pe  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Full host AMO matrix (re-export by symbol-name discovery)
+# ---------------------------------------------------------------------------
+#
+# The pybind layer generates host AMO bindings via macros.  Hand-listing
+# them in the import block is fragile — instead, walk the extension module
+# and re-export every name matching the AMO naming convention.  These are
+# runtime-backed host APIs; IPC no-MPI support for host AMOs needs to be 
+# added to the rocSHMEM runtime.
+
+_AMO_TYPE_PREFIXES = (
+    "int_", "long_", "longlong_",
+    "uint32_", "uint64_", "size_", "ptrdiff_",
+    "float_", "double_",
+)
+
+
+def _is_amo_name(name: str) -> bool:
+    if not name.startswith("rocshmem_"):
+        return False
+    if "_atomic_" not in name:
+        return False
+    suffix = name[len("rocshmem_"):]
+    return any(suffix.startswith(p) for p in _AMO_TYPE_PREFIXES)
+
+
+def _import_amo_symbols() -> list:
+    import _rocshmem4py as _ext
+    names = []
+    for name in dir(_ext):
+        if _is_amo_name(name):
+            globals()[name] = getattr(_ext, name)
+            names.append(name)
+    return names
+
+
+_AMO_NAMES = tuple(sorted(_import_amo_symbols()))
+
+
+# ---------------------------------------------------------------------------
+# Public surface
+# ---------------------------------------------------------------------------
 
 _HOST_API_BINDINGS = tuple(
     sorted(
         name
         for name in globals()
-        if name.startswith("rocshmem_") or name.startswith("ROCSHMEM_")
+        if (name.startswith("rocshmem_") or name.startswith("ROCSHMEM_"))
+        and not name.startswith("_")
     )
 )
 
@@ -85,6 +216,7 @@ __all__ = [
     *_HOST_API_BINDINGS,
     'ROCSHMEM_TEAM_INVALID',
     'ROCSHMEM_TEAM_WORLD',
+    'TeamConfig',
     # Core framework-agnostic symmetric memory
     'SymmetricBuffer',
     'rocshmem_create_buffer',
@@ -93,12 +225,19 @@ __all__ = [
     'init_rocshmem_by_uniqueid',
     'init_with_mpi',
     'init_with_torch',
+    'finalize_with_mpi',
     'finalize_with_torch',
+    'set_hip_device_from_env',
 ]
 
 
-def _set_hip_device_from_env():
-    """Set HIP device based on LOCAL_RANK or OMPI_COMM_WORLD_LOCAL_RANK."""
+def set_hip_device_from_env():
+    """Pin the HIP device from LOCAL_RANK / OMPI_COMM_WORLD_LOCAL_RANK.
+
+    Call before ``rocshmem_init()`` on the raw (non-torch, non-mpi4py) path so
+    each PE owns a distinct GPU.  ``init_with_torch()`` and ``init_with_mpi()``
+    already do this internally.
+    """
     local_rank = os.environ.get("LOCAL_RANK") or os.environ.get("OMPI_COMM_WORLD_LOCAL_RANK")
     if local_rank is not None:
         try:
@@ -108,11 +247,13 @@ def _set_hip_device_from_env():
             pass
 
 
+_set_hip_device_from_env = set_hip_device_from_env
+
+
 class SymmetricBuffer:
     """RAII wrapper around ``rocshmem_malloc`` that exposes the
     ``__cuda_array_interface__`` protocol for zero-copy interop with
-    PyTorch (``torch.as_tensor``) and any other framework that
-    implements that protocol.
+    consumers that implement that protocol.
 
     Framework-agnostic: works without any ML framework installed.
     """
@@ -123,6 +264,9 @@ class SymmetricBuffer:
             self.ptr = ptr
             self.nbytes = size
         else:
+            # rocshmem_malloc spawns kernels on every PE that can race with
+            # concurrent GPU module setup unless the device is quiesced first.
+            hip_device_synchronize()
             self.ptr = rocshmem_malloc(size)
             self.nbytes = size
         self.size = size
@@ -211,8 +355,8 @@ def rocshmem_create_buffer(nbytes: int) -> SymmetricBuffer:
     """Collectively allocate ``nbytes`` of symmetric memory.
 
     Returns a :class:`SymmetricBuffer` that exposes
-    ``__cuda_array_interface__`` for zero-copy integration with PyTorch
-    (``torch.as_tensor``), and any other ``__cuda_array_interface__`` consumer.
+    ``__cuda_array_interface__`` for zero-copy integration with consumers
+    that understand the protocol.
 
     **This is a collective operation** — all PEs must call this function
     with the same ``nbytes`` argument, matching the SHMEM symmetric heap
@@ -221,6 +365,26 @@ def rocshmem_create_buffer(nbytes: int) -> SymmetricBuffer:
     For the PyTorch convenience wrapper see :mod:`rocshmem4py.interop.torch`.
     """
     return SymmetricBuffer(nbytes)
+
+
+# ---------------------------------------------------------------------------
+# Heap-base introspection helpers for device-side pointer translation
+# ---------------------------------------------------------------------------
+
+def rocshmem_get_heap_bases(ptr: int) -> list:
+    """Return the per-PE base pointer for a symmetric allocation.
+
+    For PE ``i``, returns ``rocshmem_ptr(ptr, i)`` — the address of the
+    same allocation in PE ``i``'s symmetric heap as visible from the
+    local PE.  Entries are 0 when ``rocshmem_ptr`` returns NULL (e.g. on
+    the RO backend, where direct remote dereference is unavailable).
+
+    This helper constructs the ``heap_bases`` array used by device kernels
+    that translate a local symmetric pointer to a peer's pointer via
+    ``heap_bases[peer] + (local_ptr - heap_bases[my_pe])``.
+    """
+    n = rocshmem_n_pes()
+    return [rocshmem_ptr(ptr, pe) for pe in range(n)]
 
 
 def rocshmem_get_peer_buffer(buf: SymmetricBuffer, peer: int) -> SymmetricBuffer:
@@ -255,6 +419,23 @@ def rocshmem_get_peer_buffer(buf: SymmetricBuffer, peer: int) -> SymmetricBuffer
 # Initialization helpers
 # ---------------------------------------------------------------------------
 
+
+def _drain_live_teams() -> None:
+    """Destroy any teams left in the registry before rocshmem_finalize.
+
+    Team destruction is collective: every PE must call ``rocshmem_team_destroy``
+    on the same teams in the same order, or rocshmem_finalize will segfault.
+    Iterating the sorted set guarantees identical order across PEs.
+    """
+    if not _live_teams:
+        return
+    from _rocshmem4py import rocshmem_team_destroy as _raw_destroy
+
+    for team in sorted(_live_teams):
+        _raw_destroy(team)
+    _live_teams.clear()
+
+
 def init_rocshmem_by_uniqueid(group: 'torch.distributed.ProcessGroup'):
     """Broadcast unique ID from rank 0 and call ``rocshmem_init_attr``."""
     import torch
@@ -274,7 +455,13 @@ def init_rocshmem_by_uniqueid(group: 'torch.distributed.ProcessGroup'):
 
 
 def init_with_mpi(mpi_comm: Optional[Any] = None):
-    """Initialize rocSHMEM using mpi4py for coordination."""
+    """Initialize rocSHMEM using mpi4py to broadcast the unique ID.
+
+    The caller must launch with ``mpirun`` (or another MPI launcher) so that
+    ``MPI.COMM_WORLD`` actually spans all PEs.  Under ``torchrun`` (or any
+    non-MPI launcher) ``MPI.COMM_WORLD`` is a singleton per process and this
+    function raises -- use ``init_with_torch()`` in that case.
+    """
     try:
         from mpi4py import MPI
     except ImportError:
@@ -287,6 +474,21 @@ def init_with_mpi(mpi_comm: Optional[Any] = None):
 
     rank = mpi_comm.Get_rank()
     size = mpi_comm.Get_size()
+
+    # Sanity check: if a process launcher set WORLD_SIZE/OMPI_COMM_WORLD_SIZE
+    # but MPI.COMM_WORLD doesn't match, we are not running under MPI and the
+    # init below would silently create N independent size-1 worlds.
+    launcher_size_str = (
+        os.environ.get("WORLD_SIZE") or os.environ.get("OMPI_COMM_WORLD_SIZE")
+    )
+    if launcher_size_str is not None and int(launcher_size_str) != size:
+        raise RuntimeError(
+            f"MPI.COMM_WORLD has size {size} but the launcher reports "
+            f"WORLD_SIZE={launcher_size_str}. This usually means the job was "
+            "launched with torchrun (or another non-MPI launcher) where "
+            "MPI.COMM_WORLD is a singleton per process. Use init_with_torch() "
+            "for torchrun, or launch with mpirun for init_with_mpi()."
+        )
 
     unique_id = rocshmem_get_uniqueid() if rank == 0 else None
     unique_id = mpi_comm.bcast(unique_id, root=0)
@@ -374,11 +576,34 @@ def _populate_torch_env_from_mpi():
 _rocshmem_initialized = False
 
 
+def finalize_with_mpi():
+    """Synchronized teardown for sessions initialized via ``init_with_mpi()``.
+
+    Drains any teams the caller forgot to destroy (collective op, sorted for
+    deterministic order across PEs), quiesces the device, then barriers and
+    finalizes rocSHMEM.  MPI itself is not finalized here -- the launcher /
+    application owns ``MPI_Finalize``.
+    """
+    global _rocshmem_initialized
+    if not _rocshmem_initialized:
+        return
+
+    hip_device_synchronize()
+    _drain_live_teams()
+    rocshmem_barrier_all()
+    rocshmem_finalize()
+    _rocshmem_initialized = False
+
+
 def finalize_with_torch():
-    """Synchronized teardown: sync -> barrier_all -> dist.barrier -> finalize.
-    The barriers ensure all ranks have completed their work before any
-    rank enters ``rocshmem_finalize()``, preventing the segfault that
-    occurs when one rank tears down while another is still communicating.
+    """Synchronized teardown for sessions initialized via ``init_with_torch()``.
+
+    Order is critical:
+      1. ``torch.cuda.synchronize()`` so no rank enters finalize with pending GPU work
+      2. drain leaked teams (collective; deterministic order via sorted set)
+      3. ``rocshmem_barrier_all`` + ``dist.barrier`` -- both world barriers, paired
+         so neither library tears down while the other is still communicating
+      4. ``rocshmem_finalize`` then ``destroy_process_group``
     """
     global _rocshmem_initialized
     if not _rocshmem_initialized:
@@ -391,6 +616,7 @@ def finalize_with_torch():
         return
 
     torch.cuda.synchronize()
+    _drain_live_teams()
     rocshmem_barrier_all()
     if dist.is_initialized():
         dist.barrier()

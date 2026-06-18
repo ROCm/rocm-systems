@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_DEVICE_LL_A2A_H_
 #define _NCCL_DEVICE_LL_A2A_H_
@@ -14,7 +15,7 @@ NCCL_EXTERN_C __host__ int ncclLLA2ACalcSlots(int maxElts, int maxEltSize);
 
 NCCL_EXTERN_C __host__ ncclResult_t ncclLLA2ACreateRequirement(int nBlocks, int nSlots, ncclLLA2AHandle_t* outHandle, ncclDevResourceRequirements_t* outReq);
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 struct ncclLLA2ASession_internal;
 
@@ -25,7 +26,7 @@ struct ncclLLA2ASession: ncclLLA2ASession_internal<Coop> {
   NCCL_DEVICE_INLINE ~ncclLLA2ASession();
 
   ncclLLA2ASession(ncclLLA2ASession const&) = delete; // Sessions are not copyable
-  
+
   template<typename T>
   NCCL_DEVICE_INLINE void send(int peer, int slot, T data);
 
@@ -41,7 +42,7 @@ struct ncclLLA2ASession: ncclLLA2ASession_internal<Coop> {
   template<int Unroll, typename Elt, typename EltToAcc, typename Reduce>
   NCCL_DEVICE_INLINE auto recvReduce(int eltStart, int eltCount, int eltStride, EltToAcc eltToAcc, Reduce red)
     -> decltype(eltToAcc(nccl::utility::declval<Elt>())) ;
-  
+
   // End an alltoall region. For every peer in team you must have done both of the
   // following each of which can be accomplished using any thread in coop:
   //  1. Targeted that peer with at least one send().

@@ -393,6 +393,10 @@ typedef enum __HIP_NODISCARD hipError_t {
                                            ///< update.
   hipErrorInvalidChannelDescriptor = 911,  ///< Invalid channel descriptor.
   hipErrorInvalidTexture = 912,            ///< Invalid texture.
+  hipErrorInvalidResourceType = 914,       ///< Resource type is not valid for the operation.
+  hipErrorInvalidResourceConfiguration = 915,  ///< Resource configuration is not valid for
+                                               ///< the operation.
+  hipErrorStreamDetached = 916,            ///< The stream is detached.                                              
   hipErrorUnknown = 999,                   ///< Unknown error.
   // HSA Runtime Error Codes start here.
   hipErrorRuntimeMemory = 1052,  ///< HSA runtime memory call returned error.  Typically not seen
@@ -597,6 +601,8 @@ typedef enum hipDeviceAttribute_t {
   hipDeviceAttributePciChipId,                   ///< GPU Manufacturer device id
   hipDeviceAttributeExpertSchedMode,             ///< '1' if Device supports expert scheduling mode,
                                                  ///< '0' otherwise.
+  hipDeviceAttributeMaxDynDataPrefetchRegions,   ///< Maximum number of dynamic data prefetch regions
+                                                 ///< per kernel launch (0 if unsupported).
 
   hipDeviceAttributeAmdSpecificEnd = 19999,
   hipDeviceAttributeVendorSpecificBegin = 20000,
@@ -681,6 +687,66 @@ extern "C" {
 //---
 // API-visible structures
 typedef struct ihipCtx_t* hipCtx_t;
+typedef struct ihipExecutionCtx_t* hipExecutionCtx_t;
+typedef struct ihipDevResourceDesc_t* hipDevResourceDesc_t;
+typedef enum hipDevResourceType {
+  hipDevResourceTypeInvalid = 0,
+  hipDevResourceTypeSm = 1,
+  hipDevResourceTypeWorkqueueConfig = 1000,
+  hipDevResourceTypeWorkqueue = 10000,
+} hipDevResourceType;
+typedef enum hipDevSmResourceGroup_flags {
+  hipDevSmResourceGroupDefault = 0,
+  hipDevSmResourceGroupBackfill = 0x1,
+} hipDevSmResourceGroup_flags;
+typedef enum hipDevSmResourceSplitByCount_flags {
+  hipDevSmResourceSplitIgnoreSmCoscheduling = 0x1,
+  hipDevSmResourceSplitMaxPotentialClusterSize = 0x2,
+} hipDevSmResourceSplitByCount_flags;
+typedef enum hipDevWorkqueueConfigScope {
+  hipDevWorkqueueConfigScopeDeviceCtx = 0,
+  hipDevWorkqueueConfigScopeGreenCtxBalanced = 1,
+} hipDevWorkqueueConfigScope;
+
+#define HIP_RESOURCE_ABI_BYTES 40
+
+typedef struct hipDevSmResource {
+  unsigned int smCount;
+  unsigned int minSmPartitionSize;
+  unsigned int smCoscheduledAlignment;
+  unsigned int flags;
+} hipDevSmResource;
+
+typedef struct hipDevWorkqueueConfigResource {
+  int device;
+  unsigned int wqConcurrencyLimit;
+  hipDevWorkqueueConfigScope sharingScope;
+} hipDevWorkqueueConfigResource;
+
+typedef struct hipDevWorkqueueResource {
+  unsigned char reserved[HIP_RESOURCE_ABI_BYTES];
+} hipDevWorkqueueResource;
+
+typedef struct hipDevResource_st {
+  hipDevResourceType type;
+  unsigned char _internal_padding[92];
+  union {
+    hipDevSmResource sm;
+    hipDevWorkqueueConfigResource wqConfig;
+    hipDevWorkqueueResource wq;
+    unsigned char _oversize[HIP_RESOURCE_ABI_BYTES];
+  };
+  struct hipDevResource_st* nextResource;
+} hipDevResource;
+
+typedef struct hipDevSmResourceGroupParams_st {
+  unsigned int smCount;
+  unsigned int coscheduledSmCount;
+  unsigned int preferredCoscheduledSmCount;
+  unsigned int flags;
+  unsigned int reserved[12];
+} hipDevSmResourceGroupParams;
+
 // Note many APIs also use integer deviceIds as an alternative to the device pointer:
 typedef int hipDevice_t;
 typedef enum hipDeviceP2PAttr {
@@ -1594,6 +1660,52 @@ typedef enum hipClusterSchedulingPolicy {
 } hipClusterSchedulingPolicy;
 
 /**
+ * @brief Temporal locality hint for dynamic data prefetch.
+ */
+typedef enum hipExtDynDataPrefetchTemporal {
+  hipExtDynDataPrefetchTemporalRegular = 0, ///< Regular temporal locality
+  hipExtDynDataPrefetchTemporalHigh = 1,    ///< High temporal locality (prefer caching)
+} hipExtDynDataPrefetchTemporal;
+
+/**
+ * @brief Describes one 2D memory region to prefetch into L2 cache.
+ *
+ * @p address must be aligned to the device's L2 cache line size.
+ * @p width is measured in bytes and must be a multiple of the cache line size.
+ * @p height is the number of rows to prefetch.
+ * @p stride is the byte stride between the start of consecutive rows.
+ */
+typedef struct hipExtDynDataPrefetchRegion {
+  void*  address;      ///< Base address (must be cache-line aligned)
+  size_t stride;       ///< Stride between row starts in bytes
+  size_t width;        ///< Width of each row in bytes (must be a multiple of cache line size)
+  size_t height;       ///< Number of rows to prefetch
+} hipExtDynDataPrefetchRegion;
+
+/**
+ * Compile-time upper bound for the number of prefetch regions in
+ * @ref hipExtDynDataPrefetchConfig.  The actual device limit is queried at
+ * runtime via @ref hipDeviceAttributeMaxDynDataPrefetchRegions.
+ */
+#define HIP_EXT_DYN_DATA_PREFETCH_MAX_REGIONS 2
+
+/**
+ * @brief Configuration for dynamic data prefetch.
+ *
+ * Pointed to by a launch attribute via @ref hipLaunchAttributeExtDynDataPrefetch.
+ * @p numRegions must not exceed the device limit queried via
+ * @ref hipDeviceAttributeMaxDynDataPrefetchRegions (use @ref hipDeviceGetAttribute).
+ *
+ * Cooperative prefetch is always enabled internally; the user only controls
+ * the temporal policy.
+ */
+typedef struct hipExtDynDataPrefetchConfig {
+  unsigned int                  numRegions; ///< Number of valid regions (1-max)
+  hipExtDynDataPrefetchTemporal temporal;   ///< Cache retention policy for prefetched data
+  hipExtDynDataPrefetchRegion   regions[HIP_EXT_DYN_DATA_PREFETCH_MAX_REGIONS]; ///< Prefetch regions
+} hipExtDynDataPrefetchConfig;
+
+/**
  *  Launch Attribute ID
  */
 typedef enum hipLaunchAttributeID {
@@ -1606,6 +1718,7 @@ typedef enum hipLaunchAttributeID {
   hipLaunchAttributePriority = 8, ///< Valid for graph node, streams, launches
   hipLaunchAttributeMemSyncDomainMap = 9,       ///< Valid for streams, graph nodes, launches
   hipLaunchAttributeMemSyncDomain = 10,         ///< Valid for streams, graph nodes, launches
+  hipLaunchAttributeExtDynDataPrefetch = 1024,  ///< Valid for launches. Prefetch data into L2 before kernel execution.
   hipLaunchAttributeMax
 } hipLaunchAttributeID;
 
@@ -1648,6 +1761,7 @@ typedef union hipLaunchAttributeValue {
 
   hipClusterSchedulingPolicy clusterSchedulingPolicyPreference;  ///< Value of launch attribute :: hipLaunchAttributeClusterSchedulingPolicyPreference
                                                                  ///< determines the preferred strategy for distributing blocks within a compute cluster
+  const hipExtDynDataPrefetchConfig* dynDataPrefetch;  ///< Value of launch attribute ::hipLaunchAttributeExtDynDataPrefetch
 } hipLaunchAttributeValue;
 
 /**
@@ -6054,6 +6168,42 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src, int s
 /**
  *-------------------------------------------------------------------------------------------------
  *-------------------------------------------------------------------------------------------------
+ *  @defgroup ExecutionContext Execution Context Management
+ *  @{
+ *  This section describes execution context management functions of HIP runtime API.
+ */
+hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
+                                   hipDevResourceType type);
+hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
+                                        const hipDevResource* input, hipDevResource* remainder,
+                                        unsigned int flags, unsigned int minCount);
+hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
+                                 const hipDevResource* input, hipDevResource* remainder,
+                                 unsigned int flags,
+                                 hipDevSmResourceGroupParams* groupParams);
+hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResource* resources,
+                                       unsigned int nbResources);
+hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+                             unsigned int flags);
+hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx);
+hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device);
+hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
+                                        unsigned int flags, int priority);
+hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
+                                          hipDevResourceType type);
+hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId);
+hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
+                                    hipDevResourceType type);
+hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event);
+hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
+/**
+ * @}
+ */
+/**
+ *-------------------------------------------------------------------------------------------------
+ *-------------------------------------------------------------------------------------------------
  *  @defgroup Context Context Management [Deprecated]
  *  @{
  *  This section describes the context management functions of HIP runtime API.
@@ -6596,6 +6746,42 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
  * @return #hipSuccess, #hipErrorInvalidValue
 */
 hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
+
+/**
+ * @brief Get device pointer to a `__device__` global variable defined in a library.
+ *
+ * Returns the device pointer and size of the named global symbol within the
+ * library's code object. Mirrors CUDA's `cuLibraryGetGlobal` /
+ * `cudaLibraryGetGlobal`. Either `dptr` or `bytes` (but not both) may be NULL.
+ *
+ * @param [out] dptr   Pointer to receive the device pointer, may be NULL.
+ * @param [out] bytes  Pointer to receive the size in bytes, may be NULL.
+ * @param [in]  library Input hip library handle.
+ * @param [in]  name   Name of the global symbol to look up.
+ * @return #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
+ *         #hipErrorNotFound
+ */
+hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
+                               const char* name);
+
+/**
+ * @brief Get host pointer to a `__managed__` variable defined in a library.
+ *
+ * Returns the host-accessible managed pointer and size of the named managed
+ * symbol within the library's code object. Mirrors CUDA's
+ * `cuLibraryGetManaged` / `cudaLibraryGetManaged`. Either `dptr` or `bytes`
+ * (but not both) may be NULL. Returns #hipErrorNotFound if the symbol does
+ * not exist or is not a `__managed__` variable.
+ *
+ * @param [out] dptr   Pointer to receive the managed host pointer, may be NULL.
+ * @param [out] bytes  Pointer to receive the size in bytes, may be NULL.
+ * @param [in]  library Input hip library handle.
+ * @param [in]  name   Name of the managed symbol to look up.
+ * @return #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
+ *         #hipErrorNotFound
+ */
+hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library,
+                                const char* name);
 
 /**
  * @brief Retrieve kernel handles within a library

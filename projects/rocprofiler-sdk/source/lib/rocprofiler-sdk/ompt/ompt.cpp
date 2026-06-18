@@ -165,16 +165,22 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     corr_id->sub_ref_count();
 
     /* Warning: some tasks like early_fulfill may be scheduled
-     * out twice. The ordering between the early_fulfill and the complete
-     * (for example) is not specified. In this case the prior_task_state
-     * needs to be added to the early return if condition below.
+     * out twice. The ordering between early_fulfill and task_complete
+     * is not specified.
+     *
+     * If early_fulfill is dispatched after task_complete, state_prior
+     * will be nullptr because task_complete deleted it. Return immediately
+     * to avoid failing on a valid trailing callback.
      */
     auto* pprior = INTERNAL(prior_task_data);
     auto* pnext  = INTERNAL(next_task_data);
     assert(pprior != nullptr);
     auto* state_prior = reinterpret_cast<ompt_task_save_state*>(pprior->ptr);
     if(state_prior == nullptr)
+    {
+        if(prior_task_status == ompt_task_early_fulfill) return;
         ROCP_FATAL << "state_prior == nullptr prior_task_status: " << prior_task_status << ".";
+    }
 
     auto* state_next   = pnext ? reinterpret_cast<ompt_task_save_state*>(pnext->ptr) : nullptr;
     auto* prior_corrid = context::get_latest_correlation_id();

@@ -119,6 +119,7 @@ if hasattr(torch._C, "_dispatch_call"):
             console_warning(
                 "torch trace", "Cannot inject ROCTX markers for torch._C._dispatch_call"
             )
+            raise
         finally:
             rangePop()
             marker_stack.pop()

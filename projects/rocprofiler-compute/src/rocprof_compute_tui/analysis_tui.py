@@ -17,6 +17,7 @@ from rocprof_compute_tui.utils.tui_utils import (
 )
 from utils import file_io, parser, schema
 from utils.logger import console_error, console_log, demarcate
+from utils.metrics.evaluation_pipeline import eval_metric
 
 
 class tui_analysis(OmniAnalyze_Base):
@@ -51,8 +52,6 @@ class tui_analysis(OmniAnalyze_Base):
             workload.raw_pmc = workload.raw_pmc.rename(
                 columns={"Dispatch_Id": "Dispatch_ID"}
             )
-            # Create multi index dataframe with key pmc_perf
-            workload.raw_pmc = pd.concat([workload.raw_pmc], keys=["pmc_perf"], axis=1)
 
             kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                 df_in=workload.raw_pmc,
@@ -74,7 +73,7 @@ class tui_analysis(OmniAnalyze_Base):
             parser.nullify_unevaluated_metric_values(workload)
             return
 
-        # Join pmc_perf_*.csv or results_*.csv files if needed (Phase 2)
+        # Join results_*.csv source files into pmc_perf.csv if needed (Phase 2)
         self.join_workload_csvs(Path(self.path))
 
         workload.raw_pmc = file_io.create_df_pmc(
@@ -108,7 +107,7 @@ class tui_analysis(OmniAnalyze_Base):
         )
 
         # Group raw PMC data by kernel name
-        kernel_groups = workload.raw_pmc.pmc_perf.groupby("Kernel_Name")
+        kernel_groups = workload.raw_pmc.groupby("Kernel_Name")
 
         for kernel_name, group in kernel_groups:
             # Get all dispatch indices for this kernel
@@ -120,14 +119,13 @@ class tui_analysis(OmniAnalyze_Base):
             kernel_dfs = copy.deepcopy(workload.dfs)
 
             # Evaluate metrics aggregated across all dispatches of this kernel
-            parser.eval_metric(
+            eval_metric(
                 kernel_dfs,
                 workload.dfs_type,
                 workload.sys_info.iloc[0],
                 workload.roofline_peaks,
                 kernel_raw_pmc,
                 self.args.debug,
-                self._profiling_config,
             )
 
             self.raw_dfs[str(kernel_name)] = kernel_dfs

@@ -10,7 +10,7 @@ size_t IbCastQpSchedProxyPrevMsgSz;
 
 extern int64_t ncclParamIbCastSplitDataOnQps();
 
-RCCL_PARAM_NCCL_ALIAS(IbCastQpSchedEnable, "IB_QP_SCHED_ENABLE", QP_SCHED_ENABLE_DEF);
+RCCL_PARAM_NCCL_ALIAS(IbCastQpSchedEnable, "IB_QP_SCHED_ENABLE", -1);
 RCCL_PARAM_NCCL_ALIAS(IbQpSchedWrrEnable, "IB_QP_SCHED_WRR_ENABLE", QP_SCHED_WRR_ENABLE_DEF);
 RCCL_PARAM_NCCL_ALIAS(IbQpSchedResetInterval, "IB_QP_SCHED_RESET_INTERVAL", -1);
 RCCL_PARAM_NCCL_ALIAS(IbQpSchedUpdateInterval, "IB_QP_SCHED_UPDATE_INTERVAL", -1);
@@ -19,13 +19,42 @@ RCCL_PARAM_NCCL_ALIAS(IbQpSchedLogInterval, "IB_QP_SCHED_LOG_INTERVAL", -1);
 
 FILE *IbCastQpSchedLogStream;
 
+// Returns true if the QP scheduler (CAST) should be enabled.
+// Priority:
+//   1. RCCL_IB_QP_SCHED_ENABLE / NCCL_IB_QP_SCHED_ENABLE explicitly set (!=−1) → honour it.
+//   2. NCCL_NET=ib-cast explicitly set → force enable.
+//   3. Otherwise → disable on AINIC (default path), enable everywhere else.
+bool rcclUseIbCastQpSched() {
+  int64_t schedParam = rcclParamIbCastQpSchedEnable();
+  if (schedParam != -1) {
+    bool enabled = (schedParam != 0);
+    INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) NCCL_IB_QP_SCHED_ENABLE explicitly set to %s",
+         enabled ? "enabled" : "disabled");
+    return enabled;
+  }
+
+  const char* netEnv = ncclGetEnv("NCCL_NET");
+  if (netEnv && strcasecmp(netEnv, "ib-cast") == 0) {
+    INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) NCCL_NET=ib-cast: forcing QP scheduler enabled");
+    return (bool)QP_SCHED_ENABLE_DEF;
+  }
+
+  if (rcclUseAinic()) {
+    INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) AINIC detected: QP scheduler disabled by default "
+         "(set NCCL_IB_QP_SCHED_ENABLE=1 or NCCL_NET=ib-cast to override)");
+    return false;
+  }
+
+  return (bool)QP_SCHED_ENABLE_DEF;
+}
+
 ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms *parms) {
     char *str, *logFileName = NULL;
     int val;
     double weight;
     uint64_t nsec;
     ncclResult_t ret = ncclSuccess;
-  
+
     parms->enable = QP_SCHED_ENABLE_DEF;
     parms->wrrEnable = QP_SCHED_WRR_ENABLE_DEF;
     parms->resetInterval = QP_SCHED_RESET_DEF;
@@ -43,13 +72,13 @@ ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms *parms) {
       parms->doWrr = true;
     else
       parms->doWrr = false;
-  
-    if (rcclParamIbCastQpSchedEnable()) {
+
+    if (rcclUseIbCastQpSched()) {
       parms->enable = true;
-      INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_ENABLE set to enabled");
+      INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) QP scheduler enabled");
     } else {
       parms->enable = false;
-      INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_ENABLE set to disabled");
+      INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) QP scheduler disabled");
       goto exit;
     }
   
@@ -506,3 +535,35 @@ extern "C" ncclResult_t ncclIbCastSetSchedParms(void* sendComm,
     base->schedParms.splitDataMin = splitDataMin;
     return ncclSuccess;
 }
+
+#ifdef ENABLE_FAULT_INJECTION
+#include "p2p_resiliency_cast.h"
+
+extern "C" ncclResult_t ncclIbCastGetResiliencyState(void* sendComm, struct ncclIbCastResiliencyState* out) {
+  if (!sendComm || !out) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
+  struct ncclIbResiliency* res = comm->base.resiliency;
+  if (!res) return ncclInvalidArgument;
+
+  out->recoveryEnabled    = res->recoveryEnabled;
+  out->inProgress         = res->inProgress;
+  out->outstandingRequests = res->outstandingRequests;
+  out->outstandingRecovery = res->outstandingRecovery;
+  out->ndevs              = res->ndevs;
+  for (int i = 0; i < res->ndevs && i < NCCL_IB_MAX_DEVS_PER_NIC; i++) {
+    out->devState[i] = (int)res->devs[i].state.load(std::memory_order_acquire);
+    out->recoveryCount[i] = res->devs[i].recoveryCount;
+  }
+
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastGetRepostCount(void* sendComm, int* out) {
+  if (!sendComm || !out) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
+  struct ncclIbResiliency* res = comm->base.resiliency;
+  if (!res) return ncclInvalidArgument;
+  *out = res->repostCount;
+  return ncclSuccess;
+}
+#endif /* ENABLE_FAULT_INJECTION */

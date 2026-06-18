@@ -3,7 +3,7 @@ cooperativeGrps:
   Unit_Thread_Block_Getters_Positive_Basic:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, groups]
   Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic:
     <<: *level_2
@@ -17,59 +17,59 @@ cooperativeGrps:
   Unit_Thread_Block_Tile_Getters_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, groups]
   Unit_Thread_Block_Tile_Dynamic_Getters_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, groups]
   Unit_Thread_Block_Tile_Shfl_Up_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, ops]
   Unit_Thread_Block_Tile_Shfl_Down_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, ops]
   Unit_Thread_Block_Tile_Shfl_XOR_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, ops]
   Unit_Thread_Block_Tile_Shfl_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, ops]
   Unit_Thread_Block_Tile_Sync_Positive_Basic:
     <<: *level_2
     # Below tests hang in Jenkins PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, ops]
   Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic:
     <<: *level_2
     # SWDEV-486448 - Following tests disabled due to taking too much time to execute, ~700s per test
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, groups]
   Unit_Coalesced_Group_Tiled_Partition_Shfl_Up_Positive_Basic:
     <<: *level_2
     # SWDEV-486448 - Following tests disabled due to taking too much time to execute, ~700s per test
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, ops]
   Unit_Coalesced_Group_Tiled_Partition_Shfl_Down_Positive_Basic:
     <<: *level_2
     # SWDEV-486448 - Following tests disabled due to taking too much time to execute, ~700s per test
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, ops]
   Unit_Coalesced_Group_Tiled_Partition_Shfl_Positive_Basic:
     <<: *level_2
     tags: [cooperative, ops]
   Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic:
     <<: *level_2
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, ops]
   Unit_hipCGThreadBlockType:
     <<: *level_2
@@ -98,7 +98,7 @@ cooperativeGrps:
   Unit_coalesced_groups:
     <<: *level_2
     # Below tests hang in Jenkins PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, groups]
   Unit_hipLaunchCooperativeKernel_Basic:
     <<: *level_2
@@ -121,12 +121,12 @@ cooperativeGrps:
   Unit_coalesced_groups_shfl_down:
     <<: *level_2
     # Below tests hang in Jenkins PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, ops]
   Unit_coalesced_groups_shfl_up:
     <<: *level_2
     # Below tests hang in Jenkins PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, ops]
   Unit_Coalesced_Group_Getters_Positive_Basic:
     <<: *level_2
@@ -155,7 +155,7 @@ cooperativeGrps:
   Unit_Coalesced_Group_Sync_Positive_Basic:
     <<: *level_2
     # SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [cooperative, ops]
   Unit_Grid_Group_Getters_Positive_Basic:
     <<: *level_2
@@ -207,40 +207,40 @@ cooperativeGrps:
   Unit_Thread_Block_Coalesced_Reduce_arithmetic:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_Thread_Block_Coalesced_Reduce_boolean:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_Thread_Block_Tile_Reduce_Basic:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_Thread_Block_Tile_Reduce_Custom_Op:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_Thread_Block_Tile_Reduce_Standard_Op_Custom_Type:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_Thread_Block_Tile_Reduce_Random_arithmetic:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_Thread_Block_Tile_Reduce_Random_boolean:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]

@@ -4,207 +4,500 @@
 #pragma once
 
 #include "common/defines.h"
-#include <cstdint>
-
 #include "common/join.hpp"
+#include "logger/debug.hpp"
+
+#include <timemory/utility/filepath.hpp>
+
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <exception>
+#include <set>
 #include <sstream>
 #include <stdexcept>
+#include <stdlib.h>  // POSIX ::setenv / ::getenv
 #include <string>
 #include <string_view>
-#include <timemory/utility/filepath.hpp>
 #include <type_traits>
 #include <unistd.h>
+#include <unordered_map>
 #include <unordered_set>
-
-#if !defined(ROCPROFSYS_ENVIRON_LOG_NAME)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
-#        define ROCPROFSYS_ENVIRON_LOG_NAME "[" ROCPROFSYS_COMMON_LIBRARY_NAME "]"
-#    else
-#        define ROCPROFSYS_ENVIRON_LOG_NAME
-#    endif
-#endif
-
-#if !defined(ROCPROFSYS_ENVIRON_LOG_START)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_START)
-#        define ROCPROFSYS_ENVIRON_LOG_START ROCPROFSYS_COMMON_LIBRARY_LOG_START
-#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define ROCPROFSYS_ENVIRON_LOG_START                                             \
-            fprintf(stderr, "%s", ::tim::log::color::info());
-#    else
-#        define ROCPROFSYS_ENVIRON_LOG_START
-#    endif
-#endif
-
-#if !defined(ROCPROFSYS_ENVIRON_LOG_END)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_END)
-#        define ROCPROFSYS_ENVIRON_LOG_END ROCPROFSYS_COMMON_LIBRARY_LOG_END
-#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define ROCPROFSYS_ENVIRON_LOG_END                                               \
-            fprintf(stderr, "%s", ::tim::log::color::end());
-#    else
-#        define ROCPROFSYS_ENVIRON_LOG_END
-#    endif
-#endif
-
-#define ROCPROFSYS_ENVIRON_LOG(CONDITION, ...)                                           \
-    if(CONDITION)                                                                        \
-    {                                                                                    \
-        fflush(stderr);                                                                  \
-        ROCPROFSYS_ENVIRON_LOG_START                                                     \
-        fprintf(stderr, "[rocprof-sys]" ROCPROFSYS_ENVIRON_LOG_NAME "[%i] ", getpid());  \
-        fprintf(stderr, __VA_ARGS__);                                                    \
-        ROCPROFSYS_ENVIRON_LOG_END                                                       \
-        fflush(stderr);                                                                  \
-    }
+#include <utility>
+#include <vector>
 
 namespace rocprofsys
 {
 inline namespace common
 {
-namespace
-{
 
-inline std::string
-get_env_impl(std::string_view env_id, std::string_view _default)
+/// @brief Production environment backend that forwards to the real POSIX
+///        ::getenv / ::setenv. Used as the default @p EnvType of @ref environment;
+///        unit tests substitute a fake backend to avoid touching the real process
+///        environment.
+struct posix_env
 {
-    if(env_id.empty()) return std::string{ _default };
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var) return std::string{ env_var };
-    return std::string{ _default };
-}
-
-inline std::string
-get_env_impl(std::string_view env_id, const char* _default)
-{
-    return get_env_impl(env_id, std::string_view{ _default });
-}
-
-inline int
-get_env_impl(std::string_view env_id, int _default)
-{
-    if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var)
+    /// @brief Forwards to ::setenv.
+    /// @param name      Null-terminated variable name.
+    /// @param value     Null-terminated value to store.
+    /// @param overwrite Non-zero to replace an existing value; zero to keep it.
+    /// @return 0 on success, -1 on error.
+    static int setenv(const char* name, const char* value, int overwrite)
     {
+        return ::setenv(name, value, overwrite);
+    }
+
+    /// @brief Forwards to ::getenv.
+    /// @param name Null-terminated variable name.
+    /// @return Pointer to the value, or nullptr when the variable is unset.
+    static char* getenv(const char* name) { return ::getenv(name); }
+};
+
+/// @brief Environment variable read/write facade, parameterised over the backend.
+///
+/// All conversion and parsing logic lives here. Use @c environment<posix_env> (the
+/// default) in production; inject a fake backend in unit tests. The free functions
+/// @ref get_env / @ref set_env / @ref get_env_choice delegate to @c environment<>.
+///
+/// @tparam EnvType Backend providing static @c getenv / @c setenv.
+template <typename EnvType = posix_env>
+struct environment
+{
+private:
+    static const char* fetch_raw_env(const char* env_id)
+    {
+        if(env_id == nullptr || env_id[0] == '\0') return nullptr;
+        return EnvType::getenv(env_id);
+    }
+
+    template <typename Tp>
+    static std::string get_env_string(const char* env_id, const Tp& fallback)
+    {
+        const char* raw = fetch_raw_env(env_id);
+        return raw ? std::string{ raw } : std::string{ fallback };
+    }
+
+    static bool get_env_bool(const char* env_id, bool fallback)
+    {
+        const char* raw = fetch_raw_env(env_id);
+        if(!raw) return fallback;
+
+        const std::string_view env_sv{ raw };
+        if(env_sv.empty())
+        {
+            throw std::runtime_error(
+                std::string{ "No boolean value provided for " }.append(env_id));
+        }
+
+        if(env_sv.find_first_not_of("0123456789") == std::string_view::npos)
+        {
+            // Parse with from_chars so a very large all-digit value cannot throw
+            // (std::stoi would throw std::out_of_range). Any non-zero digit string,
+            // including one that overflows, is truthy.
+            std::uint64_t numeric{};
+            const auto*   last   = env_sv.data() + env_sv.size();
+            const auto [ptr, ec] = std::from_chars(env_sv.data(), last, numeric);
+            if(ec == std::errc::result_out_of_range) return true;
+            if(ec == std::errc{} && ptr == last) return numeric != 0;
+            return true;
+        }
+
+        std::string lower{ env_sv };
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char chr) { return std::tolower(chr); });
+
+        constexpr auto false_values = std::array{
+            std::string_view{ "off" }, std::string_view{ "false" },
+            std::string_view{ "no" },  std::string_view{ "n" },
+            std::string_view{ "f" },   std::string_view{ "0" },
+        };
+        return !std::any_of(false_values.begin(), false_values.end(),
+                            [&lower](std::string_view val) { return lower == val; });
+    }
+
+    template <typename Tp>
+    static Tp get_env_float(const char* env_id, Tp fallback)
+    {
+        const char* raw = fetch_raw_env(env_id);
+        if(!raw) return fallback;
+
+        // Trim surrounding whitespace so values such as " 1.5 " still parse.
+        constexpr std::string_view whitespace = " \t\n\r\f\v";
+        std::string_view           token{ raw };
+        const auto                 first = token.find_first_not_of(whitespace);
+        if(first == std::string_view::npos)
+        {
+            LOG_ERROR("[get_env] Cannot convert empty getenv(\"{}\") to float", env_id);
+            return fallback;
+        }
+        token = token.substr(first, token.find_last_not_of(whitespace) - first + 1);
+
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
+        // Locale-independent, non-throwing parse mirroring the integral path: a
+        // trailing-garbage or unparsable value falls back to the default.
+        Tp          value{};
+        const auto* end      = token.data() + token.size();
+        const auto [ptr, ec] = std::from_chars(token.data(), end, value);
+        if(ec == std::errc{} && ptr == end) return value;
+#else
+        // Fallback for standard libraries without floating-point from_chars
+        // (libstdc++ < 11). std::stod is locale-sensitive (assumes C/POSIX locale).
         try
         {
-            return std::stoi(env_var);
-        } catch(std::exception& _e)
-        {
-            fprintf(stderr,
-                    "[rocprof-sys][get_env] Exception thrown converting getenv(\"%s\") = "
-                    "%s to integer :: %s. Using default value of %i\n",
-                    env_id.data(), env_var, _e.what(), _default);
-        }
-        return _default;
+            std::size_t       pos = 0;
+            const std::string str{ token };
+            const double      parsed = std::stod(str, &pos);
+            if(pos == str.size()) return static_cast<Tp>(parsed);
+        } catch(const std::exception&)
+        {}
+#endif
+        LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to float", env_id,
+                  raw);
+        return fallback;
     }
-    return _default;
-}
 
-inline bool
-get_env_impl(std::string_view env_id, bool _default)
-{
-    if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var)
+    template <typename Tp>
+    static Tp get_env_integral(const char* env_id, Tp fallback)
     {
-        if(std::string_view{ env_var }.empty())
-            throw std::runtime_error(std::string{ "No boolean value provided for " } +
-                                     std::string{ env_id });
+        const char* raw = fetch_raw_env(env_id);
+        if(!raw) return fallback;
 
-        if(std::string_view{ env_var }.find_first_not_of("0123456789") ==
-           std::string_view::npos)
+        // Trim surrounding whitespace so values such as " 42 " still parse.
+        constexpr std::string_view whitespace = " \t\n\r\f\v";
+        std::string_view           token{ raw };
+        const auto                 first = token.find_first_not_of(whitespace);
+        if(first == std::string_view::npos)
         {
-            return static_cast<bool>(std::stoi(env_var));
+            LOG_ERROR("[get_env] Cannot convert empty getenv(\"{}\") to integer", env_id);
+            return fallback;
+        }
+        token = token.substr(first, token.find_last_not_of(whitespace) - first + 1);
+
+        // std::from_chars parses against the exact target type: it rejects a
+        // leading '-' for unsigned Tp and reports result_out_of_range, so
+        // negative or overflowing input falls back to the default instead of
+        // silently wrapping or truncating. Signed Tp still accepts '-'.
+        Tp          value{};
+        const auto* end      = token.data() + token.size();
+        const auto [ptr, ec] = std::from_chars(token.data(), end, value);
+        if(ec == std::errc{} && ptr == end) return value;
+
+        LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to integer",
+                  env_id, raw);
+        return fallback;
+    }
+
+    template <typename Tp>
+    static auto get_env_impl(const char* env_id, const Tp& fallback)
+    {
+        if constexpr(std::is_same_v<std::decay_t<Tp>, std::string> ||
+                     std::is_same_v<std::decay_t<Tp>, std::string_view> ||
+                     std::is_same_v<std::decay_t<Tp>, const char*> ||
+                     std::is_same_v<std::decay_t<Tp>, char*>)
+        {
+            return get_env_string(env_id, fallback);
+        }
+        else if constexpr(std::is_same_v<Tp, bool>)
+        {
+            return get_env_bool(env_id, fallback);
+        }
+        else if constexpr(std::is_floating_point_v<Tp>)
+        {
+            return get_env_float(env_id, fallback);
         }
         else
         {
-            for(size_t i = 0; i < strlen(env_var); ++i)
-                env_var[i] = tolower(env_var[i]);
-            for(const auto& itr : { "off", "false", "no", "n", "f", "0" })
-                if(strcmp(env_var, itr) == 0) return false;
+            return get_env_integral(env_id, fallback);
         }
-        return true;
     }
-    return _default;
-}
-}  // namespace
 
-template <typename Tp>
-inline auto
-get_env(std::string_view env_id, Tp&& _default)
-{
-    if constexpr(std::is_enum<Tp>::value)
+public:
+    /// @brief Read environment variable @p env_id, converted to the type of
+    ///        @p value_default.
+    ///
+    /// The conversion is selected from @p value_default's type: std::string /
+    /// const char* return the raw value, bool is parsed permissively
+    /// (1/true/yes/on are true; 0/false/no/n/f/off are false), floating-point via
+    /// std::stod, and integral types via std::from_chars so that negative or
+    /// out-of-range input for the target type yields @p value_default instead of
+    /// wrapping. Enums are read through their underlying integral type.
+    ///
+    /// Primary, allocation-free overload: @p env_id must be a null-terminated C
+    /// string (literal, const char*, or constexpr const char*).
+    /// @param env_id        Null-terminated variable name.
+    /// @param value_default Returned when the variable is unset or unparsable.
+    /// @return The parsed value, or @p value_default.
+    /// @throws std::runtime_error when a bool is requested but the value is empty.
+    template <typename Tp>
+    static auto get_env(const char* env_id, Tp&& value_default)
     {
-        using Up = std::underlying_type_t<Tp>;
-        // cast to underlying type -> get_env -> cast to enum type
-        return static_cast<Tp>(get_env_impl(env_id, static_cast<Up>(_default)));
+        if constexpr(std::is_enum_v<Tp>)
+        {
+            using up_t = std::underlying_type_t<Tp>;
+            return static_cast<Tp>(
+                get_env_impl(env_id, static_cast<up_t>(value_default)));
+        }
+        else
+        {
+            return get_env_impl(env_id, std::forward<Tp>(value_default));
+        }
     }
-    else
+
+    /// @brief std::string_view / std::string overload of @ref get_env: materialises
+    ///        a null-terminated copy of @p env_id once, then dispatches to the
+    ///        const char* overload.
+    template <typename Tp>
+    static auto get_env(std::string_view env_id, Tp&& value_default)
     {
-        return get_env_impl(env_id, std::forward<Tp>(_default));
+        const std::string name{ env_id };
+        return get_env(name.c_str(), std::forward<Tp>(value_default));
     }
-}
 
-struct ROCPROFSYS_INTERNAL_API env_config
-{
-    std::string env_name  = {};
-    std::string env_value = {};
-    int         override  = 0;
-
-    auto operator()(bool _verbose = false) const
+    /// @brief Read environment variable @p env_id as @p Tp, using a
+    ///        value-initialised @c Tp{} as the fallback.
+    /// @tparam Tp Target type (defaults to std::string).
+    /// @param env_id Null-terminated variable name.
+    /// @return The parsed value, or @c Tp{} when the variable is unset.
+    template <typename Tp = std::string>
+    static auto get_env(const char* env_id)
     {
-        if(env_name.empty()) return -1;
-        ROCPROFSYS_ENVIRON_LOG(_verbose, "setenv(\"%s\", \"%s\", %i)\n", env_name.c_str(),
-                               env_value.c_str(), override);
-        return setenv(env_name.c_str(), env_value.c_str(), override);
+        return get_env(env_id, Tp{});
+    }
+
+    /// @brief std::string_view / std::string overload of the single-argument
+    ///        @ref get_env.
+    template <typename Tp = std::string>
+    static auto get_env(std::string_view env_id)
+    {
+        return get_env(env_id, Tp{});
+    }
+
+    /// @brief Set environment variable @p env_var to the stringified @p value.
+    ///
+    /// @p value is rendered via operator<< before being stored. Primary,
+    /// allocation-free overload: @p env_var must be null-terminated.
+    /// @param env_var  Null-terminated variable name.
+    /// @param value    Value to store (stringified).
+    /// @param override Non-zero to replace an existing value; zero to keep it.
+    template <typename Tp>
+    static void set_env(const char* env_var, const Tp& value, int override)
+    {
+        std::stringstream ss_val;
+        ss_val << value;
+        EnvType::setenv(env_var, ss_val.str().c_str(), override);
+    }
+
+    /// @brief std::string_view / std::string overload of @ref set_env.
+    template <typename Tp>
+    static void set_env(std::string_view env_var, const Tp& value, int override)
+    {
+        const std::string name{ env_var };
+        set_env(name.c_str(), value, override);
+    }
+
+    /// @brief Read environment variable @p env_id constrained to a set of allowed
+    ///        values.
+    ///
+    /// Reads @p env_id as @p Tp; if the result is not in @p choices, logs a warning
+    /// and returns @p value_default. Primary, allocation-free overload (@p env_id
+    /// must be null-terminated).
+    /// @param env_id        Null-terminated variable name.
+    /// @param value_default Returned when unset or not among @p choices.
+    /// @param choices       Set of accepted values.
+    /// @return The value when valid, otherwise @p value_default.
+    template <typename Tp>
+    static auto get_env_choice(const char* env_id, Tp value_default, std::set<Tp> choices)
+    {
+        auto value = get_env(env_id, value_default);
+        if(choices.find(value) == choices.end())
+        {
+            const char* raw = fetch_raw_env(env_id);
+            LOG_WARNING("[get_env] Environment variable \"{}\" has invalid value \"{}\". "
+                        "Reverting to default.",
+                        env_id, raw ? raw : "");
+            return value_default;
+        }
+        return value;
+    }
+
+    /// @brief std::string_view / std::string overload of @ref get_env_choice.
+    template <typename Tp>
+    static auto get_env_choice(std::string_view env_id, Tp value_default,
+                               std::set<Tp> choices)
+    {
+        const std::string name{ env_id };
+        return get_env_choice(name.c_str(), std::move(value_default), std::move(choices));
     }
 };
 
-inline void
-remove_env(std::vector<std::string>& _environ, std::string_view _env_var,
-           const std::unordered_set<std::string>& _original_envs)
+/// @brief Deferred @c setenv command: stores a name/value/override triple and
+///        applies it when invoked. Templated on the backend so tests can inject a
+///        fake.
+template <typename EnvType = posix_env>
+struct ROCPROFSYS_INTERNAL_API env_config
 {
-    auto key = join("", _env_var, "=");
+    std::string m_env_name  = {};
+    std::string m_env_value = {};
+    int         m_override  = 0;
 
-    _environ.erase(std::remove_if(_environ.begin(), _environ.end(),
+    /// @brief Apply the stored setenv command.
+    /// @return The backend setenv result, or -1 when @c m_env_name is empty.
+    auto operator()() const
+    {
+        if(m_env_name.empty()) return -1;
+        LOG_DEBUG("setenv(\"{}\", \"{}\", {})", m_env_name, m_env_value, m_override);
+        return EnvType::setenv(m_env_name.c_str(), m_env_value.c_str(), m_override);
+    }
+};
+
+// ── Forwarding free functions ────────────────────────────────────────────────
+// These are the primary public API; they delegate to environment<posix_env>.
+
+/// @brief Read environment variable @p env_id as the type of @p value_default.
+///        Allocation-free overload for null-terminated names. See
+///        @ref environment::get_env for conversion rules.
+/// @param env_id        Null-terminated variable name.
+/// @param value_default Returned when the variable is unset or unparsable.
+/// @return The parsed value, or @p value_default.
+template <typename Tp>
+inline auto
+get_env(const char* env_id, Tp&& value_default)
+{
+    return environment<>::get_env(env_id, std::forward<Tp>(value_default));
+}
+
+/// @brief std::string_view / std::string overload of @ref get_env.
+template <typename Tp>
+inline auto
+get_env(std::string_view env_id, Tp&& value_default)
+{
+    return environment<>::get_env(env_id, std::forward<Tp>(value_default));
+}
+
+/// @brief Read environment variable @p env_id as @p Tp, falling back to @c Tp{}.
+/// @tparam Tp Target type (defaults to std::string).
+/// @param env_id Null-terminated variable name.
+/// @return The parsed value, or @c Tp{} when unset.
+template <typename Tp = std::string>
+inline auto
+get_env(const char* env_id)
+{
+    return environment<>::get_env<Tp>(env_id);
+}
+
+/// @brief std::string_view / std::string overload of the single-argument
+///        @ref get_env.
+template <typename Tp = std::string>
+inline auto
+get_env(std::string_view env_id)
+{
+    return environment<>::get_env<Tp>(env_id);
+}
+
+/// @brief Set environment variable @p env_var to the stringified @p value.
+///        Allocation-free overload for null-terminated names.
+/// @param env_var  Null-terminated variable name.
+/// @param value    Value to store (stringified).
+/// @param override Non-zero to replace an existing value; zero to keep it.
+template <typename Tp>
+inline void
+set_env(const char* env_var, const Tp& value, int override)
+{
+    environment<>::set_env(env_var, value, override);
+}
+
+/// @brief std::string_view / std::string overload of @ref set_env.
+template <typename Tp>
+inline void
+set_env(std::string_view env_var, const Tp& value, int override)
+{
+    environment<>::set_env(env_var, value, override);
+}
+
+/// @brief Read environment variable @p env_id constrained to @p value_choices,
+///        returning @p value_default when unset or not allowed. Allocation-free
+///        overload for null-terminated names.
+/// @param env_id        Null-terminated variable name.
+/// @param value_default Returned when unset or not among @p value_choices.
+/// @param value_choices Set of accepted values.
+/// @return The value when valid, otherwise @p value_default.
+template <typename Tp>
+inline auto
+get_env_choice(const char* env_id, Tp value_default, std::set<Tp> value_choices)
+{
+    return environment<>::get_env_choice(env_id, std::move(value_default),
+                                         std::move(value_choices));
+}
+
+/// @brief std::string_view / std::string overload of @ref get_env_choice.
+template <typename Tp>
+inline auto
+get_env_choice(std::string_view env_id, Tp value_default, std::set<Tp> value_choices)
+{
+    return environment<>::get_env_choice(env_id, std::move(value_default),
+                                         std::move(value_choices));
+}
+
+// ── Env-vector helpers (operate on std::vector<std::string>, not the real env) ──
+
+/// @brief Remove all "KEY=VALUE" entries for @p env_variable from @p env_list,
+///        then restore any entries for that key found in @p original_envs.
+/// @param env_list      Environment vector to modify in place.
+/// @param env_variable  Variable name (without '=') to remove.
+/// @param original_envs Baseline entries used to restore a pre-existing value.
+inline void
+remove_env(std::vector<std::string>& env_list, std::string_view env_variable,
+           const std::unordered_set<std::string>& original_envs)
+{
+    auto key = join("", env_variable, "=");
+
+    env_list.erase(std::remove_if(env_list.begin(), env_list.end(),
                                   [&key](const std::string& entry) {
                                       return std::string_view{ entry }.find(key) == 0;
                                   }),
-                   _environ.end());
+                   env_list.end());
 
     // Restore from original_envs if previously existed
-    for(const auto& orig : _original_envs)
+    for(const auto& orig : original_envs)
     {
-        if(std::string_view{ orig }.find(key) == 0) _environ.emplace_back(orig);
+        if(std::string_view{ orig }.find(key) == 0) env_list.emplace_back(orig);
     }
 }
 
+/// @brief Locate the ROCm LLVM library directory that contains libomptarget.so.
+///
+/// Probes candidates derived from @c ROCM_PATH and @c ROCmVersion_DIR plus the
+/// standard /opt/rocm locations, returning the first that contains the library.
+/// @return The matching libdir, or an empty string when none is found.
 inline std::string
-discover_llvm_libdir_for_ompt(bool verbose = false)
+discover_llvm_libdir_for_ompt()
 {
-    auto strip = [](std::string s) {
-        if(!s.empty() && s.back() == '/') s.pop_back();
-        return s;
+    auto strip = [](std::string value_to_strip) {
+        if(!value_to_strip.empty() && value_to_strip.back() == '/')
+        {
+            value_to_strip.pop_back();
+        }
+        return value_to_strip;
     };
 
     // Common ROCm envs
     const auto rocm_dir  = strip(get_env<std::string>("ROCM_PATH", "/opt/rocm"));
     const auto rocmv_dir = strip(get_env<std::string>("ROCmVersion_DIR", ""));
 
-    std::vector<std::string> candidates;
-    candidates.reserve(6);
+    const constexpr auto number_of_candidates = 6;
 
-    auto push_unique = [&](const std::string& p) {
-        if(p.empty()) return;
-        if(std::find(candidates.begin(), candidates.end(), p) == candidates.end())
-            candidates.emplace_back(p);
+    std::vector<std::string> candidates;
+    candidates.reserve(number_of_candidates);
+
+    auto push_unique = [&](const std::string& candidate) {
+        if(candidate.empty()) return;
+        if(std::find(candidates.begin(), candidates.end(), candidate) == candidates.end())
+        {
+            candidates.emplace_back(candidate);
+        }
     };
 
     if(!rocmv_dir.empty())
@@ -223,18 +516,20 @@ discover_llvm_libdir_for_ompt(bool verbose = false)
     };
 
     // Pick the first candidate that contains libomptarget.so
-    auto it = std::find_if(candidates.begin(), candidates.end(), has_libomptarget);
-    if(it != candidates.end())
+    auto result = std::find_if(candidates.begin(), candidates.end(), has_libomptarget);
+    if(result != candidates.end())
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "Using LLVM libdir: %s\n", it->c_str());
-        return *it;
+        LOG_DEBUG("Using LLVM libdir: {}", *result);
+        return *result;
     }
 
-    ROCPROFSYS_ENVIRON_LOG(verbose,
-                           "libomptarget.so not found in candidate LLVM libdirs\n");
+    LOG_DEBUG("libomptarget.so not found in candidate LLVM libdirs");
     return {};
 }
 
+/// @brief Test whether @p executable names a Python interpreter.
+/// @param executable Path or basename to inspect.
+/// @return true for "python", "python3", or "python3.<digits>"; false otherwise.
 inline bool
 is_python_interpreter(std::string_view executable)
 {
@@ -260,8 +555,15 @@ is_python_interpreter(std::string_view executable)
                        [](unsigned char c) { return std::isdigit(c); });
 }
 
+/// @brief Discover the PyTorch library directory for a given Python interpreter.
+///
+/// Runs @p python_binary to query torch's install path (the path is validated for
+/// safe characters first to avoid shell injection) and appends "/lib".
+/// @param python_binary Path to the Python interpreter.
+/// @return The torch lib directory, or an empty string when torch is unavailable,
+///         the path is unsafe, or the directory does not exist.
 inline std::string
-discover_torch_libpath(const std::string& python_binary, bool verbose = false)
+discover_torch_libpath(const std::string& python_binary)
 {
     if(python_binary.empty()) return {};
 
@@ -286,9 +588,8 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
 
     if(!is_safe_executable_path(python_binary))
     {
-        ROCPROFSYS_ENVIRON_LOG(
-            verbose, "Unsafe characters detected in Python interpreter path: %s\n",
-            python_binary.c_str());
+        LOG_WARNING("Unsafe characters detected in Python interpreter path: {}",
+                    python_binary);
         return {};
     }
 
@@ -298,7 +599,7 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
     FILE* pipe = popen(cmd.c_str(), "r");
     if(!pipe)
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "Failed to execute command: %s\n", cmd.c_str());
+        LOG_WARNING("Failed to execute command: {}", cmd);
         return {};
     }
 
@@ -315,8 +616,7 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
 
     if(status != 0 || result.empty())
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "torch not found for Python interpreter: %s\n",
-                               python_binary.c_str());
+        LOG_DEBUG("torch not found for Python interpreter: {}", python_binary);
         return {};
     }
 
@@ -332,24 +632,27 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
 
     if(!::tim::filepath::direxists(torch_libdir))
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "torch lib directory does not exist: %s\n",
-                               torch_libdir.c_str());
+        LOG_WARNING("torch lib directory does not exist: {}", torch_libdir);
         return {};
     }
 
-    ROCPROFSYS_ENVIRON_LOG(verbose, "Discovered torch library path: %s\n",
-                           torch_libdir.c_str());
+    LOG_DEBUG("Discovered torch library path: {}", torch_libdir);
     return torch_libdir;
 }
 
+/// @brief How @ref update_env combines a new value with an existing entry.
 enum class update_mode : std::uint8_t
 {
-    REPLACE = 0,
-    PREPEND,
-    APPEND,
-    WEAK,
+    REPLACE = 0,  ///< Overwrite the value and drop duplicate entries.
+    PREPEND,      ///< Insert the new value before the existing one.
+    APPEND,       ///< Insert the new value after the existing one.
+    WEAK,         ///< Update only when the current entry matches the original env.
 };
 
+/// @brief Render @p val as an environment-variable string.
+///        bool becomes "true"/"false"; arithmetic types use std::to_string;
+///        strings pass through.
+/// @return The string representation of @p val.
 template <typename Tp>
 inline std::string
 to_env_string(Tp&& val)
@@ -367,6 +670,17 @@ to_env_string(Tp&& val)
         return std::to_string(val);
 }
 
+/// @brief Insert or update an "KEY=VALUE" entry in an environment vector.
+///
+/// Adds a new entry when @p _env_var is absent; otherwise combines values per
+/// @p _mode (see @ref update_mode). Records @p _env_var in @p _updated_envs.
+/// @param _environ      Environment vector to modify in place.
+/// @param _env_var      Variable name (without '=').
+/// @param _env_val      New value (stringified via @ref to_env_string).
+/// @param _mode         Combination strategy.
+/// @param _join_delim   Delimiter used when prepending/appending.
+/// @param _updated_envs Set receiving the names touched by this call.
+/// @param _original_envs Baseline entries consulted by @ref update_mode::WEAK.
 template <typename Tp, typename UpdatedEnvsT>
 inline void
 update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _env_val,
@@ -416,15 +730,23 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
     }
 }
 
+/// @brief Prepend the PyTorch library directory to @c LD_LIBRARY_PATH in @p envp.
+///
+/// No-op unless @p executable is a Python interpreter with torch installed. Merges
+/// the discovered torch lib dir with existing @c LD_LIBRARY_PATH entries
+/// (deduplicated) and records the touched name in @p updated_envs.
+/// @param envp         Environment vector to modify in place.
+/// @param executable   Interpreter path used to locate torch.
+/// @param updated_envs Set receiving the names touched by this call.
 template <typename UpdatedEnvsT>
 inline void
 add_torch_library_path(std::vector<std::string>& envp, std::string_view executable,
-                       bool verbose, UpdatedEnvsT& updated_envs)
+                       UpdatedEnvsT& updated_envs)
 {
     if(executable.empty()) return;
     if(!is_python_interpreter(executable)) return;
 
-    auto torch_libpath = discover_torch_libpath(std::string{ executable }, verbose);
+    auto torch_libpath = discover_torch_libpath(std::string{ executable });
     if(torch_libpath.empty()) return;
 
     std::unordered_set<std::string> seen{ torch_libpath };
@@ -526,7 +848,9 @@ consolidate_env_entries(std::vector<std::string>& envp)
 
         std::size_t total_parts_length = 0;
         for(const auto& part : parts)
+        {
             total_parts_length += part.size();
+        }
 
         result.reserve(result.size() + total_parts_length + (parts.size() - 1));
 

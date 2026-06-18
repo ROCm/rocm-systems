@@ -1204,7 +1204,7 @@ class Roofline:
                     plt.plot(
                         [self.__ai_data[key][0][i]],
                         [self.__ai_data[key][1][i]],
-                        label=f"AI_{cache_level}_{kernel_names[i]}",
+                        label=f"AI_{cache_level}_{kernel_names[i][:40]}",
                         color=color_scheme[cache_level],
                         marker=kernel_markers[i % len(kernel_markers)],
                     )

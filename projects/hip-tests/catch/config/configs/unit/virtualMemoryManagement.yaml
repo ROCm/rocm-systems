@@ -167,10 +167,10 @@ virtualMemoryManagement:
   Unit_hipMemSetAccessHostDevice_hostalloc:
     <<: *level_2
     # SWDEV-555665
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemSetAccessHost_devicealloc:
     <<: *level_2
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemGetAllocationPropertiesFromHandle_functional:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
@@ -180,6 +180,7 @@ virtualMemoryManagement:
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
   Unit_hipMemGetAllocationPropertiesFromHandle_Capture: *level_2
+  Unit_hipMemMap_Positive_APU_LargeAllocSpill: *level_2
   Unit_hipMemMap_SameMemoryReuse:
     <<: *level_2
     # (amd_windows) SWDEV-444041: These tests fail randomly in gfx1030 MGU

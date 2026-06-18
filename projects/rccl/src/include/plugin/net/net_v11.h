@@ -1,6 +1,9 @@
-/*
- * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
- */
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NET_V11_H_
 #define NET_V11_H_
@@ -16,7 +19,6 @@ typedef struct {
   // Plugin-specific TC value
   int trafficClass;
 } ncclNetCommConfig_v11_t;
-
 
 typedef struct {
   char* name;                      // Used mostly for logging.
@@ -184,5 +186,4 @@ typedef struct {
   // Finalize the collective network.
   ncclResult_t (*finalize)(void* ctx);
 } ncclCollNet_v11_t;
-
 #endif // end include guard

@@ -12,6 +12,7 @@
 #include "core.h"
 #include "xml.h"
 #include "net.h"
+#include "os.h"
 #include "archinfo.h"
 #include <string.h>
 
@@ -37,18 +38,20 @@
 #define MI200_XGMI_WIDTH 36.0
 #define GFX94X_XGMI_WIDTH 48.0
 #define GFX95X_XGMI_WIDTH 48.0
+#define GFX125X_XGMI_WIDTH 64.0  // placeholder — revisit with measured hardware data
 
 // Intel CPU convert GPU P2P traffic into 64B PCI TLPs, so GPU
 // to GPU traffic consumes more PCI bandwidth.
 #define INTEL_P2P_OVERHEAD(bw) (bw*6/5)
 
-#define NCCL_TOPO_NODE_TYPES 6
+#define NCCL_TOPO_NODE_TYPES 7
 #define GPU 0
 #define PCI 1
 #define NVS 2
 #define CPU 3 // Actually NUMA domains
 #define NIC 4
 #define NET 5
+#define GIN 6
 extern const char* topoNodeTypeStr[];
 
 // We want link types and path types to match as much as possible
@@ -164,6 +167,7 @@ struct ncclTopoNode {
     }gpu;
     struct {
       int dev; // Plugin dev number
+      uint64_t pciId;
       uint64_t asic;
       int port;
       float bw;
@@ -178,7 +182,7 @@ struct ncclTopoNode {
       int arch;
       int vendor;
       int model;
-      cpu_set_t affinity;
+      ncclAffinity affinity;
     }cpu;
     struct {
       uint64_t device;
@@ -221,6 +225,7 @@ struct ncclTopoSystem {
   // [RCCL] Track hostIdx to support rail-optimized rings/trees
   int hostIdx;
   bool useRailOptimizedTrees;
+  int inter;
   /* RCCL Rome / GIO preset: RCCL_ROME_TOPO_PRESET_MODEL_IDX_* sentinels or romeTopoModels[] index */
   int romeTopoModelIdx;
   /* Preset matchers assume uniform ranks per host; otherwise use generic search in ncclTopoCompute */
@@ -240,6 +245,8 @@ ncclResult_t ncclTopoSplitNvLink(struct ncclTopoSystem* system, int* splitNvLink
 
 struct ncclTopoNetInfo {
   bool coll;
+  bool gin;
+  bool net;
   // communicator-specific information
   int netPluginIndex;
   bool dmaBufSupport;
@@ -266,6 +273,7 @@ ncclResult_t ncclTopoGetGraphFromXml(struct ncclXmlNode *xmlGraphs, struct ncclT
 ncclResult_t ncclTopoGetXmlFromGraphs(int ngraphs, struct ncclTopoGraph** graphs, struct ncclTopoSystem* system, struct ncclXml *xml);
 
 ncclResult_t ncclTopoGetCompCap(struct ncclTopoSystem* system, int* ccMin, int* ccMax);
+ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, float* bw);
 
 void rcclApplyTuningOverrides(struct ncclTopoSystem* system);
 
@@ -326,6 +334,8 @@ static float ncclTopoXGMISpeed(const char* gcn) {
     return GFX94X_XGMI_WIDTH;
   else if (IsArchMatch(gcn, "gfx95"))
     return GFX95X_XGMI_WIDTH;
+  else if (IsArchMatch(gcn, "gfx1250"))
+    return GFX125X_XGMI_WIDTH;
   else
     return VEGA_XGMI_WIDTH;
 }

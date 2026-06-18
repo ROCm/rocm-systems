@@ -403,6 +403,20 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(std::string device_name, in
     int render_node_id = (gpu_uuids_to_render_nodes_map_.find(gpu_uuid) != gpu_uuids_to_render_nodes_map_.end()) ? gpu_uuids_to_render_nodes_map_[gpu_uuid] : 128;
     drm_node += std::to_string(render_node_id + offset);
 
+    if (g_rocjpeg_logger.GetLogLevel() >= kRocJpegLogInfo) {
+        std::ostringstream oss;
+        oss << '{';
+        bool first = true;
+        for (const auto& entry : gpu_uuids_to_render_nodes_map_) {
+            if (!first) oss << ", ";
+            oss << entry.first << ": " << entry.second;
+            first = false;
+        }
+        oss << '}';
+        InfoLog(g_rocjpeg_logger, "gpu_uuids_to_render_nodes_map_: " + oss.str());
+        InfoLog(g_rocjpeg_logger, "Selected GPU UUID: " + gpu_uuid);
+    }
+
     CHECK_ROCJPEG(InitVAAPI(drm_node));
     CHECK_ROCJPEG(CreateDecoderConfig());
     CHECK_ROCJPEG(CreateDecoderContext());
@@ -458,9 +472,10 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
  *         - ROCJPEG_STATUS_NOT_INITIALIZED if the initialization fails.
  */
 RocJpegStatus RocJpegVappiDecoder::InitVAAPI(std::string drm_node) {
+    InfoLog(g_rocjpeg_logger, "Opening DRM node: " + drm_node);
     drm_fd_ = open(drm_node.c_str(), O_RDWR);
     if (drm_fd_ < 0) {
-        ErrorLog(g_rocjpeg_logger, "failed to open drm node " + drm_node);
+        ErrorLog(g_rocjpeg_logger, "Failed to open drm node: " + drm_node);
         return ROCJPEG_STATUS_NOT_INITIALIZED;
     }
     va_display_ = vaGetDisplayDRM(drm_fd_);
@@ -1004,11 +1019,19 @@ void RocJpegVappiDecoder::GetDrmNodeOffset(std::string device_name, uint8_t devi
             // Instead, use the device name to identify MI300A, etc.
             std::string mi300a = "MI300A";
             size_t found_mi300a = device_name.find(mi300a);
+            std::string mi308 = "MI308";
+            size_t found_mi308 = device_name.find(mi308);
             if (found_mi300a != std::string::npos) {
                 if (device_id < visible_devices.size()) {
                     offset = (visible_devices[device_id] % 6);
                 } else {
                     offset = (device_id % 6);
+                }
+            } else if (found_mi308 != std::string::npos) {
+                if (device_id < visible_devices.size()) {
+                    offset = (visible_devices[device_id] % 4);
+                } else {
+                    offset = (device_id % 4);
                 }
             } else {
                 if (device_id < visible_devices.size()) {

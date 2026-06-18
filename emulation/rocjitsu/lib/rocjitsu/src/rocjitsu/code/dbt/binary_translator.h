@@ -23,12 +23,15 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
 
 #include "rocjitsu/code/dbt/encoding_translator.h"
+#include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/rj_code.h"
 
 namespace rocjitsu {
@@ -67,11 +70,56 @@ using EncodingTranslateFn = TranslationResult (*)(uint32_t encoding_id, uint32_t
 using LegalizationLookupFn = const InstructionLegalization *(*)(uint16_t encoding_id,
                                                                 uint16_t opcode);
 
+/// @brief One source instruction trace event emitted by BinaryTranslator.
+///
+/// @details Offsets are .text-relative. When emitted_in_cave is true,
+/// target_offset points into the logical .text continuation that later becomes
+/// `.rj_translations`; subtracting the original .text size gives the offset in
+/// that cave section. source_words and target_words are only valid for the
+/// duration of the callback; callers that need to retain them must copy the
+/// spans.
+struct TranslationTraceEvent {
+  uint64_t source_offset = 0;
+  uint32_t source_size = 0;
+  std::span<const uint32_t> source_words;
+  const InstructionLegalization *legalization = nullptr;
+  bool copied_original = false;
+  bool semantic_lowering = false;
+  bool changed = false;
+  bool emitted_in_cave = false;
+  uint64_t target_offset = 0;
+  std::span<const uint32_t> target_words;
+};
+
+using TranslationTraceCallback = std::function<void(const TranslationTraceEvent &)>;
+
+/// @brief Optional controls for DBT translation.
+struct BinaryTranslatorOptions {
+  /// @brief Force liveness-based VGPR scratch allocation above a debug floor.
+  ///
+  /// @details This debug mode leaves normal liveness dataflow untouched, but
+  /// makes find_free_run() skip VGPRs below this floor. It is useful when
+  /// investigating register clobbers caused by overly optimistic liveness.
+  std::optional<uint16_t> debug_min_free_vgpr;
+
+  /// @brief Keep scanning instructions after recoverable translation failures.
+  ///
+  /// @details This is a diagnostics-only mode. The translator preserves the
+  /// original instruction at each failed source location and continues so one run
+  /// can report multiple missing EXPAND rules or resource-limit failures. If any
+  /// error diagnostic is collected, the final code object is still left unchanged
+  /// because the partially translated text is only useful for finding failures,
+  /// not for execution.
+  bool debug_continue_after_failure = false;
+};
+
 /// @brief Result of translating a code object.
 struct TranslatedCodeObject {
-  std::vector<uint8_t> elf_bytes;    ///< Translated ELF for the host ISA.
-  rj_code_arch_t host_arch;          ///< Host ISA architecture.
-  std::vector<std::string> warnings; ///< Non-fatal translation issues.
+  std::vector<uint8_t> elf_bytes;                        ///< Translated ELF for the host ISA.
+  rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
+  std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.
+
+  [[nodiscard]] bool ok() const { return !has_error_diagnostic(diagnostics); }
 };
 
 /// @brief Top-level dynamic binary translator.
@@ -93,27 +141,33 @@ public:
   /// @param host_arch     Target ISA architecture.
   /// @param target_mach   EF_AMDGPU_MACH value for the target GPU stepping.
   ///                      0 = auto-detect from host_arch (default GFX1200 for RDNA4).
-  BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch, uint32_t target_mach = 0);
+  BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch, uint32_t target_mach = 0,
+                   BinaryTranslatorOptions options = {});
   ~BinaryTranslator();
+
+  /// @brief Install an optional callback for per-instruction debugging.
+  void set_trace_callback(TranslationTraceCallback callback);
 
   /// @brief Translate a decoded code object.
   /// @param obj  The guest code object to translate.
-  /// @returns TranslatedCodeObject with the host ELF bytes and any warnings.
+  /// @returns TranslatedCodeObject with the host ELF bytes and diagnostics.
   [[nodiscard]] TranslatedCodeObject translate(const AmdGpuCodeObject &obj);
 
 private:
   /// @brief Apply a single semantic replacement to the translated text.
   ///
   /// @details If the replacement fits within the source byte range, writes
-  /// in-place with NOP padding. If it expands, writes a branch stub in-place
-  /// and appends the replacement body + return branch to the code cave via
-  /// the patcher.
+  /// in-place and pads any leftover source words. If it expands, writes a
+  /// branch stub in-place and appends the replacement body + return branch to
+  /// the .rj_translations code cave via the patcher.
   ///
   /// @param repl    The semantic replacement to apply.
   /// @param text    The translated text buffer (same size as original .text).
   /// @param patcher The code object patcher for cave body accumulation.
-  void apply_semantic(const struct SemanticReplacement &repl, std::vector<uint8_t> &text,
-                      CodeObjectPatcher &patcher);
+  /// @returns true if the replacement was applied safely; false if an expanding
+  ///          replacement could not be branched to/from the code cave.
+  [[nodiscard]] bool apply_semantic(const struct SemanticReplacement &repl,
+                                    std::vector<uint8_t> &text, CodeObjectPatcher &patcher);
 
   /// @brief Translate a single instruction via the encoding translation pipeline.
   ///
@@ -125,17 +179,25 @@ private:
   /// @param offset     Byte offset of the instruction within .text.
   /// @param text       The translated text buffer.
   /// @param dst_opcode Target opcode from the legalization table.
-  void handle_encoding(const Instruction &inst, uint64_t offset, std::vector<uint8_t> &text,
-                       uint16_t dst_opcode, CodeObjectPatcher &patcher,
-                       std::span<const uint8_t> orig_text);
+  /// @param patcher    The code object patcher for expanded instruction bodies.
+  /// @param orig_text   The original .text bytes used to preserve trailing literals.
+  /// @returns true if the instruction was translated or copied safely; false if
+  ///          the translated encoding expanded and could not be branched through
+  ///          the code cave.
+  [[nodiscard]] bool handle_encoding(const Instruction &inst, uint64_t offset,
+                                     std::vector<uint8_t> &text, uint16_t dst_opcode,
+                                     CodeObjectPatcher &patcher, std::span<const uint8_t> orig_text,
+                                     const InstructionLegalization *leg);
 
   rj_code_arch_t guest_arch_;                               ///< Source ISA.
   rj_code_arch_t host_arch_;                                ///< Target ISA.
   uint32_t target_mach_;                                    ///< ELF MACH flag for target stepping.
+  TranslationTraceCallback trace_callback_;                 ///< Optional debug trace callback.
+  BinaryTranslatorOptions options_;                         ///< Optional translation controls.
   EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.
   LegalizationLookupFn legalization_lookup_;                ///< Per-pair legalization table.
   std::unique_ptr<SemanticTranslator> semantic_translator_; ///< Per-pair semantic rule engine.
-  std::vector<std::string> *warnings_ = nullptr;            ///< Points to active result's warnings.
+  std::vector<TranslationDiagnostic> *diagnostics_ = nullptr; ///< Active result diagnostics.
 };
 
 } // namespace rocjitsu

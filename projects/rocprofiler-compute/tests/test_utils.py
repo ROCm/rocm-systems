@@ -2,46 +2,40 @@
 # SPDX-License-Identifier:  MIT
 
 import builtins
-import inspect
+import functools
 import io
-import locale
 import logging
+import math
 import os
-import re
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from unittest import mock
 
 import pandas as pd
 import pytest
+import yaml
+from common import SRC
 
 import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
+from utils.amdsmi_interface import _per_device_query
 from utils.tty import (
-    format_stats,
+    format_duration,
+    format_node_stats,
     print_operator_node,
     show_call_tree,
+    show_operator_summary,
 )
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
+    NodeRollup,
     build_call_trees,
+    build_operator_summary,
     parse_top_level_location,
     rollup_node_stats,
 )
-
-SUPPORTED_ARCHS = {
-    "gfx908": {"mi100": ["MI100"]},
-    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
-    "gfx940": {"mi300": ["MI300A_A0"]},
-    "gfx941": {"mi300": ["MI300X_A0"]},
-    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
-    "gfx950": {"mi350": ["MI350"]},
-    "gfx1151": {"strix_halo": ["STRIX_HALO"]},
-}
 
 
 class MockArgs:
@@ -58,238 +52,11 @@ class MockSoc:
 
 logging.trace = lambda *args, **kwargs: None
 
+ANALYSIS_CONFIGS = Path(SRC) / "rocprof_compute_soc" / "analysis_configs"
+
 ##################################################
 ##          Generated tests                     ##
 ##################################################
-
-# =============================================================================
-# HELPER FUNCTIONS FOR TESTING
-# =============================================================================
-
-
-def check_resource_allocation():
-    """Check if CTEST resource allocation is enabled for parallel testing and set
-    HIP_VISIBLE_DEVICES variable accordingly with assigned gpu index.
-    """
-
-    if "CTEST_RESOURCE_GROUP_COUNT" not in os.environ:
-        return
-
-    if "CTEST_RESOURCE_GROUP_0_GPUS" in os.environ:
-        resource = os.environ["CTEST_RESOURCE_GROUP_0_GPUS"]
-        # extract assigned gpu id from env var: example format -> 'id:0,slots:1'
-        for item in resource.split(","):
-            key, value = item.split(":")
-            if key == "id":
-                os.environ["HIP_VISIBLE_DEVICES"] = value
-                return
-
-    return
-
-
-def check_file_pattern(pattern, file_path):
-    """Check if the given pattern exists in the file"""
-    content = ""
-    with open(file_path) as f:
-        content = f.read()
-    return len(re.findall(pattern, content)) != 0
-
-
-def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
-    """
-    Provides a unique output directory based on the name of the calling test function
-    with a suffix applied. For parametrized tests, pass param_id to ensure unique
-    directory names and avoid NFS conflicts.
-
-    Args:
-        suffix (str, optional): suffix to append to output_dir.
-            Defaults to "_output".
-        clean_existing (bool, optional): Whether to remove existing directory if exists.
-            Defaults to True.
-        param_id (str, optional): Unique identifier for parametrized tests.
-            When provided, appended to the directory name to ensure uniqueness.
-            Defaults to None.
-    """
-
-    func_name = inspect.stack()[1].function
-
-    param_suffix = ""
-    if param_id:
-        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
-
-    output_dir = func_name + param_suffix + suffix
-    if clean_existing:
-        if Path(output_dir).exists():
-            shutil.rmtree(output_dir)
-    return output_dir
-
-
-def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=None):
-    """Provides a unique input workload directory with contents of input_dir
-    based on the name of the calling test function. For parametrized tests,
-    pass param_id to ensure unique directory names and avoid NFS conflicts.
-
-    Creates a copy to avoid modifying source workload data.
-
-    Args:
-        input_dir (str): Source directory to copy from.
-        suffix (str, optional): suffix to append to output_dir.
-            Defaults to "_tmp".
-        clean_existing (bool, optional): Whether to remove existing directory if exists.
-            Defaults to True.
-        param_id (str, optional): Unique identifier for parametrized tests.
-            When provided, appended to the directory name to ensure uniqueness.
-            Defaults to None.
-    """
-
-    func_name = inspect.stack()[1].function
-
-    # Include param_id in directory name if provided
-    param_suffix = ""
-    if param_id:
-        # Sanitize param_id: replace special chars that may not be valid in paths
-        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
-
-    output_dir = func_name + param_suffix + suffix
-    if clean_existing:
-        if Path(output_dir).exists():
-            shutil.rmtree(output_dir)
-
-    shutil.copytree(input_dir, output_dir)
-    return output_dir
-
-
-def clean_output_dir(cleanup, output_dir):
-    """Remove output directory generated from rocprofiler-compute execution
-
-    Args:
-        cleanup (boolean): flag to enable/disable directory cleanup
-        output_dir (string): name of directory to remove
-    """
-    if cleanup:
-        if Path(output_dir).exists():
-            try:
-                shutil.rmtree(output_dir)
-            except OSError:
-                print(
-                    "WARNING: shutil.rmdir(output_dir): directory may not be empty..."
-                )
-    return
-
-
-def check_csv_files(output_dir, num_devices, num_kernels):
-    """Check profiling output csv files for expected
-    number of entries (based on kernel invocations)
-
-    Args:
-        output_dir (string): output directory containing csv files
-        num_kernels (int): number of kernels expected to have been profiled
-
-    Returns:
-        dict: dictionary housing file contents as pandas dataframe
-              (excludes PMC files - those are validated internally)
-    """
-    files_in_workload = os.listdir(output_dir)
-
-    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
-    has_separate = any(
-        f.startswith("pmc_perf_") and f.endswith(".csv") for f in files_in_workload
-    )
-    has_results = any(
-        f.startswith("results_") and f.endswith(".csv") for f in files_in_workload
-    )
-
-    assert has_separate or has_results, (
-        "Expected pmc_perf_*.csv or results_*.csv from profile mode"
-    )
-
-    # Validate row counts for PMC files (but don't add to return dict)
-    for file in files_in_workload:
-        is_pmc = file.startswith("pmc_perf_") or file.startswith("results_")
-        if is_pmc and file.endswith(".csv"):
-            df = pd.read_csv(output_dir + "/" + file)
-            err_msg = (
-                f"PMC file {file} has insufficient rows: "
-                f"{len(df.index)} < {num_kernels}"
-            )
-            assert len(df.index) >= num_kernels, err_msg
-
-    # Check and return non-PMC files
-    return check_non_pmc_files(output_dir, num_devices, num_kernels)
-
-
-def check_non_pmc_files(output_dir, num_devices, num_kernels):
-    """
-    Check profiling output non-PMC files and return them as a dictionary.
-
-    Args:
-        output_dir (string): output directory containing non-PMC files
-        num_devices (int): number of devices expected to have been profiled
-        num_kernels (int): number of kernels expected to have been profiled
-
-    Returns:
-        dict: dictionary housing file contents as pandas dataframe
-    """
-    file_dict = {}
-    files_in_workload = os.listdir(output_dir)
-
-    # Load non-PMC files into return dict
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            # Skip PMC files (already validated above)
-            if file.startswith("pmc_perf_") or file.startswith("results_"):
-                continue
-
-            # Load other CSV files
-            file_dict[file] = pd.read_csv(output_dir + "/" + file)
-            if "roofline" in file:
-                assert len(file_dict[file].index) >= num_devices
-            elif "sysinfo" not in file and "ps_file" not in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".html"):
-            file_dict[file] = "html"
-        elif file.endswith(".json"):
-            file_dict[file] = "json"
-
-    return file_dict
-
-
-def get_num_pmc_file(output_dir):
-    """
-    Returns:
-        int: number of pmc perf yaml files in perfmon dir
-    """
-
-    perfmon_path = Path(output_dir) / "perfmon"
-    return len([
-        f
-        for f in perfmon_path.iterdir()
-        if f.is_file() and f.name.startswith("pmc_perf_") and f.suffix == ".yaml"
-    ])
-
-
-def gpu_soc():
-    # Parse arch details from rocminfo
-    rocminfo = str(
-        # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(
-            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("utf-8")
-    )
-    rocminfo = rocminfo.split("\n")
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
-    devices = list(filter(soc_regex.match, rocminfo))
-    if not devices:
-        return ""
-    gpu_arch = devices[0].split()[1]
-
-    if gpu_arch not in SUPPORTED_ARCHS.keys():
-        return ""
-
-    gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
-
-    return gpu_model
-
 
 # =============================================================================
 # VERSION UTILITIES TESTS
@@ -596,29 +363,46 @@ def test_detect_rocprof_sdk(monkeypatch):
     assert any("rocprof_cmd is rocprofiler-sdk" in log_entry for log_entry in logs)
 
 
+def make_dummy_process(*, lines=(), returncode=0, poll_pending_first=False):
+    """Fake subprocess.Popen for capture_subprocess_output tests."""
+
+    class Stdout:
+        def __init__(self):
+            self.iter = iter(lines)
+
+        def readline(self):
+            return next(self.iter, "")
+
+        def fileno(self):
+            return 1
+
+        def close(self):
+            pass
+
+    class Process:
+        def __init__(self):
+            self.stdout = Stdout()
+            self.poll_pending = poll_pending_first
+
+        def poll(self):
+            if self.poll_pending:
+                self.poll_pending = False
+                return None
+            return returncode
+
+        def wait(self):
+            return returncode
+
+    return Process()
+
+
 def test_capture_subprocess_output_with_new_env(monkeypatch):
     """
     Test capture_subprocess_output with custom environment variables.
     Verifies that new_env parameter is properly passed to subprocess.
     """
 
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = type(
-                "MockStdout", (), {"readline": lambda: "", "fileno": lambda: 1}
-            )()
-            self._poll_count = 0
-
-        def poll(self):
-            if self._poll_count == 0:
-                self._poll_count += 1
-                return None
-            return 0
-
-        def wait(self):
-            return 0
-
-    dummy_process = DummyProcess()
+    dummy_process = make_dummy_process(poll_pending_first=True)
     popen_calls = []
 
     def dummy_popen(*args, **kwargs):
@@ -626,18 +410,6 @@ def test_capture_subprocess_output_with_new_env(monkeypatch):
         return dummy_process
 
     monkeypatch.setattr("subprocess.Popen", dummy_popen)
-
-    class DummySelector:
-        def register(self, fileobj, event, callback):
-            pass
-
-        def select(self, timeout=1):
-            return []
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
@@ -655,31 +427,7 @@ def test_capture_subprocess_output_profile_mode(monkeypatch):
     Verifies different behavior when profiling mode is active.
     """
 
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = type(
-                "MockStdout", (), {"readline": lambda: "", "fileno": lambda: 1}
-            )()
-
-        def poll(self):
-            return 0
-
-        def wait(self):
-            return 0
-
-    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: DummyProcess())
-
-    class DummySelector:
-        def register(self, fileobj, event, callback):
-            pass
-
-        def select(self, timeout=1):
-            return []
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: make_dummy_process())
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
@@ -696,66 +444,10 @@ def test_capture_subprocess_output_failure(monkeypatch):
     Test capture_subprocess_output returns
     (False, output) when subprocess exits with nonzero code.
     """
-    lines = ["fail\n"]
-
-    class DummyStdout:
-        def __init__(self, lines):
-            self._lines = lines
-            self._idx = 0
-
-        def readline(self):
-            if self._idx < len(self._lines):
-                val = self._lines[self._idx]
-                self._idx += 1
-                return val
-            return ""
-
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = DummyStdout(lines)
-            self._poll_count = 0
-
-        def poll(self):
-            if self._poll_count == 0:
-                self._poll_count += 1
-                return None
-            return 1
-
-        def wait(self):
-            return 1
-
-    dummy_process = DummyProcess()
-
-    def dummy_popen(*args, **kwargs):
-        return dummy_process
-
-    monkeypatch.setattr("subprocess.Popen", dummy_popen)
-
-    class DummySelector:
-        def __init__(self):
-            self._registered = []
-
-        def register(self, fileobj, event, callback):
-            self._registered.append((fileobj, event, callback))
-
-        def select(self):
-            if hasattr(self, "_called"):
-                return []
-            self._called = True
-            key_obj = type(
-                "Key",
-                (),
-                {
-                    "data": staticmethod(self._registered[0][2]),
-                    "fileobj": self._registered[0][0],
-                },
-            )()
-            return [(key_obj, 1)]
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
+    dummy_process = make_dummy_process(
+        lines=["fail\n"], returncode=1, poll_pending_first=True
+    )
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: dummy_process)
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
@@ -766,72 +458,30 @@ def test_capture_subprocess_output_failure(monkeypatch):
 
 def test_capture_subprocess_output_unicode_decode(monkeypatch):
     """
-    Test capture_subprocess_output handles
-    UnicodeDecodeError in handle_output gracefully.
+    Test capture_subprocess_output handles bad bytes from the child without
+    crashing. errors="replace" on Popen substitutes invalid bytes with the
+    Unicode replacement character (\\ufffd), so readline never raises.
     """
 
-    class DummyStdout:
-        def __init__(self):
-            self._called = False
+    popen_calls = []
 
-        def readline(self):
-            if not self._called:
-                self._called = True
-                raise UnicodeDecodeError("utf-8", b"", 0, 1, "reason")
-            return ""
-
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = DummyStdout()
-            self._poll_count = 0
-
-        def poll(self):
-            if self._poll_count == 0:
-                self._poll_count += 1
-                return None
-            return 0
-
-        def wait(self):
-            return 0
-
-    dummy_process = DummyProcess()
-
+    # Lines as the TextIOWrapper would yield them after error replacement:
+    # bad bytes show up as �, not as exceptions.
     def dummy_popen(*args, **kwargs):
-        return dummy_process
+        popen_calls.append(kwargs)
+        return make_dummy_process(lines=["good line\n", "bad � byte\n"])
 
     monkeypatch.setattr("subprocess.Popen", dummy_popen)
-
-    class DummySelector:
-        def __init__(self):
-            self._registered = []
-
-        def register(self, fileobj, event, callback):
-            self._registered.append((fileobj, event, callback))
-
-        def select(self):
-            if hasattr(self, "_called"):
-                return []
-            self._called = True
-            key_obj = type(
-                "Key",
-                (),
-                {
-                    "data": staticmethod(self._registered[0][2]),
-                    "fileobj": self._registered[0][0],
-                },
-            )()
-            return [(key_obj, 1)]
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
     success, output = utils_common.capture_subprocess_output(["echo", "test"])
+
     assert success is True
-    assert output == ""
+    assert "good line" in output
+    assert "�" in output
+    # Popen must request "replace" error handling so bad bytes never raise.
+    assert popen_calls[0].get("errors") == "replace"
 
 
 # =============================================================================
@@ -1080,7 +730,7 @@ def test_check_resource_allocation_no_ctest(monkeypatch):
     monkeypatch.delenv("CTEST_RESOURCE_GROUP_COUNT", raising=False)
     monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
 
-    from tests.test_utils import check_resource_allocation
+    from tests.common import check_resource_allocation
 
     result = check_resource_allocation()
 
@@ -1099,7 +749,7 @@ def test_check_resource_allocation_with_gpu_resource(monkeypatch):
     monkeypatch.setenv("CTEST_RESOURCE_GROUP_COUNT", "1")
     monkeypatch.setenv("CTEST_RESOURCE_GROUP_0_GPUS", "id:2,slots:1")
     monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
-    from tests.test_utils import check_resource_allocation
+    from tests.common import check_resource_allocation
 
     result = check_resource_allocation()
 
@@ -1119,7 +769,7 @@ def test_check_resource_allocation_no_gpu_resource(monkeypatch):
     monkeypatch.delenv("CTEST_RESOURCE_GROUP_0_GPUS", raising=False)
     monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
 
-    from tests.test_utils import check_resource_allocation
+    from tests.common import check_resource_allocation
 
     result = check_resource_allocation()
 
@@ -1139,7 +789,7 @@ def test_check_resource_allocation_malformed_resource(monkeypatch):
     monkeypatch.setenv("CTEST_RESOURCE_GROUP_0_GPUS", "malformed_resource_string")
     monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
 
-    from tests.test_utils import check_resource_allocation
+    from tests.common import check_resource_allocation
 
     try:
         result = check_resource_allocation()
@@ -1158,6 +808,7 @@ def test_check_file_pattern_match_found():
     Test check_file_pattern when the pattern is found in the file.
     Should return True.
     """
+    from tests.common import check_file_pattern
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
         f.write("This is a test file\nwith multiple lines\nand some pattern text\n")
@@ -1179,6 +830,8 @@ def test_check_file_pattern_file_not_found():
     Test check_file_pattern when the file doesn't exist.
     Should raise FileNotFoundError.
     """
+    from tests.common import check_file_pattern
+
     with pytest.raises(FileNotFoundError):
         check_file_pattern("pattern", "/nonexistent/file/path.txt")
 
@@ -1324,7 +977,7 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
-    assert Path(workload_dir + "/pmc_perf_test.csv").exists()
+    assert Path(workload_dir + "/results_pmc_perf_test.csv").exists()
 
 
 def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
@@ -1432,6 +1085,56 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     utils_profile.run_prof(
         str(fname), profiler_options, workload_dir, logging.INFO, "csv"
     )
+
+
+def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
+    """run_prof skips per-pid rocpd update when its native counter CSV is missing."""
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    workload_dir = tmp_path / "workload"
+
+    # rocprofiler-sdk backend with native-tool counter collection writes a
+    # per-pid .db here; child pids that never touched the GPU have no CSV.
+    pmc1 = workload_dir / "out" / "pmc_1"
+    (pmc1 / "12345").mkdir(parents=True)
+    (pmc1 / "12345" / "12345.db").touch()
+
+    options = {
+        "APP_CMD": ["./test_app"],
+        "ROCPROF_OUTPUT_PATH": str(workload_dir),
+        "ROCPROF_COUNTER_COLLECTION": "0",  # native tool collects, not SDK
+        "ROCP_TOOL_LIBRARIES": "",
+    }
+
+    update_calls: list = []
+    debug_msgs: list[str] = []
+
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
+    monkeypatch.setattr(
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
+    )
+    monkeypatch.setattr(
+        "utils.utils_profile.rocpd_data.update_rocpd_pmc_events",
+        lambda *a, **k: update_calls.append(a),
+    )
+    monkeypatch.setattr(
+        "utils.utils_profile.rocpd_data.convert_dbs_to_csv",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "utils.utils_profile.console_debug",
+        lambda msg, *a, **k: debug_msgs.append(msg),
+    )
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
+
+    utils_profile.run_prof(
+        str(fname), options, str(workload_dir), logging.INFO, "rocpd"
+    )
+
+    assert update_calls == []
+    assert any("No native counter CSV for pid 12345" in m for m in debug_msgs)
 
 
 def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
@@ -1841,7 +1544,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             rocprofiler_sdk_tool_path="sdk_tool",
             roof_only=True,
             format_rocprof_output="format",
-            path="path",
+            output_directory="path",
             remaining="remaining",
             iteration_multiplexing=None,
             attach_pid=None,
@@ -2234,20 +1937,9 @@ def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
     Test capture_subprocess_output with enable_logging=False doesn't call console_log.
     """
 
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = io.StringIO("test output\n")
-
-        def poll(self):
-            return 0
-
-        def wait(self):
-            return 0
-
-    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: DummyProcess())
     monkeypatch.setattr(
-        "selectors.DefaultSelector",
-        lambda: mock.Mock(register=mock.Mock(), select=lambda: [], close=mock.Mock()),
+        "subprocess.Popen",
+        lambda *a, **k: make_dummy_process(lines=["test output\n"]),
     )
 
     log_calls = []
@@ -3727,1219 +3419,6 @@ def test_is_workload_empty_pandas_import_dependency():
 
 
 # =============================================================================
-# TESTS FOR LOCAL ENCODING FUNCTION
-#
-# Normal Functionality:
-#
-# Successful C.UTF-8 locale setting
-# Fallback to current UTF-8 locale when C.UTF-8 fails
-# Various UTF-8 encoding formats and case variations
-# Edge Cases:
-#
-# getdefaultlocale returning None or partial None values
-# Empty encoding strings
-# Unusual but valid locale names
-# Multiple function calls
-# Error Conditions:
-#
-# C.UTF-8 locale not available
-# Fallback locale setting failures
-# No UTF-8 locales available on system
-# getdefaultlocale exceptions
-# Various locale.Error scenarios
-# String Handling and Dependencies:
-#
-# UTF-8 substring detection in encoding names
-# Console error message formatting and parameters
-# Locale module dependency verification
-# Return value consistency
-# Special Scenarios:
-#
-# Thread safety simulation
-# Different locale error types and messages
-# Comprehensive error path coverage
-# Module import dependencies
-# =============================================================================
-
-
-def test_set_locale_encoding_successful_c_utf8():
-    """
-    Test set_locale_encoding when C.UTF-8 locale is
-    available and can be set successfully.
-
-    Returns:
-        None: Asserts function sets C.UTF-8 locale without errors.
-    """
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils_common.console_error", side_effect=mock_console_error):
-            mock_setlocale.return_value = None
-
-            utils_common.set_locale_encoding()
-
-            mock_setlocale.assert_called_once_with(locale.LC_ALL, "C.UTF-8")
-            assert len(console_error_calls) == 0
-
-
-def test_set_locale_encoding_c_utf8_fails_fallback_to_current_utf8():
-    """
-    Test set_locale_encoding when C.UTF-8 fails but current locale is UTF-8 based.
-
-    Returns:
-        None: Asserts function falls back to current UTF-8 locale successfully.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = [
-                    locale.Error("C.UTF-8 not available"),
-                    None,
-                ]
-                mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
-
-                utils_common.set_locale_encoding()
-
-                assert mock_setlocale.call_count == 2
-                mock_setlocale.assert_any_call(locale.LC_ALL, "C.UTF-8")
-                mock_setlocale.assert_any_call(locale.LC_ALL, "en_US")
-                assert len(console_error_calls) == 0
-
-
-def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
-    """
-    Test set_locale_encoding when both C.UTF-8 and fallback locale fail.
-
-    Returns:
-        None: Asserts function calls console_error when fallback locale fails.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                fallback_error = locale.Error("Fallback locale failed")
-                mock_setlocale.side_effect = [
-                    locale.Error("C.UTF-8 not available"),
-                    fallback_error,
-                ]
-                mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Failed to set locale to the current UTF-8-based locale:"
-                    in console_error_calls[0][0][0]
-                )
-                assert "Fallback locale failed" in console_error_calls[0][0][0]
-
-
-def test_set_locale_encoding_no_utf8_locale_available():
-    """
-    Test set_locale_encoding when no UTF-8 locale is available.
-
-    Returns:
-        None: Asserts function calls console_error when no UTF-8 locale found.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based "
-                    "locale is available on your system."
-                    in console_error_calls[0][0][0]
-                )
-                assert console_error_calls[0][1]["exit"] == False  # noqa
-
-
-def test_set_locale_encoding_getdefaultlocale_returns_none():
-    """
-    Test set_locale_encoding when getdefaultlocale returns None.
-
-    Returns:
-        None: Asserts function handles
-        None return from getdefaultlocale.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = None
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based locale "
-                    "is available on your system." in console_error_calls[0][0][0]
-                )
-
-
-def test_set_locale_encoding_getdefaultlocale_partial_none():
-    """
-    Test set_locale_encoding when getdefaultlocale returns partial None values.
-
-    Returns:
-        None: Asserts function handles partial None values from getdefaultlocale.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-
-                mock_getdefaultlocale.return_value = ("en_US", None)
-
-                try:
-                    utils_common.set_locale_encoding()
-                except TypeError as e:
-                    if "argument of type 'NoneType' is not iterable" in str(e):
-                        pytest.skip(
-                            "Function doesn't handle None encoding "
-                            "gracefully - needs null check"
-                        )
-                    else:
-                        raise
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based locale is "
-                    "available on your system." in console_error_calls[0][0][0]
-                )
-
-
-def test_set_locale_encoding_utf8_case_variations():
-    """
-    Test set_locale_encoding with various UTF-8 case variations in encoding.
-
-    Returns:
-        None: Asserts function handles different UTF-8 case formats.
-    """
-    import locale
-    from unittest.mock import patch
-
-    utf8_variations = ["UTF-8", "utf-8", "UTF8", "utf8"]
-
-    for utf8_variant in utf8_variations:
-        console_error_calls = []
-
-        def mock_console_error(*args, **kwargs):
-            console_error_calls.append((args, kwargs))
-
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    mock_setlocale.side_effect = [
-                        locale.Error("C.UTF-8 not available"),
-                        None,
-                    ]
-                    mock_getdefaultlocale.return_value = ("en_US", utf8_variant)
-
-                    utils_common.set_locale_encoding()
-
-                    if "UTF-8" in utf8_variant:
-                        assert len(console_error_calls) == 0
-                        assert mock_setlocale.call_count == 2
-                    else:
-                        assert len(console_error_calls) == 1
-
-
-def test_set_locale_encoding_empty_encoding():
-    """
-    Test set_locale_encoding when getdefaultlocale returns empty encoding.
-
-    Returns:
-        None: Asserts function handles empty encoding string.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "")
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based locale "
-                    "is available on your system." in console_error_calls[0][0][0]
-                )
-
-
-def test_set_locale_encoding_locale_with_utf8_substring():
-    """
-    Test set_locale_encoding with encoding that contains UTF-8 as substring.
-
-    Returns:
-        None: Asserts function correctly identifies UTF-8 in encoding names.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = [
-                    locale.Error("C.UTF-8 not available"),
-                    None,
-                ]
-                mock_getdefaultlocale.return_value = (
-                    "en_US",
-                    "ISO-8859-1.UTF-8.EXTENDED",
-                )
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 0
-                assert mock_setlocale.call_count == 2
-
-
-def test_set_locale_encoding_different_locale_error_types():
-    """
-    Test set_locale_encoding with different types of locale.Error exceptions.
-
-    Returns:
-        None: Asserts function handles various locale error scenarios.
-    """
-    import locale
-    from unittest.mock import patch
-
-    error_scenarios = [
-        "Locale not supported",
-        "Invalid locale specification",
-        "System locale database corrupted",
-        "",  # Empty error message
-    ]
-
-    for error_msg in error_scenarios:
-        console_error_calls = []
-
-        def mock_console_error(*args, **kwargs):
-            console_error_calls.append((args, kwargs))
-
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    fallback_error = locale.Error(error_msg)
-                    mock_setlocale.side_effect = [
-                        locale.Error("C.UTF-8 not available"),
-                        fallback_error,
-                    ]
-                    mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
-
-                    utils_common.set_locale_encoding()
-
-                    assert len(console_error_calls) == 1
-                    assert str(fallback_error) in console_error_calls[0][0][0]
-
-
-def test_set_locale_encoding_unusual_locale_names():
-    """
-    Test set_locale_encoding with unusual but valid locale names.
-
-    Returns:
-        None: Asserts function handles unusual locale name formats.
-    """
-    import locale
-    from unittest.mock import patch
-
-    unusual_locales = [
-        ("C", "UTF-8"),
-        ("POSIX", "UTF-8"),
-        ("en_US.UTF-8", "UTF-8"),
-        ("zh_CN.UTF-8", "UTF-8"),
-        ("", "UTF-8"),  # Empty locale name
-    ]
-
-    for locale_name, encoding in unusual_locales:
-        console_error_calls = []
-
-        def mock_console_error(*args, **kwargs):
-            console_error_calls.append((args, kwargs))
-
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    mock_setlocale.side_effect = [
-                        locale.Error("C.UTF-8 not available"),
-                        None,
-                    ]
-                    mock_getdefaultlocale.return_value = (locale_name, encoding)
-
-                    utils_common.set_locale_encoding()
-
-                    assert len(console_error_calls) == 0
-                    assert mock_setlocale.call_count == 2
-                    mock_setlocale.assert_any_call(locale.LC_ALL, locale_name)
-
-
-def test_set_locale_encoding_getdefaultlocale_exception():
-    """
-    Test set_locale_encoding when getdefaultlocale raises an exception.
-
-    Returns:
-        None: Asserts function handles getdefaultlocale exceptions gracefully.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.side_effect = Exception("getdefaultlocale failed")
-
-                try:
-                    utils_common.set_locale_encoding()
-                except Exception:
-                    pass
-
-
-def test_set_locale_encoding_console_error_parameters():
-    """
-    Test set_locale_encoding console_error call parameters are correct.
-
-    Returns:
-        None: Asserts console_error is called with correct parameters.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                args, kwargs = console_error_calls[0]
-                assert len(args) == 1
-                assert "exit" in kwargs
-                assert kwargs["exit"] == False  # noqa
-
-
-def test_set_locale_encoding_return_value():
-    """
-    Test that set_locale_encoding returns None (implicit return).
-
-    Returns:
-        None: Asserts function returns None in all scenarios.
-    """
-    import locale
-    from unittest.mock import patch
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils_common.console_error"):
-            mock_setlocale.return_value = None
-
-            result = utils_common.set_locale_encoding()
-            assert result is None
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils_common.console_error"):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
-
-                result = utils_common.set_locale_encoding()
-                assert result is None
-
-
-def test_set_locale_encoding_locale_module_import():
-    """
-    Test set_locale_encoding dependency on locale module.
-
-    Returns:
-        None: Asserts function properly uses locale module functionality.
-    """
-    import locale
-    from unittest.mock import patch
-
-    setlocale_calls = []
-    getdefaultlocale_calls = []
-
-    def mock_setlocale(category, locale_name):
-        setlocale_calls.append((category, locale_name))
-        return None
-
-    def mock_getdefaultlocale():
-        getdefaultlocale_calls.append(True)
-        return ("en_US", "UTF-8")
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale", side_effect=mock_setlocale):
-        with patch("locale.getdefaultlocale", side_effect=mock_getdefaultlocale):
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                utils_common.set_locale_encoding()
-
-    assert len(setlocale_calls) == 1
-    assert setlocale_calls[0] == (locale.LC_ALL, "C.UTF-8")
-    assert len(getdefaultlocale_calls) == 0
-    assert len(console_error_calls) == 0
-
-    setlocale_calls.clear()
-    getdefaultlocale_calls.clear()
-    console_error_calls.clear()
-
-    def mock_setlocale_with_error(category, locale_name):
-        setlocale_calls.append((category, locale_name))
-        if locale_name == "C.UTF-8":
-            raise locale.Error("C.UTF-8 not available")
-        return None
-
-    with patch("locale.setlocale", side_effect=mock_setlocale_with_error):
-        with patch("locale.getdefaultlocale", side_effect=mock_getdefaultlocale):
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                utils_common.set_locale_encoding()
-
-    assert len(setlocale_calls) == 2
-    assert setlocale_calls[0] == (locale.LC_ALL, "C.UTF-8")
-    assert setlocale_calls[1] == (locale.LC_ALL, "en_US")
-    assert len(getdefaultlocale_calls) == 1
-    assert len(console_error_calls) == 0
-
-
-def test_set_locale_encoding_multiple_calls():
-    """
-    Test set_locale_encoding behavior when called multiple times.
-
-    Returns:
-        None: Asserts function behaves consistently across multiple calls.
-    """
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils_common.console_error", side_effect=mock_console_error):
-            mock_setlocale.return_value = None
-
-            utils_common.set_locale_encoding()
-            utils_common.set_locale_encoding()
-            utils_common.set_locale_encoding()
-
-            assert mock_setlocale.call_count == 3
-            assert len(console_error_calls) == 0
-
-
-def test_set_locale_encoding_thread_safety_simulation():
-    """
-    Test set_locale_encoding behavior in simulated concurrent scenarios.
-
-    Returns:
-        None: Asserts function handles concurrent-like access patterns.
-    """
-    import locale
-    from unittest.mock import patch
-
-    call_count = 0
-
-    def side_effect_setlocale(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise locale.Error("First call fails")
-        return None
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale", side_effect=side_effect_setlocale):
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
-
-                utils_common.set_locale_encoding()
-
-                assert call_count == 2
-                assert len(console_error_calls) == 0
-
-
-def test_set_locale_encoding_comprehensive_error_handling():
-    """
-    Test set_locale_encoding comprehensive error handling across all code paths.
-
-    Returns:
-        None: Asserts all error paths are properly handled.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    test_scenarios = [
-        {
-            "name": "C.UTF-8 success",
-            "setlocale_side_effect": [None],
-            "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 0,
-        },
-        {
-            "name": "C.UTF-8 fails, fallback success",
-            "setlocale_side_effect": [locale.Error("C.UTF-8 fail"), None],
-            "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 0,
-        },
-        {
-            "name": "Both fail with UTF-8 locale",
-            "setlocale_side_effect": [
-                locale.Error("C.UTF-8 fail"),
-                locale.Error("Fallback fail"),
-            ],
-            "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 1,
-        },
-        {
-            "name": "No UTF-8 locale available",
-            "setlocale_side_effect": [locale.Error("C.UTF-8 fail")],
-            "getdefaultlocale_return": ("en_US", "ISO-8859-1"),
-            "expected_errors": 1,
-        },
-    ]
-
-    for scenario in test_scenarios:
-        console_error_calls.clear()
-
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    mock_setlocale.side_effect = scenario["setlocale_side_effect"]
-                    mock_getdefaultlocale.return_value = scenario[
-                        "getdefaultlocale_return"
-                    ]
-
-                    utils_common.set_locale_encoding()
-
-                    assert len(console_error_calls) == scenario["expected_errors"], (
-                        f"Failed scenario: {scenario['name']}"
-                    )
-
-
-# =============================================================================
-# TESTS FOR reverse_multi_index_df_pmc FUNCTION
-#
-# Normal Functionality:
-#
-# Basic multi-index DataFrame decomposition
-# Multiple levels with different column counts
-# Data type preservation
-# Column order preservation
-# Edge Cases:
-#
-# Single-level columns (error case)
-# Empty DataFrames
-# Single column per level
-# Uneven column distribution
-# Single row DataFrames
-# Error Conditions:
-#
-# Non-multi-index columns raising ValueError
-# Proper error message validation
-# Data Integrity:
-#
-# Mixed data types preservation
-# NaN value handling
-# Index preservation
-# Memory efficiency
-# Special Scenarios:
-#
-# Special characters in column names
-# Numeric level names
-# Three-level MultiIndex handling
-# Large DataFrame performance
-# Duplicate level name handling
-# Return Value Validation:
-#
-# Correct return types (list of DataFrames, list of levels)
-# Proper DataFrame structure in results
-# Consistent length of returned lists
-# =============================================================================
-
-
-def test_reverse_multi_index_df_pmc_basic_functionality():
-    """
-    Test reverse_multi_index_df_pmc with a basic multi-index DataFrame.
-
-    Returns:
-        None: Asserts function correctly decomposes multi-index DataFrame.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file2", "col1"): [7, 8, 9],
-        ("file2", "col3"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert len(coll_levels) == 2
-    assert "file1" in coll_levels
-    assert "file2" in coll_levels
-
-    assert list(dfs[0].columns) == ["col1", "col2"]
-    assert list(dfs[0]["col1"]) == [1, 2, 3]
-    assert list(dfs[0]["col2"]) == [4, 5, 6]
-
-    assert list(dfs[1].columns) == ["col1", "col3"]
-    assert list(dfs[1]["col1"]) == [7, 8, 9]
-    assert list(dfs[1]["col3"]) == [10, 11, 12]
-
-
-def test_reverse_multi_index_df_pmc_empty_dataframe():
-    """
-    Test reverse_multi_index_df_pmc with empty multi-index DataFrame.
-
-    Returns:
-        None: Asserts function handles empty DataFrames correctly.
-    """
-    import pandas as pd
-
-    columns = pd.MultiIndex.from_tuples([("file1", "col1"), ("file1", "col2")])
-    df = pd.DataFrame(columns=columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 1
-    assert len(coll_levels) == 1
-    assert coll_levels[0] == "file1"
-    assert len(dfs[0]) == 0
-    assert list(dfs[0].columns) == ["col1", "col2"]
-
-
-def test_reverse_multi_index_df_pmc_single_column_per_level():
-    """
-    Test reverse_multi_index_df_pmc with single column per level.
-
-    Returns:
-        None: Asserts function handles single column per level correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("level1", "col1"): [1, 2, 3],
-        ("level2", "col1"): [4, 5, 6],
-        ("level3", "col1"): [7, 8, 9],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 3
-    assert len(coll_levels) == 3
-    assert set(coll_levels) == {"level1", "level2", "level3"}
-
-    for i, df_result in enumerate(dfs):
-        assert len(df_result.columns) == 1
-        assert df_result.columns[0] == "col1"
-        assert len(df_result) == 3
-
-
-def test_reverse_multi_index_df_pmc_uneven_column_distribution():
-    """
-    Test reverse_multi_index_df_pmc with uneven column distribution across levels.
-
-    Returns:
-        None: Asserts function handles uneven column distributions correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file1", "col3"): [7, 8, 9],
-        ("file2", "col1"): [10, 11, 12],
-        ("file3", "col1"): [13, 14, 15],
-        ("file3", "col2"): [16, 17, 18],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 3
-    assert len(coll_levels) == 3
-    assert set(coll_levels) == {"file1", "file2", "file3"}
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert len(file1_df.columns) == 3
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert len(file2_df.columns) == 1
-
-    file3_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file3")
-    assert len(file3_df.columns) == 2
-
-
-def test_reverse_multi_index_df_pmc_duplicate_level_names():
-    """
-    Test reverse_multi_index_df_pmc with duplicate
-    level names (should handle unique() correctly).
-
-    Returns:
-        None: Asserts function handles duplicate level names correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file1", "col3"): [7, 8, 9],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 1
-    assert len(coll_levels) == 1
-    assert coll_levels[0] == "file1"
-    assert len(dfs[0].columns) == 3
-    assert list(dfs[0].columns) == ["col1", "col2", "col3"]
-
-
-def test_reverse_multi_index_df_pmc_mixed_data_types():
-    """
-    Test reverse_multi_index_df_pmc with mixed data types in columns.
-
-    Returns:
-        None: Asserts function handles mixed data types correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "integers"): [1, 2, 3],
-        ("file1", "floats"): [1.1, 2.2, 3.3],
-        ("file1", "strings"): ["a", "b", "c"],
-        ("file2", "booleans"): [True, False, True],
-        ("file2", "mixed"): [1, "text", 3.14],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert len(coll_levels) == 2
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert file1_df["integers"].dtype == "int64"
-    assert file1_df["floats"].dtype == "float64"
-    assert file1_df["strings"].dtype == "object"
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert file2_df["booleans"].dtype == "bool"
-    assert file2_df["mixed"].dtype == "object"
-
-
-def test_reverse_multi_index_df_pmc_nan_values():
-    """
-    Test reverse_multi_index_df_pmc with NaN values in data.
-
-    Returns:
-        None: Asserts function handles NaN values correctly.
-    """
-    import numpy as np
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, np.nan, 3],
-        ("file1", "col2"): [np.nan, 5, 6],
-        ("file2", "col1"): [7, 8, np.nan],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert pd.isna(file1_df.iloc[1, 0])
-    assert pd.isna(file1_df.iloc[0, 1])
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert pd.isna(file2_df.iloc[2, 0])
-
-
-def test_reverse_multi_index_df_pmc_special_column_names():
-    """
-    Test reverse_multi_index_df_pmc with special characters in column names.
-
-    Returns:
-        None: Asserts function handles special characters in column names.
-    """
-    import pandas as pd
-
-    data = {
-        ("file-1", "col_1"): [1, 2, 3],
-        ("file-1", "col.2"): [4, 5, 6],
-        ("file 2", "col@3"): [7, 8, 9],
-        ("file 2", "col#4"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert "file-1" in coll_levels
-    assert "file 2" in coll_levels
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file-1")
-    assert "col_1" in file1_df.columns
-    assert "col.2" in file1_df.columns
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file 2")
-    assert "col@3" in file2_df.columns
-    assert "col#4" in file2_df.columns
-
-
-def test_reverse_multi_index_df_pmc_numeric_level_names():
-    """
-    Test reverse_multi_index_df_pmc with numeric level names.
-
-    Returns:
-        None: Asserts function handles numeric level names correctly.
-    """
-    import pandas as pd
-
-    data = {
-        (1, "col1"): [1, 2, 3],
-        (1, "col2"): [4, 5, 6],
-        (2, "col1"): [7, 8, 9],
-        (3.5, "col1"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 3
-    assert set(coll_levels) == {1, 2, 3.5}
-
-    for level in [1, 2, 3.5]:
-        level_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == level)
-        assert len(level_df.columns) >= 1
-        assert "col1" in level_df.columns
-
-
-def test_reverse_multi_index_df_pmc_large_dataframe():
-    """
-    Test reverse_multi_index_df_pmc with large DataFrame.
-
-    Returns:
-        None: Asserts function handles large DataFrames efficiently.
-    """
-    import numpy as np
-    import pandas as pd
-
-    num_rows = 1000
-    num_levels = 5
-    num_cols_per_level = 10
-
-    data = {}
-    for level in range(num_levels):
-        for col in range(num_cols_per_level):
-            data[(f"level_{level}", f"col_{col}")] = np.random.randint(0, 100, num_rows)
-
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == num_levels
-    assert len(coll_levels) == num_levels
-
-    for i, df_result in enumerate(dfs):
-        assert len(df_result) == num_rows
-        assert len(df_result.columns) == num_cols_per_level
-
-
-def test_reverse_multi_index_df_pmc_three_level_index():
-    """
-    Test reverse_multi_index_df_pmc with three-level MultiIndex (should still work).
-
-    Returns:
-        None: Asserts function handles three-level MultiIndex correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "group1", "col1"): [1, 2, 3],
-        ("file1", "group1", "col2"): [4, 5, 6],
-        ("file1", "group2", "col1"): [7, 8, 9],
-        ("file2", "group1", "col1"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert set(coll_levels) == {"file1", "file2"}
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert len(file1_df.columns.levels) == 2
-
-
-def test_reverse_multi_index_df_pmc_return_type_validation():
-    """
-    Test reverse_multi_index_df_pmc return types are correct.
-
-    Returns:
-        None: Asserts function returns correct types.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file2", "col1"): [4, 5, 6],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert isinstance(dfs, list)
-    assert isinstance(coll_levels, list)
-    assert all(isinstance(df, pd.DataFrame) for df in dfs)
-    assert len(dfs) == len(coll_levels)
-
-
-def test_reverse_multi_index_df_pmc_column_order_preservation():
-    """
-    Test reverse_multi_index_df_pmc preserves column order within levels.
-
-    Returns:
-        None: Asserts function preserves column order correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "z_col"): [1, 2, 3],
-        ("file1", "a_col"): [4, 5, 6],
-        ("file1", "m_col"): [7, 8, 9],
-        ("file2", "b_col"): [10, 11, 12],
-        ("file2", "y_col"): [13, 14, 15],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert list(file1_df.columns) == ["z_col", "a_col", "m_col"]
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert list(file2_df.columns) == ["b_col", "y_col"]
-
-
-def test_reverse_multi_index_df_pmc_index_preservation():
-    """
-    Test reverse_multi_index_df_pmc preserves DataFrame index.
-
-    Returns:
-        None: Asserts function preserves original DataFrame index.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file2", "col1"): [7, 8, 9],
-    }
-    df = pd.DataFrame(data, index=["row_a", "row_b", "row_c"])
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    for df_result in dfs:
-        assert list(df_result.index) == ["row_a", "row_b", "row_c"]
-
-
-def test_reverse_multi_index_df_pmc_memory_efficiency():
-    """
-    Test reverse_multi_index_df_pmc memory usage patterns.
-
-    Returns:
-        None: Asserts function doesn't create unnecessary copies.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file2", "col1"): [4, 5, 6],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    original_memory = df.memory_usage(deep=True).sum()
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    total_result_memory = sum(df.memory_usage(deep=True).sum() for df in dfs)
-
-    assert total_result_memory < original_memory * 3
-
-
-def test_reverse_multi_index_df_pmc_edge_case_single_row():
-    """
-    Test reverse_multi_index_df_pmc with single row DataFrame.
-
-    Returns:
-        None: Asserts function handles single row DataFrames correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [100],
-        ("file1", "col2"): [200],
-        ("file2", "col1"): [300],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert len(coll_levels) == 2
-
-    for df_result in dfs:
-        assert len(df_result) == 1
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert file1_df.iloc[0]["col1"] == 100
-    assert file1_df.iloc[0]["col2"] == 200
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert file2_df.iloc[0]["col1"] == 300
-
-
-# =============================================================================
 # TESTS FOR merge_counters_spatial_multiplex FUNCTION
 # =============================================================================
 
@@ -4954,47 +3433,35 @@ def test_merge_counters_spatial_multiplex_basic_functionality():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 1],
-        ("file1", "Grid_Size"): [64, 128, 256],
-        ("file1", "Workgroup_Size"): [16, 32, 64],
-        ("file1", "LDS_Per_Workgroup"): [1024, 2048, 4096],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 64, 96],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [16, 32, 48],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
-        ("file1", "Kernel_ID"): [501, 502, 503],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_b"],
-        ("file1", "Start_Timestamp"): [1000, 1100, 2000],
-        ("file1", "End_Timestamp"): [1200, 1300, 2500],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file2", "Dispatch_ID"): [4, 5, 6],
-        ("file2", "GPU_ID"): [1, 2, 2],
-        ("file2", "Grid_Size"): [512, 1024, 2048],
-        ("file2", "Workgroup_Size"): [32, 64, 128],
-        ("file2", "LDS_Per_Workgroup"): [2048, 4096, 8192],
-        ("file2", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file2", "Arch_VGPR"): [64, 96, 128],
-        ("file2", "Accum_VGPR"): [0, 0, 0],
-        ("file2", "SGPR"): [32, 48, 64],
-        ("file2", "Wave_Size"): [64, 64, 64],
-        ("file2", "Correlation_ID"): [2001, 2002, 2003],
-        ("file2", "Kernel_ID"): [601, 602, 603],
-        ("file2", "Kernel_Name"): ["kernel_c", "kernel_c", "kernel_d"],
-        ("file2", "Start_Timestamp"): [3000, 3100, 4000],
-        ("file2", "End_Timestamp"): [3400, 3500, 4800],
-        ("file2", "Counter1"): [400, 500, 600],
+        "Dispatch_ID": [1, 2, 3, 4, 5, 6],
+        "GPU_ID": [0, 0, 1, 1, 2, 2],
+        "Grid_Size": [64, 128, 256, 512, 1024, 2048],
+        "Workgroup_Size": [16, 32, 64, 32, 64, 128],
+        "LDS_Per_Workgroup": [1024, 2048, 4096, 2048, 4096, 8192],
+        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0],
+        "Arch_VGPR": [32, 64, 96, 64, 96, 128],
+        "Accum_VGPR": [0, 0, 0, 0, 0, 0],
+        "SGPR": [16, 32, 48, 32, 48, 64],
+        "Wave_Size": [64, 64, 64, 64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003, 2001, 2002, 2003],
+        "Kernel_ID": [501, 502, 503, 601, 602, 603],
+        "Kernel_Name": [
+            "kernel_a",
+            "kernel_a",
+            "kernel_b",
+            "kernel_c",
+            "kernel_c",
+            "kernel_d",
+        ],
+        "Start_Timestamp": [1000, 1100, 2000, 3000, 3100, 4000],
+        "End_Timestamp": [1200, 1300, 2500, 3400, 3500, 4800],
+        "Counter1": [100, 200, 300, 400, 500, 600],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
-    assert isinstance(result.columns, pd.MultiIndex)
-    assert len(result.columns.levels) == 2
 
 
 def test_merge_counters_spatial_multiplex_kernel_name_fallback():
@@ -5007,25 +3474,24 @@ def test_merge_counters_spatial_multiplex_kernel_name_fallback():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2],
-        ("file1", "GPU_ID"): [0, 0],
-        ("file1", "Grid_Size"): [64, 128],
-        ("file1", "Workgroup_Size"): [16, 32],
-        ("file1", "LDS_Per_Workgroup"): [1024, 2048],
-        ("file1", "Scratch_Per_Workitem"): [0, 0],
-        ("file1", "Arch_VGPR"): [32, 64],
-        ("file1", "Accum_VGPR"): [0, 0],
-        ("file1", "SGPR"): [16, 32],
-        ("file1", "Wave_Size"): [64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002],
-        ("file1", "Kernel_ID"): [501, 502],
-        ("file1", "Name"): ["kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1100],
-        ("file1", "End_Timestamp"): [1200, 1300],
-        ("file1", "Counter1"): [100, 200],
+        "Dispatch_ID": [1, 2],
+        "GPU_ID": [0, 0],
+        "Grid_Size": [64, 128],
+        "Workgroup_Size": [16, 32],
+        "LDS_Per_Workgroup": [1024, 2048],
+        "Scratch_Per_Workitem": [0, 0],
+        "Arch_VGPR": [32, 64],
+        "Accum_VGPR": [0, 0],
+        "SGPR": [16, 32],
+        "Wave_Size": [64, 64],
+        "Correlation_ID": [1001, 1002],
+        "Kernel_ID": [501, 502],
+        "Name": ["kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1100],
+        "End_Timestamp": [1200, 1300],
+        "Counter1": [100, 200],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # The function currently has a bug where it doesn't properly check for 'Kernel_Name'
     # existence before accessing it, even though it has fallback logic for 'Name'
@@ -5056,25 +3522,24 @@ def test_merge_counters_spatial_multiplex_single_kernel_occurrence():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 1, 2],
-        ("file1", "Grid_Size"): [64, 128, 256],
-        ("file1", "Workgroup_Size"): [16, 32, 64],
-        ("file1", "LDS_Per_Workgroup"): [1024, 2048, 4096],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 64, 96],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [16, 32, 48],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
-        ("file1", "Kernel_ID"): [501, 502, 503],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_b", "kernel_c"],
-        ("file1", "Start_Timestamp"): [1000, 2000, 3000],
-        ("file1", "End_Timestamp"): [1200, 2500, 3800],
-        ("file1", "Counter1"): [100, 200, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 1, 2],
+        "Grid_Size": [64, 128, 256],
+        "Workgroup_Size": [16, 32, 64],
+        "LDS_Per_Workgroup": [1024, 2048, 4096],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [32, 64, 96],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [16, 32, 48],
+        "Wave_Size": [64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003],
+        "Kernel_ID": [501, 502, 503],
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
+        "Start_Timestamp": [1000, 2000, 3000],
+        "End_Timestamp": [1200, 2500, 3800],
+        "Counter1": [100, 200, 300],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -5092,19 +3557,19 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6],
-        ("file1", "GPU_ID"): [0, 0, 1, 1, 2, 2],
-        ("file1", "Grid_Size"): [64, 64, 128, 128, 256, 256],
-        ("file1", "Workgroup_Size"): [16, 16, 32, 32, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [1024, 1024, 2048, 2048, 4096, 4096],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0, 0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 32, 64, 64, 96, 96],
-        ("file1", "Accum_VGPR"): [0, 0, 0, 0, 0, 0],
-        ("file1", "SGPR"): [16, 16, 32, 32, 48, 48],
-        ("file1", "Wave_Size"): [64, 64, 64, 64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003, 1004, 1005, 1006],
-        ("file1", "Kernel_ID"): [501, 502, 503, 504, 505, 506],
-        ("file1", "Kernel_Name"): [
+        "Dispatch_ID": [1, 2, 3, 4, 5, 6],
+        "GPU_ID": [0, 0, 1, 1, 2, 2],
+        "Grid_Size": [64, 64, 128, 128, 256, 256],
+        "Workgroup_Size": [16, 16, 32, 32, 64, 64],
+        "LDS_Per_Workgroup": [1024, 1024, 2048, 2048, 4096, 4096],
+        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0],
+        "Arch_VGPR": [32, 32, 64, 64, 96, 96],
+        "Accum_VGPR": [0, 0, 0, 0, 0, 0],
+        "SGPR": [16, 16, 32, 32, 48, 48],
+        "Wave_Size": [64, 64, 64, 64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003, 1004, 1005, 1006],
+        "Kernel_ID": [501, 502, 503, 504, 505, 506],
+        "Kernel_Name": [
             "kernel_a",
             "kernel_a",
             "kernel_b",
@@ -5112,12 +3577,11 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
             "kernel_c",
             "kernel_c",
         ],
-        ("file1", "Start_Timestamp"): [1000, 1100, 2000, 2100, 3000, 3100],
-        ("file1", "End_Timestamp"): [1200, 1300, 2500, 2600, 3800, 3900],
-        ("file1", "Counter1"): [100, 200, 300, 400, 500, 600],
+        "Start_Timestamp": [1000, 1100, 2000, 2100, 3000, 3100],
+        "End_Timestamp": [1200, 1300, 2500, 2600, 3800, 3900],
+        "Counter1": [100, 200, 300, 400, 500, 600],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -5135,25 +3599,24 @@ def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [64, 64, 64],
-        ("file1", "Workgroup_Size"): [16, 16, 16],
-        ("file1", "LDS_Per_Workgroup"): [1024, 1024, 1024],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 32, 32],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [16, 16, 16],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
-        ("file1", "Kernel_ID"): [501, 502, 503],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Counter1"): [100, 200, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [64, 64, 64],
+        "Workgroup_Size": [16, 16, 16],
+        "LDS_Per_Workgroup": [1024, 1024, 1024],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [32, 32, 32],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [16, 16, 16],
+        "Wave_Size": [64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003],
+        "Kernel_ID": [501, 502, 503],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Counter1": [100, 200, 300],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -5894,7 +4357,6 @@ def test_alignment_and_width():
 # =============================================================================
 
 
-@pytest.mark.list_metrics
 def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     return_code = binary_handler_analyze_rocprof_compute(["--list-metrics", "gfx90a"])
     assert return_code == 0
@@ -5905,30 +4367,83 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     assert "5.2 -> Command processor packet processor (CPC)" in output
 
 
-def test_list_blocks(binary_handler_analyze_rocprof_compute, capsys):
-    return_code = binary_handler_analyze_rocprof_compute(["--list-blocks", "gfx90a"])
+def list_blocks_supported_archs() -> list[str]:
+    """Return sorted arch names from analysis_configs/gfx* directories."""
+    return sorted(
+        p.name
+        for p in ANALYSIS_CONFIGS.iterdir()
+        if p.is_dir() and p.name.startswith("gfx")
+    )
+
+
+def arch_panels_from_disk(arch: str) -> dict[str, str]:
+    """Return {panel_id_str: title} from per-arch yaml Panel Configs."""
+    panels: dict[str, str] = {}
+    for yaml_path in sorted((ANALYSIS_CONFIGS / arch).glob("*.yaml")):
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        if not data or "Panel Config" not in data:
+            continue
+        panel_config = data["Panel Config"]
+        panels[str(panel_config["id"] // 100)] = panel_config["title"]
+    return panels
+
+
+def all_template_aliases_by_panel_id() -> dict[str, set[str]]:
+    """Return {panel_id_str: {alias, ...}} from all *_config_template.yaml."""
+    aliases: dict[str, set[str]] = {}
+    for tpl in sorted(ANALYSIS_CONFIGS.glob("*_config_template.yaml")):
+        data = yaml.safe_load(tpl.read_text(encoding="utf-8")) or {}
+        for panel in data.get("panels") or []:
+            alias = panel.get("panel_alias")
+            if alias:
+                pid = str(panel.get("panel_id"))
+                aliases.setdefault(pid, set()).add(alias)
+    return aliases
+
+
+@pytest.mark.parametrize("arch", list_blocks_supported_archs())
+def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, arch):
+    """Verify --list-blocks output matches on-disk panels and template aliases."""
+    return_code = binary_handler_analyze_rocprof_compute(["--list-blocks", arch])
     assert return_code == 0
 
-    # Test output
     output = capsys.readouterr().out
     assert "INDEX" in output
     assert "BLOCK ALIAS" in output
     assert "BLOCK NAME" in output
 
-    # Verify specific block id, alias, and name mappings
-    lines = output.strip().splitlines()
-    block_entries = {}
-    for line in lines[1:]:  # skip header
-        parts = line.split()
-        if len(parts) >= 3:
-            block_id = parts[0]
-            block_alias = parts[1]
-            block_name = " ".join(parts[2:])
-            block_entries[block_id] = (block_alias, block_name)
+    # Fixed-width parse: empty aliases break whitespace splitting.
+    lines = output.splitlines()
+    header_idx = next(i for i, line in enumerate(lines) if line.startswith("INDEX"))
+    block_entries: dict[str, tuple[str, str]] = {}
+    for line in lines[header_idx + 1 :]:
+        block_id = line[0:8].strip()
+        if not block_id:
+            continue
+        alias = line[9:25].strip()
+        name = line[26:].strip()
+        block_entries[block_id] = (alias, name)
 
-    assert block_entries["0"] == ("topstats", "Top Stats")
-    assert block_entries["1"] == ("sysinfo", "System Info")
-    assert block_entries["6"] == ("spi", "Workgroup Manager (SPI)")
+    expected_panels = arch_panels_from_disk(arch)
+    assert set(block_entries) == set(expected_panels), (
+        f"--list-blocks {arch}: rows {sorted(block_entries)} != "
+        f"on-disk panels {sorted(expected_panels)}"
+    )
+
+    valid_aliases = all_template_aliases_by_panel_id()
+    for panel_id, expected_name in expected_panels.items():
+        actual_alias, actual_name = block_entries[panel_id]
+        assert actual_name == expected_name, (
+            f"--list-blocks {arch} panel {panel_id}: name "
+            f"{actual_name!r} != on-disk title {expected_name!r}"
+        )
+        if actual_alias:
+            allowed = valid_aliases.get(panel_id, set())
+            assert actual_alias in allowed, (
+                f"--list-blocks {arch} panel {panel_id}: alias "
+                f"{actual_alias!r} not declared in any template "
+                f"(declared: {sorted(allowed)})"
+            )
 
 
 # =============================================================================
@@ -6078,213 +4593,271 @@ def test_amdsmi_get_gpu_memory_partition():
             assert partition == "N/A"
 
 
+def test_amdsmi_get_gpu_cache_size():
+    from utils.amdsmi_interface import get_gpu_cache_info, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch("amdsmi.amdsmi_get_gpu_cache_info") as cache_info_mock:
+            cache_info_mock.return_value = {"cache": "Mock Cache Info"}
+            cache_info = get_gpu_cache_info()
+            cache_info_mock.assert_called_once()
+            assert cache_info == {"cache": "Mock Cache Info"}
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_cache_info",
+            side_effect=Exception("Mock exception"),
+        ):
+            cache_info = get_gpu_cache_info()
+            assert cache_info is None
+
+
+def test_amdsmi_get_gpu_num_compute_units():
+    from utils.amdsmi_interface import get_gpu_num_compute_units, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch("amdsmi.amdsmi_get_gpu_asic_info") as cu_mock:
+            cu_mock.return_value = {"num_compute_units": 10}
+            cu_count = get_gpu_num_compute_units()
+            cu_mock.assert_called_once()
+            assert cu_count == 10
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_asic_info",
+            side_effect=Exception("Mock exception"),
+        ):
+            cu_count = get_gpu_num_compute_units()
+            assert cu_count == 0
+
+
+def test_per_device_query_returns_default_and_logs_last_error_on_all_failure():
+    """When every device raises, return the default and warn with the last error."""
+
+    @functools.partial(
+        _per_device_query, default_return="DEFAULT", warning_label="test label"
+    )
+    def fn(device, amdsmi):
+        raise RuntimeError(f"boom-{device}")
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as handles_mock:
+        handles_mock.return_value = ["d1", "d2", "d3"]
+        with mock.patch("utils.amdsmi_interface.import_amdsmi_module"):
+            with mock.patch("utils.amdsmi_interface.console_warning") as warn_mock:
+                result = fn()
+                assert result == "DEFAULT"
+                warn_mock.assert_called_once()
+                warning_message = warn_mock.call_args[0][0]
+                assert "test label" in warning_message
+                assert "boom-d3" in warning_message
+
+
 # =============================================================================
 # TESTS FOR ITERATION MULTIPLEXING
 # =============================================================================
 
 
-def test_impute_counters_iteration_multiplex():
+def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     """Test impute_counters_iteration_multiplex with sample DataFrame."""
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 512, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, None],
-        ("file1", "Counter2"): [None, 500, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 512, 1024],
+        "Workgroup_Size": [64, 64, 64],
+        "LDS_Per_Workgroup": [32, 32, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, None],
+        "Counter2": [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
     # Assert Counter1 and Counter2 imputed for first two dispatches
-    assert result[("file1", "Counter2")].iloc[0] == 500
-    assert result[("file1", "Counter1")].iloc[1] == 100
+    assert result["Counter2"].iloc[0] == 500
+    assert result["Counter1"].iloc[1] == 100
 
     # For "kernel_launch_params" policy
     result = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params"
+        df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
     # Assert Counter1 and Counter2 imputed for first and last dispatches
-    assert result[("file1", "Counter2")].iloc[0] == 300
-    assert result[("file1", "Counter1")].iloc[2] == 100
+    assert result["Counter2"].iloc[0] == 300
+    assert result["Counter1"].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 32],
-        ("file1", "LDS_Per_Workgroup"): [32, 24, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, 300],
-        ("file1", "Counter2"): [None, 500, None],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 1024, 1024],
+        "Workgroup_Size": [64, 64, 32],
+        "LDS_Per_Workgroup": [32, 24, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, 300],
+        "Counter2": [None, 500, None],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params"
+        df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
     # No imputation possible
-    assert pd.isna(result[("file1", "Counter2")].iloc[0])
-    assert pd.isna(result[("file1", "Counter1")].iloc[1])
-    assert pd.isna(result[("file1", "Counter2")].iloc[2])
+    assert pd.isna(result["Counter2"].iloc[0])
+    assert pd.isna(result["Counter1"].iloc[1])
+    assert pd.isna(result["Counter2"].iloc[2])
 
     # Test multi_kernel
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 512],
-        ("file1", "Workgroup_Size"): [64, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_b", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, None],
-        ("file1", "Counter2"): [None, 500, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 1024, 512],
+        "Workgroup_Size": [64, 64, 64],
+        "LDS_Per_Workgroup": [32, 32, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, None],
+        "Counter2": [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
     # Assert Counter1 and Counter2 imputed for first and last dispatches
-    assert result[("file1", "Counter2")].iloc[0] == 300
-    assert result[("file1", "Counter1")].iloc[2] == 100
+    assert result["Counter2"].iloc[0] == 300
+    assert result["Counter1"].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
 
     # For "kernel_launch_params" policy
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 32],
-        ("file1", "LDS_Per_Workgroup"): [32, 24, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, 300],
-        ("file1", "Counter2"): [None, 500, None],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 1024, 1024],
+        "Workgroup_Size": [64, 64, 32],
+        "LDS_Per_Workgroup": [32, 24, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, 300],
+        "Counter2": [None, 500, None],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params"
+        df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
     # No imputation possible
-    assert pd.isna(result[("file1", "Counter2")].iloc[0])
-    assert pd.isna(result[("file1", "Counter1")].iloc[1])
-    assert pd.isna(result[("file1", "Counter2")].iloc[2])
+    assert pd.isna(result["Counter2"].iloc[0])
+    assert pd.isna(result["Counter1"].iloc[1])
+    assert pd.isna(result["Counter2"].iloc[2])
 
     # Test incomplete last subgroup handling and no cross-subgroup contamination
     # Scenario: 3 counter buckets, 8 dispatches (2 complete subgroups + incomplete last)
     # Subgroup 0: rows 0-2, Subgroup 1: rows 3-5, Subgroup 2 (incomplete): rows 6-7
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6, 7, 8],
-        ("file1", "GPU_ID"): [0, 0, 0, 0, 0, 0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 64, 64, 64, 64, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [32, 32, 32, 32, 32, 32, 32, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0, 0, 0, 0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16, 16, 16, 16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0, 0, 0, 0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32, 32, 32, 32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a"] * 8,
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
-        ("file1", "End_Timestamp"): [1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500],
-        ("file1", "Kernel_ID"): [1, 1, 1, 1, 1, 1, 1, 1],
+        "Dispatch_ID": [1, 2, 3, 4, 5, 6, 7, 8],
+        "GPU_ID": [0, 0, 0, 0, 0, 0, 0, 0],
+        "Grid_Size": [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024],
+        "Workgroup_Size": [64, 64, 64, 64, 64, 64, 64, 64],
+        "LDS_Per_Workgroup": [32, 32, 32, 32, 32, 32, 32, 32],
+        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0, 0, 0],
+        "Arch_VGPR": [16, 16, 16, 16, 16, 16, 16, 16],
+        "Accum_VGPR": [0, 0, 0, 0, 0, 0, 0, 0],
+        "SGPR": [32, 32, 32, 32, 32, 32, 32, 32],
+        "Kernel_Name": ["kernel_a"] * 8,
+        "Start_Timestamp": [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
+        "End_Timestamp": [1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500],
+        "Kernel_ID": [1, 1, 1, 1, 1, 1, 1, 1],
         # Counter bucket pattern: A, B, C (repeats)
-        ("file1", "Counter_A"): [100, None, None, 200, None, None, 300, None],
-        ("file1", "Counter_B"): [None, 110, None, None, 210, None, None, 310],
-        ("file1", "Counter_C"): [None, None, 120, None, None, 220, None, None],
+        "Counter_A": [100, None, None, 200, None, None, 300, None],
+        "Counter_B": [None, 110, None, None, 210, None, None, 310],
+        "Counter_C": [None, None, 120, None, None, 220, None, None],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
     result = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params"
+        df, "kernel_launch_params", tmp_path
     )
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
 
     # Verify complete subgroups: all rows should have all counters
-    assert result[("file1", "Counter_A")].iloc[0] == 100
-    assert result[("file1", "Counter_A")].iloc[1] == 100
-    assert result[("file1", "Counter_A")].iloc[2] == 100
-    assert result[("file1", "Counter_B")].iloc[0] == 110
-    assert result[("file1", "Counter_C")].iloc[0] == 120
+    assert result["Counter_A"].iloc[0] == 100
+    assert result["Counter_A"].iloc[1] == 100
+    assert result["Counter_A"].iloc[2] == 100
+    assert result["Counter_B"].iloc[0] == 110
+    assert result["Counter_C"].iloc[0] == 120
 
     # Verify no cross-subgroup contamination: subgroup 1 has its own values
-    assert result[("file1", "Counter_A")].iloc[3] == 200
-    assert result[("file1", "Counter_A")].iloc[4] == 200
-    assert result[("file1", "Counter_B")].iloc[3] == 210
-    assert result[("file1", "Counter_C")].iloc[3] == 220
+    assert result["Counter_A"].iloc[3] == 200
+    assert result["Counter_A"].iloc[4] == 200
+    assert result["Counter_B"].iloc[3] == 210
+    assert result["Counter_C"].iloc[3] == 220
 
     # Verify incomplete last subgroup gets filled from previous subgroup
     # Row 6-7 only have Counter_A and Counter_B, missing Counter_C
-    assert result[("file1", "Counter_A")].iloc[6] == 300
-    assert result[("file1", "Counter_A")].iloc[7] == 300
-    assert result[("file1", "Counter_B")].iloc[6] == 310
-    assert result[("file1", "Counter_B")].iloc[7] == 310
+    assert result["Counter_A"].iloc[6] == 300
+    assert result["Counter_A"].iloc[7] == 300
+    assert result["Counter_B"].iloc[6] == 310
+    assert result["Counter_B"].iloc[7] == 310
     # Counter_C should be filled from previous subgroup via global ffill
-    assert result[("file1", "Counter_C")].iloc[6] == 220
-    assert result[("file1", "Counter_C")].iloc[7] == 220
+    assert result["Counter_C"].iloc[6] == 220
+    assert result["Counter_C"].iloc[7] == 220
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 8  # Ensure same number of rows
@@ -6345,7 +4918,7 @@ def test_noise_clamp_clamping_behavior():
     """Core behavior: positives unchanged, negatives clamped to 0."""
     import numpy as np
 
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     # Scalar: positive unchanged
     assert to_noise_clamp(1000.0, 100000.0) == 1000.0
@@ -6368,7 +4941,7 @@ def test_noise_clamp_clamping_behavior():
 @pytest.mark.noise_clamp
 def test_noise_clamp_zero_reference():
     """Edge case: zero reference should not cause division by zero."""
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     assert to_noise_clamp(-100.0, 0.0) == 0.0
     result = to_noise_clamp(pd.Series([-100.0]), pd.Series([0.0]))
@@ -6378,7 +4951,7 @@ def test_noise_clamp_zero_reference():
 @pytest.mark.noise_clamp
 def test_noise_clamp_warning_above_threshold():
     """Warning recorded when relative error >= 1%."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6397,7 +4970,7 @@ def test_noise_clamp_warning_above_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_no_warning_below_threshold():
     """No warning when relative error < 1%."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6414,7 +4987,7 @@ def test_noise_clamp_no_warning_below_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_empty_input():
     """Empty inputs should return empty without error."""
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     result = to_noise_clamp(pd.Series([], dtype=float), pd.Series([], dtype=float))
     assert len(result) == 0
@@ -6423,7 +4996,7 @@ def test_noise_clamp_empty_input():
 @pytest.mark.noise_clamp
 def test_noise_clamp_threshold_boundary():
     """Exactly 1% error should trigger warning (>= not >)."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6441,7 +5014,7 @@ def test_noise_clamper_instance_isolation():
     """Separate NoiseClamper instances should have independent state."""
     import numpy as np
 
-    from utils.parser import NoiseClamper
+    from utils.metrics.noise_clamper import NoiseClamper
 
     clamper1 = NoiseClamper()
     clamper2 = NoiseClamper()
@@ -6867,9 +5440,11 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(benchmark_base, "Path", mock_path)
 
     deviceID = 0
+    cache_sizes = {}
     # Create Bench_base object in order to call gpu benchmark lock method
     # Device ID list arg doesn't matter since we are just using the base class
-    testClass = benchmark_base.Bench_base([deviceID])
+    # cache_sizes can be empty for this test since we do not need it to test locking
+    testClass = benchmark_base.Bench_base(deviceID, cache_sizes)
 
     # --- Test lock acquisition and lock file creation ---
     with testClass.gpu_benchmark_lock(deviceID):
@@ -6936,31 +5511,123 @@ def test_parse_location_no_colon():
     assert parse_top_level_location("10@mainpy") == "unknown:0"
 
 
-def test_format_stats_microseconds():
-    assert "us" in format_stats(1, 0.005)
+def test_format_duration_microseconds_below_threshold():
+    assert format_duration(0.005) == "5.00 us"
 
 
-def test_format_stats_milliseconds():
-    assert "1.50 ms" in format_stats(1, 1.5)
+def test_format_duration_milliseconds_above_threshold():
+    assert format_duration(1.5) == "1.50 ms"
 
 
-def test_format_stats_boundary():
-    assert "ms" in format_stats(1, 0.01)
+def test_format_duration_boundary_value_is_milliseconds():
+    assert format_duration(0.01) == "0.01 ms"
 
 
-def test_format_stats_basic():
-    result = format_stats(3, 1.5)
-    assert "kernel_launches: 3" in result
-    assert "total_duration: 1.50 ms" in result
+def test_format_duration_none_renders_na():
+    assert format_duration(None) == "N/A"
+
+
+def test_format_duration_nan_renders_na():
+    assert format_duration(float("nan")) == "N/A"
+
+
+def test_kernel_stats_defaults_min_max_to_none():
+    stats = KernelStats()
+    assert stats.min_duration_ns is None
+    assert stats.max_duration_ns is None
+
+
+def test_call_tree_node_defaults_dispatch_stats_to_none():
+    node = CallTreeNode(name="x")
+    assert node.min_dispatch_ns is None
+    assert node.max_dispatch_ns is None
+    assert node.mean_dispatch_ns is None
+
+
+def test_call_tree_node_call_count_is_property_of_invocation_ids():
+    node = CallTreeNode(name="x")
+    assert node.call_count == 0
+    node.invocation_ids.add("ctx1")
+    node.invocation_ids.add("ctx2")
+    assert node.call_count == 2
+
+
+def test_format_node_stats_omits_calls_when_no_invocation_ids():
+    node = CallTreeNode(name="x")
+    node.kernel_launches = 1
+    node.total_duration_ms = 1.0
+    node.mean_dispatch_ns = 1_000_000.0
+    node.min_dispatch_ns = 1_000_000.0
+    node.max_dispatch_ns = 1_000_000.0
+    rendered = format_node_stats(node)
+    assert "calls:" not in rendered
+    assert "dispatches: 1" in rendered
+    assert "total: 1.00 ms" in rendered
+
+
+def test_format_node_stats_includes_calls_when_invocation_ids_present():
+    node = CallTreeNode(name="x")
+    node.invocation_ids.add("ctx1")
+    node.invocation_ids.add("ctx2")
+    node.kernel_launches = 4
+    node.total_duration_ms = 2.0
+    node.mean_dispatch_ns = 500_000.0
+    node.min_dispatch_ns = 500_000.0
+    node.max_dispatch_ns = 500_000.0
+    rendered = format_node_stats(node)
+    assert "calls: 2" in rendered
+    assert "dispatches: 4" in rendered
+
+
+def test_format_node_stats_renders_na_when_dispatch_stats_missing():
+    node = CallTreeNode(name="x")
+    node.kernel_launches = 0
+    rendered = format_node_stats(node)
+    assert "dispatch_mean: N/A" in rendered
+    assert "dispatch_min: N/A" in rendered
+    assert "dispatch_max: N/A" in rendered
 
 
 def test_rollup_leaf_node():
     node = CallTreeNode(name="leaf")
     node.kernels["kern_a"] = KernelStats(launches=2, total_duration_ns=1000.0)
-    launches, dur_ns = rollup_node_stats(node)
-    assert launches == 2
-    assert dur_ns == 1000.0
+    rollup = rollup_node_stats(node)
+    assert rollup.launches == 2
+    assert rollup.total_duration_ns == 1000.0
     assert node.kernel_launches == 2
+
+
+def test_rollup_leaf_node_with_no_min_max_returns_none():
+    node = CallTreeNode(name="leaf")
+    node.kernels["kern"] = KernelStats(launches=1, total_duration_ns=0.0)
+    rollup = rollup_node_stats(node)
+    assert isinstance(rollup, NodeRollup)
+    assert rollup.min_dispatch_ns is None
+    assert rollup.max_dispatch_ns is None
+    assert node.min_dispatch_ns is None
+    assert node.max_dispatch_ns is None
+    assert node.mean_dispatch_ns == 0.0
+
+
+def test_rollup_leaf_node_with_zero_launches_has_mean_none():
+    node = CallTreeNode(name="leaf")
+    rollup = rollup_node_stats(node)
+    assert rollup.launches == 0
+    assert node.mean_dispatch_ns is None
+
+
+def test_rollup_propagates_min_max_from_kernel_stats():
+    node = CallTreeNode(name="leaf")
+    node.kernels["k"] = KernelStats(
+        launches=2,
+        total_duration_ns=3000.0,
+        min_duration_ns=1000.0,
+        max_duration_ns=2000.0,
+    )
+    rollup_node_stats(node)
+    assert node.min_dispatch_ns == 1000.0
+    assert node.max_dispatch_ns == 2000.0
+    assert node.mean_dispatch_ns == 1500.0
 
 
 def test_rollup_parent_rolls_up_children():
@@ -7126,7 +5793,7 @@ def test_show_call_tree_prints_location_and_stats(capsys):
     show_call_tree({"main.py:10": root})
     output = capsys.readouterr().out
     assert "main.py:10" in output
-    assert "kernel_launches: 1" in output
+    assert "dispatches: 1" in output
     assert "kern" in output
 
 
@@ -7166,7 +5833,7 @@ def test_print_operator_node_branching_shows_stats(capsys):
     node.kernels["k2"] = KernelStats(launches=1, total_duration_ns=2_500_000.0)
     print_operator_node(node)
     output = capsys.readouterr().out
-    assert "kernel_launches: 2" in output
+    assert "dispatches: 2" in output
     assert "k1" in output
     assert "k2" in output
 
@@ -7180,7 +5847,7 @@ def test_print_operator_node_non_branching_omits_stats(capsys):
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
     assert "└─ single" in lines[0]
-    assert "kernel_launches" not in lines[0]
+    assert "dispatches" not in lines[0]
 
 
 def test_print_operator_node_long_kernel_wraps(capsys):
@@ -7209,6 +5876,202 @@ def test_print_operator_node_long_kernel_wraps(capsys):
     assert not any(line.strip().startswith("(id 7)") for line in output_lines)
 
 
+# ---------------------------------------------------------------------------
+# build_operator_summary
+# ---------------------------------------------------------------------------
+
+
+_OPERATOR_SUMMARY_COLUMNS = [
+    "Operator",
+    "Location",
+    "Calls",
+    "Dispatches",
+    "Dispatches_Per_Call",
+    "Total_GPU",
+    "Pct_Total_GPU",
+    "Mean_Per_Call",
+    "Mean_Per_Dispatch",
+    "Min_Dispatch",
+    "Max_Dispatch",
+]
+
+
+def _build_summary_from_dataframe(rows):
+    call_trees = build_call_trees(pd.DataFrame(rows))
+    return build_operator_summary(call_trees)
+
+
+def test_build_operator_summary_empty_input_returns_empty_with_full_schema():
+    summary = build_operator_summary({})
+    assert list(summary.columns) == _OPERATOR_SUMMARY_COLUMNS
+    assert summary.empty
+
+
+def test_build_operator_summary_skips_synthetic_location_root():
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1_000_000,
+        }
+    ])
+    assert "f.py:1" not in summary["Operator"].tolist()
+    assert "op_a" in summary["Operator"].tolist()
+
+
+def test_build_operator_summary_row_values_for_single_dispatch():
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 2_000_000,
+        }
+    ])
+    row = summary.loc[summary["Operator"] == "op_a"].iloc[0]
+    assert row["Location"] == "f.py:1"
+    assert row["Calls"] == 1
+    assert row["Dispatches"] == 1
+    assert row["Dispatches_Per_Call"] == 1.0
+    assert row["Total_GPU"] == pytest.approx(2.0)
+    assert row["Pct_Total_GPU"] == pytest.approx(100.0)
+    assert row["Mean_Per_Call"] == pytest.approx(2.0)
+    assert row["Mean_Per_Dispatch"] == pytest.approx(2.0)
+    assert row["Min_Dispatch"] == pytest.approx(2.0)
+    assert row["Max_Dispatch"] == pytest.approx(2.0)
+
+
+def test_build_operator_summary_sort_by_total_descending():
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "small_op",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1_000_000,
+        },
+        {
+            "Operator_Name": "big_op",
+            "Kernel_Name": "kern",
+            "Context_Id": "20@f.py:2",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 10_000_000,
+        },
+    ])
+    operators_in_order = summary["Operator"].tolist()
+    assert operators_in_order.index("big_op") < operators_in_order.index("small_op")
+
+
+def test_build_operator_summary_pct_total_gpu_sums_to_100_at_top_level():
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 3_000_000,
+        },
+        {
+            "Operator_Name": "op_b",
+            "Kernel_Name": "kern",
+            "Context_Id": "20@f.py:2",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1_000_000,
+        },
+    ])
+    op_a_pct = summary.loc[summary["Operator"] == "op_a", "Pct_Total_GPU"].iloc[0]
+    op_b_pct = summary.loc[summary["Operator"] == "op_b", "Pct_Total_GPU"].iloc[0]
+    assert op_a_pct == pytest.approx(75.0)
+    assert op_b_pct == pytest.approx(25.0)
+
+
+def test_build_operator_summary_pct_total_gpu_is_nan_when_grand_total_zero():
+    root = CallTreeNode(name="f.py:1")
+    op = CallTreeNode(name="op")
+    op.kernel_launches = 1
+    op.total_duration_ms = 0.0
+    op.invocation_ids.add("ctx")
+    root.children["op"] = op
+    summary = build_operator_summary({"f.py:1": root})
+    pct = summary.loc[summary["Operator"] == "op", "Pct_Total_GPU"].iloc[0]
+    assert math.isnan(pct)
+
+
+def test_build_operator_summary_min_max_mean_are_nan_when_no_dispatch_stats():
+    root = CallTreeNode(name="f.py:1")
+    op = CallTreeNode(name="op")
+    op.kernel_launches = 1
+    op.total_duration_ms = 5.0
+    op.invocation_ids.add("ctx")
+    root.children["op"] = op
+    summary = build_operator_summary({"f.py:1": root})
+    row = summary.loc[summary["Operator"] == "op"].iloc[0]
+    assert math.isnan(row["Min_Dispatch"])
+    assert math.isnan(row["Max_Dispatch"])
+    assert math.isnan(row["Mean_Per_Dispatch"])
+
+
+def test_build_operator_summary_calls_nan_when_no_invocation_ids():
+    root = CallTreeNode(name="f.py:1")
+    op = CallTreeNode(name="torch.ops.x")
+    op.kernel_launches = 2
+    op.total_duration_ms = 4.0
+    op.mean_dispatch_ns = 2_000_000.0
+    op.min_dispatch_ns = 2_000_000.0
+    op.max_dispatch_ns = 2_000_000.0
+    root.children["torch.ops.x"] = op
+    summary = build_operator_summary({"f.py:1": root})
+    row = summary.loc[summary["Operator"] == "torch.ops.x"].iloc[0]
+    assert math.isnan(row["Calls"])
+    assert math.isnan(row["Dispatches_Per_Call"])
+    assert math.isnan(row["Mean_Per_Call"])
+    assert row["Dispatches"] == 2
+
+
+# ---------------------------------------------------------------------------
+# show_operator_summary
+# ---------------------------------------------------------------------------
+
+
+def test_show_operator_summary_empty_prints_no_dispatches_message(capsys):
+    show_operator_summary(pd.DataFrame(columns=_OPERATOR_SUMMARY_COLUMNS))
+    output = capsys.readouterr().out
+    assert "no operators with recorded dispatches" in output
+
+
+def test_show_operator_summary_renders_per_cell_unit_suffix(capsys):
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 2_000_000,
+        }
+    ])
+    show_operator_summary(summary)
+    output = capsys.readouterr().out
+    assert "ms" in output or "us" in output
+    assert "Operator" in output
+    assert "Total" in output
+
+
+def test_show_operator_summary_renders_na_for_nan_cells(capsys):
+    root = CallTreeNode(name="f.py:1")
+    op = CallTreeNode(name="op")
+    op.kernel_launches = 1
+    op.total_duration_ms = 0.0
+    op.invocation_ids.add("ctx")
+    root.children["op"] = op
+    summary = build_operator_summary({"f.py:1": root})
+    show_operator_summary(summary)
+    output = capsys.readouterr().out
+    assert "N/A" in output
+
+
 # =============================================================================
 # BUILD METRIC LIST TESTS
 # =============================================================================
@@ -7230,9 +6093,6 @@ class TestBuildMetricList:
 
     @classmethod
     def setup_class(cls):
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
         from utils.utils_common import build_metric_list
 
         cls.build_metric_list = staticmethod(build_metric_list)
@@ -7846,3 +6706,56 @@ def test_format_table_ascii_text_wrapping():
     ]
     # Should have multiple lines for the wrapped description
     assert len(desc_lines) > 1, "Long description should wrap to multiple lines"
+
+
+# =============================================================================
+# TESTS FOR reconfigure_stdio_utf8 FUNCTION
+# =============================================================================
+
+
+def test_reconfigure_stdio_utf8_calls_reconfigure_on_both_streams():
+    """Both sys.stdout and sys.stderr should be reconfigured to utf-8/replace."""
+    fake_stdout = mock.MagicMock()
+    fake_stderr = mock.MagicMock()
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = fake_stdout
+        fake_sys.stderr = fake_stderr
+        utils_common.reconfigure_stdio_utf8()
+    fake_stdout.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+    fake_stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
+
+def test_reconfigure_stdio_utf8_swallows_attribute_error():
+    """Streams without a reconfigure attribute (captured / wrapped) are skipped."""
+    fake_stdout = mock.MagicMock(spec=[])  # no reconfigure attribute
+    fake_stderr = mock.MagicMock()
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = fake_stdout
+        fake_sys.stderr = fake_stderr
+        utils_common.reconfigure_stdio_utf8()  # must not raise
+    fake_stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
+
+def test_reconfigure_stdio_utf8_swallows_unsupported_operation():
+    """io.UnsupportedOperation from a captured stream must be swallowed."""
+    fake_stdout = mock.MagicMock()
+    fake_stdout.reconfigure.side_effect = io.UnsupportedOperation("not seekable")
+    fake_stderr = mock.MagicMock()
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = fake_stdout
+        fake_sys.stderr = fake_stderr
+        utils_common.reconfigure_stdio_utf8()  # must not raise
+    fake_stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
+
+def test_reconfigure_stdio_utf8_end_to_end_makes_non_ascii_print_safe():
+    """After reconfigure, encoding to bytes via the wrapper must not raise."""
+    raw = io.BytesIO()
+    wrapper = io.TextIOWrapper(raw, encoding="ascii", errors="strict")
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = wrapper
+        fake_sys.stderr = wrapper
+        utils_common.reconfigure_stdio_utf8()
+    wrapper.write("│ box │\n")  # would raise UnicodeEncodeError under ascii/strict
+    wrapper.flush()
+    assert raw.getvalue() == "│ box │\n".encode("utf-8")

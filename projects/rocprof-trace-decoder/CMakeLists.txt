@@ -8,11 +8,11 @@ if(NOT DEFINED VERSION_MAJOR)
 endif()
 
 if(NOT DEFINED VERSION_MINOR)
-    set(VERSION_MINOR 1)
+    set(VERSION_MINOR 2)
 endif()
 
 if(NOT DEFINED VERSION_PATCH)
-    set(VERSION_PATCH 7)
+    set(VERSION_PATCH 0)
 endif()
 
 set(VERSION_PATCH ${VERSION_PATCH})
@@ -21,10 +21,10 @@ set(VERSION_PATCH ${VERSION_PATCH})
 project(
     rocprof-trace-decoder
     VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}
-    LANGUAGES CXX)
+    LANGUAGES C CXX)
 set(PROJECT_NAME ${CMAKE_PROJECT_NAME})
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/cmake)
@@ -56,6 +56,7 @@ set(TTD_ALL_VERSIONS ON)
 
 option(BUILD_TESTS "Enable Building Tests for ROCProf Trace Decoder" OFF)
 option(BUILD_UNIT_TESTS "Enable Building Unit Tests for ROCProf Trace Decoder" ON)
+option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
 
 add_subdirectory(source)
 
@@ -79,6 +80,8 @@ if(CLANG_FORMAT)
         ${CMAKE_SOURCE_DIR}/source/*.cpp
         ${CMAKE_SOURCE_DIR}/source/*.hpp
         ${CMAKE_SOURCE_DIR}/source/*.h
+        ${CMAKE_SOURCE_DIR}/include/*.hpp
+        ${CMAKE_SOURCE_DIR}/include/*.h
         ${CMAKE_SOURCE_DIR}/test/*.cpp
         ${CMAKE_SOURCE_DIR}/test/*.hpp
         ${CMAKE_SOURCE_DIR}/test/*.h)

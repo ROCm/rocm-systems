@@ -25,9 +25,14 @@
 
 #include <dirent.h>
 
+#include <algorithm>
+#include <cctype>
+#include <charconv>
+#include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
-#include <type_traits>
+#include <string_view>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
@@ -149,6 +154,9 @@ amdsmi_status_t smi_amdgpu_get_ainic_processor_handle_by_index(
 amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(uint32_t device_index,
                                                          amdsmi_processor_handle* processor_handle);
 
+amdsmi_status_t get_gpu_device_from_handle(amdsmi_processor_handle processor_handle,
+                                           amd::smi::AMDSmiGPUDevice** gpudevice);
+
 /**
  *  @brief Get an int environment var or return default if does not exist
  *
@@ -214,6 +222,25 @@ void fill_2d_array(A& arr, T value) {
   }
 }
 
+std::string_view trim(std::string_view str);
+
+template <typename Tp, typename = std::enable_if_t<std::is_integral_v<Tp>>>
+std::optional<Tp> parse_number_from_string(std::string_view str) {
+  auto trimmed_str = trim(str);
+  if (trimmed_str.empty()) {
+    return std::nullopt;
+  }
+
+  auto value = Tp{};
+  auto [ptr, error_code] =
+      std::from_chars(trimmed_str.data(), (trimmed_str.data() + trimmed_str.size()), value);
+  if ((error_code == std::errc{}) && (ptr == (trimmed_str.data() + trimmed_str.size()))) {
+    return value;
+  }
+
+  return std::nullopt;
+}
+
 /**
  *  @brief Get the product serial number given the processor handle.
  *
@@ -225,6 +252,25 @@ void fill_2d_array(A& arr, T value) {
  */
 uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle);
 
+/*
+ *  Note:
+ *      - A full 128-bit UUID is 16 bytes
+ *      - Therefore, the total number of hexadecimal digits needed to represent a full 128-bit UUID
+ * is 32
+ *          - (16 bytes * 2 hexadecimal digits per byte)
+ */
+constexpr auto HIP_UUID_BYTES_SIZE = size_t(16);
+constexpr auto HIP_UUID_STRING_FULL_SIZE = size_t(HIP_UUID_BYTES_SIZE * 2);
+typedef struct hipUUID_t {
+  // Pointer to raw UUID bytes (length = HIP_UUID_BYTES_SIZE), not null-terminated
+  char bytes[HIP_UUID_BYTES_SIZE];
+} hipUUID_t;
+
+const char* from_uuid_to_cstring(const hipUUID_t& uuid) noexcept;
+std::optional<amdsmi_bdf_t> from_cstring_to_bdf(const char* bdf_str) noexcept;
+std::optional<hipUUID_t> from_cstring_to_uuid(const char* uuid_str) noexcept;
+std::string stringify_bdf(const amdsmi_bdf_t& bdf);
+
 /**
  *  @brief Tokenize bdfid into components.
  *
@@ -233,4 +279,40 @@ uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle);
  *  @retval ::Tuple of domain, bus, device, function
  */
 std::tuple<uint64_t, uint64_t, uint64_t, uint64_t> parse_bdfid(uint64_t bdfid);
+
+/**
+ *  @brief Read a pp_dpm_* sysfs file and populate an amdsmi_frequencies_t.
+ *
+ *  @details Parses the kernel's per-domain DPM table (e.g. pp_dpm_vclk,
+ *  pp_dpm_dclk) for the given device. Lines look like:
+ *      0: 200Mhz
+ *      1: 400Mhz *
+ *      2: 800Mhz
+ *  The '*' marker is recorded into @p f->current.
+ *
+ *  @param[in]  device       Device whose render node sysfs is read.
+ *  @param[in]  pp_dpm_file  Basename of the sysfs file (e.g. "pp_dpm_vclk").
+ *  @param[out] f            Frequencies struct to populate.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS on success.
+ *          ::AMDSMI_STATUS_INVAL if @p f is null.
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if the sysfs file is missing or empty.
+ */
+amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* device,
+                                                     const char* pp_dpm_file,
+                                                     amdsmi_frequencies_t* f);
+
+/**
+ *  @brief Map a VCLK/DCLK clock type to its pp_dpm_* sysfs filename.
+ *
+ *  rsmi does not expose these clock types via gpu_metrics, so amdsmi reads
+ *  them directly from sysfs.
+ *
+ *  @param[in] clk_type Clock type.
+ *
+ *  @retval Pointer to a static filename string, or nullptr for clock types
+ *          that are not VCLK0/VCLK1/DCLK0/DCLK1.
+ */
+const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
+
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

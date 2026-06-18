@@ -337,7 +337,7 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
       wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(lkey);
+      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(get_lkey(laddr));
     }
   }
 
@@ -389,7 +389,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
       wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(lkey);
+      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(get_lkey(laddr));
     }
   }
 

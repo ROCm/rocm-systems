@@ -314,7 +314,19 @@ public:
                                         const uint32_t* dst_addr,
                                         uint32_t        dw_mask)
     {
+        if(dw_mask == 0x3 && src_reg_addr_hi == src_reg_addr_lo + 1 &&
+           (reinterpret_cast<std::uintptr_t>(dst_addr) % 8) == 0)
+        {
+            BuildCopyRegDataPacket(cmdbuf,
+                                   src_reg_addr_lo,
+                                   dst_addr,
+                                   PACKET3_COPY_DATA__COUNT_SEL__64_BITS_OF_DATA,
+                                   false);
+            return 2;
+        }
+
         uint32_t read_counter = 0;
+
         if(dw_mask & 0x1)
         {
             BuildCopyRegDataPacket(cmdbuf,

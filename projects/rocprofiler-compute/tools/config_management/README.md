@@ -28,10 +28,12 @@ rocprofiler-compute/
 │       │       └── <latest_arch>_diff.yaml
 │       ├── gfx90a/
 │       ├── gfx940/
-│       ├── gfx950/                      # latest_arch
-│       └── gfx9_config_template.yaml    # single source of truth
+│       ├── gfx950/                      # latest_arch for CDNA (gfx9)
+│       ├── gfx1151/                     # RDNA 3.5 (gfx115*)
+│       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
+│       └── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
 │
-├── src/util/
+├── src/utils/
 │   ├── hash_checker.py
 │   ├── .config_hashes.json
 │
@@ -49,11 +51,14 @@ rocprofiler-compute/
 ## Core Concepts
 ### Latest Architecture
 
-- Exactly one architecture is considered *latest*
-- Defined in:
+- The CDNA gfx9 line has one *latest* architecture for delta workflows.
+- It is defined in:
 ```bash
 src/rocprof_compute_soc/analysis_configs/gfx9_config_template.yaml
 ```
+- RDNA 3.5 configs (`gfx11**`, e.g. `gfx1151`) use a separate template
+  (`gfx11_config_template.yaml`) and do not participate in gfx9 deltas.
+  Regenerate it with `parse_config_template.py` from a gfx11** directory.
 
 ### Panel YAMLs
 
@@ -283,10 +288,10 @@ Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx
 **Files:**
 ```bash
 tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,942,950}_metrics_description.yaml   # plain + rst + unit
+  ├── gfx{908,90a,942,950,1151}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
-  └── gfx{908,90a,942,950}_metrics.yaml               # rst + unit (generated)
+  └── gfx{908,90a,942,950,1151}_metrics.yaml               # rst + unit (generated)
 ```
 
 **After editing panel `metrics_description` sections:**
@@ -295,4 +300,10 @@ python tools/config_management/metric_description_manager.py --sync-all src/rocp
 python tools/config_management/metric_description_manager.py --generate-docs
 ```
 
-**RST enhancement:** Edit per-arch YAMLs directly. Framework preserves manual edits (detects when `rst != plain`).
+To regenerate the docs YAML for a single architecture without rewriting the others (for example, gfx1151 only):
+
+```bash
+python tools/config_management/metric_description_manager.py --generate-docs --docs-arch gfx1151
+```
+
+**Manual RST edits:** Edit per-arch YAMLs directly. The framework preserves an edit when its `rst` differs from `plain`.

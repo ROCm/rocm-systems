@@ -1,0 +1,67 @@
+digraph public_api_ownership {
+    rankdir=TB;
+    fontname="Helvetica";
+    node [fontname="Helvetica", fontsize=11, shape=record, style=filled];
+    edge [fontname="Helvetica", fontsize=10];
+
+    label="Public API: Ownership Model";
+    labelloc=t;
+    fontsize=14;
+
+    subgraph cluster_user {
+        label="User Code";
+        style=dashed;
+        color=gray60;
+        fontcolor=gray40;
+
+        user_code [label="User", shape=ellipse, fillcolor="#e8e8e8"];
+    }
+
+    subgraph cluster_public_api {
+        label="Public API (include/)";
+        style=filled;
+        color="#dce8f5";
+        fillcolor="#f0f6ff";
+
+        storage [label="{storage_t|unique_ptr\<impl\>\l|+ get_storage_version()\l}", fillcolor="#c8ddf0"];
+        writer [label="{writer_t|unique_ptr\<impl\>\l|+ register_*_info()\l+ insert_*_data()\l+ flush_in_memory_data_to_disk()\l}", fillcolor="#c8ddf0"];
+        reader [label="{reader_t|unique_ptr\<impl\>\l|+ get_all_*()\l+ get_events*()\l+ get_*_details()\l}", fillcolor="#c8ddf0"];
+    }
+
+    subgraph cluster_types {
+        label="Type Namespaces";
+        style=filled;
+        color="#e5ddf0";
+        fillcolor="#f5f0ff";
+
+        writer_types [label="writer_types\n(const char*, input)", shape=box, fillcolor="#ddd0f0"];
+        reader_types [label="reader_types\n(std::string, output)", shape=box, fillcolor="#ddd0f0"];
+        shared_types [label="shared_types\n(call_stack, source_context)", shape=box, fillcolor="#ddd0f0"];
+        version [label="version_t", shape=box, fillcolor="#ddd0f0"];
+    }
+
+    subgraph cluster_hidden {
+        label="Hidden (source/) — Pimpl boundary";
+        style=filled;
+        color="#f5e0e0";
+        fillcolor="#fff0f0";
+
+        storage_impl [label="storage_t::impl", shape=box, fillcolor="#f0d0d0"];
+        writer_impl [label="writer_t::impl", shape=box, fillcolor="#f0d0d0"];
+        reader_impl [label="reader_t::impl", shape=box, fillcolor="#f0d0d0"];
+    }
+
+    user_code -> storage [label="  creates  ", style=bold];
+    user_code -> writer [label="  unique_ptr<storage_t>  ", style=bold, color="#2060a0", fontcolor="#2060a0"];
+    user_code -> reader [label="  unique_ptr<storage_t>  ", style=bold, color="#2060a0", fontcolor="#2060a0"];
+
+    storage -> storage_impl [label="  m_impl  ", style=dashed, color=gray50];
+    writer -> writer_impl [label="  m_impl  ", style=dashed, color=gray50];
+    reader -> reader_impl [label="  m_impl  ", style=dashed, color=gray50];
+
+    writer -> writer_types [style=dotted, color=gray50, arrowhead=none];
+    reader -> reader_types [style=dotted, color=gray50, arrowhead=none];
+    writer_types -> shared_types [style=dotted, color=gray50, arrowhead=none];
+    reader_types -> shared_types [style=dotted, color=gray50, arrowhead=none];
+    storage -> version [style=dotted, color=gray50, arrowhead=none];
+}

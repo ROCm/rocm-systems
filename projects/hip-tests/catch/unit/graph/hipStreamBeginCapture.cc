@@ -1257,6 +1257,8 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_streamReuse) {
   for (int i = 0; i < 3; i++) {
     hipGraphExec_t graphExec{nullptr};
     HIP_CHECK(hipMemset(devMem[i], 0, sizeof(int)));
+    // hipMemset to device memory can be asynchronous; keep the reset ordered before graph launch.
+    HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipGraphInstantiate(&graphExec, graphs[i], nullptr, nullptr, 0));
     HIP_CHECK(hipGraphLaunch(graphExec, streams[i]));
     HIP_CHECK(hipStreamSynchronize(streams[i]));

@@ -50,21 +50,36 @@ simpleKernel(int* data, int value, int size)
     }
 }
 
+__global__ void
+emptyKernel(int*, int, int)
+{}
+
 namespace
 {
 struct config
 {
     int num_kernels       = 2000;
     int num_iterations    = 200;
+    int sync_interval     = 0;  // sync every N iterations
     int array_size        = 256;
     int progress_interval = 50;
+
+    std::string to_string() const
+    {
+        auto oss = std::ostringstream{};
+        oss << "[num_kernels (value=" << num_kernels
+            << ")] [num_iterations (value=" << num_iterations
+            << ")] [sync_interval (value=" << sync_interval
+            << ")] [array_size (value=" << array_size
+            << ")] [progress_interval (value=" << progress_interval << ")]";
+        return oss.str();
+    }
 };
 
 void
-print_usage(const char* argv0)
+print_usage(const char* argv0, const config& cfg)
 {
-    std::cerr << "Usage: " << argv0
-              << " [num_kernels] [num_iterations] [array_size] [progress_interval]" << std::endl;
+    std::cerr << "Usage: " << argv0 << " " << cfg.to_string() << std::endl;
 }
 
 int
@@ -86,16 +101,23 @@ parse_args(int argc, char** argv)
 {
     config cfg{};
 
-    if(argc > 5)
+    if(argc > 6)
     {
-        print_usage(argv[0]);
+        print_usage(argv[0], cfg);
         exit(EXIT_FAILURE);
     }
 
     if(argc > 1) cfg.num_kernels = parse_positive_integer("num_kernels", argv[1]);
     if(argc > 2) cfg.num_iterations = parse_positive_integer("num_iterations", argv[2]);
-    if(argc > 3) cfg.array_size = parse_positive_integer("array_size", argv[3]);
-    if(argc > 4) cfg.progress_interval = parse_positive_integer("progress_interval", argv[4]);
+    if(argc > 3) cfg.sync_interval = parse_positive_integer("sync_interval", argv[3]);
+    if(argc > 4) cfg.array_size = parse_positive_integer("array_size", argv[4]);
+    if(argc > 5) cfg.progress_interval = parse_positive_integer("progress_interval", argv[5]);
+
+    if(cfg.sync_interval < 1 || cfg.sync_interval > cfg.num_iterations)
+    {
+        cfg.sync_interval =
+            cfg.num_iterations;  // Default to syncing only at the end if invalid value is provided
+    }
 
     if(cfg.array_size < 256)
     {
@@ -110,6 +132,16 @@ parse_args(int argc, char** argv)
 int
 main(int argc, char** argv)
 {
+    for(int i = 0; i < argc; ++i)
+    {
+        auto _arg = std::string_view{argv[i]};
+        if(_arg == "?" || _arg == "-h" || _arg == "--help")
+        {
+            print_usage(argv[0], config{});
+            exit(EXIT_SUCCESS);
+        }
+    }
+
     const auto cfg = parse_args(argc, argv);
 
     std::cout << "Creating HIP graph with " << cfg.num_kernels << " kernel launches" << std::endl;
@@ -140,7 +172,8 @@ main(int argc, char** argv)
 
     for(int i = 0; i < cfg.num_kernels; i++)
     {
-        hipLaunchKernelGGL(simpleKernel, gridSize, blockSize, 0, stream, d_data, i, cfg.array_size);
+        auto* kernel = (i % 2 == 0) ? &simpleKernel : &emptyKernel;
+        hipLaunchKernelGGL(*kernel, gridSize, blockSize, 0, stream, d_data, i, cfg.array_size);
         HIP_CHECK(hipGetLastError());
     }
 
@@ -166,10 +199,15 @@ main(int argc, char** argv)
         {
             std::cout << "Completed " << (iter + 1) << " iterations" << std::endl;
         }
+
+        // Wait for completion
+        if(cfg.sync_interval > 0 && ((iter + 1) % cfg.sync_interval) == 0)
+            HIP_CHECK(hipStreamSynchronize(stream));
     }
 
     // Wait for completion
     HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipDeviceSynchronize());
 
     // End timing
     auto                          end     = std::chrono::high_resolution_clock::now();
