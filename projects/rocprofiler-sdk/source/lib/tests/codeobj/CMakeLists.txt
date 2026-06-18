@@ -6,10 +6,8 @@ rocprofiler_deactivate_clang_tidy()
 
 add_executable(codeobj-library-tests)
 
-set(CODEOBJ_LIB_TEST_SOURCES
-    "codeobj_library_test.cpp"
-    "funcmap_test.cpp"
-    "kpack_code_object_test.cpp")
+set(CODEOBJ_LIB_TEST_SOURCES "codeobj_library_test.cpp" "funcmap_test.cpp"
+                             "kpack_code_object_test.cpp")
 
 target_sources(codeobj-library-tests PRIVATE ${CODEOBJ_LIB_TEST_SOURCES})
 
@@ -131,9 +129,11 @@ target_link_libraries(
 
 if(TARGET rocm::rocm_kpack)
     target_link_libraries(codeobj-library-tests PRIVATE rocm::rocm_kpack)
-    target_compile_definitions(codeobj-library-tests PRIVATE ROCPROFILER_TEST_HAS_ROCM_KPACK=1)
+    target_compile_definitions(codeobj-library-tests
+                               PRIVATE ROCPROFILER_TEST_HAS_ROCM_KPACK=1)
 else()
-    target_compile_definitions(codeobj-library-tests PRIVATE ROCPROFILER_TEST_HAS_ROCM_KPACK=0)
+    target_compile_definitions(codeobj-library-tests
+                               PRIVATE ROCPROFILER_TEST_HAS_ROCM_KPACK=0)
 endif()
 
 rocprofiler_add_unit_test(
