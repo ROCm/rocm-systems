@@ -8,18 +8,23 @@
 ## Features
 
 - **Core rocSHMEM API**: Memory management, data transfer, atomics, synchronization
+- **Teams**: Team split/destroy/translate with tracked lifecycle and WORLD/INVALID sentinels
+- **Team-scoped collectives**: Stream-ordered all-to-all and broadcast
 - **Framework-agnostic allocation**: `rocshmem_create_buffer` / `rocshmem_get_peer_buffer` work without any ML framework
+- **Heap-base introspection**: `rocshmem_get_heap_bases` for device-side pointer translation
 - **`__cuda_array_interface__`**: Zero-copy interop between `SymmetricBuffer` and PyTorch tensors
-- **PyTorch interop submodule**: `rocshmem4py.interop.torch` for tensor allocation and tensor-aware RMA (`put`, `get`, `barrier_all`)
+- **PyTorch interop submodule**: `rocshmem4py.interop.torch` for tensor allocation, RMA, and collectives
 - **PyTorch coordination**: `init_with_torch()` / `finalize_with_torch()` for torch.distributed-based init
-- **MPI Integration**: `init_with_mpi()` for existing MPI applications
+- **MPI Integration**: `init_with_mpi()` / `finalize_with_mpi()` for existing MPI applications
 
 ## API Coverage
 
 `rocshmem4py` currently exposes a focused host-side subset of rocSHMEM APIs:
-initialization/finalization, PE/team queries, memory allocation, put/get
-(blocking/non-blocking/stream variants), selected atomics, and key constants.
-It does not yet expose every rocSHMEM host API.
+initialization/finalization, PE/team queries, team management, memory
+allocation, put/get (blocking/non-blocking/stream variants), team-scoped
+collectives, the full host atomic-operation matrix, and key constants.
+Context APIs (`rocshmem_ctx_*`) are not yet exposed. It does not yet expose
+every rocSHMEM host API.
 
 Host-facing symbols are exported directly from the compiled extension module
 (`_rocshmem4py`) to avoid drift between Python imports and C++ bindings.
@@ -103,7 +108,7 @@ buf = rocshmem4py.SymmetricBuffer(1024)
 rocshmem4py.rocshmem_barrier_all()
 
 buf.free()
-rocshmem4py.rocshmem_finalize()
+rocshmem4py.finalize_with_mpi()
 ```
 
 ## API Reference
@@ -115,7 +120,9 @@ rocshmem4py.rocshmem_finalize()
 | `init_with_torch(group=None)` | Init rocSHMEM via torch.distributed (recommended) |
 | `finalize_with_torch()` | Synchronized teardown of rocSHMEM + torch.distributed |
 | `init_with_mpi(comm)` | Init rocSHMEM via mpi4py |
+| `finalize_with_mpi()` | Synchronized teardown for `init_with_mpi()` sessions |
 | `init_rocshmem_by_uniqueid(group)` | Low-level init with a torch process group |
+| `set_hip_device_from_env()` | Pin HIP device from `LOCAL_RANK` before raw init |
 | `rocshmem_init()` | Raw rocSHMEM init (rarely needed directly) |
 | `rocshmem_finalize()` | Raw rocSHMEM finalize |
 | `rocshmem_init_attr(rank, nranks, uid)` | Init with unique ID |
@@ -130,6 +137,28 @@ rocshmem4py.rocshmem_finalize()
 | `rocshmem_team_my_pe(team)` | PE number within a team |
 | `rocshmem_team_n_pes(team)` | Number of PEs in a team |
 
+### Teams
+
+Team handles are passed as Python `int` values (raw `intptr_t` from the C
+library). Use the sentinel constants below for the special teams; all other
+handles come from `rocshmem_team_split_strided`.
+
+| Function / type | Description |
+|---|---|
+| `TeamConfig()` | Configuration record for `rocshmem_team_split_strided` (`num_contexts`) |
+| `rocshmem_team_split_strided(parent, start, stride, size, config=None, mask=0)` | Split a parent team into a strided sub-team; returns `(status, team_handle)`. Non-members receive `ROCSHMEM_TEAM_INVALID` (`-1`), not `0` |
+| `rocshmem_team_destroy(team)` | Destroy a team (no-op for `ROCSHMEM_TEAM_WORLD` / `ROCSHMEM_TEAM_INVALID`) |
+| `rocshmem_team_translate_pe(src_team, src_pe, dest_team)` | Map a PE index between teams; returns `-1` if unmappable |
+
+Pass `ROCSHMEM_TEAM_WORLD` (`0`) for world-scope team operations. The C
+binding's `resolve_team_handle()` translates this sentinel to the runtime
+handle; use the constant rather than a raw runtime pointer so
+`rocshmem_team_destroy` and the tracked split/destroy wrappers stay safe.
+
+`finalize_with_torch()` and `finalize_with_mpi()` automatically destroy any
+teams created via the tracked `rocshmem_team_split_strided` wrapper before
+calling `rocshmem_finalize()`.
+
 ### Memory Management
 
 #### Framework-agnostic (`rocshmem4py`)
@@ -142,6 +171,7 @@ rocshmem4py.rocshmem_finalize()
 | `SymmetricBuffer(size)` | RAII wrapper; exposes `__cuda_array_interface__` for zero-copy torch interop |
 | `rocshmem_create_buffer(nbytes)` | Collective allocation returning a `SymmetricBuffer` |
 | `rocshmem_get_peer_buffer(buf, peer)` | Non-owning `SymmetricBuffer` view of a peer's buffer (IPC only) |
+| `rocshmem_get_heap_bases(ptr)` | Per-PE base addresses for a symmetric allocation (for device-side pointer translation) |
 
 #### PyTorch interop (`rocshmem4py.interop.torch`)
 
@@ -153,6 +183,22 @@ rocshmem4py.rocshmem_finalize()
 | `put(dst, src, peer, stream=None)` | Stream-ordered put (all backends) |
 | `get(dst, src, peer, stream=None)` | Stream-ordered get (all backends) |
 | `barrier_all(stream=None)` | Stream-ordered collective barrier |
+| `get_heap_bases(tensor)` | `(n_pes,)` int64 GPU tensor of per-PE heap bases for a symmetric tensor |
+| `alltoall(team, dst, src, stream=None)` | Stream-ordered all-to-all over a team |
+| `broadcast(team, dst, src, pe_root, stream=None)` | Stream-ordered broadcast over a team |
+
+### Collectives
+
+#### Host (`rocshmem4py`)
+
+| Function | Description |
+|---|---|
+| `rocshmem_alltoallmem_on_stream(team, dest, source, bytes_per_pe, stream)` | Stream-ordered all-to-all; `bytes_per_pe` is bytes sent to each PE in the team |
+| `rocshmem_broadcastmem_on_stream(team, dest, source, nbytes, pe_root, stream)` | Stream-ordered broadcast; `nbytes` is total bytes; `pe_root` is in the team's PE space |
+| `rocshmem_sync_all()` | Lighter-weight sync (local-store visibility) |
+| `rocshmem_sync_all_on_stream(stream)` | Stream-ordered `sync_all` |
+
+Pass `ROCSHMEM_TEAM_WORLD` (`0`) as the team handle for world-scope collectives.
 
 ### Data Transfer
 
@@ -172,17 +218,43 @@ rocshmem4py.rocshmem_finalize()
 | Function | Description |
 |---|---|
 | `rocshmem_barrier_all()` | Barrier across all PEs |
-| `rocshmem_barrier_all_on_stream(stream)` | Stream-ordered barrier |
+| `rocshmem_barrier_all_on_stream(stream)` | Stream-ordered barrier across all PEs |
+| `rocshmem_barrier(team)` | Blocking barrier across all PEs in `team` |
+| `rocshmem_barrier_on_stream(team, stream)` | Stream-ordered team barrier; `ROCSHMEM_TEAM_INVALID` is a no-op |
+| `rocshmem_team_sync(team)` | Team member rendezvous plus local-store visibility (lighter than barrier) |
+| `rocshmem_team_sync_on_stream(team, stream)` | Stream-ordered team sync; `ROCSHMEM_TEAM_INVALID` is a no-op |
+| `rocshmem_sync_all()` | World-scope sync (local-store visibility) |
+| `rocshmem_sync_all_on_stream(stream)` | Stream-ordered world sync |
 | `rocshmem_fence()` | Ordering fence |
 | `rocshmem_quiet()` | Wait for all outstanding operations |
+| `hip_device_synchronize()` | Synchronize the current HIP device |
+
+Team-scoped calls use the same `team` handle conventions as collectives
+(`ROCSHMEM_TEAM_WORLD` or a handle from `rocshmem_team_split_strided`).
+Non-members of a child team should pass `ROCSHMEM_TEAM_INVALID` (`-1`); the
+runtime returns without enqueueing work. If RMA was issued on a HIP stream,
+synchronize that stream before a *blocking* `rocshmem_barrier(team)`; use
+`rocshmem_barrier_on_stream` on the same stream as the RMA for overlap.
 
 ### Atomic Operations
+
+Host atomic operations are auto-exported from the compiled extension by naming
+convention (`rocshmem_{type}_atomic_{op}`). The matrix covers integer, unsigned,
+and floating types with fetch/set/swap/CAS, fetch-add/add, fetch-inc/inc, and
+bitwise ops where the rocSHMEM header provides them.
+
+Examples:
 
 | Function | Description |
 |---|---|
 | `rocshmem_int_atomic_fetch_add(dest, value, pe)` | Atomic int fetch-and-add |
 | `rocshmem_long_atomic_fetch_add(dest, value, pe)` | Atomic long fetch-and-add |
 | `rocshmem_int_atomic_compare_swap(dest, cond, value, pe)` | Atomic int CAS |
+| `rocshmem_uint64_atomic_or(dest, value, pe)` | Atomic uint64 OR |
+
+> **Note:** Host AMO bindings are present in all builds, but behavioral
+> correctness on the IPC no-MPI backend depends on runtime support that is
+> still being extended.
 
 ### Constants
 

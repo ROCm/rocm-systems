@@ -391,6 +391,10 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
                     new_line = new_line.replace(str_replace, str_with)
                     output_file_array[index] = new_line
 
+        # trim last newline - avoids pre-commit hook error
+        if output_file_array[-1] == "":
+            output_file_array = output_file_array[:-1]
+
         write_file(output_file, output_file_array)
 
 

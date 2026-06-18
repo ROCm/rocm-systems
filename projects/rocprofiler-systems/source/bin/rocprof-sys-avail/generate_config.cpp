@@ -6,6 +6,7 @@
 #include "defines.hpp"
 #include "info_type.hpp"
 
+#include "common/env_vars.hpp"
 #include "common/json_config.hpp"
 
 #include <nlohmann/json.hpp>
@@ -352,13 +353,13 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                 auto _romni = _rhs->get_categories().count("rocprofsys") > 0;
                 if(_lomni && !_romni) return true;
                 if(_romni && !_lomni) return false;
+                namespace env_vars = rocprofsys::env_vars;
                 for(const auto* itr :
-                    { "ROCPROFSYS_CONFIG", "ROCPROFSYS_MODE", "ROCPROFSYS_TRACE",
-                      "ROCPROFSYS_TRACE_LEGACY", "ROCPROFSYS_PROFILE",
-                      "ROCPROFSYS_USE_SAMPLING", "ROCPROFSYS_USE_PROCESS_SAMPLING",
-                      "ROCPROFSYS_USE_AMD_SMI", "ROCPROFSYS_USE_AINIC",
-                      "ROCPROFSYS_USE_KOKKOSP", "ROCPROFSYS_USE_OMPT", "ROCPROFSYS_USE",
-                      "ROCPROFSYS_OUTPUT" })
+                    { env_vars::CONFIG, env_vars::MODE, env_vars::TRACE,
+                      env_vars::TRACE_LEGACY, env_vars::PROFILE, env_vars::USE_SAMPLING,
+                      env_vars::USE_PROCESS_SAMPLING, env_vars::USE_AMD_SMI,
+                      env_vars::USE_AINIC, env_vars::USE_KOKKOSP, env_vars::USE_OMPT,
+                      "ROCPROFSYS_USE", env_vars::OUTPUT })
                 {
                     if(_lhs->get_env_name().find(itr) == 0 &&
                        _rhs->get_env_name().find(itr) != 0)
@@ -368,7 +369,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                         return false;
                 }
                 for(const auto* itr :
-                    { "ROCPROFSYS_SUPPRESS_PARSING", "ROCPROFSYS_SUPPRESS_CONFIG" })
+                    { env_vars::SUPPRESS_PARSING, env_vars::SUPPRESS_CONFIG })
                 {
                     if(_lhs->get_env_name().find(itr) == 0 &&
                        _rhs->get_env_name().find(itr) != 0)
@@ -489,6 +490,6 @@ update_choices(const std::shared_ptr<settings>& _settings)
     if(_settings->get_verbose() >= 2 || _settings->get_debug())
         printf("[rocprof-sys-avail] # of component choices: %zu\n",
                _component_choices.size());
-    _settings->find("ROCPROFSYS_TIMEMORY_COMPONENTS")
+    _settings->find(std::string{ rocprofsys::env_vars::TIMEMORY_COMPONENTS })
         ->second->set_choices(_component_choices);
 }

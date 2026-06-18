@@ -12,8 +12,12 @@
 #include "util/bitfield.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
+namespace amdgpu {
+class Wavefront;
+}
 namespace rdna4 {
 
 /// @brief RDNA4 STATUS register layout (GFX12, one 32-bit scalar register per wavefront).
@@ -67,6 +71,13 @@ struct Isa : amdgpu::RdnaIsaBase {
   using MachineInst = rdna4::MachineInst;
   using OperandType = rdna4::OperandType;
   using StatusReg = rdna4::StatusReg;
+
+  // SIMD fast-path traits — consumed by AmdgpuIsaOperand<Isa> in
+  // rocjitsu/isa/isa_operand_simd_inl.h. Definitions live in this arch's
+  // operand.cpp; bodies forward to the anonymous-namespace helpers.
+  static std::optional<uint32_t> resolved_vgpr_offset(OperandType opr_type, int ev);
+  static bool simd_capable_value(OperandType opr_type, int ev);
+  static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };
 
 } // namespace rdna4

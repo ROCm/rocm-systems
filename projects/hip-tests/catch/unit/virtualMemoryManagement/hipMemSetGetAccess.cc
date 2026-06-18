@@ -24,7 +24,6 @@
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
 
-#include "hipMallocManagedCommon.hh"
 #include "hip_vmm_common.hh"
 
 #define THREADS_PER_BLOCK 512
@@ -610,10 +609,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsAccess) {
  */
 HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2UnifiedMemCpy) {
   CTX_CREATE();
-  auto managed = HmmAttrPrint();
-  if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);

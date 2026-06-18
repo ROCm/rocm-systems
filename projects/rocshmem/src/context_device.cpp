@@ -323,4 +323,8 @@ CONTEXT_SIGNAL_FETCH_DEF()
 CONTEXT_SIGNAL_FETCH_DEF(_wg)
 CONTEXT_SIGNAL_FETCH_DEF(_wave)
 
+__device__ int Context::tile_collective_wait(rocshmem_team_t team, uint64_t flags) {
+  DISPATCH_RET(tile_collective_wait(team, flags));
+}
+
 }  // namespace rocshmem

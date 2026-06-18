@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/common_types.hpp"
+#include "core/demangler.hpp"
 #include "function_signature.hpp"
 #include "fwd.hpp"
 #include "info.hpp"
@@ -15,7 +17,9 @@
 #include <dlfcn.h>
 #include <string>
 #include <sys/stat.h>
+#include <type_traits>
 #include <unistd.h>
+#include <utility>
 
 //======================================================================================//
 
@@ -34,7 +38,8 @@ to_lower(string_t s)
 //
 //======================================================================================//
 //
-template <typename Tp, std::enable_if_t<!std::is_same<Tp, std::string>::value, int> = 0>
+template <typename Tp>
+    requires(!std::is_same_v<Tp, std::string>)
 snippet_pointer_t
 get_snippet(Tp arg)
 {
@@ -43,7 +48,8 @@ get_snippet(Tp arg)
 //
 //======================================================================================//
 //
-template <typename Tp, std::enable_if_t<std::is_same<Tp, std::string>::value, int> = 0>
+template <typename Tp>
+    requires std::is_same_v<Tp, std::string>
 snippet_pointer_t
 get_snippet(const Tp& arg)
 {

@@ -11,7 +11,7 @@ import pandas as pd
 
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning
-from utils.parser import eval_metric
+from utils.metrics.evaluation_pipeline import eval_metric
 
 ################################################
 # Global vars
@@ -82,6 +82,7 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
 PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]
 MATRIX_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
 CACHE_HIERARCHY = ["HBM", "L2", "L1", "LDS"]
+CACHE_LEVELS = ["ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
 
 TOP_N = 10
 
@@ -119,12 +120,19 @@ class PlotPoints:
     ai_l1: list[list[float]]
     ai_l2: list[list[float]]
     ai_hbm: list[list[float]]
+    ai_lds: list[list[float]]
     kernelNames: list[str]
 
     @classmethod
     def empty(cls) -> "PlotPoints":
         """Create empty plot points structure."""
-        return cls(ai_l1=[[], []], ai_l2=[[], []], ai_hbm=[[], []], kernelNames=[])
+        return cls(
+            ai_l1=[[], []],
+            ai_l2=[[], []],
+            ai_hbm=[[], []],
+            ai_lds=[[], []],
+            kernelNames=[],
+        )
 
 
 @dataclass
@@ -163,15 +171,6 @@ def get_font() -> dict[str, Union[int, str]]:
     }
 
 
-def get_color(category: str) -> str:
-    color_map = {"ai_l1": "green", "ai_l2": "blue", "ai_hbm": "red"}
-
-    if category not in color_map:
-        raise RuntimeError(f"Invalid category passed to get_color(): {category}")
-
-    return color_map[category]
-
-
 def sanitize_ai_value(value: float) -> float:
     excluded_values = ("", "N/A", np.inf, -np.inf, None)
     return value if value and value not in excluded_values else 0
@@ -191,7 +190,7 @@ def calc_ceilings(
 
     if ai_data:
         max_ai = 0
-        for cache_level in ["ai_l1", "ai_l2", "ai_hbm"]:
+        for cache_level in CACHE_LEVELS:
             if cache_level in ai_data and ai_data[cache_level][0]:
                 cache_max = max(ai_data[cache_level][0])
                 max_ai = max(max_ai, cache_max)
@@ -324,7 +323,6 @@ def calc_ceilings(
 def calc_ai_analyze(
     workload: schema.Workload,
     pmc_df: pd.DataFrame,
-    config: dict[str, Any],
     arch_config: schema.ArchConfig,
 ) -> dict[str, Union[list[list[float]], list[str]]]:
     """
@@ -373,13 +371,11 @@ def calc_ai_analyze(
         console_debug("roofline", f"Processing kernel {kernel_id}: {kernel_name[:50]}")
 
         # filter PMC data for specific kernel
-        kernel_pmc_df = pmc_df[pmc_df["pmc_perf"]["Kernel_Name"] == kernel_name]
+        kernel_pmc_df = pmc_df[pmc_df["Kernel_Name"] == kernel_name]
 
         if kernel_pmc_df.empty:
             console_debug("roofline", f"No PMC data for kernel {kernel_id}")
             continue
-
-        kernel_only_data = {"pmc_perf": kernel_pmc_df["pmc_perf"]}
 
         kernel_dfs: dict[int, pd.DataFrame] = {}
         kernel_dfs_type: dict[int, str] = {}
@@ -389,18 +385,18 @@ def calc_ai_analyze(
                 kernel_dfs[table_id] = arch_config.dfs[table_id].copy()
                 kernel_dfs_type[table_id] = arch_config.dfs_type[table_id]
 
-        # eval metrics for single kernel only
+        # eval_metric keys off kernel_dfs; extra dfs_expressions entries are ignored.
         eval_metric(
             kernel_dfs,
             kernel_dfs_type,
+            arch_config.dfs_expressions,
             workload.sys_info.iloc[0],
             workload.roofline_peaks,
-            kernel_only_data,
+            kernel_pmc_df,
             debug=False,
-            config=config,
         )
 
-        ai_hbm = ai_l2 = ai_l1 = performance = 0
+        ai_hbm = ai_l2 = ai_l1 = ai_lds = performance = 0
 
         if 402 in kernel_dfs:
             for idx, row in kernel_dfs[402].iterrows():
@@ -412,6 +408,8 @@ def calc_ai_analyze(
                     ai_l2 = sanitize_ai_value(value)
                 elif metric == "AI L1":
                     ai_l1 = sanitize_ai_value(value)
+                elif metric == "AI LDS":
+                    ai_lds = sanitize_ai_value(value)
                 elif metric == "Performance (GFLOPs)":
                     performance = sanitize_ai_value(value)
 
@@ -421,6 +419,7 @@ def calc_ai_analyze(
             f"AI_HBM={ai_hbm:.2f}, "
             f"AI_L2={ai_l2:.2f}, "
             f"AI_L1={ai_l1:.2f}, "
+            f"AI_LDS={ai_lds:.2f}, "
             f"Performance={performance:.2e} GFLOP/s",
         )
 
@@ -435,12 +434,20 @@ def calc_ai_analyze(
             if ai_l1 >= 0:
                 plot_points.ai_l1[0].append(ai_l1)
                 plot_points.ai_l1[1].append(performance)
+            if ai_lds >= 0:
+                plot_points.ai_lds[0].append(ai_lds)
+                plot_points.ai_lds[1].append(performance)
 
-            plot_points.kernelNames.append(f"K{kernel_id}")
-            console_debug("roofline", f"Added kernel {kernel_id} to plot points")
+            plot_points.kernelNames.append(kernel_name)
+            console_debug(
+                "roofline",
+                f"Added kernel {kernel_id}: {kernel_name[:50]} to plot points",
+            )
         else:
             console_debug(
-                "roofline", f"Skipping kernel {kernel_id} - no performance data"
+                "roofline",
+                f"Skipping kernel {kernel_id}: {kernel_name[:50]}"
+                f" - no performance data",
             )
 
         # store metrics for display
@@ -476,7 +483,7 @@ def construct_roof(
     headers: list[str] = []
 
     try:
-        with open(benchmark_results) as csvfile:
+        with open(benchmark_results, newline="", encoding="utf-8") as csvfile:
             csv_reader = csv.reader(csvfile, delimiter=",")
             row_count = 0
 

@@ -6,7 +6,7 @@
 References
 ==========
 
-Public material that complements the **gfx1151** panels and
+Public material that complements the **gfx115x** panels and
 metric names in ROCm Compute Profiler.
 
 * :doc:`GPU / accelerator specifications <rocm:reference/gpu-arch-specs>`

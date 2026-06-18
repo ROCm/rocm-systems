@@ -55,7 +55,7 @@ def validate_json_exec_mask_manipulation(
     # Although, it would be more elegant to wrap some of the checks in dedicated functions,
     # I noticed that it can introduce significant overhead, so I decided to inline those checks.
 
-    # the function assume homogenous system
+    # the function assumes homogeneous system
     agents = data_json["agents"]
     gpu_agents = list(filter(lambda agent: agent["type"] == 2, agents))
     # There should be at least one GPU agent
@@ -80,12 +80,12 @@ def validate_json_exec_mask_manipulation(
     # correspond to the v_rcp_f64 instructions of the last kernel
     even_simds_active_exec_mask = np.uint64(int("5" * exec_mask_hex_digit_width, 16))
     # start and end source code lines of the v_rcp_f64 instructions of the last kernel
-    v_rcp_f64_start_line_num, v_rcp_f64_end_line_num = 288, 387
+    v_rcp_f64_start_line_num, v_rcp_f64_end_line_num = 301, 400
     # execution mask where even SIMD lanes are active
     # correspond to the v_rcp_f64 instructions of the last kernel
     odd_simds_active_exec_mask = np.uint64(int("A" * exec_mask_hex_digit_width, 16))
     # start and end source code lines of the v_rcp_f32 0 instructions of the last kernel
-    v_rcp_f32_start_line_num, v_rcp_f32_end_line_num = 391, 490
+    v_rcp_f32_start_line_num, v_rcp_f32_end_line_num = 406, 505
 
     # sampled wave_ids of the last kernel
     last_kernel_sampled_wave_in_grp = set()
@@ -101,24 +101,6 @@ def validate_json_exec_mask_manipulation(
     sampled_chiplets = set()
     # sample VMIDs
     sampled_vmids = set()
-    # TODO: Similar reason for introducing stochastic_assert inside the csv.py.
-    # When asserting certain conditions related to exec_masks for all samples,
-    # we observe some failures.
-    # This usually happens because some small number of samples (e.g., 1-10 out of 100k)
-    # do not satisfy the condition. This is either a regression in the ROCr 2nd level trap
-    # handler (as sometimes execution mask or correlation ID mismatches), or
-    # just stochastic nature of the sampling (meaning our checks are too strict).
-    # To relax checks, we introduce an assertion that will allow some small number
-    # of samples to disobey the condition.
-    # This is a temporary solution until we find the root cause of the issue.
-
-    failing_exec_mask_checks_samples_num = 0
-    # We noticed failing samples in:
-    # 1. kernels 1-64
-    # 2. kernel 65 even SIMD lanes
-    # 3. kernel 64 odd SIMD lanes
-    # The number of failing samples is less than 10 per category.
-    max_number_of_failing_records = 60
 
     for sample in data_json["buffer_records"][f"pc_sample_{pc_sampling_method}"]:
         record = sample["record"]
@@ -143,7 +125,7 @@ def validate_json_exec_mask_manipulation(
 
         if cid == 0:
             # Samples originates either from a blit kernel or self-modifying code.
-            # Thus, code object is uknown, as well as the instruction.
+            # Thus, code object is unknown, as well as the instruction.
             assert record["pc"]["code_object_id"] == 0
             assert inst_index == -1
         else:
@@ -156,7 +138,7 @@ def validate_json_exec_mask_manipulation(
             assert inst_index != -1
 
             wgid = record["wrkgrp_id"]
-            # check corrdinates of the workgroup
+            # check coordinates of the workgroup
             assert wgid["x"] >= 0 and wgid["x"] <= 1023
             # FIXME: Navi4x wgid is currently broken
             # assert wgid["y"] == 0
@@ -175,9 +157,9 @@ def validate_json_exec_mask_manipulation(
                 # Each block contains number of threads that matches correlation ID of the kernel.
                 # The exec mask of a sample should contain number of ones equal to
                 # the correlation ID of the kernel during which execution the sample was generated.
-                # assert bin(exec_mask).count("1") == cid
-                if bin(exec_mask).count("1") != cid:
-                    failing_exec_mask_checks_samples_num += 1
+                assert (
+                    bin(exec_mask).count("1") == cid
+                ), "Active SIMD thread count does not match Correlation_Id"
 
                 # TODO: Comment out the following code if it causes spurious fails.
                 # The more conservative constraint based on the experience follows.
@@ -189,15 +171,15 @@ def validate_json_exec_mask_manipulation(
                 # ...
                 # 64 -> 0xffffffffffffffff
                 exec_mask_str = "0b" + "1" * cid
-                # assert np.uint64(exec_mask) == np.uint64(int(exec_mask_str, 2))
-                if np.uint64(exec_mask) != np.uint64(int(exec_mask_str, 2)):
-                    failing_exec_mask_checks_samples_num += 1
+                assert np.uint64(exec_mask) == np.uint64(
+                    int(exec_mask_str, 2)
+                ), "Exec_Mask does not match expected mask derived from Correlation_Id"
             else:
                 # No more than `unique_kernels_num`` cids
                 assert cid == unique_kernels_num
                 # Monitor wave_in_group being sampled
                 last_kernel_sampled_wave_in_grp.add(wave_in_grp)
-                # chekcs specific for samples from the last kernel
+                # checks specific for samples from the last kernel
                 assert wave_in_grp >= 0 and wave_in_grp <= 3
 
                 # validate instruction decoding
@@ -221,9 +203,9 @@ def validate_json_exec_mask_manipulation(
                 line_num = int(line_num_str)
                 if inst.startswith("v_rcp_f64"):
                     # even SIMD lanes active
-                    # assert np.uint64(exec_mask) == even_simds_active_exec_mask
-                    if np.uint64(exec_mask) != even_simds_active_exec_mask:
-                        failing_exec_mask_checks_samples_num += 1
+                    assert (
+                        np.uint64(exec_mask) == even_simds_active_exec_mask
+                    ), "Exec_Mask mismatch for v_rcp_f64: expected even SIMD lanes active"
 
                     assert (
                         line_num >= v_rcp_f64_start_line_num
@@ -232,9 +214,9 @@ def validate_json_exec_mask_manipulation(
                     last_kernel_v_rcp_64_sampled_source_line_set.add(line_num)
                 elif inst.startswith("v_rcp_f32"):
                     # odd SIMD lanes active
-                    # assert np.uint64(exec_mask) == odd_simds_active_exec_mask
-                    if np.uint64(exec_mask) != odd_simds_active_exec_mask:
-                        failing_exec_mask_checks_samples_num += 1
+                    assert (
+                        np.uint64(exec_mask) == odd_simds_active_exec_mask
+                    ), "Exec_Mask mismatch for v_rcp_f32: expected odd SIMD lanes active"
 
                     assert (
                         line_num >= v_rcp_f32_start_line_num
@@ -278,8 +260,3 @@ def validate_json_exec_mask_manipulation(
     # so I'm temporarily disabling the following check.
     # # all samples should belong to the same VMID
     # assert len(sampled_vmids) == 1
-
-    # assert that the number of failing samples is acceptable
-    assert (
-        failing_exec_mask_checks_samples_num <= max_number_of_failing_records
-    ), "Number of failing samples failing exec_mask check is too high"

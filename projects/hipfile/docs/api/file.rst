@@ -3,6 +3,7 @@ File Handle API
 
 File Handles
 ------------
+
 hipFile files are accessed via an opaque ``hipFileHandle_t`` pointer
 obtained from ``hipFileHandleRegister()``. This registration API call
 takes a ``hipFileDescr_t`` struct, which contains the filesystem file
@@ -17,6 +18,7 @@ section of the documentation for a more thorough discussion of this.
 
 Buffers
 -------
+
 Memory buffers that will be used with multiple hipFile IO operations
 should be registered via ``hipFileBufRegister()``. If this is not
 done, a temporary internal buffer will be used for IO, though this
@@ -32,6 +34,7 @@ initialized by ``hipFileBufRegister()`` if it has not already.
 
 IO Operations
 -------------
+
 hipFile read and write operations are performed using ``hipFileRead()``
 and ``hipFileWrite()``, respectively. These API calls take a hipFile
 handle, a buffer (registered or not), the size of the IO operation

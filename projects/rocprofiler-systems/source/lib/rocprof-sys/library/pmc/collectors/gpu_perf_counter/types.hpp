@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "backends/rocprofiler_sdk/types.hpp"
+
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/fmt/ranges.h>
 
@@ -17,25 +19,13 @@
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
-using counter_id_t = std::uint64_t;
+// Data types are owned by the backend layer (the producer); re-exported here so
+// pmc consumers keep their existing pmc::collectors::gpu_perf_counter::* spellings.
+namespace backend = ::rocprofsys::backends::rocprofiler_sdk;
 
-struct dimension_position
-{
-    std::string name;
-    size_t      position{ 0 };
-};
-
-struct counter_metadata
-{
-    counter_id_t                    counter_id{ 0 };
-    std::string                     name;
-    std::string                     description;
-    std::string                     block;
-    std::string                     expression;
-    bool                            is_constant = false;
-    bool                            is_derived  = false;
-    std::vector<dimension_position> dimensions;
-};
+using backend::counter_id_t;
+using backend::counter_metadata;
+using backend::dimension_position;
 
 struct counter_value
 {
@@ -113,19 +103,6 @@ to_enabled_metrics(gpu_perf_counter_settings settings)
     return enabled_metrics{ std::move(settings.explicit_counters) };
 }
 
-inline std::string
-make_qualified_name(const counter_metadata& meta)
-{
-    if(meta.dimensions.empty()) return meta.name;
-    return fmt::format("{}[{}]", meta.name, fmt::join(meta.dimensions, ","));
-}
-
-inline std::string
-format_track_name(size_t gpu_id, const std::string& qualified_name)
-{
-    return fmt::format("GPU [{}] {} (S)", gpu_id, qualified_name);
-}
-
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter
 
 template <>
@@ -140,3 +117,21 @@ struct fmt::formatter<rocprofsys::pmc::collectors::gpu_perf_counter::dimension_p
         return fmt::format_to(ctx.out(), "{}={}", dim.name, dim.position);
     }
 };
+
+namespace rocprofsys::pmc::collectors::gpu_perf_counter
+{
+
+inline std::string
+make_qualified_name(const counter_metadata& meta)
+{
+    if(meta.dimensions.empty()) return meta.name;
+    return fmt::format("{}[{}]", meta.name, fmt::join(meta.dimensions, ","));
+}
+
+inline std::string
+format_track_name(size_t gpu_id, const std::string& qualified_name)
+{
+    return fmt::format("GPU [{}] {} (S)", gpu_id, qualified_name);
+}
+
+}  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

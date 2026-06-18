@@ -262,15 +262,12 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     if(params.triple_buffering)
     {
         auto& buffer = queue->triple_buffer_memory;
-        auto  signal = signal_create();
         copy_data_sync(buffer.at(0),
                        buffer.at(1),
                        queue->near_cpu,
                        queue->hsa_agent,
                        MIN_BUFFER_SIZE,
-                       &signal);
-        signal_wait(signal);
-        signal_destroy(signal);
+                       nullptr);
     }
 
     // Submit the start packets without waiting: the producer thread (triple-buffer

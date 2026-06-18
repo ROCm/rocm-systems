@@ -81,6 +81,7 @@
 #include "suites/functional/concurrent_shutdown.h"
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
+#include "suites/functional/signal_allocation_validation.h"
 #include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
@@ -253,6 +254,13 @@ TEST(rocrtstFunc, Signal_Create_Concurrently) {
   if (!RunCustomTestProlog(&sd)) return;
   sd.TestSignalCreateConcurrent();
   RunCustomTestEpilog(&sd);
+}
+
+TEST(rocrtstFunc, Signal_Allocation_Validation) {
+  SignalAllocationValidationTest sav;
+  RunCustomTestProlog(&sav);
+  sav.TestSignalAllocationValidation();
+  RunCustomTestEpilog(&sav);
 }
 
 /* Temporary: Disable CU Masking until it is fixed */

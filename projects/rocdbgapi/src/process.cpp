@@ -109,6 +109,12 @@ process_t::process_t (amd_dbgapi_process_id_t process_id,
 
 process_t::~process_t ()
 {
+  /* Make sure to discard any cache before closing the driver.  The agent dtor
+     might otherwise try to write_back / discard the cache, but without a
+     process or a driver connection, this cannot work and would fail.  */
+  for (auto &&agent : range<agent_t> ())
+    agent.memory_cache ().discard (0, amd_dbgapi_size_t (-1), true);
+
   /* Destruct the os_driver before closing the notifier.  */
   m_os_driver.reset ();
   client_notifier ().close ();

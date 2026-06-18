@@ -8,10 +8,16 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
-#define NCCL_TESTS_VERSION "2.17.9"
+#define NCCL_TESTS_VERSION "2.18.3"
 
 #include "rccl/rccl.h"
-#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+// nccl_device.h provides the device-API public types referenced below
+// (ncclCommProperties_t, full ncclDevCommRequirements, NCCL_GIN_TYPE_NONE, ...).
+// As of NCCL 2.29 these types are referenced unconditionally by the test engine
+// signature and per-collective DevCommRequirements helpers, so the include must
+// not require -DENABLE_DEVICE_API on 2.29+.
+#if (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)) \
+    || NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 #include "nccl_device.h"
 #endif
 #include <stdio.h>
@@ -108,6 +114,7 @@ struct testColl {
   testResult_t (*runColl)(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
       size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int implIndex, void* bias);
   testResult_t (*getAlgoProtoChannels)(ncclComm_t comm, size_t count, ncclDataType_t type, int* algo, int* proto, int* nchannels);
+  testResult_t (*getSymkInfo)(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op, int* algo, int* proto, int* nchannels);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;
@@ -143,6 +150,10 @@ struct testEngine {
   void (*getBuffSize)(size_t *sendcount, size_t *recvcount, size_t count, int nranks);
   testResult_t (*runTest)(struct threadArgs* args, int root, ncclDataType_t type,
       const char* typeName, ncclRedOp_t op, const char* opName);
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+  /* Optional; called from initComms after common fields are set on ncclConfig_t. */
+  void (*initCommConfig)(ncclConfig_t* config);
+#endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
   testResult_t (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties);
@@ -222,7 +233,7 @@ extern testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const
 extern testResult_t InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks);
 extern testResult_t InitDataApplyBias(void* expected, void* bias, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op);
 extern testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks, const int rank);
-extern void AllocateBuffs(void **sendbuff, void **recvbuff, void **expected, void **expectedHost, size_t nbytes, int nranks, void **bias);
+extern testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes, void **bias);
 
 #include <unistd.h>
 
@@ -452,10 +463,13 @@ typedef ncclResult_t (*rcclTestsGetAlgoInfo_t)(struct ncclComm* comm, ncclFunc_t
                                           int* algo, int* protocol, int* maxChannels);
 typedef ncclResult_t (*rcclTestsGetAlgoName_t)(int algo, const char** algoName);
 typedef ncclResult_t (*rcclTestsGetProtocolName_t)(int protocol, const char** protocolName);
+typedef ncclResult_t (*rcclTestsGetSymkInfo_t)(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType, ncclRedOp_t op,
+    int* algo, int* protocol, int* maxChannels);
 
 extern rcclTestsGetAlgoInfo_t rcclTestsGetAlgoInfo;
 extern rcclTestsGetProtocolName_t rcclTestsGetProtocolName;
 extern rcclTestsGetAlgoName_t rcclTestsGetAlgoName;
+extern rcclTestsGetSymkInfo_t rcclTestsGetSymkInfo;
 
 // Network counter collector (self-contained, see collector.h for full API)
 #include "collector.h"

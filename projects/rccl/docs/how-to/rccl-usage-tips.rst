@@ -9,29 +9,12 @@
 RCCL usage tips
 *****************************************
 
-This topic describes some of the more common RCCL extensions, such as NPKit, and provides tips on how to
-configure and customize the application.
+This topic describes common RCCL configuration options and usage tips.
 
-NPKit
-=====
+Profiling
+=========
 
-RCCL integrates `NPKit <https://github.com/microsoft/npkit>`_, a profiler framework that
-enables the collection of fine-grained trace events in RCCL components, especially in giant collective GPU kernels.
-See the `NPKit sample workflow for RCCL <https://github.com/microsoft/NPKit/tree/main/rccl_samples>`_ for
-a fully-automated usage example. It also provides useful templates for the following manual instructions.
-
-To manually build RCCL with NPKit enabled, pass ``-DNPKIT_FLAGS="-DENABLE_NPKIT -DENABLE_NPKIT_...(other NPKit compile-time switches)"`` to the ``cmake`` command. 
-All NPKit compile-time switches are declared in the RCCL code base as macros with the prefix ``ENABLE_NPKIT_``.
-These switches control the information that is collected.
-
-.. note::
-   
-   NPKit only supports the collection of non-overlapped events on the GPU.
-   The ``-DNPKIT_FLAGS`` settings must follow this rule.
-
-To manually run RCCL with NPKit enabled, set the environment variable ``NPKIT_DUMP_DIR``
-to the NPKit event dump directory. NPKit only supports one GPU per process.
-To manually analyze the NPKit dump results, use `npkit_trace_generator.py <https://github.com/microsoft/NPKit/blob/main/rccl_samples/npkit_trace_generator.py>`_.
+For fine-grained profiling of collective operations, use the RCCL **profiler plugin** API and related tooling rather than legacy in-tree profilers.
 
 MSCCL and MSCCL++ integration has been removed from RCCL. The legacy API symbols ``mscclLoadAlgo``,
 ``mscclRunAlgo``, and ``mscclUnloadAlgo`` remain as no-ops for link compatibility.

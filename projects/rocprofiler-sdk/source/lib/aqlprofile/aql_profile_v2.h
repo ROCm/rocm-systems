@@ -98,11 +98,11 @@ typedef enum
     AQLPROFILE_BLOCK_NAME_GRBMH,
     AQLPROFILE_BLOCK_NAME_SQG,
 
-    // Blocks reserved for NPI support
-    AQLPROFILE_BLOCK_NAME_RESERVED_6,
-    AQLPROFILE_BLOCK_NAME_RESERVED_7,
-    AQLPROFILE_BLOCK_NAME_RESERVED_8,
-    AQLPROFILE_BLOCK_NAME_RESERVED_9,
+    // New blocks for gc_12_1_x
+    AQLPROFILE_BLOCK_NAME_GLARBA,
+    AQLPROFILE_BLOCK_NAME_GLARBC,
+    AQLPROFILE_BLOCK_NAME_GRBMA,
+    AQLPROFILE_BLOCK_NAME_GC_NHTTLB,
 
     // Add new blocks above
     AQLPROFILE_BLOCKS_NUMBER
@@ -417,7 +417,7 @@ aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t     agent,
  * @param[in] handle The handle returned from aqlprofile_pmc_create_packets()
  * @param[in] callback CB where the resulting event values are going to be returned
  * @param[in] userdata Data sent back to user
- * @retval HSA_STATUS_SUCCESS all operations exited succesfully
+ * @retval HSA_STATUS_SUCCESS all operations exited successfully
  * @retval HSA_STATUS_ERROR if some callback returns an error
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if invalid handle is given
  */
@@ -466,7 +466,7 @@ aqlprofile_pmc_delete_packets(aqlprofile_handle_t handle);
  * @param[in] handle The handle returned from aqlprofile_att_create_packets()
  * @param[in] callback CB where the resulting data is going to be returned
  * @param[in] userdata Data sent back to user
- * @retval HSA_STATUS_SUCCESS all operations exited succesfully
+ * @retval HSA_STATUS_SUCCESS all operations exited successfully
  * @retval HSA_STATUS_ERROR if some callback returns an error
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if invalid handle is given
  */
@@ -490,7 +490,7 @@ typedef struct
  * @param[out] packets Packets returned by this function to start and stop thread trace
  * @param[in] profile Agent information and extra parameters for thread trace
  * @param[in] callback Memory allocation fn which may request cpu or gpu memory
- * @retval HSA_STATUS_SUCCESS if all packets created succesfully
+ * @retval HSA_STATUS_SUCCESS if all packets created successfully
  * @retval HSA_STATUS_ERROR otherwise
  */
 hsa_status_t
@@ -514,11 +514,11 @@ aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
  * @param[out] header If not zero, must be inserted as first 8 bytes.
  * @param[out] query_status To be inserted before calls to aqlprofile_att_get_buffer_status
  * @param[out] buffer_swap array of AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS transition packets
- * @param[inout] num_buffer_swap In: # of packets in number buffer_swap. Out: # of buffers used.
+ * @param[in,out] num_buffer_swap In: # of packets in number buffer_swap. Out: # of buffers used.
  * @param[in] handle Created in aqlprofile_att_create_packets()
  * @param[in] shader_engine_id Shader engine to get packets from
  * @param[in] flags Must be zero
- * @retval HSA_STATUS_SUCCESS if all packets created succesfully
+ * @retval HSA_STATUS_SUCCESS if all packets created successfully
  * @retval HSA_STATUS_ERROR otherwise
  */
 hsa_status_t
@@ -539,6 +539,7 @@ typedef struct aqlprofile_att_buffer_status_t
     bool     needs_swap;  // If buffer requires swap
     bool     is_too_late;
     bool     error;
+    uint64_t read_offset;
 } aqlprofile_att_buffer_status_t;
 
 /**
@@ -548,7 +549,7 @@ typedef struct aqlprofile_att_buffer_status_t
  * @param[in] handle What was passed to aqlprofile_att_get_buffer_packets
  * @param[in] shader_engine_id Shader engine (SE) ID
  * @param[in] flags Must be zero
- * @retval HSA_STATUS_SUCCESS if all packets created succesfully
+ * @retval HSA_STATUS_SUCCESS if all packets created successfully
  * @retval HSA_STATUS_ERROR otherwise
  */
 hsa_status_t
@@ -573,7 +574,7 @@ typedef hsa_status_t (*aqlprofile_eventname_callback_t)(int id, const char* name
  * @param [in] callback Callback to use for iteration of dimensions
  * @param [in] user_data Data to supply to callback @ref aqlprofile_eventname_callback_t
  * @retval HSA_STATUS_SUCCESS if successful
- * @retval HSA_STATUS_ERROR if error on interation
+ * @retval HSA_STATUS_ERROR if error on iteration
  * @retval OTHERS If @ref aqlprofile_eventname_callback_t returns non-HSA_STATUS_SUCCESS,
  *         that value is returned.
  */
@@ -649,7 +650,7 @@ typedef struct
 
 typedef struct
 {
-    void*  data;  // Valid until delete_packets() is scalled. Caller must save contents otherwise.
+    void*  data;  // Valid until delete_packets() is called. Caller must save contents otherwise.
     size_t size;  // Size of "data"
 } aqlprofile_spm_buffer_desc_t;
 

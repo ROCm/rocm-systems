@@ -29,7 +29,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-#include "trace_decoder_api.h"
+#include "rocprof_trace_decoder/rocprof_trace_decoder.h"
 #include "trace_parser.hpp"
 #include "trie.h"
 
@@ -55,15 +55,6 @@ public:
     virtual assemblyLine GetInstruction(pcinfo_t addr, int gfxip) = 0;
     virtual ~ICodeServicer(){};
 };
-
-inline std::pair<StringView, StringView> split2(StringView view, StringView s)
-{
-    static std::string empty{""};
-
-    size_t pos = view.find(s);
-    if (pos == std::string::npos || pos + s.size() >= view.size()) return {view, empty};
-    return {view.substr(0, pos), view.substr(pos + s.size())};
-}
 
 inline std::string_view strip(std::string_view input)
 {
@@ -116,7 +107,14 @@ public:
 
     bool try_match_swapped(const Instruction& first, const Instruction& second, const assemblyLine& line)
     {
-        return second.category == line.cat && first.category == getcode(line.next)->cat;
+        try
+        {
+            return second.category == line.cat && first.category == getcode(line.next)->cat;
+        }
+        catch (std::exception&)
+        {
+            return false;
+        }
     }
 
     std::vector<assemblyLinePtr>& code;
@@ -139,8 +137,9 @@ class Stitcher
 {
 public:
     Stitcher(std::shared_ptr<ICodeServicer> service, rocprof_trace_decoder_trace_callback_t _callback, void* cbdata);
+    virtual ~Stitcher() = default;
 
-    void stitch(class WaveDataInternal& wave);
+    virtual void stitch(class WaveDataInternal& wave);
     std::vector<assemblyLinePtr> raw_code;
     void setgfxip(uint64_t gfxip);
     uint64_t getgfxip() const
@@ -164,6 +163,34 @@ public:
     void sendOccupancy(std::vector<occupancy_info_t>& vec)
     {
         sendVec(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY, vec);
+    };
+    void sendEvent(
+        rocprofiler_thread_trace_decoder_event_type_t type,
+        int64_t time,
+        uint8_t me,
+        uint8_t pipe,
+        uint32_t payload,
+        bool bop,
+        bool per_pipe
+    )
+    {
+        rocprofiler_thread_trace_decoder_event_t event{};
+        event.size = sizeof(rocprofiler_thread_trace_decoder_event_t);
+        event.time = time;
+        event.type = type;
+        event.me_id = me & 1;
+        event.pipe_id = pipe;
+        event.flags = 0;
+        event.payload.raw = payload;
+        if (per_pipe) event.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE;
+        if (bop) event.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP;
+        callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &event, 1, cbdata);
+    };
+    void sendDispatch(CSRegisterHandler& csregister, int64_t time, uint8_t me, uint8_t pipe)
+    {
+        auto event = csregister.PopulateDispatch(time, me, pipe);
+
+        callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH, &event, 1, cbdata);
     };
 
 private:

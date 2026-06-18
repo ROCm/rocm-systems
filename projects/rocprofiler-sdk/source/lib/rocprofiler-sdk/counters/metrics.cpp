@@ -23,6 +23,7 @@
 #include "metrics.hpp"
 #include "id_decode.hpp"
 
+#include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
@@ -67,7 +68,7 @@ getCustomCounterDefinition()
 }
 
 /**
- * Constant/speical metrics are treated as psudo-metrics in that they
+ * Constant/special metrics are treated as pseudo-metrics in that they
  * are given their own metric id. MAX_WAVE_SIZE for example is not collected
  * by AQL Profiler but is a constant from the topology. It will still have
  * a counter associated with it. Nearly all metrics contained in
@@ -99,14 +100,14 @@ get_constants(uint64_t starting_id)
  * Expected YAML Format:
  * COUNTER_NAME:
  *  architectures:
- *   gfxXX: // Can be more than one, / deliminated if they share idential data
+ *   gfxXX: // Can be more than one, / delimited if they share identical data
  *     block: <Optional>
  *     event: <Optional>
  *     expression: <optional>
  *     description: <Optional>
  *   gfxYY:
  *      ...
- *  description: General counter desctiption
+ *  description: General counter description
  */
 counter_metrics_t
 loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
@@ -285,10 +286,12 @@ locateMetricsFile(std::string_view name)
     auto metric_env_path = std::string{"not set"};
 
     // 1) Try env var
-    if(const char* env = std::getenv("ROCPROFILER_METRICS_PATH"))
+    auto env = common::get_env_optional("ROCPROFILER_METRICS_PATH");
+    if(env)
     {
-        metric_env_path = env;
-        auto env_paths = sdk::parse::tokenize<std::vector<std::string>>(env, std::string_view{":"});
+        metric_env_path = *env;
+        auto env_paths =
+            sdk::parse::tokenize<std::vector<std::string>>(*env, std::string_view{":"});
         for(const auto& path : env_paths)
         {
             fs::path candidate = fs::path{path} / std::string{name};
@@ -298,7 +301,7 @@ locateMetricsFile(std::string_view name)
                 return candidate.string();
             }
         }
-        ROCP_INFO << name << " not found at ROCPROFILER_METRICS_PATH (" << env
+        ROCP_INFO << name << " not found at ROCPROFILER_METRICS_PATH (" << *env
                   << "). Falling back to install path.";
     }
 

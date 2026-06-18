@@ -74,6 +74,9 @@ void
 set_fini_status(int);
 
 bool
+is_attached();
+
+bool
 supports_attachment();
 
 // call tool_attach function for all registered clients

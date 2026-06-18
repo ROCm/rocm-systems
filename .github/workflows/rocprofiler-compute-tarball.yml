@@ -73,9 +73,11 @@ jobs:
           ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
           ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
           wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get update
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y rocm-dev
+          apt install -y libdw-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
       - name: Install Python
         uses: actions/setup-python@v5
@@ -123,9 +125,11 @@ jobs:
           ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
           ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
           wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get update
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
           apt install -y rocm-dev
+          apt install -y libdw-dev pkg-config
           echo "✅ ROCm Dependencies Installed!"
       - name: Python dependency installs
         run: |

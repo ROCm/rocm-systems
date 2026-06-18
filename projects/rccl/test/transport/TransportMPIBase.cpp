@@ -139,15 +139,15 @@ void TransportTestBase::TearDown()
     {
         if(initialized_transport == TransportType::P2P)
         {
-            p2pTransport.send.free(&send_connector);
+            p2pTransport.send.free(nullptr, &send_connector);
         }
         else if(initialized_transport == TransportType::SHM)
         {
-            shmTransport.send.free(&send_connector);
+            shmTransport.send.free(nullptr, &send_connector);
         }
         else if(initialized_transport == TransportType::Network)
         {
-            netTransport.send.free(&send_connector);
+            netTransport.send.free(nullptr, &send_connector);
         }
         send_connector.transportResources = nullptr;
     }
@@ -155,15 +155,15 @@ void TransportTestBase::TearDown()
     {
         if(initialized_transport == TransportType::P2P)
         {
-            p2pTransport.recv.free(&recv_connector);
+            p2pTransport.recv.free(nullptr, &recv_connector);
         }
         else if(initialized_transport == TransportType::SHM)
         {
-            shmTransport.recv.free(&recv_connector);
+            shmTransport.recv.free(nullptr, &recv_connector);
         }
         else if(initialized_transport == TransportType::Network)
         {
-            netTransport.recv.free(&recv_connector);
+            netTransport.recv.free(nullptr, &recv_connector);
         }
         recv_connector.transportResources = nullptr;
     }

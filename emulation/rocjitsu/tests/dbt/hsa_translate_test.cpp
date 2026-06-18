@@ -156,7 +156,7 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, target.arch, target.mach);
   auto result = translator.translate(*co);
   ASSERT_FALSE(result.elf_bytes.empty());
-  EXPECT_TRUE(result.warnings.empty()) << "Translation warnings: " << result.warnings.front();
+  EXPECT_TRUE(result.ok()) << "Translation diagnostic: " << result.diagnostics.front().message;
 
   // 2. Load via HSA.
   hsa_agent_t cpu = find_cpu_agent();

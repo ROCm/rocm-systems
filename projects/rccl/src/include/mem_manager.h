@@ -182,9 +182,30 @@ ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* manager, void* pt
 
 ncclResult_t ncclCommMemSuspend(struct ncclComm* comm);
 ncclResult_t ncclCommMemResume(struct ncclComm* comm);
-ncclResult_t ncclCommMemStats(struct ncclComm* comm, ncclCommMemStat_t stat, uint64_t* value);
+
+// RCCL: Public API _impl entry points (dispatched from src/misc/api_trace.cc)
+ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags);
+ncclResult_t ncclCommResume_impl(ncclComm_t comm);
+ncclResult_t ncclCommMemStats_impl(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 
 #ifdef __cplusplus
+}
+#endif
+
+#ifdef __cplusplus
+// RCCL: true if a tracked entry for `ptr` was already torn down by Suspend
+// (state==Released). ncclCuMemFree / ncclCudaFree use it to skip the real
+// teardown for Suspended entries while still freeing persistent / untracked
+// pointers on Destroy-while-Suspended.
+static inline bool ncclMemEntryAlreadyReleased(struct ncclMemManager* manager,
+                                               void* ptr) {
+  if (manager == nullptr) return false;
+  if (!__atomic_load_n(&manager->released, __ATOMIC_ACQUIRE)) return false;
+  std::lock_guard<std::mutex> lock(manager->lock);
+  for (ncclDynMemEntry* e = manager->entries; e != nullptr; e = e->next) {
+    if (e->ptr == ptr) return e->state == ncclDynMemStateReleased;
+  }
+  return false;
 }
 #endif
 

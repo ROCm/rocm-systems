@@ -53,6 +53,15 @@ Component *CompositeComponent::add_child(std::unique_ptr<Component> child) {
   return raw;
 }
 
+void CompositeComponent::adopt_children(CompositeComponent &donor) {
+  for (auto &child : donor.children_) {
+    child->set_parent(this);
+    child->set_depth(depth() + 1);
+    children_.push_back(std::move(child));
+  }
+  donor.children_.clear();
+}
+
 Component *CompositeComponent::find_child(const std::string &name) const {
   for (auto &c : children_) {
     if (c->name() == name)

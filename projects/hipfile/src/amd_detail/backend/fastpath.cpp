@@ -159,6 +159,9 @@ Fastpath::score(shared_ptr<IFile> file, shared_ptr<IBuffer> buffer, size_t size,
     const auto     mem_addr{reinterpret_cast<intptr_t>(buffer->getBuffer()) + buffer_offset};
     accept_io &= dio_mem_align && !(mem_addr & (dio_mem_align - 1));
 
+    if (!accept_io) {
+        Context<StatsCollection>::get()->fastpathRejection();
+    }
     return accept_io ? 100 : -1;
 }
 

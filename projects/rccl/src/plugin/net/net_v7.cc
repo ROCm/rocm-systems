@@ -1,13 +1,14 @@
 /*************************************************************************
- * Copyright (c) 2022-2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "nccl_net.h"
 #include "proxy.h"
 #include "checks.h"
-#include <dlfcn.h>
+#include "os.h"
 
 static ncclNet_t ncclNet;
 static ncclCollNet_t ncclCollNet;
@@ -41,6 +42,9 @@ static ncclResult_t ncclNet_getProperties(int dev, ncclNetProperties_t* props) {
   props->maxP2pBytes = MAX_NET_SIZE;
   props->maxCollBytes = MAX_COLLNET_SIZE;
   props->maxMultiRequestSize = 1;
+  // Undefined to be ignore in NCCL core
+  props->railId = NCCL_NET_ID_UNDEF;
+  props->planeId = NCCL_NET_ID_UNDEF;
   return ncclSuccess;
 }
 
@@ -56,7 +60,7 @@ static ncclResult_t ncclNet_connect(void* ctx __attribute__((unused)),
 }
 
 static ncclResult_t ncclNet_regMr(void* comm, void* data, size_t size, int type, void** mhandle) {
-  if (size >= 1UL<<31) return ncclInternalError;
+  if (size >= 1ULL<<31) return ncclInternalError;
   return ncclNet_v7->regMr(comm, data, (int) size, type, mhandle);
 }
 
@@ -120,7 +124,7 @@ static ncclResult_t ncclCollNet_listen(void* ctx __attribute__((unused)),
 }
 
 static ncclResult_t ncclCollNet_regMr(void* comm, void* data, size_t size, int type, void** mhandle) {
-  if (size >= 1UL<<31) return ncclInternalError;
+  if (size >= 1ULL<<31) return ncclInternalError;
   return ncclCollNet_v7->regMr(comm, data, (int) size, type, mhandle);
 }
 
@@ -147,7 +151,7 @@ static ncclResult_t ncclNet_init(void** ctx __attribute__((unused)),
   // before ncclNet_v11 the net plugin was initialized only once. With ncclNet_v11 this is no longer the case.
   // The compat layer preserves the ncclNet_v7 behavior using a refCount to track the number of times the plugin
   // is initialized, and avoid initializing it multiple times.
-  if (refCount[NET_INDEX]++) return ncclSuccess;
+  if (refCount[NET_INDEX]) goto exit;
   NCCLCHECK(ncclNet_v7->init(logfn));
   ncclNet.devices = ncclNet_v7->devices;
   ncclNet.getProperties = ncclNet_getProperties; // ncclNet_v5->getProperties;
@@ -169,11 +173,13 @@ static ncclResult_t ncclNet_init(void** ctx __attribute__((unused)),
   ncclNet.makeVDevice  = NULL;
   ncclNet.finalize = ncclNet_finalize;
   ncclNet.setNetAttr = nullptr;
+exit:
+  refCount[NET_INDEX]++;
   return ncclSuccess;
 }
 
 ncclNet_t* getNcclNet_v7(void* lib) {
-  ncclNet_v7 = (ncclNet_v7_t*)dlsym(lib, "ncclNetPlugin_v7");
+  ncclNet_v7 = (ncclNet_v7_t*)ncclOsDlsym(lib, "ncclNetPlugin_v7");
   if (ncclNet_v7) {
     ncclNet.name = ncclNet_v7->name;
     ncclNet.init = ncclNet_init;
@@ -189,7 +195,7 @@ static ncclResult_t ncclCollNet_init(void** ctx __attribute__((unused)),
   // before ncclCollNet_v11 the collnet plugin was initialized only once. With ncclCollNet_v11 this is no longer the case.
   // The compat layer preserves the ncclCollNet_v7 behavior using a refCount to track the number of times the plugin
   // is initialized, and avoid initializing it multiple times.
-  if (refCount[COLLNET_INDEX]++) return ncclSuccess;
+  if (refCount[COLLNET_INDEX]) goto exit;
   NCCLCHECK(ncclCollNet_v7->init(logfn));
   ncclCollNet.devices = ncclCollNet_v7->devices;
   ncclCollNet.getProperties = ncclCollNet_getProperties;
@@ -207,11 +213,13 @@ static ncclResult_t ncclCollNet_init(void** ctx __attribute__((unused)),
   ncclCollNet.closeColl = ncclCollNet_v7->closeColl;
   ncclCollNet.closeListen = ncclCollNet_v7->closeListen;
   ncclCollNet.finalize = ncclCollNet_finalize;
+exit:
+  if (refCount[COLLNET_INDEX]++) return ncclSuccess;
   return ncclSuccess;
 }
 
 ncclCollNet_t* getNcclCollNet_v7(void* lib) {
-  ncclCollNet_v7 = (ncclCollNet_v7_t*)dlsym(lib, "ncclCollNetPlugin_v7");
+  ncclCollNet_v7 = (ncclCollNet_v7_t*)ncclOsDlsym(lib, "ncclCollNetPlugin_v7");
   if (ncclCollNet_v7) {
     ncclCollNet.name = ncclCollNet_v7->name;
     ncclCollNet.init = ncclCollNet_init;

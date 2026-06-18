@@ -312,9 +312,9 @@ uint64_t ReadSystemClock() {
 }
 
 uint64_t SystemClockFrequency() {
-  LARGE_INTEGER frequency;
-  QueryPerformanceFrequency(&frequency);
-  return frequency.QuadPart;
+  // Return 1 GHz to match libhsakmt's SystemClockCounter (nanoseconds via
+  // os::TimeNanos()) and Linux (CLOCK_BOOTTIME, 1ns resolution).
+  return 1000000000;
 }
 
 bool ParseCpuID(cpuid_t* cpuinfo) {
@@ -479,6 +479,11 @@ bool MapMemory(void* addr, size_t size, MemProt perms, int fd [[maybe_unused]],
   }
   DWORD OldProtect;
   return VirtualProtect(addr, size, memProtToOsProt(perms), &OldProtect) != 0;
+}
+
+hsa_status_t DmaBufClose(int dmabuf) {
+  (void)dmabuf;
+  return HSA_STATUS_SUCCESS;
 }
 
 bool ProtectMemory(void* va, size_t size, MemProt perms) {

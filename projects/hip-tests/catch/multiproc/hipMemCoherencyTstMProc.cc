@@ -90,24 +90,19 @@ bool static TstCoherency(int* Ptr, bool HmmMem) {
 #if HT_AMD
 HIP_TEST_CASE(Unit_malloc_CoherentTst) {
   CHECK_PCIE_ATOMIC_SUPPORT
+  CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
   char* p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
-    // Test Case execution begins from here
-    int managed = 0;
-    HIPCHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-    if (managed == 1) {
-      int *Ptr = nullptr, SIZE = sizeof(int);
-      bool HmmMem = true;
+    int *Ptr = nullptr, SIZE = sizeof(int);
+    bool HmmMem = true;
 
-      // Allocating hipMallocManaged() memory
-      Ptr = reinterpret_cast<int*>(malloc(SIZE));
-      auto ret = TstCoherency(Ptr, HmmMem);
-      free(Ptr);
-      REQUIRE(ret);
-    }
+    // Allocating hipMallocManaged() memory
+    Ptr = reinterpret_cast<int*>(malloc(SIZE));
+    REQUIRE(TstCoherency(Ptr, HmmMem));
+    free(Ptr);
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
@@ -120,27 +115,24 @@ HIP_TEST_CASE(Unit_malloc_CoherentTst) {
 // The following test is failing on Nvidia platform hence disabling it for now
 #if HT_AMD
 HIP_TEST_CASE(Unit_malloc_CoherentTstWthAdvise) {
+  CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
   char* p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
-    int managed = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-    if (managed == 1) {
-      int *Ptr = nullptr, SIZE = sizeof(int);
+    int *Ptr = nullptr, SIZE = sizeof(int);
 
-      // Allocating hipMallocManaged() memory
-      Ptr = reinterpret_cast<int*>(malloc(SIZE));
-      *Ptr = 4;
-      hipStream_t strm;
-      HIP_CHECK(hipStreamCreate(&strm));
-      SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
-      HIP_CHECK(hipStreamSynchronize(strm));
-      HIP_CHECK(hipStreamDestroy(strm));
-      REQUIRE(*Ptr == 16);
-      free(Ptr);
-    }
+    // Allocating hipMallocManaged() memory
+    Ptr = reinterpret_cast<int*>(malloc(SIZE));
+    *Ptr = 4;
+    hipStream_t strm;
+    HIP_CHECK(hipStreamCreate(&strm));
+    SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
+    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipStreamDestroy(strm));
+    REQUIRE(*Ptr == 16);
+    free(Ptr);
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
@@ -153,28 +145,19 @@ HIP_TEST_CASE(Unit_malloc_CoherentTstWthAdvise) {
 #if HT_AMD
 HIP_TEST_CASE(Unit_mmap_CoherentTst) {
   CHECK_PCIE_ATOMIC_SUPPORT
+  CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char* p = NULL;
+  char *p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
-    int managed = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-    if (managed == 1) {
-      bool HmmMem = true;
-      int* Ptr = reinterpret_cast<int*>(
-          mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
-      if (Ptr == MAP_FAILED) {
-        WARN("Mapping Failed\n");
-        REQUIRE(false);
-      }
-      auto ret = TstCoherency(Ptr, HmmMem);
-      int err = munmap(Ptr, sizeof(int));
-      if (err != 0) {
-        WARN("munmap failed\n");
-      }
-      REQUIRE(ret);
-    }
+    bool HmmMem = true;
+    int *Ptr =
+        reinterpret_cast<int *>(mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE,
+                                     MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
+    REQUIRE(Ptr != MAP_FAILED);
+    REQUIRE(TstCoherency(Ptr, HmmMem));
+    REQUIRE(munmap(Ptr, sizeof(int)) == 0);
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
@@ -186,39 +169,28 @@ HIP_TEST_CASE(Unit_mmap_CoherentTst) {
 // The following test is failing on Nvidia platform hence disabling it for now
 #if HT_AMD
 HIP_TEST_CASE(Unit_mmap_CoherentTstWthAdvise) {
+  CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char* p = NULL;
+  char *p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
-    int managed = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-    if (managed == 1) {
-      int SIZE = sizeof(int);
-      int* Ptr = reinterpret_cast<int*>(
-          mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
-      if (Ptr == MAP_FAILED) {
-        WARN("Mapping Failed\n");
-        REQUIRE(false);
-      }
-      HIP_CHECK(hipMemAdvise(Ptr, SIZE, hipMemAdviseSetCoarseGrain, 0));
-      // Initializing the value with 9
-      *Ptr = 9;
-      hipStream_t strm;
-      HIP_CHECK(hipStreamCreate(&strm));
-      SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
-      HIP_CHECK(hipStreamSynchronize(strm));
-      bool IfTstPassed = false;
-      if (*Ptr == 81) {
-        IfTstPassed = true;
-      }
-      int err = munmap(Ptr, SIZE);
-      if (err != 0) {
-        WARN("munmap failed\n");
-      }
-      REQUIRE(IfTstPassed);
-      HIP_CHECK(hipStreamDestroy(strm));
-    }
+    int SIZE = sizeof(int);
+    int *Ptr = reinterpret_cast<int *>(mmap(NULL, SIZE, PROT_READ | PROT_WRITE,
+                                            MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
+    REQUIRE(Ptr != MAP_FAILED);
+    HIP_CHECK(hipMemAdvise(Ptr, SIZE, hipMemAdviseSetCoarseGrain, 0));
+    // Initializing the value with 9
+    *Ptr = 9;
+    hipStream_t strm;
+    HIP_CHECK(hipStreamCreate(&strm));
+    SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
+    HIP_CHECK(hipStreamSynchronize(strm));
+
+    REQUIRE(*Ptr == 81);
+    REQUIRE(munmap(Ptr, SIZE) == 0);
+
+    HIP_CHECK(hipStreamDestroy(strm));
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }

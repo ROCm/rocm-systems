@@ -66,12 +66,12 @@ namespace rocprofsys
 {
 inline namespace common
 {
-inline std::vector<env_config>
+inline std::vector<env_config<>>
 get_environ(int _verbose, std::string _search_paths = {},
             std::string _omnilib    = "librocprof-sys.so",
             std::string _omnilib_dl = "librocprof-sys-dl.so")
 {
-    auto _data            = std::vector<env_config>{};
+    auto _data            = std::vector<env_config<>>{};
     auto _omnilib_path    = path::get_origin(_omnilib);
     auto _omnilib_dl_path = path::get_origin(_omnilib_dl);
 
@@ -101,7 +101,7 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
     auto _data =
         get_environ(_verbose, _search_paths, std::move(_omnilib), std::move(_omnilib_dl));
     for(const auto& itr : _data)
-        itr(_verbose >= 3);
+        itr();
 }
 }  // namespace common
 }  // namespace rocprofsys

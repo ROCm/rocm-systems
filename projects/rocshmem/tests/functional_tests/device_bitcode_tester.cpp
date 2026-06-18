@@ -458,8 +458,8 @@ void DeviceBitcodeTester::execute() {
   if (!all_pass) rocshmem_global_exit(1);
 }
 
-void DeviceBitcodeTester::resetBuffers(size_t) {}
+void DeviceBitcodeTester::resetBuffers(uint64_t) {}
 
-void DeviceBitcodeTester::launchKernel(dim3, dim3, int, size_t) {}
+void DeviceBitcodeTester::launchKernel(dim3, dim3, int, uint64_t) {}
 
-void DeviceBitcodeTester::verifyResults(size_t) {}
+void DeviceBitcodeTester::verifyResults(uint64_t) {}

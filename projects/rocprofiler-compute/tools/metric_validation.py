@@ -56,7 +56,6 @@ class Analyzer(OmniAnalyze_Base):
             "Dispatch_ID",
             "GPU_ID",
             "Info",
-            "coll_level",
             "from_csv",
         ]
 
@@ -119,31 +118,28 @@ class Analyzer(OmniAnalyze_Base):
                     f"{counter_csv_path}{Colors.ENDC}"
                 )
                 # Dump the raw counters to CSV
-                raw_pmc["pmc_perf"].set_index("Dispatch_ID").to_csv(counter_csv_path)
+                raw_pmc.set_index("Dispatch_ID").to_csv(counter_csv_path)
 
             # Dump metric values if requested
             if args.dump_values in ("metric", "all"):
                 dfs = []
-                coll_levels = ["pmc_perf"]
 
                 # Handle iteration multiplexing if specified
                 if policy := self._profiling_config.get("iteration_multiplexing"):
-                    raw_pmc = impute_counters_iteration_multiplex(raw_pmc, policy)
+                    raw_pmc = impute_counters_iteration_multiplex(
+                        raw_pmc, policy, Path(path_info[0])
+                    )
 
                 base_workload = self._runs[path_info[0]]
                 # Make a copy of the dataframe to process
-                df_new = raw_pmc["pmc_perf"].copy()
+                df_new = raw_pmc.copy()
 
                 # Process each dispatch individually
                 for i in range(len(df_new)):
                     workload = copy.deepcopy(base_workload)
                     df = df_new.loc[[i]].copy()
                     df.reset_index(drop=True, inplace=True)
-                    pmc_dfs = [df]
-                    final_df = pd.concat(
-                        pmc_dfs, keys=coll_levels, axis=1, join="inner", copy=False
-                    )
-                    workload.raw_pmc = final_df
+                    workload.raw_pmc = df
 
                     # create the loaded table
                     parser.load_table_data(
@@ -151,7 +147,6 @@ class Analyzer(OmniAnalyze_Base):
                         dir_path=path_info[0],
                         is_gui=False,
                         args=args,
-                        config=self._profiling_config,
                         skip_kernel_top=False,
                     )
 
