@@ -1755,6 +1755,13 @@ bool Device::populateOCLDeviceConstants() {
   if (HSA_STATUS_SUCCESS != hsaStatus && HSA_STATUS_ERROR_INVALID_ARGUMENT != hsaStatus)
     LogError("HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE query failed");
 
+  // A cluster of size 1 is a regular single-block launch, not multi-block cluster support.
+  // Devices without multi-block cluster support (e.g. pre-gfx12.5) report a max size of 1, so
+  // normalize it to 0 to mean "no cluster support" consistently across all consumers.
+  if (info_.clusterMaxSize_ <= 1) {
+    info_.clusterMaxSize_ = 0;
+  }
+
   info_.gpuDirectRdmaWithHipVmmSupported_ =
       info_.virtualMemoryManagement_ && info_.dmabufSupported_;
 
