@@ -225,7 +225,7 @@ def eval_metric(
                 for expr in df.columns:
                     if expr in SUPPORTED_FIELD and expr.lower() not in {
                         "alias",
-                        "pct of peak",
+                        "percent of peak",
                     }:
                         if row[expr]:
                             exprs_to_eval.append((df_id, row_id, expr, row[expr]))
@@ -263,7 +263,7 @@ def eval_metric(
     # Print aggregated summary of any noise clamping warnings
     print_noise_clamp_summary()
 
-    # Derive Pct of Peak from evaluated Value and Peak columns
+    # Derive Percent of Peak from evaluated Value and Peak columns
     compute_pct_of_peak(dfs, dfs_type)
 
     # Check for metrics exceeding theoretical peak due to dual-issue
@@ -271,12 +271,12 @@ def eval_metric(
 
 
 def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
-    """Compute and store 100 * value / peak for each row where pop is True."""
-    pop_col = "Pct of Peak"
+    """Compute and store 100 * value / peak for each row where pct_of_peak is True."""
+    pct_of_peak_col = "Percent of Peak"
     for df_id, df in dfs.items():
         if dfs_type[df_id] != "metric_table":
             continue
-        if pop_col not in df.columns:
+        if pct_of_peak_col not in df.columns:
             continue
 
         # Detect value and peak columns using canonical preference order
@@ -288,9 +288,9 @@ def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
             continue
 
         # astype(bool) handles both Python bool and numpy.bool_ from pandas dtypes
-        mask = df[pop_col].astype(bool)
-        df[pop_col] = ""
-        df.loc[mask, pop_col] = [
+        mask = df[pct_of_peak_col].astype(bool)
+        df[pct_of_peak_col] = ""
+        df.loc[mask, pct_of_peak_col] = [
             pct if (pct := calc_pct_of_peak(v, p)) is not None else ""
             for v, p in zip(df.loc[mask, value_col], df.loc[mask, peak_col])
         ]

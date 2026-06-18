@@ -10,104 +10,104 @@ Panel Config:
         value: Avg
         unit: Unit
         peak: Peak
-        pop: Pct of Peak
+        pct_of_peak: Percent of Peak
       metric:
         VALU FLOPs:
           value: SUM(SQ_INSTS_VALU_sum * $wave_size) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
-          pop: true
+          pct_of_peak: true
         VALU FLOPs (F64):
           value: SUM(SQ_INSTS_VALU_DP_sum * $wave_size) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: ((($max_sclk * $cu_per_gpu) * 4) / 1000)
-          pop: true
+          pct_of_peak: true
         IPC:
           value: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Instr/cycle
           peak: 5
-          pop: true
+          pct_of_peak: true
         Wavefront Occupancy:
           value: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr)
           unit: Wavefronts
           peak: ($max_waves_per_cu * $cu_per_gpu)
-          pop: true
+          pct_of_peak: true
         GL2 Cache Hit Rate:
           value: SUM(100 * GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
           unit: Percent
           peak: 100
-          pop: false
+          pct_of_peak: false
         GL2-Fabric Read BW:
           value: SUM(GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           # peak: LPDDR5X - $max_mclk * QDR(4) * channels * 4 bytes/ch. Requires $max_mclk in sysinfo.
           peak: ($max_mclk * 4 * $num_hbm_channels * 4 * 1e6)
-          pop: true
+          pct_of_peak: true
         GL2-Fabric Write BW:
           value: SUM((GL2C_MC_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32 + GL2C_EA_WRREQ_64B_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: ($max_mclk * 4 * $num_hbm_channels * 4 * 1e6)
-          pop: true
+          pct_of_peak: true
         LDS Bank Conflicts:
           value: AVG(SQC_LDS_BANK_CONFLICT)
           unit: Conflicts
           peak: None
-          pop: false
+          pct_of_peak: false
         Wave Dependency Wait:
           value: SUM(100 * SQ_WAIT_ANY) / SUM(SQ_WAVE_CYCLES)
           unit: Percent
           peak: 100
-          pop: false
+          pct_of_peak: false
         Wave Issue Wait:
           value: SUM(100 * SQ_WAIT_INST_ANY) / SUM(SQ_WAVE_CYCLES)
           unit: Percent
           peak: 100
-          pop: false
+          pct_of_peak: false
         GL0 Cache Hit Rate (TCP Cache):
           value: SUM(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum)) / SUM(TCP_REQ_sum)
           unit: Percent
           peak: 100
-          pop: false
+          pct_of_peak: false
         GL0 Cache BW (TCP Cache):
           value: SUM(TCP_REQ_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: ($cu_per_gpu * 128 * $max_sclk * 1e6)
-          pop: true
+          pct_of_peak: true
         GL1 Cache Hit Rate:
           value: SUM(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum)) / SUM(GL1C_REQ_sum)
           unit: Percent
           peak: 100
-          pop: false
+          pct_of_peak: false
         GL1 Cache Read BW:
           value: SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: (($cu_per_gpu / 8) * 128 * $max_sclk * 1e6)
-          pop: true
+          pct_of_peak: true
         GL2 Cache BW:
           value: SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: ($total_l2_chan * 128 * $max_sclk * 1e6)
-          pop: true
+          pct_of_peak: true
         Scalar Data Cache Hit Rate:
           value: SUM(100 * SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
           unit: Percent
           peak: 100
-          pop: false
+          pct_of_peak: false
         Scalar Data Cache BW:
           value: SUM(SQC_TC_DATA_READ_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: ($sqc_per_gpu * 64 * $max_sclk * 1e6)
-          pop: true
+          pct_of_peak: true
         Instruction Cache Hit Rate:
           value: SUM(100 * SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
           unit: Percent
           peak: 100
-          pop: false
+          pct_of_peak: false
         Instruction Cache BW:
           value: SUM(SQC_TC_INST_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: ($sqc_per_gpu * 64 * $max_sclk * 1e6)
-          pop: true
+          pct_of_peak: true
 
   metrics_description:
     VALU FLOPs: >-

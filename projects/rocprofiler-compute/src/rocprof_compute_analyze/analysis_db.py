@@ -630,7 +630,8 @@ class db_analysis(OmniAnalyze_Base):
     def calc_expressions(
         self,
     ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
-        """Calculate kernel-level and workload-level metrics, including Pct of Peak."""
+        """Calculate kernel-level and workload-level metrics,
+        including Percent of Peak."""
         kernel_values_data = {}
         workload_values_data = {}
 
@@ -646,9 +647,11 @@ class db_analysis(OmniAnalyze_Base):
                 sys_info[f"{key}_empirical_peak"] = value
 
             metrics_info = self._metrics_info_data_per_workload.get(
-                workload_path, pd.DataFrame(columns=["pop", "metric_id"])
+                workload_path, pd.DataFrame(columns=["pct_of_peak", "metric_id"])
             )
-            pop_metric_ids = set(metrics_info.loc[metrics_info["pop"], "metric_id"])
+            pct_of_peak_metric_ids = set(
+                metrics_info.loc[metrics_info["pct_of_peak"], "metric_id"]
+            )
 
             # Calculate kernel-level metrics
             kernel_values_list = []
@@ -664,7 +667,9 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_expression_df,
                 )
                 new_kernel_rows.extend(
-                    db_analysis._derive_pop_values(pop_metric_ids, kernel_expression_df)
+                    db_analysis._derive_pct_of_peak_values(
+                        pct_of_peak_metric_ids, kernel_expression_df
+                    )
                 )
                 kernel_values_list.append(kernel_expression_df)
 
@@ -697,8 +702,8 @@ class db_analysis(OmniAnalyze_Base):
                 workload_expression_df,
                 self._arch_configs[sys_info["gpu_arch"]],
             )
-            new_workload_rows = db_analysis._derive_pop_values(
-                pop_metric_ids, workload_expression_df
+            new_workload_rows = db_analysis._derive_pct_of_peak_values(
+                pct_of_peak_metric_ids, workload_expression_df
             )
             if new_workload_rows:
                 workload_values_data[workload_path] = pd.concat(
@@ -714,13 +719,13 @@ class db_analysis(OmniAnalyze_Base):
         return kernel_values_data, workload_values_data
 
     @staticmethod
-    def _derive_pop_values(
-        pop_metric_ids: set[str],
+    def _derive_pct_of_peak_values(
+        pct_of_peak_metric_ids: set[str],
         values_df: pd.DataFrame,
     ) -> list[dict]:
-        """Return new Pct of Peak rows for pop-enabled metrics in values_df."""
+        """Return new Percent of Peak rows for pct_of_peak-enabled metrics."""
         candidates = values_df[
-            values_df["metric_id"].isin(pop_metric_ids)
+            values_df["metric_id"].isin(pct_of_peak_metric_ids)
             & values_df["value_name"].isin([
                 "Avg",
                 "Value",
@@ -743,7 +748,7 @@ class db_analysis(OmniAnalyze_Base):
             if pct is None:
                 continue
             base = grp.iloc[0].to_dict()
-            base["value_name"] = "Pct of Peak"
+            base["value_name"] = "Percent of Peak"
             base["value"] = pct
             new_rows.append(base)
         return new_rows
@@ -774,7 +779,7 @@ class db_analysis(OmniAnalyze_Base):
                 "Xfer",
                 "Coherency",
                 "Transaction",
-                "Pct of Peak",
+                "Percent of Peak",
             ]
             metrics_info_df = pd.DataFrame([
                 {
@@ -782,7 +787,7 @@ class db_analysis(OmniAnalyze_Base):
                     "metric_id": metric_id,
                     "description": row.get("Description"),
                     "unit": row.get("Unit"),
-                    "pop": row.get("Pct of Peak") is True,
+                    "pct_of_peak": row.get("Percent of Peak") is True,
                     "table_name": table_names_map[int(metric_id.split(".")[0]) * 100],
                     "sub_table_name": table_names_map[
                         int(metric_id.split(".")[0]) * 100
