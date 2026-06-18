@@ -44,7 +44,6 @@ import os
 import pathlib
 import sys
 import time
-
 import unittest
 
 
@@ -73,6 +72,7 @@ def print_amdsmi_path_help(file=sys.stdout):
     _script = os.path.basename(sys.argv[0]) or "<script>"
     print("\nAdditional options:", file=file)
     print("  -l, --list           List all available tests and exit", file=file)
+    print("  -x, --exclude PAT    Skip tests whose id contains PAT (inverse of -k)", file=file)
     print(file=file)
     print("Environment variables:", file=file)
     print("  AMDSMI_PATH   Path to amd_smi share dir (overrides ROCM_HOME/ROCM_PATH)", file=file)
@@ -87,6 +87,7 @@ def print_amdsmi_path_help(file=sys.stdout):
         (_base + " -l", "list all available tests"),
         (_full + " -v", "run all tests, verbose with print statements (RECOMMENDED)"),
         (_full + ' -k "test_name" -v', "run only tests matching substring"),
+        (_full + " -x performance -v", "run everything except the performance tests"),
         (_full + " -q", "run all tests, quiet with no print statements"),
     ]
     _w = max(len(cmd) for cmd, _ in _cmds) + 2
@@ -152,9 +153,264 @@ if not os.path.realpath(_amdsmi_file).startswith(os.path.realpath(amdsmi_path) +
 # Module level functions, not part of the class #
 #################################################
 
+# Canonical status-string sentinels, shared by the Common class and the
+# standalone benchmark suites (single source of truth).
+PASS = "AMDSMI_STATUS_SUCCESS"
+FAIL = "AMDSMI_STATUS_INVAL"
+
+# Status-code -> name map, derived once from the AmdSmiStatus enum so the table
+# never drifts from the library. Shared by the Common class and the standalone
+# performance benchmark suites (which intentionally do not inherit Common).
+ERROR_MAP = {str(member.value): f"AMDSMI_STATUS_{member.name}" for member in amdsmi.AmdSmiStatus}
+
 VERBOSITY_QUIET = 0  # -q / --quiet
 VERBOSITY_NORMAL = 1  # default (dot-per-test)
 VERBOSITY_VERBOSE = 2  # -v / --verbose (per-test result lines)
+
+
+def build_type_lists():
+    """Enum-derived test-parameter lists, each ``[(name, enum_value, expected)]``.
+
+    Pure: built solely from the amdsmi enums/wrapper with no ``amdsmi_init`` or
+    hardware access, so it is safe to call at import or test-discovery time.
+    Shared by the ``Common`` class and the standalone performance benchmark
+    suites (which intentionally avoid constructing ``Common`` to keep hardware
+    init out of collection), so this enum-to-list logic lives in one place.
+    """
+    status_types = [
+        (member.name, amdsmi.AmdSmiStatus(member.value), PASS) for member in amdsmi.AmdSmiStatus
+    ]
+
+    clk_types = []
+    for member in amdsmi.AmdSmiClkType:
+        cond = PASS
+        if member.name in ["DCEF", "PCIE"]:
+            cond = [PASS, FAIL]
+        clk_types.append((member.name, amdsmi.AmdSmiClkType(member.value), cond))
+
+    clk_limit_types = [
+        (member.name, amdsmi.AmdSmiClkLimitType(member.value), PASS)
+        for member in amdsmi.AmdSmiClkLimitType
+    ]
+
+    # amdsmi_get_cpu_current_io_bandwidth(handle, encoding: int, link_name: str) takes a
+    # bandwidth-type int and a link-ID string (see amdsmi_interface). The valid values come
+    # from the amdsmi_link_id_bw_type_t struct in amdsmi.h: link names P0-P4/G0-G7, and
+    # bandwidth types 1 (Aggregate), 2 (Read), 4 (Write). For IO bandwidth only AGG (1) is
+    # used; Read/Write (2/4) apply to XGMI bandwidth. Each tuple is
+    # (link_name, bw_type, expected): the consumers pass element 0 as link_name and element
+    # 1 as the encoding int. This mirrors the public interface contract rather than scraping
+    # wrapper *_BW0 symbols (the old scrape passed the symbol name, e.g. "AGG_BW0", as
+    # link_name, which is not a valid link ID).
+    io_bw_agg_type = 1  # AGG: the bandwidth type used for IO bandwidth
+    io_bw_encodings = [
+        (link_name, io_bw_agg_type, PASS)
+        for link_name in (
+            "P0",
+            "P1",
+            "P2",
+            "P3",
+            "P4",
+            "G0",
+            "G1",
+            "G2",
+            "G3",
+            "G4",
+            "G5",
+            "G6",
+            "G7",
+        )
+    ]
+
+    gpu_blocks = []
+    for member in amdsmi.AmdSmiGpuBlock:
+        cond = PASS
+        if member.name in ["INVALID", "RESERVED"]:
+            cond = FAIL
+        gpu_blocks.append((member.name, amdsmi.AmdSmiGpuBlock(member.value), cond))
+
+    memory_types = [
+        (member.name, amdsmi.AmdSmiMemoryType(member.value), PASS)
+        for member in amdsmi.AmdSmiMemoryType
+    ]
+
+    reg_types = [
+        (member.name, amdsmi.AmdSmiRegType(member.value), PASS) for member in amdsmi.AmdSmiRegType
+    ]
+
+    voltage_metrics = [
+        (member.name, amdsmi.AmdSmiVoltageMetric(member.value), PASS)
+        for member in amdsmi.AmdSmiVoltageMetric
+    ]
+
+    voltage_types = []
+    for member in amdsmi.AmdSmiVoltageType:
+        cond = PASS
+        if member.name in ["INVALID"]:
+            cond = FAIL
+        voltage_types.append((member.name, amdsmi.AmdSmiVoltageType(member.value), cond))
+
+    link_types = []
+    for member in amdsmi.AmdSmiLinkType:
+        cond = PASS
+        if member.name in ["AMDSMI_LINK_TYPE_NOT_APPLICABLE", "AMDSMI_LINK_TYPE_UNKNOWN"]:
+            cond = FAIL
+        link_types.append((member.name, amdsmi.AmdSmiLinkType(member.value), cond))
+
+    temperature_types = [
+        (member.name, amdsmi.AmdSmiTemperatureType(member.value), PASS)
+        for member in amdsmi.AmdSmiTemperatureType
+    ]
+
+    temperature_metrics = [
+        (member.name, amdsmi.AmdSmiTemperatureMetric(member.value), PASS)
+        for member in amdsmi.AmdSmiTemperatureMetric
+    ]
+
+    utilization_counter_types: list = [
+        (member.name, amdsmi.AmdSmiUtilizationCounterType(member.value), PASS)
+        for member in amdsmi.AmdSmiUtilizationCounterType
+    ]
+    # Negative test: integer 100 is out of range for AmdSmiUtilizationCounterType;
+    # the API must reject it. Not a real enum member so must be added explicitly.
+    utilization_counter_types.append(("UTILIZATION_COUNTER_BAD", 100, FAIL))
+
+    event_groups = []
+    for member in amdsmi.AmdSmiEventGroup:
+        cond = PASS
+        if member.name in ["GRP_INVALID"]:
+            cond = FAIL
+        event_groups.append((member.name, amdsmi.AmdSmiEventGroup(member.value), cond))
+
+    event_types = [
+        (member.name, amdsmi.AmdSmiEventType(member.value), PASS)
+        for member in amdsmi.AmdSmiEventType
+    ]
+
+    counter_commands = [
+        (member.name, amdsmi.AmdSmiCounterCommand(member.value), PASS)
+        for member in amdsmi.AmdSmiCounterCommand
+    ]
+
+    compute_partition_types = []
+    for member in amdsmi.AmdSmiComputePartitionType:
+        cond = PASS
+        if member.name in ["INVALID"]:
+            cond = FAIL
+        compute_partition_types.append(
+            (member.name, amdsmi.AmdSmiComputePartitionType(member.value), cond)
+        )
+
+    memory_partition_types = []
+    for member in amdsmi.AmdSmiMemoryPartitionType:
+        cond = PASS
+        if member.name in ["UNKNOWN"]:
+            cond = FAIL
+        elif member.name in ["NPS4", "NPS8"]:
+            # NPS4/NPS8 are hardware-dependent; accept success or invalid depending on support
+            # BTW - no asic supports NPS8...
+            cond = [PASS, FAIL]
+        memory_partition_types.append(
+            (member.name, amdsmi.AmdSmiMemoryPartitionType(member.value), cond)
+        )
+
+    compute_partition_mem_alloc_mode_types = []
+    for member in amdsmi.AmdSmiComputePartitionMemAllocModeType:
+        cond = PASS
+        if member.name in ["INVALID"]:
+            cond = FAIL
+        compute_partition_mem_alloc_mode_types.append(
+            (member.name, amdsmi.AmdSmiComputePartitionMemAllocModeType(member.value), cond)
+        )
+
+    freq_inds = []
+    for member in amdsmi.AmdSmiFreqInd:
+        cond = PASS
+        if member.name in ["INVALID"]:
+            cond = FAIL
+        freq_inds.append((member.name, amdsmi.AmdSmiFreqInd(member.value), cond))
+
+    power_profile_preset_masks = []
+    for member in amdsmi.AmdSmiPowerProfilePresetMasks:
+        cond = PASS
+        if member.name in ["INVALID"]:
+            # INVALID (0xFFFFFFFFFFFFFFFF) is intentionally tested with a specific expected
+            # status rather than the generic FAIL (AMDSMI_STATUS_INVAL). The API returns
+            # AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS for this sentinel, not AMDSMI_STATUS_INVAL.
+            cond = "AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS"
+        power_profile_preset_masks.append(
+            (member.name, amdsmi.AmdSmiPowerProfilePresetMasks(member.value), cond)
+        )
+
+    processor_types = []
+    for member in amdsmi.AmdSmiProcessorType:
+        cond = PASS
+        if member.name in ["UNKNOWN"]:
+            cond = FAIL
+        processor_types.append((member.name, amdsmi.AmdSmiProcessorType(member.value), cond))
+
+    dev_perf_levels = []
+    for member in amdsmi.AmdSmiDevPerfLevel:
+        cond = PASS
+        if member.name in ["UNKNOWN"]:
+            cond = FAIL
+        dev_perf_levels.append((member.name, amdsmi.AmdSmiDevPerfLevel(member.value), cond))
+
+    return {
+        "status_types": status_types,
+        "clk_types": clk_types,
+        "clk_limit_types": clk_limit_types,
+        "io_bw_encodings": io_bw_encodings,
+        "gpu_blocks": gpu_blocks,
+        "memory_types": memory_types,
+        "reg_types": reg_types,
+        "voltage_metrics": voltage_metrics,
+        "voltage_types": voltage_types,
+        "link_types": link_types,
+        "temperature_types": temperature_types,
+        "temperature_metrics": temperature_metrics,
+        "utilization_counter_types": utilization_counter_types,
+        "event_groups": event_groups,
+        "event_types": event_types,
+        "counter_commands": counter_commands,
+        "compute_partition_types": compute_partition_types,
+        "memory_partition_types": memory_partition_types,
+        "compute_partition_mem_alloc_mode_types": compute_partition_mem_alloc_mode_types,
+        "freq_inds": freq_inds,
+        "power_profile_preset_masks": power_profile_preset_masks,
+        "processor_types": processor_types,
+        "dev_perf_levels": dev_perf_levels,
+    }
+
+
+# Module-level views of the enum-derived parameter lists, computed once at import.
+# They resolve natively (e.g. ``common.GPU_BLOCKS``) so the standalone benchmark
+# suites can consume them directly instead of via dynamic ``setattr`` a type checker
+# can't follow. Read-only test parameters, so sharing a single instance is safe.
+_TYPE_LISTS = build_type_lists()
+STATUS_TYPES = _TYPE_LISTS["status_types"]
+CLK_TYPES = _TYPE_LISTS["clk_types"]
+CLK_LIMIT_TYPES = _TYPE_LISTS["clk_limit_types"]
+IO_BW_ENCODINGS = _TYPE_LISTS["io_bw_encodings"]
+GPU_BLOCKS = _TYPE_LISTS["gpu_blocks"]
+MEMORY_TYPES = _TYPE_LISTS["memory_types"]
+REG_TYPES = _TYPE_LISTS["reg_types"]
+VOLTAGE_METRICS = _TYPE_LISTS["voltage_metrics"]
+VOLTAGE_TYPES = _TYPE_LISTS["voltage_types"]
+LINK_TYPES = _TYPE_LISTS["link_types"]
+TEMPERATURE_TYPES = _TYPE_LISTS["temperature_types"]
+TEMPERATURE_METRICS = _TYPE_LISTS["temperature_metrics"]
+UTILIZATION_COUNTER_TYPES = _TYPE_LISTS["utilization_counter_types"]
+EVENT_GROUPS = _TYPE_LISTS["event_groups"]
+EVENT_TYPES = _TYPE_LISTS["event_types"]
+COUNTER_COMMANDS = _TYPE_LISTS["counter_commands"]
+COMPUTE_PARTITION_TYPES = _TYPE_LISTS["compute_partition_types"]
+MEMORY_PARTITION_TYPES = _TYPE_LISTS["memory_partition_types"]
+COMPUTE_PARTITION_MEM_ALLOC_MODE_TYPES = _TYPE_LISTS["compute_partition_mem_alloc_mode_types"]
+FREQ_INDS = _TYPE_LISTS["freq_inds"]
+POWER_PROFILE_PRESET_MASKS = _TYPE_LISTS["power_profile_preset_masks"]
+PROCESSOR_TYPES = _TYPE_LISTS["processor_types"]
+DEV_PERF_LEVELS = _TYPE_LISTS["dev_perf_levels"]
 
 
 def _parse_verbose(argv=None):
@@ -278,6 +534,36 @@ def _parse_k_pattern(argv=None):
     return None
 
 
+def _parse_x_pattern(argv=None):
+    """Return the ``-x``/``--exclude`` filter substring from *argv*, or ``None``.
+
+    Tests whose id contains this substring are skipped (the inverse of ``-k``).
+    Accepts both the separate ("-x", "pattern") and joined ("-xpattern") forms.
+    """
+    argv = sys.argv if argv is None else argv
+    for i, arg in enumerate(argv):
+        if arg in ("-x", "--exclude") and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith("-x") and arg != "-x":
+            return arg[2:]
+    return None
+
+
+def _filter_suite_exclude(suite, pattern):
+    """Return a copy of *suite* with every test whose id contains *pattern* removed.
+
+    unittest's ``-k`` can only include matching tests; this provides the inverse so
+    callers can run everything except, e.g., the performance suites (``-x performance``).
+    """
+    filtered = unittest.TestSuite()
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            filtered.addTest(_filter_suite_exclude(test, pattern))
+        elif pattern not in test.id():
+            filtered.addTest(test)
+    return filtered
+
+
 def run_test_dir(subdir, title, top_level_dir):
     """Discover and run every test under *top_level_dir*/*subdir*, then exit.
 
@@ -307,6 +593,12 @@ def run_test_dir(subdir, title, top_level_dir):
         pattern="test_*.py",
         top_level_dir=top_level_dir,
     )
+
+    # -x/--exclude drops any test whose id contains the substring (the inverse of
+    # -k), e.g. run everything but the perf suites with `-x performance`.
+    x_pattern = _parse_x_pattern(argv)
+    if x_pattern:
+        suite = _filter_suite_exclude(suite, x_pattern)
 
     if "-l" in argv or "--list" in argv:
         print_test_ids(suite)
@@ -516,8 +808,8 @@ class Common:
         self.max_num_physical_devices = (
             amdsmi.amdsmi_interface.AMDSMI_MAX_NUM_XCP * amdsmi.amdsmi_interface.AMDSMI_MAX_DEVICES
         )
-        self.PASS = "AMDSMI_STATUS_SUCCESS"
-        self.FAIL = "AMDSMI_STATUS_INVAL"
+        self.PASS = PASS
+        self.FAIL = FAIL
         self.ANY_FAIL = "ANY_FAIL"
 
         # Tests marked with either of these flags will be skipped
@@ -565,181 +857,12 @@ class Common:
             ("49", "AMDSMI_STATUS_NO_HSMP_MSG_SUP"),
         ]
 
-        self.error_map = {}
-        self.status_types = []
-        for member in amdsmi.AmdSmiStatus:
-            self.error_map[str(member.value)] = f"AMDSMI_STATUS_{member.name}"
-            self.status_types.append((member.name, amdsmi.AmdSmiStatus(member.value), self.PASS))
-
-        self.clk_types = []
-        for member in amdsmi.AmdSmiClkType:
-            cond = self.PASS
-            if member.name in ["DCEF", "PCIE"]:
-                cond = [self.PASS, self.FAIL]
-            self.clk_types.append((member.name, amdsmi.AmdSmiClkType(member.value), cond))
-
-        self.clk_limit_types = []
-        for member in amdsmi.AmdSmiClkLimitType:
-            self.clk_limit_types.append(
-                (member.name, amdsmi.AmdSmiClkLimitType(member.value), self.PASS)
-            )
-
-        # AmdSmiIOBWEncoding is not yet part of the public amdsmi interface.
-        # Discover the wrapper symbols by convention (AGG_BW0, RD_BW0, WR_BW0).
-        # The assertion guards against a silent empty list if symbols are renamed.
-        self.io_bw_encodings = [
-            (name, getattr(amdsmi.amdsmi_wrapper, name), self.PASS)
-            for name in sorted(dir(amdsmi.amdsmi_wrapper))
-            if name.endswith("_BW0")
-        ]
-        assert self.io_bw_encodings, (
-            "No *_BW0 symbols found in amdsmi_wrapper — "
-            "amdsmi_get_cpu_current_io_bandwidth tests would pass with zero coverage. "
-            "Check that AGG_BW0/RD_BW0/WR_BW0 are still exported by the wrapper."
-        )
-
-        self.gpu_blocks = []
-        for member in amdsmi.AmdSmiGpuBlock:
-            cond = self.PASS
-            if member.name in ["INVALID", "RESERVED"]:
-                cond = self.FAIL
-            self.gpu_blocks.append((member.name, amdsmi.AmdSmiGpuBlock(member.value), cond))
-
-        self.memory_types = []
-        for member in amdsmi.AmdSmiMemoryType:
-            self.memory_types.append(
-                (member.name, amdsmi.AmdSmiMemoryType(member.value), self.PASS)
-            )
-
-        self.reg_types = []
-        for member in amdsmi.AmdSmiRegType:
-            self.reg_types.append((member.name, amdsmi.AmdSmiRegType(member.value), self.PASS))
-
-        self.voltage_metrics = []
-        for member in amdsmi.AmdSmiVoltageMetric:
-            self.voltage_metrics.append(
-                (member.name, amdsmi.AmdSmiVoltageMetric(member.value), self.PASS)
-            )
-
-        self.voltage_types = []
-        for member in amdsmi.AmdSmiVoltageType:
-            cond = self.PASS
-            if member.name in ["INVALID"]:
-                cond = self.FAIL
-            self.voltage_types.append((member.name, amdsmi.AmdSmiVoltageType(member.value), cond))
-
-        self.link_types = []
-        for member in amdsmi.AmdSmiLinkType:
-            cond = self.PASS
-            if member.name in ["AMDSMI_LINK_TYPE_NOT_APPLICABLE", "AMDSMI_LINK_TYPE_UNKNOWN"]:
-                cond = self.FAIL
-            self.link_types.append((member.name, amdsmi.AmdSmiLinkType(member.value), cond))
-
-        self.temperature_types = []
-        for member in amdsmi.AmdSmiTemperatureType:
-            self.temperature_types.append(
-                (member.name, amdsmi.AmdSmiTemperatureType(member.value), self.PASS)
-            )
-
-        self.temperature_metrics = []
-        for member in amdsmi.AmdSmiTemperatureMetric:
-            self.temperature_metrics.append(
-                (member.name, amdsmi.AmdSmiTemperatureMetric(member.value), self.PASS)
-            )
-
-        self.utilization_counter_types = []
-        for member in amdsmi.AmdSmiUtilizationCounterType:
-            self.utilization_counter_types.append(
-                (member.name, amdsmi.AmdSmiUtilizationCounterType(member.value), self.PASS)
-            )
-        # Negative test: integer 100 is out of range for AmdSmiUtilizationCounterType;
-        # the API must reject it. Not a real enum member so must be added explicitly.
-        self.utilization_counter_types.append(("UTILIZATION_COUNTER_BAD", 100, self.FAIL))
-
-        self.event_groups = []
-        for member in amdsmi.AmdSmiEventGroup:
-            cond = self.PASS
-            if member.name in ["GRP_INVALID"]:
-                cond = self.FAIL
-            self.event_groups.append((member.name, amdsmi.AmdSmiEventGroup(member.value), cond))
-
-        self.event_types = []
-        for member in amdsmi.AmdSmiEventType:
-            self.event_types.append((member.name, amdsmi.AmdSmiEventType(member.value), self.PASS))
-
-        self.counter_commands = []
-        for member in amdsmi.AmdSmiCounterCommand:
-            self.counter_commands.append(
-                (member.name, amdsmi.AmdSmiCounterCommand(member.value), self.PASS)
-            )
-
-        self.compute_partition_types = []
-        for member in amdsmi.AmdSmiComputePartitionType:
-            cond = self.PASS
-            if member.name in ["INVALID"]:
-                cond = self.FAIL
-            self.compute_partition_types.append(
-                (member.name, amdsmi.AmdSmiComputePartitionType(member.value), cond)
-            )
-
-        self.memory_partition_types = []
-        for member in amdsmi.AmdSmiMemoryPartitionType:
-            cond = self.PASS
-            if member.name in ["UNKNOWN"]:
-                cond = self.FAIL
-            elif member.name in ["NPS4", "NPS8"]:
-                # NPS4/NPS8 are hardware-dependent; accept success or invalid depending on support
-                # BTW - no asic supports NPS8...
-                cond = [self.PASS, self.FAIL]
-            self.memory_partition_types.append(
-                (member.name, amdsmi.AmdSmiMemoryPartitionType(member.value), cond)
-            )
-
-        self.compute_partition_mem_alloc_mode_types = []
-        for member in amdsmi.AmdSmiComputePartitionMemAllocModeType:
-            cond = self.PASS
-            if member.name in ["INVALID"]:
-                cond = self.FAIL
-            self.compute_partition_mem_alloc_mode_types.append(
-                (member.name, amdsmi.AmdSmiComputePartitionMemAllocModeType(member.value), cond)
-            )
-
-        self.freq_inds = []
-        for member in amdsmi.AmdSmiFreqInd:
-            cond = self.PASS
-            if member.name in ["INVALID"]:
-                cond = self.FAIL
-            self.freq_inds.append((member.name, amdsmi.AmdSmiFreqInd(member.value), cond))
-
-        self.power_profile_preset_masks = []
-        for member in amdsmi.AmdSmiPowerProfilePresetMasks:
-            cond = self.PASS
-            if member.name in ["INVALID"]:
-                # INVALID (0xFFFFFFFFFFFFFFFF) is intentionally tested with a specific expected
-                # status rather than the generic self.FAIL (AMDSMI_STATUS_INVAL). The API returns
-                # AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS for this sentinel, not AMDSMI_STATUS_INVAL.
-                cond = "AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS"
-            self.power_profile_preset_masks.append(
-                (member.name, amdsmi.AmdSmiPowerProfilePresetMasks(member.value), cond)
-            )
-
-        self.processor_types = []
-        for member in amdsmi.AmdSmiProcessorType:
-            cond = self.PASS
-            if member.name in ["UNKNOWN"]:
-                cond = self.FAIL
-            self.processor_types.append(
-                (member.name, amdsmi.AmdSmiProcessorType(member.value), cond)
-            )
-
-        self.dev_perf_levels = []
-        for member in amdsmi.AmdSmiDevPerfLevel:
-            cond = self.PASS
-            if member.name in ["UNKNOWN"]:
-                cond = self.FAIL
-            self.dev_perf_levels.append(
-                (member.name, amdsmi.AmdSmiDevPerfLevel(member.value), cond)
-            )
+        self.error_map = ERROR_MAP
+        # All enum-derived parameter lists are built by the shared, hardware-free
+        # build_type_lists() so the logic lives in one place (also importable by
+        # the standalone benchmark suites).
+        for _attr, _value in build_type_lists().items():
+            setattr(self, _attr, _value)
         return
 
     def print(self, msg, data=None):
@@ -820,13 +943,12 @@ class Common:
         # Callers use the pattern: `if self.check_ret(...): raise_exception = e`
         if isinstance(exc, str) and len(exc) == 0:
             error_code_name = expected_code_name
+            error_code = "-1"
             if error_code_name in self.error_map.values():
                 for key, value in self.error_map.items():
                     if value == error_code_name:
                         error_code = key
                         break
-            else:
-                error_code = "-1"
         elif hasattr(exc, "get_error_code"):
             error_code, error_code_name = self.get_error_code(exc)
         else:
@@ -914,10 +1036,7 @@ class Common:
             # AmdSmiLibraryException exposes get_error_code(); AmdSmiParameterException does not.
             # Accessing .err_code on AmdSmiParameterException raises AttributeError.
             err_code = e.get_error_code() if hasattr(e, "get_error_code") else None
-            if err_code in (
-                amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                amdsmi.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
-            ):
+            if err_code in (amdsmi.AmdSmiStatus.NOT_INIT, amdsmi.AmdSmiStatus.DRIVER_NOT_LOADED):
                 self.print(driver_msg)
                 raise unittest.SkipTest(driver_msg)
             raise
@@ -1011,7 +1130,7 @@ class Common:
 
         params = kwargs
         iterator = iter(params.items())
-        func_name, func = next(iterator, (None, None))
+        func_name, func = next(iterator)
         del params[func_name]
 
         raise_exception = None
@@ -1042,7 +1161,7 @@ class Common:
 
         params = kwargs
         iterator = iter(params.items())
-        func_name, func = next(iterator, (None, None))
+        func_name, func = next(iterator)
         del params[func_name]
 
         raise_exception = None
@@ -1084,8 +1203,8 @@ class Common:
 
         params = kwargs
         iterator = iter(params.items())
-        func_name, func = next(iterator, (None, None))
-        _, values1 = next(iterator, (None, None))
+        func_name, func = next(iterator)
+        _, values1 = next(iterator)
         del params[func_name]
 
         raise_exception = None
@@ -1141,9 +1260,9 @@ class Common:
 
         params = kwargs
         iterator = iter(params.items())
-        func_name, func = next(iterator, (None, None))
-        _, values1 = next(iterator, (None, None))
-        _, values2 = next(iterator, (None, None))
+        func_name, func = next(iterator)
+        _, values1 = next(iterator)
+        _, values2 = next(iterator)
         del params[func_name]
 
         raise_exception = None
@@ -1205,7 +1324,7 @@ class Common:
         """
         params = kwargs
         iterator = iter(params.items())
-        func_name, func = next(iterator, (None, None))
+        func_name, func = next(iterator)
         del params[func_name]
 
         raise_exception = None

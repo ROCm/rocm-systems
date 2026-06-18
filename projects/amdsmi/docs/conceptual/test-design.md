@@ -285,13 +285,14 @@ tests/python/
 │   │   ├── test_metrics.py            # gpu_metrics, pm_metrics, partition metrics
 │   │   ├── test_partition.py          # compute_partition, memory_partition, set, xgmi_plpd
 │   │   ├── test_pci.py                # PCI bandwidth, throughput, replay counter
-│   │   ├── test_perf.py               # perf_level, overdrive, od_volt, set_overdrive, set_perf_level
+│   │   ├── test_overdrive.py          # perf_level, overdrive, od_volt, set_overdrive, set_perf_level
 │   │   ├── test_power.py              # power_profile, power_cap get/set
 │   │   ├── test_process.py            # process_info
 │   │   ├── test_ras.py                # ras, ecc error counts
 │   │   ├── test_system.py             # GPU system-level info
 │   │   ├── test_thermal.py            # fan_rpms, fan_speed get/set
-│   │   └── test_xgmi.py               # xgmi_link, xcd_counter
+│   │   ├── test_xgmi.py               # xgmi_link, xcd_counter
+│   │   └── test_benchmark.py          # per-API latency benchmarks with timing assertions
 │   ├── cpu/
 │   │   ├── test_clock.py              # clk_freq, clock_info, core_current_freq, fclk_mclk, soc_pstate
 │   │   ├── test_dimm.py               # dimm_power, dimm_thermal, dimm_temp_range
@@ -299,7 +300,8 @@ tests/python/
 │   │   ├── test_hsmp.py               # hsmp_driver_version, hsmp_proto_ver, esmi_err_msg
 │   │   ├── test_identity.py           # CPU socket identity
 │   │   ├── test_power.py              # socket_power, power_cap get/set, boostlimit set
-│   │   └── test_thermal.py            # socket_temperature, prochot_status
+│   │   ├── test_thermal.py            # socket_temperature, prochot_status
+│   │   └── test_benchmark.py          # per-API latency benchmarks with timing assertions
 │   ├── nic/
 │   │   ├── test_discovery.py          # NIC and switch BDF/device discovery (live enumeration)
 │   │   └── test_identity.py           # NIC and switch BDF and device ID reads
@@ -474,7 +476,7 @@ install(
 | `integration_test.py` — topology | `functional/system/test_topology.py` |
 | `integration_test.py` — NIC/switch | `functional/nic/test_discovery.py` |
 | `cli_unit_test.py` | `cli/base.py` + `cli/test_cli_{common,gpu,cpu,topology}.py` |
-| `perf_tests.py` | `functional/gpu/test_perf_benchmark.py` |
-| `perf_cputests.py` | `functional/cpu/test_perf_benchmark.py` |
+| `perf_tests.py` | `functional/gpu/test_benchmark.py` |
+| `perf_cputests.py` | `functional/cpu/test_benchmark.py` |
 | `common.py` | `common/common.py` |
 | `runcmd.py` | `common/runcmd.py` |
