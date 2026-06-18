@@ -18,7 +18,7 @@ target_sources(profiler-hub-objects PRIVATE ${profiler-hub_sources})
 # ------------------------------------------------------------ #
 target_include_directories(
     profiler-hub-objects
-    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/common
+    PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/common
 )
 
 add_subdirectory(queries)
