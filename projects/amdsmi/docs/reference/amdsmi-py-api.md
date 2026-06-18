@@ -167,15 +167,14 @@ finally:
 
 ### amdsmi_get_processor_info
 
-**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
-
-Description: Return processor name. Available regardless of whether the library
-was built with ESMI support.
+Description: Return a string identifier for the processor: its index as a decimal
+string (for example `"0"`, `"1"`, `"2"`), which is its zero-based position in the
+library's processor list, the same order used by `amdsmi_get_processor_handles`.
 
 Input parameters:
 `processor_handle` processor handle
 
-Output: Processor name
+Output: Processor index as a string
 
 Exceptions that can be thrown by `amdsmi_get_processor_info` function:
 

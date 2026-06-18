@@ -265,11 +265,15 @@ void Backend::reset_stats() {
 }
 
 int Backend::buffer_register(void *addr, size_t length) {
+  LOG_TRACE("Backend::buffer_register addr=%p length=%zu", addr, length);
+
   if (addr == nullptr) {
+    LOG_TRACE("Backend::buffer_register FAIL: addr is null");
     return ROCSHMEM_ERROR;
   }
 
   if (length == 0) {
+    LOG_TRACE("Backend::buffer_register FAIL: length is 0");
     return ROCSHMEM_ERROR;
   }
 
@@ -277,6 +281,7 @@ int Backend::buffer_register(void *addr, size_t length) {
 
   // Check for overflow when computing end address
   if (start > UINTPTR_MAX - length) {
+    LOG_TRACE("Backend::buffer_register FAIL: overflow start=0x%lx length=%zu", start, length);
     return ROCSHMEM_ERROR;
   }
 
@@ -287,6 +292,9 @@ int Backend::buffer_register(void *addr, size_t length) {
 
   // Check entry at or after our start for overlap
   if (it != user_buffer_regions.end() && it->first < end) {
+    LOG_TRACE("Backend::buffer_register FAIL: overlap with existing region "
+              "[0x%lx, +%zu], new [0x%lx, +%zu]",
+              it->first, it->second, start, length);
     return ROCSHMEM_ERROR;
   }
 
@@ -295,11 +303,16 @@ int Backend::buffer_register(void *addr, size_t length) {
     auto prev = std::prev(it);
     uintptr_t prev_end = prev->first + prev->second;
     if (prev_end > start) {
+      LOG_TRACE("Backend::buffer_register FAIL: overlap with preceding region "
+                "[0x%lx, +%zu] (ends at 0x%lx), new start=0x%lx",
+                prev->first, prev->second, prev_end, start);
       return ROCSHMEM_ERROR;
     }
   }
 
   user_buffer_regions[start] = length;
+  LOG_TRACE("Backend::buffer_register OK: registered [0x%lx, +%zu] (total regions: %zu)",
+            start, length, user_buffer_regions.size());
   return ROCSHMEM_SUCCESS;
 }
 

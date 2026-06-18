@@ -891,6 +891,42 @@ struct FuncSumPostDiv<__nv_fp8_e5m2> {
 #endif
 #endif
 
+#if defined(__HIP_PLATFORM_AMD__)
+// FuncSumPostDiv for the raw ROCm float types exists only so the GIN kernel's mmRed
+// (Red<rawT> srcRedMc) is a constructible type; its reduce/postOp are never invoked on
+// ROCm (non-multimem), where avg is accumulated in a float AccT via srcRedUc.
+template<>
+struct FuncSumPostDiv<hip_bfloat16> {
+  using EltType = hip_bfloat16;
+  float scalar;
+  __device__ __forceinline__ FuncSumPostDiv(uint64_t opArg=0) {
+    union { uint64_t u64; float val; };
+    u64 = opArg;
+    scalar = val;
+  }
+};
+template<>
+struct FuncSumPostDiv<rccl_float8> {
+  using EltType = rccl_float8;
+  float scalar;
+  __device__ __forceinline__ FuncSumPostDiv(uint64_t opArg=0) {
+    union { uint64_t u64; float val; };
+    u64 = opArg;
+    scalar = val;
+  }
+};
+template<>
+struct FuncSumPostDiv<rccl_bfloat8> {
+  using EltType = rccl_bfloat8;
+  float scalar;
+  __device__ __forceinline__ FuncSumPostDiv(uint64_t opArg=0) {
+    union { uint64_t u64; float val; };
+    u64 = opArg;
+    scalar = val;
+  }
+};
+#endif
+
 template<typename T>
 struct Divider {
   __device__ __forceinline__ static T divide(T dividend, T divisor) {

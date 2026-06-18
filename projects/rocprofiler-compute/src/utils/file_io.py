@@ -227,7 +227,8 @@ def build_agent_to_gpu_map_from_json(
 def load_pc_sampling_results(workload_path: str) -> Optional[dict[str, Any]]:
     """
     Parse ``ps_file_results.json`` and return its ``rocprofiler-sdk-tool[0]``
-    record, or ``None`` if the file is absent.
+    record. Returns ``None`` if the file is absent or fails to parse (a
+    warning is logged in the latter case).
 
     The json can be multiple GB: parse once here and pass the dict to every
     PC sampling consumer instead of re-reading the file.
@@ -239,7 +240,8 @@ def load_pc_sampling_results(workload_path: str) -> Optional[dict[str, Any]]:
         with json_path.open(encoding="utf-8") as json_file:
             return json.load(json_file)["rocprofiler-sdk-tool"][0]
     except (json.JSONDecodeError, KeyError, IndexError) as error:
-        console_error(f"PC sampling: failed to parse {json_path}: {error}")
+        console_warning(f"PC sampling: failed to parse {json_path}: {error}")
+        return None
 
 
 def process_pc_sampling_kernel_trace(

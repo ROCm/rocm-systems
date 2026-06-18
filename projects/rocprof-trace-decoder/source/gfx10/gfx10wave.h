@@ -44,7 +44,8 @@ struct wave_t : public WaveDataInternal
         bool exbarw,
         uint8_t me = 0,
         uint8_t pipe = 0,
-        uint8_t wg = 0
+        uint8_t wg = 0,
+        uint8_t cluster = 0
     );
 
     int64_t last_state_cycle = 0;
@@ -94,6 +95,9 @@ protected:
 
     int dprate = 1;
     int derate = 1;
+
+    uint8_t active_cluster_id = 0;
+    bool cluster_end_pending = false;
 
     gfx10::CSRegisterHandler csregister;
     PipeArray64 wave_start_addr{};
