@@ -54,15 +54,14 @@ class TestGpuRas(unittest.TestCase):
         self.common.print_func_name("")
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_get_gpu_available_counters=amdsmi.amdsmi_get_gpu_available_counters,
-            event_group=self.common.event_groups,
+            event_group=common.EVENT_GROUPS,
         )
         return
 
     def test_get_gpu_ecc_count(self):
         self.common.print_func_name("")
         self.common.Test_Per_GPU_With_One_Enum(
-            amdsmi_get_gpu_ecc_count=amdsmi.amdsmi_get_gpu_ecc_count,
-            gpu_block=self.common.gpu_blocks,
+            amdsmi_get_gpu_ecc_count=amdsmi.amdsmi_get_gpu_ecc_count, gpu_block=common.GPU_BLOCKS
         )
         return
 
@@ -80,8 +79,7 @@ class TestGpuRas(unittest.TestCase):
             self.skipTest(msg)
 
         self.common.Test_Per_GPU_With_One_Enum(
-            amdsmi_get_gpu_ecc_status=amdsmi.amdsmi_get_gpu_ecc_status,
-            gpu_block=self.common.gpu_blocks,
+            amdsmi_get_gpu_ecc_status=amdsmi.amdsmi_get_gpu_ecc_status, gpu_block=common.GPU_BLOCKS
         )
         return
 
@@ -110,7 +108,7 @@ class TestGpuRas(unittest.TestCase):
         self.common.print_func_name("")
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_gpu_counter_group_supported=amdsmi.amdsmi_gpu_counter_group_supported,
-            event_group=self.common.event_groups,
+            event_group=common.EVENT_GROUPS,
         )
         return
 

@@ -57,7 +57,7 @@ class TestGpuEvents(unittest.TestCase):
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
             results[i] = {}
-            for event_group_name, event_group, event_group_cond in self.common.event_groups:
+            for event_group_name, event_group, event_group_cond in common.EVENT_GROUPS:
                 results[i][event_group_name] = {}
                 results[i][event_group_name]["supported"] = False
                 results[i][event_group_name]["counters"] = 0
@@ -100,7 +100,7 @@ class TestGpuEvents(unittest.TestCase):
                     self.common.print(f"\t### amdsmi_gpu_destroy_counter(){msg_add}")
                     continue
 
-                for event_type_name, event_type, event_type_cond in self.common.event_types:
+                for event_type_name, event_type, event_type_cond in common.EVENT_TYPES:
                     results[i][event_group_name][event_type_name] = {}
                     results[i][event_group_name][event_type_name]["handle"] = 0
                     results[i][event_group_name][event_type_name]["num_counts"] = 0
@@ -127,7 +127,7 @@ class TestGpuEvents(unittest.TestCase):
 
                     # Start control counter
                     counter_command_name, counter_command, counter_commands_cond = (
-                        self.common.counter_commands[0]
+                        common.COUNTER_COMMANDS[0]
                     )
                     msg = f"\t### amdsmi_gpu_control_counter(event_handle={id(event_handle)}, counter_command={counter_command_name}):"
                     try:
@@ -153,7 +153,7 @@ class TestGpuEvents(unittest.TestCase):
 
                     # Stop control counter
                     counter_command_name, counter_command, counter_commands_cond = (
-                        self.common.counter_commands[1]
+                        common.COUNTER_COMMANDS[1]
                     )
                     msg = f"\t### amdsmi_gpu_control_counter(event_handle={id(event_handle)}, counter_command={counter_command_name}):"
                     try:

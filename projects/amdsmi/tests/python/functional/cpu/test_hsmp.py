@@ -89,7 +89,7 @@ class TestCpuHsmp(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        for _, status_type, status_cond in self.common.status_types:
+        for _, status_type, status_cond in common.STATUS_TYPES:
             msg = f"\t### amdsmi_get_esmi_err_msg(status_type={status_type}):"
             try:
                 ret = amdsmi.amdsmi_get_esmi_err_msg(status_type)

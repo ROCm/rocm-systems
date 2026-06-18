@@ -60,7 +60,7 @@ class TestGpuPartition(unittest.TestCase):
 
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
-            default_compute_partition_type = self.common.compute_partition_types[0][1]
+            default_compute_partition_type = common.COMPUTE_PARTITION_TYPES[0][1]
             msg = f"\t### amdsmi_get_gpu_compute_partition(gpu={i}):"
             try:
                 default_compute_partition_name = amdsmi.amdsmi_get_gpu_compute_partition(gpu)
@@ -75,7 +75,7 @@ class TestGpuPartition(unittest.TestCase):
                 compute_partition_type_name,
                 compute_partition_type,
                 compute_partition_type_cond,
-            ) in self.common.compute_partition_types:
+            ) in common.COMPUTE_PARTITION_TYPES:
                 if default_compute_partition_name == compute_partition_type_name:
                     default_compute_partition_type = compute_partition_type
                 msg = f"\t### amdsmi_set_gpu_compute_partition(gpu={i}, compute_partition_type={compute_partition_type_name}):"
@@ -333,7 +333,7 @@ class TestGpuPartition(unittest.TestCase):
 
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_set_gpu_memory_partition=amdsmi.amdsmi_set_gpu_memory_partition,
-            memory_partition_type=self.common.memory_partition_types,
+            memory_partition_type=common.MEMORY_PARTITION_TYPES,
         )
         return
 
@@ -347,7 +347,7 @@ class TestGpuPartition(unittest.TestCase):
 
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_set_gpu_memory_partition_mode=amdsmi.amdsmi_set_gpu_memory_partition_mode,
-            memory_partition_mode=self.common.memory_partition_types,
+            memory_partition_mode=common.MEMORY_PARTITION_TYPES,
         )
         return
 
@@ -356,7 +356,7 @@ class TestGpuPartition(unittest.TestCase):
 
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_set_gpu_compute_partition_mem_alloc_mode=amdsmi.amdsmi_set_gpu_compute_partition_mem_alloc_mode,
-            compute_partition_mem_alloc_mode=self.common.compute_partition_mem_alloc_mode_types,
+            compute_partition_mem_alloc_mode=common.COMPUTE_PARTITION_MEM_ALLOC_MODE_TYPES,
         )
         return
 

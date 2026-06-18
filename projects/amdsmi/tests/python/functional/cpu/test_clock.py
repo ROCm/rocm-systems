@@ -138,7 +138,7 @@ class TestCpuClock(unittest.TestCase):
         self.common.print_func_name("")
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
-            for encoding_name, encoding, encoding_cond in self.common.io_bw_encodings:
+            for encoding_name, encoding, encoding_cond in common.IO_BW_ENCODINGS:
                 msg = f"\t### amdsmi_get_cpu_current_io_bandwidth(gpu={i}, encoding={encoding} encoding_name={encoding_name}):"
                 try:
                     ret = amdsmi.amdsmi_get_cpu_current_io_bandwidth(gpu, encoding, encoding_name)

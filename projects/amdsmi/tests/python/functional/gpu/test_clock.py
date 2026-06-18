@@ -64,7 +64,7 @@ class TestGpuClock(unittest.TestCase):
             # AmdSmiClkType enum names (e.g. SYS/MEM/DF/SOC) are not accepted;
             # map only the supported ones and skip the rest.
             clk_type_str_map = {"SYS": "sclk", "MEM": "mclk", "DF": "fclk", "SOC": "socclk"}
-            for clk_type_name, clk_type, clk_cond in self.common.clk_types:
+            for clk_type_name, clk_type, clk_cond in common.CLK_TYPES:
                 clk_type_str = clk_type_str_map.get(clk_type_name)
                 if clk_type_str is None:
                     # No string mapping for this clock type; amdsmi_set_clk_freq

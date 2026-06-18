@@ -146,7 +146,7 @@ class TestSystemTopology(unittest.TestCase):
 
         gpu_handles_by_type = []
         for i, socket in enumerate(sockets):
-            for processor_name, processor_type, processor_cond in self.common.processor_types:
+            for processor_name, processor_type, processor_cond in common.PROCESSOR_TYPES:
                 msg = f"\t### amdsmi_get_processor_handles_by_type(socket={socket.value}, processor_type={processor_name}):"
                 try:
                     ret = amdsmi.amdsmi_get_processor_handles_by_type(socket, processor_type)

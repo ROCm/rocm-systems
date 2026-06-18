@@ -271,7 +271,7 @@ class TestGpuMemory(unittest.TestCase):
         self.common.print_func_name("")
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_get_gpu_memory_total=amdsmi.amdsmi_get_gpu_memory_total,
-            memory_type=self.common.memory_types,
+            memory_type=common.MEMORY_TYPES,
         )
         return
 
@@ -279,7 +279,7 @@ class TestGpuMemory(unittest.TestCase):
         self.common.print_func_name("")
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_get_gpu_memory_usage=amdsmi.amdsmi_get_gpu_memory_usage,
-            memory_type=self.common.memory_types,
+            memory_type=common.MEMORY_TYPES,
         )
         return
 

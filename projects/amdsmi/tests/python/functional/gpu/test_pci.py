@@ -94,7 +94,7 @@ class TestGpuPci(unittest.TestCase):
         self.common.print_func_name("")
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_get_link_topology_nearest=amdsmi.amdsmi_get_link_topology_nearest,
-            link_type=self.common.link_types,
+            link_type=common.LINK_TYPES,
         )
         return
 

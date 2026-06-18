@@ -139,7 +139,7 @@ class TestGpuPower(unittest.TestCase):
                 power_profile_preset_mask_name,
                 power_profile_preset_mask,
                 power_profile_preset_masks_cond,
-            ) in self.common.power_profile_preset_masks:
+            ) in common.POWER_PROFILE_PRESET_MASKS:
                 msg = f"\t### amdsmi_set_gpu_power_profile(gpu={i}, power_profile_preset_mask={power_profile_preset_mask_name}):"
                 try:
                     amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, power_profile_preset_mask)

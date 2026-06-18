@@ -160,7 +160,7 @@ class TestGpuThermal(unittest.TestCase):
 
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_get_temp_metric=amdsmi.amdsmi_get_temp_metric,
-            temperature_type=self.common.temperature_types,
-            temperature_metric=self.common.temperature_metrics,
+            temperature_type=common.TEMPERATURE_TYPES,
+            temperature_metric=common.TEMPERATURE_METRICS,
         )
         return

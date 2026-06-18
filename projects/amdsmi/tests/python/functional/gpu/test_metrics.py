@@ -132,7 +132,7 @@ class TestGpuMetrics(unittest.TestCase):
 
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_get_utilization_count=amdsmi.amdsmi_get_utilization_count,
-            utilization_counter_type=self.common.utilization_counter_types,
+            utilization_counter_type=common.UTILIZATION_COUNTER_TYPES,
         )
         return
 
