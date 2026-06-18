@@ -654,6 +654,9 @@ def process_table_data(
                 if args.time_unit and has_time_data(base_df):
                     cur_df = convert_time_columns(cur_df, args.time_unit)
 
+                if header not in cur_df.columns:
+                    continue
+
                 if (table_type == "raw_csv_table") or (
                     table_type == "metric_table" and header not in hidden_cols
                 ):
