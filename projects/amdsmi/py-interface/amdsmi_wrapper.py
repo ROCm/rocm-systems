@@ -2814,23 +2814,23 @@ struct_amdsmi_nic_numa_info_t._fields_ = [
 ]
 
 amdsmi_nic_numa_info_t = struct_amdsmi_nic_numa_info_t
-class struct_amdsmi_nic_fw_t(Structure):
+class struct_amdsmi_nic_fw_entry_t(Structure):
     pass
 
-struct_amdsmi_nic_fw_t._pack_ = 1 # source:False
-struct_amdsmi_nic_fw_t._fields_ = [
+struct_amdsmi_nic_fw_entry_t._pack_ = 1 # source:False
+struct_amdsmi_nic_fw_entry_t._fields_ = [
     ('name', ctypes.c_char * 256),
     ('version', ctypes.c_char * 256),
 ]
 
-amdsmi_nic_fw_t = struct_amdsmi_nic_fw_t
+amdsmi_nic_fw_entry_t = struct_amdsmi_nic_fw_entry_t
 class struct_amdsmi_nic_fw_info_t(Structure):
     pass
 
 struct_amdsmi_nic_fw_info_t._pack_ = 1 # source:False
 struct_amdsmi_nic_fw_info_t._fields_ = [
     ('num_fw', ctypes.c_uint32),
-    ('fw', struct_amdsmi_nic_fw_t * 16),
+    ('fw', struct_amdsmi_nic_fw_entry_t * 16),
 ]
 
 amdsmi_nic_fw_info_t = struct_amdsmi_nic_fw_info_t
@@ -3017,6 +3017,18 @@ try:
     amdsmi_get_gpu_virtualization_mode = _libraries['libamd_smi.so'].amdsmi_get_gpu_virtualization_mode
     amdsmi_get_gpu_virtualization_mode.restype = amdsmi_status_t
     amdsmi_get_gpu_virtualization_mode.argtypes = [amdsmi_processor_handle, ctypes.POINTER(amdsmi_virtualization_mode_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_nic_processor_handles = _libraries['libamd_smi.so'].amdsmi_get_nic_processor_handles
+    amdsmi_get_nic_processor_handles.restype = amdsmi_status_t
+    amdsmi_get_nic_processor_handles.argtypes = [amdsmi_socket_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_nic_device_bdf = _libraries['libamd_smi.so'].amdsmi_get_nic_device_bdf
+    amdsmi_get_nic_device_bdf.restype = amdsmi_status_t
+    amdsmi_get_nic_device_bdf.argtypes = [amdsmi_processor_handle, ctypes.POINTER(union_amdsmi_bdf_t)]
 except AttributeError:
     pass
 try:
@@ -3431,7 +3443,6 @@ except AttributeError:
 
 # values for enumeration 'amdsmi_fabric_telemetry_category_t'
 amdsmi_fabric_telemetry_category_t__enumvalues = {
-    4294967295: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN',
     0: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE',
     1: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH',
     2: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO',
@@ -3440,8 +3451,8 @@ amdsmi_fabric_telemetry_category_t__enumvalues = {
     5: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE',
     6: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT',
     7: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX',
+    4294967295: 'AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID',
 }
-AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN = 4294967295
 AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE = 0
 AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH = 1
 AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO = 2
@@ -3450,6 +3461,7 @@ AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT = 4
 AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE = 5
 AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6
 AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID = 4294967295
 amdsmi_fabric_telemetry_category_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_fabric_telemetry_category_mask_t'
@@ -3550,8 +3562,8 @@ except AttributeError:
     pass
 try:
     amdsmi_fabric_telem_id_to_string = _libraries['libamd_smi.so'].amdsmi_fabric_telem_id_to_string
-    amdsmi_fabric_telem_id_to_string.restype = ctypes.POINTER(ctypes.c_char)
-    amdsmi_fabric_telem_id_to_string.argtypes = [uint64_t]
+    amdsmi_fabric_telem_id_to_string.restype = amdsmi_status_t
+    amdsmi_fabric_telem_id_to_string.argtypes = [uint64_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError:
     pass
 try:
@@ -3573,11 +3585,11 @@ amdsmi_fabric_size_constants_t = ctypes.c_uint32 # enum
 # values for enumeration 'amdsmi_fabric_type_t'
 amdsmi_fabric_type_t__enumvalues = {
     0: 'AMDSMI_FABRIC_TYPE_UALOE',
-    1: 'AMDSMI_FABRIC_TYPE_UALLINK',
+    1: 'AMDSMI_FABRIC_TYPE_UALINK',
     2: 'AMDSMI_FABRIC_TYPE_UNKNOWN',
 }
 AMDSMI_FABRIC_TYPE_UALOE = 0
-AMDSMI_FABRIC_TYPE_UALLINK = 1
+AMDSMI_FABRIC_TYPE_UALINK = 1
 AMDSMI_FABRIC_TYPE_UNKNOWN = 2
 amdsmi_fabric_type_t = ctypes.c_uint32 # enum
 
@@ -3650,7 +3662,7 @@ class struct_amdsmi_fabric_info_t(Structure):
 struct_amdsmi_fabric_info_t._pack_ = 1 # source:False
 struct_amdsmi_fabric_info_t._fields_ = [
     ('bdf', amdsmi_bdf_t),
-    ('fabric_info', amdsmi_fabric_info_ver_t),
+    ('info', amdsmi_fabric_info_ver_t),
     ('reserved', ctypes.c_uint32 * 15),
     ('PADDING_0', ctypes.c_ubyte * 4),
 ]
@@ -4602,6 +4614,24 @@ try:
     amdsmi_get_nic_rdma_port_statistics.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
 except AttributeError:
     pass
+try:
+    amdsmi_get_nic_fw_info = _libraries['libamd_smi.so'].amdsmi_get_nic_fw_info
+    amdsmi_get_nic_fw_info.restype = amdsmi_status_t
+    amdsmi_get_nic_fw_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_nic_fw_info_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_nic_port_statistics = _libraries['libamd_smi.so'].amdsmi_get_nic_port_statistics
+    amdsmi_get_nic_port_statistics.restype = amdsmi_status_t
+    amdsmi_get_nic_port_statistics.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_nic_vendor_statistics = _libraries['libamd_smi.so'].amdsmi_get_nic_vendor_statistics
+    amdsmi_get_nic_vendor_statistics.restype = amdsmi_status_t
+    amdsmi_get_nic_vendor_statistics.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
+except AttributeError:
+    pass
 class struct_amdsmi_uma_carveout_option_t(Structure):
     pass
 
@@ -4753,6 +4783,7 @@ __all__ = \
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE',
+    'AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT',
@@ -4766,8 +4797,7 @@ __all__ = \
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE',
-    'AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN',
-    'AMDSMI_FABRIC_TYPE_UALLINK', 'AMDSMI_FABRIC_TYPE_UALOE',
+    'AMDSMI_FABRIC_TYPE_UALINK', 'AMDSMI_FABRIC_TYPE_UALOE',
     'AMDSMI_FABRIC_TYPE_UNKNOWN', 'AMDSMI_FINE_DECODER_ACTIVITY',
     'AMDSMI_FINE_GRAIN_GFX_ACTIVITY',
     'AMDSMI_FINE_GRAIN_MEM_ACTIVITY', 'AMDSMI_FREQ_IND_INVALID',
@@ -5007,13 +5037,14 @@ __all__ = \
     'amdsmi_board_info_t', 'amdsmi_cache_property_type_t',
     'amdsmi_card_form_factor_t', 'amdsmi_clean_gpu_local_data',
     'amdsmi_clk_info_t', 'amdsmi_clk_limit_type_t',
-    'amdsmi_clk_type_t', 'amdsmi_compute_partition_type_t',
-    'amdsmi_container_types_t', 'amdsmi_counter_command_t',
-    'amdsmi_counter_value_t', 'amdsmi_cper_guid_t',
-    'amdsmi_cper_hdr_t', 'amdsmi_cper_notify_type_t',
-    'amdsmi_cper_sev_t', 'amdsmi_cper_timestamp_t',
-    'amdsmi_cper_valid_bits_t', 'amdsmi_cpu_apb_disable',
-    'amdsmi_cpu_apb_enable', 'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
+    'amdsmi_clk_type_t', 'amdsmi_compute_partition_mem_alloc_mode_t',
+    'amdsmi_compute_partition_type_t', 'amdsmi_container_types_t',
+    'amdsmi_counter_command_t', 'amdsmi_counter_value_t',
+    'amdsmi_cper_guid_t', 'amdsmi_cper_hdr_t',
+    'amdsmi_cper_notify_type_t', 'amdsmi_cper_sev_t',
+    'amdsmi_cper_timestamp_t', 'amdsmi_cper_valid_bits_t',
+    'amdsmi_cpu_apb_disable', 'amdsmi_cpu_apb_enable',
+    'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
     'amdsmi_cpusocket_handle', 'amdsmi_ddr_bw_metrics_t',
     'amdsmi_dev_perf_level_t', 'amdsmi_dimm_power_t',
     'amdsmi_dimm_thermal_t', 'amdsmi_dpm_level_t',
@@ -5133,9 +5164,13 @@ __all__ = \
     'amdsmi_get_link_metrics', 'amdsmi_get_link_topology_nearest',
     'amdsmi_get_minmax_bandwidth_between_processors',
     'amdsmi_get_nic_asic_info', 'amdsmi_get_nic_bus_info',
-    'amdsmi_get_nic_driver_info', 'amdsmi_get_nic_numa_info',
-    'amdsmi_get_nic_port_info', 'amdsmi_get_nic_rdma_dev_info',
-    'amdsmi_get_nic_rdma_port_statistics', 'amdsmi_get_node_handle',
+    'amdsmi_get_nic_device_bdf', 'amdsmi_get_nic_driver_info',
+    'amdsmi_get_nic_fw_info', 'amdsmi_get_nic_numa_info',
+    'amdsmi_get_nic_port_info', 'amdsmi_get_nic_port_statistics',
+    'amdsmi_get_nic_processor_handles',
+    'amdsmi_get_nic_rdma_dev_info',
+    'amdsmi_get_nic_rdma_port_statistics',
+    'amdsmi_get_nic_vendor_statistics', 'amdsmi_get_node_handle',
     'amdsmi_get_npm_info', 'amdsmi_get_pcie_info',
     'amdsmi_get_power_cap_info', 'amdsmi_get_power_info',
     'amdsmi_get_processor_count_from_handles',
@@ -5167,7 +5202,7 @@ __all__ = \
     'amdsmi_memory_partition_type_t', 'amdsmi_memory_type_t',
     'amdsmi_mm_ip_t', 'amdsmi_name_value_t', 'amdsmi_nic_asic_info_t',
     'amdsmi_nic_bus_info_t', 'amdsmi_nic_driver_info_t',
-    'amdsmi_nic_fw_info_t', 'amdsmi_nic_fw_t',
+    'amdsmi_nic_fw_entry_t', 'amdsmi_nic_fw_info_t',
     'amdsmi_nic_numa_info_t', 'amdsmi_nic_port_info_t',
     'amdsmi_nic_port_t', 'amdsmi_nic_rdma_dev_info_t',
     'amdsmi_nic_rdma_devices_info_t', 'amdsmi_nic_rdma_port_info_t',
@@ -5268,7 +5303,7 @@ __all__ = \
     'struct_amdsmi_memory_partition_config_t',
     'struct_amdsmi_name_value_t', 'struct_amdsmi_nic_asic_info_t',
     'struct_amdsmi_nic_bus_info_t', 'struct_amdsmi_nic_driver_info_t',
-    'struct_amdsmi_nic_fw_info_t', 'struct_amdsmi_nic_fw_t',
+    'struct_amdsmi_nic_fw_entry_t', 'struct_amdsmi_nic_fw_info_t',
     'struct_amdsmi_nic_numa_info_t', 'struct_amdsmi_nic_port_info_t',
     'struct_amdsmi_nic_port_t', 'struct_amdsmi_nic_rdma_dev_info_t',
     'struct_amdsmi_nic_rdma_devices_info_t',
