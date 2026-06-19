@@ -6949,6 +6949,26 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             case _:
                 return None
 
+    @staticmethod
+    def _named_reg_ref(operand_name: str) -> tuple[str, int] | None:
+        """Map a named special register to (RegClass, index) for to_register_ref.
+
+        Only EXEC is surfaced today: static analyses (e.g. EXEC-mask state
+        tracking) need to see that an instruction reads/writes EXEC — most
+        importantly the generic `s_mov_b64 exec, ...` form, whose EXEC operand
+        is otherwise indistinguishable from a literal/SGPR at the analysis
+        layer. EXEC is not tracked by RegisterSet, so this does not affect
+        SGPR/VGPR liveness. Other special registers stay nullopt until a
+        consumer needs them.
+        """
+        match operand_name.upper():
+            case 'EXEC' | 'EXEC_LO':
+                return ('RegClass::EXEC', 0)
+            case 'EXEC_HI':
+                return ('RegClass::EXEC', 1)
+            case _:
+                return None
+
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
         arch = self.isa_spec.arch_name
@@ -7011,6 +7031,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
                         f'return "{pattern.operand_name}";'
                     )
+                    named_ref = self._named_reg_ref(pattern.operand_name)
+                    if named_ref is not None:
+                        named_class, named_index = named_ref
+                        ref_case_lines.append(
+                            f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
+                            f'return RegisterRef{{{named_class}, {named_index}, reg_width}};'
+                        )
                 elif pattern.kind == OperandNamePattern.LITERAL:
                     case_lines.append(
                         f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '

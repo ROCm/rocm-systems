@@ -22,15 +22,19 @@ enum class ExecWrite {
 };
 
 [[nodiscard]] bool writes_exec(const Instruction &inst) {
+  // Two complementary signals: the WRITES_EXEC flag covers instructions whose
+  // semantics always write EXEC (s_*_saveexec, s_wrexec, v_cmpx), while an EXEC
+  // destination operand covers the generic move case (`s_mov_b64 exec, ...`),
+  // which has no flag because writing EXEC is a property of the instance's
+  // destination, not the opcode.
   if (inst.flags() & WRITES_EXEC)
     return true;
-  // Generated to_register_ref() may not surface EXEC yet; the flag is the
-  // primary signal. This is the fallback for operands that do resolve to EXEC.
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const Operand *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::EXEC)
+    auto ref = op->to_register_ref(); 
+    if (ref && ref->cls == RegClass::EXEC)
       return true;
   }
   return false;
