@@ -136,6 +136,29 @@ tests/amd_smi_test/
         └── ifoe_info_read.{h,cc}    # IFoE endpoint info reads
 ```
 
+### Component subdirectory depth
+
+`gpu/` is split into per-feature subdirectories (`clock/`, `power/`, `metrics/`, …) because it
+carries many tests across many features. The smaller components start flatter and gain that depth
+only as they accumulate tests, so the tree never holds empty scaffolding:
+
+- `cpu/` and `nic/` currently hold a single `placeholder.cc` — no C++ tests exist for them yet.
+- `ifoe/` keeps its two files flat for now.
+
+When a component gains real tests, mirror the `gpu/` layout (`<component>/<feature>/`), using the
+**Python feature taxonomy as the canonical target** (the Python suite already splits these out, so
+the two suites stay aligned):
+
+| Component | Target feature subdirectories |
+| :--- | :--- |
+| `cpu/` | `clock/`, `dimm/`, `energy/`, `hsmp/`, `identity/`, `power/`, `thermal/` |
+| `nic/` | `discovery/`, `identity/` |
+| `ifoe/` | `fabric/`, `identity/` |
+
+Because `CMakeLists.txt` globs sources with `CONFIGURE_DEPENDS`, adding these subdirectories later
+needs no CMake change — drop the new `.cc` in the right place and rebuild. Promote a feature to its
+own subdirectory once it holds more than one file; a lone file can stay flat in the component root.
+
 ### Naming conventions
 
 **Files**: `{feature}_{operation}.{h|cc}` where operation is `read`, `read_write`, or a descriptive
