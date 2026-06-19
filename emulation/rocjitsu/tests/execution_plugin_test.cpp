@@ -477,12 +477,18 @@ TEST(ExecutionPluginTest, PluginHooksForceSerialCpuDispatch) {
     pg->add(std::make_unique<OrderingPlugin>());
     f.soc->set_plugin_group(pg);
     EXPECT_EQ(f.cp()->dispatch_threads(), 1u);
+    EXPECT_TRUE(f.cu()->plugin_hooks_enabled());
+    f.cp()->set_dispatch_threads(8);
+    EXPECT_EQ(f.cp()->dispatch_threads(), 1u);
   }
 
   {
     PluginFixture f;
     f.cp()->set_dispatch_threads(8);
     f.soc->set_plugin_group(std::make_shared<ProfiledExecutionPluginGroup>());
+    EXPECT_EQ(f.cp()->dispatch_threads(), 1u);
+    EXPECT_FALSE(f.cu()->plugin_hooks_enabled());
+    f.cp()->set_dispatch_threads(8);
     EXPECT_EQ(f.cp()->dispatch_threads(), 1u);
   }
 }

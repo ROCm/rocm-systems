@@ -170,6 +170,8 @@ CommandProcessor::~CommandProcessor() { stop_doorbell_monitor(); }
 
 void CommandProcessor::set_dispatch_threads(uint32_t threads) {
   threads = std::max(threads, 1u);
+  if (plugin_group_->requires_serial_execution())
+    threads = 1;
   if (dispatch_threads_ == threads)
     return;
   dispatch_threads_ = threads;

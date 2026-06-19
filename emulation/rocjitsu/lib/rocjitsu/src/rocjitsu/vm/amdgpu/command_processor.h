@@ -130,6 +130,7 @@ public:
     if (completion_) {
       completion_->set_plugin_group(plugin_group_);
     }
+    set_dispatch_threads(dispatch_threads_);
   }
 
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }

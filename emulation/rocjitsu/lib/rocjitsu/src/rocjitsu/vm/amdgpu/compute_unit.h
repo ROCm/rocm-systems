@@ -214,7 +214,7 @@ public:
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     auto empty = ExecutionPluginGroup::empty_group();
     plugin_group_ = pg ? std::move(pg) : empty;
-    plugin_hooks_enabled_ = plugin_group_->requires_serial_execution();
+    plugin_hooks_enabled_ = plugin_group_->has_hooks();
   }
 
   /// @brief Return the execution plugin group.
