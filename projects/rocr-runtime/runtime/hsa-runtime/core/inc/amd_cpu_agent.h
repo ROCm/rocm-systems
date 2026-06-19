@@ -91,6 +91,8 @@ class CpuAgent : public core::Agent {
   // @brief Override from core::Agent.
   hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
+  core::Agent* GetNearestCpuAgent() const override { return const_cast<CpuAgent*>(this); }
+
   // @brief Override from core::Agent.
   void InitDerivedCuid() override;
 
