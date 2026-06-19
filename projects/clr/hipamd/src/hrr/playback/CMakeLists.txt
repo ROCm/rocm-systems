@@ -49,7 +49,11 @@ target_compile_definitions(hrr-playback PRIVATE
   $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
 )
 find_package(Threads REQUIRED)
-target_link_libraries(hrr-playback PRIVATE hrr_reader amdhip64 Threads::Threads)
+# amdhip64 references HSA runtime symbols; link hsa-runtime64 explicitly so the
+# linker can resolve them transitively against the correct ROCR install
+# (find_package honors ROCM_PATH, avoiding a stale /opt/rocm that lacks newer symbols).
+find_package(hsa-runtime64 REQUIRED)
+target_link_libraries(hrr-playback PRIVATE hrr_reader amdhip64 hsa-runtime64::hsa-runtime64 Threads::Threads)
 
 install(TARGETS hrr-playback RUNTIME DESTINATION bin)
 
