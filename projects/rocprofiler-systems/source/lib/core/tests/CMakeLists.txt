@@ -10,6 +10,21 @@ target_link_libraries(
 
 target_include_directories(demangler-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
 
+add_library(sdk-core-tests OBJECT test_sdk_core.cpp)
+
+target_link_libraries(
+    sdk-core-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+        rocprofiler-systems::rocprofiler-systems-headers
+        rocprofiler-systems::rocprofiler-systems-rocm
+        rocprofiler-systems::rocprofiler-systems-timemory
+)
+
+target_include_directories(sdk-core-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
+
 add_library(output-format-tests OBJECT test_output_format.cpp)
 
 target_link_libraries(

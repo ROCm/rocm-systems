@@ -9,8 +9,6 @@
 #include "core/timemory.hpp"
 #include "logger/debug.hpp"
 
-#include <rocprofiler-sdk/cxx/name_info.hpp>
-
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
@@ -62,7 +60,27 @@ public:
     static std::unordered_set<std::int32_t> get_backtrace_operations(
         Backend::buffer_tracing_kind kindv);
 
-private:
+    // Pure filtering logic — public so it can be unit-tested directly.
+    static std::vector<std::int32_t> get_operations_impl(
+        const std::unordered_set<std::int32_t>& complete,
+        const std::unordered_set<std::int32_t>& include,
+        const std::unordered_set<std::int32_t>& exclude);
+
+    // Helper functions — public for direct unit testing.
+    template <typename Tp>
+    static std::string to_lower(const Tp& val);
+    static std::string get_setting_name(std::string val);
+
+    // Test-only: directly inject operation options for a tracing kind without
+    // running config_settings(). Enables unit-testing get_operations() and
+    // get_backtrace_operations() without the settings infrastructure.
+    static void set_operation_options(Backend::callback_tracing_kind kind,
+                                      std::string include, std::string exclude,
+                                      std::string backtrace);
+    static void set_operation_options(Backend::buffer_tracing_kind kind,
+                                      std::string include, std::string exclude,
+                                      std::string backtrace);
+
     struct operation_options
     {
         std::string operations_include            = {};
@@ -75,30 +93,19 @@ private:
     static std::unordered_map<typename Backend::buffer_tracing_kind, operation_options>
         buffered_operation_option_names;
 
-    template <typename Tp>
-    static std::string to_lower(const Tp& val);
-
-    static std::string get_setting_name(std::string val);
-
     static std::unordered_set<std::int32_t> get_operations_impl(
         Backend::callback_tracing_kind kindv, const std::string& optname = {});
 
     static std::unordered_set<std::int32_t> get_operations_impl(
         Backend::buffer_tracing_kind kindv, const std::string& optname = {});
 
-    static std::vector<std::int32_t> get_operations_impl(
-        const std::unordered_set<std::int32_t>& complete,
-        const std::unordered_set<std::int32_t>& include,
-        const std::unordered_set<std::int32_t>& exclude);
-
     template <typename Tp>
     static auto insert_config_setting(
+
         const std::shared_ptr<settings>& config, std::string_view env_name,
         std::string_view description, Tp initial_value,
         std::initializer_list<std::string_view> extra_categories);
 };
-
-extern template class sdk_core<backend>;
 
 using core_sdk = sdk_core<backend>;
 
@@ -134,6 +141,28 @@ sdk_core<Backend>::get_setting_name(std::string val)
     return pos == 0 ? val.substr(prefix.length()) : val;
 }
 
+// ─── set_operation_options ────────────────────────────────────────────────────
+
+template <typename Backend>
+void
+sdk_core<Backend>::set_operation_options(Backend::callback_tracing_kind kind,
+                                         std::string include, std::string exclude,
+                                         std::string backtrace)
+{
+    callback_operation_option_names[kind] = { std::move(include), std::move(exclude),
+                                              std::move(backtrace) };
+}
+
+template <typename Backend>
+void
+sdk_core<Backend>::set_operation_options(Backend::buffer_tracing_kind kind,
+                                         std::string include, std::string exclude,
+                                         std::string backtrace)
+{
+    buffered_operation_option_names[kind] = { std::move(include), std::move(exclude),
+                                              std::move(backtrace) };
+}
+
 // ─── Static data members ─────────────────────────────────────────────────────
 
 template <typename Backend>
@@ -153,8 +182,7 @@ std::unordered_set<std::int32_t>
 sdk_core<Backend>::get_operations_impl(Backend::callback_tracing_kind kindv,
                                        const std::string&             optname)
 {
-    static const auto callback_tracing_info =
-        rocprofiler::sdk::get_callback_tracing_names();
+    static const auto callback_tracing_info = Backend::get_callback_tracing_names();
 
     if(optname.empty())
     {
@@ -170,9 +198,9 @@ sdk_core<Backend>::get_operations_impl(Backend::callback_tracing_kind kindv,
 
     if(!_val)
     {
-        LOG_CRITICAL("no setting {}", optname);
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        std::abort();
+        throw std::runtime_error(fmt::format(
+            "sdk_core::get_operations_impl: no registered setting '{}'", optname));
     }
 
     if(_val->empty()) return {};
@@ -199,8 +227,7 @@ std::unordered_set<std::int32_t>
 sdk_core<Backend>::get_operations_impl(Backend::buffer_tracing_kind kindv,
                                        const std::string&           optname)
 {
-    static const auto buffered_tracing_info =
-        rocprofiler::sdk::get_buffer_tracing_names();
+    static const auto buffered_tracing_info = Backend::get_buffer_tracing_names();
 
     if(optname.empty())
     {
@@ -216,9 +243,9 @@ sdk_core<Backend>::get_operations_impl(Backend::buffer_tracing_kind kindv,
 
     if(!_val)
     {
-        LOG_CRITICAL("no setting {}", optname);
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        std::abort();
+        throw std::runtime_error(fmt::format(
+            "sdk_core::get_operations_impl: no registered setting '{}'", optname));
     }
 
     if(_val->empty()) return {};
@@ -315,8 +342,8 @@ template <typename Backend>
 void
 sdk_core<Backend>::config_settings(const std::shared_ptr<settings>& _config)
 {
-    const auto buffered_tracing_info = rocprofiler::sdk::get_buffer_tracing_names();
-    const auto callback_tracing_info = rocprofiler::sdk::get_callback_tracing_names();
+    const auto buffered_tracing_info = Backend::get_buffer_tracing_names();
+    const auto callback_tracing_info = Backend::get_callback_tracing_names();
 
     auto _skip_domains =
         std::unordered_set<std::string_view>{ "none",
@@ -454,7 +481,7 @@ std::unordered_set<typename Backend::callback_tracing_kind>
 sdk_core<Backend>::get_callback_domains()
 {
     using kind_t             = typename Backend::callback_tracing_kind;
-    const auto callback_info = rocprofiler::sdk::get_callback_tracing_names();
+    const auto callback_info = Backend::get_callback_tracing_names();
     auto       supported     = std::unordered_set<kind_t>{
         Backend::CALLBACK_TRACING_HSA_CORE_API,
         Backend::CALLBACK_TRACING_HSA_AMD_EXT_API,
@@ -552,7 +579,7 @@ std::unordered_set<typename Backend::buffer_tracing_kind>
 sdk_core<Backend>::get_buffered_domains()
 {
     using kind_t           = typename Backend::buffer_tracing_kind;
-    const auto buffer_info = rocprofiler::sdk::get_buffer_tracing_names();
+    const auto buffer_info = Backend::get_buffer_tracing_names();
     auto       supported   = std::unordered_set<kind_t>{
         Backend::BUFFER_TRACING_KERNEL_DISPATCH,
         Backend::BUFFER_TRACING_MEMORY_COPY,
@@ -729,17 +756,23 @@ sdk_core<Backend>::get_operations(Backend::callback_tracing_kind kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
-        LOG_CRITICAL("callback_operation_operation_names does not have value for {}",
-                     static_cast<int>(kindv));
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        std::abort();
+        throw std::runtime_error(
+            fmt::format("sdk_core::get_operations: no options registered for "
+                        "callback tracing kind {}",
+                        static_cast<int>(kindv)));
     }
 
-    auto _complete = get_operations_impl(kindv);
-    auto _include  = get_operations_impl(
-        kindv, callback_operation_option_names.at(kindv).operations_include);
-    auto _exclude = get_operations_impl(
-        kindv, callback_operation_option_names.at(kindv).operations_exclude);
+    const auto& opts      = callback_operation_option_names.at(kindv);
+    auto        _complete = get_operations_impl(kindv);
+    // Empty option string means "no filter" — produce an empty set so the
+    // three-argument overload falls through to the complete set / removes nothing.
+    auto _include = opts.operations_include.empty()
+                        ? std::unordered_set<std::int32_t>{}
+                        : get_operations_impl(kindv, opts.operations_include);
+    auto _exclude = opts.operations_exclude.empty()
+                        ? std::unordered_set<std::int32_t>{}
+                        : get_operations_impl(kindv, opts.operations_exclude);
 
     return get_operations_impl(_complete, _include, _exclude);
 }
@@ -750,17 +783,21 @@ sdk_core<Backend>::get_operations(Backend::buffer_tracing_kind kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {
-        LOG_CRITICAL("buffered_operation_option_names does not have value for {}",
-                     static_cast<int>(kindv));
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        std::abort();
+        throw std::runtime_error(
+            fmt::format("sdk_core::get_operations: no options registered for "
+                        "buffer tracing kind {}",
+                        static_cast<int>(kindv)));
     }
 
-    auto _complete = get_operations_impl(kindv);
-    auto _include  = get_operations_impl(
-        kindv, buffered_operation_option_names.at(kindv).operations_include);
-    auto _exclude = get_operations_impl(
-        kindv, buffered_operation_option_names.at(kindv).operations_exclude);
+    const auto& opts      = buffered_operation_option_names.at(kindv);
+    auto        _complete = get_operations_impl(kindv);
+    auto        _include  = opts.operations_include.empty()
+                                ? std::unordered_set<std::int32_t>{}
+                                : get_operations_impl(kindv, opts.operations_include);
+    auto        _exclude  = opts.operations_exclude.empty()
+                                ? std::unordered_set<std::int32_t>{}
+                                : get_operations_impl(kindv, opts.operations_exclude);
 
     return get_operations_impl(_complete, _include, _exclude);
 }
@@ -771,19 +808,19 @@ sdk_core<Backend>::get_backtrace_operations(Backend::callback_tracing_kind kindv
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
-        LOG_CRITICAL("callback_operation_option_names does not have value for {}",
-                     static_cast<int>(kindv));
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        std::abort();
+        throw std::runtime_error(
+            fmt::format("sdk_core::get_backtrace_operations: no options registered for "
+                        "callback tracing kind {}",
+                        static_cast<int>(kindv)));
     }
 
-    auto _data = get_operations_impl(
-        kindv, callback_operation_option_names.at(kindv).operations_annotate_backtrace);
-    auto _ret = std::unordered_set<std::int32_t>{};
-    _ret.reserve(_data.size());
-    for(auto itr : _data)
-        _ret.emplace(itr);
-    return _ret;
+    const auto& bt =
+        callback_operation_option_names.at(kindv).operations_annotate_backtrace;
+    if(bt.empty()) return {};
+
+    auto _vec = get_operations_impl(kindv, bt);
+    return { _vec.begin(), _vec.end() };
 }
 
 template <typename Backend>
@@ -792,19 +829,19 @@ sdk_core<Backend>::get_backtrace_operations(Backend::buffer_tracing_kind kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {
-        LOG_CRITICAL("buffered_operation_option_names does not have value for {}",
-                     static_cast<int>(kindv));
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        std::abort();
+        throw std::runtime_error(
+            fmt::format("sdk_core::get_backtrace_operations: no options registered for "
+                        "buffer tracing kind {}",
+                        static_cast<int>(kindv)));
     }
 
-    auto _data = get_operations_impl(
-        kindv, buffered_operation_option_names.at(kindv).operations_annotate_backtrace);
-    auto _ret = std::unordered_set<std::int32_t>{};
-    _ret.reserve(_data.size());
-    for(auto itr : _data)
-        _ret.emplace(itr);
-    return _ret;
+    const auto& bt =
+        buffered_operation_option_names.at(kindv).operations_annotate_backtrace;
+    if(bt.empty()) return {};
+
+    auto _vec = get_operations_impl(kindv, bt);
+    return { _vec.begin(), _vec.end() };
 }
 
 }  // namespace rocprofsys::rocprofiler_sdk

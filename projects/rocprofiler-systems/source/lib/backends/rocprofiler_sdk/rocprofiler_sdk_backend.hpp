@@ -12,6 +12,7 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/counters.h>
+#include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/deprecated/counters.h>
 #include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/external_correlation.h>
@@ -558,6 +559,19 @@ struct backend
     {
         return rocprofiler_sample_device_counting_service(ctx, user_data, flags,
                                                           output_records, rec_count);
+    }
+
+    // ─── Tracing name tables ──────────────────────────────────────────────────────
+    // Wrapped here so sdk_core<Backend> routes all SDK interactions through Backend.
+
+    static auto get_callback_tracing_names()
+    {
+        return rocprofiler::sdk::get_callback_tracing_names();
+    }
+
+    static auto get_buffer_tracing_names()
+    {
+        return rocprofiler::sdk::get_buffer_tracing_names();
     }
 };
 
