@@ -10,11 +10,9 @@ import subprocess
 
 from rocm_docs import ROCmDocs
 
-subprocess.run("git submodule update --init", shell=True)
+os.system("cp ../include/amd-dbgapi.h.in ../include/amd-dbgapi.h")
 
-os.system("cp ../ROCdbgapi/projects/rocdbgapi/include/amd-dbgapi.h.in ../include/amd-dbgapi.h")
-
-with open('../ROCdbgapi/projects/rocdbgapi/CMakeLists.txt', encoding='utf-8') as f:
+with open('../CMakeLists.txt', encoding='utf-8') as f:
     match = re.search(r'.*\bproject\(amd-dbgapi VERSION\s+\"?([0-9.]+)[^0-9.]+', f.read())
     if not match:
         raise ValueError("VERSION not found!")
