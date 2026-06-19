@@ -61,7 +61,16 @@ tests/amd_smi_test/
 │
 ├── unit/                            # No hardware required; pure TEST() macro tests
 │   └── gpu/
-│       └── dynamic_metrics.cc       # Metric struct versioning and compatibility checks
+│       ├── dynamic_metrics.cc       # Metric struct versioning and compatibility checks
+│       ├── cper_read.cc             # CPER read path: synthetic edge cases (no fixtures)
+│       ├── mock_cper.cc             # CPER parse/severity filtering vs mock_cper/ fixtures
+│       └── mock_cper/               # Sanitized real CPER fixtures used by mock_cper.cc
+│           ├── README.md            # Fixture provenance and scrubbing notes
+│           ├── sanitize_cper.py     # Regenerates fixtures from raw captures
+│           ├── cper_corrected.cper
+│           ├── cper_fatal.cper
+│           ├── cper_mixed.cper
+│           └── cper_uncorrected.cper
 │
 └── functional/                      # Requires live hardware; uses TestBase lifecycle
     ├── gpu/
@@ -87,6 +96,7 @@ tests/amd_smi_test/
     │   │   └── process_info_read.{h,cc}
     │   ├── partition/
     │   │   ├── computepartition_read_write.{h,cc}
+    │   │   ├── computepartition_memallocmode_read_write.{h,cc}
     │   │   └── memorypartition_read_write.{h,cc}
     │   ├── pci/
     │   │   └── pci_read_write.{h,cc}
@@ -112,8 +122,10 @@ tests/amd_smi_test/
     │   └── xgmi/
     │       └── xgmi_read_write.{h,cc}
     ├── system/
+    │   ├── cross_process_serialization.{h,cc}
     │   ├── hw_topology_read.{h,cc}
     │   ├── init_shutdown_refcount.{h,cc}
+    │   ├── kfd_atfork_read.{h,cc}
     │   ├── mutual_exclusion.{h,cc}
     │   └── sys_info_read.{h,cc}
     ├── cpu/
@@ -121,7 +133,8 @@ tests/amd_smi_test/
     ├── nic/
     │   └── placeholder.cc           # Stub — NIC and switch C++ tests added here
     └── ifoe/
-        └── placeholder.cc           # Stub — IFoE C++ tests added here
+        ├── fabric_read.{h,cc}       # IFoE fabric link reads
+        └── ifoe_info_read.{h,cc}    # IFoE endpoint info reads
 ```
 
 ### Naming conventions
@@ -142,6 +155,32 @@ term such as `perf_determinism` or `dynamic_metrics`.
 
 The suite name scheme is `<Component><Type><Operation>`, making component, type, and operation
 all independently filterable via `--gtest_filter` wildcards.
+
+### Mocked unit tests and fixtures
+
+Mocking is a *technique*, not a separate test level: a test that supplies canned input instead
+of touching hardware is still a **unit test**. Mocked and non-mocked unit tests therefore live
+side by side under `unit/<component>/`, organized by *what* they test rather than *how* they are
+isolated.
+
+The cper suite shows both styles:
+
+- `unit/gpu/cper_read.cc` — builds CPER byte blobs in memory at runtime (no fixtures); covers
+  read-path edge cases and error handling (zero-size file, empty ring, partial reads, buffer
+  overflow, invalid args).
+- `unit/gpu/mock_cper.cc` — drives the same API against committed `.cper` fixtures and validates
+  record counting and severity-mask filtering on realistic records.
+
+**To add a mocked unit test**, follow the `mock_cper` pattern:
+
+1. Put the test at `unit/<component>/mock_<feature>.cc` and its fixtures in a sibling
+   `unit/<component>/mock_<feature>/` folder — one folder per test, no shared catch-all.
+2. Load fixtures relative to the per-test folder; the existing `MockDir()` helper finds it
+   next to the installed binary or via the `AMDSMI_TEST_MOCK_DIR` build define.
+3. Add an `install(DIRECTORY …)` line for the new fixture folder in `CMakeLists.txt`.
+
+Fixtures should be static, sanitized blobs so the tests stay deterministic and **run on any
+machine regardless of GPU** (see `mock_cper/README.md` for provenance).
 
 ### CMake integration
 
@@ -426,6 +465,14 @@ install(
 | `functional/api_support_read.{h,cc}` | `functional/gpu/identity/api_support_read.{h,cc}` |
 | `functional/computepartition_read_write.{h,cc}` | `functional/gpu/partition/computepartition_read_write.{h,cc}` |
 | `functional/dynamic_metrics_test.cc` | `unit/gpu/dynamic_metrics.cc` |
+| `functional/cper_read.cc` | `unit/gpu/cper_read.cc` |
+| `functional/mock_cper.cc` | `unit/gpu/mock_cper.cc` |
+| `functional/mock_values/` | `unit/gpu/mock_cper/` |
+| `functional/cross_process_serialization.{h,cc}` | `functional/system/cross_process_serialization.{h,cc}` |
+| `functional/kfd_atfork_read.{h,cc}` | `functional/system/kfd_atfork_read.{h,cc}` |
+| `functional/fabric_read.{h,cc}` | `functional/ifoe/fabric_read.{h,cc}` |
+| `functional/ifoe_info_read.{h,cc}` | `functional/ifoe/ifoe_info_read.{h,cc}` |
+| `functional/computepartition_memallocmode_read_write.{h,cc}` | `functional/gpu/partition/computepartition_memallocmode_read_write.{h,cc}` |
 | `functional/err_cnt_read.{h,cc}` | `functional/gpu/ras/err_cnt_read.{h,cc}` |
 | `functional/evt_notif_read_write.{h,cc}` | `functional/gpu/events/evt_notif_read_write.{h,cc}` |
 | `functional/fan_read.{h,cc}` | `functional/gpu/thermal/fan_read.{h,cc}` |
