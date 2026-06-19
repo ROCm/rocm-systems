@@ -76,33 +76,6 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   return nullptr;
 }
 
-[[nodiscard]] bool compute_sopp_branch_offset(uint64_t branch_pc, uint64_t target,
-                                              int16_t &offset_dwords) {
-  // SOPP branches encode a signed dword offset from the next instruction. Keep
-  // the range check shared so both cave entry and return branches fail closed.
-  constexpr int64_t kBranchPcBiasBytes = static_cast<int64_t>(sizeof(uint32_t));
-  constexpr uint64_t kMaxSignedTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
-  constexpr uint64_t kMaxSignedBranchPc =
-      static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
-  // The PCs are unsigned until this check passes. Compare against the casted
-  // signed int64_t limits so the later signed conversion, and branch_pc + 4,
-  // cannot overflow.
-  if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)
-    return false;
-
-  const int64_t delta_bytes = static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + 4);
-  if (delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
-    return false;
-
-  const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
-  if (delta_dwords < std::numeric_limits<int16_t>::min() ||
-      delta_dwords > std::numeric_limits<int16_t>::max())
-    return false;
-
-  offset_dwords = static_cast<int16_t>(delta_dwords);
-  return true;
-}
-
 [[nodiscard]] std::vector<uint32_t> raw_words_for_inst(const Instruction &inst) {
   const uint32_t *raw = inst.raw_encoding();
   if (!raw)
@@ -435,16 +408,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       layout.target_entry = translated_text.size();
       append_words(translated_text, scope.translation->prologue_words);
 
-      int16_t branch_dwords = 0;
       const uint64_t branch_pc = translated_text.size();
-      if (!compute_sopp_branch_offset(branch_pc, layout.target_body_entry, branch_dwords)) {
+      const auto branch_dwords = compute_sopp_branch_simm16(branch_pc, layout.target_body_entry);
+      if (!branch_dwords) {
         append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
                      "kernel descriptor prologue branch range exceeds s_branch simm16; leaving "
                      "code object unchanged",
                      layout.source_entry);
         return leave_unchanged();
       }
-      const uint32_t branch = build_s_branch(branch_dwords, host_arch_);
+      const uint32_t branch = build_s_branch(*branch_dwords, host_arch_);
       append_words(translated_text, std::span<const uint32_t>(&branch, 1));
       layout.cave_end = translated_text.size();
     } else {
@@ -780,8 +753,8 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
   const uint64_t branch_pc = repl.start_offset;
 
   // s_branch simm16 targets (PC + 4 + simm16*4).
-  int16_t fwd_dwords = 0;
-  if (!compute_sopp_branch_offset(branch_pc, cave_byte_offset, fwd_dwords)) {
+  const auto fwd_dwords = compute_sopp_branch_simm16(branch_pc, cave_byte_offset);
+  if (!fwd_dwords) {
     if (diagnostics_)
       append_error(*diagnostics_, DiagnosticKind::ResourceLimit,
                    "code cave branch range exceeds s_branch simm16; leaving code object unchanged",
@@ -789,7 +762,7 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
     return false;
   }
 
-  const uint32_t stub = build_s_branch(fwd_dwords, host_arch_);
+  const uint32_t stub = build_s_branch(*fwd_dwords, host_arch_);
   std::memcpy(text.data() + repl.start_offset, &stub, 4);
   for (uint64_t off = repl.start_offset + 4; off < repl.end_offset; off += 4) {
     const uint32_t nop = build_s_nop(0, host_arch_);
@@ -797,9 +770,9 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
   }
 
   auto cave_words = repl.target_words;
-  int16_t ret_dwords = 0;
   const uint64_t return_branch_pc = cave_byte_offset + cave_words.size() * sizeof(uint32_t);
-  if (!compute_sopp_branch_offset(return_branch_pc, stub_next, ret_dwords)) {
+  const auto ret_dwords = compute_sopp_branch_simm16(return_branch_pc, stub_next);
+  if (!ret_dwords) {
     if (diagnostics_)
       append_error(*diagnostics_, DiagnosticKind::ResourceLimit,
                    "code cave return branch range exceeds s_branch simm16; leaving code object "
@@ -807,7 +780,7 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
                    repl.start_offset);
     return false;
   }
-  cave_words.push_back(build_s_branch(ret_dwords, host_arch_));
+  cave_words.push_back(build_s_branch(*ret_dwords, host_arch_));
 
   append_words(text, cave_words);
   layout.cave_end = text.size();

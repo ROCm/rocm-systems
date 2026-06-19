@@ -72,10 +72,11 @@ ssize_t
 Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
                    hoff_t file_offset, hoff_t buffer_offset, size_t chunk_size)
 {
-    StatsIoTracker ioTracker{type, StatsBackend::Fallback};
     if (!Context<Configuration>::get()->fallback()) {
         throw BackendDisabled();
     }
+
+    StatsIoTracker ioTracker{type, StatsBackend::Fallback, file, buffer, size, file_offset, buffer_offset};
 
     size = min(size, hipFile::getMaxRwCount());
 
