@@ -22,7 +22,7 @@
 
 // Mock-value tests for the CPER read path via
 // amdsmi_get_gpu_cper_entries_by_path(); no GPU required.
-// Fixtures live in functional/mock_values/ (real GFX950 CPER captures,
+// Fixtures live in unit/gpu/mock_cper/ (real GFX950 CPER captures,
 // sanitized: timestamps normalized and the injected error-payload body zeroed).
 // See that folder's README for provenance. The fixtures are installed next to
 // the test binary and located at runtime (see MockDir); AMDSMI_TEST_MOCK_DIR is
@@ -52,7 +52,7 @@ namespace {
 // Severity bit in the severity_mask for a given amdsmi_cper_sev_t.
 constexpr uint32_t SevBit(amdsmi_cper_sev_t sev) { return 1u << static_cast<uint32_t>(sev); }
 
-// Directory holding the mock fixtures. Prefer a mock_values/ folder installed
+// Directory holding the mock fixtures. Prefer a mock_cper/ folder installed
 // next to the test binary (the packaged layout, portable across machines); fall
 // back to the build-tree path baked in at compile time for in-tree runs.
 std::string MockDir() {
@@ -63,7 +63,7 @@ std::string MockDir() {
     std::string dir(exe);
     std::string::size_type slash = dir.find_last_of('/');
     if (slash != std::string::npos) {
-      std::string candidate = dir.substr(0, slash) + "/mock_values";
+      std::string candidate = dir.substr(0, slash) + "/mock_cper";
       struct stat st;
       if (stat(candidate.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
         return candidate;
@@ -106,7 +106,7 @@ std::vector<amdsmi_cper_sev_t> ReadMock(const char* name, uint32_t severity_mask
 }  // namespace
 
 // Five non-fatal corrected records parse to five entries, all severity 2.
-TEST(amdsmitstReadOnly, CperMockCorrectedRecords) {
+TEST(GpuUnit, CperMockCorrectedRecords) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 0;
   uint64_t buf_size = 0;
@@ -122,7 +122,7 @@ TEST(amdsmitstReadOnly, CperMockCorrectedRecords) {
 }
 
 // A single non-fatal uncorrected record parses to one entry, severity 0.
-TEST(amdsmitstReadOnly, CperMockUncorrectedRecord) {
+TEST(GpuUnit, CperMockUncorrectedRecord) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 0;
   auto sevs = ReadMock("cper_uncorrected.cper", 0xFFFFFFFF, &status, &entry_count);
@@ -134,7 +134,7 @@ TEST(amdsmitstReadOnly, CperMockUncorrectedRecord) {
 }
 
 // A single fatal record parses to one entry, severity 1.
-TEST(amdsmitstReadOnly, CperMockFatalRecord) {
+TEST(GpuUnit, CperMockFatalRecord) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 0;
   auto sevs = ReadMock("cper_fatal.cper", 0xFFFFFFFF, &status, &entry_count);
@@ -147,7 +147,7 @@ TEST(amdsmitstReadOnly, CperMockFatalRecord) {
 
 // The mixed ring (5 corrected + 1 uncorrected + 1 fatal) parses to seven
 // entries under a full severity mask.
-TEST(amdsmitstReadOnly, CperMockMixedFullMask) {
+TEST(GpuUnit, CperMockMixedFullMask) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 0;
   auto sevs = ReadMock("cper_mixed.cper", 0xFFFFFFFF, &status, &entry_count);
@@ -172,7 +172,7 @@ TEST(amdsmitstReadOnly, CperMockMixedFullMask) {
 
 // The severity_mask filters the mixed ring: each single-severity mask yields
 // only the matching records.
-TEST(amdsmitstReadOnly, CperMockSeverityMaskFilter) {
+TEST(GpuUnit, CperMockSeverityMaskFilter) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 0;
 
@@ -201,7 +201,7 @@ TEST(amdsmitstReadOnly, CperMockSeverityMaskFilter) {
 }
 
 // A zero severity_mask rejects every record: SUCCESS with no entries.
-TEST(amdsmitstReadOnly, CperMockSeverityMaskRejectAll) {
+TEST(GpuUnit, CperMockSeverityMaskRejectAll) {
   amdsmi_status_t status = AMDSMI_STATUS_UNKNOWN_ERROR;
   uint64_t entry_count = 99;
   uint64_t buf_size = 99;

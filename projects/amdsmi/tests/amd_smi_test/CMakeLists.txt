@@ -67,8 +67,8 @@ include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_D
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${unitSources} ${functSources})
-# Absolute path to the committed mock CPER fixtures (functional/mock_values).
-target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/functional/mock_values")
+# Absolute path to the committed mock CPER fixtures (unit/gpu/mock_cper).
+target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/gpu/mock_cper")
 target_link_libraries(
     ${TEST}
     ${AMD_SMI_TARGET}
@@ -94,7 +94,7 @@ install(
 # Exclude __pycache__ so a locally-run sanitize_cper.py never leaks a stray .pyc
 # into the package.
 install(
-    DIRECTORY functional/mock_values
+    DIRECTORY unit/gpu/mock_cper
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
     COMPONENT ${TESTS_COMPONENT}
     PATTERN "__pycache__" EXCLUDE
