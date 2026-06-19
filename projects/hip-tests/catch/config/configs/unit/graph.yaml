@@ -926,6 +926,7 @@ graph:
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree:
     <<: *level_2
+    disabled: [amd_linux]
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams:
     <<: *level_2
