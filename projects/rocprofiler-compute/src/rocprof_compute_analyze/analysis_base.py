@@ -321,18 +321,18 @@ class OmniAnalyze_Base:
         )
         profiling_config = self.get_profiling_config()
 
-        # --api-trace enables every backend.
-        api_trace = profiling_config.get("api_trace", False)
+        # --ml-api-trace enables every backend.
+        ml_api_trace = profiling_config.get("ml_api_trace", False)
         needs_torch_trace = getattr(
             args, "torch_operator", None
         ) is not None or getattr(args, "list_torch_operators", False)
         if needs_torch_trace and not (
-            profiling_config.get("torch_trace", False) or api_trace
+            profiling_config.get("torch_trace", False) or ml_api_trace
         ):
             console_error(
                 "ml api trace",
                 'Workload was not profiled with "--torch-trace" or '
-                '"--api-trace". '
+                '"--ml-api-trace". '
                 "Cannot use --torch-operator or --list-torch-operators.",
             )
 
@@ -340,12 +340,12 @@ class OmniAnalyze_Base:
             args, "triton_operator", None
         ) is not None or getattr(args, "list_triton_operators", False)
         if needs_triton_trace and not (
-            profiling_config.get("triton_trace", False) or api_trace
+            profiling_config.get("triton_trace", False) or ml_api_trace
         ):
             console_error(
                 "ml api trace",
                 'Workload was not profiled with "--triton-trace" or '
-                '"--api-trace". '
+                '"--ml-api-trace". '
                 "Cannot use --triton-operator or --list-triton-operators.",
             )
 

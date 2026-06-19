@@ -40,7 +40,7 @@ from vendored import yaml
 _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
     "torch_trace": ("torch",),
     "triton_trace": ("triton",),
-    "api_trace": KNOWN_BACKENDS,
+    "ml_api_trace": KNOWN_BACKENDS,
 }
 
 

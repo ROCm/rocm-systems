@@ -1165,27 +1165,27 @@ frameworks in a single run:
 Each captured marker records its originating framework in the ``Backend`` column
 of ``ml_api_trace/consolidated.csv``, so each framework can be analyzed
 independently. To enable all supported backends at once, use
-:ref:`--api-trace <api-trace>`.
+:ref:`--ml-api-trace <ml-api-trace>`.
 
 To analyze the captured Triton kernels, use the ``--list-triton-operators`` and
 ``--triton-operator`` options in analyze mode (see :doc:`../analyze/cli`).
 
-.. _api-trace:
+.. _ml-api-trace:
 
-API trace
-=========
+ML API trace
+============
 
-``--api-trace`` enables marker tracing for all supported framework backends in a
+``--ml-api-trace`` enables marker tracing for all supported framework backends in a
 single option.
 
 .. warning::
 
-   API trace is currently an experimental feature. You must pass
+   ML API trace is currently an experimental feature. You must pass
    ``--experimental`` when using it.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute --experimental profile --name model --api-trace -- python train.py
+   $ rocprof-compute --experimental profile --name model --ml-api-trace -- python train.py
 
 The output is identical to enabling each framework's trace flag individually.
 Captured kernels are attributed in the ``Backend`` column and analyzed with the
