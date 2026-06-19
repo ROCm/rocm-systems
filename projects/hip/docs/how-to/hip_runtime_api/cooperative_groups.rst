@@ -590,13 +590,13 @@ The value returned for the first active lane is platform-dependent, and the prog
 **Performance**
 On AMD, when ``group`` is of the same size as the warp size and ``T`` primitive type, DPP instructions will be used, which means the operation would be significantly faster than with other group sizes. The primitive types are:
 
-For arithmetic reduces (``plus``, ``less`` and ``greater``):
+For arithmetic scans (``plus``, ``less`` and ``greater``):
 
 * On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
 
 * On AMD platform: there is hardware acceleration for ``int``, ``unsigned int``, ``unsigned long long``, ``long long``, ``half``/``float``/``double`` 
 
-For bitwise-reduces: (``bit_and``, ``bit_or``, ``bit_xor``)
+For bitwise-scans: (``bit_and``, ``bit_or``, ``bit_xor``)
 
 * On Nvidia platform: ``unsigned int``
 
