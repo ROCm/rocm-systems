@@ -37,9 +37,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--torch-trace` now captures backward-pass and nested operators that were previously missed or misattributed. The first run builds and caches a helper under `~/.cache/rocprofiler-compute/`, so it takes longer than later runs.
 
-* `--torch-trace` now wraps the device- and layout-related tensor methods (`to`, `cpu`, `cuda`, `contiguous`) by default. Previously these "deep tensor" wraps were opt-in via `ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=1`. Set `ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0` (or `false`, `no`, `off`) to disable them and reduce instrumentation overhead and trace size.
+* `--torch-trace` now wraps the tensor methods `to`, `cpu`, `cuda`, and `contiguous` by default. Previously these wraps were enabled by setting `ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=1`. Set `ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0` (or `false`, `no`, `off`) to disable them.
 
-* Renamed the torch-trace output files and directory from `torch_trace_*` to `ml_api_trace_*`, so the same artifacts are used regardless of which framework was traced.
+* Renamed the torch-trace output files and directory from `torch_trace_*` to `ml_api_trace_*`.
 
 * Profile workload output folder name for Strix Halo series (gfx1151) is changed from `strix_halo` to `rdna35_halo`
 

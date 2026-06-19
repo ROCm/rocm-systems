@@ -7,12 +7,13 @@ Maintains the per-thread marker and context stacks and the Python-tier
 rangePush/rangePop callbacks shared by all backends.
 """
 
-import importlib
+import importlib.util
 import inspect
 import os
 import sys
 import threading
 from collections.abc import Iterable
+from importlib.machinery import PathFinder
 from pathlib import Path
 from typing import Callable, Union
 
@@ -86,12 +87,16 @@ def ensure_python_tier() -> bool:
         f"{rocm_root}/lib/{py}/site-packages",
         f"{rocm_root}/libexec/rocprofiler-sdk/python",
     ]
-    for candidate in _STATE.roctx_candidate_paths:
-        if candidate not in sys.path:
-            sys.path.insert(0, candidate)
+    spec = PathFinder.find_spec("roctx", _STATE.roctx_candidate_paths)
+    if spec is None or spec.loader is None:
+        return False
+    roctx_mod = importlib.util.module_from_spec(spec)
+    # Register before exec so relative submodule imports resolve.
+    sys.modules["roctx"] = roctx_mod
     try:
-        roctx_mod = importlib.import_module("roctx")
-    except ImportError:
+        spec.loader.exec_module(roctx_mod)
+    except Exception:
+        sys.modules.pop("roctx", None)
         return False
     set_python_tier_io(roctx_mod.rangePush, roctx_mod.rangePop)
     return True
