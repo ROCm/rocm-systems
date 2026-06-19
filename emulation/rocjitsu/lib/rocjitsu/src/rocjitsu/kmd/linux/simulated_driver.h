@@ -141,6 +141,13 @@ public:
   [[nodiscard]] int claim_fd(int real_fd);
   [[nodiscard]] bool owns_reserved_fd(int fd) const;
 
+  static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags);
+
+  void gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags);
+  void gem_va_unmap(uint64_t gpu_va, size_t size);
+
+  std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
+
   /// @brief Per-GPU device state (mirrors kfd_dev in the kernel).
   struct GpuDevice {
     SoC *soc = nullptr;
@@ -150,9 +157,6 @@ public:
   };
 
 private:
-  /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
-  std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
-
   /// @brief Look up a GpuDevice by gpu_id. Returns nullptr if not found.
   GpuDevice *find_gpu(uint32_t gpu_id);
   const GpuDevice *find_gpu(uint32_t gpu_id) const;
