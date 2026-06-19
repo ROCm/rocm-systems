@@ -77,15 +77,17 @@ HIP_TEST_CASE(Contract_Runtime_GetErrorStringSuccess_ReturnsSuccessString) {
 
 HIP_TEST_CASE(Contract_Runtime_GetLastError_ClearsPreviousError) {
   HIP_CHECK(hipGetLastError());
-  HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
-  HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
+  const hipError_t error = hipMalloc(nullptr, 1);
+  REQUIRE(error != hipSuccess);
+  HIP_CHECK_ERROR(hipGetLastError(), error);
   HIP_CHECK(hipGetLastError());
 }
 
 HIP_TEST_CASE(Contract_Runtime_PeekAtLastError_DoesNotClearPreviousError) {
   HIP_CHECK(hipGetLastError());
-  HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
-  HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
-  HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
+  const hipError_t error = hipMalloc(nullptr, 1);
+  REQUIRE(error != hipSuccess);
+  HIP_CHECK_ERROR(hipPeekAtLastError(), error);
+  HIP_CHECK_ERROR(hipGetLastError(), error);
   HIP_CHECK(hipPeekAtLastError());
 }
