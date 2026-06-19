@@ -84,8 +84,12 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
     /* Map the virtual address range to the physical allocation */
     CUCHECK(cuMemMap((CUdeviceptr)*ptr, handleSize, 0, handle, 0));
     INFO(NCCL_INIT, "ncclMemAlloc: ptr=%p, handle=%p", *ptr, handle);
+    accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    accessDesc.location.id = currentDev;
+    accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1));
     /* Now allow RW access to the newly mapped memory */
-    for (int i = 0; i < dcnt; ++i) {
+    /*for (int i = 0; i < dcnt; ++i) {
       int p2p = 0;
       if (i == cudaDev || (CUDASUCCESS(cudaDeviceCanAccessPeer(&p2p, i, cudaDev)) && p2p)) {
         accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
@@ -94,7 +98,7 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
         CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1));
       }
       if (0 == p2p && i != cudaDev) INFO(NCCL_ALLOC, "P2P not supported between GPU%d and GPU%d", cudaDev, i);
-    }
+    }*/
     goto exit;
   }
 
