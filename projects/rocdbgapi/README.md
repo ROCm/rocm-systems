@@ -18,11 +18,11 @@ For more information about the AMD ROCm ecosystem, see:
 Build the AMD Debugger API Library
 ----------------------------------
 
-The ROCdbgapi library can be built on Ubuntu 22.04, Ubuntu 24.04, RHEL 9.7, RHEL 10.1, and SLES 15 Service Pack 7, and Windows 11.
+The ROCdbgapi library can be built on Ubuntu, RHEL, SLES, and Windows. See [supported Linux distributions](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems) and [supported Windows distributions](https://rocm.docs.amd.com/projects/install-on-windows/en/latest/reference/system-requirements.html).
 
 Building the ROCdbgapi library has the following prerequisites:
 
-1. A C++17 compiler such as GCC 11 or Clang 14.
+1. A C++17 compiler such as GCC 7 or later, or Clang 5 or later.
 
 2. AMD Code Object Manager Library (ROCcomgr). On Linux, this can be installed
    as part of the AMD ROCm release by the ``comgr`` package.  On Windows, this
@@ -31,7 +31,7 @@ Building the ROCdbgapi library has the following prerequisites:
 3. ROCm CMake modules, which can be installed using the ``rocm-cmake`` package
    available as part of the AMD ROCm release.
 
-4. For Ubuntu 22.04 and Ubuntu 24.04, the following adds the needed packages:
+4. For Ubuntu, the following adds the needed packages:
 
    ````shell
    apt install gcc g++ make cmake doxygen graphviz texlive-full
@@ -41,7 +41,7 @@ Building the ROCdbgapi library has the following prerequisites:
    that prevents the PDF from being created.  ``doxygen`` 1.8.11 can be built
    from source to avoid the issue.
 
-5. For RHEL 9.x and RHEL 10.x, the following adds the needed packages:
+5. For RHEL, the following adds the needed packages:
 
    ````shell
    sudo dnf install -y gcc gcc-c++ make cmake doxygen graphviz texlive \
@@ -53,7 +53,7 @@ Building the ROCdbgapi library has the following prerequisites:
    has a bug that prevents the PDF from being created. ``doxygen`` 1.8.11 can be
    built from source to avoid the issue.
 
-6. For SLES 15 Service Pack 7, the following adds the needed packages:
+6. For SLES, the following adds the needed packages:
 
    ````shell
    sudo zypper in gcc gcc-c++ make cmake doxygen graphviz texlive-scheme-medium \
