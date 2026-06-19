@@ -49,6 +49,10 @@ public:
 
   SoC *soc() { return soc_; }
   const SoC *soc() const { return soc_; }
+  /// @brief Access the Nth SoC (GPU), or nullptr if idx is out of range.
+  SoC *soc(uint32_t idx) { return idx < socs_.size() ? socs_[idx] : nullptr; }
+  /// @brief Number of SoCs (GPUs) in this VM. At least 1 for any constructed VM.
+  uint32_t num_socs() const { return static_cast<uint32_t>(socs_.size()); }
   amdgpu::GpuMemory *memory() { return soc_->memory(); }
   const amdgpu::GpuMemory *memory() const { return soc_->memory(); }
   const Config &config() const { return config_; }
@@ -58,6 +62,7 @@ public:
 private:
   Config config_;
   SoC *soc_ = nullptr;
+  std::vector<SoC *> socs_;
   std::unique_ptr<SimulatedKfd> driver_;
 };
 

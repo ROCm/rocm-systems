@@ -64,11 +64,21 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     auto vm_ptr = std::make_unique<VirtualMachine>(std::move(socs), std::move(gpu_ids), daemon);
     s->vm = vm_ptr.get();
     s->engine->topology().set_root(std::move(vm_ptr));
+
+    auto prefix_specs = [](std::vector<simdojo::LinkSpec> &specs, const std::string &pfx) {
+      for (auto &ls : specs) {
+        ls.src = pfx + ls.src;
+        ls.dst = pfx + ls.dst;
+      }
+    };
+    prefix_specs(loaded.build_result.link_specs, "gpu0.");
     loaded.wire_links(s->engine->topology());
     s->soc->wire_backing(s->engine->topology());
-    for (auto &eb : loaded.extra_gpu_builds) {
+    for (size_t i = 0; i < loaded.extra_gpu_builds.size(); ++i) {
+      auto &eb = loaded.extra_gpu_builds[i];
+      prefix_specs(eb.link_specs, "gpu" + std::to_string(i + 1) + ".");
       s->engine->topology().wire_links(eb.link_specs, loaded.exec_mode);
-      auto *extra_soc = dynamic_cast<SoC *>(s->vm->soc());
+      auto *extra_soc = s->vm->soc(static_cast<uint32_t>(i + 1));
       if (extra_soc)
         extra_soc->wire_backing(s->engine->topology());
     }
