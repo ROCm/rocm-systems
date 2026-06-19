@@ -592,11 +592,11 @@ public:
                 // Program Grbm to direct writes to one SE
                 Select_GRBM_SE_SH0(cmd_buffer, se_index_xcc);
 
-                // Issue WaitRegMem command to wait until SQTT event has completed
+                // Wait until SQTT is idle (busy bit == 0) before readout. The old "!= 1" form
+                // was a no-op (masked value is 0 or 1<<30, never 1), racing the engine writes.
                 const uint32_t mask_val      = Primitives::sqtt_busy_mask();
                 auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
-                builder.BuildWaitRegMemCommand(
-                    cmd_buffer, false, status_offset, false, mask_val, 1);
+                builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
 
                 ReadValues(cmd_buffer, config, se_index);
             }
@@ -774,9 +774,11 @@ public:
 
         if(Primitives::GFXIP_LEVEL == 9)
         {
+            // Wait until SQTT is idle (busy bit == 0) before reading status. The old "!= 1"
+            // form was a no-op (masked value is 0 or 1<<30, never 1).
             const uint32_t mask_val      = Primitives::sqtt_busy_mask();
             auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
-            builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, false, mask_val, 1);
+            builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
         }
 
         auto status_addr = (Primitives::GFXIP_LEVEL >= 12)
@@ -813,9 +815,11 @@ public:
 
         if(Primitives::GFXIP_LEVEL == 9)
         {
+            // Wait until SQTT is idle (busy bit == 0) before reprogramming the base. The old
+            // "!= 1" form was a no-op, letting the swap race the engine's in-flight writes.
             const uint32_t mask_val      = Primitives::sqtt_busy_mask();
             auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
-            builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, false, mask_val, 1);
+            builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
 
             builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                Primitives::SQ_THREAD_TRACE_BASE_ADDR,
