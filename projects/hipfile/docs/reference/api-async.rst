@@ -23,14 +23,11 @@ transfer parameters are known at registration time.
 .. doxygengroup:: stream_flags
    :content-only:
 
-Asynchronous read and write
-***************************
+Asynchronous I/O and stream registration functions
+*************************************************
 
-.. doxygenfunction:: hipFileReadAsync
-.. doxygenfunction:: hipFileWriteAsync
+Functions to enqueue non-blocking reads and writes on HIP streams and to
+register and deregister streams with the hipFile driver.
 
-Stream registration
-*******************
-
-.. doxygenfunction:: hipFileStreamRegister
-.. doxygenfunction:: hipFileStreamDeregister
+.. doxygengroup:: async
+   :content-only:
