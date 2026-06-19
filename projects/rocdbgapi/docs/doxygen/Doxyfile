@@ -1,4 +1,4 @@
-## Copyright (c) 2019-2023 Advanced Micro Devices, Inc.
+## Copyright (c) 2019-2026 Advanced Micro Devices, Inc.
 ##
 ## Permission is hereby granted, free of charge, to any person obtaining a copy
 ## of this software and associated documentation files (the "Software"), to
@@ -52,7 +52,7 @@ DOXYFILE_ENCODING      = UTF-8
 # title of most generated pages and in a few other places.
 # The default value is: My Project.
 
-PROJECT_NAME           = "AMD Debugger API"
+PROJECT_NAME           = "ROCdbgapi"
 
 # The PROJECT_NUMBER tag can be used to enter a project or revision number. This
 # could be handy for archiving the generated documentation or if some version
