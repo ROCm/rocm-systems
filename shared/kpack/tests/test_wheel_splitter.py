@@ -34,7 +34,6 @@ from rocm_kpack.wheel_splitter import (
     zip_wheel,
 )
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -674,12 +673,23 @@ class TestGenerateRecord:
 
 
 class TestWheelArchivePermissions:
-    def test_extract_and_repack_preserves_exact_executable_mode(self, tmp_path: Path):
+    def test_extract_and_repack_preserves_exact_executable_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         from rocm_kpack.binutils import Toolchain
 
         input_wheel = tmp_path / "input.whl"
         executable_path = "torch/bin/torch_shm_manager"
         plain_path = "torch/__init__.py"
+        extracted_root = input_wheel.parent / (input_wheel.stem + ".tmp_extract")
+        chmod_calls: dict[str, int] = {}
+        path_type = type(tmp_path)
+        original_chmod = path_type.chmod
+
+        def recording_chmod(self: Path, mode: int) -> None:
+            chmod_calls[self.relative_to(extracted_root).as_posix()] = mode
+            if os.name != "nt":
+                original_chmod(self, mode)
 
         with zipfile.ZipFile(input_wheel, "w") as zf:
             executable_info = zipfile.ZipInfo(executable_path)
@@ -689,6 +699,8 @@ class TestWheelArchivePermissions:
             plain_info = zipfile.ZipInfo(plain_path)
             plain_info.external_attr = (stat.S_IFREG | 0o640) << 16
             zf.writestr(plain_info, b"# torch\n")
+
+        monkeypatch.setattr(path_type, "chmod", recording_chmod)
 
         splitter = WheelSplitter(
             device_package_prefix="amd-torch-device",
@@ -707,6 +719,12 @@ class TestWheelArchivePermissions:
             zip_wheel(extracted_dir, output_wheel)
         finally:
             shutil.rmtree(extracted_dir)
+
+        assert chmod_calls[executable_path] == 0o751
+        assert chmod_calls[plain_path] == 0o640
+
+        if os.name == "nt":
+            return
 
         with zipfile.ZipFile(output_wheel, "r") as zf:
             output_executable_mode = stat.S_IMODE(
