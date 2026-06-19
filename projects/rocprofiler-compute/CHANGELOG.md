@@ -13,12 +13,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
 
-* Added support for GPU metrics on gfx1150 and gfx1152 hardware.
+* Added AMD Strix Point (gfx1150) and Krackan Point (gfx1152) support
 
-* Added GPU benchmarking support for gfx1150 and gfx1152 hardware.
-
-* Added Roofline profiling and analysis support for gfx1150/gfx1151/gfx1152 architecture
-  * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations
+* Added GPU Benchmarking and Roofline profiling/analysis support for gfx1150/gfx1151/gfx1152 architectures.
+  * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations.
 
 ### Changed
 
@@ -76,8 +74,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * PC sampling collection now runs when requested via the `pc_sampling` block alias (`--block pc_sampling`), instead of being silently skipped
 
 ### Upcoming changes
-
-* Roofline support for RDNA 3.5 gfx1151 devices
 
 ### Known issues
 

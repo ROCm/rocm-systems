@@ -1108,8 +1108,13 @@ class Roofline:
 
         for cache_level in sanitized_cache_hierarchy:
             cache_key = cache_level.lower()
-            # Check if cache level key, or value for the level, was not populated
-            cache_data = self.__ceiling_data[cache_key]
+
+            # cache_data layout:
+            #   [0] list[float] — x-axis coords for AI: [start_AI, ridge_point_AI]
+            #   [1] list[float] — y-axis coords for performance: [start_perf, peak_perf]
+            #   [2] float       — scalar peak bandwidth (GB/s)
+            cache_data = self.__ceiling_data.get(cache_key)
+
             if not cache_data or cache_data[0] is None:
                 continue
             plt.plot(
