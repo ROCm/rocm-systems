@@ -131,6 +131,19 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
           result, ignore1);
       ignore1:;
       }
+#ifdef GENERATE_SYM_KERNELS
+      if (sym == 1) {
+        // Symmetric kernels get max dynamic LDS, recorded in ncclSymkKernelMaxDynamicSmem[]
+        // so device (args->maxDynamicSmem) and launch (plan->kernelDynSmem) agree; matches upstream.
+        int dynSmem = maxSharedMem - attr.sharedSizeBytes;
+        if (dynSmem < 0) dynSmem = 0;
+        CUDACHECKGOTO(cudaFuncSetAttribute(fn,
+          cudaFuncAttributeMaxDynamicSharedMemorySize, dynSmem),
+          result, next_kernel);
+        ncclSymkKernelMaxDynamicSmem[k] = dynSmem;
+        continue; // sym kernels skip the non-symmetric ncclMaxSharedMem path
+      }
+#endif
       if (ncclMaxSharedMem != 0) {
         int sharedMemSize = ncclMaxSharedMem;
         if (sharedMemSize > (maxSharedMem-attr.sharedSizeBytes)) {

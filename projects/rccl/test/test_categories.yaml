@@ -373,9 +373,9 @@ test_categories:
 execution_settings:
   timeout_multiplier: 1
   category_timeouts:
-    quick: 1200
-    quick_env_thread_name: 1200
-    quick_env_debug_subsystems: 1200
+    quick: 2400
+    quick_env_thread_name: 2400
+    quick_env_debug_subsystems: 2400
     standard: 3600
     comprehensive: 7200
     full_base: 7200

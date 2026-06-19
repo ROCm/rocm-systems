@@ -274,7 +274,7 @@ union misc_fields
     {
         uint8_t spm_or_pl        : 1; // PL on gfx10, SPM on gfx11
         uint8_t gc_rinse         : 1;
-        uint8_t reserved         : 1;
+        uint8_t reserved         : 1; // Absent in tt >= 5, handled in tt5_shift
         uint8_t save_context     : 1;
         uint8_t tt_stall_start   : 1;
         uint8_t tt_stall_end     : 1;
@@ -282,6 +282,8 @@ union misc_fields
         uint8_t DIDT_stall_end   : 1;
     };
     uint8_t raw;
+
+    void tt5_shift() { raw = (raw & 0x3) | ((raw & 0x7C) << 1); }
 };
 
 union misc_type
@@ -423,8 +425,7 @@ union reg_init_type
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "pipe:" << pipe << " type:" << type << " context:" << context << std::hex << " data:0x" << data
-           << " data2:0x" << data2 << std::dec;
+        ss << "pipe:" << pipe << " type:" << type << std::hex << " data:0x" << data << std::dec;
         return ss;
     }
     const char* typestr() const { return "REG_INIT"; };
