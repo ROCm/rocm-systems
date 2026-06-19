@@ -1,0 +1,29 @@
+---
+contract:
+  Contract_Memory_MallocBasic_ReturnsAlignedPointer:
+    <<: *level_0
+    tags: [memory]
+  Contract_Memory_MallocZeroSize_ReturnsNull:
+    <<: *level_0
+    tags: [memory]
+  Contract_Memory_MallocNullOutPointer_ReturnsInvalidValue:
+    <<: *level_0
+    tags: [memory]
+  Contract_Memory_FreeNull_Succeeds:
+    <<: *level_0
+    tags: [memory]
+  Contract_Memory_FreeAllocatedPointer_Succeeds:
+    <<: *level_0
+    tags: [memory]
+  Contract_Transfer_HostToDeviceToHost_RoundTripsBytes:
+    <<: *level_0
+    tags: [transfer]
+  Contract_Transfer_DeviceToDevice_CopiesBytes:
+    <<: *level_0
+    tags: [transfer]
+  Contract_Transfer_MemcpyZeroBytes_Succeeds:
+    <<: *level_0
+    tags: [transfer]
+  Contract_Transfer_InvalidDirection_ReturnsInvalidMemcpyDirection:
+    <<: *level_0
+    tags: [transfer]

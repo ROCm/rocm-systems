@@ -15,6 +15,7 @@ NON_UNIT_GROUPS = [
     "performance",
     "stress",
     "TypeQualifiers",
+    "contract",
 ]
 
 _use_color = sys.stderr.isatty() and not os.environ.get("NO_COLOR")
