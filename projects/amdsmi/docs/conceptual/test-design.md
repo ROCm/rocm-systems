@@ -351,13 +351,29 @@ tests/python/
 │       ├── test_init.py               # amdsmi init / shutdown lifecycle
 │       └── test_topology.py           # socket, processor, and utilization count discovery
 │
-├── cli/
+├── cli/                               # CLI tests — one module per command (command-first: a
+│   │                                  # single command spans GPU/CPU/NIC; class Test<Command>)
 │   ├── __init__.py
-│   ├── base.py                        # TestCliBase: shared CLI-test scaffolding (FindArgs/CreateCmds/RunCmds)
-│   ├── test_cli_common.py             # help, version, list, default, invalid commands
-│   ├── test_cli_gpu.py                # static, firmware, metric, process, event, bad_pages, set, reset
-│   ├── test_cli_cpu.py                # CPU-specific CLI commands
-│   └── test_cli_topology.py           # xgmi, topology, partition, ras, node
+│   ├── base.py                        # TestCliBase: shared scaffolding + cached setUpClass (--json baseline)
+│   ├── test_general.py                # help, invalid-args
+│   ├── test_default.py                # bare amd-smi (default command)
+│   ├── test_version.py
+│   ├── test_list.py
+│   ├── test_static.py                 # static (+ mem-carveout)
+│   ├── test_firmware.py
+│   ├── test_bad_pages.py
+│   ├── test_metric.py
+│   ├── test_monitor.py
+│   ├── test_process.py
+│   ├── test_event.py
+│   ├── test_set.py
+│   ├── test_reset.py
+│   ├── test_topology.py
+│   ├── test_xgmi.py
+│   ├── test_partition.py
+│   ├── test_node.py
+│   ├── test_fabric.py
+│   └── test_ras.py                    # ras (+ afid folder)
 │
 ├── integration_test.py               # Runner: discovers and runs functional/ tests
 ├── cli_unit_test.py                  # Runner: discovers and runs cli/ tests
@@ -522,7 +538,7 @@ install(
 | `integration_test.py` — CPU setters | `functional/cpu/test_{feature}.py` |
 | `integration_test.py` — topology | `functional/system/test_topology.py` |
 | `integration_test.py` — NIC/switch | `functional/nic/test_discovery.py` |
-| `cli_unit_test.py` | `cli/base.py` + `cli/test_cli_{common,gpu,cpu,topology}.py` |
+| `cli_unit_test.py` | `cli/base.py` + `cli/test_<command>.py` (one per command) |
 | `perf_tests.py` | `functional/gpu/test_benchmark.py` |
 | `perf_cputests.py` | `functional/cpu/test_benchmark.py` |
 | `common.py` | `common/common.py` |

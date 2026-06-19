@@ -18,108 +18,20 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""CLI leaf test: common commands (help, version, list, default, invalid).
+"""CLI leaf test: general behavior (help, invalid)."""
 
-A concrete ``TestCliBase`` subclass, discovered and run via the
-cli_unit_test.py runner.
-"""
-
-import ctypes
-import json
-import stat
-import unittest
-
-import common.common as common
-import common.runcmd as runcmd
 from cli.base import TestCliBase
 
-# common.common owns path resolution, sys.path setup, and amdsmi loading — borrow the
-# reference so AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution and the stale-package check
-# (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
-from common.common import amdsmi
 
-
-class TestCliCommon(TestCliBase):
-    TMP_FILENAME = "_tmp.log"
-    TMP_FOLDER = "_tmp"
-
-    @classmethod
-    def setUpClass(cls):
-        cls.common = common.Common(common.verbose)
-        cls.util = runcmd.Util("WARNING")
-
-        # Record starting values; running here (once per class) rather than in
-        # __init__ (once per test method) reduces setup overhead from O(N) to
-        # O(1) — N being the number of test methods in this class.
-        cmds = [
-            ("metric", "amd-smi metric --json"),
-            ("static", "amd-smi static --json"),
-            ("list", "amd-smi list --json"),
-            ("partition", "amd-smi partition --current --json"),
-        ]
-        for name, cmd in cmds:
-            (rc, data, std_err) = cls.util.RunCmdSync(cmd)
-            if rc:
-                raise RuntimeError(f'Error executing "{cmd}": {std_err}')
-            if not data:
-                raise RuntimeError(f'Empty JSON output from "{cmd}". stderr: {std_err}')
-            try:
-                setattr(cls, f"{name}_data", json.loads(data))
-            except (json.JSONDecodeError, TypeError) as e:
-                # TODO(amdsmi_team): Known issue — several AI NIC and CPU commands can produce
-                # malformed JSON/CSV/error output, causing parsing & other failures.
-                # We need to log tickets on these issues.
-
-                # Log warning but continue — malformed JSON output is a CLI bug,
-                # not a test infrastructure failure; tests that depend on this
-                # data will fail individually with a KeyError pointing to the
-                # missing key, making the root cause clear.
-                cls.common.print(f'\n\tERROR: Could not parse JSON from "{cmd}": {e}')
-                setattr(cls, f"{name}_data", {})
-
-        cls.gpus = ["all"]
-        for entry in cls.list_data:
-            cls.gpus.append(entry["gpu"])
-            if entry["gpu"] == 0:
-                # Only test bdf and uuid when gpu=0
-                cls.gpus.append(entry["bdf"])
-                cls.gpus.append(entry["uuid"])
-
-        # When parsing, expand each arg with array element
-        cls.sub_args = {
-            "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
-            "PID": [123],
-            "NAME": ["AMD"],
-            "GPU": cls.gpus,
-            "FILE": [
-                cls.TMP_FILENAME,
-                f"{cls.TMP_FILENAME} --overwrite",
-                f"{cls.TMP_FILENAME} --append",
-            ],
-            "SEVERITY": ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"],
-            "FOLDER": [cls.TMP_FOLDER],
-            "FILE_LIMIT": [10],
-            #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        }
-
-    def test_default(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi"
-        self.common.print(msg)
-
-        cmds = [("amd-smi", self.PASS)]
-
-        self.RunCmds(cmds)
-        return
-
+class TestGeneral(TestCliBase):
     def test_help(self):
         self.common.print_func_name("")
-        msg = f"### amd-smi help"
+        msg = "### amd-smi help"
         self.common.print(msg)
 
         cmd = "amd-smi --help"
         (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
-        lines = std_out.split("\n")
+        lines = std_out.split("\n") if std_out else []
         # Find all available command line args
         cmd_args = []
         found = False
@@ -143,7 +55,7 @@ class TestCliCommon(TestCliBase):
             if "Descriptions" in line:
                 found = True
 
-        cmds = [(f"amd-smi --help", self.PASS)]
+        cmds = [("amd-smi --help", self.PASS)]
         for cmd_arg in cmd_args:
             cmds.append((f"amd-smi {cmd_arg} --help", self.PASS))
 
@@ -303,31 +215,6 @@ class TestCliCommon(TestCliBase):
                 cmds.append((f"amd-smi set --xgmi-plpd --gpu {index}", self.FAIL))
                 num_supported = int(xgmi_plpd["num_supported"])
                 cmds.append((f"amd-smi set --xgmi-plpd {num_supported} --gpu {index}", self.FAIL))
-
-        self.RunCmds(cmds)
-        return
-
-    def test_list(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi list"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "list", "List Arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_version(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi version"
-        self.common.print(msg)
-
-        cmds = [
-            ("amd-smi version", self.PASS),
-            ("amd-smi version --cpu_version", self.PASS),
-            ("amd-smi version --gpu_version", self.PASS),
-        ]
 
         self.RunCmds(cmds)
         return

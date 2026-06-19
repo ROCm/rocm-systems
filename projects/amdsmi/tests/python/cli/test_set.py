@@ -18,15 +18,9 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""CLI GPU commands: static, firmware, bad_pages, metric, process, event, set, reset, monitor, static_mem_carveout_gtt."""
-
-import ctypes
-import json
-import stat
-import unittest
+"""CLI leaf test: set command."""
 
 import common.common as common
-import common.runcmd as runcmd
 from cli.base import TestCliBase
 
 # common.common owns path resolution, sys.path setup, and amdsmi loading — borrow the
@@ -35,179 +29,8 @@ from cli.base import TestCliBase
 from common.common import amdsmi
 
 
-class TestCliGpu(TestCliBase):
-    TMP_FILENAME = "_tmp.log"
-    TMP_FOLDER = "_tmp"
-
-    @classmethod
-    def setUpClass(cls):
-        cls.common = common.Common(common.verbose)
-        cls.util = runcmd.Util("WARNING")
-
-        # Record starting values; running here (once per class) rather than in
-        # __init__ (once per test method) reduces setup overhead from O(N) to
-        # O(1) — N being the number of test methods in this class.
-        cmds = [
-            ("metric", "amd-smi metric --json"),
-            ("static", "amd-smi static --json"),
-            ("list", "amd-smi list --json"),
-            ("partition", "amd-smi partition --current --json"),
-        ]
-        for name, cmd in cmds:
-            (rc, data, std_err) = cls.util.RunCmdSync(cmd)
-            if rc:
-                raise RuntimeError(f'Error executing "{cmd}": {std_err}')
-            if not data:
-                raise RuntimeError(f'Empty JSON output from "{cmd}". stderr: {std_err}')
-            try:
-                setattr(cls, f"{name}_data", json.loads(data))
-            except (json.JSONDecodeError, TypeError) as e:
-                # TODO(amdsmi_team): Known issue — several AI NIC and CPU commands can produce
-                # malformed JSON/CSV/error output, causing parsing & other failures.
-                # We need to log tickets on these issues.
-
-                # Log warning but continue — malformed JSON output is a CLI bug,
-                # not a test infrastructure failure; tests that depend on this
-                # data will fail individually with a KeyError pointing to the
-                # missing key, making the root cause clear.
-                cls.common.print(f'\n\tERROR: Could not parse JSON from "{cmd}": {e}')
-                setattr(cls, f"{name}_data", {})
-
-        cls.gpus = ["all"]
-        for entry in cls.list_data:
-            cls.gpus.append(entry["gpu"])
-            if entry["gpu"] == 0:
-                # Only test bdf and uuid when gpu=0
-                cls.gpus.append(entry["bdf"])
-                cls.gpus.append(entry["uuid"])
-
-        # When parsing, expand each arg with array element
-        cls.sub_args = {
-            "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
-            "PID": [123],
-            "NAME": ["AMD"],
-            "GPU": cls.gpus,
-            "FILE": [
-                cls.TMP_FILENAME,
-                f"{cls.TMP_FILENAME} --overwrite",
-                f"{cls.TMP_FILENAME} --append",
-            ],
-            "SEVERITY": ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"],
-            "FOLDER": [cls.TMP_FOLDER],
-            "FILE_LIMIT": [10],
-            #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        }
-
-    def test_bad_pages(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi bad-pages"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "bad-pages", "Bad Pages Arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_event(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi event"
-        self.common.print(msg)
-
-        # TODO allow event commands to be executed
-        if not self.PrintCmdsOnly:
-            if self.common.TODO_SKIP_FAIL:
-                msg = f"{self.tab}Needs input"
-                self.common.print(msg)
-                self.skipTest(msg)
-
-        # Start process with "amd-smi event"
-        # In another process create an event with like "amd-smi reset --gpureset"
-        cmds = self.CreateCmds(
-            "event", "Event Arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_firmware(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi firmware"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "firmware", "Firmware Arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
-        cmds = self.CreateCmds(
-            "ucode", "Firmware Arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_metric(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi metric"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "metric",
-            "Metric arguments:",
-            "Device Arguments:",
-            "Command Modifiers:",
-            "Watch Arguments:",
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_monitor(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi monitor"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "monitor",
-            "Monitor Arguments:",
-            "Device Arguments:",
-            "Command Modifiers:",
-            "Watch Arguments:",
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_process(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi process"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "process",
-            "Process arguments:",
-            "Device Arguments:",
-            "Command Modifiers:",
-            "Watch Arguments:",
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_reset(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi reset"
-        self.common.print(msg)
-
-        # TODO allow reset commands to be executed
-        if not self.PrintCmdsOnly:
-            if self.common.TODO_SKIP_FAIL:
-                msg = f"{self.tab}Needs Testing, Not Yet Implemented"
-                # self.common.print(msg)
-                self.skipTest(msg)
-
-        cmds = self.CreateCmds(
-            "reset", "Reset Arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_set(self):
+class TestSet(TestCliBase):
+    def test_command(self):
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi set"
         self.common.print(msg)
@@ -373,6 +196,7 @@ class TestCliGpu(TestCliBase):
             clock = self.static_data["gpu_data"][index]["clock"]
             for clk_type in self.clk_levels:
                 value = -1
+                clk_type_name = ""
                 if clk_type == "SCLK":
                     clk_type_name = "sys"
                 elif clk_type == "MCLK":
@@ -413,73 +237,4 @@ class TestCliGpu(TestCliBase):
         print("Restore Starting Values")
         self.RunCmds(cmds)
 
-        return
-
-    def test_static(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi static"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "static", "Static Arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_static_mem_carveout_gtt(self):
-        """Test static --mem-carveout and node --gtt flags (display mode only)"""
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi static --mem-carveout and node --gtt"
-        self.common.print(msg)
-
-        # Test mem-carveout display (static subcommand)
-        cmd = "amd-smi static --mem-carveout"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-
-        # Test GTT display (node subcommand — GTT is system-wide, not per-GPU)
-        cmd = "amd-smi node --gtt"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-
-        # Test mem-carveout with JSON output
-        cmd = "amd-smi static --mem-carveout --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-        if data:
-            try:
-                json_data = json.loads(data)
-                self.assertIsInstance(json_data, (list, dict))
-            except json.JSONDecodeError:
-                self.fail(f"Invalid JSON output for command '{cmd}'")
-
-        # Test GTT with JSON output (node subcommand)
-        cmd = "amd-smi node --gtt --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-        if data:
-            try:
-                json_data = json.loads(data)
-                self.assertIsInstance(json_data, (list, dict))
-            except json.JSONDecodeError:
-                self.fail(f"Invalid JSON output for command '{cmd}'")
-
-        # Test mem-carveout with CSV output
-        cmd = "amd-smi static --mem-carveout --csv"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-
-        # Test GTT with CSV output (node subcommand)
-        cmd = "amd-smi node --gtt --csv"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-
-        # Note: We do NOT test set/reset operations (--mem-carveout in set, --gtt in set/reset) because:
-        # 1. They require root/sudo permissions
-        # 2. They require system reboot to take effect
-        # 3. They could interfere with the test system configuration
-        # These operations should be tested manually or in dedicated integration test environments
-
-        msg = f"{self.tab}Static mem-carveout and node GTT tests passed (display mode only)"
-        self.common.print(msg)
         return

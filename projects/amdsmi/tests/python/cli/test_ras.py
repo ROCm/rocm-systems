@@ -18,112 +18,18 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""CLI topology commands: topology, xgmi, partition, ras, node."""
+"""CLI leaf test: ras command (incl. --afid --folder fixtures)."""
 
-import ctypes
 import json
 import os
 import shutil
-import stat
 import tempfile
-import unittest
 
-import common.common as common
-import common.runcmd as runcmd
 from cli.base import TestCliBase
 
-# common.common owns path resolution, sys.path setup, and amdsmi loading — borrow the
-# reference so AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution and the stale-package check
-# (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
-from common.common import amdsmi
 
-
-class TestCliTopology(TestCliBase):
-    TMP_FILENAME = "_tmp.log"
-    TMP_FOLDER = "_tmp"
-
-    @classmethod
-    def setUpClass(cls):
-        cls.common = common.Common(common.verbose)
-        cls.util = runcmd.Util("WARNING")
-
-        # Record starting values; running here (once per class) rather than in
-        # __init__ (once per test method) reduces setup overhead from O(N) to
-        # O(1) — N being the number of test methods in this class.
-        cmds = [
-            ("metric", "amd-smi metric --json"),
-            ("static", "amd-smi static --json"),
-            ("list", "amd-smi list --json"),
-            ("partition", "amd-smi partition --current --json"),
-        ]
-        for name, cmd in cmds:
-            (rc, data, std_err) = cls.util.RunCmdSync(cmd)
-            if rc:
-                raise RuntimeError(f'Error executing "{cmd}": {std_err}')
-            if not data:
-                raise RuntimeError(f'Empty JSON output from "{cmd}". stderr: {std_err}')
-            try:
-                setattr(cls, f"{name}_data", json.loads(data))
-            except (json.JSONDecodeError, TypeError) as e:
-                # TODO(amdsmi_team): Known issue — several AI NIC and CPU commands can produce
-                # malformed JSON/CSV/error output, causing parsing & other failures.
-                # We need to log tickets on these issues.
-
-                # Log warning but continue — malformed JSON output is a CLI bug,
-                # not a test infrastructure failure; tests that depend on this
-                # data will fail individually with a KeyError pointing to the
-                # missing key, making the root cause clear.
-                cls.common.print(f'\n\tERROR: Could not parse JSON from "{cmd}": {e}')
-                setattr(cls, f"{name}_data", {})
-
-        cls.gpus = ["all"]
-        for entry in cls.list_data:
-            cls.gpus.append(entry["gpu"])
-            if entry["gpu"] == 0:
-                # Only test bdf and uuid when gpu=0
-                cls.gpus.append(entry["bdf"])
-                cls.gpus.append(entry["uuid"])
-
-        # When parsing, expand each arg with array element
-        cls.sub_args = {
-            "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
-            "PID": [123],
-            "NAME": ["AMD"],
-            "GPU": cls.gpus,
-            "FILE": [
-                cls.TMP_FILENAME,
-                f"{cls.TMP_FILENAME} --overwrite",
-                f"{cls.TMP_FILENAME} --append",
-            ],
-            "SEVERITY": ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"],
-            "FOLDER": [cls.TMP_FOLDER],
-            "FILE_LIMIT": [10],
-            #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        }
-
-    def test_node(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi node"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "node", "Node arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_partition(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi partition"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "partition", "Partition arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_ras(self):
+class TestRas(TestCliBase):
+    def test_command(self):
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi ras"
         self.common.print(msg)
@@ -142,7 +48,7 @@ class TestCliTopology(TestCliBase):
         self.RunCmds(cmds)
         return
 
-    def test_ras_afid_folder(self):
+    def test_afid_folder(self):
         """Exercise the pure-Python validation/decode branches of
         ``amd-smi ras --afid --folder`` against on-disk fixtures (no GPU needed).
         """
@@ -195,6 +101,7 @@ class TestCliTopology(TestCliBase):
             cmd = f"amd-smi ras --afid --folder {tmp_dir} --json"
             (rc, data, std_err) = self.util.RunCmdSync(cmd)
             self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+            assert data is not None, f"Command '{cmd}' produced no output"
             json_data = json.loads(data)
             self.assertIsInstance(json_data, list, f"'{cmd}' did not emit a JSON list")
             for entry in json_data:
@@ -208,37 +115,4 @@ class TestCliTopology(TestCliBase):
                 self.assertIn("decode_failed", entry)
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-        return
-
-    def test_topology(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi topology"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "topology", "Topology arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_xgmi(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi xgmi"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "xgmi", "XGMI arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
-        return
-
-    def test_fabric(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi fabric"
-        self.common.print(msg)
-
-        cmds = self.CreateCmds(
-            "fabric", "Fabric arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
-        self.RunCmds(cmds)
         return

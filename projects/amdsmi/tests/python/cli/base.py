@@ -23,9 +23,8 @@
 ``TestCliBase`` provides the instance-level scaffolding every CLI test
 needs -- ``__init__`` (command constants), ``FindArgs``, ``CreateCmds``
 and ``RunCmds``.  Extracted from develop's monolithic ``TestAmdSmiCli``
-so the per-feature CLI suites can share it: the three ``cli/test_cli_*.py``
-files each subclass ``TestCliBase`` and add their own setUpClass / test_*
-methods.
+so the per-feature CLI suites can share it: the per-command ``cli/test_*.py``
+files each subclass ``TestCliBase`` and add their own test_* methods.
 """
 
 import json
@@ -33,17 +32,121 @@ import os
 import stat
 import unittest
 
+import common.common as common
+import common.runcmd as runcmd
+
 
 class TestCliBase(unittest.TestCase):
     """Base class for CLI functional tests.
 
-    Subclasses must define a setUpClass that sets cls.common, cls.util, and
-    the JSON data attributes (cls.list_data, cls.static_data, cls.metric_data,
-    cls.partition_data) before any test method runs.
+    The base now provides a cached ``setUpClass`` that fetches the ``--json``
+    baseline (metric/static/list/partition data, the derived ``gpus`` list and
+    the ``sub_args`` dict) exactly once and shares it across all CLI test
+    classes, so subclasses only need to add their own test_* methods.
     """
 
     TMP_FILENAME = "_tmp.log"
     TMP_FOLDER = "_tmp"
+
+    # Scaffolding shared across every CLI test class.  setUpClass populates
+    # these once, directly on ``TestCliBase``; subclasses then resolve them
+    # natively through normal attribute inheritance -- no dynamic ``setattr``
+    # for a type checker (or go-to-definition) to lose track of.  Declared here
+    # so editors / type checkers can resolve ``self.util``, ``self.static_data``.
+    common: "common.Common"
+    util: "runcmd.Util"
+    list_data: dict
+    static_data: dict
+    metric_data: dict
+    partition_data: dict
+    gpus: list
+    sub_args: dict
+
+    # Built lazily (not at import like common.py's pure, enum-derived parameter
+    # lists) because the --json baseline needs a real GPU and root.  Still built
+    # only once for the whole CLI suite, then inherited by every command class;
+    # this flag guards the first-and-only initialization.
+    _initialized = False
+
+    @classmethod
+    def setUpClass(cls):
+        if TestCliBase._initialized:
+            return
+        TestCliBase.common = common.Common(common.verbose)
+        TestCliBase.util = runcmd.Util("WARNING")
+        # Print the per-device header (virtualization mode, asic and board
+        # info) once, before any CLI test class runs, rather than per test.
+        for i, _ in enumerate(TestCliBase.common.processors):
+            TestCliBase.common.print_device_header(i)
+
+        baseline = cls._build_baseline()
+        TestCliBase.metric_data = baseline["metric_data"]
+        TestCliBase.static_data = baseline["static_data"]
+        TestCliBase.list_data = baseline["list_data"]
+        TestCliBase.partition_data = baseline["partition_data"]
+        TestCliBase.gpus = baseline["gpus"]
+        TestCliBase.sub_args = baseline["sub_args"]
+        TestCliBase._initialized = True
+
+    @classmethod
+    def _build_baseline(cls):
+        baseline = {}
+
+        # Record starting values; running here (once per class) rather than in
+        # __init__ (once per test method) reduces setup overhead from O(N) to
+        # O(1) — N being the number of test methods in this class.
+        cmds = [
+            ("metric", "amd-smi metric --json"),
+            ("static", "amd-smi static --json"),
+            ("list", "amd-smi list --json"),
+            ("partition", "amd-smi partition --current --json"),
+        ]
+        for name, cmd in cmds:
+            (rc, data, std_err) = cls.util.RunCmdSync(cmd)
+            if rc:
+                raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+            if not data:
+                raise RuntimeError(f'Empty JSON output from "{cmd}". stderr: {std_err}')
+            try:
+                baseline[f"{name}_data"] = json.loads(data)
+            except (json.JSONDecodeError, TypeError) as e:
+                # TODO(amdsmi_team): Known issue — several AI NIC and CPU commands can produce
+                # malformed JSON/CSV/error output, causing parsing & other failures.
+                # We need to log tickets on these issues.
+
+                # Log warning but continue — malformed JSON output is a CLI bug,
+                # not a test infrastructure failure; tests that depend on this
+                # data will fail individually with a KeyError pointing to the
+                # missing key, making the root cause clear.
+                cls.common.print(f'\n\tERROR: Could not parse JSON from "{cmd}": {e}')
+                baseline[f"{name}_data"] = {}
+
+        gpus = ["all"]
+        for entry in baseline["list_data"]:
+            gpus.append(entry["gpu"])
+            if entry["gpu"] == 0:
+                # Only test bdf and uuid when gpu=0
+                gpus.append(entry["bdf"])
+                gpus.append(entry["uuid"])
+        baseline["gpus"] = gpus
+
+        # When parsing, expand each arg with array element
+        baseline["sub_args"] = {
+            "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
+            "PID": [123],
+            "NAME": ["AMD"],
+            "GPU": gpus,
+            "FILE": [
+                cls.TMP_FILENAME,
+                f"{cls.TMP_FILENAME} --overwrite",
+                f"{cls.TMP_FILENAME} --append",
+            ],
+            "SEVERITY": ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"],
+            "FOLDER": [cls.TMP_FOLDER],
+            "FILE_LIMIT": [10],
+            #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        }
+        return baseline
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -131,7 +234,7 @@ class TestCliBase(unittest.TestCase):
             return ["pass"]
 
         (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
-        lines = std_out.split("\n")
+        lines = std_out.split("\n") if std_out else []
 
         found = False
         options = []
@@ -168,20 +271,20 @@ class TestCliBase(unittest.TestCase):
                             options.append(f"{items[item_index]}")
                             options.append("--fw-list")
                         elif "--json" == items[item_index]:
-                            options.append(f"{{json}}")
-                            options.append(f"{{json_file}}")
-                            options.append(f"{{json_file_append}}")
-                            options.append(f"{{json_file_overwrite}}")
+                            options.append("{json}")
+                            options.append("{json_file}")
+                            options.append("{json_file_append}")
+                            options.append("{json_file_overwrite}")
                         elif "--csv" == items[item_index]:
-                            options.append(f"{{csv}}")
-                            options.append(f"{{csv_file}}")
-                            options.append(f"{{csv_file_append}}")
-                            options.append(f"{{csv_file_overwrite}}")
+                            options.append("{csv}")
+                            options.append("{csv_file}")
+                            options.append("{csv_file_append}")
+                            options.append("{csv_file_overwrite}")
                         elif "--append" == items[item_index] or "--overwrite" == items[item_index]:
                             pass
                         elif "--watch" == items[item_index]:
-                            options.append(f"{{watch_time}}")
-                            options.append(f"{{watch_iterations}}")
+                            options.append("{watch_time}")
+                            options.append("{watch_iterations}")
                         elif (
                             "--watch_time" == items[item_index]
                             or "--iterations" == items[item_index]
@@ -211,7 +314,7 @@ class TestCliBase(unittest.TestCase):
                                 for profile_level in self.profile_levels:
                                     options.append(f"{items[item_index]} {profile_level}")
                             elif sub_arg == "SCLKMAX":  # arg --perf-determinism
-                                options.append(f"{{perf_determinism}}")
+                                options.append("{perf_determinism}")
                             elif sub_arg == "TYPE/INDEX":  # arg
                                 for compute_partition_mode in self.compute_partition_modes:
                                     options.append(f"{items[item_index]} {compute_partition_mode}")
@@ -345,15 +448,12 @@ class TestCliBase(unittest.TestCase):
             cmd, cond = cmd_cond
             while self.openCurlyBrace in cmd:
                 items = cmd.split()
-                # Find gpu index and mark when gpu=0
-                gpu_0 = False
+                # Find gpu index
                 try:
                     i = items.index("--gpu")
                     gpu = items[i + 1]
                     if gpu.isdigit():
                         gpu_index = int(gpu)
-                        if gpu_index == 0:
-                            gpu_0 = True
                     else:
                         gpu_index = 0
                 except ValueError:
@@ -418,6 +518,7 @@ class TestCliBase(unittest.TestCase):
                             power_type = "N/A"
                     if (
                         power_type == "N/A"
+                        or not isinstance(power_type, dict)
                         or power_type["min_power_limit"] == "N/A"
                         or power_type["max_power_limit"] == "N/A"
                     ):
@@ -445,6 +546,7 @@ class TestCliBase(unittest.TestCase):
                         cmd = ""
                 elif "clk_limit" in nameStr:
                     clock = self.metric_data["gpu_data"][gpu_index]["clock"]
+                    clk_type = clk_type_name = limit_type = clk_limit_name = ""
                     if nameStr == "{clk_limit_sclk_min}":
                         clk_type = "SCLK"
                         clk_type_name = "socclk_0"
@@ -474,6 +576,7 @@ class TestCliBase(unittest.TestCase):
                 elif "clk_level" in nameStr:
                     clock = self.static_data["gpu_data"][gpu_index]["clock"]
                     value = -1
+                    clk_type = clk_type_name = ""
                     if nameStr == "{clk_level_sclk}":
                         clk_type = "SCLK"
                         clk_type_name = "sys"
@@ -564,7 +667,7 @@ class TestCliBase(unittest.TestCase):
                     try:
                         i = items.index("--gpu")
                         gpu_index = items[i + 1]
-                    except ValueError as e:
+                    except ValueError:
                         # condition where --gpu is not in the cmd
                         # will get default gpu_index=0
                         pass
@@ -668,7 +771,7 @@ class TestCliBase(unittest.TestCase):
                 msg += f" Failure: Received FAIL ({error_code}), expected PASS (0)"
                 errors.append(msg)
             elif not rc and cond != self.PASS:
-                msg += f" Failure: Received PASS (0), expected FAIL (!0)"
+                msg += " Failure: Received PASS (0), expected FAIL (!0)"
                 errors.append(msg)
             else:
                 if not rc:

@@ -18,10 +18,19 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""CLI CPU commands (stub — add CPU-specific CLI tests here)."""
+"""CLI leaf test: node command."""
 
 from cli.base import TestCliBase
 
 
-class TestCliCpu(TestCliBase):
-    pass  # Add CPU-specific CLI tests here
+class TestNode(TestCliBase):
+    def test_command(self):
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi node"
+        self.common.print(msg)
+
+        cmds = self.CreateCmds(
+            "node", "Node arguments:", "Device Arguments:", "Command Modifiers:", ""
+        )
+        self.RunCmds(cmds)
+        return
