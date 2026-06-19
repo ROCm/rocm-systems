@@ -49,9 +49,9 @@ RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", 0); // Opt-in environment variable f
 #define RCCL_AMDSMI_FN(name, rettype, arglist) rettype(*pfn_##name)arglist = nullptr;
 
 // dlopen the versioned SONAME (in every runtime tree), not the unversioned dev
-// symlink (devel / /opt/rocm only). The major comes from the amdsmi header,
-// which feeds its SOVERSION, so it tracks bumps. No header (AMDSMI_DIRECT==0):
-// fall back to the unversioned name.
+// symlink (devel packages and /opt/rocm installs only). The major comes from
+// the amdsmi header, which feeds its SOVERSION, so it tracks bumps. No header
+// (AMDSMI_DIRECT==0): fall back to the unversioned name.
 #if AMDSMI_DIRECT && defined(AMDSMI_LIB_VERSION_MAJOR)
 #define RCCL_AMDSMI_STR2(v) #v
 #define RCCL_AMDSMI_STR(v) RCCL_AMDSMI_STR2(v)
@@ -168,7 +168,7 @@ ncclResult_t amd_smi_init() {
       // the amdsmi headers, otherwise the unversioned name (see above).
       static void *libhandle = dlopen(RCCL_AMDSMI_LIBNAME, RTLD_NOW);
       if (libhandle == nullptr) {
-        WARN("Failed to open %s", RCCL_AMDSMI_LIBNAME);
+        WARN("Failed to open %s: %s", RCCL_AMDSMI_LIBNAME, dlerror());
         amdSmiInitResult = ncclInternalError;
         return ncclInternalError;
       }
