@@ -420,7 +420,7 @@ rocDecStatus VaapiVideoDecoder::ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_ha
     VAStatus va_status = vaExportSurfaceHandle(va_display_, va_surface_ids_[pic_idx],
                 VA_SURFACE_ATTRIB_MEM_TYPE_NTHANDLE,
                 VA_EXPORT_SURFACE_READ_ONLY |
-                VA_EXPORT_SURFACE_COMPOSED_LAYERS,
+                VA_EXPORT_SURFACE_SEPARATE_LAYERS,
                 &nt_handle);
     if (va_status == VA_STATUS_SUCCESS) {
         InfoLog(g_rocdec_logger, "Exported surface via NTHANDLE (pic_idx=" + ROCDEC_TOSTR(pic_idx) + ")");
@@ -450,34 +450,101 @@ rocDecStatus VaapiVideoDecoder::ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_ha
     return ROCDEC_SUCCESS;
 }
 
-void VaapiVideoDecoder::GetD3D12ResourceLayout(int pic_idx, uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes) {
-    num_planes = 0;
-    memset(pitches, 0, sizeof(uint32_t) * 3);
-    memset(offsets, 0, sizeof(uint32_t) * 3);
+uint64_t VaapiVideoDecoder::GetD3D12ResourceAllocationSize(int pic_idx) {
     if (d3d12_device_ == nullptr || pic_idx >= d3d12_shared_resources_.size() || d3d12_shared_resources_[pic_idx] == nullptr) {
-        return;
+        return 0;
     }
     D3D12_RESOURCE_DESC desc = d3d12_shared_resources_[pic_idx]->GetDesc();
+    D3D12_RESOURCE_ALLOCATION_INFO alloc_info = d3d12_device_->GetResourceAllocationInfo(0, 1, &desc);
+    return alloc_info.SizeInBytes;
+}
 
-    // NV12/P010 have 2 subresources (Y plane = subresource 0, UV plane = subresource 1).
-    // Query the actual layout for each plane via GetCopyableFootprints.
-    UINT num_subresources = 2; // NV12/P010
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[2] = {};
-    UINT num_rows[2] = {};
-    UINT64 row_sizes[2] = {};
-    UINT64 total_size = 0;
-    d3d12_device_->GetCopyableFootprints(&desc, 0, num_subresources, 0, footprints, num_rows, row_sizes, &total_size);
+VaapiVideoDecoder::SurfaceLayout VaapiVideoDecoder::GetSurfaceLayout() const {
+    SurfaceLayout layout = {};
+    rocDecVideoSurfaceFormat fmt = decoder_create_info_.output_format;
+    uint32_t width = decoder_create_info_.width;
+    uint32_t height = decoder_create_info_.height;
 
-    num_planes = num_subresources;
-    for (UINT i = 0; i < num_subresources; i++) {
-        pitches[i] = footprints[i].Footprint.RowPitch;
-        offsets[i] = static_cast<uint32_t>(footprints[i].Offset);
+    // Pitch and vstride: must match GetSurfaceStrideInternal in roc_video_dec.cpp.
+    switch (fmt) {
+        case rocDecVideoSurfaceFormat_P016:
+        case rocDecVideoSurfaceFormat_YUV444_16Bit:
+        case rocDecVideoSurfaceFormat_YUV420_16Bit:
+        case rocDecVideoSurfaceFormat_YUV422_16Bit:
+            layout.pitch = ((width + 127) & ~127u) * 2;
+            break;
+        case rocDecVideoSurfaceFormat_NV12:
+        case rocDecVideoSurfaceFormat_YUV444:
+        case rocDecVideoSurfaceFormat_YUV420:
+        case rocDecVideoSurfaceFormat_YUV422:
+        default:
+            layout.pitch = (width + 255) & ~255u;
+            break;
+    }
+    layout.vstride = (height + 15) & ~15u;
+
+    // Chroma height factor and plane count: must match GetChromaHeightFactor/GetChromaPlaneCount.
+    float chroma_height_factor = 0.5f;
+    int num_chroma_planes = 1;
+    switch (fmt) {
+        case rocDecVideoSurfaceFormat_NV12:
+        case rocDecVideoSurfaceFormat_P016:
+            chroma_height_factor = 0.5f;
+            num_chroma_planes = 1; // interleaved UV
+            break;
+        case rocDecVideoSurfaceFormat_YUV420:
+        case rocDecVideoSurfaceFormat_YUV420_16Bit:
+            chroma_height_factor = 0.5f;
+            num_chroma_planes = 2; // separate U, V
+            break;
+        case rocDecVideoSurfaceFormat_YUV422:
+        case rocDecVideoSurfaceFormat_YUV422_16Bit:
+            chroma_height_factor = 1.0f;
+            num_chroma_planes = 2;
+            break;
+        case rocDecVideoSurfaceFormat_YUV444:
+        case rocDecVideoSurfaceFormat_YUV444_16Bit:
+            chroma_height_factor = 1.0f;
+            num_chroma_planes = 2;
+            break;
+        default:
+            chroma_height_factor = 0.5f;
+            num_chroma_planes = 1;
+            break;
     }
 
-    InfoLog(g_rocdec_logger, "D3D12 resource layout for pic_idx=" + ROCDEC_TOSTR(pic_idx) +
-            ": plane0 pitch=" + ROCDEC_TOSTR(pitches[0]) + " offset=" + ROCDEC_TOSTR(offsets[0]) +
-            ", plane1 pitch=" + ROCDEC_TOSTR(pitches[1]) + " offset=" + ROCDEC_TOSTR(offsets[1]) +
-            ", total=" + ROCDEC_TOSTR(total_size));
+    uint32_t chroma_vstride = static_cast<uint32_t>(std::ceil(layout.vstride * chroma_height_factor));
+
+    // Build plane layout.
+    layout.num_planes = 1 + num_chroma_planes;
+    layout.plane_pitch[0] = layout.pitch;
+    layout.plane_offset[0] = 0;
+    layout.plane_height[0] = layout.vstride;
+
+    uint32_t offset = layout.pitch * layout.vstride;
+    for (int i = 0; i < num_chroma_planes; i++) {
+        layout.plane_pitch[1 + i] = layout.pitch;
+        layout.plane_offset[1 + i] = offset;
+        layout.plane_height[1 + i] = chroma_vstride;
+        offset += layout.pitch * chroma_vstride;
+    }
+
+    layout.total_size = offset;
+    return layout;
+}
+
+void VaapiVideoDecoder::GetD3D12ResourceLayout(int pic_idx, uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes) {
+    SurfaceLayout layout = GetSurfaceLayout();
+    num_planes = layout.num_planes;
+    for (uint32_t i = 0; i < num_planes && i < 3; i++) {
+        pitches[i] = layout.plane_pitch[i];
+        offsets[i] = layout.plane_offset[i];
+    }
+    InfoLog(g_rocdec_logger, "Surface layout for pic_idx=" + ROCDEC_TOSTR(pic_idx) +
+            ": format=" + ROCDEC_TOSTR(decoder_create_info_.output_format) +
+            " planes=" + ROCDEC_TOSTR(num_planes) +
+            " pitch=" + ROCDEC_TOSTR(layout.pitch) +
+            " total=" + ROCDEC_TOSTR(layout.total_size));
 }
 
 rocDecStatus VaapiVideoDecoder::CopyToStagingBuffer(int pic_idx) {
@@ -490,27 +557,42 @@ rocDecStatus VaapiVideoDecoder::CopyToStagingBuffer(int pic_idx) {
         return ROCDEC_RUNTIME_ERROR;
     }
 
+    // Get D3D12's footprints for the source texture (provides Width/Height/Format per subresource).
     D3D12_RESOURCE_DESC tex_desc = d3d12_shared_resources_[pic_idx]->GetDesc();
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[2] = {};
-    UINT num_rows[2] = {};
-    UINT64 row_sizes[2] = {};
-    UINT64 total_size = 0;
-    d3d12_device_->GetCopyableFootprints(&tex_desc, 0, 2, 0, footprints, num_rows, row_sizes, &total_size);
+    SurfaceLayout layout = GetSurfaceLayout();
 
-    // Record copy commands: texture (tiled) → buffer (linear) for each plane.
+    // Build destination footprints using our surface layout (consistent with GetD3D12ResourceLayout).
+    // We override Offset and RowPitch to match the expected linear layout, but keep Width/Height/Format
+    // from D3D12's GetCopyableFootprints so the copy source is read correctly.
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT src_footprints[3] = {};
+    UINT src_num_rows[3] = {};
+    UINT64 src_row_sizes[3] = {};
+    UINT64 src_total = 0;
+    // NV12/P010: 2 subresources. Planar YUV: may need more, but D3D12 NV12 is always 2.
+    UINT num_subresources = (tex_desc.Format == DXGI_FORMAT_NV12 || tex_desc.Format == DXGI_FORMAT_P010 ||
+                             tex_desc.Format == DXGI_FORMAT_P016) ? 2 : 1;
+    d3d12_device_->GetCopyableFootprints(&tex_desc, 0, num_subresources, 0,
+                                         src_footprints, src_num_rows, src_row_sizes, &src_total);
+
+    // Record copy commands: texture (tiled) → buffer (linear) for each subresource.
     d3d12_cmd_allocator_->Reset();
     d3d12_cmd_list_->Reset(d3d12_cmd_allocator_, nullptr);
 
-    for (UINT plane = 0; plane < 2; plane++) {
+    for (UINT sub = 0; sub < num_subresources; sub++) {
         D3D12_TEXTURE_COPY_LOCATION src = {};
         src.pResource = d3d12_shared_resources_[pic_idx];
         src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        src.SubresourceIndex = plane;
+        src.SubresourceIndex = sub;
 
         D3D12_TEXTURE_COPY_LOCATION dst = {};
         dst.pResource = d3d12_staging_buffers_[pic_idx];
         dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-        dst.PlacedFootprint = footprints[plane];
+        // Use D3D12's footprint for format/width/height, but override offset and pitch
+        // to match our surface layout so the staging buffer is consistent with what
+        // GetD3D12ResourceLayout reports to the caller.
+        dst.PlacedFootprint = src_footprints[sub];
+        dst.PlacedFootprint.Offset = layout.plane_offset[sub];
+        dst.PlacedFootprint.Footprint.RowPitch = layout.plane_pitch[sub];
 
         d3d12_cmd_list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
     }
@@ -973,20 +1055,9 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
 
     // Create linear staging buffers for tiled→linear copy, and D3D12 copy infrastructure.
     if (!linear_layout) {
-        // Get the linear footprint size for the staging buffer.
-        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[2] = {};
-        UINT64 staging_size = 0;
-        d3d12_device_->GetCopyableFootprints(&res_desc, 0, 2, 0, footprints, nullptr, nullptr, &staging_size);
-
-        // Ensure staging buffer is at least as large as the aligned size the sample layer expects
-        // (align(width,256) * (align(height,16) + align(height,16)/2) for NV12).
-        uint32_t bpp = (decoder_create_info_.bit_depth_minus_8 > 0) ? 2 : 1;
-        uint32_t aligned_pitch = ((decoder_create_info_.width + 255) & ~255u) * bpp;
-        uint32_t aligned_vstride = (decoder_create_info_.height + 15) & ~15u;
-        UINT64 sample_expected_size = static_cast<UINT64>(aligned_pitch) * (aligned_vstride + aligned_vstride / 2);
-        if (staging_size < sample_expected_size) {
-            staging_size = sample_expected_size;
-        }
+        // Size the staging buffer from GetSurfaceLayout (matches sample layer expectations).
+        SurfaceLayout layout = GetSurfaceLayout();
+        UINT64 staging_size = layout.total_size;
 
         for (auto* buf : d3d12_staging_buffers_) { if (buf) buf->Release(); }
         d3d12_staging_buffers_.resize(num_surfaces, nullptr);

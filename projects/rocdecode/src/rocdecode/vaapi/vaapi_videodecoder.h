@@ -112,12 +112,26 @@ public:
     rocDecStatus SubmitDecode(RocdecPicParams *pPicParams);
     rocDecStatus GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status);
 #ifdef _WIN32
-    // Zero-copy path:
+    // Surface layout info (computed from decoder config, matches GetSurfaceStrideInternal).
+    struct SurfaceLayout {
+        uint32_t pitch;             // Row pitch in bytes (luma and chroma share this for NV12/P016)
+        uint32_t vstride;           // Aligned height
+        uint32_t num_planes;        // Total planes (luma + chroma): 1 for mono, 2 for NV12/P016, 3 for planar YUV
+        uint32_t plane_offset[3];   // Byte offset of each plane
+        uint32_t plane_pitch[3];    // Byte pitch of each plane
+        uint32_t plane_height[3];   // Row count of each plane
+        uint64_t total_size;        // Total buffer size in bytes
+    };
+    SurfaceLayout GetSurfaceLayout() const;
+
+    // Interop paths:
     rocDecStatus ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_handle);
+    uint64_t GetD3D12ResourceAllocationSize(int pic_idx);
     rocDecStatus CopyToStagingBuffer(int pic_idx);
     rocDecStatus ExportStagingBufferHandle(int pic_idx, HANDLE &nt_handle);
     uint64_t GetStagingBufferSize(int pic_idx);
     void GetD3D12ResourceLayout(int pic_idx, uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes);
+    bool HasStagingBuffers() const { return !d3d12_staging_buffers_.empty() && d3d12_staging_buffers_[0] != nullptr; }
     // EXPERIMENTAL CPU-staged path (functional workaround):
     rocDecStatus MapSurfaceToCPU(int pic_idx, uint8_t** cpu_ptr, uint32_t &width, uint32_t &height,
                                  uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes);
