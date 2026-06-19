@@ -1213,6 +1213,13 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   // invariant required by ncclP2pChannelToPart.
   comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
 
+  // Same grow reconciliation as ncclTopoPostset, for p2p channels (the grow path
+  // skips the tpP2pNChannels clamp, so arch-specific p2p caps can diverge).
+  if (comm->isGrow) {
+    NCCLCHECK(ncclTopoReconcileGrowChannels(comm, &comm->p2pnChannels));
+    comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
+  }
+
   // Init channels that weren't used so far
   for (int c=comm->nChannels; c<std::max(comm->nChannels, comm->p2pnChannels); c++) NCCLCHECK(initChannel(comm, c));
 

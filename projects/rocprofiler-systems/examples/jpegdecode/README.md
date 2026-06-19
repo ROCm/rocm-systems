@@ -52,6 +52,16 @@ cmake --build <build_dir> --target jpegdecode
 | `-d` | GPU device ID |
 | `-o` | Output directory for decoded images (optional) |
 
+### VA drivers (`LIBVA_DRIVERS_PATH`) — only if decode fails
+
+**rocJPEG** hardware decode may use **libva** under the hood. On a typical desktop, **libva** finds a driver under the distro’s default paths, so you often need **no** extra variables.
+
+Set **`LIBVA_DRIVERS_PATH`** when decode fails or no VA driver is found. For example, when building with TheRock, point libva at the vendored sysdeps directory:
+
+```bash
+export LIBVA_DRIVERS_PATH="${ROCM_PATH}/lib/rocm_sysdeps/lib"
+```
+
 ## Profiling with rocprofiler-systems
 
 ```bash
