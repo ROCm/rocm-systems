@@ -164,6 +164,7 @@ declare -A TEST_NUMBERS=(
   ["host_wait_until_any_status"]="147"
   ["host_wait_until_some_status"]="148"
   ["teamreducescatter"]="149"
+  ["broadcast_wave"]="150"
 )
 
 # Detect which runtime to use
@@ -751,6 +752,7 @@ TestColl() {
   ExecTest  "teamreducescatter" 2      1            64        32768
   ExecTest  "teamreducescatter" 4      1            64        32768
   ExecTest  "teamreducescatter" 8      1            64        32768
+  ExecTest  "broadcast_wave"   2       1            64        32768
 }
 
 TestOnStream() {

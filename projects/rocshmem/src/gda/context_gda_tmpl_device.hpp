@@ -1478,8 +1478,6 @@ __device__ inline int GDAContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_t
   return ROCSHMEM_ERROR;
 }
 
-
-
 // Rooted SUM Reduction operations
 // Rooted MAX Reduction operations
 // Rooted MIN Reduction operations

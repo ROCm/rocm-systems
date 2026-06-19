@@ -251,6 +251,13 @@ class Context {
                             int pe_start, int log_pe_stride, int pe_size,
                             long* p_sync);  // NOLINT(runtime/int)
 
+  template <typename T>
+  __device__ int broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+                                T *dest, const T *source, int nelement, int PE_root);
+
+  __device__ int broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+                               void *dest, const void *source, int nelement, int PE_root);
+
   __device__ void putmem_wg(void* dest, const void* source, size_t nelems,
                             int pe);
 
@@ -443,13 +450,6 @@ class Context {
                                     const size_t* dst_strides, const size_t* src_strides,
                                     const size_t* start_coord, const size_t* boundary,
                                     int ndim, size_t element_size, int root, uint64_t flags);
-
-  template <typename T>
-  __device__ int broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, \
-                                T *dest, const T *source, int nelement, int PE_root);
-
-  __device__ int broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, \
-                               void *dest, const void *source, int nelement, int PE_root);
 
   // Rooted SUM Reduction operations
   // Rooted MAX Reduction operations

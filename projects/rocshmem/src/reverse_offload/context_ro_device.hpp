@@ -368,7 +368,7 @@ class ROContext : public Context {
                                     const size_t* start_coord, const size_t* boundary,
                                     int ndim, size_t element_size, int root, uint64_t flags);
 
-  // Rooted SUM Reduction operations  
+  // Rooted SUM Reduction operations
   // Rooted MAX Reduction operations
   // Rooted MIN Reduction operations
  private:
