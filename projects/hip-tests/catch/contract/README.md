@@ -11,6 +11,7 @@ The first domains are:
 - `runtime`: runtime initialization, device visibility, version, and error-state contracts
 - `device`: portable current-device property contracts
 - `stream_event`: stream and event lifecycle, query, synchronization, and wait-event ordering contracts
+- `async_transfer`: async copy visibility and invalid-kind consistency contracts
 
 Run the layer with:
 

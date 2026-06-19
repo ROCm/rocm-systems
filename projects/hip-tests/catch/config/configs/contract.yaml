@@ -99,3 +99,15 @@ contract:
   Contract_Stream_WaitEvent_OrdersDependentWork:
     <<: *level_0
     tags: [stream, event]
+  Contract_AsyncTransfer_HostToDeviceToHost_RoundTripsAfterStreamSynchronize:
+    <<: *level_0
+    tags: [async_transfer]
+  Contract_AsyncTransfer_DeviceToDevice_CopiesAfterStreamSynchronize:
+    <<: *level_0
+    tags: [async_transfer]
+  Contract_AsyncTransfer_ZeroBytes_Succeeds:
+    <<: *level_0
+    tags: [async_transfer]
+  Contract_AsyncTransfer_InvalidDirection_ReturnsConsistentError:
+    <<: *level_0
+    tags: [async_transfer]
