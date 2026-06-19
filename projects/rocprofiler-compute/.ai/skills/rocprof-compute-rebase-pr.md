@@ -26,9 +26,9 @@ Cherry-pick the user's commits onto the latest `origin/rocprofiler-compute-devel
    - Run: `git fetch origin`
 
 4. **Identify the user's commits.**
-   - Run: `git log --oneline origin/rocprofiler-compute-develop..<branch-name> --no-merges`
+   - Run: `git log --reverse --oneline origin/rocprofiler-compute-develop..<branch-name> --no-merges`
    - Present the list and ask the user to confirm which commits are theirs. Do NOT assume — other contributors' commits may be mixed in.
-   - Collect the confirmed hashes in oldest-to-newest order for step 6.
+   - Collect the confirmed hashes in the same order shown (oldest-to-newest) for step 6.
 
 5. **Reset the branch to the upstream base.**
    - Run: `git reset --hard origin/rocprofiler-compute-develop`
