@@ -331,9 +331,8 @@ rocprofiler_add_integration_validate_test(
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-event-tracing
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/event_tracing
-        -o out --kernel-include-regex matrixTranspose -- $<TARGET_FILE:simple-transpose>
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/event_tracing -o
+            out --kernel-include-regex matrixTranspose -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
     LABELS "integration-tests"

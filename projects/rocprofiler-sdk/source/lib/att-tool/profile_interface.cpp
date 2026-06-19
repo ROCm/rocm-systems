@@ -71,7 +71,7 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     }
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT)
     {
-        auto* event = static_cast<const trace_event_t*>(trace_events);
+        const auto* event = static_cast<const trace_event_t*>(trace_events);
         for(size_t i = 0; i < trace_size; ++i)
         {
             tool.config.events.emplace_back(*event);
@@ -82,7 +82,7 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     }
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH)
     {
-        auto* dispatch = static_cast<const dispatch_t*>(trace_events);
+        const auto* dispatch = static_cast<const dispatch_t*>(trace_events);
         for(size_t i = 0; i < trace_size; ++i)
         {
             tool.config.dispatches.emplace_back(*dispatch);

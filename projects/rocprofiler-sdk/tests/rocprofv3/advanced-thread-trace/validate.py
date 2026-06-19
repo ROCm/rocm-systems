@@ -31,7 +31,6 @@ import glob
 import json
 from pathlib import Path
 
-
 OCCUPANCY_FIELDS = (
     "time",
     "cu",
@@ -81,9 +80,9 @@ DISPATCH_FIELDS = (
 
 
 def assert_json_int(value, field):
-    assert isinstance(value, int) and not isinstance(value, bool), (
-        f"{field} must be an integer"
-    )
+    assert isinstance(value, int) and not isinstance(
+        value, bool
+    ), f"{field} must be an integer"
 
 
 def find_occupancy_files(output_path):
@@ -92,16 +91,20 @@ def find_occupancy_files(output_path):
 
 
 def validate_occupancy_rows(occupancy_data, occupancy_file):
-    assert occupancy_data.get("version") == OCCUPANCY_VERSION, (
-        f"occupancy version mismatch in {occupancy_file}"
-    )
-    assert "occupancy_fields" in occupancy_data, (
-        f"occupancy_fields missing from {occupancy_file}"
-    )
+    assert (
+        occupancy_data.get("version") == OCCUPANCY_VERSION
+    ), f"occupancy version mismatch in {occupancy_file}"
+    assert (
+        "occupancy_fields" in occupancy_data
+    ), f"occupancy_fields missing from {occupancy_file}"
     fields = occupancy_data["occupancy_fields"]
-    assert isinstance(fields, list), f"occupancy_fields must be a list in {occupancy_file}"
+    assert isinstance(
+        fields, list
+    ), f"occupancy_fields must be a list in {occupancy_file}"
     for field in OCCUPANCY_FIELDS:
-        assert field in fields, f"{field} missing from occupancy_fields in {occupancy_file}"
+        assert (
+            field in fields
+        ), f"{field} missing from occupancy_fields in {occupancy_file}"
 
     found_rows = False
     for se, rows in occupancy_data.items():
@@ -112,9 +115,9 @@ def validate_occupancy_rows(occupancy_data, occupancy_file):
         for row in rows:
             found_rows = True
             assert isinstance(row, list), f"occupancy row for SE {se} must be a list"
-            assert len(row) >= len(fields), (
-                f"occupancy row for SE {se} has {len(row)} fields, expected {len(fields)}"
-            )
+            assert len(row) >= len(
+                fields
+            ), f"occupancy row for SE {se} has {len(row)} fields, expected {len(fields)}"
 
     assert found_rows, f"No occupancy rows found in {occupancy_file}"
 
@@ -137,7 +140,9 @@ def validate_trace_event(event, occupancy_file):
 
 def validate_dispatch_event(dispatch, dispatches, occupancy_file):
     for field in DISPATCH_FIELDS:
-        assert field in dispatch, f"{field} missing from dispatch record in {occupancy_file}"
+        assert (
+            field in dispatch
+        ), f"{field} missing from dispatch record in {occupancy_file}"
 
     assert dispatch["kind"] == "dispatch"
     for field in (
@@ -250,9 +255,9 @@ def test_perfcounter_target_cu(output_path, request):
 
 def test_occupancy_event_tracing_fields(att_occupancy_event_trace_out_dir_path):
     occupancy_files = find_occupancy_files(att_occupancy_event_trace_out_dir_path)
-    assert occupancy_files, (
-        f"No occupancy.json files found under {att_occupancy_event_trace_out_dir_path}"
-    )
+    assert (
+        occupancy_files
+    ), f"No occupancy.json files found under {att_occupancy_event_trace_out_dir_path}"
 
     found_event = False
     found_dispatch = False
@@ -263,9 +268,9 @@ def test_occupancy_event_tracing_fields(att_occupancy_event_trace_out_dir_path):
         validate_occupancy_rows(occupancy_data, occupancy_file)
 
         dispatches = occupancy_data.get("dispatches", {})
-        assert isinstance(dispatches, dict), (
-            f"dispatches must be an object in {occupancy_file}"
-        )
+        assert isinstance(
+            dispatches, dict
+        ), f"dispatches must be an object in {occupancy_file}"
         assert dispatches, f"dispatches is empty in {occupancy_file}"
 
         events = occupancy_data.get("events", {})
