@@ -52,8 +52,8 @@ python3 -m pip install -r requirements-development.txt
 
 ## Testing
 
-Populate the <usename> variable in `docker/docker-compose.therock.tarball.yml`.
-Populate the <rocm_build_image> variable in `docker/Dockerfile.therock.tarball` based on latest ROCm CI build information.
+Populate the <username> variable in `docker/docker-compose.therock.tarball.yml`.
+Populate the <tarball_name> variable in `docker/Dockerfile.therock.tarball` (see the comment there for the naming convention and nightly index).
 
 To quickly get the environment (bash shell) for building and testing, run the following commands:
 * `cd docker`
