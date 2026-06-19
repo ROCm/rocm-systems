@@ -70,6 +70,7 @@ jobs:
           yum -y install cmake3
           yum -y install which
           yum -y install glibc-langpack-en
+          yum -y install elfutils-devel pkgconf-pkg-config
 
       - name: Install ROCm Packages
         timeout-minutes: 30

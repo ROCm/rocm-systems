@@ -36,6 +36,19 @@ from amdsmi_helpers import AMDSMIHelpers
 import amdsmi_cli_exceptions
 
 
+# Valid value ranges for CPU `set` arguments, defined by the HSMP protocol and
+# not queryable from the library. Update these if the supported range changes.
+CPU_XGMI_LINK_WIDTH_RANGE = range(0, 2)
+CPU_GMI3_LINK_WIDTH_RANGE = range(0, 3)
+CPU_LCLK_DPM_LEVEL_RANGE = range(0, 4)
+CPU_DISABLE_APB_RANGE = range(0, 4)
+
+
+def _cpu_set_range_label(value_range):
+    # Render a range like range(0, 2) as "0-1" for help text.
+    return f"{value_range.start}-{value_range[-1]}"
+
+
 # Custom Help Formatter for increasing the action max length
 class AMDSMIParserHelpFormatter(argparse.HelpFormatter):
     def __init__(self, prog):
@@ -634,33 +647,6 @@ class AMDSMIParser(argparse.ArgumentParser):
                 getattr(namespace, self.dest).append(values)
 
         return CPUSvi3VrControllerTempArgs
-
-    def _check_folder_path(self):
-        """Argument action validator:
-        Returns a path to folder from the folder path provided.
-        If the path doesn't exist create it.
-        """
-
-        class CheckOutputFilePath(argparse.Action):
-            outputformat = self.helpers.get_output_format()
-
-            # Checks the values
-            def __call__(self, parser, args, values, option_string=None):
-                path = Path(values)
-                try:
-                    path.mkdir(parents=True, exist_ok=True)
-                except OSError as e:
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
-                        path, CheckOutputFilePath.outputformat, f"Unable to make '{path}' a folder."
-                    )
-                if not path.exists():
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
-                        path, CheckOutputFilePath.outputformat
-                    )
-                elif path.is_dir():
-                    setattr(args, self.dest, path)
-
-        return CheckOutputFilePath
 
     def _check_output_file_path(self):
         """Argument action validator:
@@ -2435,18 +2421,16 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_cpu_pwr_limit_help = (
             "Set power limit for the given socket. Input parameter is power limit value."
         )
-        set_cpu_xgmi_link_width_help = "Set min and max linkwidth. Input parameters are min and max link width values (MAX >= MIN)"
-        set_cpu_lclk_dpm_level_help = "Sets the min and max dpm level on a given NBIO.\
-        \n Input parameters are die_index, min dpm, max dpm (MAX >= MIN)."
+        set_cpu_xgmi_link_width_help = f"Set min and max linkwidth. Input parameters are min and max link width values (MAX >= MIN, values {_cpu_set_range_label(CPU_XGMI_LINK_WIDTH_RANGE)})"
+        set_cpu_lclk_dpm_level_help = f"Sets the min and max dpm level on a given NBIO.\
+        \n Input parameters are die_index, min dpm, max dpm (MAX >= MIN, values {_cpu_set_range_label(CPU_LCLK_DPM_LEVEL_RANGE)})."
         set_cpu_pwr_eff_mode_help = "Sets the power efficiency mode policy. Input parameters,\
         \n MODE(0=HighPerformance, 1=PowerEfficiency, 2=IOPerformance, 3=BalancedMemory, 4=BalancedCore, 5=BalancedCoreMemory),\n For Family 1Ah Models 50h-57h onwards, UTIL(%%)(0-100) and PPT_limit (in mW) required if MODE= 4 or 5"
-        set_cpu_gmi3_link_width_help = "Sets min and max gmi3 link width range (MAX >= MIN)"
+        set_cpu_gmi3_link_width_help = f"Sets min and max gmi3 link width range (MAX >= MIN, values {_cpu_set_range_label(CPU_GMI3_LINK_WIDTH_RANGE)})"
         set_cpu_pcie_link_rate_help = "Sets pcie link rate"
         set_cpu_df_pstate_range_help = "Sets min and max df-pstates (MAX <= MIN)"
         set_cpu_enable_apb_help = "Enables the DF p-state performance boost algorithm"
-        set_cpu_disable_apb_help = (
-            "Disables the DF p-state performance boost algorithm. Input parameter is DFPstate (0-3)"
-        )
+        set_cpu_disable_apb_help = f"Disables the DF p-state performance boost algorithm. Input parameter is DFPstate ({_cpu_set_range_label(CPU_DISABLE_APB_RANGE)})"
         set_soc_boost_limit_help = (
             "Sets the boost limit for the given socket. Input parameter is socket BOOST_LIMIT value"
         )
@@ -2680,6 +2664,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     type=self._not_negative_int,
                     nargs=2,
+                    choices=CPU_XGMI_LINK_WIDTH_RANGE,
                     metavar=("MIN_WIDTH", "MAX_WIDTH"),
                     help=set_cpu_xgmi_link_width_help,
                 )
@@ -2689,6 +2674,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     type=self._not_negative_int,
                     nargs=3,
+                    choices=CPU_LCLK_DPM_LEVEL_RANGE,
                     metavar=("NBIOID", "MIN_DPM", "MAX_DPM"),
                     help=set_cpu_lclk_dpm_level_help,
                 )
@@ -2707,6 +2693,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     type=self._not_negative_int,
                     nargs=2,
+                    choices=CPU_GMI3_LINK_WIDTH_RANGE,
                     metavar=("MIN_LW", "MAX_LW"),
                     help=set_cpu_gmi3_link_width_help,
                 )
@@ -2740,6 +2727,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     type=self._not_negative_int,
                     nargs=1,
+                    choices=CPU_DISABLE_APB_RANGE,
                     metavar=("DF_PSTATE"),
                     help=set_cpu_disable_apb_help,
                 )
@@ -3176,12 +3164,14 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for RAS arguments
         cper_help = "Trigger current CPER data retrieval"
-        afid_help = "Generate an AFID (AMD Field ID) given a CPER record file"
-        decode_help = "Decode out-of-band CPER files captured by or collected from other systems"
+        afid_help = "Generate an AFID (AMD Field ID) given a CPER record file or folder"
         severity_choices = ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"]
         severity_choices_str = ", ".join(severity_choices)
         severity_help = f"Set the SEVERITY filters from the following:\n    {severity_choices_str}"
-        folder_help = "Folder to dump current CPER report files"
+        folder_help = (
+            "With --cper: folder to dump current CPER report files (created if missing)."
+            "\n    With --afid: existing folder of CPER records to decode."
+        )
         file_limit_help = "Maximum number of current CPER files in target folder\n    Older files beyond limit will be deleted"
         cper_file_help = "Full path of a retrieved CPER record file to generate the AFID"
         follow_help = "Continuously monitor for new CPER entries"
@@ -3207,9 +3197,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             choices=severity_choices,
             metavar="SEVERITY",
         )
-        cper_group.add_argument(
-            "--folder", type=str, action=self._check_folder_path(), help=folder_help
-        )
+        cper_group.add_argument("--folder", type=Path, help=folder_help)
         cper_group.add_argument(
             "--file-limit", type=self._positive_int, action="store", help=file_limit_help
         )
@@ -3223,7 +3211,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             metavar="CPER_FILE",
             help=cper_file_help,
         )
-        afid_group.add_argument("--decode", action="store_true", help=decode_help)
 
         # Add common modifiers and device selection arguments.
         self._add_device_arguments(ras_parser, required=False)
@@ -3236,14 +3223,14 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         node_help = "Gets power and baseboard information for the node"
-        node_subcommand_help = f"{self.description}\n\nReturns information for node 0 on the system.\
+        node_subcommand_help = f"{self.description}\n\nReturns information for node 0 (OAM_ID 0) on the system.\
                                 \nIf no node argument is provided, all node information will be displayed."
         node_optionals_title = "Node arguments"
 
         # Help text for Node arguments
         power_management_help = "Displays power management information"
         base_board_temps_help = "Displays baseboard temperatures"
-        gtt_help = "Display GTT (shared GPU memory) size"
+        gtt_help = "Displays GTT (shared GPU memory) size"
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help

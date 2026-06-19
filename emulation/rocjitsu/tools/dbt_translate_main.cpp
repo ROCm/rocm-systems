@@ -229,14 +229,6 @@ struct ReportTotals {
   return totals;
 }
 
-[[nodiscard]] size_t text_section_size(const CodeObjectReport &report) {
-  for (const auto &section : report.sections) {
-    if (section.name == ".text")
-      return section.size_bytes;
-  }
-  return 0;
-}
-
 [[nodiscard]] std::string hex_offset(uint64_t value) {
   std::ostringstream os;
   os << "0x" << std::hex << std::setw(4) << std::setfill('0') << value;
@@ -369,10 +361,9 @@ count_semantic_lowerings(const std::vector<InstructionTranslationReport> &transl
   return count;
 }
 
-[[nodiscard]] std::string target_location(const InstructionTranslationReport &translation,
-                                          size_t text_size) {
-  if (translation.emitted_in_cave && translation.target_offset >= text_size)
-    return ".rj_translations+" + hex_offset(translation.target_offset - text_size);
+[[nodiscard]] std::string target_location(const InstructionTranslationReport &translation) {
+  if (translation.emitted_in_cave)
+    return ".text(local-cave)+" + hex_offset(translation.target_offset);
   return ".text+" + hex_offset(translation.target_offset);
 }
 
@@ -424,14 +415,13 @@ void print_instruction_translation_report(std::ostream &os, const TranslateOutpu
      << " illegal=" << count_action(translations, Action::Illegal)
      << " semantic=" << count_semantic_lowerings(translations) << "\n";
 
-  const size_t text_size = text_section_size(output.source_report);
   for (const auto &translation : translations) {
     if (!should_show_translation(translation))
       continue;
 
     os << "  " << hex_offset(translation.source_offset) << " "
        << translation_action_text(translation) << " .text+" << hex_offset(translation.source_offset)
-       << " -> " << target_location(translation, text_size) << "\n";
+       << " -> " << target_location(translation) << "\n";
     if (!translation.source_words.empty())
       os << "    source_words: " << words_text(translation.source_words) << "\n";
     os << "    source: " << translation.source_instruction << "\n";

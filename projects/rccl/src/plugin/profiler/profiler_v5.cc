@@ -8,7 +8,7 @@
 #include "comm.h"
 #include "nccl_profiler.h"
 #include "checks.h"
-#include <dlfcn.h>
+#include "os.h"
 
 static ncclProfiler_v5_t* ncclProfiler_v5;
 static ncclProfiler_t ncclProfiler;
@@ -86,7 +86,7 @@ static ncclResult_t ncclProfiler_startEvent(void* ctx, void** eHandle, ncclProfi
     eDescr_v5.netPlugin.id = eDescr->netPlugin.id;
     eDescr_v5.netPlugin.data = eDescr->netPlugin.data;
   } break;
-    // v6 CE events - not supported in v5, discard them
+  /* v6 / RCCL-only descriptor arms: not representable in narrow v5 */
   case ncclProfileCeColl:
   case ncclProfileCeSync:
   case ncclProfileCeBatch:
@@ -100,7 +100,6 @@ static ncclResult_t ncclProfiler_startEvent(void* ctx, void** eHandle, ncclProfi
 }
 
 static ncclResult_t ncclProfiler_recordEventState(void* eHandle, ncclProfilerEventState_t eState, ncclProfilerEventStateArgs_t* eStateArgs) {
-  // Discard v6-specific CE event states
   switch(eState) {
   case ncclProfilerCeCollStart:
   case ncclProfilerCeCollComplete:
@@ -108,12 +107,13 @@ static ncclResult_t ncclProfiler_recordEventState(void* eHandle, ncclProfilerEve
   case ncclProfilerCeSyncComplete:
   case ncclProfilerCeBatchStart:
   case ncclProfilerCeBatchComplete:
+  case ncclProfilerProxyDiagUpdate:
     return ncclSuccess;
   default:
     break;
   }
+  if (!eStateArgs) return ncclSuccess;
 
-  // v5 uses the same state args structure as v6
   ncclProfilerEventStateArgs_v5_t eStateArgs_v5;
   switch(eState) {
   case ncclProfilerProxyStepSendGPUWait:
@@ -152,9 +152,8 @@ static ncclResult_t ncclProfiler_recordEventState(void* eHandle, ncclProfilerEve
 static ncclResult_t ncclProfiler_init(void** ctx, uint64_t commId, int* eActivationMask, const char* commName, int nNodes, int nRanks, int rank, ncclDebugLogger_t logfn) {
   NCCLCHECK(ncclProfiler_v5->init(ctx, commId, eActivationMask, commName, nNodes, nRanks, rank, logfn));
 
-  // Clear v6 CE event bits from the activation mask since v5 doesn't support them
   if (eActivationMask) {
-    *eActivationMask &= ~(ncclProfileCeColl | ncclProfileCeSync | ncclProfileCeBatch);
+    *eActivationMask &= ~(ncclProfileCeColl | ncclProfileCeSync | ncclProfileCeBatch | ncclProfileProxyDiag);
   }
 
   ncclProfiler.startEvent = ncclProfiler_startEvent;
@@ -165,7 +164,7 @@ static ncclResult_t ncclProfiler_init(void** ctx, uint64_t commId, int* eActivat
 }
 
 ncclProfiler_t* getNcclProfiler_v5(void* lib) {
-  ncclProfiler_v5 = (ncclProfiler_v5_t*)dlsym(lib, "ncclProfiler_v5");
+  ncclProfiler_v5 = (ncclProfiler_v5_t*)ncclOsDlsym(lib, "ncclProfiler_v5");
   if (ncclProfiler_v5) {
     ncclProfiler.name = ncclProfiler_v5->name;
     ncclProfiler.init = ncclProfiler_init;

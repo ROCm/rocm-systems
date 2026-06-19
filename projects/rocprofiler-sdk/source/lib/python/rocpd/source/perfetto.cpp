@@ -100,7 +100,7 @@ PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3*
         buffer_config->set_fill_policy(
             ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER);
     else
-        ROCP_FATAL << "Unsupport perfetto buffer fill policy: '"
+        ROCP_FATAL << "Unsupported perfetto buffer fill policy: '"
                    << config.perfetto_buffer_fill_policy << "'. Supported: discard, ring_buffer";
 
     auto* ds_cfg = cfg.add_data_sources()->mutable_config();
@@ -114,7 +114,7 @@ PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3*
     else if(config.perfetto_backend == "system")
         args.backends |= ::perfetto::kSystemBackend;
     else
-        ROCP_FATAL << "Unsupport perfetto backend: '" << config.perfetto_backend
+        ROCP_FATAL << "Unsupported perfetto backend: '" << config.perfetto_backend
                    << "'. Supported: inprocess, system";
 
     ::perfetto::Tracing::Initialize(args);
@@ -732,6 +732,24 @@ write_perfetto(
 
                         current_it->end = new_current_end;
                         next_it->start  = new_next_start;
+
+                        // The modified start may have pushed next_sample_it's effective
+                        // midpoint rightward. Update the stored sort key and stably
+                        // reinsert the element so subsequent iterations see the correct
+                        // temporal order, including cases where it must move behind
+                        // multiple later slices.
+                        next_sample_it->timestamp = (new_next_start + next_it->end) / 2;
+                        auto insert_it            = std::upper_bound(
+                            std::next(next_sample_it),
+                            group_data.end(),
+                            next_sample_it->timestamp,
+                            [](rocprofiler_timestamp_t lhs, const kernel_dispatch_data& rhs) {
+                                return lhs < rhs.timestamp;
+                            });
+                        if(insert_it != std::next(next_sample_it))
+                        {
+                            std::rotate(next_sample_it, std::next(next_sample_it), insert_it);
+                        }
                     }
                 }
             }
@@ -949,7 +967,7 @@ write_perfetto(
                 }
                 else if(itr.type == "FREE")
                 {
-                    // Store free memory operations in seperate vector to pair with agent
+                    // Store free memory operations in separate vector to pair with agent
                     // and allocation size in following loop
                     if(itr.level == "REAL")
                     {

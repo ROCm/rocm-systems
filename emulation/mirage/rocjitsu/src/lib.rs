@@ -2,18 +2,12 @@
 //!
 //! This crate exposes helpers the mirage binary needs at runtime:
 //!
-//! * [`SCHEMA_FBS_BYTES`] — `simulation_config.fbs`, the flatbuffer
-//!   schema the kmd config is validated against. This is the one
-//!   rocjitsu artifact mirage embeds directly.
-//!
 //! mirage does **not** build or embed the rocjitsu *libraries*
 //! (`librocjitsu_kmd.so`, `librocjitsu.so`); they are discovered at
 //! runtime from the installed system (see [`kmd_preload`]).
 //!
 //! Runtime entry points:
 //!
-//! * [`ensure_assets`] extracts the embedded schema into
-//!   `<MIRAGE_CACHE>/emulator/rocjitsu/`.
 //! * [`kmd_config`] synthesises a runtime `SimulationConfig` JSON
 //!   from an [`mirage_core::emulator::EmulatorDef`] by resolving its
 //!   topology + agent references and wrapping them with rocjitsu's
@@ -35,8 +29,9 @@ use mirage_core::session::{SessionHealth, SessionId};
 use mirage_core::topology::TopologyDef;
 
 /// rocjitsu [`Emulator`] implementation. Bundles the rocjitsu-specific
-/// injection (the KMD `LD_PRELOAD` plus the `RJ_CONFIG`/`RJ_SCHEMA` env
-/// vars) and profile validation so callers dispatch generically on
+/// injection (the KMD `LD_PRELOAD` plus the `ROCJITSU_RUNTIME_DIR` env
+/// var and the `config_path` discovery file it points at) and profile
+/// validation so callers dispatch generically on
 /// [`mirage_core::emulator::EmulatorKind`].
 pub struct Rocjitsu {
     profile: ProfileDef,
@@ -58,15 +53,10 @@ impl Emulator for Rocjitsu {
     fn shutdown(self) {}
 
     fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
-        // Make sure the runtime assets (the flatbuffer schema in
-        // particular) are present so this mirrors exactly what session
-        // start will do.
-        let _ = ensure_assets(false);
         // Building the kmd config resolves the topology + agent
-        // references and checks the schema is available; any error here
-        // is precisely what would otherwise surface at run time. No
-        // session exists at validation time, so no per-session config is
-        // written.
+        // references; any error here is precisely what would otherwise
+        // surface at run time. No session exists at validation time, so
+        // no per-session config is written.
         kmd_config(&def.emulator, None)
             .map(|_| ())
             .map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
@@ -101,11 +91,7 @@ impl Emulator for Rocjitsu {
 
     fn injection_def(&self, session: &SessionId) -> Result<InjectionDef> {
         let def = &self.profile.emulator;
-        // Extract embedded assets if they aren't on disk yet; the
-        // authoritative "assets missing" error comes from `kmd_config`
-        // below, so this is best-effort.
-        let _ = ensure_assets(false);
-        let (config, schema) = kmd_config(def, Some(session))?;
+        let config = kmd_config(def, Some(session))?;
         // Refuse to run unemulated: if the KMD interposer can't be
         // located there is nothing to emulate the workload, so fail
         // loudly rather than silently running on real hardware.
@@ -115,22 +101,43 @@ impl Emulator for Rocjitsu {
                  cannot emulate workload"
             ))
         })?;
+
+        // The KMD interposer discovers its `SimulationConfig` by reading a
+        // `config_path` file from its per-user runtime directory (resolved
+        // as `$ROCJITSU_RUNTIME_DIR`, else `$XDG_RUNTIME_DIR/rocjitsu`, else
+        // `/tmp/rocjitsu-<uid>`); the file's contents are the path to the
+        // config JSON it then loads via `rj_vm_create`. It does *not* read
+        // any configuration environment variable. We therefore point it at
+        // a per-session runtime directory and write that discovery file
+        // ourselves. Without it the interposer finds no config, never
+        // stands up the emulated device, and the workload fails with
+        // "Unable to open /dev/kfd ... No such device".
+        //
+        // `config` is already resolved for whichever filesystem view this
+        // injection is computed in — host paths on the orchestrator, and
+        // container paths (`/mnt/mirage/...`) when the per-node host
+        // re-resolves this injection inside its container — so both the
+        // runtime directory and the path written into `config_path` are
+        // correct in either context.
+        let runtime_dir = write_config_discovery(&config)?;
+
         let mut env = std::collections::BTreeMap::new();
-        env.insert("RJ_CONFIG".to_string(), config.display().to_string());
-        env.insert("RJ_SCHEMA".to_string(), schema.display().to_string());
+        env.insert(
+            "ROCJITSU_RUNTIME_DIR".to_string(),
+            runtime_dir.display().to_string(),
+        );
 
         // For a containerised session the workload runs inside a node
         // container that does *not* share the host filesystem, so the
-        // rocjitsu runtime assets (the KMD interposer, the flatbuffer
-        // schema, and the host-side library it may dlopen) must be
-        // bind-mounted in. The per-node host *inside* the container
-        // re-resolves this injection against its own environment, where
-        // `MIRAGE_CACHE=/mnt/mirage/cache`, so it looks for the assets
-        // under `<cache>/emulator/rocjitsu/` (see [`asset_dir`]). We mount
-        // each host asset to exactly that location so the in-container
-        // resolution finds them with no extra configuration. Without
-        // these mounts the in-container host fails to locate the KMD
-        // library and the exec can never start.
+        // rocjitsu runtime assets (the KMD interposer and the host-side
+        // library it may dlopen) must be bind-mounted in. The per-node
+        // host *inside* the container re-resolves this injection against
+        // its own environment, where `MIRAGE_CACHE=/mnt/mirage/cache`, so
+        // it looks for the assets under `<cache>/emulator/rocjitsu/` (see
+        // [`asset_dir`]). We mount each host asset to exactly that
+        // location so the in-container resolution finds them with no extra
+        // configuration. Without these mounts the in-container host fails
+        // to locate the KMD library and the exec can never start.
         let mounts = if self.profile.containerize.is_some() {
             // Mirrors `mirage_host`'s `CONTAINER_CACHE_DIR` +
             // `<emulator>/<ASSET_SUBDIR>`; kept as a literal here to avoid
@@ -151,12 +158,6 @@ impl Emulator for Rocjitsu {
                     read_only: true,
                 });
             }
-            // The flatbuffer schema (`RJ_SCHEMA`).
-            mounts.push(FileMount {
-                host_path: schema.display().to_string(),
-                container_path: format!("{container_asset_dir}/{SCHEMA_FBS_NAME}"),
-                read_only: true,
-            });
             mounts
         } else {
             Default::default()
@@ -168,8 +169,7 @@ impl Emulator for Rocjitsu {
             files: Default::default(),
             env,
             mounts,
-            devices: Default::default(),
-            groups: Default::default(),
+            host_gpus: false,
         })
     }
 }
@@ -191,15 +191,8 @@ pub fn describe() -> EmulatorDescription {
         support: SupportStatus::supported("software emulator; no special hardware required"),
     }
 }
-
-/// `simulation_config.fbs` schema bytes, embedded from the rocjitsu
-/// source tree at build time.
-pub static SCHEMA_FBS_BYTES: &[u8] =
-    include_bytes!("../../../rocjitsu/schemas/simulation_config.fbs");
-
 /// Subdirectory under `<MIRAGE_CACHE>/emulator/` where the extracted
-/// runtime assets (`librocjitsu_kmd.so`, `librocjitsu.so`,
-/// `simulation_config.fbs`) live.
+/// runtime assets (`librocjitsu_kmd.so`, `librocjitsu.so`) live.
 pub const ASSET_SUBDIR: &str = "rocjitsu";
 
 /// Name used for the extracted KMD library on disk.
@@ -207,9 +200,6 @@ pub const KMD_LIB_NAME: &str = "librocjitsu_kmd.so";
 
 /// Name used for the extracted host-side library on disk.
 pub const LIB_NAME: &str = "librocjitsu.so";
-
-/// Name used for the extracted schema on disk.
-pub const SCHEMA_FBS_NAME: &str = "simulation_config.fbs";
 
 /// Name of the synthesised rocjitsu `SimulationConfig` written into the
 /// per-session directory (`<session>/rj_config.json`).
@@ -233,44 +223,42 @@ pub fn lib_path() -> PathBuf {
     asset_dir().join(LIB_NAME)
 }
 
-/// On-disk path of the extracted flatbuffer schema.
-pub fn schema_fbs_path() -> PathBuf {
-    asset_dir().join(SCHEMA_FBS_NAME)
-}
-
 /// On-disk path of the synthesised `SimulationConfig` for `session`
 /// (`<MIRAGE_RUNTIME>/session/<id>/rj_config.json`).
 pub fn rj_config_path(session: &SessionId) -> PathBuf {
     mirage_core::paths::session_dir(session).join(RJ_CONFIG_NAME)
 }
 
-/// Write the embedded rocjitsu schema into
-/// `<MIRAGE_CACHE>/emulator/rocjitsu/`.
+/// Point the KMD interposer at `config` by writing the `config_path`
+/// discovery file it reads from `$ROCJITSU_RUNTIME_DIR`, and return that
+/// runtime directory (to export as `ROCJITSU_RUNTIME_DIR`).
 ///
-/// If `force` is true an existing file is overwritten; otherwise it is
-/// only written when missing.
-///
-/// Returns the list of `(name, written)` entries.
-pub fn ensure_assets(force: bool) -> Result<Vec<(String, bool)>> {
-    let path = schema_fbs_path();
-    let written = if path.exists() && !force {
-        false
-    } else {
-        mirage_core::state::write_bytes(&path, SCHEMA_FBS_BYTES)?;
-        true
-    };
-    Ok(vec![(SCHEMA_FBS_NAME.to_string(), written)])
+/// The interposer resolves its `SimulationConfig` by reading a
+/// `config_path` file from its per-user runtime directory; the file's
+/// contents are the path to the config JSON. This derives that runtime
+/// directory from `config`'s location, writes the discovery file, and
+/// returns the directory.
+pub fn write_config_discovery(config: &std::path::Path) -> Result<PathBuf> {
+    let runtime_dir = config
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join(ASSET_SUBDIR);
+    let config_path_file = runtime_dir.join("config_path");
+    mirage_core::state::write_bytes(
+        &config_path_file,
+        format!("{}\n", config.display()).as_bytes(),
+    )?;
+    Ok(runtime_dir)
 }
 
 /// Returns the path mirage should pass as `LD_PRELOAD` to an
 /// rocjitsu-emulated workload.
 ///
 /// Prefers the extracted on-disk copy under
-/// `<MIRAGE_CACHE>/emulator/rocjitsu/` (after [`ensure_assets`] has
-/// run); falls back to the shared [`mirage_core::discovery`] search
-/// (ROCM_HOME, LD_LIBRARY_PATH, next-to-binary, `./emulator/rocjitsu/`,
-/// standard system/ROCm dirs, …) for workspaces that rely on a
-/// separately-installed rocjitsu.
+/// `<MIRAGE_CACHE>/emulator/rocjitsu/`; falls back to the shared
+/// [`mirage_core::discovery`] search (ROCM_HOME, LD_LIBRARY_PATH,
+/// next-to-binary, `./emulator/rocjitsu/`, standard system/ROCm dirs,
+/// …) for workspaces that rely on a separately-installed rocjitsu.
 pub fn kmd_preload() -> Option<PathBuf> {
     let extracted = kmd_lib_path();
     if extracted.exists() {
@@ -283,13 +271,13 @@ pub fn kmd_preload() -> Option<PathBuf> {
 fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
     mirage_core::discovery::LibSearch {
         file_env: &["ROCJITSU_KMD_LIB"],
-        dir_env: &["ROCJITSU_LIB_DIR", "ROCJITSU_ROOT"],
+        dir_env: &["ROCJITSU_ROOT"],
         home_env: &[],
         lib_name: KMD_LIB_NAME,
         // rocjitsu's in-tree KMD build output, relative to the mirage
         // binary, so a monorepo `cargo build` finds a fresh build
         // without extra configuration.
-        binary_relative_dirs: &["../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd"],
+        binary_relative_dirs: &["../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/linux"],
         // rocjitsu may also be installed separately; keep the generic
         // ROCm/system fallbacks.
         system_fallbacks: true,
@@ -297,9 +285,9 @@ fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
 }
 
 /// Synthesise a rocjitsu `SimulationConfig` JSON file from the given
-/// [`EmulatorDef`] and return `(config_path, schema_path)` ready to
-/// be passed to the LD_PRELOAD'd workload as `RJ_CONFIG` /
-/// `RJ_SCHEMA`.
+/// [`EmulatorDef`] and return its `config_path`. That path is what gets
+/// recorded in the rocjitsu `config_path` discovery file so the
+/// LD_PRELOAD'd interposer loads it.
 ///
 /// The agent JSON under `<MIRAGE_CONFIG>/agent/` only stores the
 /// `vm` + `topology` subset that mirage owns. rocjitsu's KMD shim
@@ -323,7 +311,7 @@ fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
 pub fn kmd_config(
     def: &EmulatorDef,
     session: Option<&SessionId>,
-) -> Result<(PathBuf, PathBuf)> {
+) -> Result<PathBuf> {
     let topology: TopologyDef = match &def.topology {
         MaybeRef::Owned(t) => t.clone(),
         MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
@@ -369,14 +357,7 @@ pub fn kmd_config(
             cfg
         }
     };
-    let schema = schema_fbs_path();
-    if !schema.exists() {
-        return Err(MirageError::Other(format!(
-            "rocjitsu schema not extracted: {} missing (run `mirage state builtins`)",
-            schema.display()
-        )));
-    }
-    Ok((cfg, schema))
+    Ok(cfg)
 }
 
 /// Best-effort discovery of the rocjitsu source/install root. Used
@@ -402,15 +383,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ensure_assets_writes_or_skips() {
+    fn kmd_config_requires_resolvable_topology() {
         let _g = mirage_core::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(tmp.path());
-        let report = ensure_assets(false).unwrap();
-        assert_eq!(report.len(), 1);
-        let (name, written) = &report[0];
-        assert_eq!(name, SCHEMA_FBS_NAME);
-        assert!(written, "schema should have been written on first run");
-        assert!(schema_fbs_path().exists());
+        let def = EmulatorDef {
+            emulator: mirage_core::emulator::EmulatorKind::Rocjitsu,
+            plugins: Default::default(),
+            exec_mode: ExecMode::Functional,
+            options: Default::default(),
+            topology: MaybeRef::Ref("does-not-exist".to_string()),
+        };
+        assert!(kmd_config(&def, None).is_err());
     }
 }

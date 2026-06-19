@@ -1,8 +1,12 @@
 set(TEST_SRC
   hipGreenCtxCreate.cc
   hipExecutionCtxStreamCreate.cc
+  hipExecutionCtxStreamDetached.cc
   hipExecutionCtxRecordEvent.cc
   hipExecutionCtxResourceSplit.cc
+  hipExecutionCtxSmAlignment.cc
+  hipDeviceGetExecutionCtx.cc
+  hipStreamGetDevResource.cc
 )
 
 hip_add_exe_to_target(
