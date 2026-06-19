@@ -88,15 +88,12 @@ struct mock_gpu_metrics_t
 
 // NOLINTEND(readability-identifier-naming)
 
+// ── Mock SDMA / NIC raw types ───────────────────────────────────────────────
 // NOLINTBEGIN(readability-identifier-naming)
 struct mock_proc_info_t
 {
     std::uint64_t sdma_usage = 0;
 };
-// NOLINTEND(readability-identifier-naming)
-
-// ── Mock NIC raw types ──────────────────────────────────────────────────────
-// NOLINTBEGIN(readability-identifier-naming)
 
 struct mock_nic_asic_info_t
 {
