@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 include(AISAddExecutable)
-include(AISUseGTest)
 find_package(Threads REQUIRED)
 
 set(SHARED_SOURCE_FILES
@@ -31,7 +30,6 @@ set(TEST_SOURCE_FILES
     mountinfo.cpp
     stats.cpp
     stream.cpp
-    thread-pool.cpp
 )
 
 set(TEST_SYSINCLS
@@ -52,6 +50,8 @@ ais_add_test_executable(
 # Add gtest
 target_link_libraries(internal_tests PRIVATE GTest::gmock)
 target_link_libraries(internal_tests PRIVATE GTest::gtest)
+target_compile_options(internal_tests PRIVATE -pthread)
+target_link_options(internal_tests PRIVATE -pthread)
 
 ais_gtest_discover_tests(
     internal_tests

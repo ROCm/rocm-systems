@@ -93,22 +93,6 @@ class GpuAgentInt : public core::Agent {
 
    virtual void ReleaseResources() = 0;
 
-   // @brief Invoke the user provided callback for each region accessible by
-   // this agent.
-   //
-   // @param [in] include_peer If true, the callback will be also invoked on
-   // each peer memory region accessible by this agent. If false, only invoke
-   // the callback on memory region owned by this agent.
-   // @param [in] callback User provided callback function.
-   // @param [in] data User provided pointer as input for @p callback.
-   //
-   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
-   // region returns ::HSA_STATUS_SUCCESS.
-   virtual hsa_status_t
-   VisitRegion(bool include_peer,
-               hsa_status_t (*callback)(hsa_region_t region, void *data),
-               void *data) const = 0;
-
    // @brief Carve scratch memory for main from scratch pool.
    //
    // @param [in,out] scratch Structure to be populated with the carved memory
@@ -399,7 +383,7 @@ class GpuAgent : public GpuAgentInt {
 
   hsa_status_t Preload(uint64_t flags);
 
-  core::Agent* GetNearestCpuAgent(void) const;
+  core::Agent* GetNearestCpuAgent() const override;
 
   void RegisterGangPeer(core::Agent& gang_peer, unsigned int bandwidth_factor) override;
 
@@ -650,8 +634,14 @@ class GpuAgent : public GpuAgentInt {
   // @brief Current short duration scratch memory size.
   size_t scratch_used_large_;
 
+  struct HsaSignalLess {
+    bool operator()(const hsa_signal_t& lhs, const hsa_signal_t& rhs) const {
+      return lhs.handle < rhs.handle;
+    }
+  };
+
   // @brief Notifications for scratch release.
-  std::map<hsa_signal_t, hsa_signal_value_t> scratch_notifiers_;
+  std::map<hsa_signal_t, hsa_signal_value_t, HsaSignalLess> scratch_notifiers_;
 
   // @brief Default scratch size per queue.
   size_t queue_scratch_len_;
@@ -786,7 +776,7 @@ class GpuAgent : public GpuAgentInt {
   // @brief Initialize scratch handler thresholds
   void InitAsyncScratchThresholds();
 
-  // @brief Initialize Secondary CUID for GPU device that 
+  // @brief Initialize Secondary CUID for GPU device that
   // this agent is running on.
   void InitDerivedCuid() override;
 

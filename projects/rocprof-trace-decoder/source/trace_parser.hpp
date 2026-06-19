@@ -82,7 +82,8 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         uint64_t me,
         uint64_t pipe,
         uint64_t is_ext,
-        uint64_t wg
+        uint64_t wg,
+        uint64_t cluster = 0
     )
     {
         this->pc = pc;
@@ -96,6 +97,7 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->pipe_id = pipe & 0xF;
         this->is_ext = is_ext;
         this->workgroup_id = wg & 0x7F;
+        this->cluster_id = cluster & 0x1F;
         this->_rsvd = 0;
     }
     occupancy_info_t(
@@ -108,7 +110,8 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         uint64_t me,
         uint64_t pipe,
         uint64_t is_ext,
-        uint64_t wg
+        uint64_t wg,
+        uint64_t cluster = 0
     )
     {
         this->pc = pc;
@@ -122,6 +125,7 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->pipe_id = pipe & 0xF;
         this->is_ext = is_ext;
         this->workgroup_id = wg & 0x7F;
+        this->cluster_id = cluster & 0x1F;
         this->_rsvd = 0;
     }
 };
@@ -165,7 +169,8 @@ struct WaveDataInternal : public rocprofiler_thread_trace_decoder_wave_t
         bool exbarw,
         uint8_t me = 0,
         uint8_t pipe = 0,
-        uint8_t wg = 0
+        uint8_t wg = 0,
+        uint8_t cluster = 0
     )
     {
         this->cu = (uint8_t) cu;
@@ -175,6 +180,7 @@ struct WaveDataInternal : public rocprofiler_thread_trace_decoder_wave_t
 
         this->dispatcher = (uint8_t) (((me & 0x7) << 4) | (pipe & 0xF));
         this->workgroup_id = wg;
+        this->cluster_id = cluster;
         this->reserved = 0;
         this->size = sizeof(rocprofiler_thread_trace_decoder_wave_t);
 
@@ -341,8 +347,8 @@ public:
     int userdata_state{};
 
     CowPtr<std::vector<address_range_t>> active_codeobjs{};
-    CowPtr<CodeobjTableTranslator> table{};
-    CowPtr<CodeobjTableTranslator> table_from_start{};
+    CachedTable table{};
+    CachedTable table_from_start{};
 
     std::vector<att_decoder_realtime_t> realtime{};
 
@@ -519,6 +525,8 @@ public:
         return event;
     }
 
+    static constexpr uint64_t BITMASK = (uint64_t{1} << 48) - 1;
+
     rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int64_t time, int me, int pipe, int tt_version = 0)
     {
         rocprofiler_thread_trace_decoder_dispatch_t event{};
@@ -527,14 +535,10 @@ public:
         event.me_id = me;
         event.pipe_id = pipe;
 
-        uint64_t pc = wave_start_addr.at(me).at(pipe) << 8;
+        uint64_t pc = (wave_start_addr.at(me & 0x1).at(pipe) << 8) & BITMASK;
         event.entry_point = pcinfo_t{.address = pc, .code_object_id = 0};
-        for (const auto& co : active_codeobjs.read())
-            if (co.inrange(pc))
-            {
-                event.entry_point = {pc - co.addr, co.id};
-                break;
-            }
+        address_range_t co;
+        if (table.find(pc, co)) event.entry_point = {pc - co.addr, co.id};
 
         event.thread_dim_x = num_thread_x;
         event.thread_dim_y = num_thread_y;
@@ -564,11 +568,10 @@ public:
 
     template <typename TokenType> pcinfo_t get_wave_start(const TokenType& token)
     {
-        constexpr uint64_t BITMASK = (uint64_t{1} << 48) - 1;
-        return ToPcV2(table.write(), (wave_start_addr.at_reg(token) << 8) & BITMASK);
+        return ToPcV2(table, (wave_start_addr.at_reg(token) << 8) & BITMASK);
     }
 
-    pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start.write(), addr); }
+    pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start, addr); }
 };
 
 template <typename WaveArray> struct AnalysisReturnData

@@ -113,18 +113,12 @@ union misc_type
 {
     struct
     {
-        uint64_t header           : 7;
-        uint64_t tm               : 3;
-        uint64_t spm              : 1;
-        uint64_t gc_rinse         : 1;
-        uint64_t save_context     : 1;
-        uint64_t tt_stall_start   : 1;
-        uint64_t tt_stall_end     : 1;
-        uint64_t DIDT_stall_start : 1;
-        uint64_t DIDT_stall_end   : 1;
-        uint64_t CLF              : 1;
-        uint64_t CLL              : 1;
-        uint64_t CLID             : 4;
+        uint64_t header : 7;
+        uint64_t tm     : 3;
+        uint64_t fields : 7;
+        uint64_t CLF    : 1;
+        uint64_t CLL    : 1;
+        uint64_t CLID   : 4;
     };
     uint64_t raw;
 

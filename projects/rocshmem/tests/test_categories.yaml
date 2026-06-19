@@ -145,6 +145,7 @@ test_categories:
       - "teamwgbarrier_.*"
       - "teamwavesync_.*"
       - "teamwgsync_.*"
+      - "teamsplit2d_.*"
 
       # Extended signal operations
       - "wgputsignal_.*"
@@ -184,6 +185,22 @@ test_categories:
       # Tile RMA tests (2D/strided operations, IPC-only)
       - "tile_put_.*"
       - "tile_get_.*"
+
+      # Host RMA/AMO tests (non-MPI IPC TcpBootstrap path, IPC-only)
+      - "host_putmem_.*"
+      - "host_getmem_.*"
+      - "host_amo_fadd_.*"
+      - "host_amo_fcswap_.*"
+      - "host_ctx_putmem_.*"
+      - "host_ctx_getmem_.*"
+      - "host_int_amo_fadd_.*"
+      - "host_int_amo_fcswap_.*"
+      - "host_amo_all_pes_.*"
+      - "host_amo_self_.*"
+
+      # Tile collective tests (IPC-only)
+      - "tile_broadcast_.*"
+      - "tile_allgather_.*"
 
     labels:
       - "nightly"

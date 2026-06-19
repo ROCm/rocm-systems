@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/pmc/collectors/gpu/device.hpp"
-#include "library/pmc/collectors/gpu/tests/mock_gpu_driver.hpp"
+#include "mock_gpu_backend.hpp"
 #include <cstdint>
 
 #include <gmock/gmock.h>
@@ -18,8 +18,8 @@ using ::testing::Return;
 using ::testing::StrictMock;
 using ::testing::Throw;
 
-using MockDriver =
-    ::testing::StrictMock<rocprofsys::pmc::collectors::gpu::testing::mock_gpu_driver>;
+using MockBackend =
+    ::testing::StrictMock<rocprofsys::backends::amd_smi::testing::mock_gpu_backend>;
 
 namespace rocprofsys::pmc::collectors::gpu::testing
 {
@@ -27,21 +27,21 @@ namespace rocprofsys::pmc::collectors::gpu::testing
 /**
  * @brief Test fixture for GPU device tests.
  *
- * Provides common setup for device tests including mock driver and
+ * Provides common setup for device tests including mock backend and
  * helper methods for configuring mock behavior.
  */
 class DeviceTest : public ::testing::Test
 {
 protected:
-    std::shared_ptr<MockDriver> mock_driver;
-    size_t                      test_index;
+    std::shared_ptr<MockBackend> mock_backend;
+    size_t                       test_index;
 
     void SetUp() override
     {
-        mock_driver = std::make_shared<MockDriver>();
-        test_index  = 0;
+        mock_backend = std::make_shared<MockBackend>();
+        test_index   = 0;
 
-        EXPECT_CALL(*mock_driver, get_gpu_asic_info())
+        EXPECT_CALL(*mock_backend, get_gpu_asic_info())
             .Times(AnyNumber())
             .WillRepeatedly(Return(asic_info{ "Test GPU", "AMD" }));
     }
@@ -69,15 +69,15 @@ protected:
     {
         metrics met = CreateValidMetrics();
 
-        EXPECT_CALL(*mock_driver, get_gpu_metrics())
+        EXPECT_CALL(*mock_backend, get_gpu_metrics())
             .Times(AtLeast(1))
             .WillRepeatedly(Return(met));
 
-        EXPECT_CALL(*mock_driver, get_memory_usage())
+        EXPECT_CALL(*mock_backend, get_memory_usage())
             .Times(AtLeast(1))
             .WillRepeatedly(Return(8589934592ULL));
 
-        SetupSDMAExpectations(mock_driver);
+        SetupSDMAExpectations(mock_backend);
     }
 
     /**
@@ -87,19 +87,19 @@ protected:
     {
         metrics met = CreateSentinelMetrics();
 
-        EXPECT_CALL(*mock_driver, get_gpu_metrics())
+        EXPECT_CALL(*mock_backend, get_gpu_metrics())
             .Times(AtLeast(1))
             .WillRepeatedly(Return(met));
 
-        EXPECT_CALL(*mock_driver, get_memory_usage())
+        EXPECT_CALL(*mock_backend, get_memory_usage())
             .Times(AtLeast(1))
             .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-        EXPECT_CALL(*mock_driver, is_sdma_supported())
+        EXPECT_CALL(*mock_backend, is_sdma_supported())
             .Times(AnyNumber())
             .WillRepeatedly(Return(false));
 
-        EXPECT_CALL(*mock_driver, get_raw_sdma_usage())
+        EXPECT_CALL(*mock_backend, get_raw_sdma_usage())
             .Times(AnyNumber())
             .WillRepeatedly(Return(0));
     }
@@ -122,15 +122,15 @@ protected:
         met.hotspot_temperature  = 75;
         met.gfx_activity         = 85;
 
-        EXPECT_CALL(*mock_driver, get_gpu_metrics())
+        EXPECT_CALL(*mock_backend, get_gpu_metrics())
             .Times(AtLeast(1))
             .WillRepeatedly(Return(met));
 
-        EXPECT_CALL(*mock_driver, get_memory_usage())
+        EXPECT_CALL(*mock_backend, get_memory_usage())
             .Times(AtLeast(1))
             .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-        SetupSDMAExpectations(mock_driver);
+        SetupSDMAExpectations(mock_backend);
     }
 
     /**
@@ -249,7 +249,7 @@ TEST_F(DeviceTest, valid_device_construction_full_support)
 {
     SetupAllMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.is_supported());
 
@@ -268,7 +268,7 @@ TEST_F(DeviceTest, device_construction_no_support)
 {
     SetupNoMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.is_supported());
 
@@ -290,7 +290,7 @@ TEST_F(DeviceTest, device_construction_partial_support)
 {
     SetupPartialMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.is_supported());
 
@@ -323,17 +323,17 @@ TEST_F(DeviceTest, device_construction_different_indices)
     SetupAllMetricsSupported();
 
     {
-        device<MockDriver> dev(mock_driver, 0);
+        device<MockBackend> dev(mock_backend, 0);
         EXPECT_EQ(dev.get_index(), 0U);
     }
 
     {
-        device<MockDriver> dev(mock_driver, 1);
+        device<MockBackend> dev(mock_backend, 1);
         EXPECT_EQ(dev.get_index(), 1U);
     }
 
     {
-        device<MockDriver> dev(mock_driver, 2);
+        device<MockBackend> dev(mock_backend, 2);
         EXPECT_EQ(dev.get_index(), 2U);
     }
 }
@@ -352,17 +352,17 @@ TEST_F(DeviceTest, current_socket_power_collection)
     metrics met              = CreateSentinelMetrics();
     met.current_socket_power = 150;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.current_socket_power);
 
@@ -382,17 +382,17 @@ TEST_F(DeviceTest, average_socket_power_collection)
     metrics met              = CreateSentinelMetrics();
     met.average_socket_power = 140;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.average_socket_power);
 
@@ -411,7 +411,7 @@ TEST_F(DeviceTest, power_metrics_not_collected_when_unsupported)
 {
     SetupNoMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.current_socket_power);
@@ -438,17 +438,17 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
     metrics met             = CreateSentinelMetrics();
     met.hotspot_temperature = 75;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.hotspot_temperature);
 
@@ -468,17 +468,17 @@ TEST_F(DeviceTest, edge_temperature_collection)
     metrics met          = CreateSentinelMetrics();
     met.edge_temperature = 70;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.edge_temperature);
 
@@ -497,7 +497,7 @@ TEST_F(DeviceTest, temperature_metrics_not_collected_when_unsupported)
 {
     SetupNoMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.hotspot_temperature);
@@ -519,17 +519,17 @@ TEST_F(DeviceTest, gfx_activity_collection)
     metrics met      = CreateSentinelMetrics();
     met.gfx_activity = 85;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.gfx_activity);
 
@@ -544,17 +544,17 @@ TEST_F(DeviceTest, umc_activity_collection)
     metrics met      = CreateSentinelMetrics();
     met.umc_activity = 60;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.umc_activity);
 
@@ -569,17 +569,17 @@ TEST_F(DeviceTest, mm_activity_collection)
     metrics met     = CreateSentinelMetrics();
     met.mm_activity = 40;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.mm_activity);
 
@@ -596,17 +596,17 @@ TEST_F(DeviceTest, all_activity_metrics_collection)
     met.umc_activity = 60;
     met.mm_activity  = 40;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto supported = dev.get_supported_metrics();
     EXPECT_TRUE(supported.bits.gfx_activity);
@@ -629,17 +629,17 @@ TEST_F(DeviceTest, vram_memory_usage_collection_success)
 {
     metrics met = CreateSentinelMetrics();
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(8589934592ULL));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.memory_usage);
 
@@ -653,17 +653,17 @@ TEST_F(DeviceTest, memory_usage_collection_failure)
 {
     metrics met = CreateSentinelMetrics();
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
 
@@ -677,7 +677,7 @@ TEST_F(DeviceTest, memory_usage_not_collected_when_unsupported)
 {
     SetupNoMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
 
@@ -703,17 +703,17 @@ TEST_F(DeviceTest, vcn_busy_collection_all_xcps)
         }
     }
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_busy);
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
@@ -744,17 +744,17 @@ TEST_F(DeviceTest, jpeg_activity_collection_all_xcps)
         }
     }
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_busy);
     EXPECT_FALSE(dev.get_supported_metrics().bits.jpeg_activity);
@@ -776,7 +776,7 @@ TEST_F(DeviceTest, xcp_metrics_not_collected_when_unsupported)
 {
     SetupNoMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.vcn_busy);
@@ -812,17 +812,17 @@ TEST_F(DeviceTest, mixed_vcn_jpeg_support)
         }
     }
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto supported = dev.get_supported_metrics();
     EXPECT_TRUE(supported.bits.vcn_busy);
@@ -860,17 +860,17 @@ TEST_F(DeviceTest, xgmi_link_width_collection)
     metrics met         = CreateSentinelMetrics();
     met.xgmi.link.width = 16;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
@@ -885,17 +885,17 @@ TEST_F(DeviceTest, xgmi_link_speed_collection)
     metrics met         = CreateSentinelMetrics();
     met.xgmi.link.speed = 25;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
@@ -915,17 +915,17 @@ TEST_F(DeviceTest, xgmi_read_write_data_collection_all_links)
         met.xgmi.data_acc.write[i] = 2000000 + i * 1000;
     }
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
@@ -947,17 +947,17 @@ TEST_F(DeviceTest, xgmi_sentinel_value_handling)
     met.xgmi.data_acc.read[0]  = 1000000;
     met.xgmi.data_acc.write[0] = 2000000;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
@@ -976,7 +976,7 @@ TEST_F(DeviceTest, xgmi_not_collected_when_unsupported)
 {
     SetupNoMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.xgmi);
 
@@ -1002,17 +1002,17 @@ TEST_F(DeviceTest, pcie_link_width_collection)
     metrics met         = CreateSentinelMetrics();
     met.pcie.link.width = 16;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
@@ -1027,17 +1027,17 @@ TEST_F(DeviceTest, pcie_link_speed_collection)
     metrics met         = CreateSentinelMetrics();
     met.pcie.link.speed = 16000;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
@@ -1052,17 +1052,17 @@ TEST_F(DeviceTest, pcie_bandwidth_accumulator_collection)
     metrics met            = CreateSentinelMetrics();
     met.pcie.bandwidth.acc = 500000000;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
@@ -1077,17 +1077,17 @@ TEST_F(DeviceTest, pcie_bandwidth_instantaneous_collection)
     metrics met             = CreateSentinelMetrics();
     met.pcie.bandwidth.inst = 10000000;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
@@ -1103,17 +1103,17 @@ TEST_F(DeviceTest, pcie_sentinel_value_handling)
     met.pcie.link.width    = 16;
     met.pcie.bandwidth.acc = 500000000;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
@@ -1130,7 +1130,7 @@ TEST_F(DeviceTest, pcie_not_collected_when_unsupported)
 {
     SetupNoMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.pcie);
 
@@ -1151,7 +1151,7 @@ TEST_F(DeviceTest, all_metrics_supported_detection)
 {
     SetupAllMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto supported = dev.get_supported_metrics();
     EXPECT_TRUE(supported.bits.current_socket_power);
@@ -1179,17 +1179,17 @@ TEST_F(DeviceTest, vcn_activity_support_detection_any_xcp)
 
     met.xcp_stats[7].vcn_busy[0] = 50;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_busy);
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
@@ -1199,7 +1199,7 @@ TEST_F(DeviceTest, vcn_activity_unsupported_all_sentinels)
 {
     SetupNoMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
 }
@@ -1210,17 +1210,17 @@ TEST_F(DeviceTest, jpeg_activity_support_detection_any_xcp)
 
     met.xcp_stats[5].jpeg_busy[0] = 75;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_busy);
     EXPECT_FALSE(dev.get_supported_metrics().bits.jpeg_activity);
@@ -1231,17 +1231,17 @@ TEST_F(DeviceTest, xgmi_support_detection_link_width_only)
     metrics met         = CreateSentinelMetrics();
     met.xgmi.link.width = 16;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 }
@@ -1251,17 +1251,17 @@ TEST_F(DeviceTest, xgmi_support_detection_any_read_data_valid)
     metrics met               = CreateSentinelMetrics();
     met.xgmi.data_acc.read[2] = 1000;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 }
@@ -1271,17 +1271,17 @@ TEST_F(DeviceTest, pcie_support_detection_bandwidth_only)
     metrics met            = CreateSentinelMetrics();
     met.pcie.bandwidth.acc = 1000000;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 }
@@ -1290,17 +1290,17 @@ TEST_F(DeviceTest, memory_usage_support_detection)
 {
     metrics met = CreateSentinelMetrics();
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(4096000000ULL));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.memory_usage);
 }
@@ -1309,17 +1309,17 @@ TEST_F(DeviceTest, memory_usage_unsupported_api_failure)
 {
     metrics met = CreateSentinelMetrics();
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
 }
@@ -1332,17 +1332,17 @@ TEST_F(DeviceTest, vcn_activity_top_level_field_only)
 {
     metrics met = CreateSentinelMetrics();
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity)
         << "BUG: Implementation does not check top-level vcn_activity[] field";
@@ -1354,17 +1354,17 @@ TEST_F(DeviceTest, vcn_activity_in_both_fields)
 
     met.xcp_stats[0].vcn_busy[0] = 80;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_busy);
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
@@ -1379,17 +1379,17 @@ TEST_F(DeviceTest, vcn_activity_detection_should_check_both_sources)
 {
     metrics met = CreateSentinelMetrics();
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity)
         << "Implementation gap: initialize_supported_metrics() should check both "
@@ -1403,17 +1403,17 @@ TEST_F(DeviceTest, vcn_activity_collection_priority)
     met.xcp_stats[0].vcn_busy[0] = 80;
     met.xcp_stats[0].vcn_busy[1] = 70;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto collected =
         dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFFFFFF }, 1000000000ULL);
@@ -1426,17 +1426,17 @@ TEST_F(DeviceTest, vcn_activity_xcp_disabled_top_level_valid)
 {
     metrics met = CreateSentinelMetrics();
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
 }
@@ -1447,22 +1447,22 @@ TEST_F(DeviceTest, vcn_activity_xcp_disabled_top_level_valid)
 
 TEST_F(DeviceTest, get_metrics_info_failure)
 {
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(4096000000ULL));
 
-    EXPECT_CALL(*mock_driver, is_sdma_supported())
+    EXPECT_CALL(*mock_backend, is_sdma_supported())
         .Times(AnyNumber())
         .WillRepeatedly(Return(false));
-    EXPECT_CALL(*mock_driver, get_raw_sdma_usage())
+    EXPECT_CALL(*mock_backend, get_raw_sdma_usage())
         .Times(AnyNumber())
         .WillRepeatedly(Return(0));
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto met = dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFFFFFF }, 1000000000ULL);
 
@@ -1475,22 +1475,22 @@ TEST_F(DeviceTest, get_metrics_info_failure)
 
 TEST_F(DeviceTest, get_metrics_info_failure_during_init)
 {
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(4096000000ULL));
 
-    EXPECT_CALL(*mock_driver, is_sdma_supported())
+    EXPECT_CALL(*mock_backend, is_sdma_supported())
         .Times(AnyNumber())
         .WillRepeatedly(Return(false));
-    EXPECT_CALL(*mock_driver, get_raw_sdma_usage())
+    EXPECT_CALL(*mock_backend, get_raw_sdma_usage())
         .Times(AnyNumber())
         .WillRepeatedly(Return(0));
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.is_supported());
 
@@ -1503,7 +1503,7 @@ TEST_F(DeviceTest, multiple_metric_collections)
 {
     SetupAllMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     for(int i = 0; i < 10; ++i)
     {
@@ -1523,17 +1523,17 @@ TEST_F(DeviceTest, large_array_indices_xgmi)
         met.xgmi.data_acc.write[i] = 2000 + i;
     }
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto collected =
         dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFFFFFF }, 1000000000ULL);
@@ -1557,17 +1557,17 @@ TEST_F(DeviceTest, large_array_indices_xcp)
         }
     }
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto collected =
         dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFFFFFF }, 1000000000ULL);
@@ -1595,17 +1595,17 @@ TEST_F(DeviceTest, large_array_indices_jpeg)
         }
     }
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto collected =
         dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFFFFFF }, 1000000000ULL);
@@ -1622,45 +1622,45 @@ TEST_F(DeviceTest, large_array_indices_jpeg)
 
 TEST_F(DeviceTest, concurrent_device_objects)
 {
-    auto mock_driver1 = std::make_shared<MockDriver>();
-    auto mock_driver2 = std::make_shared<MockDriver>();
+    auto mock_backend1 = std::make_shared<MockBackend>();
+    auto mock_backend2 = std::make_shared<MockBackend>();
 
     metrics met1              = CreateSentinelMetrics();
     met1.current_socket_power = 100;
 
-    EXPECT_CALL(*mock_driver1, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend1, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met1));
 
-    EXPECT_CALL(*mock_driver1, get_memory_usage())
+    EXPECT_CALL(*mock_backend1, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver1);
+    SetupSDMAExpectations(mock_backend1);
 
-    EXPECT_CALL(*mock_driver1, get_gpu_asic_info())
+    EXPECT_CALL(*mock_backend1, get_gpu_asic_info())
         .Times(AnyNumber())
         .WillRepeatedly(Return(asic_info{ "GPU1", "AMD" }));
 
     metrics met2              = CreateSentinelMetrics();
     met2.current_socket_power = 200;
 
-    EXPECT_CALL(*mock_driver2, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend2, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met2));
 
-    EXPECT_CALL(*mock_driver2, get_memory_usage())
+    EXPECT_CALL(*mock_backend2, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver2);
+    SetupSDMAExpectations(mock_backend2);
 
-    EXPECT_CALL(*mock_driver2, get_gpu_asic_info())
+    EXPECT_CALL(*mock_backend2, get_gpu_asic_info())
         .Times(AnyNumber())
         .WillRepeatedly(Return(asic_info{ "GPU2", "AMD" }));
 
-    device<MockDriver> dev1(mock_driver1, 0);
-    device<MockDriver> dev2(mock_driver2, 1);
+    device<MockBackend> dev1(mock_backend1, 0);
+    device<MockBackend> dev2(mock_backend2, 1);
 
     auto result1 =
         dev1.get_gpu_metrics(enabled_metrics{ .value = 0xFFFFFFFF }, 1000000000ULL);
@@ -1680,7 +1680,7 @@ TEST_F(DeviceTest, device_with_index_zero)
 {
     SetupAllMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, 0);
+    device<MockBackend> dev(mock_backend, 0);
 
     EXPECT_EQ(dev.get_index(), 0U);
 }
@@ -1689,7 +1689,7 @@ TEST_F(DeviceTest, device_with_high_index)
 {
     SetupAllMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, 15);
+    device<MockBackend> dev(mock_backend, 15);
 
     EXPECT_EQ(dev.get_index(), 15U);
 }
@@ -1700,7 +1700,7 @@ TEST_F(DeviceTest, device_with_high_index)
 
 TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
 {
-    auto mock = std::make_shared<MockDriver>();
+    auto mock = std::make_shared<MockBackend>();
 
     metrics init_met              = CreateSentinelMetrics();
     init_met.current_socket_power = 150;
@@ -1738,7 +1738,7 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
         .Times(AnyNumber())
         .WillRepeatedly(Return(asic_info{ "Test GPU", "AMD" }));
 
-    device<MockDriver> dev(mock, test_index);
+    device<MockBackend> dev(mock, test_index);
 
     auto result1 =
         dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFFFFFF }, 1000000000ULL);
@@ -1768,15 +1768,15 @@ TEST_F(DeviceTest, sdma_delta_computation)
 {
     SetupAllMetricsSupported();
 
-    EXPECT_CALL(*mock_driver, is_sdma_supported())
+    EXPECT_CALL(*mock_backend, is_sdma_supported())
         .Times(AnyNumber())
         .WillRepeatedly(Return(true));
 
-    EXPECT_CALL(*mock_driver, get_raw_sdma_usage())
+    EXPECT_CALL(*mock_backend, get_raw_sdma_usage())
         .WillOnce(Return(5000000ULL))
         .WillOnce(Return(15000000ULL));
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
     ASSERT_TRUE(dev.is_supported());
     ASSERT_TRUE(dev.get_supported_metrics().bits.sdma_usage);
 
@@ -1800,17 +1800,17 @@ TEST_F(DeviceTest, gfx_clock_collection)
     metrics met       = CreateSentinelMetrics();
     met.gfx_clock_mhz = 1500;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.gfx_clock);
 
@@ -1825,17 +1825,17 @@ TEST_F(DeviceTest, mem_clock_collection)
     metrics met       = CreateSentinelMetrics();
     met.mem_clock_mhz = 1200;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.mem_clock);
 
@@ -1849,7 +1849,7 @@ TEST_F(DeviceTest, clock_metrics_not_collected_when_unsupported)
 {
     SetupNoMetricsSupported();
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     auto supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.gfx_clock);
@@ -1873,15 +1873,15 @@ TEST_F(DeviceTest, vcn_busy_collection_preserves_sentinels)
 
     met.xcp_stats[0].vcn_busy[0] = 80;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AnyNumber())
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_busy);
 
@@ -1904,15 +1904,15 @@ TEST_F(DeviceTest, jpeg_busy_collection_preserves_sentinels)
 
     met.xcp_stats[0].jpeg_busy[0] = 60;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AnyNumber())
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_busy);
 
@@ -1935,15 +1935,15 @@ TEST_F(DeviceTest, vcn_activity_device_level_preserves_sentinels)
 
     met.vcn_activity[0] = 42;
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AnyNumber())
         .WillRepeatedly(Throw(std::runtime_error("not supported")));
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_activity);
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_busy);
@@ -1964,18 +1964,18 @@ TEST_F(DeviceTest, memory_usage_unsupported_sentinel_value)
 {
     metrics met = CreateSentinelMetrics();
 
-    EXPECT_CALL(*mock_driver, get_gpu_metrics())
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
     constexpr std::uint64_t SENTINEL_MEM = 0xFFFFFFFFFFFFFFFFULL;
-    EXPECT_CALL(*mock_driver, get_memory_usage())
+    EXPECT_CALL(*mock_backend, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(SENTINEL_MEM));
 
-    SetupSDMAExpectations(mock_driver);
+    SetupSDMAExpectations(mock_backend);
 
-    device<MockDriver> dev(mock_driver, test_index);
+    device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
 }

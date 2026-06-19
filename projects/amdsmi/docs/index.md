@@ -5,7 +5,7 @@ myst:
     "keywords": "amdsmi, lib, cli, system, management, interface, amdgpu, admin, sys"
 ---
 
-# AMD SMI documentation
+# AMD SMI {{ AMDSMI_VERSION }}
 
 The AMD System Management Interface (AMD SMI) library offers a unified tool for
 managing and monitoring GPUs, particularly in high-performance computing
@@ -44,12 +44,10 @@ AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree
 :::
 
 :::{grid-item-card} Reference
-* [C++ API](./reference/amdsmi-cpp-api.md)
-  * [Modules](../doxygen/docBin/html/topics)
-  * [Files](../doxygen/docBin/html/files)
-  * [Globals](../doxygen/docBin/html/globals)
-  * [Data structures](../doxygen/docBin/html/annotated)
-  * [Data fields](../doxygen/docBin/html/functions_data_fields)
+* [C++ API](./reference/amdsmi-cpp-api/index.md)
+  * [Functions](./reference/amdsmi-cpp-api/functions.md)
+  * [Types](./reference/amdsmi-cpp-api/types.md)
+  * [Defines](./reference/amdsmi-cpp-api/defines.md)
 * [Python API](./reference/amdsmi-py-api.md)
 * [Go API](./reference/amdsmi-go-api.md)
 :::

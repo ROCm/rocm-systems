@@ -599,7 +599,7 @@ def insert_benchmark_config(cursor, sdk_id, config_record, args):
         "rocdecode_trace": "rocDecode",
         "rocjpeg_trace": "rocJPEG",
         "pc_sampling_host_trap": "PC Sampling (Host Trap)",
-        "pc_sampling_stocastic": "PC Sampling (Stocastic)",
+        "pc_sampling_stocastic": "PC Sampling (Stochastic)",
         "advanced_thread_trace": "ATT",
         "pmc_counters": "PMC",
     }

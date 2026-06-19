@@ -93,11 +93,23 @@ def check_amd_ionic_driver():
     return False
 
 
+def check_brcm_nic_driver():
+    """Returns true if bnxt_en is found in the list of initialized modules"""
+    status_file = Path("/sys/module/bnxt_en/initstate")
+    try:
+        if status_file.exists():
+            if status_file.read_text(encoding="ascii").strip() == "live":
+                return True
+    except OSError:
+        return False
+    return False
+
+
 def amdsmi_cli_init():
     """Initializes AMDSMI Library for the CLI
 
-    Checks for the presence of the amdgpu, amd_hsmp or hsmp_acpi drivers and initializes the
-    AMD SMI library based on the live drivers found.
+    Probes for the presence of the amdgpu, amd_hsmp/hsmp_acpi, ionic, and bnxt_en
+    drivers and initializes the AMD SMI library based on the live drivers found.
 
     Return:
         init_flag: the flag used to initialize the AMD SMI library without error
@@ -124,6 +136,9 @@ def amdsmi_cli_init():
         logging.debug("hsmp driver's initstate is live")
     if check_amd_ionic_driver():
         logging.debug("ionic driver's initstate is live")
+        init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
+    if check_brcm_nic_driver():
+        logging.debug("bnxt_en driver's initstate is live")
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
 
     _INIT_TIMEOUT_SEC = 60
@@ -161,7 +176,7 @@ def amdsmi_cli_init():
             or init_flag == 0
         ):
             logging.error(
-                "Drivers not loaded (amdgpu, amd_hsmp, ionic, rdma drivers not found in modules)"
+                "Drivers not loaded (amdgpu, amd_hsmp, ionic, bnxt_en drivers not found in modules)"
             )
             sys.exit(-1)
         else:

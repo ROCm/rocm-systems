@@ -20,6 +20,7 @@ import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
 from utils.amdsmi_interface import _per_device_query
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import (
     format_duration,
     format_node_stats,
@@ -952,17 +953,24 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
-    os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
+    pmc_1_subdir = Path(workload_dir) / "out" / "pmc_1" / "0"
+    pmc_1_subdir.mkdir(parents=True, exist_ok=True)
 
-    csv_content = (
-        "Agent_Type,Node_Id,Wave_Front_Size,Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
+    # counter_collection.csv and agent_info.csv are required by
+    # process_rocprofv3_output; the converted.csv is produced by
+    # v3_counter_csv_to_v2_csv which we stub to keep the test self-contained.
+    counter_file = pmc_1_subdir / "run_counter_collection.csv"
+    agent_info_file = pmc_1_subdir / "run_agent_info.csv"
+    converted_file = pmc_1_subdir / "run_converted.csv"
+
+    counter_file.write_text(
+        "Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
         "Grid_Size,Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,"
         "Scratch_Size,VGPR_Count,Accum_VGPR_Count,SGPR_Count,Start_Timestamp,"
         "End_Timestamp,Counter_Name,Counter_Value\n"
-        "GPU,0,0,0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,0,1,SQ_WAVES,100"
+        "0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,0,1,SQ_WAVES,100\n"
     )
-    with open(workload_dir + "/out/pmc_1/results_0.csv", "w") as f:
-        f.write(csv_content)
+    agent_info_file.write_text("Agent_Type,Node_Id,Wave_Front_Size\nGPU,0,64\n")
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
@@ -971,8 +979,13 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    # Stub the conversion so the test doesn't depend on csv_ops pivot logic,
+    # but process_rocprofv3_output itself runs and exercises Path.glob.
     monkeypatch.setattr(
-        "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_0.csv"]
+        "utils.utils_profile.v3_counter_csv_to_v2_csv",
+        lambda *a, **k: converted_file.write_text(
+            "GPU_ID,Kernel_Name,SQ_WAVES\n0,test_kernel,100\n"
+        ),
     )
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
@@ -1085,6 +1098,50 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     utils_profile.run_prof(
         str(fname), profiler_options, workload_dir, logging.INFO, "csv"
     )
+
+
+def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
+    """run_prof must log only profiler-added env vars, never the user's full
+    environment, to avoid leaking secrets into shared workload logs."""
+    monkeypatch.setenv("LEAK_CANARY_TOKEN", "SHOULD_NOT_APPEAR")
+
+    logs = []
+    monkeypatch.setattr(
+        "utils.utils_profile.console_debug",
+        lambda msg, *a, **k: logs.append(str(msg)),
+    )
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
+    monkeypatch.setattr(
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
+    )
+    monkeypatch.setattr("utils.utils_common.parse_pmc_perf", lambda f: ["SQ_WAVES"])
+    monkeypatch.setattr(
+        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
+    )
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
+
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    workload_dir = str(tmp_path / "workload")
+
+    utils_profile.run_prof(
+        str(fname),
+        {
+            "APP_CMD": ["./test_app"],
+            "ROCPROF_OUTPUT_PATH": workload_dir,
+            "ROCPROF_COUNTER_COLLECTION": "1",
+        },
+        workload_dir,
+        logging.INFO,
+        "csv",
+    )
+
+    assert sum("env vars" in m for m in logs) >= 1
+    env_log_lines = [m for m in logs if "env vars" in m]
+    assert any("ROCPROF_COUNTER_COLLECTION" in m for m in env_log_lines)
+    assert not any("SHOULD_NOT_APPEAR" in m for m in logs)
 
 
 def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
@@ -1314,7 +1371,6 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
         "utils.utils_profile.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("glob.glob", lambda pattern: [])  # No files found
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
@@ -1432,9 +1488,6 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr("utils.mi_gpu_spec.mi_gpu_specs.get_num_xcds", lambda *a: 2)
-    monkeypatch.setattr(
-        "glob.glob", lambda pattern: [workload_dir + "/results_test.csv"]
-    )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
@@ -1757,15 +1810,6 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
 
     counter_file.write_text("counter,data\ntest,value")
     agent_file.write_text("agent,data\ntest,value")
-
-    def mock_glob(pattern):
-        if "_counter_collection.csv" in pattern:
-            return [str(counter_file)]
-        elif "_converted.csv" in pattern:
-            return [str(converted_file)]
-        return []
-
-    monkeypatch.setattr("glob.glob", mock_glob)
 
     def mock_v3_counter_csv_to_v2_csv(counter_path, agent_path, output_path):
         Path(output_path).write_text("converted,data\ntest,value")
@@ -4100,193 +4144,14 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     assert result_df["Accum_VGPR"].dtype == "int64"
 
 
-# ===================================================================
-# Test PC_sampling function
-# ===================================================================
-
-
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
-):
-    """
-    Edge Case: rocprofiler_sdk_tool_path is valid, but librocprofiler-sdk-tool.so
-    is NOT found next to it (or in rocprofiler-sdk subdir).
-    This test primarily checks if the paths are constructed. The actual check for
-    file existence before `capture_subprocess_output` is not in the provided snippet,
-    but we test the path construction.
-    """
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
-        method = "host_trap"
-        interval = 1000
-        workload_dir = str(tmp_path)
-        options = {"APP_CMD": "my_app --arg"}
-
-        sdk_lib_dir = tmp_path / "rocm_sdk" / "lib"
-        sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_tool_path = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_tool_path).touch()
-
-        expected_tool_path = str(
-            sdk_lib_dir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
-        )
-
-        options["LD_PRELOAD"] = expected_tool_path
-
-        mock_capture_subprocess.return_value = (True, "Success output")
-
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        assert mock_capture_subprocess.called
-        call_args = mock_capture_subprocess.call_args
-        called_env = call_args.kwargs.get("new_env", {})
-
-        assert "LD_PRELOAD" in called_env
-        assert called_env["LD_PRELOAD"] == expected_tool_path
-
-        mock_console_error.assert_not_called()
-
-
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_subprocess_fails(
-    mock_console_debug, mock_capture_subprocess, tmp_path, monkeypatch
-):
-    """
-    Edge Case: The capture_subprocess_output returns success=False.
-    This should trigger the console_error("PC sampling failed.").
-    """
-    console_error_calls = []
-
-    def mock_console_error(msg, exit=True):
-        console_error_calls.append(msg)
-        if exit:
-            raise RuntimeError("console_error called")
-
-    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
-
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
-        method = "stochastic"
-        interval = 5000
-        workload_dir = str(tmp_path)
-        options = ["another_app"]
-
-        with pytest.raises(RuntimeError, match="console_error called"):
-            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        mock_capture_subprocess.assert_not_called()
-        assert console_error_calls == [
-            "APP_CMD, the workload's executable must be provided "
-            "when not in live attach mode"
-        ]
-
-    mock_capture_subprocess.reset_mock()
-    console_error_calls.clear()
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
-        options = {"APP_CMD": "another_app"}
-        sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
-        sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_tool_path_sdk).touch()
-
-        tool_dir = sdk_lib_dir / "rocprofiler-sdk"
-        tool_dir.mkdir(parents=True, exist_ok=True)
-        (tool_dir / "librocprofiler-sdk-tool.so").touch()
-
-        mock_capture_subprocess.return_value = (
-            False,
-            "Error output from SDK subprocess",
-        )
-
-        with pytest.raises(RuntimeError, match="console_error called"):
-            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        mock_capture_subprocess.assert_called_once()
-        assert console_error_calls == ["PC sampling failed."]
-
-
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_empty_appcmd(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
-):
-    """
-    Edge Case: The appcmd is an empty string.
-    The function should still attempt to run it. The behavior of
-    capture_subprocess_output with an empty command is external to this function.
-    """
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
-        method = "host_trap"
-        interval = 100
-        workload_dir = str(tmp_path)
-        options = ["--"]
-        rocprofiler_sdk_tool_path = "/some/path/librocprofiler_sdk.so"  # noqa: F841
-
-        mock_capture_subprocess.return_value = (True, "Output with empty appcmd")
-
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        assert mock_capture_subprocess.called
-        options_list = mock_capture_subprocess.call_args[0][0]
-        assert options_list[-1] == "--"
-        mock_console_error.assert_not_called()
-
-    mock_capture_subprocess.reset_mock()
-    mock_console_error.reset_mock()
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
-        sdk_lib_dir = tmp_path / "rocm_sdk_empty" / "lib"
-        sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_tool_path_sdk).touch()
-        tool_dir = sdk_lib_dir / "rocprofiler-sdk"
-        tool_dir.mkdir(parents=True, exist_ok=True)
-        (tool_dir / "librocprofiler-sdk-tool.so").touch()
-
-        mock_capture_subprocess.return_value = (True, "Output with empty appcmd SDK")
-        options = {"APP_CMD": ""}
-
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        assert mock_capture_subprocess.called
-        assert mock_capture_subprocess.call_args[0][0] == ""
-        mock_console_error.assert_not_called()
-
-
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_multiarg_appcmd(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
-):
-    """All arguments after '--' in profiler_options must appear
-    in the subprocess call."""
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
-        method = "host_trap"
-        interval = 100
-        workload_dir = str(tmp_path)
-        options = ["--kernel-trace", "--", "./myapp", "arg1", "arg2"]
-
-        mock_capture_subprocess.return_value = (True, "Success")
-
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        assert mock_capture_subprocess.called
-        options_list = mock_capture_subprocess.call_args[0][0]
-        separator_index = options_list.index("--")
-        assert options_list[separator_index:] == ["--", "./myapp", "arg1", "arg2"]
-        mock_console_error.assert_not_called()
-
-
 def test_set_parser():
-    from utils.utils_common import parse_sets_yaml
-
-    result = parse_sets_yaml("gfx90a")
-
+    result = utils_common.parse_sets_yaml("gfx90a")
     assert "compute_thruput_util" in result
     assert result["compute_thruput_util"]["title"] == "Compute Throughput Utilization"
+
+    shared = utils_common.parse_sets_yaml("gfx1152")
+    assert "compute_thruput_flops" in shared
+    assert shared["launch_stats"]["title"] == "Launch Stats"
 
 
 @pytest.mark.sci_notion
@@ -4369,11 +4234,7 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
 
 def list_blocks_supported_archs() -> list[str]:
     """Return sorted arch names from analysis_configs/gfx* directories."""
-    return sorted(
-        p.name
-        for p in ANALYSIS_CONFIGS.iterdir()
-        if p.is_dir() and p.name.startswith("gfx")
-    )
+    return list(mi_gpu_specs.get_gpu_series_dict().keys())
 
 
 def arch_panels_from_disk(arch: str) -> dict[str, str]:
@@ -4413,18 +4274,24 @@ def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, a
     assert "BLOCK NAME" in output
 
     # Fixed-width parse: empty aliases break whitespace splitting.
+    # Derive column offsets from the header so this parser tracks the producer.
     lines = output.splitlines()
     header_idx = next(i for i, line in enumerate(lines) if line.startswith("INDEX"))
+    header = lines[header_idx]
+    alias_col = header.index("BLOCK ALIAS")
+    name_col = header.index("BLOCK NAME")
     block_entries: dict[str, tuple[str, str]] = {}
     for line in lines[header_idx + 1 :]:
-        block_id = line[0:8].strip()
+        block_id = line[:alias_col].strip()
         if not block_id:
             continue
-        alias = line[9:25].strip()
-        name = line[26:].strip()
+        alias = line[alias_col:name_col].strip()
+        name = line[name_col:].strip()
         block_entries[block_id] = (alias, name)
 
-    expected_panels = arch_panels_from_disk(arch)
+    expected_panels = arch_panels_from_disk(
+        utils_common.canonical_config_arch(arch) or arch
+    )
     assert set(block_entries) == set(expected_panels), (
         f"--list-blocks {arch}: rows {sorted(block_entries)} != "
         f"on-disk panels {sorted(expected_panels)}"
@@ -6185,7 +6052,7 @@ class TestBuildMetricList:
 
 
 # ---------------------------------------------------------------------------
-# Torch operator pattern matching (PurePosixPath glob)
+# Torch operator pattern matching (fnmatch glob)
 # ---------------------------------------------------------------------------
 
 H3 = "nn.Module.Net.forward/torch.nn.functional.relu/torch.relu"
@@ -6205,25 +6072,28 @@ def test_all_keyword():
 
 
 @pytest.mark.torch_ops
-def test_bare_pattern_matches_last_component():
-    """Bare token is matched via PurePosixPath.match() against the full hierarchy."""
+def test_bare_pattern_requires_exact_match():
+    """A pattern without wildcards matches only when equal to the full target."""
     from utils.parser import torch_operator_pattern_matches as m
 
-    assert m("torch.relu", H3)
-    assert m("torch.nn.functional.conv2d", H2)
+    assert m("torch.relu", H1)
+    assert not m("torch.relu", H3)
+    assert not m("torch.nn.functional.conv2d", H2)
     assert not m("relu", H3)
     assert not m("forward", H3)
     assert not m("sigmoid", H3)
 
 
 @pytest.mark.torch_ops
-def test_bare_wildcard_pattern():
-    """Wildcard bare token matched via PurePosixPath.match()."""
+def test_substring_wildcard_pattern():
+    """``*`` matches any run of characters, including ``/``."""
     from utils.parser import torch_operator_pattern_matches as m
 
-    assert m("torch.*", H3)
+    assert m("*torch.relu", H3)
+    assert m("*torch.*", H3)
     assert m("*relu", H3)
     assert m("*conv*", H2)
+    assert m("*relu*", H3)
     assert not m("conv*", H2)
     assert not m("sigm*", H3)
 
@@ -6240,20 +6110,20 @@ def test_hierarchy_glob():
 
 @pytest.mark.torch_ops
 def test_leading_slash_is_cosmetic():
-    """Leading '/' is stripped during pattern normalization."""
+    """A leading ``/`` in the pattern is stripped before matching."""
     from utils.parser import torch_operator_pattern_matches as m
 
     assert m("/nn.Module.Net.forward/*/torch.relu", H3)
-    assert m("/torch.relu", H3)
+    assert m("/torch.relu", H1)
 
 
 @pytest.mark.torch_ops
-def test_trailing_slash_stripped_by_posixpath():
-    """PurePosixPath strips trailing slashes, so they are cosmetic."""
+def test_trailing_slash_is_cosmetic():
+    """A trailing ``/`` in the pattern is stripped before matching."""
     from utils.parser import torch_operator_pattern_matches as m
 
     assert not m("nn.Module.Net.forward/", H3)
-    assert m("torch.relu/", H3)
+    assert m("torch.relu/", H1)
 
 
 @pytest.mark.torch_ops
@@ -6416,27 +6286,17 @@ def test_parse_patterns_empty():
     assert parse_torch_operator_patterns(Namespace()) == []
 
 
-# -- PatternMatcherEngine ---------------------------------------------------
+# -- fnmatch_glob_matches ---------------------------------------------------
 
 
 @pytest.mark.torch_ops
-def test_engine_glob_hierarchy_mode():
-    """Facade delegates matching to glob-hierarchy implementation."""
-    from utils.pattern_matching import PatternMatcherEngine
+def test_glob_helper_matches_target():
+    """``fnmatch_glob_matches`` performs case-sensitive fnmatch globbing."""
+    from utils.pattern_matching import fnmatch_glob_matches
 
-    matcher = PatternMatcherEngine(mode="glob-hierarchy")
-    assert matcher.matches("torch.relu", H3)
-    assert matcher.matches("*relu", H3)
-    assert not matcher.matches("sigmoid", H3)
-
-
-@pytest.mark.torch_ops
-def test_engine_invalid_mode():
-    """Unsupported strategy names should raise ValueError."""
-    from utils.pattern_matching import PatternMatcherEngine
-
-    with pytest.raises(ValueError):
-        PatternMatcherEngine(mode="regex")
+    assert fnmatch_glob_matches("*torch.relu", H3)
+    assert fnmatch_glob_matches("*relu", H3)
+    assert not fnmatch_glob_matches("sigmoid", H3)
 
 
 # -- Additional coverage (xuchen #26) ----------------------------------------
@@ -6456,48 +6316,50 @@ def test_double_star_explicit():
 
 @pytest.mark.torch_ops
 def test_single_char_wildcard():
-    """'?' matches exactly one character in a component."""
+    """``?`` matches exactly one character."""
     from utils.parser import torch_operator_pattern_matches as m
 
-    assert m("torch.rel?", H3)
-    assert m("torch.?elu", H3)
+    assert m("*torch.rel?", H3)
+    assert m("*torch.?elu", H3)
     assert not m("torch.?", H3)
     assert not m("?", H1)
-    assert m("torch.nn.functional.conv?d", H2)
+    assert m("*torch.nn.functional.conv?d", H2)
 
 
 @pytest.mark.torch_ops
 def test_long_hierarchy():
-    """Deeply nested hierarchies match correctly."""
+    """Patterns apply to deeply nested hierarchies."""
     from utils.parser import torch_operator_pattern_matches as m
 
     deep = "/".join([f"level{i}" for i in range(20)])
-    assert m("level19", deep)
+    assert m("*level19", deep)
     assert m("*19", deep)
     assert m("*/level19", deep)
     assert m("all", deep)
     assert not m("level0", deep)
+    assert m("*level0*", deep)
 
 
 @pytest.mark.torch_ops
 def test_long_component_names():
-    """Components with very long names are handled correctly."""
+    """Patterns apply to components with long names."""
     from utils.parser import torch_operator_pattern_matches as m
 
     long_name = "a" * 500
     hierarchy = f"root/{long_name}"
-    assert m(f"{'a' * 500}", hierarchy)
-    assert m("a*", hierarchy)
+    assert m(f"*{long_name}", hierarchy)
+    assert m("*a*", hierarchy)
+    assert not m("a*", hierarchy)
     assert not m("b*", hierarchy)
 
 
 @pytest.mark.torch_ops
 def test_special_characters_in_names():
-    """Dots, underscores, and other non-glob chars are treated literally."""
+    """Dots and underscores are treated literally."""
     from utils.parser import torch_operator_pattern_matches as m
 
     h = "nn.Module._internal/torch.nn.functional.conv2d"
-    assert m("torch.nn.functional.conv2d", h)
+    assert m("*torch.nn.functional.conv2d", h)
     assert m("*conv2d", h)
     assert m("nn.Module._internal/*", h)
     assert not m("nn_Module._internal/*", h)
@@ -6505,16 +6367,16 @@ def test_special_characters_in_names():
 
 @pytest.mark.torch_ops
 def test_bracket_glob_pattern():
-    """Character classes [abc] work in glob patterns."""
+    """Character classes ``[abc]`` are supported."""
     from utils.parser import torch_operator_pattern_matches as m
 
-    assert m("torch.rel[uv]", H3)
-    assert not m("torch.rel[ab]", H3)
+    assert m("*torch.rel[uv]", H3)
+    assert not m("*torch.rel[ab]", H3)
 
 
 @pytest.mark.torch_ops
 def test_single_component_hierarchy():
-    """Single-component hierarchy (no slashes) matches bare patterns."""
+    """A single-component target matches an equal bare pattern."""
     from utils.parser import torch_operator_pattern_matches as m
 
     assert m("torch.relu", "torch.relu")
@@ -6534,7 +6396,7 @@ def test_whitespace_only_pattern():
 
 @pytest.mark.torch_ops
 def test_star_pattern_matches_all():
-    """Bare '*' is normalized to '**' and matches every hierarchy."""
+    """``*`` matches any non-empty target."""
     from utils.parser import torch_operator_pattern_matches as m
 
     assert m("*", H3)
@@ -6546,11 +6408,11 @@ def test_star_pattern_matches_all():
 
 @pytest.mark.torch_ops
 def test_star_normalize_equivalence():
-    """'*' and 'all' produce the same normalization."""
-    from utils.pattern_matching import PurePosixGlobHierarchyMatcher
+    """``"all"`` and ``"*"`` both match any non-empty target."""
+    from utils.parser import torch_operator_pattern_matches as m
 
-    norm = PurePosixGlobHierarchyMatcher.normalize_pattern
-    assert norm("*") == norm("all") == "**"
+    assert m("all", H3)
+    assert m("*", H3)
 
 
 @pytest.mark.torch_ops
@@ -6566,59 +6428,58 @@ def test_case_sensitivity():
 
 @pytest.mark.torch_ops
 def test_all_keyword_case_sensitive():
-    """Only lowercase 'all' is the special keyword; mixed case is a literal."""
-    from utils.pattern_matching import PurePosixGlobHierarchyMatcher
+    """The ``"all"`` alias is case-sensitive; other casings are literal."""
+    from utils.parser import torch_operator_pattern_matches as m
 
-    norm = PurePosixGlobHierarchyMatcher.normalize_pattern
-    assert norm("all") == "**"
-    assert norm("ALL") == "ALL"
-    assert norm("All") == "All"
+    assert m("all", H3)
+    assert not m("ALL", H3)
+    assert not m("All", H3)
 
 
 @pytest.mark.torch_ops
 def test_consecutive_slashes_in_target():
-    """Consecutive slashes in the target are collapsed by PurePosixPath."""
+    """Consecutive slashes in the target are treated literally."""
     from utils.parser import torch_operator_pattern_matches as m
 
     h = "a//b///torch.relu"
-    assert m("torch.relu", h)
+    assert m("*torch.relu", h)
     assert m("*relu", h)
 
 
 @pytest.mark.torch_ops
 def test_dots_in_patterns():
-    """Dots are literal characters in glob patterns, not regex wildcards."""
+    """Dots are treated literally, not as regex wildcards."""
     from utils.parser import torch_operator_pattern_matches as m
 
-    assert m("torch.relu", H3)
-    assert not m("torchXrelu", H3)
+    assert m("*torch.relu", H3)
+    assert not m("*torchXrelu", H3)
     h = "root/torchXrelu"
-    assert not m("torch.relu", h)
-    assert m("torchXrelu", h)
+    assert not m("*torch.relu", h)
+    assert m("*torchXrelu", h)
 
 
 @pytest.mark.torch_ops
 def test_pattern_with_spaces():
-    """Spaces in patterns and targets are treated literally."""
+    """Spaces are treated literally."""
     from utils.parser import torch_operator_pattern_matches as m
 
     h = "module/ spaced op /torch.relu"
-    assert m("torch.relu", h)
+    assert m("*torch.relu", h)
     assert not m(" spaced op ", h)
     assert m("* spaced op */*", h)
 
 
 @pytest.mark.torch_ops
 def test_colons_in_operator_names():
-    """Colons (e.g. aten::relu) are literal characters in glob matching."""
+    """Colons are treated literally."""
     from utils.parser import torch_operator_pattern_matches as m
 
     h = "nn.Module/aten::relu_"
-    assert m("aten::relu_", h)
+    assert m("*aten::relu_", h)
     assert m("*relu_", h)
-    assert m("aten::*", h)
+    assert m("*aten::*", h)
     assert not m("*relu", h)
-    assert not m("torch.relu", h)
+    assert not m("*torch.relu", h)
 
 
 @pytest.mark.torch_ops
@@ -6759,3 +6620,33 @@ def test_reconfigure_stdio_utf8_end_to_end_makes_non_ascii_print_safe():
     wrapper.write("│ box │\n")  # would raise UnicodeEncodeError under ascii/strict
     wrapper.flush()
     assert raw.getvalue() == "│ box │\n".encode("utf-8")
+
+
+def test_set_cache_sizes_selects_vl1d_by_instance_count():
+    """vL1D is the level-1 data cache with the most instances; that count need
+    not equal the active CU count, which it does not on harvested parts."""
+    from utils.specs import set_cache_sizes
+
+    def l1(props, size, instances):
+        return {
+            "cache_properties": props,
+            "cache_size": size,
+            "cache_level": 1,
+            "max_num_cu_shared": 1,
+            "num_cache_instance": instances,
+        }
+
+    # Harvested: vL1D instances (112) exceed active CUs (104). It must still
+    # win over a smaller data cache and an instruction cache.
+    harvested = {
+        "cache": [
+            l1(["DATA_CACHE"], 16, 112),
+            l1(["DATA_CACHE"], 8, 16),
+            l1(["INST_CACHE"], 32, 112),
+        ]
+    }
+    assert set_cache_sizes(104, harvested, num_dies=1)["L1"] == 16 * 1024
+
+    # Non-harvested: vL1D instances equal active CUs.
+    non_harvested = {"cache": [l1(["DATA_CACHE"], 32, 304), l1(["DATA_CACHE"], 16, 16)]}
+    assert set_cache_sizes(304, non_harvested, num_dies=1)["L1"] == 32 * 1024

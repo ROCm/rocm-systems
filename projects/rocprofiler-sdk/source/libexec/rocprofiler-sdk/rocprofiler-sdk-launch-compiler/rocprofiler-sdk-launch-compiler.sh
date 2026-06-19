@@ -49,7 +49,7 @@ debug_message()
 # if rocprofiler-sdk compiler is not passed, someone is probably trying to invoke it directly
 if [ -z "${1}" ]; then
     echo -e "\n${BASH_SOURCE[0]} was invoked without the rocprofiler-sdk compiler as the first argument."
-    echo "This script is not indended to be directly invoked by any mechanism other"
+    echo "This script is not intended to be directly invoked by any mechanism other"
     echo -e "than through a RULE_LAUNCH_COMPILE or RULE_LAUNCH_LINK property set in CMake.\n"
     exit 1
 fi
@@ -57,7 +57,7 @@ fi
 # if rocprofiler-sdk compiler is not passed, someone is probably trying to invoke it directly
 if [ -z "${2}" ]; then
     echo -e "\n${BASH_SOURCE[0]} was invoked without the C++ compiler as the second argument."
-    echo "This script is not indended to be directly invoked by any mechanism other"
+    echo "This script is not intended to be directly invoked by any mechanism other"
     echo -e "than through a RULE_LAUNCH_COMPILE or RULE_LAUNCH_LINK property set in CMake.\n"
     exit 1
 fi

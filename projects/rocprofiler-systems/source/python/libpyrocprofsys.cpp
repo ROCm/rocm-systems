@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "libpyrocprofsys.hpp"
+#include "common/env_vars.hpp"
 #include "dl/dl.hpp"
 #include "library/coverage.hpp"
 #include "library/coverage/impl.hpp"
@@ -140,7 +141,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(!_cmd_line.empty())
             {
                 _cmd_line = _cmd_line.substr(_cmd_line.find_first_not_of(' '));
-                rocprofsys::set_env("ROCPROFSYS_COMMAND_LINE", _cmd_line, 0);
+                rocprofsys::set_env(rocprofsys::env_vars::COMMAND_LINE, _cmd_line, 0);
             }
             rocprofsys_init("trace", false, _cmd.c_str());
         },
@@ -160,11 +161,11 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
     pycoverage::generate(omni);
     pyuser::generate(omni);
 
-    auto _python_path = rocprofsys::get_env("ROCPROFSYS_PATH", std::string{});
+    auto _python_path = rocprofsys::get_env(rocprofsys::env_vars::PATH, std::string{});
     auto _libpath     = std::string{ "librocprof-sys-dl.so" };
     if(!_python_path.empty()) _libpath = TIMEMORY_JOIN("/", _python_path, _libpath);
     // permit env override if default path fails/is wrong
-    _libpath = rocprofsys::get_env("ROCPROFSYS_DL_LIBRARY", _libpath);
+    _libpath = rocprofsys::get_env(rocprofsys::env_vars::DL_LIBRARY, _libpath);
     // this is necessary when building with -static-libstdc++
     // without it, loading librocprof-sys.so within librocprof-sys-dl.so segfaults
     if(!dlopen(_libpath.c_str(), RTLD_NOW | RTLD_GLOBAL))
