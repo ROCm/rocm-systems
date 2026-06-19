@@ -1,2 +1,6 @@
+gitpython
 pydantic
+pygithub
+pytest
+pyyaml
 requests
