@@ -32,17 +32,14 @@ ROCPROFILER_EXTERN_C_INIT
  * @defgroup kernel_replay_service Kernel replay (dispatch counting)
  * @brief Optional multi-pass hardware counter collection for a single kernel dispatch.
  *
- * When enabled, the SDK will (once the replay loop is fully wired) re-execute a targeted
- * dispatch once per counter batch while the application observes a single completion, restore
- * GPU memory between passes, and invoke @p record_callback once per pass with the same
- * @c dispatch_id. Until that orchestration lands in the HSA queue path, this entry point
- * configures the same callback dispatch counting service as
- * ::rocprofiler_configure_callback_dispatch_counting_service and records that replay mode
- * was requested for the context.
+ * When enabled, the SDK re-executes a targeted dispatch once per counter batch while the
+ * application observes a single completion. Directly-allocated device memory is saved before the
+ * first pass and restored between passes, so every pass runs against identical inputs, and
+ * @p record_callback is invoked once per pass with the same @c dispatch_id.
  *
  * This API is mutually exclusive with ::rocprofiler_configure_callback_dispatch_counting_service
  * and ::rocprofiler_configure_buffer_dispatch_counting_service on the same context: configure
- * kernel replay first, or use only the legacy dispatch counting entry points without replay.
+ * kernel replay first, or use only the regular dispatch counting entry points without replay.
  *
  * @{
  */

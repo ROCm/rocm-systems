@@ -31,7 +31,6 @@
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/memory_snapshot.hpp"
-#include "lib/rocprofiler-sdk/hsa/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
@@ -87,10 +86,10 @@ namespace
 {
 constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
 
-// Kernel-replay (design doc Section 4.4) per-pass descriptor threaded into process_packet_batch.
-// When non-null the batch is one replay pass: the app's original completion signal is fired only
-// on the final pass, every pass shares one dispatch_id (Section 2.1), and a CPU-observable barrier
-// signal (pass_done) is appended so the WriteInterceptor thread can wait for the pass to finish.
+// Kernel-replay per-pass descriptor threaded into process_packet_batch. When non-null the batch is
+// one replay pass: the app's original completion signal is fired only on the final pass, every pass
+// shares one dispatch_id, and a CPU-observable barrier signal (pass_done) is appended so the
+// WriteInterceptor thread can wait for the pass to finish.
 struct replay_pass_state
 {
     bool                      is_final          = false;
@@ -99,8 +98,7 @@ struct replay_pass_state
 };
 
 // Number of replay passes requested. Opt-in via env so non-replay runs are unaffected; a value <= 1
-// disables replay. Wiring N to the tool's multi-counter-batch plan is the remaining integration
-// seam (Section 4.7).
+// disables replay.
 int
 kernel_replay_passes()
 {
@@ -573,8 +571,8 @@ WriteInterceptor(const void* packets,
             static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
                           "failed to compute size field based on offset of reserved_padding field");
 
-            // Replay: all N passes for one dispatch share a single dispatch_id (Section 2.1). The
-            // first pass mints it; later passes reuse it.
+            // Replay: all N passes for one dispatch share a single dispatch_id. The first pass
+            // mints it; later passes reuse it.
             auto dispatch_id = (_replay && _replay->fixed_dispatch_id != 0)
                                    ? _replay->fixed_dispatch_id
                                    : ++sequence_counter;
@@ -689,7 +687,7 @@ WriteInterceptor(const void* packets,
 
             // if the original completion signal exists, trigger it via a barrier packet.
             // Replay: defer the app's completion signal until the final pass so the application
-            // observes only one execution (Section 2.2 / Section 4.4 step 6).
+            // observes only one execution.
             if(existing_completion_signal && (!_replay || _replay->is_final))
             {
                 auto barrier   = hsa_barrier_and_packet_t{};
@@ -771,20 +769,19 @@ WriteInterceptor(const void* packets,
     };
 
     // ---------------------------------------------------------------------------------------------
-    // Kernel replay (design doc Section 4.4). Re-execute a single kernel dispatch N times -- once
-    // per counter batch -- restoring GPU memory between passes so each pass runs against identical
-    // inputs, while the application observes only one execution. Runs synchronously on this
-    // (WriteInterceptor) thread; reuses process_packet_batch for each pass so counter collection,
-    // the serializer, the async signal handler, and record_callback all behave exactly as in the
-    // single-pass path (Section 4.7). Opt-in and gated so non-replay runs are byte-for-byte
-    // unchanged.
+    // Kernel replay. Re-execute a single kernel dispatch N times -- once per counter batch --
+    // restoring device memory between passes so each pass runs against identical inputs, while the
+    // application observes only one execution. Runs synchronously on this (WriteInterceptor)
+    // thread; reuses process_packet_batch for each pass so counter collection, the serializer, the
+    // async signal handler, and record_callback all behave exactly as in the single-pass path.
+    // Opt-in and gated so non-replay runs are unchanged.
     if(const int replay_n = kernel_replay_passes();
        replay_n > 1 && pkt_count == 1 && num_dispatch_packets == 1 && kernel_replay_active())
     {
         const auto& core = queue.core_api();
 
-        // (Section 4.4 step 2-3) Drain barrier: fence the CPU against all prior in-flight GPU work
-        // so HBM is stable before snapshotting.
+        // Drain barrier: fence the CPU against all prior in-flight GPU work so device memory is
+        // stable before snapshotting.
         hsa_signal_t drain_signal = null_hsa_signal;
         Queue::create_signal(0, &drain_signal, /*use_pool=*/false);
         {
@@ -795,12 +792,12 @@ WriteInterceptor(const void* packets,
                 drain_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
         }
 
-        // (Section 4.4 step 4) Snapshot all tracked GPU allocations to disk + record page hashes.
+        // Save all tracked device allocations.
         memory_snapshot::Snapshot snapshot{};
         snapshot.snap();
 
-        // (Section 4.4 step 5) Per-pass loop. pass_done is reused across passes; reset to 1 before
-        // each submit so the appended barrier decrements it to 0 on completion.
+        // Per-pass loop. pass_done is reused across passes; reset to 1 before each submit so the
+        // appended barrier decrements it to 0 on completion.
         hsa_signal_t pass_done = null_hsa_signal;
         Queue::create_signal(0, &pass_done, /*use_pool=*/false);
 
@@ -821,14 +818,14 @@ WriteInterceptor(const void* packets,
             core.hsa_signal_wait_scacquire_fn(
                 pass_done, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
-            // (Section 4.4 step 5 cont.) Restore dirty pages between passes so the next pass sees
-            // identical inputs. The final pass leaves GPU memory as the app expects.
+            // Restore device memory between passes so the next pass sees identical inputs. The
+            // final pass leaves device memory as the app expects.
             if(!replay_state.is_final) snapshot.restore();
         }
 
-        // (Section 4.4 steps 6-7) The final pass already emitted the app's original completion
-        // signal barrier and flowed through the serializer normally, so the application unblocks
-        // and the next kernel on this GPU can dispatch. Clean up our private signals.
+        // The final pass already emitted the app's original completion signal barrier and flowed
+        // through the serializer normally, so the application unblocks and the next kernel on this
+        // GPU can dispatch. Clean up our private signals.
         if(drain_signal.handle != 0) get_core_table()->hsa_signal_destroy_fn(drain_signal);
         if(pass_done.handle != 0) get_core_table()->hsa_signal_destroy_fn(pass_done);
         return;
