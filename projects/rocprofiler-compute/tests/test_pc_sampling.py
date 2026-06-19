@@ -296,11 +296,14 @@ def test_pc_sampling_profile_then_analyze(
 
 
 def test_pc_sampling_with_sol_block(
-    binary_handler_profile_rocprof_compute, monkeypatch
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+    monkeypatch,
 ):
     """
-    Test that PC sampling works with --block 21 and --block 2
-    (PC sampling with counter collection)
+    PC sampling with counter collection (--block 21 2): profiling produces the
+    expected artifacts and analyze renders both counter and PC sampling panels.
     """
     common.require_pc_sampling_gpu()
     monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
@@ -335,5 +338,23 @@ def test_pc_sampling_with_sol_block(
 
     assert common.check_file_pattern("- '21'", f"{workload_dir}/profiling_config.yaml")
     assert common.check_file_pattern("- '2'", f"{workload_dir}/profiling_config.yaml")
+
+    # Analyze with a single kernel so the detailed PC sampling table renders.
+    code = binary_handler_analyze_rocprof_compute(
+        [
+            "analyze",
+            "--path",
+            workload_dir,
+            "--kernel",
+            "0",
+        ],
+    )
+    assert code == 0
+
+    captured = capsys.readouterr()
+    assert "2.1 System Speed-of-Light" in captured.out
+    assert "21. PC Sampling" in captured.out
+    # The "instruction" column header only renders when the table has rows.
+    assert "instruction" in captured.out
 
     common.clean_output_dir(config["cleanup"], workload_dir)

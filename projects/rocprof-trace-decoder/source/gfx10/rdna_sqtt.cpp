@@ -74,6 +74,17 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
         stitch.sendOccupancy(occupancy);
     };
 
+    auto consume_launch_cluster = [&]() -> uint8_t
+    {
+        auto cluster_id = active_cluster_id;
+        if (cluster_end_pending)
+        {
+            active_cluster_id = 0;
+            cluster_end_pending = false;
+        }
+        return cluster_id;
+    };
+
     while (generator.nextValid())
     {
         Token token = generator.next();
@@ -92,9 +103,18 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     mi400::misc_type misc{.raw = token.contents};
                     DEBUGPRINT(misc);
                     fields.raw = (uint8_t) misc.fields;
+                    fields.tt5_shift();
 
-                    if (misc.CLF) generate_event(ROCPROF_TRACE_DECODER_EVENT_CLUSTER_BEGIN, misc.CLID);
-                    if (misc.CLL) generate_event(ROCPROF_TRACE_DECODER_EVENT_CLUSTER_END, misc.CLID);
+                    if (misc.CLF)
+                    {
+                        active_cluster_id = static_cast<uint8_t>(misc.CLID);
+                        cluster_end_pending = false;
+                    }
+                    if (misc.CLL)
+                    {
+                        active_cluster_id = static_cast<uint8_t>(misc.CLID);
+                        cluster_end_pending = true;
+                    }
                 }
                 else
                 {
@@ -280,6 +300,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         token.time - 1, start.SACU(), start.simd, start.wid, 0, 0, 0, 0, 0
                     });
                 }
+                auto cluster_id = consume_launch_cluster();
                 running_waves[start.getGPULocation()] = wave_addr;
 
                 occupancy.push_back(
@@ -292,7 +313,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                      (uint64_t) start.me,
                      (uint64_t) start.pipe,
                      start.isExt,
-                     (uint64_t) start.wgid}
+                     (uint64_t) start.wgid,
+                     cluster_id}
                 );
                 if (double_buffer && occupancy.size() >= MAX_ACCUM_RECORDS) send_occupancy();
 
@@ -314,7 +336,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         exclude_barrier_wait,
                         (uint8_t) start.me,
                         (uint8_t) start.pipe,
-                        (uint8_t) start.wgid
+                        (uint8_t) start.wgid,
+                        cluster_id
                     ));
                 }
                 break;

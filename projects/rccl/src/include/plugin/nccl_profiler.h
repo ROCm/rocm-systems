@@ -21,10 +21,11 @@ enum {
   ncclProfileCollApi        = (1 << 9),  // Collective API events
   ncclProfileP2pApi         = (1 << 10), // Point-to-Point API events
   ncclProfileKernelLaunch   = (1 << 11), // Kernel launch events
-  // CE events (v6)
+  // CE events (profiler v6)
   ncclProfileCeColl         = (1 << 12), // CE collective operation
   ncclProfileCeSync         = (1 << 13), // CE synchronization operation
   ncclProfileCeBatch        = (1 << 14), // CE batch operation
+  ncclProfileProxyDiag      = (1 << 15), // RCCL: extra proxy FIFO/counter diagnostics (proxy-trace plugin)
 };
 
 typedef enum {
@@ -71,6 +72,9 @@ typedef enum {
   ncclProfilerCeSyncComplete           = 28,  // CE synchronization completes
   ncclProfilerCeBatchStart             = 29,  // CE batch operation begins
   ncclProfilerCeBatchComplete          = 30,  // CE batch operation completes
+
+  /* RCCL proxy-trace plugin: opaque counter/timestamp payload in ncclProfilerEventStateArgs_t.proxyDiag */
+  ncclProfilerProxyDiagUpdate          = 31,
 } ncclProfilerEventState_t;
 
 typedef ncclProfilerEventState_t ncclProfilerEventState_v1_t;
@@ -90,8 +94,7 @@ typedef ncclProfilerEventState_t ncclProfilerEventState_v6_t;
 #include "profiler/profiler_v2.h"
 #include "profiler/profiler_v1.h"
 
-// Use v6 as default to support CE events
-// v5 and earlier versions are still supported for backward compatibility
+/* Canonical API: ncclProfiler_v6 (upstream) + RCCL fields in ncclProfilerEventDescr_v6_t. */
 typedef ncclProfiler_v6_t ncclProfiler_t;
 typedef ncclProfilerEventDescr_v6_t ncclProfilerEventDescr_t;
 typedef ncclProfilerEventStateArgs_v6_t ncclProfilerEventStateArgs_t;

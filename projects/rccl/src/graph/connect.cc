@@ -12,12 +12,32 @@
 #include "trees.h"
 #include "rings.h"
 #include "topo.h"
+#include "bootstrap.h"
 
 #include <stdio.h>      // For NULL and
 #include <stdlib.h>     // For malloc(), calloc(), and free()
 #include <stdint.h>     // For uint8_t and other fixed-width types
 #include <string.h>     // For memset()
 #include <limits.h>     // For INT_MAX
+
+// Allgather *value across the comm and reduce it to the global minimum. Leak-safe
+// on the allgather error path. See declaration in graph.h for why grow needs this.
+ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
+#if defined(TOPO_EXPL)
+  // topo_expl does not link the bootstrap layer and never grows comms.
+  (void)comm; (void)value;
+  return ncclSuccess;
+#else
+  int* perRank = NULL;
+  NCCLCHECK(ncclCalloc(&perRank, comm->nRanks));
+  perRank[comm->rank] = *value;
+  ncclResult_t ret = bootstrapAllGather(comm->bootstrap, perRank, sizeof(int));
+  if (ret == ncclSuccess)
+    for (int r = 0; r < comm->nRanks; r++) *value = std::min(*value, perRank[r]);
+  free(perRank);
+  return ret;
+#endif
+}
 
 
 /******************************************************************/
@@ -1290,6 +1310,11 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   } else {
     nChannels = comm->nChannels = std::min(std::min(ncclMaxNchannels() * channelMultiplier, nChannels), comm->config.maxCTAs);
     nChannels = comm->nChannels = copyChannels(comm, nChannels, std::max(minNchannels, std::max(nc, comm->config.minCTAs)), ringPrev, ringNext);
+  }
+
+  if (comm->isGrow) {
+    NCCLCHECKGOTO(ncclTopoReconcileGrowChannels(comm, &comm->nChannels), ret, fail);
+    nChannels = comm->nChannels;
   }
 
   comm->collChannels = comm->nChannels;
