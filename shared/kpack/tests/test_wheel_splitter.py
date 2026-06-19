@@ -712,8 +712,11 @@ class TestWheelArchivePermissions:
 
         try:
             extracted_executable = extracted_dir / executable_path
-            assert stat.S_IMODE(extracted_executable.stat().st_mode) == 0o751
-            assert stat.S_IMODE((extracted_dir / plain_path).stat().st_mode) == 0o640
+            if os.name != "nt":
+                assert stat.S_IMODE(extracted_executable.stat().st_mode) == 0o751
+                assert (
+                    stat.S_IMODE((extracted_dir / plain_path).stat().st_mode) == 0o640
+                )
 
             output_wheel = tmp_path / "output.whl"
             zip_wheel(extracted_dir, output_wheel)
