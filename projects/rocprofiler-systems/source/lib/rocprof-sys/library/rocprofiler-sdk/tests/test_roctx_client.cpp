@@ -7,8 +7,7 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
-#include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/fwd.h>
+// SDK headers come transitively through roctx_client.hpp -> backend shim.
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -102,8 +101,8 @@ TEST_F(roctx_client_test, constructor_creates_controller)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ true, true, true, false, "TestRegion" };
-    roctx_client<mock_marker_policy> client(config);
+    const roctx_client_config config{ true, true, true, false, "TestRegion" };
+    roctx_client<mock_marker_policy, rocprofsys::rocprofiler_sdk::backend> client(config);
     EXPECT_NE(client.get_controller(), nullptr);
 }
 
@@ -111,8 +110,8 @@ TEST_F(roctx_client_test, constructor_without_region_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ true, true, true, false, "" };
-    roctx_client<mock_marker_policy> client(config);
+    const roctx_client_config config{ true, true, true, false, "" };
+    roctx_client<mock_marker_policy, rocprofsys::rocprofiler_sdk::backend> client(config);
     EXPECT_NE(client.get_controller(), nullptr);
     EXPECT_FALSE(client.get_controller()->region_filter_active());
 }
@@ -121,8 +120,8 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config        config{ true, true, true, false, "Region 1" };
-    roctx_client<mock_marker_policy> client(config);
+    const roctx_client_config config{ true, true, true, false, "Region 1" };
+    roctx_client<mock_marker_policy, rocprofsys::rocprofiler_sdk::backend> client(config);
     EXPECT_TRUE(client.get_controller()->region_filter_active());
 }
 
@@ -130,8 +129,9 @@ TEST_F(roctx_client_test, should_write_no_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config              config{ true, true, true, false, "" };
-    const roctx_client<mock_marker_policy> client(config);
+    const roctx_client_config config{ true, true, true, false, "" };
+    const roctx_client<mock_marker_policy, rocprofsys::rocprofiler_sdk::backend> client(
+        config);
     EXPECT_TRUE(client.get_controller()->should_write_markers());
 }
 
@@ -139,8 +139,9 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config              config{ true, true, true, false, "Region 1" };
-    const roctx_client<mock_marker_policy> client(config);
+    const roctx_client_config config{ true, true, true, false, "Region 1" };
+    const roctx_client<mock_marker_policy, rocprofsys::rocprofiler_sdk::backend> client(
+        config);
     EXPECT_FALSE(client.get_controller()->should_write_markers());
 }
 
@@ -157,7 +158,9 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 class roctx_client_control_test : public mock_cleanup_base
 {
 protected:
-    using roctx_client_t = rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy>;
+    using roctx_client_t =
+        rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy,
+                                                  rocprofsys::rocprofiler_sdk::backend>;
     using roctx_config_t = rocprofsys::rocprofiler_sdk::roctx_client_config;
 
     int start_count = 0;
@@ -565,11 +568,12 @@ using mock_marker_writer =
     rocprofsys::rocprofiler_sdk::marker_writer<rocprofsys::rocprofiler_sdk::backend,
                                                mock_marker_policy>;
 
-rocprofiler_callback_tracing_record_t
+template <typename Backend = rocprofsys::rocprofiler_sdk::backend>
+typename Backend::callback_tracing_record
 make_record(std::uint64_t thread_id, std::uint64_t corr_internal,
             std::uint64_t corr_external)
 {
-    rocprofiler_callback_tracing_record_t record{};
+    typename Backend::callback_tracing_record record{};
     record.thread_id                     = thread_id;
     record.correlation_id.internal       = corr_internal;
     record.correlation_id.external.value = corr_external;
@@ -708,7 +712,9 @@ TEST_F(marker_write_test, write_end_with_empty_args)
 class roctx_push_pop_region_test : public mock_cleanup_base
 {
 protected:
-    using roctx_client_t = rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy>;
+    using roctx_client_t =
+        rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy,
+                                                  rocprofsys::rocprofiler_sdk::backend>;
     using roctx_config_t = rocprofsys::rocprofiler_sdk::roctx_client_config;
 
     int start_count = 0;

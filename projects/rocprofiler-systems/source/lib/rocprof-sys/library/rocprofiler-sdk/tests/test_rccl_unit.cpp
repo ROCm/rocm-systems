@@ -12,6 +12,7 @@
 #include <vector>
 
 using namespace rocprofsys::rocprofiler_sdk;
+using backend_t = ::rocprofsys::rocprofiler_sdk::backend;
 
 /**
  * @brief Mock PMC registrar for testing with GMock.
@@ -98,7 +99,7 @@ class rccl_type_size_test : public ::testing::TestWithParam<rccl_type_size_param
 TEST_P(rccl_type_size_test, returns_correct_size)
 {
     auto param = GetParam();
-    EXPECT_EQ(rccl_type_size(param.datatype), param.expected_size);
+    EXPECT_EQ(rccl_type_size<backend_t>(param.datatype), param.expected_size);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -120,20 +121,20 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_F(rccl_test, rccl_type_size_returns_zero_for_invalid_datatype)
 {
     const auto INVALID_DATATYPE = static_cast<ncclDataType_t>(100);
-    EXPECT_EQ(rccl_type_size(INVALID_DATATYPE), 0u);
+    EXPECT_EQ(rccl_type_size<backend_t>(INVALID_DATATYPE), 0u);
 }
 
 TEST_F(rccl_test, rccl_type_size_returns_zero_for_negative_datatype)
 {
     const auto NEGATIVE_DATATYPE = static_cast<ncclDataType_t>(-1);
-    EXPECT_EQ(rccl_type_size(NEGATIVE_DATATYPE), 0u);
+    EXPECT_EQ(rccl_type_size<backend_t>(NEGATIVE_DATATYPE), 0u);
 }
 
 TEST_F(rccl_test, rccl_type_size_returns_zero_for_max_int_datatype)
 {
     const auto MAX_INT_DATATYPE =
         static_cast<ncclDataType_t>(std::numeric_limits<int>::max());
-    EXPECT_EQ(rccl_type_size(MAX_INT_DATATYPE), 0u);
+    EXPECT_EQ(rccl_type_size<backend_t>(MAX_INT_DATATYPE), 0u);
 }
 
 TEST_F(rccl_test, tracking_state_default_constructor_creates_empty_state)
@@ -404,7 +405,7 @@ TEST_F(rccl_test, tracking_state_usable_after_reset)
 
 TEST_F(rccl_test, rccl_event_info_default_initialized)
 {
-    rccl_event_info info{};
+    rccl_event_info<backend_t> info{};
     EXPECT_EQ(info.size, 0u);
     EXPECT_FALSE(info.is_send);
     EXPECT_EQ(info.comm, nullptr);
@@ -412,7 +413,7 @@ TEST_F(rccl_test, rccl_event_info_default_initialized)
 
 TEST_F(rccl_test, rccl_event_info_can_be_modified)
 {
-    rccl_event_info info{};
+    rccl_event_info<backend_t> info{};
 
     info.size    = 1024;
     info.is_send = true;
@@ -425,7 +426,7 @@ TEST_F(rccl_test, rccl_event_info_can_be_modified)
 
 TEST_F(rccl_test, rccl_event_info_large_size)
 {
-    rccl_event_info info{};
+    rccl_event_info<backend_t> info{};
 
     info.size = std::numeric_limits<size_t>::max();
 

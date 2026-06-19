@@ -22,6 +22,29 @@
 #include <utility>
 #include <vector>
 
+// The ROCPROFILER_CALL macro uses raw SDK identifiers which remain accessible
+// via the transitive SDK includes from the backend shim.
+#ifndef ROCPROFILER_CALL
+#    define ROCPROFILER_CALL(result)                                                     \
+        {                                                                                \
+            rocprofiler_status_t ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) =          \
+                (result);                                                                \
+            if(ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) !=                           \
+               ROCPROFILER_STATUS_SUCCESS)                                               \
+            {                                                                            \
+                auto        msg        = std::stringstream{};                            \
+                std::string status_msg = rocprofiler_get_status_string(                  \
+                    ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__));                       \
+                msg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] "           \
+                    << "rocprofiler-sdk call [" << #result                               \
+                    << "] failed with error code "                                       \
+                    << ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__)                      \
+                    << " :: " << status_msg;                                             \
+                LOG_WARNING("{}", msg.str());                                            \
+            }                                                                            \
+        }
+#endif
+
 namespace rocprofsys
 {
 namespace rocprofiler_sdk
@@ -529,26 +552,3 @@ using timing_interval_t = timing_interval<backend>;
 
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
-
-// The ROCPROFILER_CALL macro uses raw SDK identifiers which remain accessible
-// via the transitive SDK includes from the backend shim.
-#ifndef ROCPROFILER_CALL
-#    define ROCPROFILER_CALL(result)                                                     \
-        {                                                                                \
-            rocprofiler_status_t ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) =          \
-                (result);                                                                \
-            if(ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) !=                           \
-               ROCPROFILER_STATUS_SUCCESS)                                               \
-            {                                                                            \
-                auto        msg        = std::stringstream{};                            \
-                std::string status_msg = rocprofiler_get_status_string(                  \
-                    ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__));                       \
-                msg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] "           \
-                    << "rocprofiler-sdk call [" << #result                               \
-                    << "] failed with error code "                                       \
-                    << ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__)                      \
-                    << " :: " << status_msg;                                             \
-                LOG_WARNING("{}", msg.str());                                            \
-            }                                                                            \
-        }
-#endif

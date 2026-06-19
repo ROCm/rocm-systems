@@ -112,11 +112,11 @@ public:
 
     // ─── Static data members (formerly anon-namespace globals) ───────────────
 
-    static client_data<Backend>*           tool_data;
-    static std::shared_ptr<roctx_client<>> g_roctx_client;
-    static std::atomic<bool>               tool_fini_done;
-    static std::atomic<bool>               tool_init_done;
-    static std::atomic<bool>               sdk_configured;
+    static client_data<Backend>*                                         tool_data;
+    static std::shared_ptr<roctx_client<default_marker_policy, Backend>> g_roctx_client;
+    static std::atomic<bool>                                             tool_fini_done;
+    static std::atomic<bool>                                             tool_init_done;
+    static std::atomic<bool>                                             sdk_configured;
 
 private:
     // ─── Nested helper types ──────────────────────────────────────────────────
@@ -193,8 +193,9 @@ private:
 
     // ─── roctx / counter / finalization helpers ───────────────────────────────
 
-    static std::shared_ptr<roctx_client<>> get_roctx_client();
-    static void                            flush_counter_storage_outputs();
+    static std::shared_ptr<roctx_client<default_marker_policy, Backend>>
+                get_roctx_client();
+    static void flush_counter_storage_outputs();
     static void flush_counter_tracks_to_zero(typename Backend::timestamp_t ts);
     static void finalize_sdk_common();
 
@@ -470,7 +471,8 @@ template <typename Backend>
 client_data<Backend>* library_sdk<Backend>::tool_data = new client_data<Backend>{};
 
 template <typename Backend>
-std::shared_ptr<roctx_client<>> library_sdk<Backend>::g_roctx_client = {};
+std::shared_ptr<roctx_client<default_marker_policy, Backend>>
+    library_sdk<Backend>::g_roctx_client = {};
 
 template <typename Backend>
 std::atomic<bool> library_sdk<Backend>::tool_fini_done{ false };
@@ -713,7 +715,7 @@ library_sdk<Backend>::flush()
 // ─── roctx helper ────────────────────────────────────────────────────────────
 
 template <typename Backend>
-std::shared_ptr<roctx_client<>>
+std::shared_ptr<roctx_client<default_marker_policy, Backend>>
 library_sdk<Backend>::get_roctx_client()
 {
     if(!g_roctx_client)
@@ -736,7 +738,8 @@ library_sdk<Backend>::get_roctx_client()
             config::get_use_timemory(), config::get_perfetto_annotations(),
             roctx_traced_regions,
         };
-        g_roctx_client = std::make_shared<roctx_client<>>(roctx_config);
+        g_roctx_client =
+            std::make_shared<roctx_client<default_marker_policy, Backend>>(roctx_config);
     }
     return g_roctx_client;
 }
@@ -1330,7 +1333,7 @@ library_sdk<Backend>::tool_code_object_callback(
                     record.payload);
                 tool_data->code_object_records.wlock([ts, &record, &data_v](auto& _data) {
                     _data.emplace_back(
-                        code_object_callback_record_t{ ts, record, data_v });
+                        code_object_callback_record_t<Backend>{ ts, record, data_v });
                 });
                 trace_cache::get_metadata_registry().add_code_object(data_v);
             }
@@ -1339,11 +1342,11 @@ library_sdk<Backend>::tool_code_object_callback(
             {
                 auto data_v =
                     *static_cast<kernel_symbol_data_t<Backend>*>(record.payload);
-                tool_data->kernel_symbol_records.wlock(
-                    [ts, &record, &data_v](auto& _data) {
-                        _data.emplace_back(
-                            kernel_symbol_callback_record_t{ ts, record, data_v });
-                    });
+                tool_data->kernel_symbol_records.wlock([ts, &record,
+                                                        &data_v](auto& _data) {
+                    _data.emplace_back(
+                        kernel_symbol_callback_record_t<Backend>{ ts, record, data_v });
+                });
                 trace_cache::get_metadata_registry().add_kernel_symbol(data_v);
             }
         }
@@ -1640,8 +1643,8 @@ library_sdk<Backend>::tool_tracing_callback(
             {
                 auto* rccl_payload =
                     static_cast<typename Backend::rccl_api_data*>(record.payload);
-                tool_tracing_callback_rccl(record.operation, rccl_payload,
-                                           user_data->value, ts);
+                tool_tracing_callback_rccl<Backend>(record.operation, rccl_payload,
+                                                    user_data->value, ts);
                 tool_tracing_callback_stop(category::rocm_rccl_api{}, record, user_data,
                                            ts, _bt_data);
                 break;
@@ -3058,8 +3061,9 @@ library_sdk<Backend>::sdk_tool_configure(std::uint32_t                  version,
 
     ROCPROFILER_CALL(Backend::at_internal_thread_create(
         &library_sdk::thread_precreate, &library_sdk::thread_postcreate,
-        ROCPROFILER_LIBRARY | ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
-            ROCPROFILER_MARKER_LIBRARY,
+        static_cast<typename Backend::runtime_library_t>(
+            ROCPROFILER_LIBRARY | ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
+            ROCPROFILER_MARKER_LIBRARY),
         nullptr));
 
     return true;
