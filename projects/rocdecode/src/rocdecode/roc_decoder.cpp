@@ -141,18 +141,94 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
     }
 
 #ifdef _WIN32
-    // EXPERIMENTAL: Windows path — CPU staging (vaDeriveImage/vaMapBuffer → hipMemcpy).
-    // This is a temporary workaround. Zero-copy D3D12↔HIP interop is required for
-    // production but hipImportExternalMemory does not yet support D3D12 resource handles
-    // on AMD HIP for Windows. Once HIP adds D3D12 interop support, this path should be
-    // replaced with the zero-copy ExportSurfaceNTHandle → hipImportExternalMemory flow.
-    // The copy must happen every frame since surfaces are reused by the decoder.
-    {
-        static bool warned_once = false;
-        if (!warned_once) {
-            WarningLog(g_rocdec_logger, "EXPERIMENTAL: using CPU-staged frame transfer (no D3D12↔HIP zero-copy interop).");
-            warned_once = true;
+    // Windows interop: D3D12 tiled texture → linear staging buffer → HIP import.
+    // The staging buffer import + layout setup is done once per surface slot.
+    // The tiled→linear copy (CopyToStagingBuffer) runs every frame since surfaces are reused.
+    if (hip_interop_[pic_idx].hip_mapped_device_mem == nullptr) {
+        // Copy decoded tiled texture to linear staging buffer, then export + import into HIP.
+        rocdec_status = va_video_decoder_.CopyToStagingBuffer(pic_idx);
+        if (rocdec_status != ROCDEC_SUCCESS) {
+            ErrorLog(g_rocdec_logger, "CopyToStagingBuffer failed for pic_idx=" + ROCDEC_TOSTR(pic_idx));
+            FunctionExitLog(g_rocdec_logger);
+            return rocdec_status;
         }
+
+        HANDLE nt_handle = nullptr;
+        rocdec_status = va_video_decoder_.ExportStagingBufferHandle(pic_idx, nt_handle);
+        if (rocdec_status != ROCDEC_SUCCESS) {
+            ErrorLog(g_rocdec_logger, "ExportStagingBufferHandle failed for pic_idx=" + ROCDEC_TOSTR(pic_idx));
+            FunctionExitLog(g_rocdec_logger);
+            return rocdec_status;
+        }
+
+        uint64_t staging_size = va_video_decoder_.GetStagingBufferSize(pic_idx);
+        InfoLog(g_rocdec_logger, "Staging buffer size for pic_idx=" + ROCDEC_TOSTR(pic_idx) +
+                ": " + ROCDEC_TOSTR(staging_size) + " bytes");
+
+        // Import the linear staging buffer into HIP.
+        struct { hipExternalMemoryHandleType type; const char* name; } handle_types[] = {
+            { hipExternalMemoryHandleTypeD3D12Resource, "D3D12Resource" },
+            { hipExternalMemoryHandleTypeD3D12Heap,     "D3D12Heap" },
+            { hipExternalMemoryHandleTypeOpaqueWin32,   "OpaqueWin32" },
+        };
+
+        hipError_t hip_status = hipErrorInvalidValue;
+        for (auto& ht : handle_types) {
+            hipExternalMemoryHandleDesc external_mem_handle_desc = {};
+            external_mem_handle_desc.type = ht.type;
+            external_mem_handle_desc.handle.win32.handle = nt_handle;
+            external_mem_handle_desc.size = staging_size;
+            external_mem_handle_desc.flags = 0;
+
+            hip_status = hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc);
+            if (hip_status == hipSuccess) {
+                InfoLog(g_rocdec_logger, "hipImportExternalMemory succeeded with type=" + ROCDEC_STR(ht.name));
+                break;
+            }
+            DebugLog(g_rocdec_logger, "hipImportExternalMemory with type=" + ROCDEC_STR(ht.name) +
+                     " failed: " + ROCDEC_STR(hipGetErrorName(hip_status)));
+            hip_interop_[pic_idx].hip_ext_mem = nullptr;
+        }
+
+        if (hip_status == hipSuccess) {
+            hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
+            external_mem_buffer_desc.size = staging_size;
+            CHECK_HIP(hipExternalMemoryGetMappedBuffer((void**)&hip_interop_[pic_idx].hip_mapped_device_mem,
+                                                       hip_interop_[pic_idx].hip_ext_mem, &external_mem_buffer_desc));
+
+            // Use the linear staging buffer layout (from GetCopyableFootprints).
+            uint32_t d3d_pitches[3] = {}, d3d_offsets[3] = {}, d3d_num_planes = 0;
+            va_video_decoder_.GetD3D12ResourceLayout(pic_idx, d3d_pitches, d3d_offsets, d3d_num_planes);
+
+            hip_interop_[pic_idx].width = decoder_create_info_.width;
+            hip_interop_[pic_idx].height = decoder_create_info_.height;
+            hip_interop_[pic_idx].num_layers = d3d_num_planes;
+            for (uint32_t i = 0; i < d3d_num_planes && i < 3; i++) {
+                hip_interop_[pic_idx].pitch[i] = d3d_pitches[i];
+                hip_interop_[pic_idx].offset[i] = d3d_offsets[i];
+            }
+            hip_interop_[pic_idx].nt_handle = nt_handle;
+
+            InfoLog(g_rocdec_logger, "D3D12↔HIP interop active for pic_idx=" + ROCDEC_TOSTR(pic_idx));
+        } else {
+            CloseHandle(nt_handle);
+            WarningLog(g_rocdec_logger, "All hipImportExternalMemory handle types failed. "
+                       "Falling back to CPU-staged transfer (EXPERIMENTAL).");
+            hip_interop_[pic_idx].hip_ext_mem = nullptr;
+        }
+    } else if (hip_interop_[pic_idx].hip_ext_mem != nullptr) {
+        // Subsequent frame on an already-imported surface slot: re-copy tiled→linear.
+        rocdec_status = va_video_decoder_.CopyToStagingBuffer(pic_idx);
+        if (rocdec_status != ROCDEC_SUCCESS) {
+            ErrorLog(g_rocdec_logger, "CopyToStagingBuffer failed for pic_idx=" + ROCDEC_TOSTR(pic_idx));
+            FunctionExitLog(g_rocdec_logger);
+            return rocdec_status;
+        }
+    }
+
+    // CPU staging fallback — used when zero-copy interop is not available.
+    // Must run every frame since surfaces are reused by the decoder.
+    if (hip_interop_[pic_idx].hip_ext_mem == nullptr) {
         uint8_t* cpu_ptr = nullptr;
         uint32_t va_width = 0, va_height = 0, num_planes = 0;
         uint32_t va_pitches[3] = {}, va_offsets[3] = {};
@@ -164,15 +240,12 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
             return rocdec_status;
         }
 
-        // Use the same aligned stride that the Linux DRM/VCN path produces (align(width, 256))
-        // so the downstream sample layer's size calculations match our device allocation.
         uint32_t bytes_per_pixel = (decoder_create_info_.bit_depth_minus_8 > 0) ? 2 : 1;
         uint32_t aligned_pitch = ((decoder_create_info_.width + 255) & ~255u) * bytes_per_pixel;
         uint32_t aligned_vstride = (decoder_create_info_.height + 15) & ~15u;
-        uint32_t chroma_vstride = aligned_vstride / 2; // NV12/P010: chroma is half height
+        uint32_t chroma_vstride = aligned_vstride / 2;
         uint32_t total_size = aligned_pitch * (aligned_vstride + chroma_vstride);
 
-        // Allocate device memory once, reuse for subsequent frames on the same surface slot.
         if (hip_interop_[pic_idx].hip_mapped_device_mem == nullptr) {
             CHECK_HIP(hipMalloc(&hip_interop_[pic_idx].hip_mapped_device_mem, total_size));
             hip_interop_[pic_idx].width = decoder_create_info_.width;
@@ -186,11 +259,9 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
             }
         }
 
-        // Copy each plane row-by-row from the VA image pitch to the aligned device pitch.
-        // Plane 0 (Y/luma):
+        // Copy each plane with stride conversion.
         uint32_t plane_height = decoder_create_info_.height;
         if (va_pitches[0] == aligned_pitch) {
-            // Pitches match — bulk copy luma plane.
             CHECK_HIP(hipMemcpy(hip_interop_[pic_idx].hip_mapped_device_mem,
                                 cpu_ptr + va_offsets[0], aligned_pitch * plane_height, hipMemcpyHostToDevice));
         } else {
@@ -199,7 +270,6 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
                                   decoder_create_info_.width * bytes_per_pixel, plane_height,
                                   hipMemcpyHostToDevice));
         }
-        // Plane 1 (UV/chroma) if present:
         if (num_planes >= 2) {
             uint32_t chroma_height = decoder_create_info_.height / 2;
             uint8_t* dst_uv = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[1];
@@ -213,7 +283,6 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
                                       hipMemcpyHostToDevice));
             }
         }
-
         va_video_decoder_.UnmapSurface(pic_idx);
     }
 #else

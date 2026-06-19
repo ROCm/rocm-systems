@@ -27,6 +27,9 @@ VaapiVideoDecoder::VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info) 
     va_context_id_{0}, va_surface_ids_{{}}, supports_modifiers_{false},
 #ifdef _WIN32
     d3d12_device_{nullptr}, d3d12_shared_resources_{},
+    d3d12_copy_queue_{nullptr}, d3d12_cmd_allocator_{nullptr}, d3d12_cmd_list_{nullptr},
+    d3d12_fence_{nullptr}, d3d12_fence_event_{nullptr}, d3d12_fence_value_{0},
+    d3d12_staging_buffers_{},
 #endif
     pic_params_buf_id_{0}, iq_matrix_buf_id_{0}, num_slices_{0},
     slice_data_buf_id_{0} {
@@ -45,11 +48,20 @@ VaapiVideoDecoder::~VaapiVideoDecoder() {
             CriticalLog(g_rocdec_logger, "vaDestroySurfaces failed");
         }
 #ifdef _WIN32
-        // Release D3D12 shared resources after VA surfaces are destroyed
+        // Release D3D12 resources after VA surfaces are destroyed
+        for (auto* res : d3d12_staging_buffers_) {
+            if (res) res->Release();
+        }
+        d3d12_staging_buffers_.clear();
         for (auto* res : d3d12_shared_resources_) {
             if (res) res->Release();
         }
         d3d12_shared_resources_.clear();
+        if (d3d12_cmd_list_) { d3d12_cmd_list_->Release(); d3d12_cmd_list_ = nullptr; }
+        if (d3d12_cmd_allocator_) { d3d12_cmd_allocator_->Release(); d3d12_cmd_allocator_ = nullptr; }
+        if (d3d12_copy_queue_) { d3d12_copy_queue_->Release(); d3d12_copy_queue_ = nullptr; }
+        if (d3d12_fence_) { d3d12_fence_->Release(); d3d12_fence_ = nullptr; }
+        if (d3d12_fence_event_) { CloseHandle(d3d12_fence_event_); d3d12_fence_event_ = nullptr; }
         if (d3d12_device_) {
             d3d12_device_->Release();
             d3d12_device_ = nullptr;
@@ -437,6 +449,113 @@ rocDecStatus VaapiVideoDecoder::ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_ha
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
+
+void VaapiVideoDecoder::GetD3D12ResourceLayout(int pic_idx, uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes) {
+    num_planes = 0;
+    memset(pitches, 0, sizeof(uint32_t) * 3);
+    memset(offsets, 0, sizeof(uint32_t) * 3);
+    if (d3d12_device_ == nullptr || pic_idx >= d3d12_shared_resources_.size() || d3d12_shared_resources_[pic_idx] == nullptr) {
+        return;
+    }
+    D3D12_RESOURCE_DESC desc = d3d12_shared_resources_[pic_idx]->GetDesc();
+
+    // NV12/P010 have 2 subresources (Y plane = subresource 0, UV plane = subresource 1).
+    // Query the actual layout for each plane via GetCopyableFootprints.
+    UINT num_subresources = 2; // NV12/P010
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[2] = {};
+    UINT num_rows[2] = {};
+    UINT64 row_sizes[2] = {};
+    UINT64 total_size = 0;
+    d3d12_device_->GetCopyableFootprints(&desc, 0, num_subresources, 0, footprints, num_rows, row_sizes, &total_size);
+
+    num_planes = num_subresources;
+    for (UINT i = 0; i < num_subresources; i++) {
+        pitches[i] = footprints[i].Footprint.RowPitch;
+        offsets[i] = static_cast<uint32_t>(footprints[i].Offset);
+    }
+
+    InfoLog(g_rocdec_logger, "D3D12 resource layout for pic_idx=" + ROCDEC_TOSTR(pic_idx) +
+            ": plane0 pitch=" + ROCDEC_TOSTR(pitches[0]) + " offset=" + ROCDEC_TOSTR(offsets[0]) +
+            ", plane1 pitch=" + ROCDEC_TOSTR(pitches[1]) + " offset=" + ROCDEC_TOSTR(offsets[1]) +
+            ", total=" + ROCDEC_TOSTR(total_size));
+}
+
+rocDecStatus VaapiVideoDecoder::CopyToStagingBuffer(int pic_idx) {
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
+    if (pic_idx >= d3d12_shared_resources_.size() || d3d12_shared_resources_[pic_idx] == nullptr ||
+        pic_idx >= d3d12_staging_buffers_.size() || d3d12_staging_buffers_[pic_idx] == nullptr ||
+        d3d12_copy_queue_ == nullptr) {
+        CriticalLog(g_rocdec_logger, "D3D12 staging infrastructure not available for pic_idx=" + ROCDEC_TOSTR(pic_idx));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+
+    D3D12_RESOURCE_DESC tex_desc = d3d12_shared_resources_[pic_idx]->GetDesc();
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[2] = {};
+    UINT num_rows[2] = {};
+    UINT64 row_sizes[2] = {};
+    UINT64 total_size = 0;
+    d3d12_device_->GetCopyableFootprints(&tex_desc, 0, 2, 0, footprints, num_rows, row_sizes, &total_size);
+
+    // Record copy commands: texture (tiled) → buffer (linear) for each plane.
+    d3d12_cmd_allocator_->Reset();
+    d3d12_cmd_list_->Reset(d3d12_cmd_allocator_, nullptr);
+
+    for (UINT plane = 0; plane < 2; plane++) {
+        D3D12_TEXTURE_COPY_LOCATION src = {};
+        src.pResource = d3d12_shared_resources_[pic_idx];
+        src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        src.SubresourceIndex = plane;
+
+        D3D12_TEXTURE_COPY_LOCATION dst = {};
+        dst.pResource = d3d12_staging_buffers_[pic_idx];
+        dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        dst.PlacedFootprint = footprints[plane];
+
+        d3d12_cmd_list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    }
+
+    d3d12_cmd_list_->Close();
+    ID3D12CommandList* lists[] = { d3d12_cmd_list_ };
+    d3d12_copy_queue_->ExecuteCommandLists(1, lists);
+
+    // Wait for copy to complete.
+    d3d12_fence_value_++;
+    d3d12_copy_queue_->Signal(d3d12_fence_, d3d12_fence_value_);
+    if (d3d12_fence_->GetCompletedValue() < d3d12_fence_value_) {
+        d3d12_fence_->SetEventOnCompletion(d3d12_fence_value_, d3d12_fence_event_);
+        WaitForSingleObject(d3d12_fence_event_, INFINITE);
+    }
+
+    FunctionExitLog(g_rocdec_logger);
+    return ROCDEC_SUCCESS;
+}
+
+rocDecStatus VaapiVideoDecoder::ExportStagingBufferHandle(int pic_idx, HANDLE &nt_handle) {
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
+    if (pic_idx >= d3d12_staging_buffers_.size() || d3d12_staging_buffers_[pic_idx] == nullptr) {
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_INVALID_PARAMETER;
+    }
+    HRESULT hr = d3d12_device_->CreateSharedHandle(d3d12_staging_buffers_[pic_idx], nullptr, GENERIC_ALL, nullptr, &nt_handle);
+    if (FAILED(hr)) {
+        CriticalLog(g_rocdec_logger, "CreateSharedHandle for staging buffer failed, HRESULT=0x" +
+                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(hr));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+    FunctionExitLog(g_rocdec_logger);
+    return ROCDEC_SUCCESS;
+}
+
+uint64_t VaapiVideoDecoder::GetStagingBufferSize(int pic_idx) {
+    if (pic_idx >= d3d12_staging_buffers_.size() || d3d12_staging_buffers_[pic_idx] == nullptr) {
+        return 0;
+    }
+    D3D12_RESOURCE_DESC desc = d3d12_staging_buffers_[pic_idx]->GetDesc();
+    return desc.Width; // For buffers, Width is the size in bytes.
+}
+
 rocDecStatus VaapiVideoDecoder::MapSurfaceToCPU(int pic_idx, uint8_t** cpu_ptr, uint32_t &width, uint32_t &height,
                                                 uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes) {
     FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
@@ -790,15 +909,40 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
     res_desc.MipLevels = 1;
     res_desc.Format = dxgi_format;
     res_desc.SampleDesc.Count = 1;
-    res_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    res_desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    // Force linear (row-major) layout so HIP can read the texture as a flat buffer.
+    // D3D12_TEXTURE_LAYOUT_ROW_MAJOR requires ALLOW_CROSS_ADAPTER on UMA adapters (APUs).
+    // If this fails (e.g. on discrete GPUs), fall back to LAYOUT_UNKNOWN.
+    res_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    res_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
 
     D3D12_HEAP_PROPERTIES heap_props = {};
     heap_props.Type = D3D12_HEAP_TYPE_DEFAULT;
 
-    for (uint32_t i = 0; i < num_surfaces; i++) {
+    D3D12_HEAP_FLAGS heap_flags = D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER;
+
+    // Try linear layout first; fall back to driver-default layout.
+    bool linear_layout = true;
+    {
         HRESULT hr = d3d12_device_->CreateCommittedResource(
-            &heap_props, D3D12_HEAP_FLAG_SHARED,
+            &heap_props, heap_flags,
+            &res_desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+            __uuidof(ID3D12Resource), reinterpret_cast<void**>(&d3d12_shared_resources_[0]));
+        if (FAILED(hr)) {
+            InfoLog(g_rocdec_logger, "ROW_MAJOR layout not supported (HRESULT=0x" +
+                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(hr) +
+                    "), falling back to LAYOUT_UNKNOWN (tiled)");
+            linear_layout = false;
+            res_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+            res_desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+            heap_flags = D3D12_HEAP_FLAG_SHARED;
+        } else {
+            InfoLog(g_rocdec_logger, "Using D3D12_TEXTURE_LAYOUT_ROW_MAJOR (linear) for decode surfaces");
+        }
+    }
+
+    for (uint32_t i = (linear_layout ? 1 : 0); i < num_surfaces; i++) {
+        HRESULT hr = d3d12_device_->CreateCommittedResource(
+            &heap_props, heap_flags,
             &res_desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
             __uuidof(ID3D12Resource), reinterpret_cast<void**>(&d3d12_shared_resources_[i]));
         if (FAILED(hr) || d3d12_shared_resources_[i] == nullptr) {
@@ -826,6 +970,64 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
 
     CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format, decoder_create_info_.width,
         decoder_create_info_.height, va_surface_ids_.data(), va_surface_ids_.size(), surf_attribs.data(), surf_attribs.size()));
+
+    // Create linear staging buffers for tiled→linear copy, and D3D12 copy infrastructure.
+    if (!linear_layout) {
+        // Get the linear footprint size for the staging buffer.
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[2] = {};
+        UINT64 staging_size = 0;
+        d3d12_device_->GetCopyableFootprints(&res_desc, 0, 2, 0, footprints, nullptr, nullptr, &staging_size);
+
+        // Ensure staging buffer is at least as large as the aligned size the sample layer expects
+        // (align(width,256) * (align(height,16) + align(height,16)/2) for NV12).
+        uint32_t bpp = (decoder_create_info_.bit_depth_minus_8 > 0) ? 2 : 1;
+        uint32_t aligned_pitch = ((decoder_create_info_.width + 255) & ~255u) * bpp;
+        uint32_t aligned_vstride = (decoder_create_info_.height + 15) & ~15u;
+        UINT64 sample_expected_size = static_cast<UINT64>(aligned_pitch) * (aligned_vstride + aligned_vstride / 2);
+        if (staging_size < sample_expected_size) {
+            staging_size = sample_expected_size;
+        }
+
+        for (auto* buf : d3d12_staging_buffers_) { if (buf) buf->Release(); }
+        d3d12_staging_buffers_.resize(num_surfaces, nullptr);
+
+        D3D12_RESOURCE_DESC buf_desc = {};
+        buf_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        buf_desc.Width = staging_size;
+        buf_desc.Height = 1;
+        buf_desc.DepthOrArraySize = 1;
+        buf_desc.MipLevels = 1;
+        buf_desc.Format = DXGI_FORMAT_UNKNOWN;
+        buf_desc.SampleDesc.Count = 1;
+        buf_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+        for (uint32_t i = 0; i < num_surfaces; i++) {
+            HRESULT hr = d3d12_device_->CreateCommittedResource(
+                &heap_props, D3D12_HEAP_FLAG_SHARED,
+                &buf_desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+                __uuidof(ID3D12Resource), reinterpret_cast<void**>(&d3d12_staging_buffers_[i]));
+            if (FAILED(hr)) {
+                CriticalLog(g_rocdec_logger, "Failed to create staging buffer " + ROCDEC_TOSTR(i) +
+                            ", HRESULT=0x" + ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(hr));
+                FunctionExitLog(g_rocdec_logger);
+                return ROCDEC_RUNTIME_ERROR;
+            }
+        }
+
+        // Create copy command queue, allocator, list, and fence.
+        if (d3d12_copy_queue_ == nullptr) {
+            D3D12_COMMAND_QUEUE_DESC qd = {};
+            qd.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+            d3d12_device_->CreateCommandQueue(&qd, __uuidof(ID3D12CommandQueue), reinterpret_cast<void**>(&d3d12_copy_queue_));
+            d3d12_device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, __uuidof(ID3D12CommandAllocator), reinterpret_cast<void**>(&d3d12_cmd_allocator_));
+            d3d12_device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COPY, d3d12_cmd_allocator_, nullptr, __uuidof(ID3D12GraphicsCommandList), reinterpret_cast<void**>(&d3d12_cmd_list_));
+            d3d12_cmd_list_->Close();
+            d3d12_device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), reinterpret_cast<void**>(&d3d12_fence_));
+            d3d12_fence_event_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+            d3d12_fence_value_ = 0;
+        }
+        InfoLog(g_rocdec_logger, "Created D3D12 staging buffers (" + ROCDEC_TOSTR(staging_size) + " bytes each) for tiled→linear copy");
+    }
 #else
     uint64_t mod_linear = 0;
     VADRMFormatModifierList modifier_list = {

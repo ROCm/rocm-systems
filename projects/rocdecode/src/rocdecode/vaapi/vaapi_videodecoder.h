@@ -112,8 +112,12 @@ public:
     rocDecStatus SubmitDecode(RocdecPicParams *pPicParams);
     rocDecStatus GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status);
 #ifdef _WIN32
-    // Zero-copy path (blocked on HIP D3D12 interop support — not yet functional):
+    // Zero-copy path:
     rocDecStatus ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_handle);
+    rocDecStatus CopyToStagingBuffer(int pic_idx);
+    rocDecStatus ExportStagingBufferHandle(int pic_idx, HANDLE &nt_handle);
+    uint64_t GetStagingBufferSize(int pic_idx);
+    void GetD3D12ResourceLayout(int pic_idx, uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes);
     // EXPERIMENTAL CPU-staged path (functional workaround):
     rocDecStatus MapSurfaceToCPU(int pic_idx, uint8_t** cpu_ptr, uint32_t &width, uint32_t &height,
                                  uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes);
@@ -137,6 +141,14 @@ private:
 #ifdef _WIN32
     ID3D12Device* d3d12_device_;                         // D3D12 device for creating shared resources
     std::vector<ID3D12Resource*> d3d12_shared_resources_; // Shared D3D12 textures used as VA surfaces
+    // D3D12 copy infrastructure: tiled texture → linear staging buffer
+    ID3D12CommandQueue* d3d12_copy_queue_;
+    ID3D12CommandAllocator* d3d12_cmd_allocator_;
+    ID3D12GraphicsCommandList* d3d12_cmd_list_;
+    ID3D12Fence* d3d12_fence_;
+    HANDLE d3d12_fence_event_;
+    uint64_t d3d12_fence_value_;
+    std::vector<ID3D12Resource*> d3d12_staging_buffers_;  // Linear staging buffers (shared, for HIP import)
     VAImage va_mapped_image_;                             // Current derived image for CPU mapping
 #endif
 
