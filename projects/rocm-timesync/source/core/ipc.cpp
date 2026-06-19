@@ -127,8 +127,6 @@ void publish(state_t* state, event_t& event)
     ringbuffer_t& rbuf = state->rbuf;
 
     const uint64_t idx = rbuf.write_idx.load();
-
-    std::memcpy(&(rbuf.events[idx & (header.ring_size - 1)]), &event, sizeof(event_t));
     rbuf.events[idx & (header.ring_size - 1)] = event;
     rbuf.write_idx.store(idx+1, std::memory_order_release);
 
