@@ -29,6 +29,7 @@ def roctx_env() -> dict[str, str]:
         "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,marker_api,kernel_dispatch",
         "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,mem_usage,gfx_clock,mem_clock",
+        "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "1000",
     }
 
 
@@ -134,13 +135,8 @@ class TestROCTx(RocprofsysTest):
         self,
         roctx_env: dict[str, str],
         roctx_rules: list[Path],
-        gpu_info,
     ):
         env = roctx_env.copy()
-        if "apu" in gpu_info.categories:
-            # APUs share host memory and report metrics less frequently, so
-            # increase the process sampling rate to capture enough amd-smi samples.
-            env["ROCPROFSYS_PROCESS_SAMPLING_FREQ"] = "1000"
         categories = ["rocm_marker_api"]
         if env["ROCPROFSYS_TRACE_LEGACY"] == "ON":
             labels = self.roctx_legacy_labels()
