@@ -2210,7 +2210,7 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3MfmaPartialScratchGrowsDescriptor) {
   expect_cdna3_translated_descriptor_vgprs_at_least(result.elf_bytes, kScratchFloor + 4);
 }
 
-TEST(BinaryTranslatorE2E, RelocatedKernelCompactsSourceGapsAndPatchesBranches) {
+TEST(BinaryTranslatorE2E, RelocatedKernelPreservesEntryWindowAndPatchesBranches) {
   constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   constexpr uint32_t kCdna4SCbranchScc1ToSourceTarget = rocjitsu::pack_sopp(5, 4);
   const std::vector<uint32_t> words = {
@@ -2239,17 +2239,25 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsSourceGapsAndPatchesBranches) {
 
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  // Relocation emits only reachable blocks, compacted in source order. Explicit
-  // branch immediates are then patched into the compact layout; the old source
-  // gaps are not preserved for compatibility.
-  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[1], rocjitsu::pack_sopp(5, 1));
-  EXPECT_EQ(target_words[2], rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[3], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[4], kCdna4SEndpgm);
-  for (size_t i = 5; i < words.size(); ++i) {
+  // The first 256 bytes after the descriptor entry are layout-stable for the
+  // kernarg preload compatibility entry path. Explicit branch immediates are
+  // still patched into target-ISA encodings, but source gaps in that protected
+  // window are intentionally preserved.
+  const std::vector<uint32_t> expected = {
+      rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::pack_sopp(5, 4),
+      rocjitsu::build_s_branch(4, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
+      kCdna4SEndpgm,
+  };
+  for (size_t i = 0; i < expected.size(); ++i) {
     SCOPED_TRACE(i);
-    EXPECT_EQ(target_words[i], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+    EXPECT_EQ(target_words[i], expected[i]);
   }
 }
 
