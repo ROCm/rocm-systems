@@ -689,9 +689,11 @@ int extractNumber(const std::string& filename) {
     // Operate on basename only to avoid picking up digits from directory path
     auto sep = filename.find_last_of("/\\");
     std::string base = (sep == std::string::npos) ? filename : filename.substr(sep + 1);
-    // Strip extension so digits in ".265" are not picked up
+    // Strip extension so digits in ".265" are not picked up.
+    // Only treat a dot as an extension separator if it is not the leading character
+    // (a leading dot marks a hidden file, not an extension).
     auto dot = base.find_last_of('.');
-    if (dot != std::string::npos) base = base.substr(0, dot);
+    if (dot != std::string::npos && dot != 0) base = base.substr(0, dot);
     // Find the last contiguous digit sequence in the stem
     std::string numStr;
     for (auto it = base.rbegin(); it != base.rend(); ++it) {
