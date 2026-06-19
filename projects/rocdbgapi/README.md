@@ -22,7 +22,7 @@ The ROCdbgapi library can be built on Ubuntu, RHEL, SLES, and Windows. See [supp
 
 Building the ROCdbgapi library has the following prerequisites:
 
-1. A C++17 compiler such as GCC 7 or later, or Clang 5 or later.
+1. A C++17 compiler such as GCC 7 or later, Clang 5 or later, or MSVC 19.15 or later.
 
 2. AMD Code Object Manager Library (ROCcomgr). On Linux, this can be installed
    as part of the AMD ROCm release by the ``comgr`` package.  On Windows, this
