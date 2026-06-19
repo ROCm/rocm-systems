@@ -12,14 +12,23 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/counters.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/deprecated/counters.h>
 #include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
+#include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/version.h>
+
+#if __has_include(<rocprofiler-sdk/experimental/registration.h>)
+#    include <rocprofiler-sdk/experimental/registration.h>
+#else
+#    include <rocprofiler-sdk/registration.h>
+#endif
 
 #if ROCPROFILER_VERSION >= 10000
 #    include <rocprofiler-sdk/counter_config.h>
@@ -88,10 +97,19 @@ struct backend
     using marker_op_t                = rocprofiler_marker_core_api_id_t;
     using marker_control_op_t        = rocprofiler_marker_control_api_id_t;
 
+    // ─── Client / registration types ────────────────────────────────────────────
+    using client_id_t       = rocprofiler_client_id_t;
+    using client_finalize_t = rocprofiler_client_finalize_t;
+    using client_detach_t   = rocprofiler_client_detach_t;
+
+    // ─── Correlation types ────────────────────────────────────────────────────────
+    using correlation_id_t = rocprofiler_correlation_id_t;
+
     // ─── Buffer/callback tracing record types ────────────────────────────────────
     using record_header_t         = rocprofiler_record_header_t;
     using user_data_t             = rocprofiler_user_data_t;
     using kernel_dispatch_record  = rocprofiler_buffer_tracing_kernel_dispatch_record_t;
+    using kernel_dispatch_data    = rocprofiler_callback_tracing_kernel_dispatch_data_t;
     using memory_copy_record      = rocprofiler_buffer_tracing_memory_copy_record_t;
     using scratch_memory_record   = rocprofiler_buffer_tracing_scratch_memory_record_t;
     using callback_tracing_record = rocprofiler_callback_tracing_record_t;
@@ -147,6 +165,8 @@ struct backend
 #endif
 
 #if ROCPROFILER_VERSION >= 600
+    using ompt_data_t         = rocprofiler_callback_tracing_ompt_data_t;
+    using ompt_operation_t    = rocprofiler_ompt_operation_t;
     using rccl_api_data       = rocprofiler_callback_tracing_rccl_api_data_t;
     using memory_alloc_record = rocprofiler_buffer_tracing_memory_allocation_record_t;
 #endif
@@ -197,6 +217,8 @@ struct backend
     // ─── Buffer category constants ───────────────────────────────────────────────
     static constexpr buffer_category_t BUFFER_CATEGORY_TRACING =
         ROCPROFILER_BUFFER_CATEGORY_TRACING;
+    static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS =
+        ROCPROFILER_BUFFER_POLICY_LOSSLESS;
 
     // ─── Runtime library flag constants ──────────────────────────────────────────
     static constexpr runtime_library_t LIBRARY        = ROCPROFILER_LIBRARY;

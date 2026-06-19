@@ -21,9 +21,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 struct version_info
@@ -109,8 +107,7 @@ public:
 
 using core_sdk = sdk_core<backend>;
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk
 
 // ─── Template Implementations ────────────────────────────────────────────────
 
