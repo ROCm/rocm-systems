@@ -21,12 +21,18 @@
 """CLI leaf test: set command."""
 
 import common.common as common
+from common.common import amdsmi
+
 from cli.base import TestCliBase
 
-# common.common owns path resolution, sys.path setup, and amdsmi loading — borrow the
-# reference so AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution and the stale-package check
-# (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
-from common.common import amdsmi
+
+def _strip_prefix(value, prefix):
+    # Backport of str.removeprefix() (added in Python 3.9) because the test suite
+    # still supports Python 3.8. Strips a leading enum-name prefix (e.g.
+    # "AMDSMI_DEV_PERF_LEVEL_") when present, otherwise returns value unchanged.
+    if value.startswith(prefix):
+        return value[len(prefix) :]
+    return value
 
 
 class TestSet(TestCliBase):
@@ -47,7 +53,7 @@ class TestSet(TestCliBase):
         for index, gpu in enumerate(self.common.processors):
             try:
                 power_profile[index] = amdsmi.amdsmi_get_gpu_power_profile_presets(gpu, 0)
-            except amdsmi.AmdSmiLibraryException as e:
+            except amdsmi.AmdSmiLibraryException:
                 power_profile[index] = None
 
         cmds = self.CreateCmds(
@@ -80,12 +86,12 @@ class TestSet(TestCliBase):
             # set --perf-level defaults
             perf_level = self.metric_data["gpu_data"][index]["perf_level"]
             if perf_level != "N/A":
-                perf_level = perf_level.removeprefix("AMDSMI_DEV_PERF_LEVEL_")
+                perf_level = _strip_prefix(perf_level, "AMDSMI_DEV_PERF_LEVEL_")
                 cmds.append((f"amd-smi set --perf-level {perf_level} --gpu {index}", self.PASS))
 
             # set --profile defaults
             if power_profile[index]:
-                profile = power_profile[index]["current"].removeprefix("AMDSMI_PWR_PROF_PRST_")
+                profile = _strip_prefix(power_profile[index]["current"], "AMDSMI_PWR_PROF_PRST_")
                 cmds.append((f"amd-smi set --profile {profile} --gpu {index}", self.PASS))
 
             # set --perf-determinism defaults
