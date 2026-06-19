@@ -1,2 +1,5 @@
 add_subdirectory(include)
-add_subdirectory(lib)
+add_subdirectory(core)
+add_subdirectory(consumer)
+add_subdirectory(producer)
+add_subdirectory(consumertest)

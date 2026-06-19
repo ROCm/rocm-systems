@@ -1,9 +1,12 @@
 #include <rocm-timesync/rocm_timesync.hpp>
+#include <core/ipc.hpp>
 
-namespace rocm::timesync
+namespace rocm_timesync
 {
+
 void initialize()
 {
+        
     // TODO
 }
 }

@@ -2,7 +2,7 @@ option(ROCM_TIMESYNC_BUILD_SHARED "Build shared library" ON)
 option(ROCM_TIMESYNC_BUILD_STATIC "Build static library" ON)
 
 set(ROCM_TIMESYNC_SOURCES
-  rocm_timesync.cpp
+  consumer.cpp
 )
 
 # Shared library
@@ -10,6 +10,7 @@ if(ROCM_TIMESYNC_BUILD_SHARED)
   add_library(rocm-timesync SHARED ${ROCM_TIMESYNC_SOURCES})
 
   target_link_libraries(rocm-timesync
+    PRIVATE rocm-timesync-core-headers
     PUBLIC rocm-timesync-headers
   )
 
@@ -30,6 +31,7 @@ if(ROCM_TIMESYNC_BUILD_STATIC)
   add_library(rocm-timesync-static STATIC ${ROCM_TIMESYNC_SOURCES})
 
   target_link_libraries(rocm-timesync-static
+    PRIVATE rocm-timesync-core-headers
     PUBLIC rocm-timesync-headers
   )
 
