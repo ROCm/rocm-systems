@@ -152,6 +152,25 @@ public:
   [[nodiscard]] int claim_fd(int real_fd);
   [[nodiscard]] bool owns_reserved_fd(int fd) const;
 
+  /// @brief Derive the PTE MTYPE from KFD allocation flags (mirrors amdgpu).
+  /// @details Public so the interposer's DRM GEM_VA path can install page-table
+  /// entries with the same coherency type the KFD alloc requested.
+  static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags);
+
+  /// @brief Install a host range into the local process's GPU page table.
+  /// @details Drives DRM AMDGPU_GEM_VA MAP/REPLACE from the interposer: maps
+  /// @p size bytes at @p gpu_va to @p host_ptr with the MTYPE derived from
+  /// @p alloc_flags. No-op if the local process is gone.
+  void gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags);
+
+  /// @brief Remove a GPU page-table range installed by gem_va_map (GEM_VA UNMAP).
+  void gem_va_unmap(uint64_t gpu_va, size_t size);
+
+  /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
+  /// @details Public so the interposer can read a local allocation's flags when
+  /// synthesizing GEM bookkeeping at EXPORT_DMABUF time.
+  std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
+
   /// @brief Per-GPU device state (mirrors kfd_dev in the kernel).
   struct GpuDevice {
     SoC *soc = nullptr;
@@ -161,9 +180,6 @@ public:
   };
 
 private:
-  /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
-  std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
-
   /// @brief Look up the local-mode process.
   std::shared_ptr<KfdProcess> find_local_process() const;
 

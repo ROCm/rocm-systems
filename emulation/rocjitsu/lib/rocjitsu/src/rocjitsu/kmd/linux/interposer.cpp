@@ -263,6 +263,7 @@ public:
     sysfs_fds_.clear();
     drm_fds_.clear();
     kfd_dup_fds_.clear();
+    gem_entries_.clear();
     in_construction = false;
   }
 
@@ -834,6 +835,121 @@ public:
     std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
   }
 
+  /// @brief A GEM buffer object synthesized from a prime (dmabuf) fd.
+  /// @details The native DRM emulation has no real GEM objects. EXPORT_DMABUF
+  /// hands userspace a dmabuf fd whose KFD allocation flags determine the GPU
+  /// PTE MTYPE; PRIME_FD_TO_HANDLE later mints handle = dmabuf_fd + 1. Because
+  /// handle and fd are a fixed bijection, a single map keyed by the dmabuf fd
+  /// carries the flags from export through to GEM_VA, where it also records the
+  /// size and a lazily created host mapping used to install the pages into the
+  /// GPU page table. installed_vas holds the GPU VA ranges mapped from this BO so
+  /// close() can tear down the page-table entries before munmapping cpu_ptr.
+  struct GemEntry {
+    uint64_t size = 0;
+    uint32_t alloc_flags = 0;
+    void *cpu_ptr = nullptr;
+    std::vector<std::pair<uint64_t, uint64_t>> installed_vas;
+  };
+
+  /// @brief A GPU VA range still installed in the page table at close time.
+  struct GemMapping {
+    uint64_t va_address = 0;
+    uint64_t map_size = 0;
+  };
+
+  /// @brief GEM handle for a dmabuf fd (PRIME_FD_TO_HANDLE convention).
+  static constexpr uint32_t gem_handle_for_fd(int dmabuf_fd) {
+    return static_cast<uint32_t>(dmabuf_fd) + 1u;
+  }
+
+  /// @brief dmabuf fd backing a GEM handle (inverse of gem_handle_for_fd).
+  static constexpr int gem_fd_for_handle(uint32_t handle) { return static_cast<int>(handle) - 1; }
+
+  /// @brief Record KFD alloc flags for an exported dmabuf fd (at EXPORT_DMABUF).
+  /// @details The flags must be captured at export time because the underlying
+  /// allocation may be freed before the fd is mapped via GEM_VA.
+  void track_gem_flags(int dmabuf_fd, uint32_t alloc_flags) {
+    std::lock_guard lock(fd_mutex_);
+    gem_entries_[dmabuf_fd].alloc_flags = alloc_flags;
+  }
+
+  /// @brief Record the BO size for a dmabuf fd (at PRIME_FD_TO_HANDLE).
+  void track_gem_size(int dmabuf_fd, uint64_t size) {
+    std::lock_guard lock(fd_mutex_);
+    gem_entries_[dmabuf_fd].size = size;
+  }
+
+  /// @brief Resolve a GEM_VA MAP into a host pointer to install in the page table.
+  /// @details Runs entirely under fd_mutex_: it lazily mmaps the dmabuf fd's
+  /// backing pages the first time (publishing cpu_ptr while locked, so racing
+  /// maps cannot double-mmap or observe a torn write), bounds-checks the request
+  /// against the BO size, records the VA range for teardown, and returns the host
+  /// pointer + PTE MTYPE flags by value so no GemEntry pointer escapes the lock.
+  /// @retval true @p host_out / @p flags_out are set; the caller installs them.
+  /// @retval false unknown fd, out-of-bounds request, or the lazy mmap failed.
+  [[nodiscard]] bool gem_prepare_map(int dmabuf_fd, uint64_t va_address, uint64_t offset_in_bo,
+                                     uint64_t map_size, void **host_out, uint32_t *flags_out) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = gem_entries_.find(dmabuf_fd);
+    if (it == gem_entries_.end())
+      return false;
+    GemEntry &gem = it->second;
+    // Bound the request within the BO without letting offset_in_bo + map_size
+    // overflow (both are caller-controlled __u64 from the UAPI struct): a wrap
+    // would defeat a naive sum-vs-size check and install PTEs pointing outside
+    // the mmap. Reject a zero-size BO, a zero-size map, and any range past the end.
+    if (gem.size == 0 || map_size == 0 || offset_in_bo > gem.size ||
+        map_size > gem.size - offset_in_bo)
+      return false;
+    if (!gem.cpu_ptr) {
+      void *p = InterposerContext::real().mmap(nullptr, gem.size, PROT_READ | PROT_WRITE,
+                                               MAP_SHARED, dmabuf_fd, 0);
+      if (p == MAP_FAILED)
+        return false;
+      gem.cpu_ptr = p;
+    }
+    gem.installed_vas.emplace_back(va_address, map_size);
+    *host_out = static_cast<uint8_t *>(gem.cpu_ptr) + offset_in_bo;
+    *flags_out = gem.alloc_flags;
+    return true;
+  }
+
+  /// @brief Forget a GPU VA range previously recorded for a dmabuf fd.
+  /// @details Called after a GEM_VA UNMAP tears the range down, so close() does
+  /// not redundantly unmap an already-removed range.
+  void gem_forget_map(int dmabuf_fd, uint64_t va_address, uint64_t map_size) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = gem_entries_.find(dmabuf_fd);
+    if (it == gem_entries_.end())
+      return;
+    auto &vas = it->second.installed_vas;
+    std::erase(vas, std::pair<uint64_t, uint64_t>{va_address, map_size});
+  }
+
+  /// @brief Drop the GEM entry for a closing dmabuf fd.
+  /// @details Called from close() so a closed dmabuf fd cannot leave a stale
+  /// entry behind: fd integers are reused, and a later EXPORT_DMABUF on the same
+  /// value must start clean. Returns (under the lock) any GPU VA ranges still
+  /// installed from this BO so the caller can tear them out of the page table
+  /// BEFORE munmapping cpu_ptr — otherwise the page table would hold pointers
+  /// into freed host memory. @p cpu_ptr_out / @p size_out receive the lazy host
+  /// mapping to munmap (nullptr if none). Returns the still-installed VA ranges.
+  std::vector<GemMapping> untrack_gem(int dmabuf_fd, void **cpu_ptr_out, uint64_t *size_out) {
+    std::vector<GemMapping> ranges;
+    *cpu_ptr_out = nullptr;
+    *size_out = 0;
+    std::lock_guard lock(fd_mutex_);
+    auto it = gem_entries_.find(dmabuf_fd);
+    if (it == gem_entries_.end())
+      return ranges;
+    for (auto &[va, sz] : it->second.installed_vas)
+      ranges.push_back({va, sz});
+    *cpu_ptr_out = it->second.cpu_ptr;
+    *size_out = it->second.size;
+    gem_entries_.erase(it);
+    return ranges;
+  }
+
   LinuxKfd *get_or_create() {
     std::lock_guard lock(init_mutex_);
     if (active_driver_.load(std::memory_order_acquire) == nullptr) {
@@ -951,6 +1067,7 @@ private:
   /// recorded only if a reference was actually acquired, so track/untrack stay
   /// balanced and can never over-release or resurrect the wrong connection.
   std::unordered_map<int, DupBackend> kfd_dup_fds_;
+  std::unordered_map<int, GemEntry> gem_entries_;
   std::string invocation_runtime_dir_;
 
   alignas(16) static uint8_t storage_[];
@@ -1201,6 +1318,23 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
     return 0;
   }
   InterposerContext::ctx.untrack_sysfs(fd);
+  {
+    // Tear down any GPU page-table ranges still installed from this dmabuf BO
+    // BEFORE munmapping its lazy host mapping: the page table holds host
+    // pointers into cpu_ptr, so unmapping the pages without clearing the PTEs
+    // would leave the simulated GPU dereferencing freed memory. gem_va_unmap
+    // needs the local simulated driver; if none, the ranges are moot (the page
+    // table went away with the driver).
+    void *gem_cpu_ptr = nullptr;
+    uint64_t gem_size = 0;
+    auto gem_ranges = InterposerContext::ctx.untrack_gem(fd, &gem_cpu_ptr, &gem_size);
+    if (auto *sim = dynamic_cast<SimulatedKfd *>(InterposerContext::ctx.driver())) {
+      for (const auto &r : gem_ranges)
+        sim->gem_va_unmap(r.va_address, r.map_size);
+    }
+    if (gem_cpu_ptr && gem_size)
+      InterposerContext::real().munmap(gem_cpu_ptr, gem_size);
+  }
   if (InterposerContext::ctx.untrack_drm(fd)) {
     InterposerContext::real().close(fd);
     return 0;
@@ -1230,6 +1364,7 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   constexpr unsigned kDrmIoctlType = 'd';
   constexpr unsigned kDrmIoctlNrVersion = 0x00;
   constexpr unsigned kDrmIoctlNrAmdgpuInfo = DRM_COMMAND_BASE + DRM_AMDGPU_INFO;
+  constexpr unsigned kDrmIoctlNrGemVa = DRM_COMMAND_BASE + DRM_AMDGPU_GEM_VA;
   constexpr unsigned kDrmIoctlNrPrimeFdToHandle = 0x2e;
 
   if (InterposerContext::ctx.is_drm(fd)) {
@@ -1272,7 +1407,16 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         errno = EINVAL;
         return -1;
       }
-      prime->handle = static_cast<uint32_t>(prime->fd) + 1u;
+      prime->handle = InterposerContext::ctx.gem_handle_for_fd(prime->fd);
+
+      // Record the BO size so GEM_VA can map the dmabuf into the GPU page table.
+      // The dmabuf fd is mmap-able (it dups the allocation's backing memfd); its
+      // KFD alloc flags were captured on the same entry at EXPORT_DMABUF time.
+      uint64_t sz = 0;
+      struct stat st {};
+      if (fstat(prime->fd, &st) == 0 && st.st_size > 0)
+        sz = static_cast<uint64_t>(st.st_size);
+      InterposerContext::ctx.track_gem_size(prime->fd, sz);
       return 0;
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrAmdgpuInfo && arg) {
@@ -1368,6 +1512,35 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         return 0;
       }
     }
+    if (type == kDrmIoctlType && nr == kDrmIoctlNrGemVa && arg) {
+      // GEM_VA installs (or tears down) a GPU virtual mapping for a prime-
+      // imported buffer. HSA's vmem path (hsa_amd_vmem_map) lowers to this via
+      // amdgpu_bo_va_op; IREE's ring allocator triple-maps one BO at adjacent
+      // VAs. We resolve the GEM handle back to its dmabuf fd, lazily mmap the
+      // fd's backing pages, and install/remove them in the GPU page table.
+      auto *va = static_cast<drm_amdgpu_gem_va *>(arg);
+      // GEM_VA page-table installation only applies to the local simulated
+      // driver; there is no such path for a remote (daemon) or DBT-guest backend.
+      auto *drv = dynamic_cast<SimulatedKfd *>(InterposerContext::ctx.driver());
+      if (!drv)
+        return 0;
+
+      int dmabuf_fd = InterposerContext::ctx.gem_fd_for_handle(va->handle);
+      if (va->operation == AMDGPU_VA_OP_MAP || va->operation == AMDGPU_VA_OP_REPLACE) {
+        void *host = nullptr;
+        uint32_t alloc_flags = 0;
+        // gem_prepare_map does the lazy mmap, bounds check, and VA-range tracking
+        // under fd_mutex_, returning the host pointer by value so no GEM entry
+        // pointer escapes the lock (avoids a race/UAF against a concurrent close).
+        if (InterposerContext::ctx.gem_prepare_map(dmabuf_fd, va->va_address, va->offset_in_bo,
+                                                   va->map_size, &host, &alloc_flags))
+          drv->gem_va_map(va->va_address, host, va->map_size, alloc_flags);
+      } else if (va->operation == AMDGPU_VA_OP_UNMAP || va->operation == AMDGPU_VA_OP_CLEAR) {
+        drv->gem_va_unmap(va->va_address, va->map_size);
+        InterposerContext::ctx.gem_forget_map(dmabuf_fd, va->va_address, va->map_size);
+      }
+      return 0;
+    }
     errno = EINVAL;
     return -1;
   }
@@ -1387,7 +1560,26 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       if (auto remote = InterposerContext::ctx.remote())
         return kfd_ioctl_ret(remote->ioctl(request, arg));
     } else if (auto *drv = InterposerContext::ctx.driver()) {
-      return kfd_ioctl_ret(drv->ioctl(request, arg));
+      int rc = drv->ioctl(request, arg);
+      // Capture the KFD allocation flags for a freshly exported dmabuf fd. The
+      // flags determine the GPU PTE MTYPE when the fd is later mapped via GEM_VA,
+      // and must be recorded now because the allocation may be freed first. Only
+      // the local simulated driver exports dmabufs this path can later map.
+      if (rc == 0 && request == AMDKFD_IOC_EXPORT_DMABUF && arg) {
+        if (auto *sim = dynamic_cast<SimulatedKfd *>(drv)) {
+          auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
+          uint32_t alloc_flags = 0;
+          if (auto proc = sim->find_process(sim->local_process_id())) {
+            std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+            auto it = proc->allocations_.find(export_args->handle);
+            if (it != proc->allocations_.end())
+              alloc_flags = it->second.flags;
+          }
+          InterposerContext::ctx.track_gem_flags(static_cast<int>(export_args->dmabuf_fd),
+                                                 alloc_flags);
+        }
+      }
+      return kfd_ioctl_ret(rc);
     }
   }
   // Late-ioctl safety net: an AMDKFD ('K') ioctl may arrive on a tracked KFD fd

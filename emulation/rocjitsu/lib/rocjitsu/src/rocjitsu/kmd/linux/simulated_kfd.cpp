@@ -49,8 +49,9 @@ bool vm_trace_enabled() {
 constexpr uint32_t kTileConfigCount = 32;
 constexpr uint32_t kMacroTileConfigCount = 16;
 
-/// @brief Derive PTE MTYPE from KFD allocation flags (mirrors amdgpu driver).
-amdgpu::Mtype pte_mtype_for_flags(uint32_t flags) {
+} // namespace
+
+amdgpu::Mtype SimulatedKfd::pte_mtype_for_flags(uint32_t flags) {
   if (flags & KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED)
     return amdgpu::Mtype::UC;
   if (flags & (KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_USERPTR))
@@ -61,6 +62,22 @@ amdgpu::Mtype pte_mtype_for_flags(uint32_t flags) {
     return amdgpu::Mtype::CC;
   return amdgpu::Mtype::RW;
 }
+
+void SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags) {
+  auto proc = find_process(local_process_id_);
+  if (!proc)
+    return;
+  map_to_gpu(*proc, gpu_va, host_ptr, size, pte_mtype_for_flags(alloc_flags));
+}
+
+void SimulatedKfd::gem_va_unmap(uint64_t gpu_va, size_t size) {
+  auto proc = find_process(local_process_id_);
+  if (!proc)
+    return;
+  unmap_from_gpu(*proc, gpu_va, size);
+}
+
+namespace {
 
 /// @brief mmap via the real libc, bypassing the interposer.
 /// @details Routes through the process-wide libc_passthrough() table so the
