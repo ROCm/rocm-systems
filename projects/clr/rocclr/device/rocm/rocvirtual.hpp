@@ -28,6 +28,9 @@ class Memory;
 struct ProfilingSignal;
 class Timestamp;
 
+//! True while the calling thread is inside HsaAmdSignalHandler (async-events thread).
+bool InAsyncSignalHandler();
+
 // Initial HSA signal value
 constexpr static hsa_signal_value_t kInitSignalValueOne = 1;
 
@@ -515,11 +518,6 @@ class VirtualGPU : public device::VirtualDevice {
   hsa_agent_t gpu_device() const { return gpu_device_; }
   hsa_queue_t* gpu_queue() { return gpu_queue_; }
 
-  //! Defer the blocking HSA queue_destroy to device teardown to avoid a
-  //! self-deadlock when ~VirtualGPU runs on the ROCr async-events thread.
-  void SetReleaseDeferred(bool defer) { releaseDeferred_ = defer; }
-  bool ReleaseDeferred() const { return releaseDeferred_; }
-
   //! Set the active HW queue and keep the metadata preloader in sync.
   void SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer = nullptr);
 
@@ -799,7 +797,6 @@ class VirtualGPU : public device::VirtualDevice {
   void* last_barrier_hw_event_ = nullptr;
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;  //!< Active queue associated with a vgpu
-  bool releaseDeferred_ = false;  //!< Defer queue_destroy to device teardown (set by async handler)
   hsa_barrier_and_packet_t barrier_packet_ {};
   hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 

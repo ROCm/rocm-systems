@@ -579,7 +579,7 @@ class Device : public NullDevice {
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
-                    bool managed = false, bool defer_destroy = false);
+                    bool managed = false);
 
   hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority,
                                    hsa_queue_t* preferred = nullptr,
@@ -653,6 +653,13 @@ class Device : public NullDevice {
 
   //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
   void WaitForHsaAsyncHandlersIdle() override;
+
+  //! Destroy all queues whose destroy was deferred from the async-events thread.
+  //! Must only be called on an app thread (e.g. acquireQueue, ~Device).
+  void DrainDeferredQueueDestroys();
+
+  //! Current number of queues pending deferred destroy.
+  size_t DeferredQueueCount();
 
  private:
   bool create();
@@ -794,7 +801,8 @@ class Device : public NullDevice {
  public:
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
 
-  //! Queues with destroy deferred from an async-handler-driven ~VirtualGPU, drained in ~Device.
+  //! Queues with destroy deferred from an async-handler-driven ~VirtualGPU, drained on app threads.
+  static constexpr size_t kDeferredQueueDrainThreshold = 8;
   std::vector<hsa_queue_t*> deferredQueueDestroy_;
   std::mutex deferredQueueDestroyLock_;
 

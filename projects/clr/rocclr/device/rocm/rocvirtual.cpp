@@ -374,8 +374,22 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
   signal->flags_.done_ = true;
 }
 
+// True while this thread is executing inside HsaAmdSignalHandler (the ROCr
+// async-events thread). Device::releaseQueue uses it to defer the blocking
+// queue_destroy off this thread and avoid a self-deadlock.
+namespace {
+thread_local bool tls_in_async_handler = false;
+struct AsyncHandlerScope {
+  AsyncHandlerScope() { tls_in_async_handler = true; }
+  ~AsyncHandlerScope() { tls_in_async_handler = false; }
+};
+}  // namespace
+
+bool InAsyncSignalHandler() { return tls_in_async_handler; }
+
 // ================================================================================================
 bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
+  AsyncHandlerScope async_scope;
   Timestamp* ts = reinterpret_cast<Timestamp*>(arg);
 
   VirtualGPU* const gpu = ts->gpu();
@@ -403,11 +417,6 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
 
   // Return false, so the callback will not be called again for this signal
   gpu->QueuedAsyncHandlers()--;
-  // If we are the last owner, defer the queue destroy: ~AqlQueue would block on
-  // this async thread waiting for a handler only this thread can dispatch.
-  if (gpu->referenceCount() == 1) {
-    gpu->SetReleaseDeferred(true);
-  }
   gpu->release();
   return false;
 }
@@ -2043,8 +2052,7 @@ VirtualGPU::~VirtualGPU() {
   }
 
   if (gpu_queue_ != nullptr) {
-    roc_device_.releaseQueue(gpu_queue_, cuMask_, cooperative_, /*managed=*/false,
-                             /*defer_destroy=*/releaseDeferred_);
+    roc_device_.releaseQueue(gpu_queue_, cuMask_, cooperative_);
   }
 
   if (hostcallBuffer_) {
