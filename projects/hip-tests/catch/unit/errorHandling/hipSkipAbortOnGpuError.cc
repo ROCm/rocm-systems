@@ -36,9 +36,9 @@
 #include <hip/hip_runtime_api.h>
 #include "hip_test_context.hh"
 
-// Returns true when abort() would fire (HIP_SKIP_ABORT_ON_GPU_ERROR not set
-// or set to 0). Tests that would abort the process must be skipped in this
-// case since abort() cannot be caught by the Catch2 framework.
+// Returns true when abort() would fire (HIP_SKIP_ABORT_ON_GPU_ERROR
+// explicitly set to 0). CLR defaults this flag to 1 in release builds,
+// so unset is treated as "skip abort" (recovery mode).
 static bool isAbortActive() {
   std::string v = TestContext::getEnvVar("HIP_SKIP_ABORT_ON_GPU_ERROR");
   if (!v.empty()) {
@@ -46,7 +46,7 @@ static bool isAbortActive() {
       return std::stoi(v) == 0;
     } catch (...) {}
   }
-  return true;
+  return false;  // CLR defaults to HIP_SKIP_ABORT_ON_GPU_ERROR=1
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ __global__ void aperture_violation_kernel() {
 HIP_TEST_CASE(Unit_HipSkipAbortOnGpuError_IllegalInstruction) {
 #if HT_AMD
   if (isAbortActive()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set HIP_SKIP_ABORT_ON_GPU_ERROR=1 to run GPU hardware exception tests.");
     return;
   }
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Unit_HipSkipAbortOnGpuError_IllegalInstruction) {
   illegal_instruction_kernel<<<1, 1, 0, stream>>>();
   HIP_CHECK_ERROR(hipStreamSynchronize(stream), hipErrorLaunchFailure);
 #else
-  HipTest::HIP_SKIP_TEST("AMD-only: HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION behavior.");
+  HIP_SKIP_TEST("AMD-only: HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION behavior.");
 #endif
 }
 
@@ -126,7 +126,7 @@ HIP_TEST_CASE(Unit_HipSkipAbortOnGpuError_IllegalInstruction) {
 HIP_TEST_CASE(Unit_HipSkipAbortOnGpuError_ApertureViolation) {
 #if HT_AMD
   if (isAbortActive()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set HIP_SKIP_ABORT_ON_GPU_ERROR=1 to run GPU hardware exception tests.");
     return;
   }
@@ -136,7 +136,7 @@ HIP_TEST_CASE(Unit_HipSkipAbortOnGpuError_ApertureViolation) {
   aperture_violation_kernel<<<1, 1, 0, stream>>>();
   HIP_CHECK_ERROR(hipStreamSynchronize(stream), hipErrorIllegalAddress);
 #else
-  HipTest::HIP_SKIP_TEST("AMD-only: HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION behavior.");
+  HIP_SKIP_TEST("AMD-only: HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION behavior.");
 #endif
 }
 

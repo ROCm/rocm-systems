@@ -355,6 +355,13 @@ bool Device::init() {
     return false;
   }
 
+  // Propagate HIP_SKIP_ABORT_ON_GPU_ERROR to the environment so ROCr can
+  // read it during hsa_init() and skip the GPU core dump for queue exceptions.
+  // Uses overwrite=0 to respect any explicit user setting.
+  if (HIP_SKIP_ABORT_ON_GPU_ERROR) {
+    setenv("HIP_SKIP_ABORT_ON_GPU_ERROR", "1", 0);
+  }
+
   hsa_status_t status = Hsa::init();
 
   // If there are no GPUs available, hsa_init will fail with HSA_STATUS_ERROR_OUT_OF_RESOURCES
