@@ -669,6 +669,11 @@ class Device : public NullDevice {
 
   static constexpr int kDefaultNumaNode = -1;
 
+  //! Queues with destroy deferred from an async-handler-driven ~VirtualGPU, drained on app threads.
+  static constexpr size_t kDeferredQueueDrainThreshold = 8;
+  std::vector<hsa_queue_t*> deferredQueueDestroy_;
+  std::mutex deferredQueueDestroyLock_;
+
   bool SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
                            bool first_alloc = false, bool use_cpu = false,
                            int numa_id = kDefaultNumaNode) const;
@@ -800,11 +805,6 @@ class Device : public NullDevice {
 
  public:
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
-
-  //! Queues with destroy deferred from an async-handler-driven ~VirtualGPU, drained on app threads.
-  static constexpr size_t kDeferredQueueDrainThreshold = 8;
-  std::vector<hsa_queue_t*> deferredQueueDestroy_;
-  std::mutex deferredQueueDestroyLock_;
 
   //! Returns the valid SDMA engine bitmask for the given operation type.
   uint32_t GetSdmaValidMask(HwQueueEngine engine_type) const {
