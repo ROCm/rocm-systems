@@ -58,8 +58,11 @@ struct cache_policy
             { trace_cache::info::format_track_name<category::amd_smi_power>(), thread_id,
               "{}" });
         trace_cache::get_metadata_registry().add_track(
-            { trace_cache::info::format_track_name<category::amd_smi_temp>(), thread_id,
-              "{}" });
+            { trace_cache::info::format_track_name<category::amd_smi_temp_hotspot>(),
+              thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { trace_cache::info::format_track_name<category::amd_smi_temp_edge>(),
+              thread_id, "{}" });
         trace_cache::get_metadata_registry().add_track(
             { trace_cache::info::format_track_name<category::amd_smi_memory_usage>(),
               thread_id, "{}" });
@@ -193,8 +196,15 @@ struct cache_policy
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_temp>::value, "Temp",
-              trait::name<category::amd_smi_temp>::description, LONG_DESCRIPTION,
+              trait::name<category::amd_smi_temp_hotspot>::value, "Hotspot Temp",
+              trait::name<category::amd_smi_temp_hotspot>::description, LONG_DESCRIPTION,
+              COMPONENT, CELSIUS_DEGREES, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+              EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_temp_edge>::value, "Edge Temp",
+              trait::name<category::amd_smi_temp_edge>::description, LONG_DESCRIPTION,
               COMPONENT, CELSIUS_DEGREES, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
               EXPRESSION, 0, 0, "{}" });
 

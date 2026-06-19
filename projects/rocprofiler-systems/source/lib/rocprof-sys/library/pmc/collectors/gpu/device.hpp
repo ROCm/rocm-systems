@@ -161,10 +161,6 @@ public:
                 LOG_DEBUG("GPU device [{}] memory query failed: {}", m_index, e.what());
             }
         }
-
-        // At most one SMI temperature read per sample: prefer hotspot when it is both
-        // supported and enabled; otherwise read edge when enabled (so edge-only configs
-        // still work when the device exposes both sensors).
         if(enabled_cfg.bits.hotspot_temperature &&
            m_supported_metrics.bits.hotspot_temperature)
         {
@@ -177,8 +173,7 @@ public:
                           e.what());
             }
         }
-        else if(enabled_cfg.bits.edge_temperature &&
-                m_supported_metrics.bits.edge_temperature)
+        if(enabled_cfg.bits.edge_temperature && m_supported_metrics.bits.edge_temperature)
         {
             try
             {

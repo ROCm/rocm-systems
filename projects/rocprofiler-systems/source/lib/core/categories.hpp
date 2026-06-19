@@ -109,7 +109,8 @@ ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_req_rx_impl_nak_seq_err, ROCPRO
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_gfx_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_GFX, "device_busy_gfx", "Busy percentage of GFX engine on a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_umc_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_UMC, "device_busy_umc", "Busy percentage of UMC engin on a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_mm_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_MM, "device_busy_mm", "Busy percentage of MM engine on a GPU device")
-ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_temp, ROCPROFSYS_CATEGORY_AMD_SMI_TEMP, "device_temp",   "Temperature of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_temp_hotspot, ROCPROFSYS_CATEGORY_AMD_SMI_TEMP_HOTSPOT, "device_temp_hotspot", "Hotspot temperature of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_temp_edge, ROCPROFSYS_CATEGORY_AMD_SMI_TEMP_EDGE, "device_temp_edge", "Edge temperature of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_power, ROCPROFSYS_CATEGORY_AMD_SMI_POWER, "device_power", "Power consumption of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_memory_usage, ROCPROFSYS_CATEGORY_AMD_SMI_MEMORY_USAGE, "device_memory_usage", "Memory usage of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_vcn_activity, ROCPROFSYS_CATEGORY_AMD_SMI_VCN_ACTIVITY, "device_vcn_activity", "VCN Activity of a GPU device")
@@ -212,7 +213,8 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_gfx_busy),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_umc_busy),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_mm_busy),                         \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_temp),                            \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_temp_hotspot),                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_temp_edge),                       \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_power),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_memory_usage),                    \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_vcn_activity),                    \

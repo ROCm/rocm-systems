@@ -365,11 +365,12 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     insert_scalar(trait::name<category::amd_smi_mm_busy>::value,
                   info::format_track_name<category::amd_smi_mm_busy>(),
                   enabled.bits.mm_activity, m.mm_activity);
-    insert_scalar(trait::name<category::amd_smi_temp>::value,
-                  info::format_track_name<category::amd_smi_temp>(),
-                  enabled.bits.hotspot_temperature || enabled.bits.edge_temperature,
-                  enabled.bits.hotspot_temperature ? m.hotspot_temperature
-                                                   : m.edge_temperature);
+    insert_scalar(trait::name<category::amd_smi_temp_hotspot>::value,
+                  info::format_track_name<category::amd_smi_temp_hotspot>(),
+                  enabled.bits.hotspot_temperature, m.hotspot_temperature);
+    insert_scalar(trait::name<category::amd_smi_temp_edge>::value,
+                  info::format_track_name<category::amd_smi_temp_edge>(),
+                  enabled.bits.edge_temperature, m.edge_temperature);
     insert_scalar(trait::name<category::amd_smi_power>::value,
                   info::format_track_name<category::amd_smi_power>(),
                   enabled.bits.current_socket_power || enabled.bits.average_socket_power,

@@ -527,6 +527,46 @@ TEST_F(DeviceTest, edge_temperature_collection)
 }
 
 /**
+ * TC2.5b: Hotspot and Edge Temperature Collected Independently
+ *
+ * Objective: When both sensors are enabled and supported, both temperature
+ * fields are populated in the same sample (hotspot and edge are independent
+ * counters, not a single prefer-hotspot-else-edge value).
+ */
+TEST_F(DeviceTest, hotspot_and_edge_temperature_collected_together)
+{
+    metrics met = CreateSentinelMetrics();
+
+    EXPECT_CALL(*mock_backend, get_gpu_metrics())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(met));
+
+    EXPECT_CALL(*mock_backend, get_memory_usage())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Throw(std::runtime_error("not supported")));
+
+    EXPECT_CALL(*mock_backend, get_hotspot_temperature())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::int64_t{ 75 }));
+    EXPECT_CALL(*mock_backend, get_edge_temperature())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::int64_t{ 70 }));
+
+    SetupSDMAExpectations(mock_backend);
+
+    device<MockBackend> dev(mock_backend, test_index);
+
+    EXPECT_TRUE(dev.get_supported_metrics().bits.hotspot_temperature);
+    EXPECT_TRUE(dev.get_supported_metrics().bits.edge_temperature);
+
+    auto collected =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFFFFFF }, 1000000000ULL);
+
+    EXPECT_EQ(collected.hotspot_temperature, 75);
+    EXPECT_EQ(collected.edge_temperature, 70);
+}
+
+/**
  * TC2.6: Temperature Metrics Not Collected When Unsupported
  *
  * Objective: Verify temperature skipped when not supported.

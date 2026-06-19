@@ -144,14 +144,15 @@ get_track(CategoryT, std::string name, std::uint64_t hash_arg)
     return ::perfetto::Track(_uuid, ::perfetto::ProcessTrack::Current());
 }
 
-using amd_smi_gfx_track   = perfetto_counter_track<category::amd_smi_gfx_busy>;
-using amd_smi_umc_track   = perfetto_counter_track<category::amd_smi_umc_busy>;
-using amd_smi_mm_track    = perfetto_counter_track<category::amd_smi_mm_busy>;
-using amd_smi_temp_track  = perfetto_counter_track<category::amd_smi_temp>;
-using amd_smi_power_track = perfetto_counter_track<category::amd_smi_power>;
-using amd_smi_mem_track   = perfetto_counter_track<category::amd_smi_memory_usage>;
-using amd_smi_vcn_track   = perfetto_counter_track<category::amd_smi_vcn_activity>;
-using amd_smi_jpeg_track  = perfetto_counter_track<category::amd_smi_jpeg_activity>;
+using amd_smi_gfx_track          = perfetto_counter_track<category::amd_smi_gfx_busy>;
+using amd_smi_umc_track          = perfetto_counter_track<category::amd_smi_umc_busy>;
+using amd_smi_mm_track           = perfetto_counter_track<category::amd_smi_mm_busy>;
+using amd_smi_temp_hotspot_track = perfetto_counter_track<category::amd_smi_temp_hotspot>;
+using amd_smi_temp_edge_track    = perfetto_counter_track<category::amd_smi_temp_edge>;
+using amd_smi_power_track        = perfetto_counter_track<category::amd_smi_power>;
+using amd_smi_mem_track          = perfetto_counter_track<category::amd_smi_memory_usage>;
+using amd_smi_vcn_track          = perfetto_counter_track<category::amd_smi_vcn_activity>;
+using amd_smi_jpeg_track = perfetto_counter_track<category::amd_smi_jpeg_activity>;
 using amd_smi_xgmi_link_width_track =
     perfetto_counter_track<category::amd_smi_xgmi_link_width>;
 using amd_smi_xgmi_link_speed_track =
@@ -1369,10 +1370,11 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     emit_gpu_scalar<amd_smi_mm_track>(_device_id, _ts, _em.bits.mm_activity, "MM Busy",
                                       "%", _m.mm_activity);
 
-    emit_gpu_scalar<amd_smi_temp_track>(
-        _device_id, _ts, _em.bits.hotspot_temperature || _em.bits.edge_temperature,
-        "Temperature", "deg C",
-        _em.bits.hotspot_temperature ? _m.hotspot_temperature : _m.edge_temperature);
+    emit_gpu_scalar<amd_smi_temp_hotspot_track>(
+        _device_id, _ts, _em.bits.hotspot_temperature, "Hotspot Temp", "deg C",
+        _m.hotspot_temperature);
+    emit_gpu_scalar<amd_smi_temp_edge_track>(_device_id, _ts, _em.bits.edge_temperature,
+                                             "Edge Temp", "deg C", _m.edge_temperature);
 
     emit_gpu_scalar<amd_smi_power_track>(
         _device_id, _ts, _em.bits.current_socket_power || _em.bits.average_socket_power,

@@ -41,21 +41,22 @@ make_metric_value(std::initializer_list<std::uint8_t> bit_positions)
     return value;
 }
 
-const auto GFX_BUSY_VALUE      = make_metric_value({ 5 });     // gfx_activity
-const auto UMC_BUSY_VALUE      = make_metric_value({ 6 });     // umc_activity
-const auto MM_BUSY_VALUE       = make_metric_value({ 7 });     // mm_activity
-const auto TEMPERATURE_VALUE   = make_metric_value({ 3, 4 });  // hotspot, edge
-const auto CURRENT_POWER_VALUE = make_metric_value({ 0, 1 });  // current, average
-const auto MEMORY_USAGE_VALUE  = make_metric_value({ 2 });     // memory_usage
-const auto VCN_ACTIVITY_VALUE  = make_metric_value({ 8 });     // vcn_activity
-const auto JPEG_ACTIVITY_VALUE = make_metric_value({ 9 });     // jpeg_activity
-const auto VCN_BUSY_VALUE      = make_metric_value({ 10 });    // vcn_busy (MI300)
-const auto JPEG_BUSY_VALUE     = make_metric_value({ 11 });    // jpeg_busy (MI300)
-const auto XGMI_VALUE          = make_metric_value({ 12 });    // xgmi
-const auto PCIE_VALUE          = make_metric_value({ 13 });    // pcie
-const auto SDMA_USAGE_VALUE    = make_metric_value({ 14 });    // sdma_usage
-const auto GFX_CLOCK_VALUE     = make_metric_value({ 15 });    // gfx_clock
-const auto MEM_CLOCK_VALUE     = make_metric_value({ 16 });    // mem_clock
+const auto GFX_BUSY_VALUE            = make_metric_value({ 5 });     // gfx_activity
+const auto UMC_BUSY_VALUE            = make_metric_value({ 6 });     // umc_activity
+const auto MM_BUSY_VALUE             = make_metric_value({ 7 });     // mm_activity
+const auto TEMPERATURE_HOTSPOT_VALUE = make_metric_value({ 3 });     // hotspot
+const auto TEMPERATURE_EDGE_VALUE    = make_metric_value({ 4 });     // edge
+const auto CURRENT_POWER_VALUE       = make_metric_value({ 0, 1 });  // current, average
+const auto MEMORY_USAGE_VALUE        = make_metric_value({ 2 });     // memory_usage
+const auto VCN_ACTIVITY_VALUE        = make_metric_value({ 8 });     // vcn_activity
+const auto JPEG_ACTIVITY_VALUE       = make_metric_value({ 9 });     // jpeg_activity
+const auto VCN_BUSY_VALUE            = make_metric_value({ 10 });    // vcn_busy (MI300)
+const auto JPEG_BUSY_VALUE           = make_metric_value({ 11 });    // jpeg_busy (MI300)
+const auto XGMI_VALUE                = make_metric_value({ 12 });    // xgmi
+const auto PCIE_VALUE                = make_metric_value({ 13 });    // pcie
+const auto SDMA_USAGE_VALUE          = make_metric_value({ 14 });    // sdma_usage
+const auto GFX_CLOCK_VALUE           = make_metric_value({ 15 });    // gfx_clock
+const auto MEM_CLOCK_VALUE           = make_metric_value({ 16 });    // mem_clock
 
 inline std::unordered_map<std::uint32_t, track_description>
 make_default_tracks()
@@ -64,7 +65,8 @@ make_default_tracks()
         { GFX_BUSY_VALUE, { "GFX Busy", "%", {} } },
         { UMC_BUSY_VALUE, { "UMC Avg. Busy", "%", {} } },
         { MM_BUSY_VALUE, { "MM Busy", "%", {} } },
-        { TEMPERATURE_VALUE, { "Temperature", "deg C", {} } },
+        { TEMPERATURE_HOTSPOT_VALUE, { "Hotspot Temp", "deg C", {} } },
+        { TEMPERATURE_EDGE_VALUE, { "Edge Temp", "deg C", {} } },
         { CURRENT_POWER_VALUE, { "Current Power", "watts", {} } },
         { MEMORY_USAGE_VALUE, { "Memory Usage", "megabytes", {} } },
         { VCN_ACTIVITY_VALUE, { "VCN Activity", "%", {} } },
@@ -416,20 +418,25 @@ private:
                           ts, static_cast<double>(metric_values.mm_activity));
         }
 
-        auto temp_it = tracks.find(detail::TEMPERATURE_VALUE);
-        if((effective_metrics.bits.hotspot_temperature ||
-            effective_metrics.bits.edge_temperature) &&
-           temp_it != tracks.end() && !temp_it->second.track_indexes.empty())
+        auto temp_hotspot_it = tracks.find(detail::TEMPERATURE_HOTSPOT_VALUE);
+        if(effective_metrics.bits.hotspot_temperature &&
+           temp_hotspot_it != tracks.end() &&
+           !temp_hotspot_it->second.track_indexes.empty())
         {
-            // Single GPU temperature track: prefer hotspot sensor, fall back to edge.
-            const double temp =
-                static_cast<double>(effective_metrics.bits.hotspot_temperature
-                                        ? metric_values.hotspot_temperature
-                                        : metric_values.edge_temperature);
             TRACE_COUNTER(
-                "device_temp",
-                counter_track::at(device_index, temp_it->second.track_indexes[0]), ts,
-                temp);
+                "device_temp_hotspot",
+                counter_track::at(device_index, temp_hotspot_it->second.track_indexes[0]),
+                ts, static_cast<double>(metric_values.hotspot_temperature));
+        }
+
+        auto temp_edge_it = tracks.find(detail::TEMPERATURE_EDGE_VALUE);
+        if(effective_metrics.bits.edge_temperature && temp_edge_it != tracks.end() &&
+           !temp_edge_it->second.track_indexes.empty())
+        {
+            TRACE_COUNTER(
+                "device_temp_edge",
+                counter_track::at(device_index, temp_edge_it->second.track_indexes[0]),
+                ts, static_cast<double>(metric_values.edge_temperature));
         }
 
         auto power_it = tracks.find(detail::CURRENT_POWER_VALUE);
