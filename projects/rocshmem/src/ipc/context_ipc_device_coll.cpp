@@ -331,6 +331,8 @@ __device__ void IPCContext::broadcastmem_wg(rocshmem_team_t team,
 }
 __device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest, 
                                   const void* source, int nelems) {
+  if (dest == nullptr || source == nullptr)
+    return ROCSHMEM_ERROR;
 #if defined(USE_SDMA)
   if (nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
 #else
@@ -340,7 +342,7 @@ __device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest,
   else
     alltoallmem_linear_wave(team, dest, source, nelems);
   
-  return ROCSHMEM_ERROR;
+  return ROCSHMEM_SUCCESS;
 }
 
 
@@ -357,7 +359,8 @@ __device__ void IPCContext::alltoallmem_linear_wave(rocshmem_team_t team, void *
   // Have each PE put their designated data to the other PEs
   for (int j = 0; j < pe_size; j++) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    putmem_nbi_wave(((char *)dst + my_pe_in_team * nelems), ((char *)src + j * nelems), nelems, dest_pe);
+    putmem_nbi_wave((static_cast<char *>(dst) + my_pe_in_team * nelems), 
+                    (static_cast<const char *>(src) + j * nelems), nelems, dest_pe);
   }
   if (is_thread_zero_in_block()) {
     quiet();
@@ -382,8 +385,8 @@ __device__ void IPCContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    put_nbi((char *)dst + my_pe_in_team * nelems,
-      (char *)src + j * nelems, nelems, dest_pe);
+    putmem_nbi((static_cast<char *>(dst) + my_pe_in_team * nelems), 
+                    (static_cast<const char *>(src) + j * nelems), nelems, dest_pe);
   }
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
@@ -408,7 +411,7 @@ __device__ void IPCContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
     team_obj->alltoall_sequence_number++;
   }
 
-  __syncthreads();
+  sync_wave(team);
 }
 
 }  // namespace rocshmem

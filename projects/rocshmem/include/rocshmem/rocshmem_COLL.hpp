@@ -135,7 +135,75 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoall_wg(
     rocshmem_team_t team, unsigned long long *dest, const unsigned long long *source, int nelems);
 
 /**
- * @name ROCSHMEM_ALLTOALL_WAVE
+ * @name ROCSHMEM_CTX_ALLTOALL_WAVE
+ * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
+ * of PEs participating in the collective routine.
+ *
+ * This function must be called as a wave-level collective.
+ *
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+                           heap.
+ * @param[in] nelems       Number of data blocks transferred per pair of PEs.
+ *
+ * @return int: zero on success, non-zero otherwise
+ */
+__device__ ATTR_NO_INLINE int rocshmem_ctx_float_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, float *dest,
+    const float *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_double_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, double *dest,
+    const double *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_char_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, char *dest,
+    const char *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_schar_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, signed char *dest,
+    const signed char *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_short_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, short *dest,
+    const short *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_int_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, int *dest,
+    const int *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_long_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long *dest,
+    const long *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_longlong_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, long long *dest,
+    const long long *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_uchar_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned char *dest,
+    const unsigned char *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_ushort_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned short *dest,
+    const unsigned short *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_uint_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned int *dest,
+    const unsigned int *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_ulong_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long *dest,
+    const unsigned long *source, int nelems);
+
+__device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_alltoall_wave(
+    rocshmem_ctx_t ctx, rocshmem_team_t team, unsigned long long *dest,
+    const unsigned long long *source, int nelems);
+
+/**
+ * @name ROCSHMEM_ALLTOALLMEM_WAVE
  * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
  * of PEs participating in the collective routine.
  *

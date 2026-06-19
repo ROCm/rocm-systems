@@ -303,7 +303,13 @@ __device__ void Context::broadcastmem_wg(rocshmem_team_t team, void *dest, const
   DISPATCH(broadcastmem_wg(team, dest, source, nelement, PE_root));
 }
 __device__ int Context::alltoallmem_wave(rocshmem_team_t team, void* dest, const void* source, int nelems){
-  ctxStats.incStat(NUM_ALLTOALL);
+  if (nelems == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_ALLTOALL);
+  }
 
   DISPATCH_RET(alltoallmem_wave(team, dest, source, nelems));
 }
