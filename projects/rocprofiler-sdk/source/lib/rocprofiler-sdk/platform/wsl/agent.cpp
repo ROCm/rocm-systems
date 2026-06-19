@@ -851,20 +851,33 @@ enumerate()
         }
         else
         {
-            // gfx1150 (RDNA 3.5) documented defaults — see the gfx target note
-            // above. These keep aql_profile init from dividing by zero and keep
-            // pre-HSA tools non-zero; the HSA refinement in
-            // agent::construct_agent_cache() replaces them with the real per-device
-            // topology at runtime (so non-gfx1150 GPUs report correct values).
-            info.cu_count               = 16;  // 8 WGPs * 2 CUs
-            info.num_shader_banks       = 1;   // 1 SE
-            info.simd_arrays_per_engine = 2;   // 2 SAs per SE
-            info.array_count            = 2;   // 1 SE * 2 SA
-            info.cu_per_simd_array      = 8;   // 16 CUs / 2 SAs
-            info.simd_per_cu            = 2;   // RDNA: 2 SIMDs per CU
-            info.simd_count             = 32;  // 16 CUs * 2 SIMDs
-            info.wave_front_size        = 32;  // RDNA wave32
-            info.max_waves_per_simd     = 16;
+            // Neutral placeholder topology — NOT a real device layout and
+            // intentionally does NOT impersonate any architecture (e.g. gfx1150
+            // CU/SIMD counts would yield absurd counter values on gfx940).
+            // DXCore cannot expose KFD shader counts, so these are minimal
+            // non-zero sentinels whose only job is to keep enumerate()'s derived
+            // fields (cu_per_engine, max_waves_per_cu) and aqlprofile agent
+            // registration (GpuPmcBuilder) from dividing by zero before HSA is
+            // initialized. agent::construct_agent_cache() overrides every field
+            // below with the real per-device topology from HSA at runtime, so
+            // profiling never relies on these values. The agent name /
+            // gfx_target_version resolved above still select the counter YAML for
+            // pre-HSA rocprofv3-avail; they deliberately do NOT assume a layout.
+            //
+            // cu_count must be >= 2 (one WGP): aqlprofile's GpuPmcBuilder derives
+            // wgp_per_sa_ as (cu_num/2 + ...) / ..., so cu_num == 1 yields zero
+            // WGPs and a divide-by-zero (SIGFPE) when iterating event coordinates.
+            // Everything else is the smallest internally consistent layout (1 SE,
+            // 1 SA per SE, 1 WGP), which is the minimum that stays divide-safe.
+            info.cu_count               = 2;
+            info.num_shader_banks       = 1;
+            info.simd_arrays_per_engine = 1;
+            info.array_count            = 1;
+            info.cu_per_simd_array      = 2;
+            info.simd_per_cu            = 1;
+            info.simd_count             = 2;
+            info.wave_front_size        = 1;
+            info.max_waves_per_simd     = 1;
         }
 
         // Fields not surfaced by DXCore but reported by the HSA runtime for
@@ -898,20 +911,23 @@ enumerate()
             ::rocprofiler::agent::get_agent_available_properties().insert(prop);
         }
 
-        // workgroup/grid limits, family code, and firmware versions are not
-        // exposed by DXCore. Seed documented defaults here so pre-HSA consumers are
-        // non-zero; the HSA refinement in agent::construct_agent_cache() overrides
-        // them at runtime. workgroup/grid limits are fixed by the HSA runtime for
-        // gfx11; family/firmware only affect agent-info parity (tests/agent.cpp),
-        // not profiling.
+        // workgroup/grid limits are not exposed by DXCore but are fixed by the
+        // HSA runtime for gfx11; seed them here so pre-HSA consumers are non-zero.
+        // The HSA refinement in agent::construct_agent_cache() overrides them at
+        // runtime.
         info.workgroup_max_size = 1024;
         info.workgroup_max_dim  = {1024, 1024, 1024};
         info.grid_max_size      = std::numeric_limits<uint32_t>::max();
         info.grid_max_dim       = {2147483647u, 65535u, 65535u};
 
-        info.family_id                 = 150;
-        info.fw_version.ui32.uCode     = 34;
-        info.sdma_fw_version.uCodeSDMA = 15;
+        // family code and firmware versions are not exposed by DXCore and are not
+        // needed to avoid divide-by-zero. Leave them zero rather than impersonate
+        // a specific architecture (e.g. gfx1150/RDNA3.5); agent::construct_agent_cache()
+        // fills them from HSA at runtime, which is also what tests/agent.cpp
+        // compares against.
+        info.family_id                 = 0;
+        info.fw_version.ui32.uCode     = 0;
+        info.sdma_fw_version.uCodeSDMA = 0;
 
         auto adapter_name = wchar_to_utf8(reg.AdapterString, kMaxStr);
         if(adapter_name.empty()) adapter_name = "unknown";
