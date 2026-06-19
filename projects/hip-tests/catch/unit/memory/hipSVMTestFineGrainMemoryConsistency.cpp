@@ -136,7 +136,7 @@ void launch_kernels_and_verify(std::vector<hipStream_t>& streams, unsigned int n
   for (unsigned int d = 0; d < num_devices; d++) {
     threads.push_back(std::thread(
         [](hipStream_t s) {
-          HIP_CHECK_THREAD(hipStreamSynchronize(s));  // To workarround batch dispatching on Windows
+          HIP_CHECK_THREAD(hipStreamSynchronize(s));  // To work around batch dispatching on Windows
         },
         streams[d]));
   }

@@ -242,7 +242,12 @@ template <typename T> void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hme
   }
 
   HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceSynchronize());
-  HipTest::checkVectorADD(hmem->A_h(), hmem->B_h(), hmem->C_h(), numElements);
+  // checkVectorADD uses thread-unsafe Catch2 macros (INFO/CHECK/REQUIRE) on a
+  // mismatch. Disable its internal reporting and validate the returned mismatch
+  // count via the optionally thread-safe macro so worker threads stay safe.
+  size_t mismatchCount =
+      HipTest::checkVectorADD(hmem->A_h(), hmem->B_h(), hmem->C_h(), numElements, true, false);
+  REQUIRE_OPT_THREAD(threadSafe, mismatchCount == 0);
 
 
   printf("  %s success\n", __func__);
@@ -350,6 +355,12 @@ template <typename T> void multiThread_1(bool serialize, bool usePinnedHost,
   }
 
   if (singleThread) {
+    // Always join before finalizing, even when not serialized, to avoid
+    // destroying a joinable std::thread (std::terminate) and to ensure the
+    // worker has finished recording its results.
+    if (t1.joinable()) {
+      t1.join();
+    }
     HIP_CHECK_THREAD_FINALIZE();
     return;
   }
@@ -357,6 +368,14 @@ template <typename T> void multiThread_1(bool serialize, bool usePinnedHost,
   HostMemory<T> mem2(NUM_ELM(), usePinnedHost);
   std::thread t2(memcpytest2<T>, &memD, &mem2, NUM_ELM(), 0, 0, 0, true);
   if (serialize) {
+    t2.join();
+  }
+  // Ensure all worker threads are joined before finalizing, regardless of the
+  // serialize flag, to avoid std::terminate on joinable threads.
+  if (t1.joinable()) {
+    t1.join();
+  }
+  if (t2.joinable()) {
     t2.join();
   }
   HIP_CHECK_THREAD_FINALIZE();
