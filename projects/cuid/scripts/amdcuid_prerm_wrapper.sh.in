@@ -31,7 +31,7 @@
 # preserved so that reinstalls keep the same CUID values.
 # To fully purge configuration run: sudo rm -rf @AMDCUID_SHARED_CONFIG_DIR@
 
-DAEMON_PRERM="@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/amdcuid_prerm.sh"
+DAEMON_PRERM="@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/amdcuid_daemon_prerm.sh"
 DAEMON_BIN="@CMAKE_INSTALL_FULL_BINDIR@/amdcuid_daemon"
 
 echo "=== amdcuid pre-removal ==="

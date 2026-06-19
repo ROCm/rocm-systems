@@ -27,7 +27,7 @@
 # Automatically runs the daemon post-install when the daemon binary is present.
 
 LIB_POSTINST="@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/postinst"
-DAEMON_POSTINST="@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/amdcuid_postinst.sh"
+DAEMON_POSTINST="@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/amdcuid_daemon_postinst.sh"
 DAEMON_BIN="@CMAKE_INSTALL_FULL_BINDIR@/amdcuid_daemon"
 
 echo "=== amdcuid post-installation ==="

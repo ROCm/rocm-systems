@@ -144,14 +144,14 @@ if(UNIX AND NOT APPLE)
     install(
         PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/postinst
         DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
-        RENAME amdcuid_postinst.sh
+        RENAME amdcuid_daemon_postinst.sh
         COMPONENT ${DAEMON_COMPONENT}
     )
 
     install(
         PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/prerm
         DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
-        RENAME amdcuid_prerm.sh
+        RENAME amdcuid_daemon_prerm.sh
         COMPONENT ${DAEMON_COMPONENT}
     )
 endif()
