@@ -115,6 +115,37 @@ After green only. Remove duplication, improve names, extract helpers. Keep tests
 
 One failing test for the next behavior.
 
+## One Test at a Time — No Horizontal Slicing
+
+**Do NOT write all the tests first, then all the implementation.** Treating RED as
+"write every test" and GREEN as "write every implementation" is *horizontal slicing*
+and it produces crap tests:
+
+- Bulk-written tests verify *imagined* behavior, not *actual* behavior.
+- You end up testing the *shape* of things (signatures, struct fields) instead of
+  observable behavior.
+- The tests go insensitive to real changes — they pass when behavior breaks.
+
+**Correct approach — vertical slices (tracer bullets):** one test → one minimal
+implementation → repeat. Each test responds to what the previous cycle taught you.
+
+```
+WRONG (horizontal):
+  RED:   test1, test2, test3, test4
+  GREEN: impl1, impl2, impl3, impl4
+
+RIGHT (vertical):
+  RED→GREEN: test1→impl1
+  RED→GREEN: test2→impl2
+  ...
+```
+
+**amd-smi cascade caution:** it's tempting, when adding a C API function, to write
+the GTest *and* the Python unit test *and* the CLI test all up front. Don't. Drive
+one tracer bullet end-to-end first (e.g. C++ behavior), then add the next layer's
+test once that layer exists. The cascade is still fully tested — just one slice at
+a time, not all tests before any code.
+
 ## Good Tests
 
 | Quality | Good | Bad |
@@ -145,6 +176,7 @@ One failing test for the next behavior.
 - "This case is different because..."
 - Watching the test pass without ever seeing it fail
 - Adding production code while writing the test
+- Writing every layer's test up front before any implementation (horizontal slicing)
 
 **All of these mean: delete the code, start over with the test.**
 

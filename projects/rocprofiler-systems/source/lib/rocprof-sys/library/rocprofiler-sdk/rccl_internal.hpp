@@ -84,7 +84,11 @@ struct rccl_event_info
  *   Testing:    rccl_gpu_tracking_state_t<mock_pmc_registrar> state(mock);
  *               rccl_gpu_tracking_state_t<mock_pmc_registrar> state(nullptr);
  */
-template <typename PmcRegistrar>
+template <typename T>
+concept pmc_registrar =
+    requires(T& _r, std::uint32_t _idx) { _r.register_gpu_pmc(_idx); };
+
+template <pmc_registrar PmcRegistrar>
 class rccl_gpu_tracking_state_t
 {
 public:

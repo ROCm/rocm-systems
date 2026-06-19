@@ -28,6 +28,8 @@ public:
   bool simd_capable() const override;
   void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
                        uint32_t *out) const override;
+  void write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                        const uint32_t *vals, uint64_t mask) const override;
   uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
   uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
   void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;

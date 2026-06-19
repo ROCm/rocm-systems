@@ -270,18 +270,22 @@ class HostQueue : public CommandQueue {
     // an invalid access
     command->retain();
 
-    // Release the last command in the batch
-    if (lastEnqueueCommand_ != nullptr) {
-      lastEnqueueCommand_->release();
+    // Extra retain for the last command
+    command->retain();
+
+    // Update lastEnqueueCommand_ before releasing the old one to prevent
+    // use-after-free if the release triggers re-entrant access to this queue
+    // (e.g. ~GraphExec calling finish() on graph-internal streams during
+    // cascading destruction from the old command's release).
+    Command* prevLastEnqueue = lastEnqueueCommand_;
+    lastEnqueueCommand_ = command;
+
+    if (prevLastEnqueue != nullptr) {
+      prevLastEnqueue->release();
     } else {
       // The queue becomes active. Add it to the set of activeQueues.
       device_.addToActiveQueues(this);
     }
-
-    // Extra retain for the last command
-    command->retain();
-
-    lastEnqueueCommand_ = command;
   }
 
   //! Flushes submitted commands if the batch size significantly grew

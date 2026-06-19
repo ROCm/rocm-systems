@@ -55,6 +55,14 @@ struct cache_policy
             { "ainic_rx_rdma_cnp_pkts", thread_id, "{}" });
         trace_cache::get_metadata_registry().add_track(
             { "ainic_tx_rdma_cnp_pkts", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_tx_rdma_ack_timeout", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_resp_tx_pkt_seq_err", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_req_rx_pkt_seq_err", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_req_rx_impl_nak_seq_err", thread_id, "{}" });
     }
 
     /**

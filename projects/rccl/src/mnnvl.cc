@@ -43,9 +43,11 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     }
   }
 #endif
-  // Determine our MNNVL domain/clique
+
+  // Determine our MNNVL domain/clique and NVL domain size
   NCCLCHECK(ncclCalloc(&comm->clique.ranks, comm->nRanks));
   comm->clique.id = comm->peerInfo[comm->rank].fabricInfo.cliqueId;
+  comm->nvlDomainSize = 0;
   for (int i = 0; i < comm->nRanks; i++) {
     auto fabricInfo1 = &comm->peerInfo[comm->rank].fabricInfo;
     auto fabricInfo2 = &comm->peerInfo[i].fabricInfo;
@@ -56,17 +58,21 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     memcpy(&uuid0, fabricInfo2->clusterUuid, sizeof(uuid0));
     memcpy(&uuid1, fabricInfo2->clusterUuid + sizeof(uuid0), sizeof(uuid1));
     if ((uuid0 | uuid1) == 0) return ncclSuccess;
-    if ((memcmp(fabricInfo1->clusterUuid, fabricInfo2->clusterUuid, NVML_GPU_FABRIC_UUID_LEN) == 0) &&
-        (fabricInfo1->cliqueId == fabricInfo2->cliqueId)) {
-      if (i == comm->rank) {
-        comm->cliqueRank = comm->clique.size;
+    // Check if same NVL domain (clusterUuid match)
+    if (memcmp(fabricInfo1->clusterUuid, fabricInfo2->clusterUuid, NVML_GPU_FABRIC_UUID_LEN) == 0) {
+      comm->nvlDomainSize++;
+      // Also check if same clique (cliqueId match)
+      if (fabricInfo1->cliqueId == fabricInfo2->cliqueId) {
+        if (i == comm->rank) {
+          comm->cliqueRank = comm->clique.size;
+        }
+        comm->clique.ranks[comm->clique.size++] = i;
       }
-      comm->clique.ranks[comm->clique.size++] = i;
     }
   }
 
-  // No MNNVL clique found
-  if (comm->clique.size <= 1) return ncclSuccess;
+  // ncclCommSplit: clique.size may be 1 while nvlDomainSize > 1; still enable MNNVL.
+  if (comm->clique.size <= 1 && comm->nvlDomainSize <= 1) return ncclSuccess;
 #ifdef HIP_FABRIC_API
   // Check that FABRIC handles can be exported & imported by IMEX
   {
@@ -105,8 +111,8 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     // Force the CUMEM handle type to be FABRIC for MNNVL
     ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_FABRIC;
     comm->MNNVL = 1;
-    INFO(NCCL_INIT, "MNNVL %d cliqueId %x cliqueSize %d cliqueRank %d",
-        comm->MNNVL, comm->clique.id, comm->clique.size, comm->cliqueRank);
+    INFO(NCCL_INIT, "MNNVL %d cliqueId %x cliqueSize %d cliqueRank %d nvlDomainSize %d",
+        comm->MNNVL, comm->clique.id, comm->clique.size, comm->cliqueRank, comm->nvlDomainSize);
   }
 #endif
   return ncclSuccess;

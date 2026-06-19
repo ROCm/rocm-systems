@@ -159,6 +159,16 @@ hipError_t ihipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
     return hipErrorInvalidValue;
   }
 
+  // Validate each operation's arguments before checking device capability, so
+  // that invalid arguments are reported as hipErrorInvalidValue regardless of
+  // whether the device supports the discard feature. Otherwise a bad argument
+  // would be masked by hipErrorNotSupported on platforms without HMM.
+  for (size_t op_idx = 0; op_idx < count; op_idx++) {
+    if (dev_ptrs[op_idx] == nullptr || sizes[op_idx] == 0) {
+      return hipErrorInvalidValue;
+    }
+  }
+
   // Check that all devices support HMM (required for discard)
   if (!AllDevicesSupportHmm()) {
     return hipErrorNotSupported;
@@ -182,14 +192,11 @@ hipError_t ihipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
     std::vector<amd::Memory*> mem_objs =
         getMemoryObjectBatch(hip::getCurrentDevice(), dev_ptrs, count, offsets);
 
-    // Validate and prepare each operation
+    // Prepare each operation. Null pointers and zero sizes were already
+    // rejected above, before the device-capability check.
     for (size_t op_idx = 0; op_idx < count; op_idx++) {
       void* dev_ptr = dev_ptrs[op_idx];
       size_t size = sizes[op_idx];
-
-      if (size == 0 || dev_ptr == nullptr) {
-        return hipErrorInvalidValue;
-      }
 
       amd::Memory* mem_obj = mem_objs[op_idx];
       size_t offset = offsets[op_idx];

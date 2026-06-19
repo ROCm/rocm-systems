@@ -5,6 +5,7 @@ test_categories:
       - test_profile_misc
       - test_metric_utils
       - test_parser
+      - test_argparser
       - test_profile_section
       - test_pc_sampling
       - test_analyze_workloads
@@ -29,7 +30,12 @@ test_categories:
       - test_import_guard
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
+      - test_inject_roctx_loader
+      - test_soc_base
+      - test-pc-sampling-collector
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -58,6 +64,7 @@ test_categories:
       - test_profile_iteration_multiplexing_stochastic
       - test_metric_utils
       - test_parser
+      - test_argparser
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
@@ -79,7 +86,12 @@ test_categories:
       - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
+      - test_inject_roctx_loader
+      - test_soc_base
+      - test-pc-sampling-collector
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -107,6 +119,7 @@ test_categories:
       - test_profile_iteration_multiplexing_stochastic
       - test_metric_utils
       - test_parser
+      - test_argparser
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
@@ -128,7 +141,12 @@ test_categories:
       - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
+      - test_inject_roctx_loader
+      - test_soc_base
+      - test-pc-sampling-collector
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -156,6 +174,7 @@ test_categories:
       - test_profile_iteration_multiplexing_stochastic
       - test_metric_utils
       - test_parser
+      - test_argparser
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
@@ -177,7 +196,12 @@ test_categories:
       - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
+      - test_inject_roctx_loader
+      - test_soc_base
+      - test-pc-sampling-collector
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation

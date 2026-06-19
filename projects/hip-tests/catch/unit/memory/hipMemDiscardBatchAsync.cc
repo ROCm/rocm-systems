@@ -44,6 +44,11 @@ static bool HmmSupported(int device = 0) {
  *  - HIP_VERSION >= 7.2
  */
 HIP_TEST_CASE(Unit_hipMemDiscardBatchAsync_NegativeTests) {
+  if (!HmmSupported()) {
+    HIP_SKIP_TEST("HMM/managed memory not supported");
+    return;
+  }
+
   constexpr size_t kAllocSize = 4096;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));

@@ -277,7 +277,8 @@ TIMEMORY_CEREAL_SAVE_FUNCTION_NAME(SettingsTextArchive&, const std::nullptr_t&)
 {}
 
 //! Saving for arithmetic
-template <typename T, traits::EnableIf<std::is_arithmetic<T>::value> = traits::sfinae>
+template <typename T>
+    requires std::is_arithmetic_v<T>
 inline void
 TIMEMORY_CEREAL_SAVE_FUNCTION_NAME(SettingsTextArchive& ar, const T& t)
 {

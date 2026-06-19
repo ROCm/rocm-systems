@@ -22,19 +22,19 @@ Panel Config:
         unit: Unit
       metric:
         GPU Busy:
-          avg: SUM(100 * GRBM_GUI_ACTIVE) / SUM(GRBM_COUNT)
-          min: MIN(100 * GRBM_GUI_ACTIVE / GRBM_COUNT)
-          max: MAX(100 * GRBM_GUI_ACTIVE / GRBM_COUNT)
+          avg: 100 * SUM(GRBM_GUI_ACTIVE) / SUM(GRBM_COUNT)
+          min: 100 * MIN(GRBM_GUI_ACTIVE / GRBM_COUNT)
+          max: 100 * MAX(GRBM_GUI_ACTIVE / GRBM_COUNT)
           unit: Percent
         CP Busy:
-          avg: SUM(100 * GRBM_CP_BUSY) / SUM(GRBM_GUI_ACTIVE)
-          min: MIN(100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE)
-          max: MAX(100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE)
+          avg: 100 * SUM(GRBM_CP_BUSY) / SUM(GRBM_GUI_ACTIVE)
+          min: 100 * MIN(GRBM_CP_BUSY / GRBM_GUI_ACTIVE)
+          max: 100 * MAX(GRBM_CP_BUSY / GRBM_GUI_ACTIVE)
           unit: Percent
         GL2C Busy:
-          avg: SUM(100 * GRBM_GL2C_BUSY) / SUM(GRBM_GUI_ACTIVE)
-          min: MIN(100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE)
-          max: MAX(100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE)
+          avg: 100 * SUM(GRBM_GL2C_BUSY) / SUM(GRBM_GUI_ACTIVE)
+          min: 100 * MIN(GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE)
+          max: 100 * MAX(GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE)
           unit: Percent
 
   # =========================================================================
@@ -51,9 +51,9 @@ Panel Config:
         unit: Unit
       metric:
         TA Busy:
-          avg: SUM(100 * GRBM_TA_BUSY) / SUM(GRBM_GUI_ACTIVE)
-          min: MIN(100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE)
-          max: MAX(100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE)
+          avg: 100 * SUM(GRBM_TA_BUSY) / SUM(GRBM_GUI_ACTIVE)
+          min: 100 * MIN(GRBM_TA_BUSY / GRBM_GUI_ACTIVE)
+          max: 100 * MAX(GRBM_TA_BUSY / GRBM_GUI_ACTIVE)
           unit: Percent
 
   metrics_description:

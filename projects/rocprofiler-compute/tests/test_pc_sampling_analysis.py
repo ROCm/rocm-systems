@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import argparse
 import json
 import sqlite3
 from pathlib import Path
@@ -19,8 +20,10 @@ from utils.file_io import (
 )
 from utils.parser import (
     PMC_KERNEL_TOP_TABLE_ID,
+    load_non_mertrics_table,
     load_pc_sampling_data,
     load_pc_sampling_data_per_kernel,
+    load_table_data,
     nullify_unevaluated_metric_values,
 )
 from utils.pc_sampling_analysis import (
@@ -154,6 +157,17 @@ def write_results_json(path: Path, **kwargs) -> Path:
     return path
 
 
+def sample_tool_data_kwargs() -> dict:
+    """Minimal populated tool-data kwargs with one kernel and one sample."""
+    return {
+        "stochastic": [make_record(5, 0x10, 0, dispatch_id=0, wave_issued=True)],
+        "instructions": ["v_mov"],
+        "comments": ["/s/a.cpp:1"],
+        "kernel_symbols": [make_kernel_symbol(100, 5, "vecCopy")],
+        "kernel_dispatch": [make_dispatch(0, 100)],
+    }
+
+
 # ═══════════════════════════════════════════════════════════════
 # is_only_pc_sampling
 # ═══════════════════════════════════════════════════════════════
@@ -173,6 +187,26 @@ def write_results_json(path: Path, **kwargs) -> Path:
 def test_is_only_pc_sampling(filter_blocks: list[str], expected: bool) -> None:
     """True only when every requested block is PC sampling (21 / pc_sampling)."""
     assert is_only_pc_sampling(filter_blocks) is expected
+
+
+@pytest.mark.parametrize(
+    "filter_blocks, expected",
+    [
+        ([], False),
+        (["21"], True),
+        (["pc_sampling"], True),
+        (["21", "pc_sampling"], True),
+        (["21", "2"], True),
+        (["2"], False),
+    ],
+)
+def test_pc_sampling_collected(
+    filter_blocks: list[str], expected: bool, tmp_path: Path
+) -> None:
+    """True when any collected block is PC sampling, including mixed runs."""
+    instance = make_db_analysis(str(tmp_path))
+    instance._profiling_config = {"filter_blocks": filter_blocks}
+    assert instance.pc_sampling_collected() is expected
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -659,19 +693,22 @@ def test_load_per_kernel_out_of_range_index_guards(
         pytest.param(["v_mov", "v_add"], None, id="empty_comments"),
     ],
 )
-def test_load_per_kernel_empty_string_table_exits(
+def test_load_per_kernel_empty_string_table_warns_and_skips(
     instructions: list | None,
     comments: list | None,
 ) -> None:
-    """An empty instruction/comment table is treated as missing and exits."""
+    """Empty instruction/comment table warns with the kernel name, no exit."""
     tool_data = make_per_kernel_guard_data(instructions, comments)
-    with pytest.raises(SystemExit):
-        load_pc_sampling_data_per_kernel(
+    with patch("utils.parser.console_warning") as console_warning_mock:
+        df = load_pc_sampling_data_per_kernel(
             method="host_trap",
             tool_data=tool_data,
             kernel_name="vecCopy",
             sorting_type="offset",
         )
+    assert df.empty
+    console_warning_mock.assert_called_once()
+    assert "vecCopy" in console_warning_mock.call_args.args[0]
 
 
 def assert_none_kind(column: pd.Series, kind: str) -> None:
@@ -754,22 +791,22 @@ def test_load_per_kernel_kernel_not_found() -> None:
     assert df.empty
 
 
-def test_load_per_kernel_no_pc_sample_key() -> None:
-    """
-    When the tool data has no populated pc_sample array,
-    the per-kernel loader calls console_error which exits.
-    """
+def test_load_per_kernel_no_pc_sample_key_warns_and_skips() -> None:
+    """Missing pc_sample array warns with the kernel name, no exit."""
     tool_data = make_tool_data(
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    with pytest.raises(SystemExit):
-        load_pc_sampling_data_per_kernel(
+    with patch("utils.parser.console_warning") as console_warning_mock:
+        df = load_pc_sampling_data_per_kernel(
             method="host_trap",
             tool_data=tool_data,
             kernel_name="vecCopy",
             sorting_type="offset",
         )
+    assert df.empty
+    console_warning_mock.assert_called_once()
+    assert "vecCopy" in console_warning_mock.call_args.args[0]
 
 
 def test_load_per_kernel_invalid_sorting_type() -> None:
@@ -1157,6 +1194,73 @@ def make_db_analysis(workload_path: str) -> db_analysis:
     return instance
 
 
+def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
+    """Tool data loads whenever PC sampling was collected, else returns None."""
+    write_results_json(tmp_path / "ps_file_results.json", **sample_tool_data_kwargs())
+    instance = make_db_analysis(str(tmp_path))
+
+    instance._profiling_config = {"filter_blocks": ["21", "2"]}  # mixed
+    assert instance.pc_sampling_collected() is True
+    assert instance.pc_sampling_only() is False
+    assert instance.load_pc_sampling_tool_data(str(tmp_path)) is not None
+
+    instance._profiling_config = {"filter_blocks": ["21"]}  # pc sampling only
+    assert instance.pc_sampling_only() is True
+    assert instance.load_pc_sampling_tool_data(str(tmp_path)) is not None
+
+    instance._profiling_config = {"filter_blocks": ["2"]}  # counters only
+    assert instance.pc_sampling_collected() is False
+    assert instance.load_pc_sampling_tool_data(str(tmp_path)) is None
+
+
+def test_load_table_data_forwards_pc_sampling_tool_data() -> None:
+    """load_table_data forwards tool data to load_non_mertrics_table."""
+    sentinel = {"sentinel": True}
+    args = argparse.Namespace(debug=False)
+    workload = schema.Workload()
+    workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx942"}])
+    with (
+        patch("utils.parser.load_non_mertrics_table") as mock_load_non_metrics,
+        patch("utils.parser.eval_metric"),
+        patch("utils.parser.apply_filters"),
+    ):
+        load_table_data(
+            workload=workload,
+            dir_path="dir",
+            is_gui=False,
+            args=args,
+            dfs_expressions={},
+            pc_sampling_tool_data=sentinel,
+        )
+    mock_load_non_metrics.assert_called_once()
+    assert mock_load_non_metrics.call_args.args[3] is sentinel
+
+
+def test_load_non_mertrics_table_populates_pc_sampling_from_tool_data(
+    tmp_path: Path,
+) -> None:
+    """A ``from_pc_sampling`` table is populated when tool data is provided."""
+    args = argparse.Namespace(pc_sampling_sorting_type="count")
+    workload = schema.Workload()
+    workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": ["ps_file"]})}
+    tool_data = make_tool_data(**sample_tool_data_kwargs())
+    load_non_mertrics_table(
+        workload, str(tmp_path), args, pc_sampling_tool_data=tool_data
+    )
+    assert not workload.dfs[2101].empty
+
+
+def test_load_non_mertrics_table_pc_sampling_empty_without_tool_data(
+    tmp_path: Path,
+) -> None:
+    """Without tool data the ``from_pc_sampling`` table stays empty (no crash)."""
+    args = argparse.Namespace(pc_sampling_sorting_type="count")
+    workload = schema.Workload()
+    workload.dfs = {2101: pd.DataFrame({"from_pc_sampling": ["ps_file"]})}
+    load_non_mertrics_table(workload, str(tmp_path), args)
+    assert workload.dfs[2101].empty
+
+
 def test_calc_pc_sampling_data_missing_file(
     tmp_path: Path,
 ) -> None:
@@ -1414,7 +1518,7 @@ def test_pc_sampling_analyze_db_output(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
-    """Analyze in db mode produces a populated pcsampling table."""
+    """Analyze in db mode produces a populated pc sampling table."""
     workload_dir = Path(common.setup_workload_dir(PC_SAMPLING_WORKLOAD)).resolve()
     db_name = "pc_sampling_db_test"
     db_path = workload_dir / f"{db_name}.db"
