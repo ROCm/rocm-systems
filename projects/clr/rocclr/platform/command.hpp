@@ -1540,6 +1540,13 @@ class AccumulateCommand : public Command {
   //! Kernel names and timestamps list for activity profiling
   std::vector<const std::string*> kernelNames_;
   const std::vector<const std::string*>* kernelNamesRef_ = nullptr;
+  //! Optional owner of the borrowed kernel-name strings (e.g. the GraphExec
+  //! whose nodes own them). Retained while this command lives so the strings
+  //! outlive ReportActivity(), which runs at the end of setStatus(CL_COMPLETE)
+  //! -- after OnLaunchComplete() may have dropped the launch's reference. This
+  //! ties the strings' lifetime to the consumer (this command) rather than to
+  //! the graph launch, with no string copies. Set via the constructor.
+  ReferenceCountedObject* kernelNamesOwner_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
@@ -1548,10 +1555,21 @@ class AccumulateCommand : public Command {
   bool owns_hw_events_ = true;
 
  public:
-  //! Create a new Marker
+  //! Create a new accumulate command. kernelNamesOwner, when given, is the
+  //! object that owns the borrowed kernel-name strings (e.g. the GraphExec);
+  //! it is retained for the command's whole lifetime and released in the
+  //! destructor, so the borrowed strings stay valid through ReportActivity()
+  //! even after OnLaunchComplete() drops the launch's reference -- with no
+  //! string copies.
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
-                    const Event* waitingEvent = nullptr)
-      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
+                    const Event* waitingEvent = nullptr,
+                    ReferenceCountedObject* kernelNamesOwner = nullptr)
+      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent),
+        kernelNamesOwner_(kernelNamesOwner) {
+    if (kernelNamesOwner_ != nullptr) {
+      kernelNamesOwner_->retain();
+    }
+  }
 
   //! Destructor - release all retained HW events
   virtual ~AccumulateCommand();
@@ -1587,7 +1605,9 @@ class AccumulateCommand : public Command {
     kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
   }
 
-  //! Set kernel names by reference
+  //! Set kernel names by reference (cheap; borrows the caller's vector and
+  //! strings). Safe only while that storage outlives this command. Used on the
+  //! hot path when no profiler is active, where the names are never read.
   void setKernelNamesRef(const std::vector<const std::string*>* kernelNames) {
     kernelNamesRef_ = kernelNames;
   }

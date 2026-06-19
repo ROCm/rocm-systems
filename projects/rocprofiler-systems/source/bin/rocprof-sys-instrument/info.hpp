@@ -28,8 +28,8 @@ dump_info(std::ostream& _os, const fmodset_t& _data)
     module_function::reset_width();
 }
 //
-template <typename ArchiveT,
-          std::enable_if_t<tim::concepts::is_archive<ArchiveT>::value, int> = 0>
+template <typename ArchiveT>
+    requires tim::concepts::is_archive<ArchiveT>::value
 static inline void
 dump_info(ArchiveT& _ar, const fmodset_t& _data)
 {

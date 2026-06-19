@@ -5,7 +5,7 @@
 
 from types import SimpleNamespace
 
-from amdisa.codegen.execute.vector_special import gen_vector_permlane
+from amdisa.codegen.execute.vector_special import gen_vector_bitop3, gen_vector_permlane
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import Instruction, Operand
 
@@ -111,11 +111,23 @@ def test_gfx1250_true16_execute_bodies_are_arch_local():
             Operand('src0', 16, 'OPR_SRC', True, False, False, False, 1),
         ],
     )
+    cndmask_b16 = Instruction(
+        'V_CNDMASK_B16',
+        'ENC_VOP3',
+        0,
+        [
+            Operand('vdst', 16, 'OPR_VGPR', False, True, False, False, 0),
+            Operand('src0', 16, 'OPR_SRC', True, False, False, False, 1),
+            Operand('src1', 16, 'OPR_SRC', True, False, False, False, 2),
+            Operand('src2', 64, 'OPR_SREG', True, False, False, False, 3),
+        ],
+    )
 
     assert codegen._requires_arch_local_execute(mov_b16, 'ENC_VOP1')
     assert codegen._requires_arch_local_execute(not_b16, 'ENC_VOP1')
     assert codegen._requires_arch_local_execute(add_f16, 'ENC_VOP2')
     assert codegen._requires_arch_local_execute(or_b16, 'ENC_VOP3')
+    assert codegen._requires_arch_local_execute(cndmask_b16, 'ENC_VOP3')
     assert not codegen._can_force_shared_simd_probe(mov_b16, 'ENC_VOP1')
 
 
@@ -167,3 +179,14 @@ def test_gfx1250_true16_e32_dst_reg_uses_physical_vgpr():
         '(inst_.vdst & 0x7fu)'
     )
     assert codegen._e32_true16_dst_reg_expr(add_f32, 'ENC_VOP2') == 'inst_.vdst'
+
+
+def test_gfx1250_bitop3_b16_uses_true16_helpers():
+    body = gen_vector_bitop3(
+        ['vdst'], ['src0', 'src1', 'src2'], 'b16', true16_opsel='inst_.opsel'
+    )
+
+    assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in body
+    assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in body
+    assert 'read_vop3_true16_src(src2, wf, lane, inst_.opsel, 2)' in body
+    assert 'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, result)' in body

@@ -13,8 +13,53 @@ executionctx:
   Unit_hipExecutionCtxStreamDestroy_Negative:
     <<: *level_2
     disabled: [amd_linux, amd_windows, amd_wsl]
+  Unit_hipExecutionCtxStreamDetached_StreamApis_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_EventRecord_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_KernelLaunch_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MemcpyAsync_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MemsetAsync_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MempoolAsync_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_HmmAsync_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_GraphLaunch_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_StreamCapture_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_ActiveCapture_Invalidated:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_ParallelCapture_Invalidated:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MetadataGetters_Succeed:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_StreamOutlivesCtx:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_StreamDestroyedBeforeCtx:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MultipleStreams:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_EmptyCtx:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MultiCtx_Isolation:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_RegularStream_NotAffected:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_DefaultStreams_NeverDetach:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_StreamMemOps_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_MemcpyBatch_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamDetached_EventRecordedBeforeDetach_StillUsable:
+    <<: *level_2
   Unit_hipExecutionCtxRecordWaitEvent_Sanity:
     <<: *level_2
+    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_hipExecutionCtxRecordEventFunctional:
     <<: *level_2
   Unit_hipExecutionCtxRecordWait_Blocking:

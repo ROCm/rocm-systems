@@ -285,7 +285,7 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_eve
                     ev.me_id = static_cast<uint8_t>(r.me);
                     ev.pipe_id = static_cast<uint8_t>(r.pipe);
                     ev.flags = ROCPROF_TRACE_DECODER_EVENT_FLAGS_NONE;
-                    ev.payload = 0;
+                    ev.payload.raw = 0;
                     ev.byte_offset = static_cast<uint64_t>(tok.offset) + header_skip;
                     auto status = trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &ev, 1, userdata);
                     if (status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return status;
@@ -375,7 +375,7 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_eve
             ev.pipe_id = static_cast<uint8_t>(event.pipe);
             ev.flags = ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE;
             if (event.bop) ev.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP;
-            ev.payload = 0;
+            ev.payload.raw = 0;
             ev.byte_offset = static_cast<uint64_t>(tok.offset);
             auto status = trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &ev, 1, userdata);
             if (status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return status;

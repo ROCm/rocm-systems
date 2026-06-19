@@ -1036,6 +1036,16 @@ static void DrainAllDevices() {
   for (auto* dev : hip::g_devices) {
     constexpr bool kWaitForCpu = true;
     dev->SyncAllStreams(kWaitForCpu);
+    // SyncAllStreams only guarantees the GPU work is done and the host has
+    // observed the completion signals. The HSA async-handler thread may still
+    // be executing the completion callback (ReportActivity -> profiler record
+    // write). Wait for those handlers to drain too, so no callback runs after
+    // we flush/free the profiler's record storage below.
+    for (auto* adev : dev->devices()) {
+      if (adev != nullptr) {
+        adev->WaitForHsaAsyncHandlersIdle();
+      }
+    }
   }
 }
 

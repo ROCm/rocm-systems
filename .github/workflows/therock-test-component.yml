@@ -111,6 +111,9 @@ jobs:
           # Windows hip-tests (PAL=1, ROCR=0) set this via matrix; other
           # components leave it empty. See: https://github.com/ROCm/TheRock/issues/3587
           GPU_ENABLE_PAL: ${{ fromJSON(inputs.component).gpu_enable_pal }}
+          # Limit thread count to prevent CPU over-subscription during tests
+          OPENBLAS_NUM_THREADS: "4"
+          OMP_NUM_THREADS: "4"
         run: |
           ${{ fromJSON(inputs.component).test_script }}
 
