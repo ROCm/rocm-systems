@@ -9,11 +9,14 @@
 #define NCCL_ROCMWRAP_H_
 
 #include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>  // hsa_amd_portable_export_dmabuf (DMA-BUF export)
 #include "checks.h"
 
-typedef hsa_status_t (*PFN_hsa_init)();
-typedef hsa_status_t (*PFN_hsa_system_get_info)(hsa_system_info_t attribute, void* value);
-typedef hsa_status_t (*PFN_hsa_status_string)(hsa_status_t status, const char ** status_string);
+// hsa_init, hsa_system_get_info and hsa_status_string are called directly via the
+// hsa-runtime64 library that librccl links against. Only the DMA-BUF export entry
+// keeps a function-pointer indirection, because it doubles as the runtime feature
+// gate: pfn_hsa_amd_portable_export_dmabuf stays NULL when the platform does not
+// support DMA-BUF.
 typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size_t size, int* dmabuf, uint64_t* offset);
 
 #ifdef __HIP_PLATFORM_AMD__
@@ -23,20 +26,20 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
 #endif
 
 #define HSACHECK(cmd) do {				      \
-    hsa_status_t err = pfn_##cmd;				      \
+    hsa_status_t err = cmd;				      \
     if( err != HSA_STATUS_SUCCESS ) {				      \
       const char *errStr;				      \
-      pfn_hsa_status_string(err, &errStr);	      \
+      hsa_status_string(err, &errStr);	      \
       WARN("HSA failure '%s' at %s:%d", errStr, __FILE__, __LINE__); \
       return ncclUnhandledCudaError;			      \
     }							      \
 } while(false)
 
 #define HSACHECKGOTO(cmd, res, label) do {		      \
-    hsa_status_t err = pfn_##cmd;				      \
+    hsa_status_t err = cmd;				      \
     if( err != HSA_STATUS_SUCCESS ) {				      \
       const char *errStr;				      \
-      pfn_hsa_status_string(err, &errStr);	      \
+      hsa_status_string(err, &errStr);	      \
       WARN("HSA failure '%s' at %s:%d", errStr, __FILE__, __LINE__); \
       res = ncclUnhandledCudaError;			      \
       goto label;					      \
@@ -82,12 +85,7 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
 
 #define DECLARE_ROCM_PFN_EXTERN(symbol) extern PFN_##symbol pfn_##symbol
 
-DECLARE_ROCM_PFN_EXTERN(hsa_amd_portable_export_dmabuf); // DMA-BUF support
-
-/* ROCr Driver functions loaded with dlsym() */
-DECLARE_ROCM_PFN_EXTERN(hsa_init);
-DECLARE_ROCM_PFN_EXTERN(hsa_system_get_info);
-DECLARE_ROCM_PFN_EXTERN(hsa_status_string);
+DECLARE_ROCM_PFN_EXTERN(hsa_amd_portable_export_dmabuf); // DMA-BUF feature gate
 
 extern int ncclCuMemEnable();
 extern int ncclCuMemHostEnable();

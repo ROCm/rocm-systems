@@ -1041,6 +1041,13 @@ else()
   target_link_libraries(rccl PRIVATE hip::device)
 endif()
 target_link_libraries(rccl PRIVATE   dl)
+# Direct-link the HSA runtime. RCCL already depends on it transitively through the
+# HIP runtime, so this is runtime-neutral. The linker records DT_NEEDED
+# libhsa-runtime64.so.1 automatically (no SONAME string in source) and it resolves
+# via librccl's existing RPATH, the same entry that already resolves libamdhip64.
+# This replaces the previous dlopen("libhsa-runtime64.so") which broke on runtime
+# trees (e.g. TheRock pip wheels) that ship no unversioned developer symlink.
+target_link_libraries(rccl PRIVATE   hsa-runtime64::hsa-runtime64)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 # librocm-core provides getROCmVersion() for reporting the runtime ROCm version.
 if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
