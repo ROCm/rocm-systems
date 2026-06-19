@@ -74,6 +74,7 @@ static void handle_client(int client_fd, rj_vm_t *vm, std::stop_token stop) {
       hs.gpu_id = gpu_id;
       hs.topology_path_len = static_cast<uint32_t>(topo_len);
       hs.drm_path_len = static_cast<uint32_t>(drm_len);
+      rj_vm_gpu_info(vm, &hs.gpu_info);
 
       resp.payload_bytes = sizeof(hs) + hs.topology_path_len + hs.drm_path_len;
       rpc_send_exact(client_fd, &resp, sizeof(resp));

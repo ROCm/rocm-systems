@@ -29,19 +29,25 @@ inline hipError_t GetSmResourceDesc(hipDevResourceDesc_t* desc) {
   return hipDevResourceGenerateDesc(desc, &resource, 1);
 }
 
-// Creates a green context spanning the device's full SM resource together with a
-// single non-blocking stream owned by that context. Both handles are returned by
-// reference; the caller is responsible for destroying the stream and the context.
+// Convenience helper used by the detach tests: builds a green execution
+// context from the device's full SM resource and creates a single
+// non-blocking stream attached to it. Both handles are returned via
+// out-parameters so callers can drive their own teardown (the typical
+// pattern being: hipExecutionCtxDestroy(ctx) to detach the stream, then
+// hipStreamDestroy(stream) to release it).
 inline void MakeCtxAndStream(hipExecutionCtx_t& ctx, hipStream_t& stream) {
   HIP_CHECK(hipSetDevice(0));
 
   hipDevResourceDesc_t desc{};
-  HIP_CHECK(GetSmResourceDesc(&desc));
+  hipError_t ret = GetSmResourceDesc(&desc);
+  REQUIRE(ret == hipSuccess);
 
+  ctx = nullptr;
   HIP_CHECK(hipGreenCtxCreate(&ctx, desc, 0, 0));
   REQUIRE(ctx != nullptr);
 
-  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, ctx, hipStreamNonBlocking, 0x0));
+  stream = nullptr;
+  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, ctx, hipStreamNonBlocking, 0));
   REQUIRE(stream != nullptr);
 }
 

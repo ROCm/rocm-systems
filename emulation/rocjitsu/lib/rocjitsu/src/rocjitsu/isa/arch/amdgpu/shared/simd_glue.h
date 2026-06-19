@@ -15,12 +15,21 @@
 #define ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/simd.h"
 
+#include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <type_traits>
+
+namespace rocjitsu::gfx1250 {
+struct Isa;
+} // namespace rocjitsu::gfx1250
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -35,14 +44,67 @@ using float32_t = float;
 /// flip at runtime.
 inline bool simd_force_scalar() { return util::force_scalar(); }
 
+/// Write an explicit SGPR lane-mask destination. Wave32 targets use the low
+/// dword only; writing a pair would clobber the next SGPR, which codegen may
+/// legally use for unrelated scalar state.
+template <typename Operand>
+inline void write_explicit_lane_mask(const Operand &dst, Wavefront &wf, uint64_t mask) {
+  if (wf.wf_size() <= 32)
+    dst.write_scalar(wf, static_cast<uint32_t>(mask));
+  else
+    dst.write_scalar64(wf, mask);
+}
+
 template <typename Op>
 inline void write_wave_mask_scalar(const Op &op, Wavefront &wf, uint64_t mask) {
-  // Keep this wave32/wave64 mask-width rule in sync with the Python emitters
-  // in sema_lower.py and vector_cmp.py.
-  if (wf.wf_size() <= 32)
-    op.write_scalar(wf, static_cast<uint32_t>(mask));
+  write_explicit_lane_mask(op, wf, mask);
+}
+
+template <typename MachineInst> inline uint32_t vop3_opsel(const MachineInst &inst) {
+  if constexpr (requires { inst.opsel; })
+    return inst.opsel;
+  else if constexpr (requires { inst.op_sel; })
+    return inst.op_sel;
   else
-    op.write_scalar64(wf, mask);
+    return 0;
+}
+
+template <typename Inst> inline bool vop3_fp8_decode_e5m3(const Inst &inst) {
+  if constexpr (requires { typename Inst::IsaType; }) {
+    if constexpr (std::is_same_v<typename Inst::IsaType, ::rocjitsu::gfx1250::Isa> &&
+                  requires { inst.inst_.clamp; })
+      return inst.inst_.clamp;
+  }
+  return false;
+}
+
+template <typename Operand>
+inline uint32_t read_vop3_true16_src(const Operand &src, Wavefront &wf, uint32_t lane,
+                                     uint32_t opsel, uint32_t src_idx) {
+  uint32_t value = src.read_lane(wf, lane);
+  if (opsel & (1u << src_idx))
+    value >>= 16;
+  return value & 0xffffu;
+}
+
+template <typename Operand>
+inline void write_vop3_true16_dst(const Operand &dst, Wavefront &wf, uint32_t lane, uint32_t opsel,
+                                  uint32_t value) {
+  uint32_t src_half = value & 0xffffu;
+  auto reg = dst.to_register_ref();
+  if (reg && reg->cls == RegClass::VGPR) {
+    // VOP3 true16 selects the destination half with op_sel[3], independent of
+    // any packed operand encoding convention.
+    uint32_t off = reg->index + (wf.vgpr_msb_for_role(dst.vgpr_msb_role()) << 8);
+    uint32_t voff = wf.gpr_idx_en() ? apply_gpr_idx(wf, off, true) : off;
+    uint32_t idx = wf.vgpr_alloc().base + voff;
+    uint32_t old_dst = wf.cu().read_vgpr(idx, lane);
+    uint32_t merged = (opsel & 0x8u) ? ((old_dst & 0x0000ffffu) | (src_half << 16))
+                                     : ((old_dst & 0xffff0000u) | src_half);
+    wf.cu().write_vgpr(idx, lane, merged);
+    return;
+  }
+  dst.write_lane(wf, lane, (opsel & 0x8u) ? (src_half << 16) : src_half);
 }
 
 /// In-vector VOP3 source modifier (f32), bit-exact with the scalar lambda the
@@ -93,8 +155,12 @@ util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t cl
   else if (omod == 3)
     v = v * T(0.5);
   if (clamp) {
-    util::stdx::where(v < T(0), v) = T(0);
-    util::stdx::where(v > T(1), v) = T(1);
+    if constexpr (std::is_same_v<T, double>) {
+      v = util::ordered_clamp_f64_simd(v, 0.0, 1.0);
+    } else {
+      util::stdx::where(v < T(0), v) = T(0);
+      util::stdx::where(v > T(1), v) = T(1);
+    }
   }
   return v;
 }
@@ -422,6 +488,51 @@ template <typename To, typename Mask>
   requires(util::has_stdx_simd)
 inline auto simd_mask_as(const Mask &m) {
   return util::stdx::__proposed::static_simd_cast<util::native<To>>(m);
+}
+
+template <typename T, typename CmpOp>
+  requires(util::has_stdx_simd)
+inline uint64_t cmp_bits64(util::native<T> a, util::native<T> b, CmpOp cmp_op) {
+  constexpr std::size_t W = util::native_width64;
+  alignas(64) T abuf[W];
+  alignas(64) T bbuf[W];
+  a.copy_to(abuf, util::stdx::element_aligned);
+  b.copy_to(bbuf, util::stdx::element_aligned);
+  uint64_t bits = 0;
+  for (std::size_t i = 0; i < W; ++i) {
+    if constexpr (std::is_floating_point_v<T>) {
+      using One = util::stdx::fixed_size_simd<T, 1>;
+      const One av(&abuf[i], util::stdx::element_aligned);
+      const One bv(&bbuf[i], util::stdx::element_aligned);
+      if (cmp_op(av, bv)[0])
+        bits |= (1ULL << i);
+    } else {
+      if (cmp_op(abuf[i], bbuf[i]))
+        bits |= (1ULL << i);
+    }
+  }
+  return bits;
+}
+
+template <typename CmpOp>
+  requires(util::has_stdx_simd)
+inline uint64_t cmp_class_f64_bits(util::native<uint64_t> s, util::narrow32<uint32_t> mask,
+                                   CmpOp cmp_op) {
+  constexpr std::size_t W = util::native_width64;
+  alignas(64) uint64_t sbuf[W];
+  alignas(64) uint32_t mbuf[W];
+  s.copy_to(sbuf, util::stdx::element_aligned);
+  mask.copy_to(mbuf, util::stdx::element_aligned);
+  uint64_t bits = 0;
+  for (std::size_t i = 0; i < W; ++i) {
+    using One64 = util::stdx::fixed_size_simd<uint64_t, 1>;
+    using One32 = util::stdx::fixed_size_simd<uint32_t, 1>;
+    const One64 sv(&sbuf[i], util::stdx::element_aligned);
+    const One32 mv(&mbuf[i], util::stdx::element_aligned);
+    if (cmp_op(sv, mv)[0])
+      bits |= (1ULL << i);
+  }
+  return bits;
 }
 
 /// VOP1 unary SIMD fast path. Reads `src0` as `Tin`, applies `un_op`
@@ -1091,11 +1202,7 @@ template <typename T, typename Inst, typename CmpOp>
       continue;
     const auto a = simd_load64_or<T>(rs0, base, a_bcast);
     const auto b = simd_load64_or<T>(rs1, base, b_bcast);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   wf.set_vcc(vcc);
@@ -1140,11 +1247,7 @@ template <typename Inst, typename CmpOp>
       continue;
     const auto s = simd_load64_or<uint64_t>(rs0, base, s_bcast);
     const auto mask = simd_load_narrow_or<uint32_t>(rm, base, mask_bcast);
-    const auto m = cmp_op(s, mask);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
   wf.set_vcc(vcc);
@@ -1205,7 +1308,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, vcc);
+  write_explicit_lane_mask(inst.vdst, wf, vcc);
   return true;
 }
 
@@ -1252,14 +1355,10 @@ template <typename Inst, typename CmpOp>
     if (do_neg)
       s = s ^ sm;
     const auto mask = simd_load_narrow_or<uint32_t>(rm, base, mask_bcast);
-    const auto m = cmp_op(s, mask);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, vcc);
+  write_explicit_lane_mask(inst.vdst, wf, vcc);
   return true;
 }
 
@@ -1403,7 +1502,7 @@ template <typename T, typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1442,14 +1541,10 @@ template <typename T, typename Inst, typename CmpOp>
       continue;
     const auto a = simd_load64_or<T>(rs0, base, a_bcast);
     const auto b = simd_load64_or<T>(rs1, base, b_bcast);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1498,7 +1593,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1549,7 +1644,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1594,14 +1689,10 @@ template <typename Inst, typename CmpOp>
       continue;
     const auto a = apply_vop3_src_mod_f64<0>(simd_load64_or<T>(rs0, base, a_bcast), abs, neg);
     const auto b = apply_vop3_src_mod_f64<1>(simd_load64_or<T>(rs1, base, b_bcast), abs, neg);
-    const auto m = cmp_op(a, b);
-    uint64_t cmp_bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (m[i])
-        cmp_bits |= (1ULL << i);
+    const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
@@ -2231,28 +2322,41 @@ inline util::native<float> div_fixup_f32_simd(util::native<float> p, util::nativ
 /// f64 counterpart of div_fixup_f32_simd — same cascade, 64-bit-lane domain.
 inline util::native<double> div_fixup_f64_simd(util::native<double> p, util::native<double> b,
                                                util::native<double> c) {
-  using D = util::native<double>;
-  using U = util::native<uint64_t>;
-  const auto bxc = std::bit_cast<D>(std::bit_cast<U>(b) ^ std::bit_cast<U>(c));
-  const auto inf_val = util::stdx::copysign(D(std::numeric_limits<double>::infinity()), bxc);
-  const auto zero_val = util::stdx::copysign(D(0.0), bxc);
-  const auto qnan = D(std::numeric_limits<double>::quiet_NaN());
-  const auto b_nan = util::stdx::isnan(b);
-  const auto c_nan = util::stdx::isnan(c);
-  const auto b_inf = util::stdx::isinf(b);
-  const auto c_inf = util::stdx::isinf(c);
-  const auto b_zero = (b == D(0.0));
-  const auto c_zero = (c == D(0.0));
-  D r = p;
-  util::stdx::where(b_inf, r) = zero_val;
-  util::stdx::where(c_inf, r) = inf_val;
-  util::stdx::where(c_zero, r) = zero_val;
-  util::stdx::where(b_zero, r) = inf_val;
-  util::stdx::where(b_inf && c_inf, r) = qnan;
-  util::stdx::where(b_zero && c_zero, r) = qnan;
-  util::stdx::where(b_nan, r) = b;
-  util::stdx::where(c_nan, r) = c;
-  return r;
+  constexpr std::size_t W = util::native_width64;
+  alignas(64) double pbuf[W];
+  alignas(64) double bbuf[W];
+  alignas(64) double cbuf[W];
+  alignas(64) double out[W];
+  p.copy_to(pbuf, util::stdx::element_aligned);
+  b.copy_to(bbuf, util::stdx::element_aligned);
+  c.copy_to(cbuf, util::stdx::element_aligned);
+  for (std::size_t i = 0; i < W; ++i) {
+    const double bv = bbuf[i];
+    const double cv = cbuf[i];
+    const double sign =
+        std::bit_cast<double>(std::bit_cast<uint64_t>(bv) ^ std::bit_cast<uint64_t>(cv));
+    if (std::isnan(cv))
+      out[i] = cv;
+    else if (std::isnan(bv))
+      out[i] = bv;
+    else if (cv == 0.0 && bv == 0.0)
+      out[i] = std::numeric_limits<double>::quiet_NaN();
+    else if (std::isinf(cv) && std::isinf(bv))
+      out[i] = std::numeric_limits<double>::quiet_NaN();
+    else if (bv == 0.0)
+      out[i] = std::copysign(std::numeric_limits<double>::infinity(), sign);
+    else if (cv == 0.0)
+      out[i] = std::copysign(0.0, sign);
+    else if (std::isinf(cv))
+      out[i] = std::copysign(std::numeric_limits<double>::infinity(), sign);
+    else if (std::isinf(bv))
+      out[i] = std::copysign(0.0, sign);
+    else
+      out[i] = pbuf[i];
+  }
+  util::native<double> result;
+  result.copy_from(out, util::stdx::element_aligned);
+  return result;
 }
 
 /// VOP3 div_fmas SIMD fast path (f32). The scalar body is `fma(s0, s1, s2)`
@@ -2349,15 +2453,9 @@ template <typename Inst>
     const auto c = apply_vop3_src_mod_f64<2>(simd_load64_or<T>(rs2, base, c_bcast), abs, neg);
     auto r = util::stdx::fma(a, b, c);
     const auto scaled = util::stdx::ldexp(r, shift_64);
-    // VCC mask built directly in the f64 abi via a generator; avoids a
-    // cross-abi mask cast (the f32 path can ride load+simd_mask_as because
-    // native<uint32_t> shares abi with native<float>, but native<uint64_t>
-    // does not match native<double>::abi on AVX-512).
     const uint64_t vcc_chunk = vcc >> base;
-    const auto vcc_mask = util::native<double>([&](std::size_t i) {
-                            return ((vcc_chunk >> i) & 1ULL) ? 1.0 : 0.0;
-                          }) != 0.0;
-    util::stdx::where(vcc_mask, r) = scaled;
+    r = util::replace_f64_lanes(r, scaled,
+                                [&](std::size_t i) { return ((vcc_chunk >> i) & 1ULL) != 0; });
     write_simd64_at<T>(rd64, inst.vdst, wf, base, r, chunk);
   }
   return true;
@@ -2624,8 +2722,9 @@ template <FmaMixDst DstMode, typename Inst>
   if constexpr (DstMode == FmaMixDst::F32) {
     // Clang contracts native SIMD a*b+c on FMA hosts for this shape while the
     // generated scalar bodies remain bit-exact with separate multiply/add. The
-    // f16 destination modes stay enabled: they narrow to f16 and are covered by
-    // the fma_mix SIMD-vs-scalar tests rather than by this raw-f32 bit path.
+    // f16 destination modes round after the mixed-precision add, and the other
+    // FMA-family SIMD helpers intentionally model fused instructions with
+    // stdx::fma, so this guard is only needed for the F32 fma_mix/mad_mix path.
     return false;
   }
 #endif
