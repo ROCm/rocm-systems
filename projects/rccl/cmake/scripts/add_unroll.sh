@@ -37,6 +37,18 @@ if [[ "$HIP_FILE" =~ .*/src/device/.*\.h ]]; then
   perl -pi -e 's/(runRing<T, RedOp, Proto, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
   perl -pi -e 's/(runTreeSplit<T, RedOp, Proto, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
   perl -pi -e 's/(runTreeUpDown<T, RedOp, Proto, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
+  # AllGatherV: runAllGatherV mirrors runRing call-site handling.
+  perl -pi -e 's/(runAllGatherV<T.*?)(>\()/\1, USE_ACC, COLL_UNROLL\2/g' "$HIP_FILE"
+  perl -pi -e 's/(runAllGatherV<T, RedOp, (ProtoLL|ProtoLL128), USE_ACC, COLL_UNROLL.*?)>/\1, 0>/' "$HIP_FILE"
+  perl -pi -e 's/(runAllGatherV<T, RedOp, Proto, USE_ACC, COLL_UNROLL.*?)>/\1, Pipeline>/' "$HIP_FILE"
+
+  # setDataPtrsHelper is deduced: overload 1 (generic Proto) drops all injected params;
+  # overload 2 (ProtoSimple<1,1>) keeps deducible USE_ACC/COLL_UNROLL, drops only Pipeline.
+  perl -0777 -pi -e 's/template<typename T, typename RedOp, typename Proto, int USE_ACC, int COLL_UNROLL, int Pipeline>(\s*__device__ __forceinline__ void setDataPtrsHelper)/template<typename T, typename RedOp, typename Proto>$1/g' "$HIP_FILE"
+  perl -0777 -pi -e 's/template<typename T, typename RedOp, int USE_ACC, int COLL_UNROLL, int Pipeline>(\s*__device__ __forceinline__ void setDataPtrsHelper)/template<typename T, typename RedOp, int USE_ACC, int COLL_UNROLL>$1/g' "$HIP_FILE"
+  # RCCL's prims setDataPtrs takes a trailing acc arg (no accumulation for AllGatherV).
+  perl -pi -e 's/(prims\.setDataPtrs\(srcBuf, dstBuf, redOpArg, nullptr, 0, 0)\)/\1, nullptr)/g' "$HIP_FILE"
+
   sed -i "s/\\(struct RunWorkBatch<ncclFunc[^>]*\\)>*/\\1, USE_ACC, COLL_UNROLL, Pipeline, UserRegMode>/" "$HIP_FILE"
   sed -i "s/\\(RunWorkColl<[^,]*,[^,]*,[^,]*,[^,]*,[^>]*\\)>/\\1, USE_ACC, COLL_UNROLL, Pipeline, UserRegMode>/" "$HIP_FILE"
 

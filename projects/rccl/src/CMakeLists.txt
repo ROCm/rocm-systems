@@ -61,6 +61,7 @@ set(SRC_FILES
   sym_kernels.cc
   transport.cc
   device/all_gather.h
+  device/all_gather_v.h
   device/all_reduce.h
   device/alltoall_pivot.h
   device/alltoall_gda.h
