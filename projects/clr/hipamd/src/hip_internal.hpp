@@ -96,6 +96,9 @@ static_assert(sizeof(ihipIpcEventHandle_t) <= sizeof(hipIpcEventHandle_t),
 
 const char* ihipGetErrorName(hipError_t hip_error);
 
+// Drains the deferred IPC-event signal cleanup queue. Called where a device-wide
+// wait is already expected (hipDeviceSynchronize / hipDeviceReset / shutdown).
+void drainDeferredIpcSignals();
 } // namespace hip
 
 // Helper: set up TLS device pointer on first use.

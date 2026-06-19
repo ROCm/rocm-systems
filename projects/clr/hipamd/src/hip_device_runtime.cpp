@@ -587,6 +587,8 @@ hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* pConfig) {
 hipError_t hipDeviceReset(void) {
   HIP_INIT_API(hipDeviceReset);
 
+  // Free any deferred IPC-event signals before tearing the device down.
+  hip::drainDeferredIpcSignals();
   hip::getCurrentDevice()->Reset();
 
   HIP_RETURN(hipSuccess);
@@ -679,6 +681,8 @@ hipError_t hipDeviceSynchronize() {
   CHECK_SUPPORTED_DURING_CAPTURE();
   constexpr bool kDoWaitForCpu = false;
   hip::getCurrentDevice()->SyncAllStreams(kDoWaitForCpu);
+  // Device work has been drained; free any deferred IPC-event signals now.
+  hip::drainDeferredIpcSignals();
   HIP_RETURN_DURATION(hipSuccess);
 }
 

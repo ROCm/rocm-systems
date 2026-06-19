@@ -12,6 +12,8 @@
 #else
 #include <io.h>
 #endif
+#include <mutex>
+#include <vector>
 
 // ================================================================================================
 namespace hip {
@@ -21,6 +23,67 @@ hipError_t ihipCreateIpcEventByType(hipEvent_t* event, ihipIpcEventHandleType ty
 void ihipDestroyIpcEvent(hipEvent_t event);
 
 // ================================================================================================
+// Deferred IPC-signal cleanup.
+//
+// Destroying a recorded IPC event must wait for the GPU barrier that decrements
+// the IPC signal before the signal can be freed (otherwise the GPU could write to
+// freed memory). Doing that wait inside hipEventDestroy() makes destroy block on
+// the event's own pending GPU work — unlike CUDA, whose cudaEventDestroy() is
+// non-blocking. Instead, transfer the signal (and the record marker's event) to a
+// deferred queue and free them where a device-wide wait is already expected
+// (hipDeviceSynchronize / hipDeviceReset) or when the queue grows past a bound.
+// hipEventDestroy() then returns immediately; total GPU + cleanup cost is conserved
+// at the explicit sync point.
+namespace {
+struct DeferredIpcSignal {
+  amd::device::Signal* signal;  //!< IPC signal to free once its barrier completes
+  amd::Event* event;            //!< record marker's event (non-null => signal was armed)
+};
+
+std::mutex g_deferredIpcMutex;
+std::vector<DeferredIpcSignal> g_deferredIpcSignals;
+constexpr size_t kDeferredIpcDrainThreshold = 256;
+
+void cleanupDeferredIpcSignal(const DeferredIpcSignal& item) {
+  if (item.signal != nullptr) {
+    // Only armed signals (event != null) have an in-flight barrier to wait on;
+    // waiting on a never-recorded signal (still at its initial value) would hang.
+    if (item.event != nullptr) {
+      item.signal->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
+    }
+    delete item.signal;
+  }
+  if (item.event != nullptr) {
+    item.event->release();
+  }
+}
+}  // namespace
+
+void enqueueDeferredIpcSignal(amd::device::Signal* signal, amd::Event* event) {
+  std::vector<DeferredIpcSignal> overflow;
+  {
+    std::scoped_lock lock(g_deferredIpcMutex);
+    g_deferredIpcSignals.push_back({signal, event});
+    if (g_deferredIpcSignals.size() >= kDeferredIpcDrainThreshold) {
+      overflow.swap(g_deferredIpcSignals);  // bounded: drain inline on overflow
+    }
+  }
+  for (const auto& item : overflow) {
+    cleanupDeferredIpcSignal(item);
+  }
+}
+
+void drainDeferredIpcSignals() {
+  std::vector<DeferredIpcSignal> pending;
+  {
+    std::scoped_lock lock(g_deferredIpcMutex);
+    pending.swap(g_deferredIpcSignals);
+  }
+  for (const auto& item : pending) {
+    cleanupDeferredIpcSignal(item);
+  }
+}
+
 bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
   // Early return if shared memory already exists
   if (ipc_evt_.ipc_shmem_) {
@@ -231,15 +294,16 @@ hipError_t IPCEvent::createIpcSignalIfNeeded() {
 
 IPCEvent::~IPCEvent() {
   if (ipc_signal_ != nullptr) {
-    // If the event was recorded (signal armed), wait for any in-flight barrier
-    // to finish before destroying the signal; otherwise the GPU could write to
-    // freed memory.  Skip the wait when the signal was never recorded (still at
-    // its initial value) — waiting would hang forever.
-    if (event_ != nullptr) {
-      ipc_signal_->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
-    }
-    delete ipc_signal_;
+    // Do NOT wait here: that would make hipEventDestroy() block on this event's
+    // own pending GPU work. Transfer the signal (and the record marker's event)
+    // to the deferred-cleanup queue, which waits for the barrier and frees them
+    // at the next device sync/reset (or on overflow). Matches CUDA's non-blocking
+    // cudaEventDestroy() semantics.
+    enqueueDeferredIpcSignal(ipc_signal_, event_);
     ipc_signal_ = nullptr;
+    // Ownership of event_ is transferred to the deferred queue; clear it so the
+    // base ~Event() does not release it (the deferred cleanup will).
+    event_ = nullptr;
   }
 }
 
