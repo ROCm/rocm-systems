@@ -256,24 +256,24 @@ Panel Config:
         unit: Unit
       metric:
         Wait for Any:
-          avg: SUM(100 * SQ_WAIT_ANY) / SUM(SQ_WAVE_CYCLES)
-          min: MIN(100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES)
-          max: MAX(100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES)
+          avg: 100 * SUM(SQ_WAIT_ANY) / SUM(SQ_WAVE_CYCLES)
+          min: 100 * MIN(SQ_WAIT_ANY / SQ_WAVE_CYCLES)
+          max: 100 * MAX(SQ_WAIT_ANY / SQ_WAVE_CYCLES)
           unit: Percent
         Wait for Instruction Fetch:
-          avg: SUM(100 * SQ_WAIT_IFETCH) / SUM(SQ_WAVE_CYCLES)
-          min: MIN(100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES)
-          max: MAX(100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES)
+          avg: 100 * SUM(SQ_WAIT_IFETCH) / SUM(SQ_WAVE_CYCLES)
+          min: 100 * MIN(SQ_WAIT_IFETCH / SQ_WAVE_CYCLES)
+          max: 100 * MAX(SQ_WAIT_IFETCH / SQ_WAVE_CYCLES)
           unit: Percent
         Wait for Barrier:
-          avg: SUM(100 * SQ_WAIT_BARRIER) / SUM(SQ_WAVE_CYCLES)
-          min: MIN(100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES)
-          max: MAX(100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES)
+          avg: 100 * SUM(SQ_WAIT_BARRIER) / SUM(SQ_WAVE_CYCLES)
+          min: 100 * MIN(SQ_WAIT_BARRIER / SQ_WAVE_CYCLES)
+          max: 100 * MAX(SQ_WAIT_BARRIER / SQ_WAVE_CYCLES)
           unit: Percent
         Wait for Counter:
-          avg: SUM(100 * SQ_WAIT_CNT_ANY) / SUM(SQ_WAVE_CYCLES)
-          min: MIN(100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES)
-          max: MAX(100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES)
+          avg: 100 * SUM(SQ_WAIT_CNT_ANY) / SUM(SQ_WAVE_CYCLES)
+          min: 100 * MIN(SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES)
+          max: 100 * MAX(SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES)
           unit: Percent
 
   # =========================================================================
@@ -292,9 +292,9 @@ Panel Config:
         # HITS and REQ are per-SQ per-bank; summed HITS can exceed REQ → >100%. Use HITS+MISSES
         # as the outcome denominator (same pairing as Memory Chart / SoL).
         Icache Hit Rate:
-          avg: SUM(100 * SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
-          min: MIN(100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
-          max: MAX(100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
+          avg: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
+          min: 100 * MIN(SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
+          max: 100 * MAX(SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
           unit: Percent
 
   # =========================================================================
@@ -311,9 +311,9 @@ Panel Config:
         unit: Unit
       metric:
         Dcache Hit Rate:
-          avg: SUM(100 * SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
-          min: MIN(100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
-          max: MAX(100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
+          avg: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
+          min: 100 * MIN(SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
+          max: 100 * MAX(SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
           unit: Percent
 
   metrics_description:

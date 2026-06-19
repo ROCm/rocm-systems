@@ -24,27 +24,23 @@ Panel Config:
       metric:
         IPC:
           avg: SUM(SQ_INSTS) / SUM(SQ_BUSY_CU_CYCLES)
-          min: MIN((SQ_INSTS / SQ_BUSY_CU_CYCLES))
-          max: MAX((SQ_INSTS / SQ_BUSY_CU_CYCLES))
+          min: MIN(SQ_INSTS / SQ_BUSY_CU_CYCLES)
+          max: MAX(SQ_INSTS / SQ_BUSY_CU_CYCLES)
           unit: Instructions per Cycle
         IPC (Issued):
           avg: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
-          min: MIN(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
-            + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS)
-            / SQ_ACTIVE_INST_ANY))
-          max: MAX(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
-            + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS)
-            / SQ_ACTIVE_INST_ANY))
+          min: MIN((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SQ_ACTIVE_INST_ANY)
+          max: MAX((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SQ_ACTIVE_INST_ANY)
           unit: Instructions per Cycle
         SALU Utilization:
-          avg: SUM(100 * SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-          max: MAX((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          avg: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(SQ_ACTIVE_INST_SCA / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
+          max: 100 * MAX(SQ_ACTIVE_INST_SCA / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
           unit: Percent
         VALU Utilization:
-          avg: SUM(100 * SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-          max: MAX((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          avg: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(SQ_ACTIVE_INST_VALU / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
+          max: 100 * MAX(SQ_ACTIVE_INST_VALU / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
           unit: Percent
         VALU Active Threads:
           avg: SUM(SQ_THREAD_CYCLES_VALU) / SUM(SQ_ACTIVE_INST_VALU)
