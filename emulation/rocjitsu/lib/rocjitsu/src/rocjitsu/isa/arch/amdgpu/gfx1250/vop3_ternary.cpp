@@ -3437,7 +3437,9 @@ void VMadI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     int32_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int32_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     int32_t s2 = static_cast<int32_t>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(s0 * s1 + s2));
+    vdst.write_lane(wf, lane,
+                    static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1) +
+                        static_cast<uint32_t>(s2));
   }
 }
 
@@ -4865,7 +4867,8 @@ void VMadNcI64I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     int64_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
     int64_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
     int64_t s2 = static_cast<int64_t>(src2.read_lane64(wf, lane));
-    uint64_t result = static_cast<uint64_t>(s0 * s1 + s2);
+    uint64_t result =
+        static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1) + static_cast<uint64_t>(s2);
     vdst.write_lane64(wf, lane, result);
   }
 }
