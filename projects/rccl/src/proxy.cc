@@ -634,12 +634,22 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
   case ncclPatternPipelineTo:
     {
       struct ncclRing* ring = &channel->ring;
-      if (NeedProxy(proxyRecv, op->pattern, op->root, ring, comm->nRanks)) {
+      needProxy = NeedProxy(proxyRecv, op->pattern, op->root, ring, comm->nRanks);
+      if (op->coll == ncclFuncAllGatherV && op->pattern == ncclPatternRing) {
+        op->nsteps = op->specifics.bcast.recvSlices;
+        if (op->nsteps == 0) needProxy = false;
+      }
+      if (needProxy) {
         op->prevRank = ring->prev;
         op->nextRank = ring->next;
         NCCLCHECK(SaveProxy(comm, channel, proxyRecv, ring->prev, op, op->connIndex, justInquire));
       }
-      if (NeedProxy(proxySend, op->pattern, op->root, ring, comm->nRanks)) {
+      needProxy = NeedProxy(proxySend, op->pattern, op->root, ring, comm->nRanks);
+      if (op->coll == ncclFuncAllGatherV && op->pattern == ncclPatternRing) {
+        op->nsteps = op->specifics.bcast.sendSlices;
+        if (op->nsteps == 0) needProxy = false;
+      }
+      if (needProxy) {
         op->prevRank = ring->prev;
         op->nextRank = ring->next;
         NCCLCHECK(SaveProxy(comm, channel, proxySend, ring->next, op, op->connIndex, justInquire));
