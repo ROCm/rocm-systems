@@ -89,6 +89,11 @@ rj_add_triton_asm_fixture(triton_cdna3_flash_attention_buffer_async_1024 gfx942)
 # single-bundle assumption — see executable.cpp::load_hip_fatbin.)
 rj_add_device_kernel(vector_add gfx90a OUTPUT_NAME vector_add_gfx90a)
 
+# Register-padded vector_add for the DBI probe-CALL smoke test
+# (tests/dbi/hsa_dbi_nop_probe_test.cpp). Forces .sgpr_count >= 32 so the
+# probe's link pair s[30:31] is granted; see vector_add_probe.hip.
+rj_add_device_kernel(vector_add_probe gfx90a OUTPUT_NAME vector_add_probe_gfx90a)
+
 if(RJ_INSTALL_TESTS)
     set(RJ_DEVICE_KERNEL_FIXTURES
         ${KERNEL_OUTPUT_DIR}/matmul_naive.o
@@ -146,6 +151,7 @@ add_custom_target(
         kernel_matmul_tiled
         kernel_vector_add
         kernel_vector_add_gfx90a
+        kernel_vector_add_probe_gfx90a
         kernel_dynamic_copy_loop
         kernel_multikernel_indirect_branch
         kernel_multikernel_indirect_branch_part0
