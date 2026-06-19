@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <assert.h>
+#include <cstddef>
 #include <cstring>
 #include <iomanip>
 #include <algorithm>
@@ -542,9 +543,22 @@ namespace code {
     bool AmdHsaCode::GetNoteIsa(std::string& vendor_name, std::string& architecture_name, uint32_t* major_version, uint32_t* minor_version, uint32_t* stepping)
     {
       amdgpu_hsa_note_isa_t *desc;
-      if (!GetAmdNote(NT_AMD_HSA_ISA_VERSION, &desc)) { return false; }
+      uint32_t desc_size = 0;
+      if (!GetAmdNote(NT_AMD_HSA_ISA_VERSION, &desc, &desc_size)) { return false; }
+      // The inner *_name_size fields are attacker-controlled. Bound the
+      // variable-length name array against the actual descriptor size before
+      // reading, otherwise GetNoteString reads past the descriptor into
+      // adjacent heap memory. See ROCM-26177 finding #3.
+      const size_t name_offset = offsetof(amdgpu_hsa_note_isa_t, vendor_and_architecture_name);
+      if (desc_size < name_offset) { return false; }
+      const size_t name_room = desc_size - name_offset;
+      if (desc->vendor_name_size > name_room) { return false; }
       vendor_name = GetNoteString(desc->vendor_name_size, desc->vendor_and_architecture_name);
-      architecture_name = GetNoteString(desc->architecture_name_size, desc->vendor_and_architecture_name + vendor_name.length() + 1);
+      const size_t arch_offset = vendor_name.length() + 1;
+      if (arch_offset > name_room || desc->architecture_name_size > name_room - arch_offset) {
+        return false;
+      }
+      architecture_name = GetNoteString(desc->architecture_name_size, desc->vendor_and_architecture_name + arch_offset);
       *major_version = desc->major;
       *minor_version = desc->minor;
       *stepping = desc->stepping;
@@ -827,9 +841,16 @@ namespace code {
     bool AmdHsaCode::GetNoteProducer(uint32_t* major, uint32_t* minor, std::string& producer_name)
     {
       amdgpu_hsa_note_producer_t* desc;
-      if (!GetAmdNote(NT_AMD_HSA_PRODUCER, &desc)) { return false; }
+      uint32_t desc_size = 0;
+      if (!GetAmdNote(NT_AMD_HSA_PRODUCER, &desc, &desc_size)) { return false; }
       *major = desc->producer_major_version;
       *minor = desc->producer_minor_version;
+      // Bound the attacker-controlled producer_name_size against the descriptor.
+      // See ROCM-26177 finding #3.
+      const size_t name_offset = offsetof(amdgpu_hsa_note_producer_t, producer_name);
+      if (desc_size < name_offset || desc->producer_name_size > desc_size - name_offset) {
+        return false;
+      }
       producer_name = GetNoteString(desc->producer_name_size, desc->producer_name);
       return true;
     }
@@ -860,7 +881,14 @@ namespace code {
     bool AmdHsaCode::GetNoteProducerOptions(std::string& options)
     {
       amdgpu_hsa_note_producer_options_t* desc;
-      if (!GetAmdNote(NT_AMD_HSA_PRODUCER_OPTIONS, &desc)) { return false; }
+      uint32_t desc_size = 0;
+      if (!GetAmdNote(NT_AMD_HSA_PRODUCER_OPTIONS, &desc, &desc_size)) { return false; }
+      // Bound the attacker-controlled producer_options_size against the
+      // descriptor. See ROCM-26177 finding #3.
+      const size_t opts_offset = offsetof(amdgpu_hsa_note_producer_options_t, producer_options);
+      if (desc_size < opts_offset || desc->producer_options_size > desc_size - opts_offset) {
+        return false;
+      }
       options = GetNoteString(desc->producer_options_size, desc->producer_options);
       return true;
     }
