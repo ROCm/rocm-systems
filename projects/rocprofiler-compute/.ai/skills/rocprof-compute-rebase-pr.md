@@ -30,9 +30,9 @@ Cherry-pick the user's commits onto the latest `origin/rocprofiler-compute-devel
    - Present the list and ask the user to confirm which commits are theirs. Do NOT assume — other contributors' commits may be mixed in.
    - Collect the confirmed hashes in the same order shown (oldest-to-newest) for step 6.
 
-5. **Reset the branch to the upstream base.**
+5. **Create a safety backup, then reset the branch to the upstream base.**
+   - Run: `git branch <branch-name>-backup`
    - Run: `git reset --hard origin/rocprofiler-compute-develop`
-
 6. **Cherry-pick the confirmed commits (oldest first).**
    - Run: `git cherry-pick <hash1> <hash2> ... <hashN>` (all in one command).
    - If a commit is already in `rocprofiler-compute-develop`, the cherry-pick will report "empty commit" — run `git cherry-pick --skip` to continue.
