@@ -642,6 +642,36 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
 
 namespace {
 
+// Wavefront-free subset of resolve_src_scalar: the value of an inline
+// constant (small integers 0..64 / -1..-16 and the inline float
+// constants), or nullopt for any other encoding value. Negative inline
+// integers are sign-extended to 64 bits so 64-bit consumers see all-ones.
+std::optional<uint64_t> resolve_inline_const(int ev) {
+  if (ev >= 128 && ev <= 192)
+    return static_cast<uint64_t>(ev - 128);
+  if (ev >= 193 && ev <= 208)
+    return static_cast<uint64_t>(static_cast<int64_t>(-(ev - 192)));
+  if (ev == 240)
+    return static_cast<uint64_t>(0x3F000000u); // 0.5f
+  if (ev == 241)
+    return static_cast<uint64_t>(0xBF000000u); // -0.5f
+  if (ev == 242)
+    return static_cast<uint64_t>(0x3F800000u); // 1.0f
+  if (ev == 243)
+    return static_cast<uint64_t>(0xBF800000u); // -1.0f
+  if (ev == 244)
+    return static_cast<uint64_t>(0x40000000u); // 2.0f
+  if (ev == 245)
+    return static_cast<uint64_t>(0xC0000000u); // -2.0f
+  if (ev == 246)
+    return static_cast<uint64_t>(0x40800000u); // 4.0f
+  if (ev == 247)
+    return static_cast<uint64_t>(0xC0800000u); // -4.0f
+  if (ev == 248)
+    return static_cast<uint64_t>(0x3E22F983u); // 1/(2*pi)
+  return std::nullopt;
+}
+
 uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
   if (ev == 102)
     return static_cast<uint32_t>(wf.scratch_base());
@@ -892,6 +922,16 @@ uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(encoding_value_);
   return resolve_src_scalar(wf, encoding_value_);
+}
+
+std::optional<uint64_t> Operand::const_value() const {
+  if (has_literal64_)
+    return literal64_value_;
+  if (is_immediate_type(opr_type_))
+    return static_cast<uint64_t>(static_cast<uint32_t>(encoding_value_));
+  if (to_register_ref())
+    return std::nullopt;
+  return resolve_inline_const(encoding_value_);
 }
 
 uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {

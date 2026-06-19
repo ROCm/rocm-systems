@@ -29,6 +29,7 @@ VInterpP10F32Vinterp::VInterpP10F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VInterpP10F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
@@ -48,6 +49,7 @@ VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VInterpP2F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
@@ -67,6 +69,7 @@ VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VInterpP10F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
@@ -86,6 +89,7 @@ VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VInterpP2F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
@@ -105,6 +109,7 @@ VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VInterpP10RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
@@ -124,6 +129,7 @@ VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VInterpP2RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {

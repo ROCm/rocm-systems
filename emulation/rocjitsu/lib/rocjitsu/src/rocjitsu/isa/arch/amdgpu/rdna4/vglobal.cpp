@@ -34,6 +34,7 @@ GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -61,6 +62,7 @@ GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -89,6 +91,7 @@ GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadU16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -116,6 +119,7 @@ GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadI16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -144,6 +148,7 @@ GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -171,6 +176,7 @@ GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -198,6 +204,7 @@ GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -225,6 +232,7 @@ GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -252,6 +260,7 @@ GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalStoreB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -288,6 +297,7 @@ GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalStoreB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -324,6 +334,7 @@ GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalStoreB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -360,6 +371,7 @@ GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalStoreB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -398,6 +410,7 @@ GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalStoreB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -438,6 +451,7 @@ GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalStoreB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -480,6 +494,7 @@ GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadD16U8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -508,6 +523,7 @@ GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadD16I8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -537,6 +553,7 @@ GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadD16B16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -565,6 +582,7 @@ GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadD16HiU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -593,6 +611,7 @@ GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadD16HiI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -622,6 +641,7 @@ GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -650,6 +670,7 @@ GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalStoreD16HiB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -687,6 +708,7 @@ GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalStoreD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -839,6 +861,7 @@ GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicSwapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -879,6 +902,7 @@ GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicCmpswapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -921,6 +945,7 @@ GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicAddU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -961,6 +986,7 @@ GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1001,6 +1027,7 @@ GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicSubClampU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1041,6 +1068,7 @@ GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicMinI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1081,6 +1109,7 @@ GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicMinU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1121,6 +1150,7 @@ GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicMaxI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1161,6 +1191,7 @@ GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicMaxU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1201,6 +1232,7 @@ GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicAndB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1241,6 +1273,7 @@ GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicOrB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1281,6 +1314,7 @@ GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicXorB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1321,6 +1355,7 @@ GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicIncU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1361,6 +1396,7 @@ GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicDecU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1401,6 +1437,7 @@ GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicSwapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1443,6 +1480,7 @@ GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicCmpswapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1489,6 +1527,7 @@ GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicAddU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1531,6 +1570,7 @@ GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicSubU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1573,6 +1613,7 @@ GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicMinI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1615,6 +1656,7 @@ GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicMinU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1657,6 +1699,7 @@ GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicMaxI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1699,6 +1742,7 @@ GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicMaxU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1741,6 +1785,7 @@ GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicAndB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1783,6 +1828,7 @@ GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicOrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1825,6 +1871,7 @@ GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicXorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1867,6 +1914,7 @@ GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicIncU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1909,6 +1957,7 @@ GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicDecU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -1960,6 +2009,7 @@ GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicCondSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -2000,6 +2050,7 @@ GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *in
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicMinNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -2040,6 +2091,7 @@ GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *in
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicMaxNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -2078,6 +2130,7 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -2105,6 +2158,7 @@ GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -2205,6 +2259,7 @@ GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicAddF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -2243,6 +2298,7 @@ GlobalLoadTrB128Vglobal::GlobalLoadTrB128Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadTrB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -2271,6 +2327,7 @@ GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalLoadTrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -2301,6 +2358,7 @@ GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicPkAddF16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -2341,6 +2399,7 @@ GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *in
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicPkAddBf16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -2381,6 +2440,7 @@ GlobalAtomicOrderedAddB64Vglobal::GlobalAtomicOrderedAddB64Vglobal(const Machine
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void GlobalAtomicOrderedAddB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {

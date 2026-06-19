@@ -34,6 +34,7 @@ DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAddU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -73,6 +74,7 @@ DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsSubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -112,6 +114,7 @@ DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsRsubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -151,6 +154,7 @@ DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsIncU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -190,6 +194,7 @@ DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsDecU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -229,6 +234,7 @@ DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinI32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -268,6 +274,7 @@ DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxI32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -307,6 +314,7 @@ DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -346,6 +354,7 @@ DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -385,6 +394,7 @@ DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAndB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -424,6 +434,7 @@ DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsOrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -463,6 +474,7 @@ DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsXorB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -548,6 +560,7 @@ DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStoreB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -587,6 +600,7 @@ DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStore2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -640,6 +654,7 @@ DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStore2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -693,6 +708,7 @@ DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstoreB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -738,6 +754,7 @@ DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinNumF32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -778,6 +795,7 @@ DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxNumF32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -825,6 +843,7 @@ DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAddF32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -864,6 +883,7 @@ DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStoreB8Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -900,6 +920,7 @@ DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStoreB16Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -939,6 +960,7 @@ DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAddRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -982,6 +1004,7 @@ DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsSubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1025,6 +1048,7 @@ DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsRsubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1068,6 +1092,7 @@ DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsIncRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1111,6 +1136,7 @@ DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsDecRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1154,6 +1180,7 @@ DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinRtnI32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1197,6 +1224,7 @@ DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxRtnI32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1240,6 +1268,7 @@ DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1283,6 +1312,7 @@ DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1326,6 +1356,7 @@ DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAndRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1369,6 +1400,7 @@ DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsOrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1412,6 +1444,7 @@ DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsXorRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1506,6 +1539,7 @@ DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStorexchgRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1552,6 +1586,7 @@ DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStorexchg2addrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1598,6 +1633,7 @@ DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const Machi
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStorexchg2addrStride64RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1644,6 +1680,7 @@ DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstoreRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1692,6 +1729,7 @@ DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinNumRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1735,6 +1773,7 @@ DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxNumRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1774,6 +1813,7 @@ DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
   num_dst_ = 1;
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= EXEC_MASKED;
 }
 
 void DsSwizzleB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1791,6 +1831,7 @@ DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1818,6 +1859,7 @@ DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoad2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1863,6 +1905,7 @@ DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoad2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1907,6 +1950,7 @@ DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadI8Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1934,6 +1978,7 @@ DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadU8Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1960,6 +2005,7 @@ DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadI16Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1987,6 +2033,7 @@ DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadU16Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2083,6 +2130,7 @@ DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAddU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2124,6 +2172,7 @@ DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsSubU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2165,6 +2214,7 @@ DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsRsubU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2206,6 +2256,7 @@ DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsIncU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2247,6 +2298,7 @@ DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsDecU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2288,6 +2340,7 @@ DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinI64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2329,6 +2382,7 @@ DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxI64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2370,6 +2424,7 @@ DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2411,6 +2466,7 @@ DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2452,6 +2508,7 @@ DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAndB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2493,6 +2550,7 @@ DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsOrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2534,6 +2592,7 @@ DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsXorB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2625,6 +2684,7 @@ DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStoreB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2666,6 +2726,7 @@ DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStore2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2723,6 +2784,7 @@ DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStore2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2780,6 +2842,7 @@ DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstoreB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2829,6 +2892,7 @@ DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinNumF64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2871,6 +2935,7 @@ DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxNumF64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2912,6 +2977,7 @@ DsAddF64Vds::DsAddF64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAddF64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2979,6 +3045,7 @@ DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAddRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3024,6 +3091,7 @@ DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsSubRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3069,6 +3137,7 @@ DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsRsubRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3114,6 +3183,7 @@ DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsIncRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3159,6 +3229,7 @@ DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsDecRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3204,6 +3275,7 @@ DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinRtnI64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3249,6 +3321,7 @@ DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxRtnI64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3294,6 +3367,7 @@ DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3339,6 +3413,7 @@ DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3384,6 +3459,7 @@ DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAndRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3429,6 +3505,7 @@ DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsOrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3474,6 +3551,7 @@ DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsXorRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3574,6 +3652,7 @@ DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStorexchgRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3622,6 +3701,7 @@ DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStorexchg2addrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3670,6 +3750,7 @@ DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const Machi
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStorexchg2addrStride64RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3718,6 +3799,7 @@ DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstoreRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3770,6 +3852,7 @@ DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMinNumRtnF64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3815,6 +3898,7 @@ DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxNumRtnF64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3860,6 +3944,7 @@ DsAddRtnF64Vds::DsAddRtnF64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAddRtnF64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3946,6 +4031,7 @@ DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3973,6 +4059,7 @@ DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoad2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4018,6 +4105,7 @@ DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoad2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4066,6 +4154,7 @@ DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsAddRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4109,6 +4198,7 @@ DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsCondxchg32RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4158,6 +4248,7 @@ DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsCondSubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4198,6 +4289,7 @@ DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsSubClampU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4238,6 +4330,7 @@ DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsPkAddF16Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4278,6 +4371,7 @@ DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsPkAddBf16Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4318,6 +4412,7 @@ DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStoreB8D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4355,6 +4450,7 @@ DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStoreB16D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4392,6 +4488,7 @@ DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadU8D16Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4420,6 +4517,7 @@ DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadU8D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4448,6 +4546,7 @@ DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadI8D16Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4477,6 +4576,7 @@ DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadI8D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4506,6 +4606,7 @@ DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadU16D16Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4534,6 +4635,7 @@ DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadU16D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4565,6 +4667,7 @@ DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsCondSubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4608,6 +4711,7 @@ DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsSubClampRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4651,6 +4755,7 @@ DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsPkAddRtnF16Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4694,6 +4799,7 @@ DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsPkAddRtnBf16Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4731,6 +4837,7 @@ DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
   num_dst_ = 0;
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStoreAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4764,6 +4871,7 @@ DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
   num_dst_ = 1;
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4784,6 +4892,7 @@ DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= EXEC_MASKED;
 }
 
 void DsPermuteB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4804,6 +4913,7 @@ DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= EXEC_MASKED;
 }
 
 void DsBpermuteB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4824,6 +4934,7 @@ DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= EXEC_MASKED;
 }
 
 void DsBpermuteFiB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4842,6 +4953,7 @@ DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStoreB96Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4882,6 +4994,7 @@ DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsStoreB128Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4924,6 +5037,7 @@ DsLoadTr4B64Vds::DsLoadTr4B64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadTr4B64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4950,6 +5064,7 @@ DsLoadTr6B96Vds::DsLoadTr6B96Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadTr6B96Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4976,6 +5091,7 @@ DsLoadTr16B128Vds::DsLoadTr16B128Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadTr16B128Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -5002,6 +5118,7 @@ DsLoadTr8B64Vds::DsLoadTr8B64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadTr8B64Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -5027,6 +5144,7 @@ DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadB96Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -5054,6 +5172,7 @@ DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void DsLoadB128Vds::execute_impl(amdgpu::Wavefront &wf) {

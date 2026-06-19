@@ -34,6 +34,7 @@ ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -61,6 +62,7 @@ ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -89,6 +91,7 @@ ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadU16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -116,6 +119,7 @@ ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadI16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -144,6 +148,7 @@ ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -171,6 +176,7 @@ ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -198,6 +204,7 @@ ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -225,6 +232,7 @@ ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -252,6 +260,7 @@ ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchStoreB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -288,6 +297,7 @@ ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchStoreB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -324,6 +334,7 @@ ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchStoreB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -360,6 +371,7 @@ ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchStoreB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -398,6 +410,7 @@ ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchStoreB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -438,6 +451,7 @@ ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchStoreB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -480,6 +494,7 @@ ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadD16U8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -508,6 +523,7 @@ ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadD16I8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -537,6 +553,7 @@ ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadD16B16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -565,6 +582,7 @@ ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadD16HiU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -593,6 +611,7 @@ ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadD16HiI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -622,6 +641,7 @@ ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -650,6 +670,7 @@ ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchStoreD16HiB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -687,6 +708,7 @@ ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *in
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchStoreD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -724,6 +746,7 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchLoadBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -751,6 +774,7 @@ ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void ScratchStoreBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {

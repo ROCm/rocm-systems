@@ -206,6 +206,7 @@ BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadUbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -250,6 +251,7 @@ BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadSbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -295,6 +297,7 @@ BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadUshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -339,6 +342,7 @@ BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadSshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -384,6 +388,7 @@ BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -428,6 +433,7 @@ BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -472,6 +478,7 @@ BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -516,6 +523,7 @@ BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -560,6 +568,7 @@ BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreByteMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -599,6 +608,7 @@ BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreByteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -639,6 +649,7 @@ BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreShortMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -678,6 +689,7 @@ BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -718,6 +730,7 @@ BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -757,6 +770,7 @@ BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -798,6 +812,7 @@ BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -843,6 +858,7 @@ BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -886,6 +902,7 @@ BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadUbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -931,6 +948,7 @@ BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadUbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -976,6 +994,7 @@ BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadSbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1022,6 +1041,7 @@ BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadSbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1068,6 +1088,7 @@ BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadShortD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1113,6 +1134,7 @@ BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1201,6 +1223,7 @@ BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSwapMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1242,6 +1265,7 @@ BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicCmpswapMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1285,6 +1309,7 @@ BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicAddMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1326,6 +1351,7 @@ BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSubMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1367,6 +1393,7 @@ BufferAtomicCsubMubuf::BufferAtomicCsubMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicCsubMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1408,6 +1435,7 @@ BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSminMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1449,6 +1477,7 @@ BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicUminMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1490,6 +1519,7 @@ BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSmaxMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1531,6 +1561,7 @@ BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicUmaxMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1572,6 +1603,7 @@ BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicAndMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1613,6 +1645,7 @@ BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicOrMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1654,6 +1687,7 @@ BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicXorMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1695,6 +1729,7 @@ BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicIncMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1736,6 +1771,7 @@ BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicDecMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1777,6 +1813,7 @@ BufferAtomicFcmpswapMubuf::BufferAtomicFcmpswapMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicFcmpswapMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1820,6 +1857,7 @@ BufferAtomicFminMubuf::BufferAtomicFminMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicFminMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1861,6 +1899,7 @@ BufferAtomicFmaxMubuf::BufferAtomicFmaxMubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicFmaxMubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1902,6 +1941,7 @@ BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSwapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1945,6 +1985,7 @@ BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicCmpswapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1992,6 +2033,7 @@ BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicAddX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2035,6 +2077,7 @@ BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSubX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2078,6 +2121,7 @@ BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2121,6 +2165,7 @@ BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicUminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2164,6 +2209,7 @@ BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2207,6 +2253,7 @@ BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicUmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2250,6 +2297,7 @@ BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicAndX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2293,6 +2341,7 @@ BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicOrX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2336,6 +2385,7 @@ BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicXorX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2379,6 +2429,7 @@ BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicIncX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2422,6 +2473,7 @@ BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicDecX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2465,6 +2517,7 @@ BufferAtomicFcmpswapX2Mubuf::BufferAtomicFcmpswapX2Mubuf(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicFcmpswapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2512,6 +2565,7 @@ BufferAtomicFminX2Mubuf::BufferAtomicFminX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicFminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -2555,6 +2609,7 @@ BufferAtomicFmaxX2Mubuf::BufferAtomicFmaxX2Mubuf(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicFmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {

@@ -34,6 +34,7 @@ VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mov_b32_vop3(*this, wf); }
@@ -70,6 +71,7 @@ VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtI32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -85,6 +87,7 @@ VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF64I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -100,6 +103,7 @@ VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF32I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -115,6 +119,7 @@ VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF32U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -130,6 +135,7 @@ VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtU32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -145,6 +151,7 @@ VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -160,6 +167,7 @@ VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -175,6 +183,7 @@ VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -190,6 +199,7 @@ VCvtRpiI32F32Vop3::VCvtRpiI32F32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtRpiI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -205,6 +215,7 @@ VCvtFlrI32F32Vop3::VCvtFlrI32F32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtFlrI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -220,6 +231,7 @@ VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtOffF32I4Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -235,6 +247,7 @@ VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -250,6 +263,7 @@ VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF64F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -265,6 +279,7 @@ VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF32Ubyte0Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -280,6 +295,7 @@ VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF32Ubyte1Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -295,6 +311,7 @@ VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF32Ubyte2Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -310,6 +327,7 @@ VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF32Ubyte3Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -325,6 +343,7 @@ VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtU32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -340,6 +359,7 @@ VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF64U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -355,6 +375,7 @@ VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VTruncF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -369,6 +390,7 @@ VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCeilF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -384,6 +406,7 @@ VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VRndneF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -399,6 +422,7 @@ VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFloorF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -414,6 +438,7 @@ VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFractF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -429,6 +454,7 @@ VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VTruncF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -443,6 +469,7 @@ VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCeilF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -458,6 +485,7 @@ VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VRndneF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -473,6 +501,7 @@ VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFloorF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -487,6 +516,7 @@ VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VExpF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_exp_f32_vop3(*this, wf); }
@@ -499,6 +529,7 @@ VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLogF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_log_f32_vop3(*this, wf); }
@@ -511,6 +542,7 @@ VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VRcpF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rcp_f32_vop3(*this, wf); }
@@ -524,6 +556,7 @@ VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VRcpIflagF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -538,6 +571,7 @@ VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VRsqF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rsq_f32_vop3(*this, wf); }
@@ -550,6 +584,7 @@ VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VRcpF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rcp_f64_vop3(*this, wf); }
@@ -562,6 +597,7 @@ VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VRsqF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rsq_f64_vop3(*this, wf); }
@@ -574,6 +610,7 @@ VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSqrtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -588,6 +625,7 @@ VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSqrtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -602,6 +640,7 @@ VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSinF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sin_f32_vop3(*this, wf); }
@@ -614,6 +653,7 @@ VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCosF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_cos_f32_vop3(*this, wf); }
@@ -626,6 +666,7 @@ VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VNotB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_not_b32_vop3(*this, wf); }
@@ -639,6 +680,7 @@ VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VBfrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -653,6 +695,7 @@ VFfbhU32Vop3::VFfbhU32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFfbhU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -667,6 +710,7 @@ VFfblB32Vop3::VFfblB32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFfblB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -681,6 +725,7 @@ VFfbhI32Vop3::VFfbhI32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFfbhI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -696,6 +741,7 @@ VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFrexpExpI32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -711,6 +757,7 @@ VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFrexpMantF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -726,6 +773,7 @@ VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFractF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -741,6 +789,7 @@ VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFrexpExpI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -756,6 +805,7 @@ VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFrexpMantF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -796,6 +846,7 @@ VMovB64Vop3::VMovB64Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMovB64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mov_b64_vop3(*this, wf); }
@@ -809,6 +860,7 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF16U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -824,6 +876,7 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF16I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -839,6 +892,7 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -854,6 +908,7 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -868,6 +923,7 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rcp_f16_vop3(*this, wf); }
@@ -880,6 +936,7 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSqrtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -894,6 +951,7 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rsq_f16_vop3(*this, wf); }
@@ -906,6 +964,7 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_log_f16_vop3(*this, wf); }
@@ -918,6 +977,7 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_exp_f16_vop3(*this, wf); }
@@ -931,6 +991,7 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -946,6 +1007,7 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -961,6 +1023,7 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFloorF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -975,6 +1038,7 @@ VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCeilF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -990,6 +1054,7 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VTruncF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1005,6 +1070,7 @@ VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VRndneF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1020,6 +1086,7 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFractF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1034,6 +1101,7 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSinF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sin_f16_vop3(*this, wf); }
@@ -1046,6 +1114,7 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCosF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_cos_f16_vop3(*this, wf); }
@@ -1059,6 +1128,7 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1074,6 +1144,7 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1106,6 +1177,7 @@ VSwapB32Vop3::VSwapB32Vop3(const MachineInst *inst)
   dst_operands_[1] = &src0;
   num_src_ = 2;
   num_dst_ = 2;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1129,6 +1201,7 @@ VAccvgprMovB32Vop3::VAccvgprMovB32Vop3(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= ACCVGPR;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAccvgprMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1144,6 +1217,7 @@ VCvtF32Fp8Vop3::VCvtF32Fp8Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1159,6 +1233,7 @@ VCvtF32Bf8Vop3::VCvtF32Bf8Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1174,6 +1249,7 @@ VCvtPkF32Fp8Vop3::VCvtPkF32Fp8Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtPkF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1202,6 +1278,7 @@ VCvtPkF32Bf8Vop3::VCvtPkF32Bf8Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtPkF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1234,6 +1311,7 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCndmaskB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1250,6 +1328,7 @@ VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAddF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_f32_vop3(*this, wf); }
@@ -1264,6 +1343,7 @@ VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sub_f32_vop3(*this, wf); }
@@ -1279,6 +1359,7 @@ VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubrevF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1296,6 +1377,7 @@ VFmacF64Vop3::VFmacF64Vop3(const MachineInst *inst)
   src_operands_[2] = &src1;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFmacF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1312,6 +1394,7 @@ VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mul_f32_vop3(*this, wf); }
@@ -1327,6 +1410,7 @@ VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1344,6 +1428,7 @@ VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulHiI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1361,6 +1446,7 @@ VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1378,6 +1464,7 @@ VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulHiU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1394,6 +1481,7 @@ VMinF32Vop3::VMinF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMinF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_f32_vop3(*this, wf); }
@@ -1408,6 +1496,7 @@ VMaxF32Vop3::VMaxF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMaxF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_f32_vop3(*this, wf); }
@@ -1422,6 +1511,7 @@ VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMinI32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_i32_vop3(*this, wf); }
@@ -1436,6 +1526,7 @@ VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMaxI32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_i32_vop3(*this, wf); }
@@ -1450,6 +1541,7 @@ VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMinU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_u32_vop3(*this, wf); }
@@ -1464,6 +1556,7 @@ VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMaxU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_u32_vop3(*this, wf); }
@@ -1479,6 +1572,7 @@ VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLshrrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1496,6 +1590,7 @@ VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAshrrevI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1513,6 +1608,7 @@ VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLshlrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1529,6 +1625,7 @@ VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAndB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_and_b32_vop3(*this, wf); }
@@ -1543,6 +1640,7 @@ VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_or_b32_vop3(*this, wf); }
@@ -1557,6 +1655,7 @@ VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_xor_b32_vop3(*this, wf); }
@@ -1571,6 +1670,7 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAddF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_f16_vop3(*this, wf); }
@@ -1585,6 +1685,7 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sub_f16_vop3(*this, wf); }
@@ -1600,6 +1701,7 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1616,6 +1718,7 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mul_f16_vop3(*this, wf); }
@@ -1631,6 +1734,7 @@ VMacF16Vop3::VMacF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src1;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMacF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mac_f16_vop3(*this, wf); }
@@ -1645,6 +1749,7 @@ VAddU16Vop3::VAddU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAddU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_u16_vop3(*this, wf); }
@@ -1659,6 +1764,7 @@ VSubU16Vop3::VSubU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sub_u16_vop3(*this, wf); }
@@ -1674,6 +1780,7 @@ VSubrevU16Vop3::VSubrevU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubrevU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1691,6 +1798,7 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulLoU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1708,6 +1816,7 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLshlrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1725,6 +1834,7 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLshrrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1742,6 +1852,7 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAshrrevI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1758,6 +1869,7 @@ VMaxF16Vop3::VMaxF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMaxF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_f16_vop3(*this, wf); }
@@ -1772,6 +1884,7 @@ VMinF16Vop3::VMinF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMinF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_f16_vop3(*this, wf); }
@@ -1786,6 +1899,7 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMaxU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_u16_vop3(*this, wf); }
@@ -1800,6 +1914,7 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMaxI16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_i16_vop3(*this, wf); }
@@ -1814,6 +1929,7 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMinU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_u16_vop3(*this, wf); }
@@ -1828,6 +1944,7 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMinI16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_i16_vop3(*this, wf); }
@@ -1843,6 +1960,7 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLdexpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1859,6 +1977,7 @@ VAddU32Vop3::VAddU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAddU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_u32_vop3(*this, wf); }
@@ -1873,6 +1992,7 @@ VSubU32Vop3::VSubU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sub_u32_vop3(*this, wf); }
@@ -1888,6 +2008,7 @@ VSubrevU32Vop3::VSubrevU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubrevU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1906,6 +2027,7 @@ VDot2cF32F16Vop3::VDot2cF32F16Vop3(const MachineInst *inst)
   src_operands_[2] = &src1;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDot2cF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1924,6 +2046,7 @@ VDot2cI32I16Vop3::VDot2cI32I16Vop3(const MachineInst *inst)
   src_operands_[2] = &src1;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDot2cI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1942,6 +2065,7 @@ VDot4cI32I8Vop3::VDot4cI32I8Vop3(const MachineInst *inst)
   src_operands_[2] = &src1;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDot4cI32I8Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1960,6 +2084,7 @@ VDot8cI32I4Vop3::VDot8cI32I4Vop3(const MachineInst *inst)
   src_operands_[2] = &src1;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDot8cI32I4Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1977,6 +2102,7 @@ VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src1;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFmacF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2012,6 +2138,7 @@ VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VXnorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2031,6 +2158,7 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2050,6 +2178,7 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2069,6 +2198,7 @@ VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCubeidF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2088,6 +2218,7 @@ VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCubescF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2107,6 +2238,7 @@ VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCubetcF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2126,6 +2258,7 @@ VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCubemaF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2144,6 +2277,7 @@ VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VBfeU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfe_u32_vop3(*this, wf); }
@@ -2160,6 +2294,7 @@ VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VBfeI32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfe_i32_vop3(*this, wf); }
@@ -2176,6 +2311,7 @@ VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VBfiB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfi_b32_vop3(*this, wf); }
@@ -2192,6 +2328,7 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFmaF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_fma_f32_vop3(*this, wf); }
@@ -2208,6 +2345,7 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFmaF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_fma_f64_vop3(*this, wf); }
@@ -2224,6 +2362,7 @@ VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLerpU8Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_lerp_u8_vop3(*this, wf); }
@@ -2241,6 +2380,7 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAlignbitB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2260,6 +2400,7 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAlignbyteB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2278,6 +2419,7 @@ VMin3F32Vop3::VMin3F32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMin3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2296,6 +2438,7 @@ VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMin3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2314,6 +2457,7 @@ VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMin3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2332,6 +2476,7 @@ VMax3F32Vop3::VMax3F32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMax3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2350,6 +2495,7 @@ VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMax3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2368,6 +2514,7 @@ VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMax3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2386,6 +2533,7 @@ VMed3F32Vop3::VMed3F32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMed3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2404,6 +2552,7 @@ VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMed3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2422,6 +2571,7 @@ VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMed3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2440,6 +2590,7 @@ VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSadU8Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sad_u8_vop3(*this, wf); }
@@ -2456,6 +2607,7 @@ VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSadHiU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2474,6 +2626,7 @@ VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSadU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sad_u16_vop3(*this, wf); }
@@ -2490,6 +2643,7 @@ VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSadU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sad_u32_vop3(*this, wf); }
@@ -2507,6 +2661,7 @@ VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtPkU8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2526,6 +2681,7 @@ VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDivFixupF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2545,6 +2701,7 @@ VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDivFixupF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2564,6 +2721,7 @@ VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDivFmasF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2583,6 +2741,7 @@ VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDivFmasF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2601,6 +2760,7 @@ VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMsadU8Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_msad_u8_vop3(*this, wf); }
@@ -2678,6 +2838,7 @@ VMadLegacyF16Vop3::VMadLegacyF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadLegacyF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2697,6 +2858,7 @@ VMadLegacyU16Vop3::VMadLegacyU16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadLegacyU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2716,6 +2878,7 @@ VMadLegacyI16Vop3::VMadLegacyI16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadLegacyI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2734,6 +2897,7 @@ VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VPermB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2753,6 +2917,7 @@ VFmaLegacyF16Vop3::VFmaLegacyF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFmaLegacyF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2772,6 +2937,7 @@ VDivFixupLegacyF16Vop3::VDivFixupLegacyF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDivFixupLegacyF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2790,6 +2956,7 @@ VCvtPkaccumU8F32Vop3::VCvtPkaccumU8F32Vop3(const MachineInst *inst)
   src_operands_[2] = &src1;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtPkaccumU8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2809,6 +2976,7 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadU32U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2828,6 +2996,7 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2846,6 +3015,7 @@ VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VXadU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_xad_u32_vop3(*this, wf); }
@@ -2862,6 +3032,7 @@ VMin3F16Vop3::VMin3F16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMin3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2880,6 +3051,7 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMin3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2898,6 +3070,7 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMin3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2916,6 +3089,7 @@ VMax3F16Vop3::VMax3F16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMax3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2934,6 +3108,7 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMax3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2952,6 +3127,7 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMax3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2970,6 +3146,7 @@ VMed3F16Vop3::VMed3F16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMed3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2988,6 +3165,7 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMed3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3006,6 +3184,7 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMed3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3025,6 +3204,7 @@ VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLshlAddU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3044,6 +3224,7 @@ VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAddLshlU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3062,6 +3243,7 @@ VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAdd3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3081,6 +3263,7 @@ VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLshlOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3100,6 +3283,7 @@ VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAndOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3118,6 +3302,7 @@ VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VOr3B32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_or3_b32_vop3(*this, wf); }
@@ -3134,6 +3319,7 @@ VMadF16Vop3::VMadF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mad_f16_vop3(*this, wf); }
@@ -3150,6 +3336,7 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mad_u16_vop3(*this, wf); }
@@ -3166,6 +3353,7 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadI16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mad_i16_vop3(*this, wf); }
@@ -3182,6 +3370,7 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_fma_f16_vop3(*this, wf); }
@@ -3199,6 +3388,7 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3218,6 +3408,7 @@ VLshlAddU64Vop3::VLshlAddU64Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLshlAddU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3234,6 +3425,7 @@ VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAddF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_f64_vop3(*this, wf); }
@@ -3248,6 +3440,7 @@ VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mul_f64_vop3(*this, wf); }
@@ -3262,6 +3455,7 @@ VMinF64Vop3::VMinF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMinF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_f64_vop3(*this, wf); }
@@ -3276,6 +3470,7 @@ VMaxF64Vop3::VMaxF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMaxF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_f64_vop3(*this, wf); }
@@ -3291,6 +3486,7 @@ VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLdexpF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3308,6 +3504,7 @@ VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulLoU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3325,6 +3522,7 @@ VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulHiU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3342,6 +3540,7 @@ VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulHiI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3359,6 +3558,7 @@ VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLdexpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3395,6 +3595,7 @@ VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src1;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VWritelaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3414,6 +3615,7 @@ VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VBcntU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3431,6 +3633,7 @@ VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMbcntLoU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3448,6 +3651,7 @@ VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMbcntHiU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3465,6 +3669,7 @@ VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLshlrevB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3482,6 +3687,7 @@ VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VLshrrevB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3499,6 +3705,7 @@ VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAshrrevI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3533,6 +3740,7 @@ VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VBfmB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfm_b32_vop3(*this, wf); }
@@ -3548,6 +3756,7 @@ VCvtPknormI16F32Vop3::VCvtPknormI16F32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtPknormI16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3565,6 +3774,7 @@ VCvtPknormU16F32Vop3::VCvtPknormU16F32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtPknormU16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3582,6 +3792,7 @@ VCvtPkrtzF16F32Vop3::VCvtPkrtzF16F32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtPkrtzF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3599,6 +3810,7 @@ VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtPkU16U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3616,6 +3828,7 @@ VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtPkI16I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3668,6 +3881,7 @@ VAddI32Vop3::VAddI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAddI32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_i32_vop3(*this, wf); }
@@ -3682,6 +3896,7 @@ VSubI32Vop3::VSubI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubI32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sub_i32_vop3(*this, wf); }
@@ -3696,6 +3911,7 @@ VAddI16Vop3::VAddI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAddI16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_i16_vop3(*this, wf); }
@@ -3710,6 +3926,7 @@ VSubI16Vop3::VSubI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubI16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sub_i16_vop3(*this, wf); }
@@ -3725,6 +3942,7 @@ VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3742,6 +3960,7 @@ VMulLegacyF32Vop3::VMulLegacyF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMulLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3760,6 +3979,7 @@ VCvtPkFp8F32Vop3::VCvtPkFp8F32Vop3(const MachineInst *inst)
   src_operands_[2] = &src1;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtPkFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3788,6 +4008,7 @@ VCvtPkBf8F32Vop3::VCvtPkBf8F32Vop3(const MachineInst *inst)
   src_operands_[2] = &src1;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCvtPkBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3873,6 +4094,7 @@ VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3890,6 +4112,9 @@ VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3945,6 +4170,7 @@ VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -3962,6 +4188,9 @@ VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4019,6 +4248,7 @@ VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4036,6 +4266,9 @@ VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4096,6 +4329,7 @@ VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4113,6 +4347,7 @@ VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4130,6 +4365,7 @@ VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4147,6 +4383,7 @@ VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4164,6 +4401,7 @@ VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4181,6 +4419,7 @@ VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4198,6 +4437,7 @@ VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4214,6 +4454,7 @@ VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4230,6 +4471,7 @@ VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4247,6 +4489,7 @@ VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4264,6 +4507,7 @@ VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4281,6 +4525,7 @@ VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4298,6 +4543,7 @@ VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4315,6 +4561,7 @@ VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4332,6 +4579,7 @@ VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4349,6 +4597,7 @@ VCmpTruF16Vop3::VCmpTruF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4366,6 +4615,9 @@ VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4394,6 +4646,9 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4433,6 +4688,9 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4472,6 +4730,9 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4511,6 +4772,9 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4550,6 +4814,9 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4589,6 +4856,9 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4628,6 +4898,9 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4667,6 +4940,9 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4706,6 +4982,9 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4745,6 +5024,9 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4784,6 +5066,9 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4823,6 +5108,9 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4862,6 +5150,9 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4901,6 +5192,9 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4940,6 +5234,9 @@ VCmpxTruF16Vop3::VCmpxTruF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4967,6 +5264,7 @@ VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -4984,6 +5282,7 @@ VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5001,6 +5300,7 @@ VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5018,6 +5318,7 @@ VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5035,6 +5336,7 @@ VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5052,6 +5354,7 @@ VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5069,6 +5372,7 @@ VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5085,6 +5389,7 @@ VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5101,6 +5406,7 @@ VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5118,6 +5424,7 @@ VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5135,6 +5442,7 @@ VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5152,6 +5460,7 @@ VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5169,6 +5478,7 @@ VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5186,6 +5496,7 @@ VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5203,6 +5514,7 @@ VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5220,6 +5532,7 @@ VCmpTruF32Vop3::VCmpTruF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5237,6 +5550,9 @@ VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5265,6 +5581,9 @@ VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5304,6 +5623,9 @@ VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5343,6 +5665,9 @@ VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5382,6 +5707,9 @@ VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5421,6 +5749,9 @@ VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5460,6 +5791,9 @@ VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5499,6 +5833,9 @@ VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5538,6 +5875,9 @@ VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5577,6 +5917,9 @@ VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5616,6 +5959,9 @@ VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5655,6 +6001,9 @@ VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5694,6 +6043,9 @@ VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5733,6 +6085,9 @@ VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5772,6 +6127,9 @@ VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5811,6 +6169,9 @@ VCmpxTruF32Vop3::VCmpxTruF32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5838,6 +6199,7 @@ VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5855,6 +6217,7 @@ VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5872,6 +6235,7 @@ VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5889,6 +6253,7 @@ VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5906,6 +6271,7 @@ VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5923,6 +6289,7 @@ VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5940,6 +6307,7 @@ VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5956,6 +6324,7 @@ VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5972,6 +6341,7 @@ VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -5989,6 +6359,7 @@ VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6006,6 +6377,7 @@ VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6023,6 +6395,7 @@ VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6040,6 +6413,7 @@ VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6057,6 +6431,7 @@ VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6074,6 +6449,7 @@ VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6091,6 +6467,7 @@ VCmpTruF64Vop3::VCmpTruF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6108,6 +6485,9 @@ VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6136,6 +6516,9 @@ VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6175,6 +6558,9 @@ VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6214,6 +6600,9 @@ VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6253,6 +6642,9 @@ VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6292,6 +6684,9 @@ VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6331,6 +6726,9 @@ VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6370,6 +6768,9 @@ VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6409,6 +6810,9 @@ VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6448,6 +6852,9 @@ VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6487,6 +6894,9 @@ VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6526,6 +6936,9 @@ VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6565,6 +6978,9 @@ VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6604,6 +7020,9 @@ VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6643,6 +7062,9 @@ VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6682,6 +7104,9 @@ VCmpxTruF64Vop3::VCmpxTruF64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6709,6 +7134,7 @@ VCmpFI16Vop3::VCmpFI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpFI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6726,6 +7152,7 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6743,6 +7170,7 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6760,6 +7188,7 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6777,6 +7206,7 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6794,6 +7224,7 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6811,6 +7242,7 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6827,6 +7259,7 @@ VCmpTI16Vop3::VCmpTI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpTI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6843,6 +7276,7 @@ VCmpFU16Vop3::VCmpFU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpFU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6860,6 +7294,7 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6877,6 +7312,7 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6894,6 +7330,7 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6911,6 +7348,7 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6928,6 +7366,7 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6945,6 +7384,7 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6961,6 +7401,7 @@ VCmpTU16Vop3::VCmpTU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpTU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -6978,6 +7419,9 @@ VCmpxFI16Vop3::VCmpxFI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxFI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7006,6 +7450,9 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7044,6 +7491,9 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7082,6 +7532,9 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7120,6 +7573,9 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7158,6 +7614,9 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7196,6 +7655,9 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7234,6 +7696,9 @@ VCmpxTI16Vop3::VCmpxTI16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxTI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7262,6 +7727,9 @@ VCmpxFU16Vop3::VCmpxFU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxFU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7290,6 +7758,9 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7328,6 +7799,9 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7366,6 +7840,9 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7404,6 +7881,9 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7442,6 +7922,9 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7480,6 +7963,9 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7518,6 +8004,9 @@ VCmpxTU16Vop3::VCmpxTU16Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxTU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7545,6 +8034,7 @@ VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7562,6 +8052,7 @@ VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7579,6 +8070,7 @@ VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7596,6 +8088,7 @@ VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7613,6 +8106,7 @@ VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7630,6 +8124,7 @@ VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7647,6 +8142,7 @@ VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7663,6 +8159,7 @@ VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7679,6 +8176,7 @@ VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7696,6 +8194,7 @@ VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7713,6 +8212,7 @@ VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7730,6 +8230,7 @@ VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7747,6 +8248,7 @@ VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7764,6 +8266,7 @@ VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7781,6 +8284,7 @@ VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7797,6 +8301,7 @@ VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7814,6 +8319,9 @@ VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7842,6 +8350,9 @@ VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7873,6 +8384,9 @@ VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7904,6 +8418,9 @@ VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7935,6 +8452,9 @@ VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7966,6 +8486,9 @@ VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -7997,6 +8520,9 @@ VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8028,6 +8554,9 @@ VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8056,6 +8585,9 @@ VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8084,6 +8616,9 @@ VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8115,6 +8650,9 @@ VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8146,6 +8684,9 @@ VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8177,6 +8718,9 @@ VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8208,6 +8752,9 @@ VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8239,6 +8786,9 @@ VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8270,6 +8820,9 @@ VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8297,6 +8850,7 @@ VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8314,6 +8868,7 @@ VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8331,6 +8886,7 @@ VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8348,6 +8904,7 @@ VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8365,6 +8922,7 @@ VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8382,6 +8940,7 @@ VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8399,6 +8958,7 @@ VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8415,6 +8975,7 @@ VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8431,6 +8992,7 @@ VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8448,6 +9010,7 @@ VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8465,6 +9028,7 @@ VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8482,6 +9046,7 @@ VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8499,6 +9064,7 @@ VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8516,6 +9082,7 @@ VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8533,6 +9100,7 @@ VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8549,6 +9117,7 @@ VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
 }
 
 void VCmpTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8566,6 +9135,9 @@ VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8594,6 +9166,9 @@ VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8625,6 +9200,9 @@ VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8656,6 +9234,9 @@ VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8687,6 +9268,9 @@ VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8718,6 +9302,9 @@ VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8749,6 +9336,9 @@ VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8780,6 +9370,9 @@ VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8808,6 +9401,9 @@ VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8836,6 +9432,9 @@ VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8867,6 +9466,9 @@ VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8898,6 +9500,9 @@ VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8929,6 +9534,9 @@ VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8960,6 +9568,9 @@ VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -8991,6 +9602,9 @@ VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9022,6 +9636,9 @@ VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MASKED;
+  flags_ |= WRITES_EXEC;
+  flags_ |= READS_EXEC;
 }
 
 void VCmpxTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9052,6 +9669,7 @@ VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 2;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAddCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9071,6 +9689,7 @@ VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 2;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9090,6 +9709,7 @@ VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 2;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubrevCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9111,6 +9731,7 @@ VAddcCoU32Vop3SdstEnc::VAddcCoU32Vop3SdstEnc(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 2;
+  flags_ |= EXEC_MASKED;
 }
 
 void VAddcCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9132,6 +9753,7 @@ VSubbCoU32Vop3SdstEnc::VSubbCoU32Vop3SdstEnc(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 2;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubbCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9153,6 +9775,7 @@ VSubbrevCoU32Vop3SdstEnc::VSubbrevCoU32Vop3SdstEnc(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 2;
+  flags_ |= EXEC_MASKED;
 }
 
 void VSubbrevCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9174,6 +9797,7 @@ VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 2;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDivScaleF32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9195,6 +9819,7 @@ VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 2;
+  flags_ |= EXEC_MASKED;
 }
 
 void VDivScaleF64Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9216,6 +9841,7 @@ VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 2;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadU64U32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9237,6 +9863,7 @@ VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 2;
+  flags_ |= EXEC_MASKED;
 }
 
 void VMadI64I32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
