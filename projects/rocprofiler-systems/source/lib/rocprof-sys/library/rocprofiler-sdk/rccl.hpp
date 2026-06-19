@@ -3,24 +3,331 @@
 
 #pragma once
 
+// All rocprofiler-sdk headers come transitively through the backend shim.
+#include "library/rocprofiler-sdk/fwd.hpp"
+#include "library/rocprofiler-sdk/rccl_internal.hpp"
+
 #include <cstdint>
-#include <rocprofiler-sdk/buffer_tracing.h>
-#include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/registration.h>
+
+#if ROCPROFILER_VERSION >= 600
+
+#    include "core/categories.hpp"
+#    include "core/config.hpp"
+#    include "core/perfetto.hpp"
+#    include "core/trace_cache/cache_manager.hpp"
+#    include "core/trace_cache/cacheable.hpp"
+#    include "core/trace_cache/metadata_registry.hpp"
+#    include "core/trace_cache/sample_type.hpp"
+#    include "logger/debug.hpp"
+
+#    include <dlfcn.h>
 
 namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
+
+// ─── Public functions ─────────────────────────────────────────────────────────
+
 void
 rccl_comm_data_initialize();
 
+template <typename Backend>
 void
-tool_tracing_callback_rccl(std::uint32_t                                 operation,
-                           rocprofiler_callback_tracing_rccl_api_data_t* payload,
+tool_tracing_callback_rccl(std::uint32_t                    operation,
+                           typename Backend::rccl_api_data* payload,
                            std::uint64_t begin_ts, std::uint64_t end_ts);
 
 }  // namespace rocprofiler_sdk
-
 }  // namespace rocprofsys
+
+// ─── Template implementations ────────────────────────────────────────────────
+
+namespace rocprofsys::rocprofiler_sdk
+{
+
+// ─── rccl_detail: non-template helpers ───────────────────────────────────────
+
+namespace rccl_detail
+{
+
+struct rccl_recv
+{
+    static constexpr auto value = "comm_data";
+    static constexpr auto label = "RCCL Comm Recv";
+};
+
+struct rccl_send
+{
+    static constexpr auto value = "comm_data";
+    static constexpr auto label = "RCCL Comm Send";
+};
+
+inline void
+rccl_metadata_initialize_categories()
+{
+    static bool _is_initialized = false;
+    if(_is_initialized) return;
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::comm_data>::value);
+    _is_initialized = true;
+}
+
+template <typename Track>
+void
+rccl_metadata_initialize_track()
+{
+    trace_cache::get_metadata_registry().add_track({ Track::label, std::nullopt, "{}" });
+}
+
+template <typename Tp>
+void
+write_perfetto_counter_track(std::uint64_t _val, std::uint64_t _begin_ts,
+                             std::uint64_t _end_ts)
+{
+    using counter_track = rocprofsys::perfetto_counter_track<Tp>;
+    if(rocprofsys::get_use_perfetto() &&
+       rocprofsys::get_state() == rocprofsys::State::Active)
+    {
+        const size_t _idx = 0;
+        if(!counter_track::exists(_idx))
+        {
+            std::string _label =
+                (_idx > 0) ? fmt::format("{} [{}]", Tp::label, _idx) : Tp::label;
+            counter_track::emplace(_idx, _label, "bytes");
+        }
+        TRACE_COUNTER(Tp::value, counter_track::at(_idx, 0), _begin_ts, _val);
+        TRACE_COUNTER(Tp::value, counter_track::at(_idx, 0), _end_ts, 0);
+    }
+}
+
+template <typename Backend>
+[[nodiscard]] inline size_t
+rccl_type_size_or_abort(typename Backend::nccl_data_type_t datatype) noexcept
+{
+    auto sz = rccl_type_size<Backend>(datatype);
+    if(sz == 0)
+    {
+        LOG_WARNING("Unsupported RCCL datatype: {}", static_cast<int>(datatype));
+        return 0;
+    }
+    return sz;
+}
+
+struct production_pmc_registrar
+{
+    void register_gpu_pmc(std::uint32_t rccl_device_idx)
+    {
+        constexpr size_t EVENT_CODE  = 0;
+        constexpr size_t INSTANCE_ID = 0;
+        constexpr auto*  LONG_DESCRIPTION =
+            "Per-GPU RCCL communication data with transfer_bytes in extdata JSON";
+        constexpr auto* COMPONENT   = "";
+        constexpr auto* BLOCK       = "";
+        constexpr auto* EXPRESSION  = "";
+        constexpr auto* MSG         = "bytes";
+        constexpr auto* TARGET_ARCH = "GPU";
+
+        auto register_rccl_info = [&](const char* direction_label,
+                                      const char* description) {
+            std::string label =
+                fmt::format("{} GPU {}", direction_label, rccl_device_idx);
+            trace_cache::get_metadata_registry().add_pmc_info(
+                { agent_type::GPU, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                  label.c_str(), description,
+                  trait::name<category::comm_data>::description, LONG_DESCRIPTION,
+                  COMPONENT, MSG, trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+        };
+
+        register_rccl_info(rccl_send::label,
+                           "Tracks RCCL communication data sizes (send)");
+        register_rccl_info(rccl_recv::label,
+                           "Tracks RCCL communication data sizes (recv)");
+    }
+};
+
+using rccl_gpu_tracking_state = rccl_gpu_tracking_state_t<production_pmc_registrar>;
+
+inline rccl_gpu_tracking_state&
+rccl_get_gpu_tracking_state()
+{
+    static auto registrar = std::make_shared<production_pmc_registrar>();
+    static rccl_gpu_tracking_state state{ registrar };
+    return state;
+}
+
+template <typename Track>
+void
+cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
+                            std::uint64_t timestamp_ns)
+{
+    auto&  tracking_state = rccl_get_gpu_tracking_state();
+    size_t transfer_bytes = bytes;
+
+    tracking_state.register_gpu(rccl_device_idx);
+    std::uint64_t cumulative = tracking_state.add_bytes(rccl_device_idx, bytes);
+
+    const auto event_metadata = fmt::format(R"({{"transfer_bytes":{}}})", transfer_bytes);
+    const auto pmc_label      = fmt::format("{} GPU {}", Track::label, rccl_device_idx);
+
+    const size_t stack_id        = 0;
+    const size_t parent_stack_id = 0;
+    const size_t correlation_id  = 0;
+    const auto*  call_stack      = "{}";
+    const auto*  line_info       = "{}";
+
+    trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+        static_cast<size_t>(category_enum_id<category::comm_data>::value), Track::label,
+        timestamp_ns, event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
+        call_stack, line_info, rccl_device_idx,
+        static_cast<std::uint8_t>(agent_type::GPU), pmc_label.c_str(),
+        static_cast<double>(cumulative), std::nullopt });
+}
+
+template <typename Backend>
+rccl_event_info<Backend>
+rccl_get_event_info_impl(std::uint32_t                          operation,
+                         const typename Backend::rccl_api_data& payload) noexcept
+{
+    rccl_event_info<Backend> info{};
+
+    const auto set_event = [](rccl_event_info<Backend>& out, bool send, size_t count,
+                              typename Backend::nccl_data_type_t _dt,
+                              typename Backend::nccl_comm_t      _comm) {
+        out.is_send = send;
+        out.size    = count * rccl_type_size_or_abort<Backend>(_dt);
+        out.comm    = _comm;
+    };
+
+    switch(static_cast<typename Backend::rccl_api_id_t>(operation))
+    {
+        case Backend::RCCL_API_ID_ncclAllGather:
+            set_event(info, false, payload.args.ncclAllGather.sendcount,
+                      payload.args.ncclAllGather.datatype,
+                      payload.args.ncclAllGather.comm);
+            break;
+        case Backend::RCCL_API_ID_ncclAllToAll:
+            set_event(info, false, payload.args.ncclAllToAll.count,
+                      payload.args.ncclAllToAll.datatype, payload.args.ncclAllToAll.comm);
+            break;
+        case Backend::RCCL_API_ID_ncclAllReduce:
+            set_event(info, false, payload.args.ncclAllReduce.count,
+                      payload.args.ncclAllReduce.datatype,
+                      payload.args.ncclAllReduce.comm);
+            break;
+        case Backend::RCCL_API_ID_ncclGather:
+            set_event(info, false, payload.args.ncclGather.sendcount,
+                      payload.args.ncclGather.datatype, payload.args.ncclGather.comm);
+            break;
+        case Backend::RCCL_API_ID_ncclRecv:
+            set_event(info, false, payload.args.ncclRecv.count,
+                      payload.args.ncclRecv.datatype, payload.args.ncclRecv.comm);
+            break;
+        case Backend::RCCL_API_ID_ncclReduce:
+            set_event(info, false, payload.args.ncclReduce.count,
+                      payload.args.ncclReduce.datatype, payload.args.ncclReduce.comm);
+            break;
+        case Backend::RCCL_API_ID_ncclBroadcast:
+            set_event(info, true, payload.args.ncclBroadcast.count,
+                      payload.args.ncclBroadcast.datatype,
+                      payload.args.ncclBroadcast.comm);
+            break;
+        case Backend::RCCL_API_ID_ncclReduceScatter:
+            set_event(info, true, payload.args.ncclReduceScatter.recvcount,
+                      payload.args.ncclReduceScatter.datatype,
+                      payload.args.ncclReduceScatter.comm);
+            break;
+        case Backend::RCCL_API_ID_ncclSend:
+            set_event(info, true, payload.args.ncclSend.count,
+                      payload.args.ncclSend.datatype, payload.args.ncclSend.comm);
+            break;
+        default: break;
+    }
+    return info;
+}
+
+}  // namespace rccl_detail
+
+// ─── rccl_get_device_id ───────────────────────────────────────────────────────
+
+template <typename Backend>
+[[nodiscard]] inline std::uint32_t
+rccl_get_device_id(typename Backend::nccl_comm_t comm) noexcept
+{
+    constexpr std::uint32_t DEFAULT_DEVICE_ID = 0;
+    if(comm == nullptr) return DEFAULT_DEVICE_ID;
+
+    using nccl_fn_t =
+        typename Backend::nccl_result_t (*)(typename Backend::nccl_comm_t, int*);
+
+    static nccl_fn_t      ncclCommCuDevice_ptr = nullptr;
+    static std::once_flag lookup_flag;
+
+    std::call_once(lookup_flag, []() {
+        ncclCommCuDevice_ptr =
+            reinterpret_cast<nccl_fn_t>(dlsym(RTLD_DEFAULT, "ncclCommCuDevice"));
+        if(ncclCommCuDevice_ptr == nullptr)
+        {
+            const char* error = dlerror();
+            LOG_DEBUG(
+                "ncclCommCuDevice not found via dlsym ({}), using default device_id",
+                error ? error : "unknown error");
+        }
+    });
+
+    if(ncclCommCuDevice_ptr == nullptr) return DEFAULT_DEVICE_ID;
+
+    int                             device_id = DEFAULT_DEVICE_ID;
+    typename Backend::nccl_result_t result    = ncclCommCuDevice_ptr(comm, &device_id);
+    if(result != Backend::NCCL_SUCCESS)
+    {
+        LOG_DEBUG("ncclCommCuDevice failed with error {}, using default device_id",
+                  static_cast<int>(result));
+        return DEFAULT_DEVICE_ID;
+    }
+    return static_cast<std::uint32_t>(device_id);
+}
+
+// ─── rccl_comm_data_initialize ───────────────────────────────────────────────
+
+inline void
+rccl_comm_data_initialize()
+{
+    rccl_detail::rccl_metadata_initialize_categories();
+    rccl_detail::rccl_metadata_initialize_track<rccl_detail::rccl_send>();
+    rccl_detail::rccl_metadata_initialize_track<rccl_detail::rccl_recv>();
+}
+
+// ─── tool_tracing_callback_rccl<Backend> ─────────────────────────────────────
+
+template <typename Backend>
+void
+tool_tracing_callback_rccl(std::uint32_t                    operation,
+                           typename Backend::rccl_api_data* payload,
+                           std::uint64_t begin_ts, std::uint64_t end_ts)
+{
+    using namespace rccl_detail;
+
+    rccl_event_info<Backend> info =
+        rccl_get_event_info_impl<Backend>(operation, *payload);
+
+    if(info.size > 0 && info.comm != nullptr)
+    {
+        std::uint32_t device_id = rccl_get_device_id<Backend>(info.comm);
+
+        if(info.is_send)
+        {
+            cache_rccl_comm_data_events<rccl_send>(device_id, info.size, end_ts);
+            write_perfetto_counter_track<rccl_send>(info.size, begin_ts, end_ts);
+        }
+        else
+        {
+            cache_rccl_comm_data_events<rccl_recv>(device_id, info.size, end_ts);
+            write_perfetto_counter_track<rccl_recv>(info.size, begin_ts, end_ts);
+        }
+    }
+}
+
+}  // namespace rocprofsys::rocprofiler_sdk
+
+#endif  // ROCPROFILER_VERSION >= 600

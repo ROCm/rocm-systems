@@ -40,6 +40,7 @@
 #endif
 
 #if ROCPROFILER_VERSION >= 600
+#    include <rocprofiler-sdk/rccl/api_args.h>
 #    include <rocprofiler-sdk/rccl/api_id.h>
 #endif
 
@@ -167,9 +168,50 @@ struct backend
 #endif
 
 #if ROCPROFILER_VERSION >= 600
-    using ompt_data_t         = rocprofiler_callback_tracing_ompt_data_t;
-    using ompt_operation_t    = rocprofiler_ompt_operation_t;
-    using rccl_api_data       = rocprofiler_callback_tracing_rccl_api_data_t;
+    using ompt_data_t      = rocprofiler_callback_tracing_ompt_data_t;
+    using ompt_operation_t = rocprofiler_ompt_operation_t;
+    using rccl_api_data    = rocprofiler_callback_tracing_rccl_api_data_t;
+    using rccl_api_id_t    = rocprofiler_rccl_api_id_t;
+    using nccl_data_type_t = ncclDataType_t;
+    using nccl_comm_t      = ncclComm_t;
+    using nccl_result_t    = ncclResult_t;
+
+    // ─── NCCL data type constants ─────────────────────────────────────────────
+    static constexpr nccl_result_t    NCCL_SUCCESS  = ncclSuccess;
+    static constexpr nccl_data_type_t NCCL_INT8     = ncclInt8;
+    static constexpr nccl_data_type_t NCCL_UINT8    = ncclUint8;
+    static constexpr nccl_data_type_t NCCL_FLOAT16  = ncclFloat16;
+    static constexpr nccl_data_type_t NCCL_BFLOAT16 = ncclBfloat16;
+    static constexpr nccl_data_type_t NCCL_INT32    = ncclInt32;
+    static constexpr nccl_data_type_t NCCL_UINT32   = ncclUint32;
+    static constexpr nccl_data_type_t NCCL_FLOAT32  = ncclFloat32;
+    static constexpr nccl_data_type_t NCCL_INT64    = ncclInt64;
+    static constexpr nccl_data_type_t NCCL_UINT64   = ncclUint64;
+    static constexpr nccl_data_type_t NCCL_FLOAT64  = ncclFloat64;
+#    if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
+    static constexpr nccl_data_type_t NCCL_FP8_E4M3 = ncclFp8E4M3;
+    static constexpr nccl_data_type_t NCCL_FP8_E5M2 = ncclFp8E5M2;
+#    endif
+
+    // ─── RCCL API ID constants ─────────────────────────────────────────────────
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather =
+        ROCPROFILER_RCCL_API_ID_ncclAllGather;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllToAll =
+        ROCPROFILER_RCCL_API_ID_ncclAllToAll;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllReduce =
+        ROCPROFILER_RCCL_API_ID_ncclAllReduce;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclGather =
+        ROCPROFILER_RCCL_API_ID_ncclGather;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclRecv =
+        ROCPROFILER_RCCL_API_ID_ncclRecv;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduce =
+        ROCPROFILER_RCCL_API_ID_ncclReduce;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclBroadcast =
+        ROCPROFILER_RCCL_API_ID_ncclBroadcast;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduceScatter =
+        ROCPROFILER_RCCL_API_ID_ncclReduceScatter;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclSend =
+        ROCPROFILER_RCCL_API_ID_ncclSend;
     using memory_alloc_record = rocprofiler_buffer_tracing_memory_allocation_record_t;
 #endif
 
