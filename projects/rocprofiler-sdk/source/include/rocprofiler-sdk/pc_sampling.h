@@ -54,7 +54,7 @@ ROCPROFILER_EXTERN_C_INIT
  * where available_config is the instance of the @see rocprofiler_pc_sampling_configuration_s
  * supported/available at the moment.
  *
- * Rocprofiler-SDK checks whether the requsted configuration is actually supported
+ * Rocprofiler-SDK checks whether the requested configuration is actually supported
  * at the moment of calling this function. If the answer is yes, it returns
  * the @see ROCPROFILER_STATUS_SUCCESS. Otherwise, it notifies the client about the
  * rejection reason via the returned status code. For more information
@@ -164,7 +164,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configuratio
     /// @var unit
     /// @brief A unit used to specify the interval of the @ref method for samples generation.
     /// @var min_interval
-    /// @brief the highest possible frequencey for generating samples using @ref method.
+    /// @brief the highest possible frequency for generating samples using @ref method.
     /// @var max_interval
     /// @brief the lowest possible frequency for generating samples using @ref method
 
@@ -404,7 +404,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_snapshot_v0_
     /// @brief Two VALU instructions were issued for coexecution (MI3xx specific)
     /// @var sampling_lock_error
     /// @brief At least one wave was locked out from taking a sample,
-    /// due to the latency instroduced by current sample read.
+    /// due to the latency introduced by current sample read.
     /// Too many samples with this bit on indicates that the sampling frequency is too high
 } rocprofiler_pc_sampling_snapshot_v0_t;
 
@@ -443,8 +443,8 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_count
     /// @var tensor_cnt
     /// @brief Counts the number of tensor instructions issued but not yet completed.
     /// @var xnack_cnt
-    /// @brief Counts the number of oustanding memory instruction not yet reported
-    /// XNACK ackwlodgement.
+    /// @brief Counts the number of outstanding memory instructions not yet reported
+    /// XNACK acknowledgment.
 } rocprofiler_pc_sampling_memory_counters_t;
 
 /**

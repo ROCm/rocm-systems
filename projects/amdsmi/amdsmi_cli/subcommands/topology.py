@@ -66,14 +66,19 @@ class TopologyCommands:
             self.group_check_printed = True
 
         is_single_nic_request = False  # -N option
-        is_single_switch_request = False  # -bs option
+        is_single_switch_request = False  # --switch option
         is_single_gpu_request = False  # -g option
 
         gpucount = 0
         niccount = 0
         switchcount = 0
 
-        if args.nic == None:
+        # The topology parser conditionally registers --nic / --switch based on
+        # is_brcm_nic_initialized() / is_brcm_switch_initialized(). On hosts
+        # where one is gated off, the corresponding argparse attribute is
+        # absent on the namespace; getattr() guards the unconditional access
+        # below to prevent AttributeError on single-subsystem hosts.
+        if getattr(args, "nic", None) is None:
             args.nic = self.device_handles_brcm_nics
         if not isinstance(args.nic, list):
             args.nic = [args.nic]
@@ -81,7 +86,7 @@ class TopologyCommands:
             is_single_nic_request = True
         niccount = len(args.nic)
 
-        if args.switch is None:
+        if getattr(args, "switch", None) is None:
             args.switch = self.device_handles_switchs
         if not isinstance(args.switch, list):
             args.switch = [args.switch]
@@ -405,18 +410,23 @@ class TopologyCommands:
             args.nic = nic
         if switch:
             args.switch = switch
-        if (self.helpers.is_brcm_nic_initialized() and (nic_topo or args.nic_topo)) or (
-            self.helpers.is_brcm_switch_initialized() and (nic_switch or args.nic_switch)
+        # nic_topo / nic_switch are only registered on the parser when their
+        # respective subsystem is initialized, so guard every namespace access
+        # with getattr() to stay safe on single-subsystem hosts.
+        nic_topo_req = getattr(args, "nic_topo", False)
+        nic_switch_req = getattr(args, "nic_switch", False)
+        if (self.helpers.is_brcm_nic_initialized() and (nic_topo or nic_topo_req)) or (
+            self.helpers.is_brcm_switch_initialized() and (nic_switch or nic_switch_req)
         ):
             self.topology_nic(
                 args,
                 multiple_devices,
                 args.gpu,
-                args.nic,
-                args.nic_topo,
-                args.nic_switch,
+                getattr(args, "nic", None),
+                nic_topo_req,
+                nic_switch_req,
                 multiple_device_enabled,
-                args.switch,
+                getattr(args, "switch", None),
             )
             return
 

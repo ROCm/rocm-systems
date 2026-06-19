@@ -649,6 +649,8 @@ generic_address_space_t::convert (
   else if (kind == kind_t::global)
     contiguous_bytes
       = lowered_address_space.last_address () - lowered_address + 1;
+  else if (kind == kind_t::local)
+      contiguous_bytes = wave.lds_size () - lowered_address;
   else
     dbgapi_assert_not_reached ("unsupported address space for generic.");
 

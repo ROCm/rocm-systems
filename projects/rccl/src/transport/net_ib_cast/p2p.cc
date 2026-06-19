@@ -355,7 +355,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
 
 ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle, void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
-  bool useWriteOp = (IbCastOffloadEnabled &&(*request == (void *)NCCL_NET_OPTIONAL_RECV_COMPLETION)) ? true : false;
+  bool useWriteOp = (comm->useCtsOffload &&(*request == (void *)NCCL_NET_OPTIONAL_RECV_COMPLETION)) ? true : false;
   if (comm->base.ready == 0) {
     WARN("NET/IB: IbCastIsend() called when comm->base.ready == 0");
     *request = NULL;
@@ -530,11 +530,11 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   //
   // slot == devIndex - When writing to CTS FIFO slot N, and this QP lives on device index N, it should send signalled.
   // This works out that each CTS posting QP gets drained
-  if (IbCastOffloadEnabled && (slot == ctsQp->ctsQpSlot)) {
+  if (comm->useCtsOffload && (slot == ctsQp->ctsQpSlot)) {
     wr.send_flags |= IBV_SEND_SIGNALED;
     wr.wr_id = (req - req->base->reqs);
     IbCastAddEvent(req, ctsQp->devIndex);
-  } else if (!IbCastOffloadEnabled && (slot == ctsQp->devIndex || comm->base.resiliency)) {
+  } else if (!comm->useCtsOffload && (slot == ctsQp->devIndex || comm->base.resiliency)) {
     wr.send_flags |= IBV_SEND_SIGNALED;
     wr.wr_id = slot;
     IbCastAddEventCTS(req, ctsQp->devIndex);
@@ -562,7 +562,7 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   }
   if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
   NCCLCHECK(IbCastStatsCheckFatalCount(&comm->base.stats,__func__));
-  if (IbCastOffloadEnabled) {
+  if (comm->useCtsOffload) {
     if (*request == (void *)NCCL_NET_OPTIONAL_RECV_COMPLETION) {
       netOptRecvCompletionEnabled = true;
     }

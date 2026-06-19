@@ -617,8 +617,9 @@ amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_
 
   ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
 
+  // No UALoE session: fabric telemetry is unsupported on this device.
   if (ualoe_handle == -1) {
-    return AMDSMI_STATUS_NOT_INIT;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
   uint32_t ualoe_category_mask = category_mask;
@@ -652,8 +653,9 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
 
   ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
 
+  // No UALoE session: fabric telemetry is unsupported on this device.
   if (ualoe_handle == -1) {
-    return AMDSMI_STATUS_NOT_INIT;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
   // Cast AMDSMI telemetry directly to UALoE telemetry since structures are now binary compatible
@@ -684,8 +686,9 @@ amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_h
 
   ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
 
+  // No UALoE session: fabric telemetry is unsupported on this device.
   if (ualoe_handle == -1) {
-    return AMDSMI_STATUS_NOT_INIT;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
   // Cast AMDSMI telemetry directly to UALoE telemetry since structures are now binary compatible

@@ -32,6 +32,7 @@ concurrency:
 
 jobs:
   ci:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     strategy:
       fail-fast: false
       matrix:
@@ -89,13 +90,6 @@ jobs:
       SUBMODULE_PATHS: "projects/rocprofiler-register"
 
     steps:
-    - name: Install Latest Nightly ROCm
-      shell: bash
-      working-directory: /tmp
-      run: |
-        tar -xf ${{ env.PACKAGING_INSTALL_PREFIX }}-gfx94X.tar.gz -C ${{ env.PACKAGING_INSTALL_PREFIX }}
-        echo "ROCm installed to: ${{ env.PACKAGING_INSTALL_PREFIX }}"
-
     - name: Setup Git
       shell: bash
       run: |

@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -25,7 +26,9 @@ SUPPORTED_ARCHS = {
     "gfx941": {"mi300": ["MI300X_A0"]},
     "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
     "gfx950": {"mi350": ["MI350"]},
+    "gfx1150": {"rdna35_point_1": ["RDNA35_POINT_1"]},
     "gfx1151": {"rdna35_halo": ["RDNA35_HALO"]},
+    "gfx1152": {"rdna35_point_2": ["RDNA35_POINT_2"]},
 }
 
 
@@ -235,6 +238,20 @@ def strip_ansi(s: str) -> str:
     return ansi_escape.sub("", s)
 
 
+def patch_console(monkeypatch, module, *names, **overrides):
+    """Patch ``module.console_<name>`` with a Mock for each name; return {name: Mock}.
+
+    Pass ``name=callable`` to substitute a specific mock (e.g. a record-and-raise
+    stub for the console_error exit path).
+    """
+    mocks = {}
+    for name in names:
+        mock = overrides.get(name, Mock())
+        monkeypatch.setattr(f"{module}.console_{name}", mock)
+        mocks[name] = mock
+    return mocks
+
+
 def gpu_soc():
     """Return (arch, model) from rocminfo, e.g. ('gfx942', 'MI300').
 
@@ -262,9 +279,18 @@ def skip_unsupported_pc_sampling_soc(is_stochastic=False):
     """Skip PC-sampling tests on SoCs that do not support the selected mode."""
     _, soc = gpu_soc()
 
-    unsupported_socs = {"MI100", "RDNA35_HALO"}
+    unsupported_socs = {"MI100", "RDNA35_POINT_1", "RDNA35_HALO", "RDNA35_POINT_2"}
     if is_stochastic:
         unsupported_socs.add("MI200")
 
     if soc in unsupported_socs:
         pytest.skip(f"PC sampling is not supported on {soc}")
+
+
+def require_pc_sampling_gpu(is_stochastic=False):
+    """Skip the test unless a GPU that supports the selected PC sampling mode is
+    present."""
+    _, soc = gpu_soc()
+    if not soc:
+        pytest.skip("GPU not supported")
+    skip_unsupported_pc_sampling_soc(is_stochastic=is_stochastic)

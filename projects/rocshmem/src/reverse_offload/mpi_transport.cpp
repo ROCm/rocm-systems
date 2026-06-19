@@ -385,14 +385,12 @@ void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
   MPI_Datatype mpi_type{convertType(type)};
   MPI_Request req;
 
-  if (rank != root){
-    NET_CHECK(mpilib_ftable_.Rget(reinterpret_cast<char *>(dst), size, mpi_type, world_ranks[root],
-                       bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char *>(src)),
-                       size, mpi_type, bp->heap_window_info[win_id]->get_win(), &req));
+  NET_CHECK(mpilib_ftable_.Rget(reinterpret_cast<char *>(dst), size, mpi_type, world_ranks[root],
+                      bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char *>(src)),
+                      size, mpi_type, bp->heap_window_info[win_id]->get_win(), &req));
 
-      requests.push_back({req, {nullptr, contextId, false}});
-      outstanding[contextId]++;
-  }
+  requests.push_back({req, {nullptr, contextId, false}});
+  outstanding[contextId]++;
 
   NET_CHECK(mpilib_ftable_.Win_flush_all(bp->heap_window_info[win_id]->get_win()));
   barrier(contextId, nullptr, false, comm, false);

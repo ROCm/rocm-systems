@@ -141,6 +141,43 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block)
         assert 'std::fma(' in result
 
+    def test_vector_explicit_vcc_dst_preserves_high_sgpr_on_wave32(self):
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), SemaType.U32),
+                SemaNode(
+                    SemaNodeKind.CALL,
+                    call_name='add_co',
+                    ty=SemaType.U32,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='add_co'),
+                        _cast(_src(0), SemaType.U32),
+                        _cast(_src(1), SemaType.U32),
+                    ),
+                ),
+            ),
+        )
+        block = SemaBlock('V_ADD_CO_U32', ExecModel.VECTOR, body)
+        omap = OperandMap(
+            src_bindings={
+                0: OperandBinding('src0', RegClass.VGPR, 32),
+                1: OperandBinding('src1', RegClass.VGPR, 32),
+            },
+            dst_bindings={0: OperandBinding('vdst', RegClass.VGPR, 32)},
+        )
+        ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR,
+            operand_map=omap,
+            vcc_dst='sdst',
+        )
+
+        result = lower_sema_block(block, ctx)
+
+        assert 'if (wf.wf_size() <= 32)' in result
+        assert 'sdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in result
+        assert 'sdst.write_scalar64(wf, vcc)' in result
+
     def test_vector_block_can_write_scalar_destination(self):
         body = SemaNode(
             SemaNodeKind.ASSIGN,
@@ -190,6 +227,85 @@ class TestLowerVectorAdd:
         assert 'for (uint32_t lane = 0' not in result
         assert 'src0.read_scalar(wf)' in result
         assert 'vdst.write_scalar(wf' in result
+
+    def test_less_greater_compare_reads_operands_once(self):
+        s0 = _cast(_src(0), SemaType.F32)
+        s1 = _cast(_src(1), SemaType.F32)
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ARRAYDEREF,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='VCC'),
+                        SemaNode(SemaNodeKind.ID, id_name='laneId'),
+                    ),
+                ),
+                SemaNode(
+                    SemaNodeKind.LOR,
+                    ty=SemaType.U1,
+                    children=(
+                        SemaNode(SemaNodeKind.LT, ty=SemaType.U1, children=(s0, s1)),
+                        SemaNode(SemaNodeKind.GT, ty=SemaType.U1, children=(s0, s1)),
+                    ),
+                ),
+            ),
+        )
+        block = SemaBlock('V_CMP_LG_F32', ExecModel.VECTOR, body)
+        omap = OperandMap(
+            src_bindings={
+                0: OperandBinding('src0', RegClass.VGPR, 32),
+                1: OperandBinding('src1', RegClass.VGPR, 32),
+            },
+        )
+
+        result = lower_sema_block(
+            block, LoweringContext(exec_model=ExecModel.VECTOR, operand_map=omap)
+        )
+
+        assert 'return (a < b) || (a > b);' in result
+        assert result.count('src0.read_lane(wf, lane)') == 1
+        assert result.count('src1.read_lane(wf, lane)') == 1
+
+    def test_zero_initialized_vcc_mask_omits_false_lane_clear(self):
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ARRAYDEREF,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='VCC'),
+                        SemaNode(SemaNodeKind.ID, id_name='laneId'),
+                    ),
+                ),
+                SemaNode(
+                    SemaNodeKind.EQ,
+                    ty=SemaType.U1,
+                    children=(
+                        _cast(_src(0), SemaType.U32),
+                        _cast(_src(1), SemaType.U32),
+                    ),
+                ),
+            ),
+        )
+        block = SemaBlock('V_CMP_EQ_U32', ExecModel.VECTOR, body)
+        omap = OperandMap(
+            src_bindings={
+                0: OperandBinding('src0', RegClass.VGPR, 32),
+                1: OperandBinding('src1', RegClass.VGPR, 32),
+            },
+        )
+        ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR,
+            operand_map=omap,
+            clear_false_lane_mask_writes=False,
+        )
+
+        result = lower_sema_block(block, ctx)
+
+        assert 'uint64_t vcc = 0;' in result
+        assert 'vcc |= (1ULL << lane);' in result
+        assert 'vcc &= ~(1ULL << lane);' not in result
 
     def test_true16_destination_select_merges_half(self):
         b16 = SemaType('B', 16)
@@ -291,7 +407,62 @@ class TestLowerVectorAdd:
 
         assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in result
         assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in result
-        assert 'inst_.opsel & 0x8u' in result
+        assert (
+            '::rocjitsu::amdgpu::write_vop3_true16_dst('
+            'vdst, wf, lane, inst_.opsel & 0x8u, src_half);' in result
+        )
+
+    def test_true16_cndmask_keeps_selector_scalar(self):
+        b16 = SemaType('B', 16)
+        cond = SemaNode(
+            SemaNodeKind.ARRAYDEREF,
+            ty=SemaType.U1,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='VCC', ty=SemaType.U64),
+                SemaNode(SemaNodeKind.ID, id_name='laneId', ty=SemaType.U32),
+            ),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), b16),
+                SemaNode(
+                    SemaNodeKind.TERNARY,
+                    ty=b16,
+                    children=(cond, _cast(_src(1), b16), _cast(_src(0), b16)),
+                ),
+            ),
+        )
+        block = SemaBlock('V_CNDMASK_B16', ExecModel.VECTOR, body)
+        omap = OperandMap(
+            src_bindings={
+                0: OperandBinding('src0', RegClass.VGPR, 16),
+                1: OperandBinding('src1', RegClass.VGPR, 16),
+                2: OperandBinding('src2', RegClass.SGPR, 64),
+            },
+            dst_bindings={0: OperandBinding('vdst', RegClass.VGPR, 16)},
+        )
+        ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR,
+            operand_map=omap,
+            true16_dst_select='inst_.opsel & 0x8u',
+            true16_src_selects={
+                0: 'inst_.opsel & 0x1u',
+                1: 'inst_.opsel & 0x2u',
+            },
+            vcc_read='src2.read_scalar64(wf)',
+        )
+
+        result = lower_sema_block(block, ctx)
+
+        assert 'src2.read_scalar64(wf)' in result
+        assert 'src2.read_lane' not in result
+        assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in result
+        assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in result
+        assert (
+            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);'
+            in result
+        )
 
     def test_true16_bf16_destination_converts_float_result(self):
         body = SemaNode(
@@ -324,7 +495,55 @@ class TestLowerVectorAdd:
             'uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_bf16('
             in result
         )
+        assert (
+            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);'
+            in result
+        )
         assert 'std::cos' in result
+
+    def test_true16_destination_read_selects_matching_half(self):
+        f16 = SemaType('F', 16)
+        dst_read = SemaNode(
+            SemaNodeKind.INSTOPERAND,
+            ty=f16,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='D'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0'),
+            ),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), f16),
+                SemaNode(
+                    SemaNodeKind.ADD,
+                    ty=SemaType.F32,
+                    children=(
+                        _cast(_src(0), f16),
+                        _cast(dst_read, f16),
+                    ),
+                ),
+            ),
+        )
+        block = SemaBlock('V_FMAC_F16', ExecModel.VECTOR, body)
+        omap = OperandMap(
+            src_bindings={0: OperandBinding('src0', RegClass.VGPR, 16)},
+            dst_bindings={0: OperandBinding('vdst', RegClass.VGPR, 16)},
+        )
+        ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR,
+            operand_map=omap,
+            true16_dst_select='inst_.opsel & 0x8u',
+            true16_dst_reg='inst_.vdst & 0x7fu',
+        )
+
+        result = lower_sema_block(block, ctx)
+
+        assert (
+            '((inst_.opsel & 0x8u) != 0 ? '
+            '(wf.cu().read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane) >> 16)'
+            in result
+        )
 
 
 class TestLowerCast:

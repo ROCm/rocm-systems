@@ -577,17 +577,19 @@ __device__ void GDAContext::internal_put_broadcast(T *dst, const T *src,
   if (constmem.my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
-      if (i != constmem.my_pe) {
+      if (constmem.my_pe != i)
         internal_putmem_nbi_wg(dst, src, nelems * sizeof(T), i, i, wf_info);
-      }
     }
+    memcpy_wg<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
   }
 }
 
 template <typename T>
 __device__ void GDAContext::internal_get_broadcast(T *dst, const T *src,
     int nelems, int pe_root, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
-  if (constmem.my_pe != pe_root) {
+  if (constmem.my_pe == pe_root) {
+    memcpy_wg<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
+  } else {
     internal_getmem_wg(dst, src, nelems * sizeof(T), pe_root, pe_root, wf_info);
   }
 }
@@ -682,8 +684,8 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
@@ -752,7 +754,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     /* Wait for Ctrl Message */
     uint64_t ctrl_value;
-    volatile uint64_t *vol_ctrl = &tmp_buf[dest_pe];
+    uint64_t *vol_ctrl = &tmp_buf[dest_pe];
 
     do {
       ctrl_value = uncached_load(vol_ctrl);
@@ -771,8 +773,8 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
     qps[dest_pe].atomic_nofetch_single(amo_dst, 1);
 
-    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
@@ -846,8 +848,8 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 

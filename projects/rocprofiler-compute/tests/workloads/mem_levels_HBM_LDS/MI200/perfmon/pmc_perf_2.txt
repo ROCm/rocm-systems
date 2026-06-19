@@ -1,5 +1,0 @@
-pmc:  SQ_LDS_IDX_ACTIVE SQ_LDS_BANK_CONFLICT
-
-gpu:
-range:
-kernel:

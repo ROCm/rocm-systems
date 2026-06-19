@@ -751,11 +751,11 @@
                                 },
                                 "kernel_id": {
                                     "type": "integer",
-                                    "description": "ID of the corressponding kernel."
+                                    "description": "ID of the corresponding kernel."
                                 },
                                 "code_object_id": {
                                     "type": "integer",
-                                    "description": "ID of the corressponding code object."
+                                    "description": "ID of the corresponding code object."
                                 },
                                 "host_function_address": {
                                     "type": "integer",
@@ -1063,7 +1063,7 @@
                                                 },
                                                 "cu_or_wgp_id":{
                                                     "type": "integer",
-                                                    "description": "Index of compute unit or workgroup processer."
+                                                    "description": "Index of compute unit or workgroup processor."
                                                 },
                                                 "shader_array_id":{
                                                     "type": "integer",

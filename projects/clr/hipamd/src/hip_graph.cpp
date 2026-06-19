@@ -1034,6 +1034,10 @@ hipError_t capturehipMallocAsync(hipStream_t stream, hipMemPool_t mem_pool, size
   *dev_ptr = (HIP_MEM_POOL_USE_VM) ? mem_alloc_node->ReserveAddress() : mem_alloc_node->Execute(s);
   s->SetLastCapturedNode(mem_alloc_node);
 
+  // Track the allocation like the explicit path, so a captured escaped allocation
+  // is not misclassified as reusable and freed on hipGraphExecDestroy.
+  hip::Graph::TrackMemAllocPtr(s->GetCaptureGraph(), *dev_ptr);
+
   return hipSuccess;
 }
 
@@ -1042,6 +1046,11 @@ hipError_t capturehipFreeAsync(hipStream_t stream, void* dev_ptr) {
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
           "[hipGraph] Current capture node FreeAsync on stream : %p", stream);
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  // Mirror hipGraphAddMemFreeNode: reject a free of memory that is not a live
+  // unmatched graph allocation. Capture stays Active, so EndCapture still succeeds.
+  if (!hip::Graph::UntrackMemAllocPtr(dev_ptr)) {
+    return hipErrorInvalidValue;
+  }
   auto mem_free_node = new hip::GraphMemFreeNode(dev_ptr);
   auto status =
       ihipGraphAddNode(mem_free_node, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
@@ -1104,6 +1113,7 @@ hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
 hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode mode,
                                         hipGraph_t graph = nullptr) {
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
   // capture cannot be initiated on legacy stream
   if (stream == nullptr || stream == hipStreamLegacy) {
     return hipErrorStreamCaptureUnsupported;
@@ -1149,6 +1159,7 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                         size_t numDependencies, hipStreamCaptureMode mode) {
   HIP_INIT_API(hipStreamBeginCapture, stream, graph, dependencies, dependencyData, numDependencies,
                mode);
+  CHECK_STREAM_DETACHED_API(stream);
   if (dependencyData != nullptr) {
     return hipErrorNotSupported;
   } else if (graph == nullptr) {
@@ -1190,6 +1201,7 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
   if (!hip::isValid(stream)) {
     return hipErrorContextIsDestroyed;
   }
+  CHECK_STREAM_DETACHED(stream);
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   // Capture status must be active before endCapture can be initiated
   if (s->GetCaptureStatus() == hipStreamCaptureStatusNone) {
@@ -1640,6 +1652,7 @@ hipError_t hipGraphLaunch_common(hip::GraphExec* graphExec, hipStream_t stream) 
   if (!hip::isValid(stream)) {
     return hipErrorContextIsDestroyed;
   }
+  CHECK_STREAM_DETACHED(stream);
   if (graphExec->GetNodeCount() == 0) {
     return hipSuccess;
   }
@@ -2793,8 +2806,7 @@ hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
     HIP_RETURN(hipErrorOutOfMemory);
   }
   *pGraphNode = reinterpret_cast<hipGraphNode_t>(node);
-  amd::ScopedLock lock(hip::Graph::graphSetLock_);
-  hgraph->memAllocNodePtrs_.insert(pNodeParams->dptr);
+  hip::Graph::TrackMemAllocPtr(hgraph, pNodeParams->dptr);
   HIP_RETURN(status);
 }
 
@@ -2843,24 +2855,10 @@ hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
       dev_ptr == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  // memAllocNodePtrs_ stores only local to graph alloc dptrs whose free node is not added.
-  // and so we need to traverse all graphs of graphSet_ and below cases are handled.
-  // 1) Free node cannot be added twice to the same graph
-  // 2) Free node if it part of another graph cannot be added to this graph
+  // Reject if dev_ptr is not a live unmatched graph allocation (also rejects a
+  // duplicate free; matches an alloc registered under another graph).
   hip::GraphNode* pNode;
-  bool bGraphFound = false;
-  {
-    amd::ScopedLock lock(hip::Graph::graphSetLock_);
-    for (auto itGraph : hip::Graph::graphSet_) {
-      std::unordered_set<void*>::iterator itDevPtr = itGraph->memAllocNodePtrs_.find(dev_ptr);
-      if (itDevPtr != itGraph->memAllocNodePtrs_.end()) {
-        bGraphFound = true;
-        itGraph->memAllocNodePtrs_.erase(itDevPtr);
-        break;
-      }
-    }
-  }
-  if (bGraphFound == false) {
+  if (!hip::Graph::UntrackMemAllocPtr(dev_ptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   auto status = ihipGraphAddMemFreeNode(&pNode, reinterpret_cast<hip::Graph*>(graph),

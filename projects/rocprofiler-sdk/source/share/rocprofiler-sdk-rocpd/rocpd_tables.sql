@@ -1,5 +1,4 @@
--- Enable foreign key support for cascading
-PRAGMA foreign_keys = ON;
+-- RocPD schema version 3.0.1
 
 CREATE TABLE IF NOT EXISTS
     "rocpd_metadata{{uuid}}" (
@@ -68,7 +67,7 @@ CREATE TABLE IF NOT EXISTS
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "nid" INTEGER NOT NULL,
         "pid" INTEGER NOT NULL,
-        "type" TEXT CHECK ("type" IN ('CPU', 'GPU')),
+        "type" TEXT CHECK ("type" IN ('CPU', 'GPU', 'NIC')),
         "absolute_index" INTEGER,
         "logical_index" INTEGER,
         "type_index" INTEGER,
@@ -117,7 +116,7 @@ CREATE TABLE IF NOT EXISTS
         "nid" INTEGER NOT NULL,
         "pid" INTEGER NOT NULL,
         "agent_id" INTEGER,
-        "target_arch" TEXT CHECK ("target_arch" IN ('CPU', 'GPU')),
+        "target_arch" TEXT CHECK ("target_arch" IN ('CPU', 'GPU', 'NIC')),
         "event_code" INT,
         "instance_id" INTEGER,
         "name" TEXT NOT NULL,
@@ -364,10 +363,3 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (queue_id) REFERENCES `rocpd_info_queue{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
-
-INSERT INTO
-    `rocpd_metadata{{uuid}}` ("tag", "value")
-VALUES
-    ("schema_version", "3"),
-    ("uuid", "{{uuid}}"),
-    ("guid", "{{guid}}");
