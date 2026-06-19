@@ -75,6 +75,7 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::query() {
+  amd::ScopedLock lock(lock_);
   if (ipc_evt_.ipc_shmem_) {
     int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     int offset = (prev_read_idx % IPC_SIGNALS_PER_EVENT);
@@ -88,6 +89,7 @@ hipError_t IPCEventEmulated::query() {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::synchronize() {
+  amd::ScopedLock lock(lock_);
   if (ipc_evt_.ipc_shmem_) {
     int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     if (prev_read_idx >= 0) {
@@ -103,6 +105,7 @@ hipError_t IPCEventEmulated::synchronize() {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
+  amd::ScopedLock lock(lock_);
   const int offset = ipc_evt_.ipc_shmem_->read_index;
   return ihipStreamOperation(
       reinterpret_cast<hipStream_t>(stream),
@@ -114,12 +117,14 @@ hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
 // ================================================================================================
 hipError_t IPCEventEmulated::recordCommand(amd::Command*& command, amd::HostQueue* stream,
                                            uint32_t flags, bool batch_flush) {
+  amd::ScopedLock lock(lock_);
   command = new amd::Marker(*stream, kMarkerDisableFlush);
   return hipSuccess;
 }
 
 // ================================================================================================
 hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+  amd::ScopedLock lock(lock_);
   createIpcEventShmemIfNeeded();
   int write_index = ipc_evt_.ipc_shmem_->write_index++;
   int offset = write_index % IPC_SIGNALS_PER_EVENT;
@@ -158,6 +163,7 @@ hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Comm
 
 // ================================================================================================
 hipError_t IPCEventEmulated::GetHandle(ihipIpcEventHandle_t* handle) {
+  amd::ScopedLock lock(lock_);
   if (!createIpcEventShmemIfNeeded()) {
     return hipErrorInvalidValue;
   }
@@ -172,6 +178,7 @@ hipError_t IPCEventEmulated::GetHandle(ihipIpcEventHandle_t* handle) {
 
 // ================================================================================================
 hipError_t IPCEventEmulated::OpenHandle(ihipIpcEventHandle_t* handle) {
+  amd::ScopedLock lock(lock_);
   ipc_evt_.ipc_name_ = handle->shmem_name;
   if (!amd::Os::MemoryMapFileTruncated(ipc_evt_.ipc_name_.c_str(),
                                        (const void**)&(ipc_evt_.ipc_shmem_),
@@ -279,6 +286,8 @@ hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
 // ================================================================================================
 hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* stream,
                                    uint32_t flags, bool batch_flush) {
+  amd::ScopedLock lock(lock_);
+
   auto status = createIpcSignalIfNeeded();
   if (status != hipSuccess) {
     return status;
@@ -292,6 +301,19 @@ hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* strea
 
 // ================================================================================================
 hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+  amd::ScopedLock lock(lock_);
+
+  // A single shared IPC signal cannot represent overlapping recordings, and the
+  // consumer is attached to this exact signal (it cannot be rotated). So we must
+  // serialize re-recordings: wait for the previous record's GPU work to drain
+  // before re-arming, otherwise the absolute Reset(1) races with the prior
+  // barrier's pending decrement and a waiter can wake on the wrong recording.
+  // Skip the wait on the first record (signal still at its initial value, never
+  // decremented) — waiting there would hang forever.
+  if (event_ != nullptr) {
+    ipc_signal_->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
+  }
+
   // Re-arm the signal; GPU barrier will decrement to 0 when work completes
   ipc_signal_->Reset(1);
 

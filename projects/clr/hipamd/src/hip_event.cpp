@@ -172,6 +172,9 @@ int64_t EventDD::time(bool getStartTs) const {
 }
 // ================================================================================================
 hipError_t Event::streamWaitCommand(amd::Command*& command, hip::Stream* stream) {
+  // Guard event_ against concurrent record/sync. Graph stream-wait nodes call
+  // this directly (not via the locked streamWait path); lock_ is recursive.
+  amd::ScopedLock lock(lock_);
   amd::Command::EventWaitList eventWaitList;
   if (event_ != nullptr) {
     eventWaitList.push_back(event_);
@@ -209,6 +212,9 @@ hipError_t Event::streamWait(hip::Stream* stream, uint flags) {
 // ================================================================================================
 hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, uint32_t ext_flags,
                                 bool batch_flush) {
+  // Guard event state against concurrent access. Graph event-record nodes call
+  // this directly (not via the locked addMarker path); lock_ is recursive.
+  amd::ScopedLock lock(lock_);
   if (command == nullptr) {
     int32_t releaseFlags =
         ((ext_flags == 0) ? flags_ : ext_flags) &
@@ -228,6 +234,9 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
 
 // ================================================================================================
 hipError_t Event::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+  // Guard event_ release/replace against concurrent access. Graph event-record
+  // nodes call this directly (not via locked addMarker); lock_ is recursive.
+  amd::ScopedLock lock(lock_);
   command->enqueue();
   if (event_ == &command->event()) {
     return hipSuccess;
