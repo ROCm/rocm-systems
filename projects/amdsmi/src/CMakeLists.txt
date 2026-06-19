@@ -55,7 +55,9 @@ set(SRC_LIST
     "${NIC_SOURCES}"
 )
 
-file(GLOB IMPL_HEADERS "${INC_DIR}/impl/*.h")
+# CONFIGURE_DEPENDS re-evaluates the glob at build time so adding or removing an
+# impl header triggers a regenerate instead of going unnoticed until a clean build.
+file(GLOB IMPL_HEADERS CONFIGURE_DEPENDS "${INC_DIR}/impl/*.h")
 set(INC_LIST
     "${IMPL_HEADERS}"
     "${INC_DIR}/amdsmi.h"
@@ -156,7 +158,6 @@ foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
         ${_TARGET}
         PUBLIC
             "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified/interface>"
             "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
     )
 
@@ -228,21 +229,25 @@ install(
     COMPONENT dev
 )
 
-install(FILES ${IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
+# Test-only impl headers (those with "_test" in the name: the CPER read seam and
+# the internal test helpers/flags) are build-only. Production and the unit tests
+# include them from the source tree, but their symbols are hidden from
+# libamd_smi.so by the version script (cper_set_read_fn_for_testing has no
+# amdsmi_ prefix; amdsmi_test_sleep is a C++ symbol the amdsmi_* export glob does
+# not match), so a dev-package consumer that included them would hit a link
+# error. Build them, but keep them out of the installed dev headers.
+set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
+install(FILES ${INSTALL_IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
 
 install(FILES ${NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)
 
-set(UNIFIED_NIC_INCLUDES ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface/smi_nic_interface.h)
-install(FILES ${UNIFIED_NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)
+set(UNIFIED_NIC_INCLUDES ${PROJECT_SOURCE_DIR}/include/amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h)
 install(
     FILES ${UNIFIED_NIC_INCLUDES}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/interface
     COMPONENT dev
 )
-# Public impl/ header amd_smi_system.h includes <amdsmi_unified/interface/...>
-# as a bare path. Install at that bare path so installed consumers (e.g. the
-# standalone example rebuild in CI) can resolve it from /opt/rocm/include.
-install(FILES ${UNIFIED_NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amdsmi_unified/interface COMPONENT dev)
 set(UNIFIED_NIC_INCLUDES
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_devlink_netlink.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_ethtool_ioctl.h"
@@ -255,18 +260,6 @@ install(
     FILES ${UNIFIED_NIC_INCLUDES}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/inc/
     COMPONENT dev
-)
-
-# UALOE headers are pulled in transitively by public impl/ headers
-# (amd_smi_gpu_device.h includes <ualoe_lib/ualoe_lib.h>), so they must be
-# installed alongside the other public-facing headers. Use DIRECTORY to
-# preserve the cbl_cfg/ subdirectory referenced by ualoe_lib.h.
-install(
-    DIRECTORY ${UALOE_INCLUDE_DIR}/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ualoe_lib
-    COMPONENT dev
-    FILES_MATCHING
-    PATTERN "*.h"
 )
 
 file(GLOB ESMI_HEADERS "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/e_smi/*.h")

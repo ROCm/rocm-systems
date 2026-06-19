@@ -786,67 +786,6 @@ operator<<(std::ostream& out, const hsa_ext_image_descriptor_t& v)
 }
 
 inline static std::ostream&
-operator<<(std::ostream& out, const hsa_ext_image_descriptor_v2_t& v)
-{
-    std::operator<<(out, '{');
-    HSA_depth_max_cnt++;
-    if(HSA_depth_max == -1 || HSA_depth_max_cnt <= HSA_depth_max)
-    {
-        if(std::string_view{"hsa_ext_image_descriptor_v2_t::format"}.find(HSA_structs_regex) !=
-           std::string_view::npos)
-        {
-            rocprofiler::hsa::detail::operator<<(out, "format=");
-            rocprofiler::hsa::detail::operator<<(out, v.format);
-            rocprofiler::hsa::detail::operator<<(out, ", ");
-        }
-        if(std::string_view{"hsa_ext_image_descriptor_v2_t::array_size"}.find(HSA_structs_regex) !=
-           std::string_view::npos)
-        {
-            rocprofiler::hsa::detail::operator<<(out, "array_size=");
-            rocprofiler::hsa::detail::operator<<(out, v.array_size);
-            rocprofiler::hsa::detail::operator<<(out, ", ");
-        }
-        if(std::string_view{"hsa_ext_image_descriptor_v2_t::depth"}.find(HSA_structs_regex) !=
-           std::string_view::npos)
-        {
-            rocprofiler::hsa::detail::operator<<(out, "depth=");
-            rocprofiler::hsa::detail::operator<<(out, v.depth);
-            rocprofiler::hsa::detail::operator<<(out, ", ");
-        }
-        if(std::string_view{"hsa_ext_image_descriptor_v2_t::height"}.find(HSA_structs_regex) !=
-           std::string_view::npos)
-        {
-            rocprofiler::hsa::detail::operator<<(out, "height=");
-            rocprofiler::hsa::detail::operator<<(out, v.height);
-            rocprofiler::hsa::detail::operator<<(out, ", ");
-        }
-        if(std::string_view{"hsa_ext_image_descriptor_v2_t::width"}.find(HSA_structs_regex) !=
-           std::string_view::npos)
-        {
-            rocprofiler::hsa::detail::operator<<(out, "width=");
-            rocprofiler::hsa::detail::operator<<(out, v.width);
-            rocprofiler::hsa::detail::operator<<(out, ", ");
-        }
-        if(std::string_view{"hsa_ext_image_descriptor_v2_t::mipmap_levels"}.find(HSA_structs_regex) !=
-           std::string_view::npos)
-        {
-            rocprofiler::hsa::detail::operator<<(out, "mipmap_levels=");
-            rocprofiler::hsa::detail::operator<<(out, v.mipmap_levels);
-            rocprofiler::hsa::detail::operator<<(out, ", ");
-        }
-        if(std::string_view{"hsa_ext_image_descriptor_v2_t::geometry"}.find(HSA_structs_regex) !=
-           std::string_view::npos)
-        {
-            rocprofiler::hsa::detail::operator<<(out, "geometry=");
-            rocprofiler::hsa::detail::operator<<(out, v.geometry);
-        }
-    };
-    HSA_depth_max_cnt--;
-    std::operator<<(out, '}');
-    return out;
-}
-
-inline static std::ostream&
 operator<<(std::ostream& out, const hsa_ext_image_data_info_t& v)
 {
     std::operator<<(out, '{');
@@ -1701,13 +1640,6 @@ operator<<(std::ostream& out, const hsa_ext_image_format_t& v)
 
 inline static std::ostream&
 operator<<(std::ostream& out, const hsa_ext_image_descriptor_t& v)
-{
-    rocprofiler::hsa::detail::operator<<(out, v);
-    return out;
-}
-
-inline static std::ostream&
-operator<<(std::ostream& out, const hsa_ext_image_descriptor_v2_t& v)
 {
     rocprofiler::hsa::detail::operator<<(out, v);
     return out;

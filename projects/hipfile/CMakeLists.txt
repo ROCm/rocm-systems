@@ -293,6 +293,7 @@ endif()
 
 # Add the testing directories
 if(BUILD_TESTING)
+    include(AISUseGTest)
     add_subdirectory(test)
 endif()
 if(BUILD_TESTING AND AIS_BUILD_AMD_DETAIL)

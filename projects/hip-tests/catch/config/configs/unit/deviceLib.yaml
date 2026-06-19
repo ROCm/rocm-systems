@@ -341,6 +341,27 @@ deviceLib:
   Unit__hip_cvt_e8m0_to_bf16raw:
     <<: *level_2
     tags: [types]
+  Unit_e8m0_float_constructors:
+    <<: *level_2
+    tags: [types]
+  Unit_e8m0_int_constructors:
+    <<: *level_2
+    tags: [types]
+  Unit_e8m0_float_conversions:
+    <<: *level_2
+    tags: [types]
+  Unit_e8m0_int_conversions:
+    <<: *level_2
+    tags: [types]
+  Unit__hip_cvt_e8m0_to_double_exhaustive_host:
+    <<: *level_2
+    tags: [types]
+  Unit_e8m0_int_conversions_saturation:
+    <<: *level_2
+    tags: [types]
+  Unit_e8m0_int_conversions_saturation_boundary:
+    <<: *level_2
+    tags: [types]
   Unit_all_fp6_ocp_vector_cvt_interger_data:
     <<: *level_2
     tags: [types]

@@ -186,6 +186,7 @@ private:
   int svm_ioctl(KfdProcess &proc, void *arg);
   int runtime_enable_ioctl(KfdProcess &proc, void *arg);
   int set_xnack_mode_ioctl(void *arg);
+  int get_tile_config_ioctl(void *arg);
   bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);
 
   std::vector<GpuDevice> gpus_;

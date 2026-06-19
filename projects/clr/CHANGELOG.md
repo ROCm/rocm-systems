@@ -6,16 +6,15 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Added
 * New HIP APIs
-    - Execution Context Management
-    Support for the following APIs for parity with corresponding CUDA runtime APIs.
+    - Execution Context Management: Support for the following APIs for parity with corresponding CUDA APIs.
       * `hipDeviceGetDevResource` returns the device resource of a given type for a device
       * `hipDevSmResourceSplitByCount` splits SM resources into groups with at least a minimum SM count
       * `hipDevSmResourceSplit` splits SM resources into groups with configurable per-group parameters
       * `hipDevResourceGenerateDesc` generates a resource descriptor from one or more device resources
-      * `hipGreenCtxCreate` creates a green (execution) context from a resource descriptor
-      * `hipExecutionCtxDestroy` destroys a green (execution) context
+      * `hipGreenCtxCreate` creates a green context from a resource descriptor
+      * `hipExecutionCtxDestroy` destroys an execution context
       * `hipDeviceGetExecutionCtx` returns the default execution context for a device
-      * `hipExecutionCtxStreamCreate` creates a stream on a green (execution) context with specified flags and priority
+      * `hipExecutionCtxStreamCreate` creates a stream on an execution context with specified flags and priority
       * `hipExecutionCtxGetDevResource` returns the device resource of a given type for an execution context
       * `hipExecutionCtxGetDevice` returns the device associated with an execution context
       * `hipExecutionCtxGetId` returns a unique identifier for an execution context
@@ -23,6 +22,14 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipExecutionCtxRecordEvent` records an event on an execution context
       * `hipExecutionCtxSynchronize` blocks until all work on an execution context has completed
       * `hipExecutionCtxWaitEvent` makes an execution context wait on an event
+    - Module Management: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipLibraryGetGlobal` returns the device pointer and size of a `__device__` global defined in a `hipLibrary_t`. Mirrors `cudaLibraryGetGlobal` / `cuLibraryGetGlobal`.
+      * `hipLibraryGetManaged` returns the host pointer and size of a `__managed__` variable defined in a `hipLibrary_t`. Mirrors `cudaLibraryGetManaged` / `cuLibraryGetManaged`.
+    - Memory Management: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipMemDiscardBatchAsync` discards a batch of memory ranges asynchronously, allowing the runtime to reclaim resources. Mirrors `cudaMemDiscardBatchAsync`.
+      * `hipDrvMemDiscardBatchAsync` driver API variant of `hipMemDiscardBatchAsync`, using `hipDeviceptr_t` pointers. Mirrors `cuMemDiscardBatchAsync`.
+      * `hipMemDiscardAndPrefetchBatchAsync` combines discard and prefetch in a single call, enabling the runtime to optimize data movement. Mirrors `cudaMemDiscardAndPrefetchBatchAsync`.
+      * `hipDrvMemDiscardAndPrefetchBatchAsync` driver API variant of `hipMemDiscardAndPrefetchBatchAsync`, using `hipDeviceptr_t` pointers. Mirrors `cuMemDiscardAndPrefetchBatchAsync`.
 
 ## HIP 7.13 for ROCm 7.13
 
@@ -30,8 +37,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * New HIP APIs
     - `cooperative_groups::reduce()` allows calling reduce operators on `thread_block_tile` and `coalesced_threads`. The implementation is based on the `__reduce_*_sync` operations, so the macro `HIP_ENABLE_EXTRA_WARP_SYNC_TYPES` may be needed to unlock some optimizations.
-    - `hipLibraryGetGlobal` returns the device pointer and size of a `__device__` global defined in a `hipLibrary_t`. Mirrors CUDA's `cudaLibraryGetGlobal` / `cuLibraryGetGlobal`.
-    - `hipLibraryGetManaged` returns the host-accessible managed pointer and size of a `__managed__` variable defined in a `hipLibrary_t`. Mirrors CUDA's `cudaLibraryGetManaged` / `cuLibraryGetManaged`.
 * New device attribute `hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported`, indicating support for GPU Direct RDMA when using HIP VMM. This attribute corresponds to CUDA’s `CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED`.
 
 ### Resolved issues

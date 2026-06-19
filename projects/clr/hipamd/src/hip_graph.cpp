@@ -1113,6 +1113,7 @@ hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
 hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode mode,
                                         hipGraph_t graph = nullptr) {
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
   // capture cannot be initiated on legacy stream
   if (stream == nullptr || stream == hipStreamLegacy) {
     return hipErrorStreamCaptureUnsupported;
@@ -1158,6 +1159,7 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                         size_t numDependencies, hipStreamCaptureMode mode) {
   HIP_INIT_API(hipStreamBeginCapture, stream, graph, dependencies, dependencyData, numDependencies,
                mode);
+  CHECK_STREAM_DETACHED_API(stream);
   if (dependencyData != nullptr) {
     return hipErrorNotSupported;
   } else if (graph == nullptr) {
@@ -1199,6 +1201,7 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
   if (!hip::isValid(stream)) {
     return hipErrorContextIsDestroyed;
   }
+  CHECK_STREAM_DETACHED(stream);
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   // Capture status must be active before endCapture can be initiated
   if (s->GetCaptureStatus() == hipStreamCaptureStatusNone) {
@@ -1649,6 +1652,7 @@ hipError_t hipGraphLaunch_common(hip::GraphExec* graphExec, hipStream_t stream) 
   if (!hip::isValid(stream)) {
     return hipErrorContextIsDestroyed;
   }
+  CHECK_STREAM_DETACHED(stream);
   if (graphExec->GetNodeCount() == 0) {
     return hipSuccess;
   }

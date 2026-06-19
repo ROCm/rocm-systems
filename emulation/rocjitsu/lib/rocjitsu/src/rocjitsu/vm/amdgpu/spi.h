@@ -87,6 +87,7 @@ public:
         wf->set_lds_base(lds_base);
         wf->set_dispatch_id(wg.entry->dispatch_id);
         wf->set_process_id(wg.entry->process_id);
+        wf->set_exec(initial_exec_mask_for_wave(*wg.entry, w, cu->wf_size()));
         init_wf(cu, wf, *wg.entry, wg.global_wg_id, w);
         wg_wfs.push_back(wf);
       }

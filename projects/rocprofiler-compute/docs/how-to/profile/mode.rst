@@ -1411,11 +1411,6 @@ for MPI applications because running the application multiple times results in
 multiple ``MPI_Init`` and ``MPI_Finalize`` calls, which is not permitted by the
 MPI specification.
 
-**PC Sampling:**
-
-PC sampling (``--pc-sampling``) may fail to collect data for multi-rank
-applications with MPI communication due to synchronization requirements.
-
 **Recommended single-pass modes:**
 
 For multi-rank applications with MPI communication, use one of these single-pass
