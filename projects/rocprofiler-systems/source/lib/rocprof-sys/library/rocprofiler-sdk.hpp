@@ -147,7 +147,7 @@ private:
     using kernel_dispatch_bundle_t = tim::lightweight_tuple<tim::component::wall_clock>;
     using tool_agent_vec_t         = std::vector<tool_agent>;
     using counter_storage_map_t =
-        std::unordered_map<typename Backend::counter_id, counter_storage>;
+        std::unordered_map<typename Backend::counter_id, counter_storage<Backend>>;
     using agent_counter_storage_map_t =
         std::unordered_map<typename Backend::agent_id, counter_storage_map_t>;
 
@@ -1104,7 +1104,7 @@ template <typename Backend>
 auto&
 library_sdk<Backend>::get_counter_dispatch_records()
 {
-    static auto _v = std::vector<counter_dispatch_record>{};
+    static auto _v = std::vector<counter_dispatch_record<Backend>>{};
     return _v;
 }
 
@@ -1132,7 +1132,8 @@ library_sdk<Backend>::flush_counter_storage_outputs()
     auto* _agent_counter_storage = get_counter_storage();
     if(!_agent_counter_storage) return;
 
-    auto _cleanup_keys = std::vector<std::pair<std::string, const counter_storage*>>{};
+    auto _cleanup_keys =
+        std::vector<std::pair<std::string, const counter_storage<Backend>*>>{};
     for(const auto& [agent_id, counter_map] : *_agent_counter_storage)
     {
         static_cast<void>(agent_id);
@@ -1152,8 +1153,8 @@ library_sdk<Backend>::flush_counter_storage_outputs()
         if(storage->manager)
             storage->manager->cleanup(cleanup_key);
         else
-            counter_storage::write(storage->storage.get(), storage->metric_name,
-                                   storage->metric_description);
+            counter_storage<Backend>::write(storage->storage.get(), storage->metric_name,
+                                            storage->metric_description);
     }
 }
 
@@ -2584,9 +2585,10 @@ library_sdk<Backend>::counter_record_callback(
             }
             auto _dev_id = static_cast<std::uint32_t>(_agent->device_id);
             _agent_counter_storage->at(_agent_id).emplace(
-                itr.first, counter_storage{ tool_data, _dev_id, 0, _info->name });
+                itr.first,
+                counter_storage<Backend>{ tool_data, _dev_id, 0, _info->name });
         }
-        auto _event = counter_event{ counter_dispatch_record{
+        auto _event = counter_event<Backend>{ counter_dispatch_record<Backend>{
             &dispatch_data, _dispatch_id, itr.first, itr.second } };
         _agent_counter_storage->at(_agent_id).at(itr.first)(_event, _interval, _scope);
     }
