@@ -424,28 +424,56 @@ template <typename T> static bool TestMemoryAccessInAllThread(int test_type, int
  * validate after HIP_CHECK_THREAD_FINALIZE().
  */
 template <typename T> static void runTestMemoryAccessInAllThread(int test_type, int thread_idx) {
+  // Default to failure so an early bail-out never leaves a stale result for the
+  // main thread to validate. The *_THREAD macros only record failures (they do
+  // not unwind), so each device call below is explicitly gated to avoid acting
+  // on a failed step (e.g. launching the kernel with a null device pointer or
+  // reading the host buffer after a failed copy).
+  thread_results[thread_idx] = false;
+
   T *outputVec_d{nullptr}, *outputVec_h{nullptr};
   size_t arraysize = (BLOCKSIZE * GRIDSIZE);
   T data_value = std::numeric_limits<T>::max();
+
   outputVec_h = reinterpret_cast<T*>(malloc(sizeof(T) * arraysize));
   REQUIRE_THREAD(outputVec_h != nullptr);
+  if (outputVec_h == nullptr) {
+    return;
+  }
+
   HIP_CHECK_THREAD(hipMalloc(&outputVec_d, (sizeof(T) * arraysize)));
+  if (outputVec_d == nullptr) {
+    free(outputVec_h);
+    return;
+  }
+
   // Launch Test Kernel
   kerTestAccessInAllThreadsInBlock<T>
       <<<GRIDSIZE, BLOCKSIZE>>>(outputVec_d, test_type, data_value, thread_idx);
-  HIP_CHECK_THREAD(hipDeviceSynchronize());
-  // Copy to host buffer
-  HIP_CHECK_THREAD(hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault));
-  bool bPassed = true;
-  for (size_t idx = 0; idx < arraysize; idx++) {
-    if (outputVec_h[idx] != data_value) {
-      bPassed = false;
-      break;
+
+  hipError_t err = hipDeviceSynchronize();
+  HIP_CHECK_THREAD(err);
+  if (err == hipSuccess) {
+    // Copy to host buffer and validate only when the prior steps succeeded.
+    err = hipMemcpy(outputVec_h, outputVec_d, sizeof(T) * arraysize, hipMemcpyDefault);
+    HIP_CHECK_THREAD(err);
+    if (err == hipSuccess) {
+      bool bPassed = true;
+      for (size_t idx = 0; idx < arraysize; idx++) {
+        if (outputVec_h[idx] != data_value) {
+          bPassed = false;
+          break;
+        }
+      }
+      thread_results[thread_idx] = bPassed;
     }
   }
-  HIP_CHECK_THREAD(hipFree(outputVec_d));
+
+  // Always release resources before returning. Use a plain hipFree so cleanup is
+  // never skipped by the deferred-error early return inside HIP_CHECK_THREAD.
+  hipError_t freeErr = hipFree(outputVec_d);
   free(outputVec_h);
-  thread_results[thread_idx] = bPassed;
+  HIP_CHECK_THREAD(freeErr);
 }
 
 /**
