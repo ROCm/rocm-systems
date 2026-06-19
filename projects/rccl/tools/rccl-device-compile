@@ -17,7 +17,8 @@ Link mode (--link):
     2. Compiles dispatcher source to assembly
     3. Patches dispatcher with aggregated resources
     4. Assembles patched dispatcher
-    5. Links all objects + dispatcher into device.elf via ld.lld
+    5. Optionally compiles --rocshmem-bitcode=<path>.bc to a device object
+    6. Links all objects + dispatcher (+ optional rocSHMEM object) into device.elf via ld.lld
 
 Tool discovery:
     amdclang++, ld.lld are found relative to --clang=<path> or by searching
@@ -544,6 +545,7 @@ def do_link(args, forwarded_flags):
     output = args.output
     dispatcher = args.dispatcher
     keep_temps = args.keep_temps
+    rocshmem_bitcode = getattr(args, 'rocshmem_bitcode', None)
 
     if not dispatcher:
         raise SystemExit("ERROR: --link requires --dispatcher=<source>")
@@ -571,13 +573,17 @@ def do_link(args, forwarded_flags):
         disp_asm = os.path.join(output_dir, f'dispatcher_{arch}.s')
         disp_patched = os.path.join(output_dir, f'dispatcher_{arch}_patched.s')
         disp_obj = os.path.join(output_dir, f'dispatcher_{arch}.o')
+        rocshmem_obj = os.path.join(output_dir, f'rocshmem_device_{arch}.o') if rocshmem_bitcode else None
         cleanup = []
     else:
         tmpdir = tempfile.mkdtemp(prefix='rccl-dl-')
         disp_asm = os.path.join(tmpdir, 'dispatcher.s')
         disp_patched = os.path.join(tmpdir, 'dispatcher_patched.s')
         disp_obj = os.path.join(tmpdir, 'dispatcher.o')
+        rocshmem_obj = os.path.join(tmpdir, 'rocshmem_device.o') if rocshmem_bitcode else None
         cleanup = [disp_asm, disp_patched, disp_obj, tmpdir]
+        if rocshmem_obj:
+            cleanup.insert(-1, rocshmem_obj)  # remove before rmdir
 
     try:
         # Step 2: Compile dispatcher to assembly
@@ -609,13 +615,35 @@ def do_link(args, forwarded_flags):
         ]
         run(disp_assemble_cmd, f"assemble dispatcher for {arch}")
 
-        # Step 5: Link all objects + dispatcher into device.elf
+        # Step 5: Compile rocSHMEM device bitcode to an amdgcn object (if provided).
+        # rocSHMEM device API symbols (rocshmem::*_wg, rocshmem_n_pes, …) have
+        # hidden visibility and cannot be imported from a shared lib — they must
+        # be statically present in the device ELF.  The bitcode path is supplied
+        # by CMake via --rocshmem-bitcode when ENABLE_ROCSHMEM is on.
+        if rocshmem_bitcode:
+            if not os.path.exists(rocshmem_bitcode):
+                print(f"  rocSHMEM: no device bitcode for {arch} ({rocshmem_bitcode}), skipping",
+                      file=sys.stderr)
+                rocshmem_obj = None
+            else:
+                bc_compile_cmd = [
+                    clang,
+                    '-target', 'amdgcn-amd-amdhsa',
+                    f'-mcpu={arch}',
+                    '-c', '-x', 'ir',
+                    '-o', rocshmem_obj, rocshmem_bitcode,
+                ]
+                run(bc_compile_cmd, f"compile rocSHMEM device bitcode for {arch}")
+
+        # Step 6: Link all objects + dispatcher into device.elf
         # Use a response file for potentially long object lists
         rsp_path = os.path.join(output_dir, f'link_{arch}.rsp')
         with open(rsp_path, 'w') as f:
             f.write(disp_obj + '\n')
             for obj in objects:
                 f.write(obj + '\n')
+            if rocshmem_obj:
+                f.write(rocshmem_obj + '\n')
 
         link_cmd = [
             lld, '-shared',
@@ -672,6 +700,11 @@ def parse_compiler_flags(argv):
         elif arg == '--dispatcher' and i + 1 < len(argv):
             our_args.extend([arg, argv[i + 1]])
             i += 1
+        elif arg.startswith('--rocshmem-bitcode='):
+            our_args.append(arg)
+        elif arg == '--rocshmem-bitcode' and i + 1 < len(argv):
+            our_args.extend([arg, argv[i + 1]])
+            i += 1
         elif arg == '-o' and i + 1 < len(argv):
             our_args.extend(['-o', argv[i + 1]])
             i += 1
@@ -717,6 +750,7 @@ def main():
     parser.add_argument('--arch', required=False)
     parser.add_argument('--clang', default=None)
     parser.add_argument('--dispatcher', default=None)
+    parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
     parser.add_argument('-o', '--output', required=False)
     parser.add_argument('--keep-temps', action='store_true')
     parser.add_argument('--version', action='store_true')

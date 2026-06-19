@@ -96,7 +96,10 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
   return postorder;
 }
 
-LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks) { analyze(blocks); }
+LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options) {
+  min_free_vgpr_ = options.min_free_vgpr;
+  analyze(blocks);
+}
 
 void LivenessAnalysis::analyze(KernelBlockScope blocks) {
   liveness_.resize(blocks.size());
@@ -220,7 +223,8 @@ std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst,
     return std::nullopt;
 
   const RegisterSet &live = live_it->second;
-  for (size_t base = search_start; base + count <= REGISTER_SET_MAX_VGPRS; ++base) {
+  const size_t first_candidate = std::max<size_t>(search_start, min_free_vgpr_);
+  for (size_t base = first_candidate; base + count <= REGISTER_SET_MAX_VGPRS; ++base) {
     if (!any_live_in_range(live, RegClass::VGPR, static_cast<uint16_t>(base), count))
       return static_cast<uint16_t>(base);
   }

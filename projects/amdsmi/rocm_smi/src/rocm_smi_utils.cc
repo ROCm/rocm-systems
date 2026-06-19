@@ -354,22 +354,6 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
   }
 }
 
-rsmi_status_t SysfsWriteErrnoToRsmiStatus(int err) {
-  switch (err) {
-    case 0:
-      return RSMI_STATUS_SUCCESS;
-    case EACCES:
-    case EPERM:
-      return RSMI_STATUS_PERMISSION;
-    case ENOENT:
-      return RSMI_STATUS_NOT_SUPPORTED;
-    case EINVAL:
-      return RSMI_STATUS_INVALID_ARGS;
-    default:
-      return RSMI_STATUS_FILE_ERROR;
-  }
-}
-
 // Helper function to read multi-line sysfs file into vector of strings
 static int ReadSysfsLines(const std::string& path, std::vector<std::string>* lines) {
   auto is_regular_file_result = isRegularFile(path, nullptr);
@@ -488,13 +472,13 @@ int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
 rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value) {
   int write_ret = WriteSysfsStr(path, value);
   if (write_ret != 0) {
-    return SysfsWriteErrnoToRsmiStatus(write_ret);
+    return ErrnoToRsmiStatus(write_ret);
   }
 
   // Commit by writing 'c'
   write_ret = WriteSysfsStr(path, "c");
   if (write_ret != 0) {
-    return SysfsWriteErrnoToRsmiStatus(write_ret);
+    return ErrnoToRsmiStatus(write_ret);
   }
   return RSMI_STATUS_SUCCESS;
 }

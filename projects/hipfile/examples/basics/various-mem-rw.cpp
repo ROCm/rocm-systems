@@ -29,7 +29,7 @@
  *   6. Hash verify
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>
@@ -133,6 +133,12 @@ zero_buf(mem_mode_t mode, void *buf, size_t size)
     hipError_t hip_err = hipMemset(buf, 0, size);
     if (hipSuccess != hip_err) {
         fprintf(stderr, "Could not zero buffer (%s, hip err %d)\n", mode_name(mode), hip_err);
+        return 1;
+    }
+    /* hipMemset is async w.r.t. the host; block until it completes (testing). */
+    hip_err = hipDeviceSynchronize();
+    if (hipSuccess != hip_err) {
+        fprintf(stderr, "Could not synchronize after memset (%s, hip err %d)\n", mode_name(mode), hip_err);
         return 1;
     }
     return 0;

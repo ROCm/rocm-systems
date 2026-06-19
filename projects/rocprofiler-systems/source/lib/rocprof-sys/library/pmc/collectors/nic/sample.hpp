@@ -61,7 +61,10 @@ serialize(std::uint8_t* buffer, const pmc::collectors::nic::sample& item)
         std::string_view(item.device_name), item.timestamp,
         item.metric_values.rx_rdma_ucast_bytes, item.metric_values.tx_rdma_ucast_bytes,
         item.metric_values.rx_rdma_ucast_pkts, item.metric_values.tx_rdma_ucast_pkts,
-        item.metric_values.rx_rdma_cnp_pkts, item.metric_values.tx_rdma_cnp_pkts);
+        item.metric_values.rx_rdma_cnp_pkts, item.metric_values.tx_rdma_cnp_pkts,
+        item.metric_values.tx_rdma_ack_timeout, item.metric_values.resp_tx_pkt_seq_err,
+        item.metric_values.req_rx_pkt_seq_err,
+        item.metric_values.req_rx_impl_nak_seq_err);
 }
 
 template <>
@@ -75,7 +78,9 @@ deserialize(std::uint8_t*& buffer)
         item.timestamp, item.metric_values.rx_rdma_ucast_bytes,
         item.metric_values.tx_rdma_ucast_bytes, item.metric_values.rx_rdma_ucast_pkts,
         item.metric_values.tx_rdma_ucast_pkts, item.metric_values.rx_rdma_cnp_pkts,
-        item.metric_values.tx_rdma_cnp_pkts);
+        item.metric_values.tx_rdma_cnp_pkts, item.metric_values.tx_rdma_ack_timeout,
+        item.metric_values.resp_tx_pkt_seq_err, item.metric_values.req_rx_pkt_seq_err,
+        item.metric_values.req_rx_impl_nak_seq_err);
     item.device_name = std::string(device_name_view);
     return item;
 }
@@ -89,7 +94,9 @@ get_size(const pmc::collectors::nic::sample& item)
         item.timestamp, item.metric_values.rx_rdma_ucast_bytes,
         item.metric_values.tx_rdma_ucast_bytes, item.metric_values.rx_rdma_ucast_pkts,
         item.metric_values.tx_rdma_ucast_pkts, item.metric_values.rx_rdma_cnp_pkts,
-        item.metric_values.tx_rdma_cnp_pkts);
+        item.metric_values.tx_rdma_cnp_pkts, item.metric_values.tx_rdma_ack_timeout,
+        item.metric_values.resp_tx_pkt_seq_err, item.metric_values.req_rx_pkt_seq_err,
+        item.metric_values.req_rx_impl_nak_seq_err);
 }
 
 }  // namespace trace_cache

@@ -98,6 +98,7 @@ struct TraceControl
     uint64_t gpu_clock_cnt_start{0};
     uint64_t gpu_clock_cnt_end{0};
     uint32_t status_double_buffer{0};
+    uint32_t wptr_doublebuffer{0};
 };
 
 // Encapsulates the various Api and structures that are used to enable
@@ -146,7 +147,7 @@ public:
     virtual size_t GetWritePtrMask() const = 0;
     // Returns size of block in bytes per increment in WPTR
     virtual size_t GetWritePtrBlk() const = 0;
-    // Returns number of bits used for TTrace buffer alignement (e.g. 12 for 4KB alignment)
+    // Returns number of bits used for TTrace buffer alignment (e.g. 12 for 4KB alignment)
     virtual size_t BufferAlignment() const = 0;
 };
 
@@ -182,7 +183,7 @@ public:
     virtual size_t GetWritePtrMask() const override { return Primitives::TT_WRITE_PTR_MASK; };
     // Returns size of block in bytes per increment in WPTR
     virtual size_t GetWritePtrBlk() const override { return 32; };
-    // Returns number of bits used for TTrace buffer alignement (e.g. 12 for 4KB alignment)
+    // Returns number of bits used for TTrace buffer alignment (e.g. 12 for 4KB alignment)
     virtual size_t BufferAlignment() const override { return Primitives::TT_BUFF_ALIGN_SHIFT; }
 
     void SetGRBMToBroadcast(CmdBuffer* cmd_buffer)
@@ -298,7 +299,7 @@ public:
             // Program the thread trace token mask
             uint32_t token_mask_value = (config->occupancy_mode)
                                             ? Primitives::sqtt_token_mask_occupancy_value()
-                                            : Primitives::sqtt_token_mask_on_value();
+                                            : Primitives::sqtt_token_mask_on_value(false);
             if(config->perfcounters.size()) token_mask_value |= SQTT_PERFCOUNTER_TOKEN;
             if(legacy_mode) token_mask_value = config->deprecated_tokenMask;
 
@@ -403,87 +404,103 @@ public:
                                   Primitives::spi_sqg_event_ctl(true));
             }
 
-            for(uint64_t index = 0; index < se_number_total; index++)
+            for(int xcc = 0; xcc < xcc_number_; xcc++)
             {
-                config->se_base_addresses[index] = base_addr;
-                bool bMaskedIn                   = config->target_cu_per_se.at(index) >= 0;
+                if(!isXccEnabled(xcc, se_number_xcc, config)) continue;
 
-                const unsigned baddr_lo  = Low32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
-                const unsigned baddr_hi  = High32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
-                const uint64_t sqtt_size = bMaskedIn ? base_step : config->capacity_per_disabled_se;
-                if(sqtt_size == 0) continue;
+                XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
 
-                uint32_t ctrl_val = Primitives::sqtt_ctrl_value(true, !config->buffer_data.empty());
-
-                Select_GRBM_SE_SH0(cmd_buffer, index);
-                builder.BuildPrimeL2(cmd_buffer, base_addr);
-
-                if(Primitives::GFXIP_LEVEL == 12)
+                for(size_t local_se = 0; local_se < se_number_xcc; local_se++)
                 {
-                    WriteConfigPacket(cmd_buffer,
-                                      Primitives::SQ_THREAD_TRACE_BUF0_SIZE_ADDR,
-                                      Primitives::sqtt_buffer0_size_value(sqtt_size));
+                    size_t global_se = local_se + se_number_xcc * xcc;
+
+                    config->se_base_addresses[global_se] = base_addr;
+                    bool bMaskedIn = config->target_cu_per_se.at(global_se) >= 0;
+
+                    const unsigned baddr_lo = Low32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
+                    const unsigned baddr_hi = High32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
+                    const uint64_t sqtt_size =
+                        bMaskedIn ? base_step : config->capacity_per_disabled_se;
+                    if(sqtt_size == 0) continue;
+
+                    uint32_t ctrl_val =
+                        Primitives::sqtt_ctrl_value(true, !config->buffer_data.empty());
+
+                    Select_GRBM_SE_SH0(cmd_buffer, local_se);
+                    builder.BuildPrimeL2(cmd_buffer, base_addr);
+
+                    if(Primitives::GFXIP_LEVEL == 12)
+                    {
+                        WriteConfigPacket(cmd_buffer,
+                                          Primitives::SQ_THREAD_TRACE_BUF0_SIZE_ADDR,
+                                          Primitives::sqtt_buffer0_size_value(sqtt_size));
+
+                        WriteConfigPacket(
+                            cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF0_BASE_LO_ADDR, baddr_lo);
+
+                        WriteConfigPacket(
+                            cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR, baddr_hi);
+                        WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_WPTR_ADDR, 0);
+                    }
+                    else
+                    {
+                        const uint32_t sqtt_reg_size =
+                            Primitives::sqtt_buffer_size_value(sqtt_size, baddr_hi);
+                        // Program size of buffer to use for thread trace
+                        WriteConfigPacket(
+                            cmd_buffer, Primitives::SQ_THREAD_TRACE_SIZE_ADDR, sqtt_reg_size);
+                        // Program base address of buffer to use for thread trace
+                        WriteConfigPacket(
+                            cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR, baddr_lo);
+                    }
+
+                    // Program the thread trace mask
+                    const uint32_t mask_value = Primitives::sqtt_mask_value(
+                        config->targetCu, config->simd_sel, config->vmIdMask);
+                    WriteConfigPacket(
+                        cmd_buffer, Primitives::SQ_THREAD_TRACE_MASK_ADDR, mask_value);
+
+                    uint32_t token_mask =
+                        (config->occupancy_mode)
+                            ? Primitives::sqtt_token_mask_occupancy_value()
+                            : Primitives::sqtt_token_mask_on_value(xcc_number_ > 1);
+                    if(((1 << global_se) & config->se_mask) == 0)
+                        token_mask = Primitives::sqtt_token_mask_off_value();
 
                     WriteConfigPacket(
-                        cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF0_BASE_LO_ADDR, baddr_lo);
+                        cmd_buffer, Primitives::SQ_THREAD_TRACE_TOKEN_MASK_ADDR, token_mask);
+                    // Program the thread trace ctrl register
+                    WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_CTRL_ADDR, ctrl_val);
+                    // If we are in double buffer mode
+                    if(!config->buffer_data.empty())
+                    {
+                        if(Primitives::GFXIP_LEVEL != 12) throw std::runtime_error("Not supported");
 
-                    WriteConfigPacket(
-                        cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR, baddr_hi);
-                    WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_WPTR_ADDR, 0);
+                        uint64_t buf1_addr =
+                            reinterpret_cast<uint64_t>(config->buffer_data.at(global_se).at(0));
+                        unsigned buff1_lo = Low32(buf1_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
+                        unsigned buff1_hi = High32(buf1_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
+
+                        WriteConfigPacket(cmd_buffer,
+                                          Primitives::SQ_THREAD_TRACE_BUF1_SIZE_ADDR,
+                                          Primitives::sqtt_buffer0_size_value(sqtt_size));
+                        WriteConfigPacket(
+                            cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR, buff1_lo);
+                        builder.BuildWriteWaitIdlePacket(cmd_buffer);
+                        WriteConfigPacket(
+                            cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR, buff1_hi);
+                    }
+                    base_addr += sqtt_size;
                 }
-                else
+                for(uint64_t local_se = 0; local_se < se_number_xcc; local_se++)
                 {
-                    const uint32_t sqtt_reg_size =
-                        Primitives::sqtt_buffer_size_value(sqtt_size, baddr_hi);
-                    // Program size of buffer to use for thread trace
-                    WriteConfigPacket(
-                        cmd_buffer, Primitives::SQ_THREAD_TRACE_SIZE_ADDR, sqtt_reg_size);
-                    // Program base address of buffer to use for thread trace
-                    WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_BASE_ADDR, baddr_lo);
+                    if(config->target_cu_per_se.at(local_se + se_number_xcc * xcc) < 0)
+                        continue;  // Ignore masked SEs
+
+                    Select_GRBM_SE_SH0(cmd_buffer, local_se);
+                    builder.BuildWriteShRegPacket(
+                        cmd_buffer, Primitives::COMPUTE_THREAD_TRACE_ENABLE_ADDR, 1);
                 }
-
-                // Program the thread trace mask
-                const uint32_t mask_value = Primitives::sqtt_mask_value(
-                    config->targetCu, config->simd_sel, config->vmIdMask);
-                WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_MASK_ADDR, mask_value);
-
-                uint32_t token_mask = (config->occupancy_mode)
-                                          ? Primitives::sqtt_token_mask_occupancy_value()
-                                          : Primitives::sqtt_token_mask_on_value();
-                if(((1 << index) & config->se_mask) == 0)
-                    token_mask = Primitives::sqtt_token_mask_off_value();
-
-                WriteConfigPacket(
-                    cmd_buffer, Primitives::SQ_THREAD_TRACE_TOKEN_MASK_ADDR, token_mask);
-                // Program the thread trace ctrl register
-                WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_CTRL_ADDR, ctrl_val);
-                // If we are in double buffer mode
-                if(!config->buffer_data.empty())
-                {
-                    if(Primitives::GFXIP_LEVEL != 12) throw std::runtime_error("Not supported");
-
-                    uint64_t buf1_addr =
-                        reinterpret_cast<uint64_t>(config->buffer_data.at(index).at(0));
-                    unsigned buff1_lo = Low32(buf1_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
-                    unsigned buff1_hi = High32(buf1_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
-
-                    WriteConfigPacket(cmd_buffer,
-                                      Primitives::SQ_THREAD_TRACE_BUF1_SIZE_ADDR,
-                                      Primitives::sqtt_buffer0_size_value(sqtt_size));
-                    WriteConfigPacket(
-                        cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR, buff1_lo);
-                    builder.BuildWriteWaitIdlePacket(cmd_buffer);
-                    WriteConfigPacket(
-                        cmd_buffer, Primitives::SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR, buff1_hi);
-                }
-                base_addr += sqtt_size;
-            }
-            for(uint64_t index = 0; index < se_number_total; index++)
-            {
-                if(config->target_cu_per_se.at(index) < 0) continue;  // Ignore masked SEs
-                Select_GRBM_SE_SH0(cmd_buffer, index);
-                builder.BuildWriteShRegPacket(
-                    cmd_buffer, Primitives::COMPUTE_THREAD_TRACE_ENABLE_ADDR, 1);
             }
             // Reset the GRBM to broadcast mode
             SetGRBMToBroadcast(cmd_buffer);
@@ -520,10 +537,7 @@ public:
         {
             for(size_t xcc = 0; xcc < GetXCCNumber(); xcc++)
             {
-                bool some_se_enabled = false;
-                for(int se = 0; se < se_number_xcc; se++)
-                    some_se_enabled |= config->target_cu_per_se.at(se + xcc * se_number_xcc) >= 0;
-                if(!some_se_enabled) continue;
+                if(!isXccEnabled(xcc, se_number_xcc, config)) continue;
 
                 XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
                 auto& control = reinterpret_cast<TraceControl*>(config->control_buffer_ptr)[xcc];
@@ -537,20 +551,15 @@ public:
         SetGRBMToBroadcast(cmd_buffer);
         // Issue a CSPartialFlush cmd including cache flush
         builder.BuildWriteWaitIdlePacket(cmd_buffer);
+        const uint32_t se_number_xcc = se_number_total / std::max(1u, GetXCCNumber());
 
         if(Primitives::GFXIP_LEVEL == 9)
         {
-            const uint32_t se_number_xcc = se_number_total / std::max(1u, GetXCCNumber());
-
             if(config->enable_rt_timestamp)
             {
                 for(size_t xcc = 0; xcc < GetXCCNumber(); xcc++)
                 {
-                    bool some_se_enabled = false;
-                    for(int se = 0; se < se_number_xcc; se++)
-                        some_se_enabled |=
-                            config->target_cu_per_se.at(se + xcc * se_number_xcc) >= 0;
-                    if(!some_se_enabled) continue;
+                    if(!isXccEnabled(xcc, se_number_xcc, config)) continue;
 
                     XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
                     auto&                    control =
@@ -633,10 +642,16 @@ public:
                 builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
             }
 
-            for(uint64_t index = 0; index < se_number_total; index++)
+            for(int xcc = 0; xcc < xcc_number_; xcc++)
             {
-                Select_GRBM_SE_SH0(cmd_buffer, index);
-                ReadValues(cmd_buffer, config, index);
+                if(!isXccEnabled(xcc, se_number_xcc, config)) continue;
+
+                XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
+                for(uint64_t index = 0; index < se_number_xcc; index++)
+                {
+                    Select_GRBM_SE_SH0(cmd_buffer, index);
+                    ReadValues(cmd_buffer, config, index + xcc * se_number_xcc);
+                }
             }
 
             // Reset the GRBM to broadcast mode
@@ -691,6 +706,14 @@ public:
             se_mask >>= 1;
         }
         return std::max<uint64_t>(num_enabled, 1u);
+    }
+
+    bool isXccEnabled(int xcc, int se_number_xcc, TraceConfig* config)
+    {
+        for(size_t index = 0; index < se_number_xcc; index++)
+            if(config->target_cu_per_se.at(xcc * se_number_xcc + index) >= 0) return true;
+
+        return false;
     }
 
     uint64_t GetBaseStep(TraceConfig* config) const
@@ -749,6 +772,13 @@ public:
         XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), se_id / se_per_xcc);
         Select_GRBM_SE_SH0(cmd_buffer, se_id % se_per_xcc);
 
+        if(Primitives::GFXIP_LEVEL == 9)
+        {
+            const uint32_t mask_val      = Primitives::sqtt_busy_mask();
+            auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
+            builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, false, mask_val, 1);
+        }
+
         auto status_addr = (Primitives::GFXIP_LEVEL >= 12)
                                ? Primitives::SQ_THREAD_TRACE_STATUS2_ADDR
                                : Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
@@ -757,8 +787,13 @@ public:
                                        &control.status_double_buffer,
                                        Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
                                        false);
+        if(Primitives::GFXIP_LEVEL == 9)
+            builder.BuildCopyRegDataPacket(cmd_buffer,
+                                           Primitives::SQ_THREAD_TRACE_WPTR_ADDR,
+                                           &control.wptr_doublebuffer,
+                                           Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
+                                           false);
 
-        builder.BuildWriteWaitIdlePacket(cmd_buffer);
         builder.BuildCacheFlushPacket(cmd_buffer, size_t(&control), sizeof(TraceControl));
         SetGRBMToBroadcast(cmd_buffer);
     }
@@ -778,6 +813,10 @@ public:
 
         if(Primitives::GFXIP_LEVEL == 9)
         {
+            const uint32_t mask_val      = Primitives::sqtt_busy_mask();
+            auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
+            builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, false, mask_val, 1);
+
             builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                Primitives::SQ_THREAD_TRACE_BASE_ADDR,
                                                Primitives::sqtt_base_value_lo(base_addr));
@@ -796,7 +835,6 @@ public:
                                : Primitives::SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR;
 
             WriteConfigPacket(cmd_buffer, reg_lo, buff1_lo);
-            builder.BuildWriteWaitIdlePacket(cmd_buffer);
             WriteConfigPacket(cmd_buffer, reg_hi, buff1_hi);
         }
         builder.BuildCacheFlushPacket(cmd_buffer, size_t(prev), config->data_buffer_size);

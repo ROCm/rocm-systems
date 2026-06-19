@@ -29,6 +29,7 @@ enum class type_identifier_t : std::uint32_t
     scratch_memory          = 0x0009,
     ainic_pmc_sample        = 0x000A,
     kfd_sample              = 0x000B,
+    gpu_perf_counter_sample = 0x000C,
     fragmented_space        = 0xFFFF
 };
 

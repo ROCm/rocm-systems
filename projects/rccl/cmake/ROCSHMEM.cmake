@@ -81,6 +81,7 @@ function(add_rocshmem_targets)
             ${CMAKE_COMMAND} -E chdir build ${CMAKE_MAKE_PROGRAM} install
     )
 
+    set(ROCSHMEM_INSTALL_DIR  "${ROCSHMEM_INSTALL_DIR}"          PARENT_SCOPE)
     set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INSTALL_DIR}/include" PARENT_SCOPE)
     set(ROCSHMEM_LIBRARY     "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a" PARENT_SCOPE)
 

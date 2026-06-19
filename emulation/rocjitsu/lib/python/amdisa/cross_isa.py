@@ -3,7 +3,7 @@
 
 """Cross-ISA instruction analysis for shared execute() deduplication.
 
-The ``CrossIsaAnalyzer`` compares instructions across all 9 AMDGPU ISAs
+The ``CrossIsaAnalyzer`` compares instructions across AMDGPU ISAs
 and classifies each into one of three categories:
 
 - **universal** — identical encoding fields and semantics on all ISAs where
@@ -61,7 +61,9 @@ class SharedInstructionPlan:
     """
 
     universal: dict[str, SharedInstInfo] = field(default_factory=dict)
-    family_shared: dict[str, dict[tuple[str, str], SharedInstInfo]] = field(default_factory=dict)
+    family_shared: dict[str, dict[tuple[str, str], SharedInstInfo]] = field(
+        default_factory=dict
+    )
     isa_exclusive: dict[str, set[str]] = field(default_factory=dict)
 
     @property
@@ -98,7 +100,9 @@ def _sem_key(sem: InstructionSemantics | None) -> tuple[str, str | None, str | N
     return (sem.semantic_class, sem.operation, sem.data_type)
 
 
-def _operand_signature(inst: Instruction) -> tuple[tuple[str, str, int, bool, bool], ...]:
+def _operand_signature(
+    inst: Instruction,
+) -> tuple[tuple[str, str, int, bool, bool], ...]:
     """Return a canonical tuple of operand (name, type, size, is_input, is_output)."""
     return tuple(
         (op.name, op.operand_type, op.size, op.is_input, op.is_output)
@@ -147,10 +151,10 @@ _FAMILIES: list[tuple[str, frozenset[str]]] = [
     ('rdna_gfx12', RDNA_GFX12),
     ('rdna_gfx11', RDNA_GFX11),
     ('rdna_gfx10', RDNA_GFX10),
-    ('cdna_gfx9',  CDNA_GFX9),
+    ('cdna_gfx9', CDNA_GFX9),
     # Coarse families — spans sub-families but stays within one family.
-    ('rdna',       RDNA_ISAS),
-    ('cdna',       CDNA_ISAS),
+    ('rdna', RDNA_ISAS),
+    ('cdna', CDNA_ISAS),
 ]
 
 
@@ -180,7 +184,10 @@ class CrossIsaAnalyzer:
         # be False, routing them through the grouping path which separates
         # them by (field_sig, sem_key, operand_sig) and assigns each
         # per-encoding group independently.
-        inst_map: dict[str, list[tuple[str, InstEncoding, Instruction, InstructionSemantics | None]]] = {}
+        inst_map: dict[
+            str,
+            list[tuple[str, InstEncoding, Instruction, InstructionSemantics | None]],
+        ] = {}
         for isa_name, spec, sem_spec in specs:
             for enc in spec.inst_encodings:
                 if not enc.insts:
@@ -197,9 +204,8 @@ class CrossIsaAnalyzer:
                     if (
                         child_enc.insts
                         and spec.profile.is_alt_encoding(child_enc.enc_name)
-                        and spec.profile.derive_parent_enc_name(
-                            child_enc.enc_name
-                        ) == enc.enc_name
+                        and spec.profile.derive_parent_enc_name(child_enc.enc_name)
+                        == enc.enc_name
                     ):
                         all_insts.extend(child_enc.insts)
                 for inst in all_insts:
@@ -233,9 +239,7 @@ class CrossIsaAnalyzer:
                 opnd_sigs.add(_operand_signature(inst))
 
             same_structure = (
-                len(field_sigs) == 1
-                and len(sem_keys) == 1
-                and len(opnd_sigs) == 1
+                len(field_sigs) == 1 and len(sem_keys) == 1 and len(opnd_sigs) == 1
             )
 
             if same_structure and present_isas == isa_names_set:
@@ -271,7 +275,9 @@ class CrossIsaAnalyzer:
                 # Determine which family this belongs to.
                 family_name = self._classify_family(present_isas)
                 _, enc0, inst0, sem0 = entries[0]
-                plan.family_shared.setdefault(family_name, {})[(mnemonic, enc0.enc_name)] = SharedInstInfo(
+                plan.family_shared.setdefault(family_name, {})[
+                    (mnemonic, enc0.enc_name)
+                ] = SharedInstInfo(
                     mnemonic=mnemonic,
                     encoding_name=enc0.enc_name,
                     field_layout=_field_signature(enc0),
@@ -302,11 +308,14 @@ class CrossIsaAnalyzer:
                     # mnemonic, which is identical for all entries in this
                     # inst_map bucket, so matching fsig + osig is sufficient.
                     next_match = next(
-                        (e for e in entries
-                         if e[0] == group_isas[0]
-                         and _field_signature(e[1]) == fsig
-                         and _operand_signature(e[2]) == osig),
-                        None
+                        (
+                            e
+                            for e in entries
+                            if e[0] == group_isas[0]
+                            and _field_signature(e[1]) == fsig
+                            and _operand_signature(e[2]) == osig
+                        ),
+                        None,
                     )
                     if next_match is None:
                         raise ValueError(
@@ -326,7 +335,10 @@ class CrossIsaAnalyzer:
                     # encoding layout changes, this assertion will fire.
                     # Fix by introducing finer sub-family groupings or by
                     # incorporating the field layout into the key.
-                    assert inst_key not in fam_dict or fam_dict[inst_key].field_layout == fsig, (
+                    assert (
+                        inst_key not in fam_dict
+                        or fam_dict[inst_key].field_layout == fsig
+                    ), (
                         f"Key collision in family_shared['{family_name}'] for "
                         f"{inst_key}: existing entry has field_layout="
                         f"{fam_dict[inst_key].field_layout}, new group has "

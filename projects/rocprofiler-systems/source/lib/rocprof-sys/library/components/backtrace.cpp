@@ -30,9 +30,7 @@
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/operations.hpp>
 #include <timemory/storage.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
 
@@ -113,8 +111,8 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
         return 1;
     };
 
-    static bool _keep_suffix = tim::get_env<bool>(
-        env_vars::SAMPLING_KEEP_DYNINST_SUFFIX.data(), get_debug_sampling());
+    static bool _keep_suffix = rocprofsys::get_env<bool>(
+        env_vars::SAMPLING_KEEP_DYNINST_SUFFIX, get_debug_sampling());
 
     // in the dyninst binary rewrite runtime, instrumented functions are appended with
     // "_dyninst", i.e. "main" will show up as "main_dyninst" in the backtrace.

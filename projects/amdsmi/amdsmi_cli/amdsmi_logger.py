@@ -362,15 +362,17 @@ class AMDSMILogger:
 
         clean_yaml_output = ""
         for line in yaml_output.splitlines():
-            line = line.split(":")
+            # Continuation lines (no ":") must not run replace("  ", "    ") on leading
+            # spaces or multiline-aligned fields (e.g. LOCAL_ACTIVE_ACCELERATORS) break.
+            if ":" not in line:
+                clean_yaml_output += line + "\n"
+                continue
 
-            # Remove dashes and increase tabbing split key
-            line[0] = line[0].replace("-", " ", 1)
-            line[0] = line[0].replace("  ", "    ")
-
-            # Join cleaned output
-            line = ":".join(line) + "\n"
-            clean_yaml_output += line
+            parts = line.split(":")
+            # Remove dashes and increase tabbing split key (key is before first ":")
+            parts[0] = parts[0].replace("-", " ", 1)
+            parts[0] = parts[0].replace("  ", "    ")
+            clean_yaml_output += ":".join(parts) + "\n"
 
         return clean_yaml_output
 
@@ -391,7 +393,19 @@ class AMDSMILogger:
                     else:  # If the list is not a dictionary, print it as a string
                         yaml_string += "  " * (indent + 1) + f"- {item}\n"
             else:
-                yaml_string += "  " * indent + f"{key}: {value}\n"
+                key_prefix = "  " * indent
+                if isinstance(value, str) and "\n" in value:
+                    lines = value.split("\n")
+                    # Match _convert_json_to_human_readable: expand "  " -> "    " in the key column
+                    # so continuation lines align with the first row of the value after post-process.
+                    key_column = (key_prefix + str(key)).replace("-", " ", 1).replace("  ", "    ")
+                    data_column = len(key_column) + len(": ")
+                    yaml_string += key_prefix + f"{key}: {lines[0]}\n"
+                    cont = " " * data_column
+                    for extra in lines[1:]:
+                        yaml_string += cont + extra + "\n"
+                else:
+                    yaml_string += key_prefix + f"{key}: {value}\n"
         return yaml_string
 
     def flatten_dict(self, target_dict, topology_override=False):

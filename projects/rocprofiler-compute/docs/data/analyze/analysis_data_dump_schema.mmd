@@ -1,0 +1,106 @@
+%% Source for analysis_data_dump_schema.png. Re-export the PNG via draw.io.
+%% Tables and relationships mirror src/utils/analysis_orm.py.
+
+erDiagram
+    compute_workload {
+        int workload_id PK
+        string name
+        string sub_name
+        json sys_info_extdata
+        json roofline_bench_extdata
+        json profiling_config_extdata
+    }
+
+    compute_metric_definition {
+        int metric_uuid PK
+        int workload_id FK
+        string name
+        string metric_id
+        text description
+        string table_name
+        string sub_table_name
+        string unit
+    }
+
+    compute_kernel {
+        int kernel_uuid PK
+        int workload_id FK
+        string kernel_name
+    }
+
+    compute_dispatch {
+        int dispatch_uuid PK
+        int kernel_uuid FK
+        int dispatch_id
+        int gpu_id
+        int start_timestamp
+        int end_timestamp
+    }
+
+    compute_pcsampling {
+        int pc_sampling_uuid PK
+        int kernel_uuid FK
+        string source
+        string instruction
+        int count
+        int offset
+        int count_issue
+        int count_stall
+        json stall_reason
+    }
+
+    compute_kernel_roofline_data {
+        int roofline_uuid PK
+        int kernel_uuid FK
+        float total_flops
+        float l1_cache_data
+        float l2_cache_data
+        float hbm_cache_data
+        float lds_cache_data
+    }
+
+    compute_kernel_metric_value {
+        int value_uuid PK
+        int metric_uuid FK
+        int kernel_uuid FK
+        string value_name
+        float value
+    }
+
+    compute_workload_metric_value {
+        int value_uuid PK
+        int metric_uuid FK
+        int workload_id FK
+        string value_name
+        float value
+    }
+
+    compute_workload_roofline_data {
+        int roofline_uuid PK
+        int workload_id FK
+        float total_flops
+        float l1_cache_data
+        float l2_cache_data
+        float hbm_cache_data
+        float lds_cache_data
+    }
+
+    compute_metadata {
+        int id PK
+        string compute_version
+        string git_version
+        string schema_version
+    }
+
+    compute_workload ||--o{ compute_kernel : workload_id
+    compute_workload ||--o{ compute_metric_definition : workload_id
+    compute_workload ||--o{ compute_workload_metric_value : workload_id
+    compute_workload ||--o{ compute_workload_roofline_data : workload_id
+
+    compute_kernel ||--o{ compute_dispatch : kernel_uuid
+    compute_kernel ||--o{ compute_pcsampling : kernel_uuid
+    compute_kernel ||--o{ compute_kernel_roofline_data : kernel_uuid
+    compute_kernel ||--o{ compute_kernel_metric_value : kernel_uuid
+
+    compute_metric_definition ||--o{ compute_kernel_metric_value : metric_uuid
+    compute_metric_definition ||--o{ compute_workload_metric_value : metric_uuid

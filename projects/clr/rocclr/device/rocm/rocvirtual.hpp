@@ -372,6 +372,26 @@ class VirtualGPU : public device::VirtualDevice {
         }
       }
 
+      //! Set the launch descriptor version (called once from VirtualGPU::create)
+      void SetLaunchDescriptorVersion(uint8_t version) {
+        launch_descriptor_version_ = version;
+      }
+
+      //! Copy the dynamic data prefetch config into the preloader state
+      void SetDynDataPrefetchRegions(const amd::DynDataPrefetchConfig& cfg) {
+        dyn_data_prefetch_enabled_ = true;
+        dyn_data_prefetch_num_regions_ = cfg.numRegions;
+        dyn_data_prefetch_hints_ = cfg.hints;
+        for (uint32_t i = 0; i < cfg.numRegions && i < amd::kDynDataPrefetchMaxRegions; ++i) {
+          dyn_data_prefetch_regions_[i] = cfg.regions[i];
+        }
+      }
+
+      //! Reset the dynamic data prefetch state after dispatch
+      void ClearDynDataPrefetchConfig() {
+        dyn_data_prefetch_enabled_ = false;
+      }
+
     private:
       //! Return whether the loader is attached to a gpu queue
       bool IsAttached() const { return queue_base_ != nullptr; }
@@ -383,7 +403,7 @@ class VirtualGPU : public device::VirtualDevice {
 
       //! Set the metadata prefetch aql packet for kernel dispatch
       void SetPacket(hsa_kernel_dispatch_packet_t* aql, uint16_t header,
-                     hsa_amd_metadata_kernel_dispatch_packet_t* metadata) const;
+                     hsa_amd_metadata_kernel_dispatch_packet_t* metadata);
 
       //! Set the metadata prefetch aql packet for barrier.
       //! The CP invalidates headers after completion, so only header0
@@ -410,6 +430,12 @@ class VirtualGPU : public device::VirtualDevice {
       const hsa_amd_metadata_kernel_descriptor_t* pending_descriptor_ = nullptr;
       uint16_t pending_preload_length_ = 0;
       uint16_t pending_preload_offset_ = 0;
+
+      uint8_t launch_descriptor_version_ = AMD_LAUNCH_DESCRIPTOR_VERSION_NONE;
+      bool dyn_data_prefetch_enabled_ = false;
+      uint8_t dyn_data_prefetch_hints_ = 0;
+      uint32_t dyn_data_prefetch_num_regions_ = 0;
+      amd::DynDataPrefetchRegion dyn_data_prefetch_regions_[amd::kDynDataPrefetchMaxRegions] = {};
   };
 
   VirtualGPU(Device& device, bool profiling = false, bool cooperative = false,
@@ -464,7 +490,7 @@ class VirtualGPU : public device::VirtualDevice {
   void submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& cmd);
   void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd);
   void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd);
-
+  void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd);
   virtual void submitSignal(amd::SignalCommand& cmd) {}
   virtual void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) {}
 
@@ -535,7 +561,7 @@ class VirtualGPU : public device::VirtualDevice {
 
   void hasPendingDispatch() { hasPendingDispatch_ = true; }
   bool IsPendingDispatch() const { return (hasPendingDispatch_) ? true : false; }
-  void addSystemScope() {
+  void addSystemScope() override {
     addSystemScope_ = true;
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }
@@ -703,6 +729,30 @@ class VirtualGPU : public device::VirtualDevice {
     return false;
   }
 
+  //! True if this marker records the same event as the preceding barrier with no
+  //! intervening dispatch or sync. Caller must hold the execution() lock.
+  bool ShouldCoalesceMarker(const amd::Marker& vcmd) const {
+    // A zero coalesceEvent() means the record didn't opt in or isn't a record,
+    // so it can never be coalesced.
+    uint64_t event_id = vcmd.coalesceEvent();
+    if (event_id == 0 || event_id != last_barrier_coalesce_event_) {
+      return false;
+    }
+    if (IsPendingDispatch() || vcmd.syncedSinceRecord()) {
+      return false;
+    }
+    return true;
+  }
+
+  //! Set the coalescing window to the given event and its barrier's HwEvent,
+  //! retaining the new signal and releasing the previously held one. Pass
+  //! (0, nullptr) to end the window. Caller must hold the execution() lock.
+  void SetCoalesceWindow(uint64_t event_id, void* hw_event);
+
+  //! Attach a ProfilingSignal to a command as its HwEvent, releasing any prior
+  //! one and retaining the new one. No-op if cmd or hw_event is null.
+  static void AttachHwEvent(amd::Command* cmd, void* hw_event);
+
   //! Queue state flags
   union {
     struct {
@@ -719,6 +769,12 @@ class VirtualGPU : public device::VirtualDevice {
 
   Timestamp* timestamp_;
   amd::Command* command_;   //!< Current command
+  //! Monotonic client coalesce id of the last barrier from submitMarker, used to
+  //! coalesce consecutive records. Execution() lock only. 0 = no window open.
+  uint64_t last_barrier_coalesce_event_ = 0;
+  //! Retained ProfilingSignal of that last barrier; a coalesced record reuses it
+  //! as its HwEvent so query/sync observe correct readiness. Released on reset.
+  void* last_barrier_hw_event_ = nullptr;
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;  //!< Active queue associated with a vgpu
   hsa_barrier_and_packet_t barrier_packet_ {};

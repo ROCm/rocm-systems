@@ -26,7 +26,7 @@ def read_csv_as_dicts(csv_file: str) -> tuple[list[dict], list[str]]:
     Equivalent to: df = pd.read_csv(csv_file)
     """
     try:
-        with open(csv_file, newline="") as f:
+        with open(csv_file, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             if fieldnames is None:
@@ -56,7 +56,7 @@ def write_csv_from_dicts(
             raise ValueError("Cannot write CSV: no rows and no fieldnames provided")
         fieldnames = list(rows[0].keys())
 
-    with open(csv_file, "w", newline="") as f:
+    with open(csv_file, "w", newline="", encoding="utf-8") as f:
         # extrasaction='ignore': silently ignore extra keys in rows (not in fieldnames)
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
@@ -79,7 +79,7 @@ def concat_csv_files(
     fieldnames = None
 
     for csv_file in input_files:
-        with open(csv_file, newline="") as f:
+        with open(csv_file, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             if fieldnames is None:
                 fieldnames = reader.fieldnames

@@ -49,7 +49,7 @@ def annotate_env(annotate_papi_condition) -> dict[str, str]:
 @pytest.mark.annotate
 @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite", "sys_run"])
 class TestAnnotate(RocprofsysTest):
-    REWRITE_ARGS = [
+    BINARY_REWRITE_ARGS = [
         "-e",
         "-v",
         "2",
@@ -74,7 +74,7 @@ class TestAnnotate(RocprofsysTest):
             mode,
             "parallel-overhead",
             env=annotate_env,
-            rewrite_args=self.REWRITE_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
             run_args=self.RUN_ARGS,
         )
         self.assert_regex(result)

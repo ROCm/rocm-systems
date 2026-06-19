@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_CE_COLL_H_
 #define NCCL_CE_COLL_H_
@@ -29,6 +30,9 @@ struct ncclCeColl {
   int nCopyStreams;
   cudaStream_t copyStreams[RCCL_CE_NUM_COPY_STREAMS];
   cudaEvent_t copyEvents[RCCL_CE_NUM_COPY_STREAMS];
+#ifdef ENABLE_FAULT_INJECTION
+  uint32_t ceFaults;  // bitmask of CE_FAULT_* bits; see ce_fault_inject.h
+#endif
 };
 
 struct ncclCeInitTask {
@@ -39,12 +43,15 @@ struct ncclCeInitTask {
 struct alignas(16) ncclCeCollArgs {
   ncclFunc_t func;
   int rootRank;
+  ncclDataType_t datatype;
   size_t nElts;
   size_t eltSize;
   uint8_t* sendBuff;
   uint8_t* recvBuff;
   struct ncclDevrWindow* sendWin;
   struct ncclDevrWindow* recvWin;
+  void* collApiEventHandle;  // Parent API event handle for profiler hierarchy
+  void* ceCollProfHandle;     // CE collective profiler event handle
 };
 
 struct ncclCeBatchOpsParams {
@@ -53,12 +60,14 @@ struct ncclCeBatchOpsParams {
   size_t* sizes;
   size_t numOps;
   bool intraBatchSync;
-#if ROCM_VERSION >= 71200
-  cudaMemcpyAttributes* attrs;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+  hipMemcpyAttributes* attrs;
   size_t* attrIdxs;
   size_t numAttrs;
 #endif
 };
+
+bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType);
 
 bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 
@@ -66,7 +75,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm);
 
 ncclResult_t ncclCeFinalize(struct ncclComm* comm);
 
-ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream);
+ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, void* ceCollHandle);
 
 ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan);
 

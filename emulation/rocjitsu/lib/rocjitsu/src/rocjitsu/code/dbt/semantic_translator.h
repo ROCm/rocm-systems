@@ -6,27 +6,26 @@
 ///
 /// @details Handles instructions and ABI conventions whose semantics change
 /// across ISA generations, as opposed to the encoding translator which handles
-/// pure binary format differences. Current semantic translations:
+/// pure binary format differences. Current semantic translations include:
 ///
-/// - **Waitcnt splitting**: GFX9 monolithic s_waitcnt → GFX12 split
-///   s_wait_loadcnt / s_wait_storecnt_dscnt / s_wait_kmcnt / s_wait_expcnt
-/// - **Instruction lowering**: MFMA/AccVGPR and other one-to-many target
-///   sequences. Kernel-entry descriptor ABI prologues are built by
-///   KernelDescriptorTranslator and reached through a CodeObjectPatcher
-///   descriptor-entry redirect.
+/// - **Waitcnt lowering**: re-encode or conservatively expand a source
+///   s_waitcnt when the host has a different wait-counter model.
+/// - **Pair-specific instruction lowering**: MFMA→WMMA, AccVGPR elimination,
+///   and other one-to-many target sequences. Kernel-entry descriptor ABI
+///   prologues are built by KernelDescriptorTranslator and reached through a
+///   CodeObjectPatcher descriptor-entry redirect.
 ///
-/// The translator runs per-basic-block before the per-instruction encoding
-/// loop. It scans for anchor instructions (identified by InstFlags), applies
-/// the first matching rule, and produces a SemanticReplacement that the binary
-/// translator writes in-place or via code caves.
+/// The translator runs per instruction before the encoding translator. It
+/// performs a binary search over the selected ISA-pair rule table, then invokes
+/// the matched ExpandFn to produce replacement words that BinaryTranslator
+/// writes in-place or through a code cave.
 ///
-/// Rules are data-driven: each SemanticRule is a (name, anchor_flags,
-/// translate_fn) tuple. Adding a new rule means adding one entry to the
-/// per-pair rule table.
+/// Rules are data-driven and live under code/dbt/semantic/. Adding a new
+/// handwritten semantic rule means adding one entry to the relevant ISA-pair
+/// table, not modifying BinaryTranslator's ISA-agnostic loop.
 
 #pragma once
 
-#include <cassert>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -37,21 +36,7 @@
 
 namespace rocjitsu {
 
-class BasicBlock;
 class Instruction;
-
-/// @brief Decoded wait-counter values from a GFX9 s_waitcnt simm16 field.
-struct WaitcntValues {
-  uint8_t vmcnt = 0x3F;   ///< VM count (loads + stores on GFX9). Sentinel: 0x3F.
-  uint8_t lgkmcnt = 0x0F; ///< LDS/GDS/Kmem count. Sentinel: 0x0F.
-  uint8_t expcnt = 0x07;  ///< Export count. Sentinel: 0x07.
-};
-
-/// @brief Decode a GFX9 s_waitcnt simm16 field into individual counter values.
-[[nodiscard]] WaitcntValues decode_waitcnt_gfx9(uint16_t simm16);
-
-/// @brief Encode wait-counter values as GFX12 split s_wait_* instruction words.
-[[nodiscard]] std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals);
 
 /// @brief Result of a successful semantic translation: the source byte range
 /// and the target instruction words that replace it.
@@ -68,7 +53,8 @@ struct SemanticReplacement {
 ///
 /// @details All expansion rules (waitcnt, MFMA→WMMA, AccVGPR, etc.) are
 /// registered as TranslationRule entries with RuleAction::Expand. The
-/// try_lower_expand() method looks up rules by opcode via binary search.
+/// try_lower_expand() method looks up rules by (encoding_id, opcode) via
+/// binary search.
 class SemanticTranslator {
 public:
   SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
@@ -77,14 +63,15 @@ public:
   /// @param inst      The decoded instruction.
   /// @param offset    Byte offset of the instruction in .text.
   /// @param liveness  Kernel-scoped live-before data used for scratch register allocation.
-  /// @returns Replacement instruction words on success, empty vector if no rule matches.
-  [[nodiscard]] std::vector<uint32_t> try_lower_expand(const Instruction &inst, uint64_t offset,
-                                                       const LivenessAnalysis &liveness) const;
+  /// @returns Structured expansion status and replacement words.
+  [[nodiscard]] ExpandResult try_lower_expand(const Instruction &inst, uint64_t offset,
+                                              const LivenessAnalysis &liveness,
+                                              TranslationContext &context) const;
 
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 
 private:
-  std::span<const TranslationRule> expand_rules_; ///< Sorted by src_opcode.
+  std::span<const TranslationRule> expand_rules_; ///< Sorted by (src_encoding_id, src_opcode).
   rj_code_arch_t host_arch_;
 };
 

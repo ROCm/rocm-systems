@@ -135,8 +135,10 @@ SKIPPABLE_PATH_PATTERNS = [
     "shared/*/docs/*",
     "shared/*/.gitignore",
     "experimental/python/perfxpert/*",
+    ".github/CODEOWNERS",
     ".github/label*.yml",
     ".github/workflows/labeler.yml",
+    ".github/workflows/amdsmi-manylinux-build.yml",
 ]
 
 

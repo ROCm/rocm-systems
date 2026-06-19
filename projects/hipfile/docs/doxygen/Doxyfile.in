@@ -290,6 +290,8 @@ ALIASES += batch_handle_param="Opaque handle for batch operations"
 ALIASES += hipstream_param="The stream used for async IO requests"
 ALIASES += hipstream_if_null="If NULL, this request will be synchronous"
 ALIASES += max_io_size_note="@note The maximum IO size is determined by the Linux kernel and is currently 2^31 - the system page size"
+ALIASES += warn_not_implemented="@warning This function is only a stub on AMD and will always return an error (typically `hipFileInternalError` with `hip_drv_err` set to `hipSuccess`)"
+ALIASES += warn_not_implemented_void="@warning This function is only a stub on AMD and has no effect"
 
 # Set the OPTIMIZE_OUTPUT_FOR_C tag to YES if your project consists of C sources
 # only. Doxygen will then generate output that is more tailored for C. For

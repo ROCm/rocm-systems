@@ -13,8 +13,6 @@
 #include <timemory/manager/declaration.hpp>
 #include <timemory/mpl/apply.hpp>
 #include <timemory/mpl/types.hpp>
-#include <timemory/units.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/variadic/types.hpp>
 
 #include "logger/debug.hpp"
@@ -732,7 +730,7 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
         mpip_gotcha_t::get_reject_list() = [reject]() {
             auto _reject = reject;
             // check environment
-            auto reject_list = tim::get_env<std::string>(
+            auto reject_list = rocprofsys::get_env<std::string>(
                 TIMEMORY_SETTINGS_PREFIX "MPIP_REJECT_LIST", "");
             // add environment setting
             for(const auto& itr : tim::delimit(reject_list))
@@ -744,7 +742,7 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
         mpip_gotcha_t::get_permit_list() = [permit]() {
             auto _permit = permit;
             // check environment
-            auto permit_list = tim::get_env<std::string>(
+            auto permit_list = rocprofsys::get_env<std::string>(
                 TIMEMORY_SETTINGS_PREFIX "MPIP_PERMIT_LIST", "");
             // add environment setting
             for(const auto& itr : tim::delimit(permit_list))

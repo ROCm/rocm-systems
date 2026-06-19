@@ -40,11 +40,11 @@ get_timemory_hash_aliases(std::int64_t _tid)
 }
 }  // namespace
 
-bool debug_push = tim::get_env(env_vars::DEBUG_PUSH.data(), false) || get_debug_env();
-bool debug_pop  = tim::get_env(env_vars::DEBUG_POP.data(), false) || get_debug_env();
-bool debug_mark = tim::get_env(env_vars::DEBUG_MARK.data(), false) || get_debug_env();
+bool debug_push = rocprofsys::get_env(env_vars::DEBUG_PUSH, false) || get_debug_env();
+bool debug_pop  = rocprofsys::get_env(env_vars::DEBUG_POP, false) || get_debug_env();
+bool debug_mark = rocprofsys::get_env(env_vars::DEBUG_MARK, false) || get_debug_env();
 bool debug_user =
-    tim::get_env(env_vars::DEBUG_USER_REGIONS.data(), false) || get_debug_env();
+    rocprofsys::get_env(env_vars::DEBUG_USER_REGIONS, false) || get_debug_env();
 
 std::unordered_map<hash_value_t, std::string>&
 get_perfetto_track_uuids()

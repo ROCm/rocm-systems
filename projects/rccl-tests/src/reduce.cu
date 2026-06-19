@@ -64,7 +64,8 @@ struct testColl reduceTest = {
   ReduceInitData,
   ReduceGetBw,
   ReduceRunColl,
-  ReduceGetAlgoProtoChannels
+  ReduceGetAlgoProtoChannels,
+  NULL
 };
 
 void ReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {

@@ -1,115 +1,84 @@
 .. meta::
-   :description: A library that can be loaded by ROCr to print the AMDGPU wavefront states
-   :keywords: ROCdebug-agent installation, ROCR Debug Agent installation, install ROCdebug-agent, install ROCR Debug Agent,
-    build ROCdebug-agent, build ROCR Debug Agent
+   :description: Installation instructions for ROCr Debug Agent
+   :keywords: rocm, rocr debug agent, install, debugger, tool
 
+.. _installation:
 
-.. _debug-agent-installation:
+************************
+Install ROCr Debug Agent
+************************
 
-==============================
-ROCR Debug Agent installation
-==============================
+Before you begin, verify that your system is supported. For more information,
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
-This topic provides information required to build and install ROCR Debug Agent (ROCdebug-agent) library.
+For advanced workflows, source builds, or custom configurations, see
+`Build ROCdebug-agent library <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocr-debug-agent/README.md#build-the-rocdebug-agent-library>`_.
 
-System requirements
--------------------
+.. _install-rocm:
 
-- A system supporting ROCm. See the `supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
+Install the ROCm Core SDK
+=========================
 
-- A C++ 17 compiler such as GCC 7 or Clang 5.
+ROCr Debug Agent is included with the ROCm Core SDK on Linux. For the most
+complete installation, we recommend that developers use the
+``amdrocm-core-sdk`` meta package.
 
-- The AMD ROCm software stack. See the :doc:`ROCm installation instructions <rocm-install-on-linux:index>`.
+For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
+selector panel on that page to view instructions appropriate for your system
+environment.
 
-- Install the required packages according to the OS:
+.. _install-base:
 
-.. tab-set::
+Install ROCm debuggers on Linux
+===============================
 
-  .. tab-item:: Ubuntu
-    :sync: ubuntu
+Alternatively, if you want to install ROCr Debug Agent as part of the ROCm
+Debugger package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
+additional ROCm libraries and tools, install the ``amdrocm-debugger`` package.
+This includes the ROCm debuggers, dependencies, and base packages.
 
-    .. code-block:: shell
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+   install dependencies and configure GPU access permissions.
 
-      apt install gcc g++ make cmake libelf-dev libdw-dev
+2. Install the ROCm Debugger package that matches your desired ROCm version.
+   Package names use the following format:
 
-  .. tab-item:: RHEL
-    :sync: rhel
+   .. code-block:: shell-session
 
-    .. code-block:: shell
+      amdrocm-debugger<rocm_version>
 
-      yum install gcc gcc-c++ make cmake elfutils-libelf-devel elfutils-devel
+   Where ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+   suffix to install the latest available version.
 
-  .. tab-item:: SLES
-    :sync: sles
+   For example, to install the latest ROCm Debugger package release for
+   supported GPU architectures:
 
-    .. code-block:: shell
+   .. tab-set::
 
-      zypper install gcc gcc-c++ make cmake libelf-devel libdw-devel
+      .. tab-item:: Debian-based distros
 
-- Python 3.6 or later to run the tests.
+         .. code-block:: bash
 
-- :doc:`ROCdbgapi library <rocdbgapi:index>`. This can be installed using the ROCdbgapi package as part of the ROCm release. See the instructions to install :doc:`ROCdbgapi library <rocdbgapi:install/build>`.
+            sudo apt install amdrocm-debugger
 
-.. note::
+      .. tab-item:: RHEL-based distros
 
-  ROCdebug-agent might become unresponsive in SELinux-enabled distributions. To learn more about this issue, see `installation troubleshooting <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/install-faq.html#issue-10-rocm-debugging-tools-might-become-unresponsive-in-selinux-enabled-distributions>`_.
+         .. code-block:: bash
 
-Build and install
--------------------
+            sudo dnf install amdrocm-debugger
 
-An example command line to build and install the ROCdebug-agent library on Linux:
+      .. tab-item:: SLES
 
-.. code-block:: shell
+         .. code-block:: bash
 
-    cd rocm-debug-agent
-    mkdir build && cd build
-    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../install ..
-    make
+            sudo zypper install amdrocm-debugger
 
-To specify the location for the installation, use ``CMAKE_INSTALL_PREFIX``. The default location is ``/usr``.
+.. _install-nightly:
 
-To specify a list of paths (separated by semicolons) that are used to locate the ``cmake`` modules, use ``CMAKE_MODULE_PATH``. It is used to locate the HIP ``cmake`` modules required to build the tests. The default is location is ``/opt/rocm/hip/cmake``.
+Install a nightly build
+=======================
 
-The built ROCdebug-agent library is placed in ``build/librocm-debug-agent.so.2*``.
-
-To install the ROCdebug-agent library, use:
-
-.. code:: shell
-
-    make install
-
-The installed ROCdebug-agent library and tests are placed in:
-
-- <install-prefix>/lib/librocm-debug-agent.so.2*
-- <install-prefix>/share/rocm-debug-agent/LICENSE.txt
-- <install-prefix>/share/rocm-debug-agent/README.md
-- <install-prefix>/src/rocm-debug-agent-test/*
-
-Test
------
-
-To test the ROCdebug-agent library, use:
-
-.. code:: shell
-
-    make test
-
-Output:
-
-.. code-block:: shell
-
-    Running tests...
-    Test project /rocm-debug-agent/build
-    Start 1: rocm-debug-agent-test
-    1/1 Test #1: rocm-debug-agent-test ............   Passed    1.59 sec
-
-    100% tests passed, 0 tests failed out of 1
-    Total Test time (real) =   1.59 sec
-
-You can run the tests individually outside of the ``CTest`` harness as shown:
-
-.. code-block:: shell
-
-    HSA_TOOLS_LIB=librocm-debug-agent.so.2 test/rocm-debug-agent-test 0
-    HSA_TOOLS_LIB=librocm-debug-agent.so.2 test/rocm-debug-agent-test 1
-    HSA_TOOLS_LIB=librocm-debug-agent.so.2 test/rocm-debug-agent-test 2
+The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
+nightly builds for the ROCm Core SDK and its components, including ROCr Debug
+Agent. See `Nightly release status
+<https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.

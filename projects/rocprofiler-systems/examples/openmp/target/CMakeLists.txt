@@ -1,6 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+check_rocprofsys_disable_examples("openmp-target" _OPENMP_TARGET_DISABLED)
+if(_OPENMP_TARGET_DISABLED)
+    return()
+endif()
+
 cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 if(NOT ROCPROFSYS_GFX_TARGETS)
@@ -9,28 +14,27 @@ if(NOT ROCPROFSYS_GFX_TARGETS)
 endif()
 
 if(NOT OMP_TARGET_COMPILER)
-    find_program(
-        amdclangpp_EXECUTABLE
-        NAMES amdclang++
-        HINTS ${ROCM_PATH}
-        ENV ROCM_PATH
-        /opt/rocm
-        PATHS ${ROCM_PATH}
-        ENV ROCM_PATH
-        /opt/rocm
-        PATH_SUFFIXES bin llvm/bin
-    )
-    mark_as_advanced(amdclangpp_EXECUTABLE)
+    # Prefer amdclang++ from the same bin/ directory as the active CXX compiler
+    # so its LLVM version matches the ASan bitcode (asanrtl.bc) built into the
+    # same toolchain tree. Use if(EXISTS) rather than find_program to bypass
+    # the result cache — a stale entry from a different ROCm installation would
+    # otherwise take precedence over the path derived from the active compiler.
+    get_filename_component(_cxx_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(_toolchain_amdclangpp "${_cxx_bin_dir}/amdclang++")
 
-    if(amdclangpp_EXECUTABLE)
+    if(EXISTS "${_toolchain_amdclangpp}")
+        set(OMP_TARGET_COMPILER
+            "${_toolchain_amdclangpp}"
+            CACHE FILEPATH
+            "OpenMP target compiler"
+        )
+    else()
+        # Fall back to the amdclang++ discovered by openmp-helper.cmake
         set(OMP_TARGET_COMPILER
             "${amdclangpp_EXECUTABLE}"
             CACHE FILEPATH
             "OpenMP target compiler"
         )
-    else()
-        message(WARNING "OpenMP target compiler not found. Skipping this example.")
-        return()
     endif()
 endif()
 
@@ -103,6 +107,35 @@ target_link_libraries(openmp-target PRIVATE openmp-target-lib)
 target_compile_options(openmp-target PRIVATE -fopenmp -ggdb)
 target_link_options(openmp-target PUBLIC -fopenmp)
 add_offload_flags(openmp-target)
+
+# Only instinct GPUs are xnack-capable and ship a device-side AddressSanitizer runtime.
+# When building under a sanitizer on non-instinct arches, the OpenMP target offload
+# device image would otherwise be instrumented and fail to link with undefined
+# __asan_* device symbols, so we disable device-side instrumentation with
+# -fno-gpu-sanitize. Note: rocprofiler_systems_lookup_gfx defaults unknown arches to
+# 'instinct', so device instrumentation is only disabled when every target is
+# known-non-instinct (fail-safe).
+
+# NOTE: only inspects CMAKE_CXX_FLAGS. Sanitizers added via add_compile_options,
+# CMAKE_CXX_FLAGS_<CONFIG>, or a toolchain file will not be detected; pass
+# -fsanitize=... in CMAKE_CXX_FLAGS when building this example under a sanitizer.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _omp_target_sanitizer_pos)
+if(_omp_target_sanitizer_pos GREATER -1)
+    set(_omp_target_device_sanitizer OFF)
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        rocprofiler_systems_lookup_gfx(${arch} _gpu_categories)
+        if("instinct" IN_LIST _gpu_categories)
+            set(_omp_target_device_sanitizer ON)
+            break()
+        endif()
+    endforeach()
+    if(NOT _omp_target_device_sanitizer)
+        foreach(tgt openmp-target-lib openmp-target)
+            target_compile_options(${tgt} PRIVATE -fno-gpu-sanitize)
+            target_link_options(${tgt} PUBLIC -fno-gpu-sanitize)
+        endforeach()
+    endif()
+endif()
 
 foreach(tgt openmp-target-lib openmp-target)
     set_target_properties(

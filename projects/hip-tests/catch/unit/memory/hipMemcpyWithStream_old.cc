@@ -36,7 +36,7 @@ This testfile verifies the following scenarios
 #define THREADS 2
 #define MAX_THREADS 16
 
-static constexpr size_t N{4 * 1024 * 1024};
+static const size_t N = isQuickLevel() ? (256 * 1024) : (4 * 1024 * 1024);
 static const auto MaxGPUDevices{256};
 static constexpr unsigned blocksPerCU{6};  // to hide latency
 static constexpr unsigned threadsPerBlock{256};

@@ -108,7 +108,7 @@ producer(spm_state_t* s)
         args.size_copied = 0;
         args.dest_buf    = s->prod_buf;
         // s->stop_prod_thread should be set after SPM End() sequence is submitted, this is the
-        // handshake protocal between app/library and aqlprofile.
+        // handshake protocol between app/library and aqlprofile.
         // If s->stop_prod_thread is set in current loop, producer thread will exit after all
         // SPM counters are drained (args.size_copied == 0) which could be at least one
         // HsaSpmSetDestBuffer() call or maybe more than one.
@@ -166,14 +166,18 @@ producer(spm_state_t* s)
 exit_:
     if(status != HSA_STATUS_SUCCESS)
     {
-        // Even when HsaSpmSetDestBuffer() fails, we still need to fulfill the handshake protocal
+        // Even when HsaSpmSetDestBuffer() fails, we still need to fulfill the handshake protocol
         // between producer and consumer
         std::unique_lock<std::mutex> lock(s->work_mutex);
         s->size_copied = 0;
         s->data_ready  = true;
         s->work_cond.notify_one();
     }
-    s->stop_cons_thread = true;
+    {
+        std::unique_lock<std::mutex> lock(s->work_mutex);
+        s->stop_cons_thread = true;
+        s->work_cond.notify_one();
+    }
 }
 
 static void
@@ -182,8 +186,9 @@ consumer(spm_state_t* s)
     do
     {
         std::unique_lock<std::mutex> lock(s->work_mutex);
-        while(!s->data_ready)
+        while(!s->data_ready && !s->stop_cons_thread)
             s->work_cond.wait(lock);
+        if(s->stop_cons_thread) break;
         s->data_ready = false;
 
         hsa_status_t                       status = HSA_STATUS_SUCCESS;

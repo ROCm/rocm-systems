@@ -266,16 +266,6 @@ TEST(CSRegisterHandlerGFX9Test, IsRegNoCS)
     EXPECT_FALSE(handler.IsRegNoCS(15)); // SQTT_TOKEN_REG_CS_PRIV
 }
 
-TEST(CSRegisterHandlerGFX9Test, IsPgmLoHi)
-{
-    CSRegisterHandlerGFX9 handler;
-
-    EXPECT_TRUE(handler.IsPgmLo(0xC));
-    EXPECT_FALSE(handler.IsPgmLo(0xD));
-    EXPECT_TRUE(handler.IsPgmHi(0xD));
-    EXPECT_FALSE(handler.IsPgmHi(0xC));
-}
-
 TEST(CSRegisterHandlerGFX9Test, IsUserdata)
 {
     CSRegisterHandlerGFX9 handler;

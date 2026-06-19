@@ -31,25 +31,39 @@ class TestHelperRegistry:
         assert len(HELPER_REGISTRY) == 135
 
     def test_address_calc_entries_are_inline_cpp(self):
-        for name in ['CalcBufferAddr', 'CalcFlatAddr', 'CalcGlobalAddr',
-                      'CalcDsAddr', 'CalcScalarGlobalAddr',
-                      'CalcScalarBufferAddr', 'CalcScratchAddr']:
+        for name in [
+            'CalcBufferAddr',
+            'CalcFlatAddr',
+            'CalcGlobalAddr',
+            'CalcDsAddr',
+            'CalcScalarGlobalAddr',
+            'CalcScalarBufferAddr',
+            'CalcScratchAddr',
+        ]:
             treatment, cpp = HELPER_REGISTRY[name]
             assert treatment == HelperTreatment.INLINE_CPP
             assert cpp is not None
 
     def test_system_entries_are_opaque_nop(self):
-        for name in ['CheckBarrierComplete', 'PrefetchScalarData',
-                      'PrefetchScalarInst', 'ReallocVgprs',
-                      'WaitIdleExceptStoreCnt', 'nop', 's_nop',
-                      'InCluster', 'InWorkgroup']:
+        for name in [
+            'CheckBarrierComplete',
+            'PrefetchScalarData',
+            'PrefetchScalarInst',
+            'ReallocVgprs',
+            'WaitIdleExceptStoreCnt',
+            'nop',
+            's_nop',
+            'InCluster',
+            'InWorkgroup',
+        ]:
             treatment, cpp = HELPER_REGISTRY[name]
             assert treatment == HelperTreatment.OPAQUE_NOP
             assert cpp is None
 
     def test_recursive_entries_have_no_cpp_name(self):
         recursive = [
-            (name, t, cpp) for name, (t, cpp) in HELPER_REGISTRY.items()
+            (name, t, cpp)
+            for name, (t, cpp) in HELPER_REGISTRY.items()
             if t == HelperTreatment.RECURSIVE
         ]
         assert len(recursive) >= 37
@@ -58,9 +72,9 @@ class TestHelperRegistry:
 
     def test_all_entries_have_valid_treatment(self):
         for name, (treatment, _) in HELPER_REGISTRY.items():
-            assert isinstance(treatment, HelperTreatment), (
-                f"{name} has invalid treatment {treatment}"
-            )
+            assert isinstance(
+                treatment, HelperTreatment
+            ), f"{name} has invalid treatment {treatment}"
 
     def test_type_conversion_entries(self):
         for name in ['f16_to_f32', 'f32_to_bf16', 'fp8_to_f32', 'bf8_to_f16']:
@@ -69,8 +83,7 @@ class TestHelperRegistry:
             assert cpp is not None
 
     def test_scaled_conversion_entries(self):
-        for name in ['f32_to_fp8_scale', 'bf16_to_fp4_sr_scale',
-                      'f16_to_bf6_scale']:
+        for name in ['f32_to_fp8_scale', 'bf16_to_fp4_sr_scale', 'f16_to_bf6_scale']:
             treatment, cpp = HELPER_REGISTRY[name]
             assert treatment == HelperTreatment.INLINE_CPP
             assert 'scale' in cpp
@@ -107,24 +120,36 @@ class TestResolveHelper:
             resolve_helper('v_add_nc_u32', depth=4)
 
     def test_cycle_detection(self):
-        body_a = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.CALL, call_name='v_max_num_f32', children=(
-                SemaNode(SemaNodeKind.ID, id_name='v_max_num_f32'),
-            )),
-        ))
-        body_b = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.CALL, call_name='v_add_nc_u32', children=(
-                SemaNode(SemaNodeKind.ID, id_name='v_add_nc_u32'),
-            )),
-        ))
+        body_a = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.CALL,
+                    call_name='v_max_num_f32',
+                    children=(SemaNode(SemaNodeKind.ID, id_name='v_max_num_f32'),),
+                ),
+            ),
+        )
+        body_b = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.CALL,
+                    call_name='v_add_nc_u32',
+                    children=(SemaNode(SemaNodeKind.ID, id_name='v_add_nc_u32'),),
+                ),
+            ),
+        )
         fake_blocks = {
             'V_ADD_NC_U32': SemaBlock('V_ADD_NC_U32', ExecModel.VECTOR, body_a),
             'V_MAX_NUM_F32': SemaBlock('V_MAX_NUM_F32', ExecModel.VECTOR, body_b),
         }
         with pytest.raises(ValueError, match="Cycle detected"):
             resolve_helper(
-                'v_add_nc_u32', all_blocks=fake_blocks,
-                visited=set(), depth=0,
+                'v_add_nc_u32',
+                all_blocks=fake_blocks,
+                visited=set(),
+                depth=0,
             )
 
 
@@ -133,20 +158,30 @@ class TestListUnresolved:
         assert list_unresolved({}) == []
 
     def test_all_resolved(self):
-        body = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.CALL, call_name='CalcBufferAddr', children=(
-                SemaNode(SemaNodeKind.ID, id_name='CalcBufferAddr'),
-            )),
-        ))
+        body = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.CALL,
+                    call_name='CalcBufferAddr',
+                    children=(SemaNode(SemaNodeKind.ID, id_name='CalcBufferAddr'),),
+                ),
+            ),
+        )
         blocks = {'TEST': SemaBlock('TEST', ExecModel.SCALAR, body)}
         assert list_unresolved(blocks) == []
 
     def test_unresolved_detected(self):
-        body = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.CALL, call_name='SomeNewHelper', children=(
-                SemaNode(SemaNodeKind.ID, id_name='SomeNewHelper'),
-            )),
-        ))
+        body = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.CALL,
+                    call_name='SomeNewHelper',
+                    children=(SemaNode(SemaNodeKind.ID, id_name='SomeNewHelper'),),
+                ),
+            ),
+        )
         blocks = {'TEST': SemaBlock('TEST', ExecModel.SCALAR, body)}
         assert list_unresolved(blocks) == ['SomeNewHelper']
 
@@ -158,13 +193,12 @@ class TestSemaXmlCoverage:
     @pytest.fixture(scope='class')
     def blocks(self):
         from amdisa.sema_parser import parse_semantics_xml
+
         return parse_semantics_xml(SEMA_XML_PATH)
 
     def test_no_unresolved_helpers(self, blocks):
         unresolved = list_unresolved(blocks)
-        assert unresolved == [], (
-            f"Unresolved .call targets: {unresolved}"
-        )
+        assert unresolved == [], f"Unresolved .call targets: {unresolved}"
 
     def test_call_target_count(self, blocks):
         targets = set()

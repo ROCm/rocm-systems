@@ -102,6 +102,7 @@ target_sources(amdhip64 PRIVATE
   hip_event_ipc.cpp
   hip_fatbin.cpp
   hip_global.cpp
+  hip_executionctx.cpp
   hip_graph_internal.cpp
   hip_graph.cpp
   hip_hmm.cpp
@@ -231,6 +232,9 @@ endif()
 
 # Add hiprtc
 add_subdirectory(hiprtc)
+
+# HRR in-tree capture layer
+add_subdirectory(hrr)
 
 #############################
 # Profiling API support

@@ -13,14 +13,12 @@ instructions
 <https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
 TheRock is the recommended way to build ROCm components from source.
 
-Alternatively, you can build ROCprofiler-SDK standalone using the following
-instructions.
+Alternatively, you can build ROCprofiler-SDK standalone using the instructions given in the following sections.
 
 Supported systems
 =================
 
-ROCprofiler-SDK is supported on Linux. For more information, see :ref:`ROCm
-Core SDK components <rocm:release-components>`.
+ROCprofiler-SDK is supported on Linux. For more information, see :doc:`ROCm Core SDK components <rocm:release-components>`.
 
 Identifying the operating system
 --------------------------------
@@ -92,7 +90,7 @@ Install `CMake <https://cmake.org/>`_ version 3.21 (or later).
    version using various methods. One of the easiest options is to use PyPi
    (Python's pip).
 
-.. code-block:: bash
+   .. code-block:: bash
 
     /usr/local/bin/python -m pip install --user 'cmake==3.22.0'
     export PATH=${HOME}/.local/bin:${PATH}

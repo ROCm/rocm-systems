@@ -82,6 +82,7 @@ struct testColl gatherTest = {
   GatherInitData,
   GatherGetBw,
   GatherRunColl,
+  NULL,
   NULL
 };
 

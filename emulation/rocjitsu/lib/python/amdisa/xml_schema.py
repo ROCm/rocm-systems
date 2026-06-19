@@ -28,13 +28,11 @@ class SchemaVersion(NamedTuple):
         """Parse a dot-separated version string (e.g. '1.2.0') into a SchemaVersion."""
         parts = s.strip().split('.')
         if len(parts) != 3:
-            raise ValueError(
-                f"Expected 'major.minor.patch' version string, got {s!r}")
+            raise ValueError(f"Expected 'major.minor.patch' version string, got {s!r}")
         try:
             return cls(int(parts[0]), int(parts[1]), int(parts[2]))
         except ValueError as e:
-            raise ValueError(
-                f"Non-integer component in version string {s!r}") from e
+            raise ValueError(f"Non-integer component in version string {s!r}") from e
 
     def __str__(self) -> str:
         return f'{self.major}.{self.minor}.{self.patch}'
@@ -49,13 +47,13 @@ class SchemaVersion(NamedTuple):
 # the corrected names are included as comments for a future schema version.
 _VERSIONED_FIELDS: dict[str, dict[SchemaVersion, str]] = {
     'COND_EXPR': {
-        SchemaVersion(1, 0, 0): 'CondtionExpression',   # typo: missing 'd'
+        SchemaVersion(1, 0, 0): 'CondtionExpression',  # typo: missing 'd'
         SchemaVersion(1, 1, 0): 'CondtionExpression',
         SchemaVersion(1, 1, 1): 'CondtionExpression',
         # SchemaVersion(2, 0, 0): 'ConditionExpression',  # if/when fixed
     },
     'ENCODING_IDENTIFER': {
-        SchemaVersion(1, 0, 0): 'EncodingIdentifer',    # typo: missing 'i'
+        SchemaVersion(1, 0, 0): 'EncodingIdentifer',  # typo: missing 'i'
         SchemaVersion(1, 1, 0): 'EncodingIdentifer',
         SchemaVersion(1, 1, 1): 'EncodingIdentifer',
         # SchemaVersion(2, 0, 0): 'EncodingIdentifier',  # if/when fixed
@@ -64,6 +62,7 @@ _VERSIONED_FIELDS: dict[str, dict[SchemaVersion, str]] = {
 
 # Top-level structure.
 ARCH = 'Architecture'
+ARCH_ID = 'ArchitectureId'
 ARCH_NAME = 'ArchitectureName'
 DOCUMENT = 'Document'
 ISA = 'ISA'
@@ -147,6 +146,7 @@ EXPR_TYPE_VAL_LITERAL = 'Literal'
 EXPR_TYPE_VAL_OPERATOR = 'Operator'
 EXPR_TYPE_VAL_RETURN = 'ReturnType'
 
+
 class SchemaValueError(ValueError):
     """Exception indicating a value is missing from the XML schema."""
 
@@ -157,9 +157,7 @@ class SchemaValueError(ValueError):
         return f'Value not defined in the XML schema: {super().__str__()}'
 
 
-def get_node(
-    parent: elem_tree.Element, tag: str
-) -> elem_tree.Element:
+def get_node(parent: elem_tree.Element, tag: str) -> elem_tree.Element:
     """Find a child element by tag.
 
     Raises:

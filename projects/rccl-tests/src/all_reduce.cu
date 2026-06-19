@@ -62,6 +62,12 @@ testResult_t  AllReduceGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclD
   return testSuccess;
 }
 
+testResult_t  AllReduceGetSymkInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetSymkInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetSymkInfo(comm, ncclFuncAllReduce , count, type , op, algo, proto, nchannels));
+  return testSuccess;
+}
+
 void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize) / 1.0E9 / sec;
 
@@ -138,11 +144,7 @@ testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
 template <typename T>
 __global__ void allReduceLsaKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
   const int rank = devComm.rank, nRanks = devComm.nRanks;
 
   const int globalTid = threadIdx.x + blockDim.x * (rank + blockIdx.x * nRanks);
@@ -159,11 +161,7 @@ __global__ void allReduceLsaKernel(ncclWindow_t sendwin, size_t sendoffset, nccl
       recvPtr[offset] = v;
     }
   }
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
 }
 
 /*
@@ -192,11 +190,7 @@ __global__ void allReduceLsaKernel(ncclWindow_t sendwin, size_t sendoffset, nccl
 template <typename T>
 __global__ void allReduceLsaVectorizedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
 
   // Compile time vector type and vector size mapping
   using TN = typename VectorTypeMapping<T>::Type;
@@ -319,11 +313,7 @@ __global__ void allReduceLsaVectorizedKernel(ncclWindow_t sendwin, size_t sendof
   }
 
   // Sync
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
 }
 
 /*
@@ -353,11 +343,7 @@ __global__ void allReduceLsaVectorizedKernel(ncclWindow_t sendwin, size_t sendof
 template <typename T>
 __global__ void allReduceMultimemKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamTagLsa(), blockIdx.x, true };
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
 
   const int rank = devComm.rank, nRanks = devComm.nRanks;
 
@@ -372,11 +358,7 @@ __global__ void allReduceMultimemKernel(ncclWindow_t sendwin, size_t sendoffset,
       multimemStore<T,T>(recv_ptr + offset, v);
     }
   }
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
 }
 
 /*
@@ -411,11 +393,7 @@ template <typename T>
 __global__ void allReduceMultimemVectorizedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamTagLsa(), blockIdx.x, true };
 
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
 
   using TN = typename VectorTypeMapping<T>::Type;
   constexpr int VECTOR_FACTOR = sizeof(TN)/sizeof(T);
@@ -513,11 +491,7 @@ __global__ void allReduceMultimemVectorizedKernel(ncclWindow_t sendwin, size_t s
   }
 
   // Sync
-#if __HIP_PLATFORM_AMD__
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
 }
 #endif
 
@@ -559,7 +533,8 @@ struct testColl allReduceTest = {
   AllReduceInitData,
   AllReduceGetBw,
   AllReduceRunColl,
-  AllReduceGetAlgoProtoChannels
+  AllReduceGetAlgoProtoChannels,
+  AllReduceGetSymkInfo
 };
 
 void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {

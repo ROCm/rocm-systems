@@ -115,11 +115,14 @@ def test_kernel_trace_no_bubbles(
 
     # Filter to only simpleKernel dispatches (exclude BLIT kernels, etc.)
     simple_kernel_data = [
-        row for row in kernel_input_data if "simpleKernel" in row.get("Kernel_Name", "")
+        row
+        for row in kernel_input_data
+        if "simpleKernel" in row.get("Kernel_Name", "")
+        or "emptyKernel" in row.get("Kernel_Name", "")
     ]
 
     assert len(simple_kernel_data) > 0, (
-        "No simpleKernel dispatches found in kernel trace data. "
+        "No simpleKernel or emptyKernel dispatches found in kernel trace data. "
         "Check that the test binary is executing the expected kernels."
     )
 

@@ -9,6 +9,7 @@
 #include <hip/amd_detail/hip_storage.h>
 
 #include "hip_internal.hpp"
+#include "hip_executionctx.hpp"
 #include "hip_mempool_impl.hpp"
 #include "hip_platform.hpp"
 
@@ -333,6 +334,17 @@ bool Device::GetActiveStatus() {
 }
 
 // ================================================================================================
+void Device::registerResource(uint32_t resId, uint32_t familyId, uint32_t startCU) {
+  std::lock_guard<std::mutex> lk(resourceFamilyMapLock_);
+  resourceFamilyMap_[resId] = {familyId, startCU};
+}
+
+const ResourceMeta* Device::lookupResource(uint32_t resId) {
+  std::lock_guard<std::mutex> lk(resourceFamilyMapLock_);
+  auto it = resourceFamilyMap_.find(resId);
+  return (it != resourceFamilyMap_.end()) ? &it->second : nullptr;
+}
+
 Device::~Device() {
   if ((IS_LINUX || !DEBUG_HIP_MEM_POOL_VMHEAP) && (default_mem_pool_ != nullptr)) {
     default_mem_pool_->release();
@@ -348,6 +360,9 @@ Device::~Device() {
   if (default_managed_mem_pool_ != nullptr) {
     default_managed_mem_pool_->release();
   }
+
+  delete primaryExecCtx_;
+  primaryExecCtx_ = nullptr;
 
   if (null_stream_ != nullptr) {
     hip::Stream::Destroy(null_stream_);
@@ -662,7 +677,9 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   // access policy
   deviceProps.accessPolicyMaxWindowSize = 0;
   // cluster launch
-  deviceProps.clusterLaunch = info.clusterMaxSize_ > 0;
+  // A cluster of size 1 is a regular single-block launch (legal on all GPUs); clusterLaunch
+  // advertises multi-block cluster support, which only devices reporting a max size > 1 have.
+  deviceProps.clusterLaunch = info.clusterMaxSize_ > 1;
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options

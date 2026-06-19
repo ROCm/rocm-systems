@@ -23,7 +23,7 @@ Testcase Scenarios :
 #include "occupancy_common.hh"
 
 static __global__ void f1(float* a) { *a = 1.0; }
-static __global__ __cluster_dims__(1, 1, 1) void f1_with_attr(float* a) { *a = 1.0; }
+static __global__ CLUSTER_DIMS(1, 1, 1) void f1_with_attr(float* a) { *a = 1.0; }
 static void host_f1(float* a) { *a = 1.0; }
 static __global__ void reverse(int* d, int n) {
   __shared__ int shBuf[64];
@@ -48,8 +48,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation") {
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
 
   if (!props.clusterLaunch) {
-    SUCCEED("cluster launches are not supported on this device");
-    return;
+    HIP_SKIP_TEST("cluster launches are not supported on this device");
   }
 
   auto& clusterDim = attribute[0].val.clusterDim;

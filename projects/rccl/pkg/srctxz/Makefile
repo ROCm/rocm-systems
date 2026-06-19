@@ -1,7 +1,8 @@
 #
-# Copyright (c) 2015-2019, NVIDIA CORPORATION. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 #
-# See LICENSE.txt for license information
+# See LICENSE.txt for more license information
 #
 
 include ../../makefiles/common.mk
@@ -22,7 +23,7 @@ prep: $(TXZTARGETS)
 build: prep
 	$(MAKE) -C ../../src clean
 	@printf "Building source tar.xz package\n"
-	(cd $(BUILDDIR); SRCTXZ_APITESTS=$(SRCTXZ_APITESTS) bash srctxz/create_srctxz.sh)
+	(cd $(BUILDDIR); bash srctxz/create_srctxz.sh)
 	mkdir -p $(PKGDIR)
 	mv $(BUILDDIR)/../../nccl-src*.txz $(PKGDIR)
 

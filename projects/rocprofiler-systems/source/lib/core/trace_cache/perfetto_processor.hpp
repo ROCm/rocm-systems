@@ -49,6 +49,7 @@ public:
     void handle(const gpu_pmc_sample& sample);
     void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_pmc_sample& sample);
+    void handle(const gpu_perf_counter_sample& sample);
     void handle(const backtrace_region_sample& sample);
     void handle(const kfd_sample& sample);
 
@@ -57,6 +58,7 @@ private:
     void       setup_perfetto();
     void       start_session();
     void       stop_session();
+    void       initialize_pmc_track_map();
     void       flush(bool& perfetto_output_error);
     char_vec_t get_session_data();
 
@@ -65,6 +67,13 @@ private:
     // mutex on every event in high-frequency handle() paths.
     template <typename CategoryT, typename FuncT, typename... Args>
     ::perfetto::Track get_or_create_track(CategoryT, FuncT&& desc_gen, Args&&... args);
+
+    // Returns a cached per-thread ::perfetto::ThreadTrack for a system thread id,
+    // created via ThreadTrack::ForThread on first use. Replayed region events are
+    // emitted on the originating thread's track instead of the single replay thread.
+    // Worker threads (sequent_value > 0) get a "Thread N" descriptor name.
+    // The main thread keeps its default descriptor.
+    ::perfetto::ThreadTrack get_thread_track(std::uint64_t thread_id);
 
     template <typename CategoryT>
     void emit_kfd_event(const kfd_sample& sample);
@@ -87,8 +96,9 @@ private:
     // No synchronization is required for instance-local state below.
     // Note: m_output_registry is shared across threads; it must be internally
     // thread-safe.
-    std::unordered_map<std::uint64_t, ::perfetto::Track> m_track_cache;
-    std::unordered_map<std::uint32_t, agent_type>        m_kfd_node_type_cache;
+    std::unordered_map<std::uint64_t, ::perfetto::Track>       m_track_cache;
+    std::unordered_map<std::uint64_t, ::perfetto::ThreadTrack> m_thread_track_cache;
+    std::unordered_map<std::uint32_t, agent_type>              m_kfd_node_type_cache;
     // KFD node_id -> per-type GPU index matching kfd_sample.device_id.
     std::unordered_map<std::uint32_t, std::uint32_t> m_kfd_node_to_gpu_index_cache;
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;

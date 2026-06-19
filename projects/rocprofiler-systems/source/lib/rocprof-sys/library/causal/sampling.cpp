@@ -26,7 +26,6 @@
 #include <timemory/sampling/overflow.hpp>
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/sampling/timer.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/variadic.hpp>
 
@@ -460,14 +459,10 @@ sampling_signals()
 }  // namespace
 
 template <typename ScopeT>
+    requires sampling_scope<ScopeT>
 void
 pause(ScopeT)
 {
-    static_assert(
-        tim::is_one_of<ScopeT,
-                       type_list<scope::thread_scope, scope::process_scope>>::value,
-        "Unsupported scope");
-
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
     {
         if(!_thread_paused) _thread_paused = false;
@@ -500,14 +495,10 @@ pause(ScopeT)
 }
 
 template <typename ScopeT>
+    requires sampling_scope<ScopeT>
 void
 resume(ScopeT)
 {
-    static_assert(
-        tim::is_one_of<ScopeT,
-                       type_list<scope::thread_scope, scope::process_scope>>::value,
-        "Unsupported scope");
-
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
     {
         if(!_thread_paused) _thread_paused = true;

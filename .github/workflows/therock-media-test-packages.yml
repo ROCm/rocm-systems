@@ -1,4 +1,4 @@
-# TBD: Add customer test cases 
+# TBD: Add customer test cases
 name: TheRock Test Packages for media libs
 
 on:
@@ -36,7 +36,8 @@ jobs:
           "shard_arr": [1],
           "total_shards": 1,
           "test_type": "full",
-          "container_image": "ghcr.io/rocm/no_rocm_image_ubuntu24_04_media@sha256:d715ae2db664b055c90343e00588ce9ac3eec387513fe359396e5e08e75521ca"
+          "container_image": "ghcr.io/rocm/no_rocm_image_ubuntu24_04_media@sha256:d715ae2db664b055c90343e00588ce9ac3eec387513fe359396e5e08e75521ca",
+          "container_options": "--ipc host --group-add video --device /dev/kfd --device /dev/dri --group-add 992 --group-add 110 --ulimit memlock=-1:-1 --security-opt seccomp=unconfined --env-file /etc/podinfo/gha-gpu-isolation-settings --user 0:0"
         }
 
   test_rocjpeg:
@@ -56,5 +57,7 @@ jobs:
           "test_script": "python ./build/share/rocjpeg/test/run_rocjpeg.py",
           "shard_arr": [1],
           "total_shards": 1,
-          "test_type": "full"
+          "test_type": "full",
+          "container_image": "ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98",
+          "container_options": "--ipc host --group-add video --device /dev/kfd --device /dev/dri --group-add 992 --group-add 110 --ulimit memlock=-1:-1 --security-opt seccomp=unconfined --env-file /etc/podinfo/gha-gpu-isolation-settings --user 0:0"
         }

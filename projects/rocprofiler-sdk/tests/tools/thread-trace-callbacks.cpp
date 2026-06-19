@@ -123,7 +123,7 @@ finalize(void* /* tool_data */)
     if(decoder.handle != 0)
     {
         if(extra_args && latency != 0)
-            throw std::runtime_error("Got detailled profling in nondetail mode");
+            throw std::runtime_error("Got detailed profiling in nondetail mode");
         else if(!extra_args && latency == 0)
             throw std::runtime_error("Missing detailed profiling!");
 

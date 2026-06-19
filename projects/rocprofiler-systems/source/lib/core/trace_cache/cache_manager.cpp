@@ -58,7 +58,7 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
         discovery::find_cache_files(root_pid, temp_directory_content);
     LOG_DEBUG("Found {} cache file pairs to process", cache_files.size());
 
-    if(config::output_filtering::is_output_enabled_for_current_mpi_rank())
+    if(config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
         const data::enabled_formats_t enabled_formats;
         enabled_formats.print();

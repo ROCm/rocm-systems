@@ -39,7 +39,13 @@
 #include <hip/hip_runtime.h>
 #include <cassert>
 
+#include "ipc_test_config.hpp"
+
 namespace rocshmem {
+
+//=============================================================================
+// Constants and helpers
+//=============================================================================
 
 const uint32_t SIGNAL_OFFSET {67108864};
 
@@ -60,6 +66,10 @@ simple_validator(bool *error, int *golden, int *dest, size_t bytes) {
     }
 }
 
+//=============================================================================
+// Kernels — templated on IPC implementation type
+//=============================================================================
+
 template <typename NotifierT>
 __global__
 void
@@ -74,12 +84,12 @@ kernel_put_with_signal_simple_validator(bool *error, int *golden, int *dest, siz
     simple_validator(error, golden, dest, bytes);
 }
 
-template <typename NotifierT>
+template <typename IpcImplT, typename NotifierT>
 __global__
 void
-kernel_simple_fine_copy(IpcImpl *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
+kernel_simple_fine_copy(IpcImplT *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
     if (!get_flat_id()) {
-        ipc_impl->ipcCopy(dest, src, bytes);
+        ipc_impl->ipcCopy(dest, src, bytes, 1);
         ipc_impl->ipcFence();
         if (test == WRITE) {
             ipc_impl->ipcAMOFetchAdd(dest + SIGNAL_OFFSET, 1);
@@ -91,12 +101,12 @@ kernel_simple_fine_copy(IpcImpl *ipc_impl, bool *error, int *golden, int *src, i
     }
 }
 
-template <typename NotifierT>
+template <typename IpcImplT, typename NotifierT>
 __global__
 void
-kernel_simple_fine_copy_block(IpcImpl *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
+kernel_simple_fine_copy_block(IpcImplT *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
     if (!blockIdx.x) {
-        ipc_impl->ipcCopy_wg(dest, src, bytes);
+        ipc_impl->ipcCopy_wg(dest, src, bytes, 1);
         ipc_impl->ipcFence();
         if (test == WRITE) {
             if (!threadIdx.x) {
@@ -110,12 +120,12 @@ kernel_simple_fine_copy_block(IpcImpl *ipc_impl, bool *error, int *golden, int *
     }
 }
 
-template <typename NotifierT>
+template <typename IpcImplT, typename NotifierT>
 __global__
 void
-kernel_simple_fine_copy_warp(IpcImpl *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
+kernel_simple_fine_copy_warp(IpcImplT *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
     if (!blockIdx.x && threadIdx.x < 64) {
-        ipc_impl->ipcCopy_wave(dest, src, bytes);
+        ipc_impl->ipcCopy_wave(dest, src, bytes, 1);
         ipc_impl->ipcFence();
         if (test == WRITE) {
             if (!threadIdx.x) {
@@ -130,11 +140,17 @@ kernel_simple_fine_copy_warp(IpcImpl *ipc_impl, bool *error, int *golden, int *s
     }
 }
 
+//=============================================================================
+// Fixture — templated on Config trait
+//=============================================================================
+
+template <typename Config>
 class IPCImplSimpleFine : public ::testing::TestWithParam<std::tuple<int, int, int>> {
+    using IpcImplT = typename Config::impl_type;
     using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
     using NotifierT = Notifier<detail::atomic::memory_scope_agent>;
     using NotifierProxyT = NotifierProxy<HIPAllocator, detail::atomic::memory_scope_agent>;
-    using FN_T1 = void (*)(IpcImpl*, bool*, int*, int*, int*, size_t, TestType, NotifierT*);
+    using FN_T1 = void (*)(IpcImplT*, bool*, int*, int*, int*, size_t, TestType, NotifierT*);
     using FN_T2 = void (*)(bool*, int*, int*, size_t, NotifierT*);
 
   public:
@@ -146,11 +162,12 @@ class IPCImplSimpleFine : public ::testing::TestWithParam<std::tuple<int, int, i
 
         mpi_ = new MPI_T (heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
 
+        Config::preInit();
         ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
 
         assert(ipc_impl_dptr_ == nullptr);
-        hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImpl));
-        CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImpl), hipMemcpyHostToDevice));
+        hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
+        CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT), hipMemcpyHostToDevice));
 
         assert(error_dptr_ == nullptr);
         hip_allocator_->allocate((void**)&error_dptr_, sizeof(bool));
@@ -172,6 +189,7 @@ class IPCImplSimpleFine : public ::testing::TestWithParam<std::tuple<int, int, i
         delete mpi_;
         delete heap_mem_;
         MPIInstance::mpilib_dl_close();
+
     }
 
     void launch(FN_T1 f, const dim3 grid, const dim3 block, int* src, int* dest, size_t bytes, TestType test) {
@@ -225,7 +243,7 @@ class IPCImplSimpleFine : public ::testing::TestWithParam<std::tuple<int, int, i
         bool is_write_test = test;
         if (is_write_test && mpi_->my_pe() == 0) {
             int *dest = reinterpret_cast<int*>(ipc_impl_.ipc_bases[1]);
-            *(dest + SIGNAL_OFFSET) = 0;
+            CHECK_HIP(hipMemset(dest + SIGNAL_OFFSET,  0, sizeof(int)));
         }
     }
 
@@ -306,42 +324,46 @@ class IPCImplSimpleFine : public ::testing::TestWithParam<std::tuple<int, int, i
 
     int *golden_dptr_ {nullptr};
 
-    IpcImpl ipc_impl_ {};
+    IpcImplT ipc_impl_ {};
 
-    IpcImpl *ipc_impl_dptr_ {nullptr};
+    IpcImplT *ipc_impl_dptr_ {nullptr};
 
     bool *error_dptr_ {nullptr};
 };
 
-class DegenerateSimpleFine : public IPCImplSimpleFine {
+//=============================================================================
+// IPC load/store test classes
+//=============================================================================
+
+class DegenerateSimpleFine : public IPCImplSimpleFine<IpcOnTestConfig> {
   public:
     ~DegenerateSimpleFine() override {};
 };
 
-class ParameterizedBlockSimpleFine : public IPCImplSimpleFine {
+class ParameterizedBlockSimpleFine : public IPCImplSimpleFine<IpcOnTestConfig> {
   public:
     ~ParameterizedBlockSimpleFine() override {};
 
     void copy(TestType test, dim3 grid, dim3 block) override {
-        execute(test, kernel_simple_fine_copy_block, grid, block);
+        execute(test, kernel_simple_fine_copy_block<IpcOnImpl>, grid, block);
     }
 };
 
-class ParameterizedWarpSimpleFine : public IPCImplSimpleFine {
+class ParameterizedWarpSimpleFine : public IPCImplSimpleFine<IpcOnTestConfig> {
   public:
     ~ParameterizedWarpSimpleFine() override {};
 
     void copy(TestType test, dim3 grid, dim3 block) override {
-        execute(test, kernel_simple_fine_copy_warp, grid, block);
+        execute(test, kernel_simple_fine_copy_warp<IpcOnImpl>, grid, block);
     }
 };
 
-class ParameterizedThreadSimpleFine : public IPCImplSimpleFine {
+class ParameterizedThreadSimpleFine : public IPCImplSimpleFine<IpcOnTestConfig> {
   public:
     ~ParameterizedThreadSimpleFine() override {};
 
     void copy(TestType test, dim3 grid, dim3 block) override {
-        execute(test, kernel_simple_fine_copy, grid, block);
+        execute(test, kernel_simple_fine_copy<IpcOnImpl>, grid, block);
     }
 };
 

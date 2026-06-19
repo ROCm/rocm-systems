@@ -23,7 +23,6 @@ name: simple_net
 no_native_tool: false
 no_roof: true
 output_directory: /tmp/tt
-path: /tmp/tt
 pc_sampling_interval: 1048576
 pc_sampling_method: stochastic
 quiet: false
@@ -37,7 +36,6 @@ set_selected: null
 sort: kernels
 spatial_multiplexing: null
 specs: false
-subpath: gpu_model
 target: null
 torch_trace: true
 verbose: 0

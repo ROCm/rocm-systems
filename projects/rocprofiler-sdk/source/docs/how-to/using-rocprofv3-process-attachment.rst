@@ -3,7 +3,7 @@
   :description: Guide for using rocprofv3 process attachment
   :keywords: ROCprofiler-SDK, process attachment, ptrace, dynamic profiling
 
-.. _rocprofv3_process_attachment:
+.. _rocprofv3-process-attachment:
 
 ==========================================
 Dynamic process attachment using rocprofv3
@@ -111,49 +111,47 @@ The following example attaches the profiler to a process with PID "12345", colle
 Reattaching to the same process
 --------------------------------
 
-The dynamic process attachment functionality supports reattachment, which can be used to attach multiple times to the same PID over a process's lifetime. Give the same PID to ``rocprofv3`` to reattach.
+The dynamic process attachment functionality supports reattachment, allowing attaching multiple times to the same PID over a process's lifetime. You need to provide the same PID to ``rocprofv3`` to reattach.
 
-There are some restrictions on what options can change when reattaching.  Typically, tracing, PC sampling, ATT, counter collection, and other options that change what data will be collected cannot be changed. ``rocprofv3`` will throw a ``RuntimeError`` if it detects a configuration change that is not supported.
+There are some restrictions on what the options are allowed to change when reattaching. Typically, tracing, PC sampling, ATT, counter collection, and other options that decide the data to be collected can't be changed. ``rocprofv3`` throws a ``RuntimeError`` if it detects a configuration change that isn't supported.
 
-By default, output file generation runs asynchronously after detachment to allow for faster tool detachment. This means output files may not be immediately available when ``rocprofv3`` exits. If output file generation from the previous attachment is still in progress, ``rocprofv3`` will block reattachment until that output generation completes.
+By default, the output file generation runs asynchronously after detachment, allowing for faster tool detachment. This implies that the output files might not be immediately available when ``rocprofv3`` exits. If the output file generation from the previous attachment is still in progress, ``rocprofv3`` blocks reattachment until the ongoing output generation completes.
 
-For use cases that require output files to be fully written before detachment completes (e.g., scripts that process or delete output directories immediately after detachment), you can enable synchronous output generation using:
-
-- Command line: ``--attach-sync-output`` flag
-
-This will cause ``tool_detach`` to wait for all output files to be written before returning, ensuring output files are complete when the ``rocprofv3`` process exits.
+For use cases requiring output files to be fully written before detachment completes, such as scripts that process or delete output directories immediately after detachment, you can enable synchronous output generation using the ``--attach-sync-output`` flag. This causes ``tool_detach`` to wait for all output files to be written before returning, ensuring output files are complete when the ``rocprofv3`` process exits.
 
 .. class:: details
 
-Full list of options that must not change 
-  - ALL options ending with ``trace``
-  - ALL options starting with ``pc_sampling``
-  - ALL options starting with ``att``
-  - ``pmc``
-  - ``pmc_groups``
-  - ``output_config``
-  - ``extra_counters``
-  - ``kernel_include_regex``
-  - ``kernel_exclude_regex``
-  - ``kernel_iteration_range``
+   Full list of options that mustn't change:
+
+   - ALL options ending with ``trace``
+   - ALL options starting with ``pc_sampling``
+   - ALL options starting with ``att``
+   - ``pmc``
+   - ``pmc_groups``
+   - ``output_config``
+   - ``extra_counters``
+   - ``kernel_include_regex``
+   - ``kernel_exclude_regex``
+   - ``kernel_iteration_range``
 
 Attaching to a process tree
 ----------------------------
 
-By default, ``rocprofv3 --attach`` attaches to the target process **and all of its descendant processes**. This is useful for profiling applications that spawn child processes, such as multi-process MPI jobs or launchers that fork workers.
+By default, ``rocprofv3 --attach`` attaches to the target process **and all of its descendant processes**. This is useful for profiling applications that spawn child processes, such as multiprocess MPI jobs or launchers that fork workers.
+
+To attach to a PID and all its children (default behavior), use:
 
 .. code-block:: bash
 
-   # Attach to PID 1234 and all its children (default behavior)
    rocprofv3 --attach 1234 --hip-trace
 
-To attach only to the specified PID and skip its descendants, pass ``--attach-children=false``:
+To attach only to the specified PID and skip its descendants, use ``--attach-children=false``:
 
 .. code-block:: bash
 
    rocprofv3 --attach 1234 --attach-children=false --hip-trace
 
-The child process tree is enumerated once at attach time using ``/proc``. Processes that are spawned after attachment begins are not automatically profiled.
+The child process tree is enumerated once at attach time using ``/proc``. Processes that are spawned after the attachment has begun are not automatically profiled.
 
 Key considerations
 -------------------

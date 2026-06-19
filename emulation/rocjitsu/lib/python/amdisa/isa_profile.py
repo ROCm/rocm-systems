@@ -43,11 +43,11 @@ class MemoryCoherencyModel(Enum):
     CDNA3/4. GFX10/11/12 cover RDNA generations.
     """
 
-    GFX9_GLC        = auto()  # CDNA1, CDNA2 — GLC bit only, all memory
+    GFX9_GLC = auto()  # CDNA1, CDNA2 — GLC bit only, all memory
     GFX940_SC0_SC1_NT = auto()  # CDNA3, CDNA4 — SC0/SC1+NT vector; GLC scalar
     GFX10_GLC_DLC_SLC = auto()  # RDNA1, RDNA2 — GLC + DLC + SLC
-    GFX11_SC0_SC1_TH  = auto()  # RDNA3, RDNA3.5 — SC0+SC1 scope + TH hint
-    GFX12_SCOPE_TH    = auto()  # RDNA4 — 2-bit SCOPE + TH hint
+    GFX11_SC0_SC1_TH = auto()  # RDNA3, RDNA3.5 — SC0+SC1 scope + TH hint
+    GFX12_SCOPE_TH = auto()  # RDNA4 — 2-bit SCOPE + TH hint
 
 
 @dataclass
@@ -155,6 +155,11 @@ class IsaProfile(ABC):
         ...
 
     @property
+    def generated_arch_name(self) -> str | None:
+        """Override for the generated C++ architecture namespace/directory."""
+        return None
+
+    @property
     def skip_encodings(self) -> frozenset[str]:
         """Encoding names to skip entirely during parsing.
 
@@ -173,6 +178,90 @@ class IsaProfile(ABC):
         decoded under the 64-bit VOP3P_MFMA encoding).
         """
         return {}
+
+    @property
+    def vop3px2_prefix_opcode(self) -> int | None:
+        """VOP3P opcode slot for the VOP3PX2 128-bit prefix decoder.
+
+        Returns the opcode index in the VOP3P sub-decode table where the
+        VOP3PX2 prefix handler should be placed.  The prefix reads the
+        actual MFMA opcode from DW2-DW3 and re-dispatches.  ``None``
+        means VOP3PX2 is not supported.
+        """
+        return None
+
+    @property
+    def source_split_max_bytes(self) -> dict[str, int]:
+        """Maximum generated source chunk size by encoding.
+
+        Large generated instruction implementation files can be split into
+        multiple translation units. Keys are XML encoding names such as
+        ``ENC_VOP3``; values are soft byte limits used by the generator.
+        """
+        return {}
+
+    def source_split_file_stem(
+        self, enc_name: str, inst_name: str, semantics: object | None
+    ) -> str | None:
+        """Optional logical source-file stem for a generated instruction.
+
+        When ``source_split_max_bytes`` asks the generator to split an
+        encoding's implementation file, profiles can return a descriptive
+        stem such as ``cvt_pack`` or ``cmpx_f32``. The generator writes
+        matching ``<encoding>_<stem>.cpp`` chunks while still enforcing the
+        configured byte limit.
+        """
+        return None
+
+    @property
+    def uses_vgpr_msb_indexing(self) -> bool:
+        """True when VGPR operands use MODE-controlled high-bank bits."""
+        return False
+
+    @property
+    def uses_packed_16bit_e32_source_selectors(self) -> bool:
+        """True when E32 16-bit source selectors can address packed high halves."""
+        return False
+
+    @property
+    def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
+        """True when buffer-store data operands use the destination VGPR-MSB bank."""
+        return False
+
+    @property
+    def use_hwreg_helpers(self) -> bool:
+        """True when generated SOPK getreg/setreg should use target hwreg helpers."""
+        return False
+
+    @property
+    def hwreg_mode_id(self) -> int | None:
+        """Hardware-register ID for MODE, when modeled by generated setreg code."""
+        return None
+
+    @property
+    def hwreg_status_id(self) -> int:
+        """Hardware-register ID for STATUS in generated getreg/setreg code."""
+        return 1
+
+    @property
+    def hwreg_ib_sts2_id(self) -> int | None:
+        """Hardware-register ID for IB_STS2, when exposed by the target."""
+        return None
+
+    @property
+    def hwreg_wave_sched_mode_id(self) -> int | None:
+        """Hardware-register ID for WAVE_SCHED_MODE, when exposed by the target."""
+        return None
+
+    @property
+    def generate_scaled_wmma_vop3px2(self) -> bool:
+        """True when generator should synthesize scaled-WMMA VOP3PX2 support."""
+        return False
+
+    @property
+    def smem_address_uses_access_size(self) -> bool:
+        """True when generated SMEM address helpers need the access size."""
+        return False
 
     @property
     def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
@@ -304,6 +393,16 @@ class IsaProfile(ABC):
         """
         return {}
 
+    def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
+        """Return the logical condition name to use in generated code.
+
+        Some XML revisions spell an encoding's base condition as an expression
+        rather than the literal ``default`` name. Profiles can normalize those
+        names here while leaving instruction filtering decisions in
+        ``skip_inst_encoding``.
+        """
+        return cond_name
+
     @abstractmethod
     def is_alt_encoding(self, enc_name: str) -> bool:
         """True if the encoding name indicates an alternate encoding.
@@ -354,12 +453,14 @@ class IsaProfile(ABC):
         """
         ...
 
+
 _VOP_E32_RULE = MnemonicRule(suffix='_e32')
 
 # GFX940 (CDNA3/4): SC0+SC1+NT coherency model.
 _SMEM_MODIFIERS = [
     EncodingModifier(
-        'offset', is_offset=True,
+        'offset',
+        is_offset=True,
         condition='inst->soffset_en && inst->imm',
     ),
     EncodingModifier('glc'),
@@ -386,7 +487,8 @@ _MTBUF_MODIFIERS = [
 
 _FLAT_MODIFIERS = [
     EncodingModifier(
-        'flat_offset', is_offset=True,
+        'flat_offset',
+        is_offset=True,
         preamble=(
             'int flat_offset = (inst->seg != 0) ?'
             ' (inst->offset | (inst->pad_12 << 12)) : inst->offset;'
@@ -416,7 +518,8 @@ _MTBUF_MODIFIERS_GLC = [
 
 _FLAT_MODIFIERS_GLC = [
     EncodingModifier(
-        'flat_offset', is_offset=True,
+        'flat_offset',
+        is_offset=True,
         preamble=(
             'int flat_offset = (inst->seg != 0) ?'
             ' (inst->offset | (inst->pad_12 << 12)) : inst->offset;'
@@ -527,8 +630,7 @@ class _AmdgpuProfileBase(IsaProfile):
     def has_abs_modifier(self, enc_name: str) -> bool:
         """VOP3 has abs, but VOP3_SDST_ENC does not."""
         upper = enc_name.upper()
-        return ('VOP3' in upper and 'VOP3P' not in upper
-                and 'SDST_ENC' not in upper)
+        return 'VOP3' in upper and 'VOP3P' not in upper and 'SDST_ENC' not in upper
 
     def mnemonic_rule(self, enc_name: str) -> MnemonicRule:
         """Default AMDGPU mnemonic rules.
@@ -550,16 +652,31 @@ class _AmdgpuProfileBase(IsaProfile):
         if parts[0] != 'ENC':
             return True
         return (
-            len(parts) == 3
-            and parts[1] == 'FLAT'
-            and parts[2] in self._FLAT_SEGMENTS
+            len(parts) == 3 and parts[1] == 'FLAT' and parts[2] in self._FLAT_SEGMENTS
         )
 
     def derive_parent_enc_name(self, enc_name: str) -> str:
         parts = enc_name.split('_')
-        if (parts[0] == 'ENC' and len(parts) >= 3
-                and parts[1] == 'FLAT' and parts[2] in self._FLAT_SEGMENTS):
+        if (
+            parts[0] == 'ENC'
+            and len(parts) >= 3
+            and parts[1] == 'FLAT'
+            and parts[2] in self._FLAT_SEGMENTS
+        ):
             return 'ENC_FLAT'
+        for suffix in (
+            '_INST_LITERAL64',
+            '_INST_LITERAL',
+            '_VOP_DPP16',
+            '_VOP_DPP8',
+            '_VOP_DPP',
+            '_VOP_SDWA',
+        ):
+            if enc_name.endswith(suffix):
+                parent_name = enc_name[: -len(suffix)]
+                if parent_name.endswith('_ENC'):
+                    return parent_name
+                return f'ENC_{parent_name}'
         return f'ENC_{parts[0]}'
 
     def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
@@ -798,6 +915,10 @@ class CdnaProfile(_AmdgpuProfileBase):
             'V_MFMA_F32_16X16X128_F8F6F4': 16,
             'V_MFMA_F32_32X32X64_F8F6F4': 16,
         }
+
+    @property
+    def vop3px2_prefix_opcode(self) -> int | None:
+        return 0x2C
 
     # ISA dimension properties for CDNA3/4 (the two ISAs this profile covers).
     # Cdna1Profile and Cdna2Profile override the ones that differ.
@@ -1245,3 +1366,198 @@ class Rdna4Profile(_AmdgpuProfileBase):
         if upper in ('ENC_VFLAT', 'ENC_VGLOBAL', 'ENC_VSCRATCH'):
             return _VFLAT_MODIFIERS_RDNA4
         return []
+
+
+class Gfx1250Profile(Rdna4Profile):
+    """ISA profile for gfx1250.
+
+    The gfx1250 encoding model is RDNA4/GFX12-like. Keep it as a named target
+    profile so generated C++ lands under ``amdgpu/gfx1250`` while reusing the
+    RDNA4 parser/codegen rules.
+    """
+
+    @property
+    def generated_arch_name(self) -> str | None:
+        return 'gfx1250'
+
+    _SKIP = frozenset(
+        {
+            'ENC_VOP3PX2',
+            'ENC_VOP3PX3',
+            'VOPD3XY',
+            'VOPDXY_X',
+            'VOPDXY_INST_LITERAL_X',
+            'VOPDXY_Y',
+            'VOPDXY_INST_LITERAL_Y',
+        }
+    )
+
+    _SOP1_BASE_COND = '!has_lit64_0&!has_lit64_1&!has_lit_0&!has_lit_1'
+
+    def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
+        if enc_name.upper() == 'ENC_SOP1' and cond_name == self._SOP1_BASE_COND:
+            return 'default'
+        return super().normalize_encoding_condition(enc_name, cond_name)
+
+    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+        if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
+            return False
+        return super().skip_inst_encoding(enc_name, enc_cond)
+
+    def field_renames(self, enc_name: str) -> dict[str, str]:
+        renames = dict(super().field_renames(enc_name))
+        renames['literal'] = 'simm32'
+        return renames
+
+    @property
+    def supported_versions(self) -> list[str]:
+        return ['1.2.0']
+
+    @property
+    def wave_size_max(self) -> int:
+        return 32
+
+    @property
+    def uses_vgpr_msb_indexing(self) -> bool:
+        return True
+
+    @property
+    def uses_packed_16bit_e32_source_selectors(self) -> bool:
+        return True
+
+    @property
+    def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
+        return True
+
+    @property
+    def use_hwreg_helpers(self) -> bool:
+        return True
+
+    @property
+    def hwreg_mode_id(self) -> int | None:
+        return 1
+
+    @property
+    def hwreg_status_id(self) -> int:
+        return 2
+
+    @property
+    def hwreg_ib_sts2_id(self) -> int | None:
+        return 28
+
+    @property
+    def hwreg_wave_sched_mode_id(self) -> int | None:
+        return 26
+
+    @property
+    def generate_scaled_wmma_vop3px2(self) -> bool:
+        return True
+
+    @property
+    def smem_address_uses_access_size(self) -> bool:
+        return True
+
+    @property
+    def source_split_max_bytes(self) -> dict[str, int]:
+        # Keep generated gfx1250 instruction sources under the repository's
+        # added-file size hook without changing the hook policy for all users.
+        # clang-format expands constructor-heavy generated sources, so leave
+        # enough room below the hook instead of targeting the hook limit itself.
+        return {
+            'ENC_VOP3': 450 * 1024,
+            'ENC_VOPC': 450 * 1024,
+        }
+
+    def source_split_file_stem(
+        self, enc_name: str, inst_name: str, semantics: object | None
+    ) -> str | None:
+        enc = enc_name.upper()
+        name = inst_name.upper()
+        sem_class = getattr(semantics, 'semantic_class', None)
+
+        if enc == 'ENC_VOPC':
+            return self._vopc_source_split_file_stem(name)
+        if enc == 'ENC_VOP3':
+            return self._vop3_source_split_file_stem(name, sem_class)
+        return None
+
+    @staticmethod
+    def _vopc_source_split_file_stem(inst_name: str) -> str:
+        if inst_name.startswith('V_CMPX_'):
+            return 'cmpx'
+        if inst_name.startswith('V_CMP_'):
+            return 'cmp'
+        return 'misc'
+
+    @staticmethod
+    def _vop3_source_split_file_stem(
+        inst_name: str,
+        sem_class: str | None,
+    ) -> str:
+        if inst_name.startswith(('V_CMPX_', 'V_CMP_')):
+            return 'cmp'
+
+        if inst_name.startswith(('V_CVT_', 'V_PACK_', 'V_FREXP_')):
+            return 'cvt'
+
+        if inst_name.startswith('V_DIV_'):
+            return 'alu'
+        if inst_name.startswith(('V_PERM', 'V_CUBE')):
+            return 'data'
+        if inst_name in ('V_READFIRSTLANE_B32', 'V_READLANE_B32', 'V_WRITELANE_B32'):
+            return 'data'
+        # Carry-out instructions are grouped with ALU even when their generic
+        # semantic class is a multiply-add family.
+        if '_CO_' in inst_name:
+            return 'alu'
+
+        if sem_class == 'vector_cvt_scale':
+            return 'cvt'
+        if sem_class in {
+            'vector_cvt_pk',
+            'vector_cvt_pknorm',
+            'vector_cvt_pk_u8_f32',
+            'vector_cvt_pkrtz_f16_f32',
+            'vector_cvt_pk_f16_f32',
+            'vector_cvt_pk_bf16_f32',
+            'vector_cvt_sr_f16_f32',
+            'vector_cvt_sr_bf16_f32',
+            'vector_pack_b32_f16',
+        }:
+            return 'cvt'
+        if sem_class in {'vector_readfirstlane', 'vector_readlane', 'vector_writelane'}:
+            return 'data'
+        if sem_class in {
+            'vector_permlane16',
+            'vector_permlanex16',
+            'vector_permlane16_swap',
+            'vector_permlane32_swap',
+            'vector_permlane64',
+        }:
+            return 'data'
+        if sem_class in {'vector_div_fixup', 'vector_div_scale', 'vector_div_fmas'}:
+            return 'alu'
+        if sem_class in {'vector_mad_32_16', 'vector_mad_64_32'}:
+            return 'ternary'
+        if sem_class in {'vector_mbcnt', 'vector_bitop3'}:
+            return 'alu'
+        if sem_class == 'vector_add_co':
+            return 'alu'
+        if sem_class == 'vector_binop':
+            return 'alu'
+        if sem_class == 'vector_ternary':
+            return 'ternary'
+        if sem_class in {
+            'vector_cndmask',
+            'vector_mov',
+            'vector_movrel',
+        }:
+            return 'data'
+        if sem_class in {'vector_dot', 'vector_dot2c_bf16'}:
+            return 'alu'
+        if sem_class == 'vector_unary':
+            return 'alu'
+        if sem_class in {'nop', 'true_nop'}:
+            return 'misc'
+
+        return 'misc'

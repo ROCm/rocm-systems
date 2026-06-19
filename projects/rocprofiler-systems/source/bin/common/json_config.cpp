@@ -352,6 +352,8 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& output = config["output"];
         resolve_value(result, output, "path", env_vars::OUTPUT_PATH);
+        resolve_value(result, output, "unified_memory_output_path",
+                      env_vars::UNIFIED_MEMORY_OUTPUT_PATH);
         if(output.contains("time_output"))
             resolve_enabled(result, output["time_output"], "enabled",
                             env_vars::TIME_OUTPUT);
@@ -395,6 +397,7 @@ resolve_schema_config(const nlohmann::json& config)
         {
             resolve_value(result, hw, "rocm_events", env_vars::ROCM_EVENTS);
             resolve_value(result, hw, "papi_events", env_vars::PAPI_EVENTS);
+            resolve_value(result, hw, "gpu_perf_counters", env_vars::GPU_PERF_COUNTERS);
         }
         if(hw.contains("papi_multiplexing"))
             resolve_enabled(result, hw["papi_multiplexing"], "enabled",
@@ -851,6 +854,11 @@ export_hardware_counters(nlohmann::json&                           config,
         hw["enabled"]              = true;
         hw["papi_events"]["value"] = *v;
     }
+    if(auto v = lookup(env_map, env_vars::GPU_PERF_COUNTERS))
+    {
+        hw["enabled"]                    = true;
+        hw["gpu_perf_counters"]["value"] = *v;
+    }
     export_enabled(config, env_map, env_vars::PAPI_MULTIPLEXING_ENABLED,
                    "hardware_counters", "papi_multiplexing");
 }
@@ -874,6 +882,8 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     export_domain_parallel(config, env_map);
 
     export_string_value(config, env_map, env_vars::OUTPUT_PATH, "output", "path");
+    export_string_value(config, env_map, env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "output",
+                        "unified_memory_output_path");
     export_enabled(config, env_map, env_vars::TIME_OUTPUT, "output", "time_output");
     export_enabled(config, env_map, env_vars::FILE_OUTPUT, "output", "file_output");
     export_enabled(config, env_map, env_vars::USE_ROCPD, "output", "rocpd_output");
@@ -953,6 +963,10 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     //                                        in a preset would break config
     //                                        file handling.
     //   ROCPROFSYS_CI                      - Internal CI mode flag.
+    //   ROCPROFSYS_LOG_LEVEL               - Diagnostic logging verbosity for
+    //                                        the profiler itself; controls how
+    //                                        the tool reports its own activity,
+    //                                        not what/how to profile.
     //   ROCPROFSYS_TMPDIR                  - Base directory for temporary
     //                                        files; depends on the system's
     //                                        filesystem layout, not profiling

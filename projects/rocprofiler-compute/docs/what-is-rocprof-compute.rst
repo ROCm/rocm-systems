@@ -38,8 +38,8 @@ comma-separated-values format for further
 micro-benchmarks to acquire hierarchical roofline data. The roofline model is
 not available on accelerators pre-MI200.
 
-ROCm Compute Profiler standalone GUI analyzer
----------------------------------------------
+ROCm Compute Profiler standalone GUI analyzer (experimental)
+-------------------------------------------------------------
 
 ROCm Compute Profiler provides a :doc:`standalone GUI <how-to/analyze/standalone-gui>` to
 enable basic performance analysis.
@@ -59,7 +59,7 @@ The following list describes ROCm Compute Profiler's features at a high level.
 
 * :doc:`Support for AMD Instinct MI300, MI200, and MI100 accelerators <reference/compatible-accelerators>`
 
-* :doc:`Standalone GUI analyzer </how-to/analyze/standalone-gui>`
+* :doc:`Standalone GUI analyzer </how-to/analyze/standalone-gui>` (experimental)
 
 * :ref:`Filtering <filtering>` to reduce profiling time
 

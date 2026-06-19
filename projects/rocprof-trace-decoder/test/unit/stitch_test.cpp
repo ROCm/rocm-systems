@@ -69,14 +69,6 @@ protected:
     }
 };
 
-TEST_F(StitcherTest, ConstructorInitializesRawCode)
-{
-    Stitcher stitcher(mock_service, test_callback, &cbdata);
-
-    ASSERT_FALSE(stitcher.raw_code.empty());
-    EXPECT_EQ(stitcher.raw_code[0]->line, "; Begin ASM");
-}
-
 TEST_F(StitcherTest, SetGfxipSetsValueAndCallsCallback)
 {
     Stitcher stitcher(mock_service, test_callback, &cbdata);

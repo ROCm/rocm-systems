@@ -21,9 +21,6 @@ rocprofiler_systems_add_interface_library(
     rocprofiler-systems-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-boost
-    "Boost interface library (for Dyninst)"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-elfutils
     "ElfUtils interface library (for Dyninst)"
 )
@@ -560,17 +557,6 @@ if(ROCPROFSYS_BUILD_DYNINST)
 
     target_link_libraries(rocprofiler-systems-dyninst INTERFACE Dyninst::Dyninst)
 else()
-    # Find Boost before finding Dyninst
-    find_package(Boost)
-    if(NOT TARGET Dyninst::Boost_headers)
-        add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
-        target_include_directories(
-            Dyninst::Boost_headers
-            SYSTEM
-            INTERFACE ${Boost_INCLUDE_DIRS}
-        )
-    endif()
-
     find_package(
         Dyninst
         ${rocprofiler_systems_FIND_QUIETLY}
@@ -578,9 +564,22 @@ else()
         COMPONENTS dyninstAPI parseAPI instructionAPI symtabAPI
     )
 
-    if(TARGET Dyninst::Dyninst) # updated Dyninst CMake system was found
+    if(TARGET Dyninst::Dyninst) # CMake package exports aggregated target (no-Boost OK)
         target_link_libraries(rocprofiler-systems-dyninst INTERFACE Dyninst::Dyninst)
-    else() # updated Dyninst CMake system was not found
+        rocprofiler_systems_target_compile_definitions(rocprofiler-systems-dyninst
+            INTERFACE ROCPROFSYS_USE_DYNINST
+        )
+    else() # legacy Dyninst install: Boost component libraries
+        find_package(Boost)
+        if(NOT TARGET Dyninst::Boost_headers)
+            add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
+            target_include_directories(
+                Dyninst::Boost_headers
+                SYSTEM
+                INTERFACE ${Boost_INCLUDE_DIRS}
+            )
+        endif()
+
         set(_BOOST_COMPONENTS atomic system thread date_time)
         set(rocprofiler_systems_BOOST_COMPONENTS
             "${_BOOST_COMPONENTS}"
@@ -919,7 +918,7 @@ rocprofiler_systems_checkout_git_submodule(
     RELATIVE_PATH external/timemory
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://github.com/ROCm/timemory.git
-    REPO_BRANCH omnitrace
+    REPO_BRANCH rocprofiler-systems-cppstd20
 )
 
 rocprofiler_systems_save_variables(
@@ -939,7 +938,30 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(TIMEMORY_BUILD_HIDDEN_VISIBILITY OFF CACHE BOOL "" FORCE)
 endif()
 
+# Under sanitizer builds, ASan's globals-dead-stripping optimization converts
+# timemory's explicit template instantiations (STB_GLOBAL) into COMDAT groups
+# with STB_GLOBAL leaders. Rocprofiler-systems TUs that include timemory headers
+# produce COMDAT groups with STB_WEAK leaders for the same symbols (implicit
+# instantiation). lld rejects the resulting mix of STB_WEAK and STB_GLOBAL
+# COMDAT group leaders for the same symbol.
+#
+# -fno-sanitize-address-globals-dead-stripping disables this COMDAT conversion
+# for timemory's compilation, keeping explicit instantiations as regular
+# STB_GLOBAL symbols (as they are without sanitizers). lld then applies its
+# normal STB_GLOBAL-overrides-COMDAT-STB_WEAK rule, which is the same
+# behaviour as non-sanitizer builds and what GNU ld always does.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _timemory_sanitizer_flag_pos)
+if(_timemory_sanitizer_flag_pos GREATER -1)
+    set(TIMEMORY_BUILD_HIDDEN_VISIBILITY OFF CACHE BOOL "" FORCE)
+    set(_timemory_saved_cxx_flags "${CMAKE_CXX_FLAGS}")
+    string(APPEND CMAKE_CXX_FLAGS " -fno-sanitize-address-globals-dead-stripping")
+endif()
+
 add_subdirectory(external/timemory EXCLUDE_FROM_ALL)
+
+if(_timemory_sanitizer_flag_pos GREATER -1)
+    set(CMAKE_CXX_FLAGS "${_timemory_saved_cxx_flags}")
+endif()
 
 install(
     TARGETS gotcha

@@ -35,11 +35,14 @@ The documentation is structured as follows:
    .. grid-item-card:: Quick Reference
 
       * :ref:`quick-guide`
+      * :ref:`cli-options`
 
    .. grid-item-card:: How to
 
-      * :doc:`Samples <how-to/samples>`
       * :ref:`using-rocprofv3`
+      * :ref:`rocprofv3-advanced-options`
+      * :ref:`kernel-naming-filtering`
+      * :ref:`rocprofv3-io-options`
       * :ref:`using-rocprofv3-avail`
       * :ref:`rocprofv3_process_attachment`
       * :ref:`using-rocpd-output-format`
@@ -49,6 +52,7 @@ The documentation is structured as follows:
       * :ref:`using-pc-sampling`
       * :ref:`cdna3-cdna4-pc-sampling`
       * :ref:`using-thread-trace`
+      * :doc:`Samples <how-to/samples>`
 
    .. grid-item-card:: API reference
 

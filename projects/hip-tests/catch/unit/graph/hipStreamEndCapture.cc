@@ -187,6 +187,61 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Positive_Thread) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that after hipStreamEndCapture fails on an invalidated
+ * stream, the capture state is reset to None (not left as Invalidated), and
+ * subsequent stream operations succeed:
+ *        -# Begin capture on a stream
+ *        -# Perform an illegal hipStreamSynchronize during capture (invalidates stream)
+ *        -# Verify capture state is Invalidated
+ *        -# Call hipStreamEndCapture (expect hipErrorStreamCaptureInvalidated)
+ *        -# Verify hipGetLastError returns the error once then clears
+ *        -# Verify capture state is now None twice in a row (not still Invalidated)
+ *        -# Verify hipStreamSynchronize now succeeds (stream is no longer capturing)
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamEndCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative_InvalidatedStateReset) {
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t stream = stream_guard.stream();
+  hipGraph_t graph{nullptr};
+  hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
+
+  // Begin capture
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
+  REQUIRE(captureStatus == hipStreamCaptureStatusActive);
+
+  // Illegal sync during capture — invalidates the stream
+  HIP_CHECK_ERROR(hipStreamSynchronize(stream), hipErrorStreamCaptureUnsupported);
+  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+
+  // EndCapture on invalidated stream must fail with the appropriate error
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorStreamCaptureInvalidated);
+  REQUIRE(graph == nullptr);
+
+  // GetLastError must return the error once, then clear it
+  REQUIRE(hipGetLastError() == hipErrorStreamCaptureInvalidated);
+  REQUIRE(hipGetLastError() == hipSuccess);
+
+  // Querying capture state twice must both return None (not Invalidated).
+  // Without the fix, the state stays Invalidated after the failed EndCapture.
+  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
+  REQUIRE(captureStatus == hipStreamCaptureStatusNone);
+  HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
+  REQUIRE(captureStatus == hipStreamCaptureStatusNone);
+
+  // Stream must be usable again — sync should succeed
+  HIP_CHECK(hipStreamSynchronize(stream));
+}
+
+/**
  * End doxygen group GraphTest.
  * @}
  */

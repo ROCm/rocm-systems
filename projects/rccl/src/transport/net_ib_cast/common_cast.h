@@ -420,6 +420,8 @@ struct ncclIbQp {
   // to.
   int remDevIdx;
   int8_t ctsQpSlot;
+  int channelId;
+  bool isDataQp;
 };
 
 // We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive
@@ -809,6 +811,7 @@ struct ncclIbQpSchedParmsCB {
   struct ncclIbQpSchedParms parms;
 };
 
+bool rcclUseIbCastQpSched();
 ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms *parms);
 void IbCastLogSched(struct ncclIbSendComm *comm);
 void IbCastUpdateSchedParmsTry(struct ncclIbNetCommBase *base, int nreqs, int size);
@@ -819,4 +822,3 @@ int IbCastQpSchedGetEffectiveTxNqps(struct ncclIbRequest* req, int *startQpIndex
 ncclResult_t IbCastQpSchedGetRemap(struct ncclIbNetCommBase* base, uint64_t wrId, int qpIndex, struct ncclIbRemapWrId** remap);
 ncclResult_t IbCastQpSchedFreeRemap(struct ncclIbRemapWrId* r);
 #endif
-

@@ -252,7 +252,7 @@ extern "C"
                 _command_line.append(" ").append(argv[i]);
             }
             if(_command_line.length() > 1) _command_line = _command_line.substr(1);
-            tim::set_env(rocprofsys::env_vars::COMMAND_LINE.data(), _command_line, 0);
+            rocprofsys::set_env(rocprofsys::env_vars::COMMAND_LINE, _command_line, 0);
         }
     }
 
@@ -283,7 +283,8 @@ extern "C"
            (!rocprofsys::config::settings_are_configured() &&
             rocprofsys::get_state() < rocprofsys::State::Active))
         {
-            auto _kokkos_profile_lib = tim::get_env<std::string>("KOKKOS_TOOLS_LIBS");
+            auto _kokkos_profile_lib =
+                rocprofsys::get_env<std::string>("KOKKOS_TOOLS_LIBS");
             if(_kokkos_profile_lib.find("librocprof-sys.so") != std::string::npos)
             {
                 auto _maps = tim::procfs::read_maps(tim::process::get_id());
@@ -318,7 +319,7 @@ extern "C"
 
             LOG_DEBUG("Initializing rocprof-sys (standalone)... ");
             auto _mode =
-                tim::get_env<std::string>(rocprofsys::env_vars::MODE.data(), "trace");
+                rocprofsys::get_env<std::string>(rocprofsys::env_vars::MODE, "trace");
             auto _arg0 = (_initialize_arguments.empty()) ? std::string{ "unknown" }
                                                          : _initialize_arguments.at(0);
 

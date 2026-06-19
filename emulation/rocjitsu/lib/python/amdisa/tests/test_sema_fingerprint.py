@@ -25,30 +25,49 @@ SEMA_XML_PATH = os.path.join(_MRISA, 'amdgpu_isa_cdna4.semantics.xml')
 _HAS_SEMA_XML = os.path.isfile(SEMA_XML_PATH)
 
 
-def _make_add_block(name: str, pragma: ExecModel = ExecModel.SCALAR,
-                    tmp_name: str = 'tmp') -> SemaBlock:
+def _make_add_block(
+    name: str, pragma: ExecModel = ExecModel.SCALAR, tmp_name: str = 'tmp'
+) -> SemaBlock:
     """Build a simple S_ADD-like block: tmp = S[0] + S[1]; D[0] = tmp."""
-    s0 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-        SemaNode(SemaNodeKind.ID, id_name='S'),
-        SemaNode(SemaNodeKind.LIT, lit_value='0'),
-    ))
-    s1 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-        SemaNode(SemaNodeKind.ID, id_name='S'),
-        SemaNode(SemaNodeKind.LIT, lit_value='1'),
-    ))
+    s0 = SemaNode(
+        SemaNodeKind.INSTOPERAND,
+        ty=SemaType.B32,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='S'),
+            SemaNode(SemaNodeKind.LIT, lit_value='0'),
+        ),
+    )
+    s1 = SemaNode(
+        SemaNodeKind.INSTOPERAND,
+        ty=SemaType.B32,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='S'),
+            SemaNode(SemaNodeKind.LIT, lit_value='1'),
+        ),
+    )
     add = SemaNode(SemaNodeKind.ADD, ty=SemaType.U32, children=(s0, s1))
-    assign_tmp = SemaNode(SemaNodeKind.ASSIGN, children=(
-        SemaNode(SemaNodeKind.ID, id_name=tmp_name),
-        add,
-    ))
-    d0 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-        SemaNode(SemaNodeKind.ID, id_name='D'),
-        SemaNode(SemaNodeKind.LIT, lit_value='0'),
-    ))
-    assign_dst = SemaNode(SemaNodeKind.ASSIGN, children=(
-        d0,
-        SemaNode(SemaNodeKind.ID, id_name=tmp_name),
-    ))
+    assign_tmp = SemaNode(
+        SemaNodeKind.ASSIGN,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name=tmp_name),
+            add,
+        ),
+    )
+    d0 = SemaNode(
+        SemaNodeKind.INSTOPERAND,
+        ty=SemaType.B32,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='D'),
+            SemaNode(SemaNodeKind.LIT, lit_value='0'),
+        ),
+    )
+    assign_dst = SemaNode(
+        SemaNodeKind.ASSIGN,
+        children=(
+            d0,
+            SemaNode(SemaNodeKind.ID, id_name=tmp_name),
+        ),
+    )
     body = SemaNode(SemaNodeKind.SEQ, children=(assign_tmp, assign_dst))
     return SemaBlock(name, pragma, body)
 
@@ -82,19 +101,32 @@ class TestFingerprint:
 
     def test_different_operation_different_fingerprint(self):
         add_block = _make_add_block('ADD')
-        s0 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-            SemaNode(SemaNodeKind.ID, id_name='S'),
-            SemaNode(SemaNodeKind.LIT, lit_value='0'),
-        ))
-        s1 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-            SemaNode(SemaNodeKind.ID, id_name='S'),
-            SemaNode(SemaNodeKind.LIT, lit_value='1'),
-        ))
+        s0 = SemaNode(
+            SemaNodeKind.INSTOPERAND,
+            ty=SemaType.B32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='S'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0'),
+            ),
+        )
+        s1 = SemaNode(
+            SemaNodeKind.INSTOPERAND,
+            ty=SemaType.B32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='S'),
+                SemaNode(SemaNodeKind.LIT, lit_value='1'),
+            ),
+        )
         sub = SemaNode(SemaNodeKind.SUB, ty=SemaType.U32, children=(s0, s1))
-        body = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='tmp'), sub)),
-        ))
+        body = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(SemaNode(SemaNodeKind.ID, id_name='tmp'), sub),
+                ),
+            ),
+        )
         sub_block = SemaBlock('SUB', ExecModel.SCALAR, body)
         assert fingerprint(add_block) != fingerprint(sub_block)
 
@@ -104,99 +136,182 @@ class TestFingerprint:
         assert fingerprint(a) != fingerprint(b)
 
     def test_different_type_different_fingerprint(self):
-        s0 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-            SemaNode(SemaNodeKind.ID, id_name='S'),
-            SemaNode(SemaNodeKind.LIT, lit_value='0'),
-        ))
-        s1 = SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-            SemaNode(SemaNodeKind.ID, id_name='S'),
-            SemaNode(SemaNodeKind.LIT, lit_value='1'),
-        ))
+        s0 = SemaNode(
+            SemaNodeKind.INSTOPERAND,
+            ty=SemaType.B32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='S'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0'),
+            ),
+        )
+        s1 = SemaNode(
+            SemaNodeKind.INSTOPERAND,
+            ty=SemaType.B32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='S'),
+                SemaNode(SemaNodeKind.LIT, lit_value='1'),
+            ),
+        )
         add_u32 = SemaNode(SemaNodeKind.ADD, ty=SemaType.U32, children=(s0, s1))
         add_f32 = SemaNode(SemaNodeKind.ADD, ty=SemaType.F32, children=(s0, s1))
 
-        body_u32 = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='r'), add_u32)),
-        ))
-        body_f32 = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='r'), add_f32)),
-        ))
+        body_u32 = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(SemaNode(SemaNodeKind.ID, id_name='r'), add_u32),
+                ),
+            ),
+        )
+        body_f32 = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(SemaNode(SemaNodeKind.ID, id_name='r'), add_f32),
+                ),
+            ),
+        )
         a = SemaBlock('A', ExecModel.SCALAR, body_u32)
         b = SemaBlock('B', ExecModel.SCALAR, body_f32)
         assert fingerprint(a) != fingerprint(b)
 
     def test_context_ids_are_hashed(self):
-        body_scc = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='SCC', ty=SemaType.U1),
-                SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U1),
-            )),
-        ))
-        body_vcc = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='VCC', ty=SemaType.U64),
-                SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U64),
-            )),
-        ))
+        body_scc = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='SCC', ty=SemaType.U1),
+                        SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U1),
+                    ),
+                ),
+            ),
+        )
+        body_vcc = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='VCC', ty=SemaType.U64),
+                        SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U64),
+                    ),
+                ),
+            ),
+        )
         a = SemaBlock('A', ExecModel.SCALAR, body_scc)
         b = SemaBlock('B', ExecModel.SCALAR, body_vcc)
         assert fingerprint(a) != fingerprint(b)
 
     def test_operand_index_is_hashed(self):
         def _make_read(idx: str):
-            return SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-                SemaNode(SemaNodeKind.ID, id_name='S'),
-                SemaNode(SemaNodeKind.LIT, lit_value=idx),
-            ))
-        body_0 = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='r'), _make_read('0'))),
-        ))
-        body_1 = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='r'), _make_read('1'))),
-        ))
+            return SemaNode(
+                SemaNodeKind.INSTOPERAND,
+                ty=SemaType.B32,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='S'),
+                    SemaNode(SemaNodeKind.LIT, lit_value=idx),
+                ),
+            )
+
+        body_0 = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(SemaNode(SemaNodeKind.ID, id_name='r'), _make_read('0')),
+                ),
+            ),
+        )
+        body_1 = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(SemaNode(SemaNodeKind.ID, id_name='r'), _make_read('1')),
+                ),
+            ),
+        )
         a = SemaBlock('A', ExecModel.SCALAR, body_0)
         b = SemaBlock('B', ExecModel.SCALAR, body_1)
         assert fingerprint(a) != fingerprint(b)
 
     def test_arrayslice_bounds_are_hashed(self):
         def _make_slice(hi: str, lo: str):
-            return SemaNode(SemaNodeKind.ARRAYSLICE, children=(
-                SemaNode(SemaNodeKind.ID, id_name='SDATA'),
-                SemaNode(SemaNodeKind.LIT, lit_value=hi),
-                SemaNode(SemaNodeKind.LIT, lit_value=lo),
-            ))
-        body_lo = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='r'), _make_slice('31', '0'))),
-        ))
-        body_hi = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='r'), _make_slice('63', '32'))),
-        ))
+            return SemaNode(
+                SemaNodeKind.ARRAYSLICE,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='SDATA'),
+                    SemaNode(SemaNodeKind.LIT, lit_value=hi),
+                    SemaNode(SemaNodeKind.LIT, lit_value=lo),
+                ),
+            )
+
+        body_lo = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='r'),
+                        _make_slice('31', '0'),
+                    ),
+                ),
+            ),
+        )
+        body_hi = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='r'),
+                        _make_slice('63', '32'),
+                    ),
+                ),
+            ),
+        )
         a = SemaBlock('A', ExecModel.SCALAR, body_lo)
         b = SemaBlock('B', ExecModel.SCALAR, body_hi)
         assert fingerprint(a) != fingerprint(b)
 
     def test_general_literal_not_hashed(self):
         def _make_cmp(lit_val: str):
-            return SemaNode(SemaNodeKind.GE, children=(
-                SemaNode(SemaNodeKind.ID, id_name='tmp', ty=SemaType.U64),
-                SemaNode(SemaNodeKind.LIT, lit_value=lit_val, ty=SemaType.U64),
-            ))
-        body_a = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='SCC'),
-                _make_cmp('4294967296'))),
-        ))
-        body_b = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='SCC'),
-                _make_cmp('999999'))),
-        ))
+            return SemaNode(
+                SemaNodeKind.GE,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='tmp', ty=SemaType.U64),
+                    SemaNode(SemaNodeKind.LIT, lit_value=lit_val, ty=SemaType.U64),
+                ),
+            )
+
+        body_a = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='SCC'),
+                        _make_cmp('4294967296'),
+                    ),
+                ),
+            ),
+        )
+        body_b = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='SCC'),
+                        _make_cmp('999999'),
+                    ),
+                ),
+            ),
+        )
         a = SemaBlock('A', ExecModel.SCALAR, body_a)
         b = SemaBlock('B', ExecModel.SCALAR, body_b)
         assert fingerprint(a) == fingerprint(b)
@@ -209,17 +324,36 @@ class TestFingerprint:
 
     def test_call_name_is_hashed(self):
         def _make_call(name: str):
-            return SemaNode(SemaNodeKind.CALL, call_name=name, children=(
-                SemaNode(SemaNodeKind.ID, id_name=name),
-            ))
-        body_a = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='r'), _make_call('CalcDsAddr'))),
-        ))
-        body_b = SemaNode(SemaNodeKind.SEQ, children=(
-            SemaNode(SemaNodeKind.ASSIGN, children=(
-                SemaNode(SemaNodeKind.ID, id_name='r'), _make_call('CalcFlatAddr'))),
-        ))
+            return SemaNode(
+                SemaNodeKind.CALL,
+                call_name=name,
+                children=(SemaNode(SemaNodeKind.ID, id_name=name),),
+            )
+
+        body_a = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='r'),
+                        _make_call('CalcDsAddr'),
+                    ),
+                ),
+            ),
+        )
+        body_b = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                SemaNode(
+                    SemaNodeKind.ASSIGN,
+                    children=(
+                        SemaNode(SemaNodeKind.ID, id_name='r'),
+                        _make_call('CalcFlatAddr'),
+                    ),
+                ),
+            ),
+        )
         a = SemaBlock('A', ExecModel.SCALAR, body_a)
         b = SemaBlock('B', ExecModel.SCALAR, body_b)
         assert fingerprint(a) != fingerprint(b)
@@ -257,8 +391,9 @@ class TestBuildEquivalenceMap:
         assert result == {'ADD': None}
 
     def test_stubs_map_to_none(self):
-        stub = SemaBlock('NOP', ExecModel.UNKNOWN,
-                         SemaNode(SemaNodeKind.SEQ, children=()))
+        stub = SemaBlock(
+            'NOP', ExecModel.UNKNOWN, SemaNode(SemaNodeKind.SEQ, children=())
+        )
         src = {'NOP': stub}
         dst = {'NOP': stub}
         result = build_equivalence_map(src, dst)
@@ -285,12 +420,12 @@ class TestSemaXmlFingerprinting:
     @pytest.fixture(scope='class')
     def blocks(self):
         from amdisa.sema_parser import parse_semantics_xml
+
         return parse_semantics_xml(SEMA_XML_PATH)
 
     def test_self_equivalence(self, blocks):
         result = build_equivalence_map(blocks, blocks)
-        non_stub = {k: v for k, v in result.items()
-                    if not blocks[k].is_empty}
+        non_stub = {k: v for k, v in result.items() if not blocks[k].is_empty}
         matched = sum(1 for v in non_stub.values() if v is not None)
         assert matched == len(non_stub)
 
