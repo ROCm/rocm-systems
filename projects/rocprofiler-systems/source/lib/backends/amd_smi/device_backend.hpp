@@ -76,11 +76,10 @@ public:
     }
 
     // amdsmi_get_temp_metric() returns the same std::int64_t as SMI API.
-    // (whole °C after library / 1000 scaling). Failures are non-success statuses ->
-    // std::runtime_error via check(). gpu::metrics stores the same width so values are
-    // not narrowed or reinterpreted at this boundary (including sub-zero °C if the stack
-    // ever reports it).
-    [[nodiscard]] std::int64_t get_temperature_value(
+    // Not narrowed or reinterpreted at this boundary to std::uint32_t
+    // (including sub-zero °C if the stack ever reports it).
+    // Failures are non-success statuses -> std::runtime_error via check().
+    [[nodiscard]] std::int64_t get_temperature(
         amdsmi_temperature_type_t sensor_type) const
     {
         std::int64_t temperature = 0;
@@ -92,12 +91,12 @@ public:
 
     [[nodiscard]] std::int64_t get_hotspot_temperature() const
     {
-        return get_temperature_value(AMDSMI_TEMPERATURE_TYPE_HOTSPOT);
+        return get_temperature(AMDSMI_TEMPERATURE_TYPE_HOTSPOT);
     }
 
     [[nodiscard]] std::int64_t get_edge_temperature() const
     {
-        return get_temperature_value(AMDSMI_TEMPERATURE_TYPE_EDGE);
+        return get_temperature(AMDSMI_TEMPERATURE_TYPE_EDGE);
     }
 
     [[nodiscard]] std::uint64_t get_raw_sdma_usage() const
