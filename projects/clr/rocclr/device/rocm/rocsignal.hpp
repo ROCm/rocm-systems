@@ -32,6 +32,7 @@ class Signal : public device::Signal {
 class IpcSignal : public device::Signal {
  private:
   hsa_signal_t signal_;
+  void* gpu_ptr_ = nullptr;  // GPU-accessible pointer from memory_lock (if needed)
 
  public:
   IpcSignal() { signal_.handle = 0; }
@@ -43,8 +44,12 @@ class IpcSignal : public device::Signal {
   void Reset(uint64_t value) override;
   uint64_t Load() override;
   bool IpcExport(void* handle, size_t handle_size) override;
-  bool IpcImport(const void* handle, size_t handle_size) override;
+  bool IpcImport(const void* handle, size_t handle_size,
+                 const amd::Device* dev = nullptr) override;
   void* getHandle() override { return reinterpret_cast<void*>(signal_.handle); }
+  void* getGpuHandle() override {
+    return gpu_ptr_ ? gpu_ptr_ : reinterpret_cast<void*>(signal_.handle);
+  }
 };
 
 };  // namespace amd::roc
