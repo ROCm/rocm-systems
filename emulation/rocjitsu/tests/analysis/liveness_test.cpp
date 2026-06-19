@@ -421,6 +421,62 @@ std::vector<const Instruction *> insts_of(BasicBlock &block) {
   return out;
 }
 
+// Decode real CDNA4 instruction words into a CFG with the production decoder.
+std::vector<std::unique_ptr<BasicBlock>> build_cdna4_blocks(std::vector<uint32_t> words) {
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  return BasicBlock::build(co, *decoder);
+}
+
+// Full end-to-end on real decoded instructions: `s_mov_b64 exec, -1` makes EXEC
+// provably all-ones, so the following EXEC-masked VGPR def overwrites every lane
+// and becomes a real kill — the defined VGPR is dead immediately before it. This
+// exercises the whole chain: decode -> to_register_ref (EXEC dest) + const_value
+// (-1 -> all-ones) -> ExecMaskAnalysis (Full) -> liveness kill.
+TEST(ExecFlagsRealDecode, Cdna4SMovExecAllOnesPromotesVgprDefToKill) {
+  // s_mov_b64 exec, -1 ; v_mov_b32 v0, s0 ; v_mov_b32 v2, v0 ; s_endpgm
+  auto blocks = build_cdna4_blocks({0xBEFE01C1u, 0x7E000200u, 0x7E040300u, 0xBF810000u});
+  ASSERT_FALSE(blocks.empty());
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 3u);
+
+  // Sanity-check the decode so an encoding typo fails loudly.
+  EXPECT_EQ(insts[0]->mnemonic(), "s_mov_b64");
+  const Instruction &def = *insts[1];
+  EXPECT_TRUE(def.mnemonic().starts_with("v_mov_b32"));
+  ASSERT_NE(def.dst_operand(0), nullptr);
+  auto def_ref = def.dst_operand(0)->to_register_ref();
+  ASSERT_TRUE(def_ref.has_value());
+  EXPECT_EQ(*def_ref, (RegisterRef{RegClass::VGPR, 0, 1}));
+
+  // EXEC is provably full at the def, so its vector write is a real kill.
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+  EXPECT_EQ(exec.before(def), ExecState::Full);
+
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+}
+
+// Contrast: without the all-ones EXEC write, EXEC stays Unknown at the def, so
+// the same vector def is not promoted to a kill and the VGPR remains live.
+TEST(ExecFlagsRealDecode, Cdna4VgprDefStaysLiveWithoutFullExec) {
+  // v_mov_b32 v0, s0 ; v_mov_b32 v2, v0 ; s_endpgm
+  auto blocks = build_cdna4_blocks({0x7E000200u, 0x7E040300u, 0xBF810000u});
+  ASSERT_FALSE(blocks.empty());
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  const Instruction &def = *insts[0];
+  EXPECT_TRUE(def.mnemonic().starts_with("v_mov_b32"));
+
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+  EXPECT_EQ(exec.before(def), ExecState::Unknown);
+
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+}
+
 TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
   // exec=all-ones; v0=...; exec=narrow; v0=...; end
   auto blocks =
