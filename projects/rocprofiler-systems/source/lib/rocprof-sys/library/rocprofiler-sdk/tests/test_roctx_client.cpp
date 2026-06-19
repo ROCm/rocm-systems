@@ -561,7 +561,9 @@ MATCHER_P2(IsAnnotation, key, value, "")
            std::get<std::uint64_t>(arg.value) == static_cast<std::uint64_t>(value);
 }
 
-using mock_marker_writer = rocprofsys::rocprofiler_sdk::marker_writer<mock_marker_policy>;
+using mock_marker_writer =
+    rocprofsys::rocprofiler_sdk::marker_writer<rocprofsys::rocprofiler_sdk::backend,
+                                               mock_marker_policy>;
 
 rocprofiler_callback_tracing_record_t
 make_record(std::uint64_t thread_id, std::uint64_t corr_internal,

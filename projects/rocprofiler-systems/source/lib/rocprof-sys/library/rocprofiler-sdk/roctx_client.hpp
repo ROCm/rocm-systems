@@ -60,10 +60,10 @@ private:
 
     using marker_range_stack_t = std::vector<marker_range_entry>;
 
-    rocprofiler_context_id_t                m_ctx{ 0 };
-    roctx_client_config                     m_config;
-    marker_writer<MarkerWriterPolicy>       m_writer;
-    std::shared_ptr<control::trace_control> m_controller{};
+    rocprofiler_context_id_t                   m_ctx{ 0 };
+    roctx_client_config                        m_config;
+    marker_writer<backend, MarkerWriterPolicy> m_writer;
+    std::shared_ptr<control::trace_control>    m_controller{};
 
     static thread_local marker_range_stack_t m_pushed_ranges;
     static thread_local marker_range_stack_t m_started_ranges;

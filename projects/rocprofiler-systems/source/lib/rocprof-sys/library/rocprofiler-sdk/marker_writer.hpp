@@ -3,11 +3,10 @@
 
 #pragma once
 
-#include "core/categories.hpp"
+// All rocprofiler-sdk headers come transitively through the backend shim.
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
-
-#include <rocprofiler-sdk/fwd.h>
+#include "library/rocprofiler-sdk/fwd.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -61,7 +60,8 @@ struct default_marker_policy
 /// Delegates raw API calls to the policy, which can be mocked for testing.
 ///
 /// @tparam MarkerWriterPolicy Compile-time policy providing thin API wrappers.
-template <typename MarkerWriterPolicy = default_marker_policy>
+/// @tparam Backend            SDK backend policy (controls SDK type aliases).
+template <typename Backend, typename MarkerWriterPolicy = default_marker_policy>
 class marker_writer
 {
 public:
@@ -90,8 +90,8 @@ public:
     }
 
     void write_end(std::string_view name, std::uint64_t begin_ts, std::uint64_t end_ts,
-                   const std::string&                    args,
-                   rocprofiler_callback_tracing_record_t record) const
+                   const std::string&                        args,
+                   typename Backend::callback_tracing_record record) const
     {
         if(m_use_timemory)
         {
