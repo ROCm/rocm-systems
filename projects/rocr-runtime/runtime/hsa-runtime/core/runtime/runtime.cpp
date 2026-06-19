@@ -908,7 +908,7 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
       .ui32 = {.kmtHandle = ((flags & HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != 0)}};
 
   auto status =
-      hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags);
+      HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags));
   if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   assert(num_agents > 0);
@@ -1398,7 +1398,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   int dmabuf_fd;
   uint64_t dmabufOffset;
 
-  auto err = hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &dmabufOffset);
+  auto err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &dmabufOffset));
   assert(dmabufOffset/pageSize == fragOffset && "DMA Buf inconsistent with pointer offset.");
   if (err != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
@@ -3665,7 +3665,7 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
 
         int fd;
         uint64_t off;
-        hsa_status_t err = (hsaKmtExportDMABufHandle(const_cast<void*>(ptr), size, &fd, &off) == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+        hsa_status_t err = (HSAKMT_CALL(hsaKmtExportDMABufHandle(const_cast<void*>(ptr), size, &fd, &off)) == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
         if (err != HSA_STATUS_SUCCESS) {
           assert((err != HSA_STATUS_ERROR_INVALID_ARGUMENT) &&
                  "Thunk does not recognize an expected allocation.");
