@@ -403,6 +403,11 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
 
   // Return false, so the callback will not be called again for this signal
   gpu->QueuedAsyncHandlers()--;
+  // If we are the last owner, defer the queue destroy: ~AqlQueue would block on
+  // this async thread waiting for a handler only this thread can dispatch.
+  if (gpu->referenceCount() == 1) {
+    gpu->SetReleaseDeferred(true);
+  }
   gpu->release();
   return false;
 }
@@ -2038,7 +2043,8 @@ VirtualGPU::~VirtualGPU() {
   }
 
   if (gpu_queue_ != nullptr) {
-    roc_device_.releaseQueue(gpu_queue_, cuMask_, cooperative_);
+    roc_device_.releaseQueue(gpu_queue_, cuMask_, cooperative_, /*managed=*/false,
+                             /*defer_destroy=*/releaseDeferred_);
   }
 
   if (hostcallBuffer_) {

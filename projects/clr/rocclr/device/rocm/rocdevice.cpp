@@ -221,6 +221,18 @@ Device::~Device() {
   delete xferQueue_;
   xferQueue_ = nullptr;
 
+  // Drain queues whose destroy was deferred from the async thread; safe here on
+  // the main thread before hsa_shut_down.
+  {
+    std::scoped_lock<std::mutex> lock(deferredQueueDestroyLock_);
+    for (hsa_queue_t* queue : deferredQueueDestroy_) {
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting deferred hardware queue %p ",
+              queue->base_address);
+      Hsa::queue_destroy(queue);
+    }
+    deferredQueueDestroy_.clear();
+  }
+
   for (auto& it : queuePool_) {
     for (auto qIter = it.begin(); qIter != it.end();) {
       hsa_queue_t* queue = qIter->first;
@@ -3438,7 +3450,7 @@ bool Device::ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority 
 
 // ================================================================================================
 void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMask, bool coop_queue,
-                          bool managed) {
+                          bool managed, bool defer_destroy) {
   // Defer cleanup operations outside the lock
   {  // Lock
     amd::ScopedLock l(active_queue_access_);
@@ -3462,9 +3474,19 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
   // hsa queues with cumask set and coop queues are not being reused. Hence, if the app uses such
   // queues, we need to destroy them when the queue is released.
   if (!cuMask.empty() || coop_queue) {
-    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
-            queue->base_address);
-    Hsa::queue_destroy(queue);
+    // Only non-coop CU-masked queues hit the blocking ~AqlQueue and can deadlock; coop queues
+    // are recycled synchronously via GWSRelease, so never defer them.
+    if (defer_destroy && !coop_queue) {
+      // Called from the async thread: defer the blocking destroy to ~Device to avoid self-deadlock.
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deferring CG enabled hardware queue %p destroy",
+              queue->base_address);
+      std::scoped_lock<std::mutex> lock(deferredQueueDestroyLock_);
+      deferredQueueDestroy_.push_back(queue);
+    } else {
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
+              queue->base_address);
+      Hsa::queue_destroy(queue);
+    }
   }
 }
 

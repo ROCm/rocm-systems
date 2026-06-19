@@ -237,7 +237,7 @@ hipError_t ExecutionCtx::recordEvent(hipEvent_t event) {
 
   // For single stream, use the existing addMarker path directly.
   if (snapshot.size() == 1) {
-    hipError_t err = e->addMarker(snapshot[0], nullptr, true);
+    hipError_t err = e->addMarker(snapshot[0], nullptr, !hip::Event::kBatchFlush);
     snapshot[0]->release();
     return err;
   }

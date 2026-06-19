@@ -27,8 +27,9 @@
 
 #include <atomic>
 #include <iostream>
-#include <vector>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 /*! \addtogroup HSA
  *  @{
@@ -578,7 +579,7 @@ class Device : public NullDevice {
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
-                    bool managed = false);
+                    bool managed = false, bool defer_destroy = false);
 
   hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority,
                                    hsa_queue_t* preferred = nullptr,
@@ -792,6 +793,10 @@ class Device : public NullDevice {
 
  public:
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
+
+  //! Queues with destroy deferred from an async-handler-driven ~VirtualGPU, drained in ~Device.
+  std::vector<hsa_queue_t*> deferredQueueDestroy_;
+  std::mutex deferredQueueDestroyLock_;
 
   //! Returns the valid SDMA engine bitmask for the given operation type.
   uint32_t GetSdmaValidMask(HwQueueEngine engine_type) const {
