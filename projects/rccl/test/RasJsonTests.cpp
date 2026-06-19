@@ -49,18 +49,18 @@ static int pickFreePort() {
 
 // Connects to the local RAS server and runs one STATUS query in the requested
 // format ("text" or "json"). Returns the entire response body, or an empty
-// string on connection/protocol failure. Uses getaddrinfo so it works whether
-// the RAS listener bound to IPv4 (127.0.0.1) or IPv6 (::1).
+// string on connection/protocol failure. Uses 127.0.0.1 (IPv4 loopback) to
+// match the address family used by pickFreePort() and NCCL_RAS_ADDR.
 static std::string queryRas(const std::string& format, const std::string& portStrIn) {
   int sock = -1;
   addrinfo hints{};
-  hints.ai_family   = AF_UNSPEC;
+  hints.ai_family   = AF_INET;
   hints.ai_socktype = SOCK_STREAM;
   const char* portStr = portStrIn.c_str();
 
   for (int attempt = 0; attempt < 20 && sock < 0; ++attempt) {
     addrinfo* results = nullptr;
-    if (::getaddrinfo("localhost", portStr, &hints, &results) == 0) {
+    if (::getaddrinfo("127.0.0.1", portStr, &hints, &results) == 0) {
       for (addrinfo* ai = results; ai != nullptr; ai = ai->ai_next) {
         int s = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (s < 0) continue;
@@ -108,7 +108,11 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
   int port = pickFreePort();
   ASSERT_GT(port, 0) << "Could not allocate a free TCP port for RAS";
   std::string portStr = std::to_string(port);
-  std::string rasAddr = "localhost:" + portStr;
+  // Use 127.0.0.1 explicitly (not "localhost") so the RAS server binds on the
+  // same IPv4 address that pickFreePort() probed.  On Ubuntu 24.04, resolving
+  // "localhost" via getaddrinfo(AF_UNSPEC) returns ::1 first, which would cause
+  // the RAS bind() to target an IPv6 port that pickFreePort() never checked.
+  std::string rasAddr = "127.0.0.1:" + portStr;
 
   RUN_ISOLATED_TEST_WITH_ENV(
       "RasJson_JsonFormatIsSupportedAndDistinctFromText",
