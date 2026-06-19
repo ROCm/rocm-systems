@@ -31,7 +31,6 @@ from rocm_kpack.wheel_splitter import (
     parse_wheel_identity,
 )
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -244,6 +243,19 @@ class TestGenerateDeviceMetadata:
         # gfx12_0 becomes gfx12-0 in dist name (underscore to hyphen)
         assert "Name: amd-torch-device-gfx12-0" in metadata
 
+    def test_gfx11_sub_family_level(self):
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.1",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.1.dist-info",
+        )
+        metadata = generate_device_metadata(identity, "gfx110x", "amd-torch-device", [])
+        assert "Name: amd-torch-device-gfx110x" in metadata
+        assert "Summary: AMD device kernels (RDNA3)" in metadata
+
     def test_with_device_requires_dist(self):
         identity = WheelIdentity(
             name="torch",
@@ -344,7 +356,13 @@ class TestBundleKeyToDistName:
         )
 
     def test_sub_family_level(self):
-        # Underscore in bundle key becomes hyphen in dist name
+        assert (
+            _bundle_key_to_dist_name("amd-torch-device", "gfx110x")
+            == "amd-torch-device-gfx110x"
+        )
+
+    def test_structural_sub_family_level(self):
+        # Underscore in bundle key becomes hyphen in dist name.
         assert (
             _bundle_key_to_dist_name("amd-torch-device", "gfx12_0")
             == "amd-torch-device-gfx12-0"
@@ -448,7 +466,7 @@ class TestRewriteHostMetadata:
     def test_chain_with_family_wheel(self, tmp_path: Path):
         staging, identity = self._make_host_staging(tmp_path)
         splitter = self._make_splitter()
-        # gfx1100 chain: gfx1100 -> gfx11_0 -> gfx11
+        # gfx1100 chain: gfx1100 -> gfx110x -> gfx11
         # If gfx11 and gfx1100 both have device wheels:
         splitter._rewrite_host_metadata(staging, identity, {"gfx1100", "gfx11"})
 
@@ -469,6 +487,25 @@ class TestRewriteHostMetadata:
         )
         assert (
             'Requires-Dist: amd-torch-device-gfx1100 == 2.10.0+rocm7.1; extra == "device-all"'
+            in metadata
+        )
+
+    def test_chain_with_gfx110x_wheel(self, tmp_path: Path):
+        staging, identity = self._make_host_staging(tmp_path)
+        splitter = self._make_splitter()
+        splitter._rewrite_host_metadata(staging, identity, {"gfx1100", "gfx110x"})
+
+        metadata = (staging / identity.dist_info_name / "METADATA").read_text()
+        assert (
+            'Requires-Dist: amd-torch-device-gfx1100 == 2.10.0+rocm7.1; extra == "device-gfx1100"'
+            in metadata
+        )
+        assert (
+            'Requires-Dist: amd-torch-device-gfx110x == 2.10.0+rocm7.1; extra == "device-gfx1100"'
+            in metadata
+        )
+        assert (
+            'Requires-Dist: amd-torch-device-gfx110x == 2.10.0+rocm7.1; extra == "device-all"'
             in metadata
         )
 
