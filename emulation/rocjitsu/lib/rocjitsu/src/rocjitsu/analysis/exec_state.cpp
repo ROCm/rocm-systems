@@ -33,7 +33,7 @@ enum class ExecWrite {
     const Operand *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
-    auto ref = op->to_register_ref(); 
+    auto ref = op->to_register_ref();
     if (ref && ref->cls == RegClass::EXEC)
       return true;
   }
