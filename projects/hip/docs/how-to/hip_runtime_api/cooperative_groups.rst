@@ -476,7 +476,7 @@ With each group type, the synchronization requires using the correct cooperative
       multi_grid_group multi_grid = this_multi_grid();
       multi_grid.sync();
 
-.. _scan_operations
+.. _cg_operations
 Operations
 ==========
 
@@ -501,6 +501,8 @@ All cooperative groups operations receive the same arguments:
   + ``cooperative_groups::bit_or`` (bitwise or)
 
   + ``cooperative_groups::bit_xor`` (bitwise xor)
+
+Overloads without the ``op`` parameter, use cooperative_groups::plus.
 
 Reduce
 ---------
@@ -535,10 +537,11 @@ inclusive_scan
 .. code-block:: cpp
 
   auto inclusive_scan(const TyGroup& group, TyVal&& val, Operation&& op)
+  auto inclusive_scan(const TyGroup& group, TyVal&& val)
 
 Defined in cooperative_groups/hip_scan.h. Performs an inclusive scan using the operation ``op`` on the specified group, contributing the value ``val``. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
 
-The parameters are described here: :ref:`scan_operations`
+The parameters are described here: :ref:`cg_operations`
 
 **Performance**
 On AMD, when ``group`` is of the same size as the warp size and ``T`` primitive type, DPP instructions will be used, which means the operation would be significantly faster than with other group sizes. The primitive types are:
@@ -560,6 +563,7 @@ exclusive_scan
 .. code-block:: cpp
 
   auto exclusive_scan(const TyGroup& group, TyVal&& val, Operation&& op)
+  auto exclusive_scan(const TyGroup& group, TyVal&& val)
 
 Defined in cooperative_groups/hip_scan.h. Performs an exclusive scan using the operation ``op`` on the specified group, contributing the value ``val``. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
 
@@ -604,7 +608,6 @@ Unsupported NVIDIA CUDA features
 HIP doesn't support the following NVIDIA CUDA optional headers:
 
 * ``cooperative_groups/memcpy_async.h``
-* ``cooperative_groups/scan.h``
 
 HIP doesn't support the following CUDA class in ``cooperative_groups`` namespace:
 
