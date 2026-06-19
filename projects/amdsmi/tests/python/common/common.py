@@ -835,11 +835,9 @@ class Common:
                     ret = amdsmi.amdsmi_get_gpu_virtualization_mode(gpu)
                     mode_name = self.VIRTUALIZATION_MODE_MAP.get(ret["mode"], "UNKNOWN")
                     self.virt_mode.append({"mode": mode_name})
-                except amdsmi.AmdSmiLibraryException as e:
-                    if self.verbose > VERBOSITY_QUIET:
-                        print(
-                            f"In class Common, Cannot get virtualization mode information for gpu {gpu}, {e}"
-                        )
+                except amdsmi.AmdSmiLibraryException:
+                    # Virtualization mode is not supported on every ASIC; record
+                    # UNKNOWN silently (it is still surfaced via print_device_header).
                     self.virt_mode.append({"mode": "UNKNOWN"})
 
                 # Get asic info
@@ -934,7 +932,7 @@ class Common:
 
     def get_error_code_from_name(self, error_code_name):
         error_code = self.get_dict_key_from_value(error_code_name, self.error_map)
-        if error_code == None:
+        if error_code is None:
             error_code = -1
         return error_code
 
