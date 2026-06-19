@@ -36,8 +36,12 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
 #define CUPFN(symbol) pfn_##symbol
 #endif
 
+// Call sites go through pfn_##cmd so the (optional, weakly-linked)
+// hsa_amd_portable_export_dmabuf stays gated by its function pointer and is not
+// referenced as a symbol in every consumer TU. hsa_status_string is a required
+// HSA entry point and is called directly.
 #define HSACHECK(cmd) do {				      \
-    hsa_status_t err = cmd;				      \
+    hsa_status_t err = pfn_##cmd;				      \
     if( err != HSA_STATUS_SUCCESS ) {				      \
       const char *errStr;				      \
       hsa_status_string(err, &errStr);	      \
@@ -47,7 +51,7 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
 } while(false)
 
 #define HSACHECKGOTO(cmd, res, label) do {		      \
-    hsa_status_t err = cmd;				      \
+    hsa_status_t err = pfn_##cmd;				      \
     if( err != HSA_STATUS_SUCCESS ) {				      \
       const char *errStr;				      \
       hsa_status_string(err, &errStr);	      \
