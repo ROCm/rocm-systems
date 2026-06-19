@@ -9,7 +9,6 @@
       "mpi_path": "${MPI_PATH:-$HOME/ompi}"
     },
     "env_variables": {
-      "NCCL_SOCKET_IFNAME": "ens1np0",
       "NCCL_DEBUG": "INFO",
       "NCCL_MNNVL_ENABLE": "0",
       "RCCL_USE_AMD_SMI_LIB": "0",
@@ -18,8 +17,6 @@
     "mpi_args": [
       "--mca pml ob1",
       "--mca btl ^openib",
-      "--mca oob_tcp_if_include 10.210.78.0/22",
-      "--mca btl_tcp_if_include 10.210.78.0/22",
       "--bind-to none"
     ],
     "build_configuration": {
