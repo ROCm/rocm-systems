@@ -414,16 +414,22 @@ def load_pc_sampling_data_per_kernel(
     :param sorting_type: "offset" or "count".
     :param kernel_name: Kernel to filter to, or None for all kernels.
     """
+    kernel_context = f"kernel '{kernel_name}'" if kernel_name else "all kernels"
     pc_samples = tool_data["buffer_records"][
         "pc_sample_host_trap" if method == "host_trap" else "pc_sample_stochastic"
     ]
     if not pc_samples:
-        console_error("PC sampling: can not find pc sample.")
+        console_warning(f"PC sampling: no pc samples found for {kernel_context}.")
+        return pd.DataFrame()
 
     instructions = tool_data["strings"]["pc_sample_instructions"]
     comments = tool_data["strings"]["pc_sample_comments"]
     if not instructions or not comments:
-        console_error("PC sampling: instruction or comment string table is empty.")
+        console_warning(
+            "PC sampling: instruction or comment string table is empty for "
+            f"{kernel_context}."
+        )
+        return pd.DataFrame()
 
     records_df = load_pc_sample_records(tool_data)
     aggregated_df = aggregate_pc_sample_records(
@@ -642,6 +648,7 @@ def load_table_data(
     args: argparse.Namespace,
     dfs_expressions: dict[int, list[str]],
     skip_kernel_top: bool = False,
+    pc_sampling_tool_data: Optional[dict[str, Any]] = None,
 ) -> None:
     """
     - Load data for all "raw_csv_table"
@@ -649,7 +656,7 @@ def load_table_data(
     - Calculate mertric value for all "metric_table"
     """
     if not skip_kernel_top:
-        load_non_mertrics_table(workload, dir_path, args)
+        load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
 
     eval_metric(
         workload.dfs,

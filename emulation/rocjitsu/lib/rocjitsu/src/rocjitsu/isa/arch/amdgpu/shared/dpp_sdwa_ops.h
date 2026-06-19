@@ -30,8 +30,12 @@ namespace amdgpu {
 /// @brief VOP1/VOP2 src0 encoding values that indicate a DPP or SDWA suffix.
 constexpr uint32_t SRC_SDWA = 249;
 constexpr uint32_t SRC_DPP = 250;
+constexpr uint32_t SRC_DPP8_LO = 233;
+constexpr uint32_t SRC_DPP8_HI = 234;
 
 namespace dpp {
+
+inline bool is_src_dpp8(uint32_t src0) { return src0 == SRC_DPP8_LO || src0 == SRC_DPP8_HI; }
 
 /// Row size for DPP operations (16 lanes per row).
 constexpr int ROW_SIZE = 16;
@@ -236,6 +240,27 @@ inline void apply_dpp(Operand *&src0, uint32_t dpp_ctrl, uint32_t row_mask, uint
   for (uint32_t i = 0; i < ws; ++i)
     result[i] = dpp_read(raw, static_cast<int>(i), static_cast<int>(ws), dpp_ctrl, row_mask,
                          bank_mask, bound_ctrl, raw[i]);
+  storage = std::make_unique<DppOperand>(*src0, result, static_cast<int>(ws));
+  src0 = storage.get();
+}
+
+inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
+  uint32_t sel = (lane_sel >> ((lane & 7u) * 3u)) & 7u;
+  return (lane & ~7u) | sel;
+}
+
+inline void apply_dpp8(Operand *&src0, uint32_t lane_sel, std::unique_ptr<DppOperand> &storage,
+                       amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint32_t ws = wf.wf_size();
+  uint32_t vbase = wf.vgpr_alloc().base + src0->encoding_value_;
+  uint32_t raw[64], result[64];
+  for (uint32_t i = 0; i < ws; ++i)
+    raw[i] = cu.read_vgpr(vbase, i);
+  for (uint32_t lane = 0; lane < ws; ++lane) {
+    uint32_t src_lane = dpp8_src_lane(lane, lane_sel);
+    result[lane] = src_lane < ws ? raw[src_lane] : 0u;
+  }
   storage = std::make_unique<DppOperand>(*src0, result, static_cast<int>(ws));
   src0 = storage.get();
 }
