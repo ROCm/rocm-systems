@@ -57,3 +57,24 @@ contract:
   Contract_Runtime_PeekAtLastError_DoesNotClearPreviousError:
     <<: *level_0
     tags: [runtime]
+  Contract_Device_GetProperties_SucceedsForCurrentDevice:
+    <<: *level_0
+    tags: [device]
+  Contract_Device_Name_IsNonEmpty:
+    <<: *level_0
+    tags: [device]
+  Contract_Device_TotalGlobalMem_IsPositive:
+    <<: *level_0
+    tags: [device]
+  Contract_Device_MultiProcessorCount_IsPositive:
+    <<: *level_0
+    tags: [device]
+  Contract_Device_WarpSize_IsPositive:
+    <<: *level_0
+    tags: [device]
+  Contract_Device_GetAttributeWarpSize_MatchesProperties:
+    <<: *level_0
+    tags: [device]
+  Contract_Device_CurrentOrdinal_IsWithinDeviceCount:
+    <<: *level_0
+    tags: [device]
