@@ -2360,9 +2360,8 @@ def main(argv=None):
         )
 
     def validate_selected_regions_conflicts(_args):
-        if (
-            getattr(_args, "selected_regions", False)
-            and getattr(_args, "att_no_intercept", False)
+        if getattr(_args, "selected_regions", False) and getattr(
+            _args, "att_no_intercept", False
         ):
             warning(
                 "--selected-regions does not control --att-no-intercept captures; "
