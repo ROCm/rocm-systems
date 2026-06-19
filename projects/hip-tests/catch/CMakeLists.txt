@@ -406,11 +406,17 @@ add_custom_target(build_tests ALL)
 add_dependencies(build_tests hip_tests_config)
 
 # Tests folder
+# kernels and hipTestMain provide the KERNELS and Main_Object object libraries
+# referenced by hip_add_exe_to_target. They are required by every test
+# executable built through hip_add_exe_to_target (unit, contract, perf, and
+# stress), so add them once when any of those test groups is enabled.
+if(BUILD_UNIT_TESTS OR BUILD_CONTRACT_TESTS OR BUILD_PERF_TESTS OR BUILD_STRESS_TESTS)
+  add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
+  add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
+endif()
 if(BUILD_UNIT_TESTS)
   add_subdirectory(unit ${CATCH_BUILD_DIR}/unit)
   add_subdirectory(ABM ${CATCH_BUILD_DIR}/ABM)
-  add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
-  add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
   add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
   if(UNIX)
     add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
