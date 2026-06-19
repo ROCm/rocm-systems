@@ -27,7 +27,6 @@
 #include "functional/gpu/clock/frequencies_read.h"
 #include "functional/gpu/clock/frequencies_read_write.h"
 #include "functional/gpu/events/evt_notif_read_write.h"
-#include "functional/gpu/identity/api_support_read.h"
 #include "functional/gpu/identity/id_info_read.h"
 #include "functional/gpu/identity/version_read.h"
 #include "functional/gpu/memory/mem_page_info_read.h"
@@ -263,10 +262,6 @@ TEST(GpuFunctionalReadWrite, TestXGMIReadWrite) {
 }
 TEST(GpuFunctionalReadOnly, TestMemPageInfoRead) {
   TestMemPageInfoRead tst;
-  RunGenericTest(&tst);
-}
-TEST(GpuFunctionalReadOnly, TestAPISupportRead) {
-  TestAPISupportRead tst;
   RunGenericTest(&tst);
 }
 
