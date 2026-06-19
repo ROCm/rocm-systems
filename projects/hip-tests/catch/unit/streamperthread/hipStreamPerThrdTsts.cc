@@ -22,6 +22,7 @@
 */
 #include <vector>
 #include <thread>
+#include <atomic>
 #include <chrono>
 #ifdef _WIN32
 #include <Windows.h>
@@ -42,7 +43,7 @@ using namespace cooperative_groups;
 #endif
 
 
-static bool IfTestPassed = false;
+static std::atomic<bool> IfTestPassed{false};
 // kernel
 __global__ void StreamPerThrd(int* Ad, int* Ad1, size_t n, int Pk_Clk, int Wait, int WaitEvnt = 0) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -231,8 +232,6 @@ static void EventSync() {
     // WARN is a thread-unsafe Catch2 macro; use printf from the worker thread.
     printf("Data Mismatch observed!!\n");
     IfTestPassed = false;
-  } else {
-    IfTestPassed = true;
   }
 
   HIP_CHECK_THREAD(hipEventDestroy(start));

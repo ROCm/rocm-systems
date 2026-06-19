@@ -1089,8 +1089,11 @@ class vmm_resize_class {
   void* ptrVmm;
   std::vector<hipMemGenericAllocationHandle_t> vhandle;
   std::vector<size_t> vsize;
-  // When true, use thread-safe check macros (call HIP_CHECK_THREAD_FINALIZE
-  // after joining). Set for objects constructed on worker threads.
+  // When true, the worker-thread-reachable paths (object construction via
+  // allocate_vmm() and free_vmm()) use thread-safe check macros; the caller must
+  // call HIP_CHECK_THREAD_FINALIZE after joining the worker threads. grow_vmm()
+  // is exercised only by single-threaded tests and intentionally keeps the plain
+  // Catch2 macros (it is never invoked from a worker thread).
   bool threadSafe = false;
   // allocate initial VMM memory chunk
   void allocate_vmm(hipDeviceptr_t* ptr, hipDevice_t device, size_t size) {
