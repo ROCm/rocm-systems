@@ -35,9 +35,3 @@ To contribute to the documentation, refer to
 
 You can find licensing information on the
 `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.
-
-
-
-
-
-
