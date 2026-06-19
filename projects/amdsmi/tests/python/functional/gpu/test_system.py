@@ -20,13 +20,10 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """GPU system operations: init, shutdown, reset, status codes, socket handles."""
 
+import ctypes
 import unittest
 
 import common.common as common
-
-# common.common owns path resolution, sys.path setup, and amdsmi loading — borrow the
-# reference so AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution and the stale-package check
-# (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
 from common.common import amdsmi
 
 

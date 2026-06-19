@@ -23,10 +23,6 @@
 import unittest
 
 import common.common as common
-
-# common.common owns path resolution, sys.path setup, and amdsmi loading — borrow the
-# reference so AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution and the stale-package check
-# (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
 from common.common import amdsmi
 
 
@@ -84,22 +80,27 @@ class TestGpuThermal(unittest.TestCase):
                 continue
 
             # Verify max fan speed returns a sensible value
+            fan_speed_max = 0
             msg = f"\t### amdsmi_get_gpu_fan_speed_max(gpu={i}, index=0):"
             try:
                 fan_speed_max = amdsmi.amdsmi_get_gpu_fan_speed_max(gpu, 0)
                 self.common.print(msg, fan_speed_max)
                 self.common.check_ret("", "", self.common.PASS)
-                assert fan_speed_max > 0, f"Max fan speed must be > 0, got {fan_speed_max}"
+                self.assertGreater(
+                    fan_speed_max, 0, f"Max fan speed must be > 0, got {fan_speed_max}"
+                )
                 # Detect gpu_od interface to set appropriate max threshold
                 gpu_bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
                 has_gpu_od = common.has_gpu_od_interface(gpu_bdf)
                 if has_gpu_od:
-                    assert fan_speed_max <= 100, (
-                        f"gpu_od max fan speed must be <= 100, got {fan_speed_max}"
+                    self.assertLessEqual(
+                        fan_speed_max,
+                        100,
+                        f"gpu_od max fan speed must be <= 100, got {fan_speed_max}",
                     )
                 else:
-                    assert fan_speed_max <= 255, (
-                        f"Max fan speed must be <= 255, got {fan_speed_max}"
+                    self.assertLessEqual(
+                        fan_speed_max, 255, f"Max fan speed must be <= 255, got {fan_speed_max}"
                     )
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 if self.common.check_ret(msg, e, self.common.PASS):
