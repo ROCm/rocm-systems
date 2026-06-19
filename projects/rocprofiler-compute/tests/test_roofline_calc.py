@@ -17,7 +17,9 @@ from utils.roofline_calc import (
 )
 
 
-def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
+def run_calc_ai_analyze_with_values(
+    monkeypatch: pytest.MonkeyPatch, metric_values: dict[str, object]
+) -> dict:
     """
     Build mocks and invoke calc_ai_analyze with controlled metric values.
 
@@ -53,8 +55,14 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     pmc_df = pd.DataFrame({"Kernel_Name": [kernel_name]})
 
     def mock_eval_metric(
-        dfs, dfs_type, dfs_expressions, sys_info_row, roofline_peaks, pmc_data, debug
-    ):
+        dfs: dict,
+        dfs_type: dict,
+        dfs_expressions: object,
+        sys_info_row: object,
+        roofline_peaks: object,
+        pmc_data: object,
+        debug: object,
+    ) -> None:
         dfs[402] = pd.DataFrame({
             "Metric": [
                 "AI HBM",
@@ -87,7 +95,9 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     )
 
 
-def test_calc_ai_analyze_replaces_inf_with_zero(monkeypatch):
+def test_calc_ai_analyze_replaces_inf_with_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """np.inf / -np.inf metric values are replaced with 0."""
     result = run_calc_ai_analyze_with_values(
         monkeypatch,
@@ -111,7 +121,9 @@ def test_calc_ai_analyze_replaces_inf_with_zero(monkeypatch):
     assert result["ai_lds"][1] == [100.0]
 
 
-def test_calc_ai_analyze_replaces_none_with_zero(monkeypatch):
+def test_calc_ai_analyze_replaces_none_with_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """None metric values are replaced with 0 and still included in plot points."""
     result = run_calc_ai_analyze_with_values(
         monkeypatch,
@@ -131,7 +143,9 @@ def test_calc_ai_analyze_replaces_none_with_zero(monkeypatch):
     assert result["ai_lds"][0] == [0], "None should be replaced with 0"
 
 
-def test_calc_ai_analyze_valid_values_pass_through(monkeypatch):
+def test_calc_ai_analyze_valid_values_pass_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Normal positive floats pass through unchanged."""
     result = run_calc_ai_analyze_with_values(
         monkeypatch,
@@ -155,7 +169,9 @@ def test_calc_ai_analyze_valid_values_pass_through(monkeypatch):
     assert result["ai_lds"][1] == [100.0]
 
 
-def test_calc_ai_analyze_na_and_empty_replaced(monkeypatch):
+def test_calc_ai_analyze_na_and_empty_replaced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Sentinel values 'N/A' and '' are replaced with 0."""
     result = run_calc_ai_analyze_with_values(
         monkeypatch,
@@ -175,7 +191,7 @@ def test_calc_ai_analyze_na_and_empty_replaced(monkeypatch):
     assert result["ai_lds"][0] == [0], "'' should be replaced with 0"
 
 
-def test_sanitize_ai_value_replaces_invalid_values_with_zero():
+def test_sanitize_ai_value_replaces_invalid_values_with_zero() -> None:
     """Invalid values are replaced with 0."""
     assert sanitize_ai_value(np.inf) == 0
     assert sanitize_ai_value(-np.inf) == 0
@@ -190,32 +206,32 @@ def test_sanitize_ai_value_replaces_invalid_values_with_zero():
 ##############################################################################
 
 
-def test_sanitize_mem_level_all_falls_back_to_hierarchy():
+def test_sanitize_mem_level_all_falls_back_to_hierarchy() -> None:
     """'ALL' results in full memory levels for the model, minus MALL."""
     result = sanitize_mem_level("ALL", "mi210")
     # mi210 has no MALL, so result equals memory_levels directly
     assert result == mi_gpu_specs.get_memory_levels("mi210")
 
 
-def test_sanitize_mem_level_all_list_falls_back_to_hierarchy():
+def test_sanitize_mem_level_all_list_falls_back_to_hierarchy() -> None:
     """['ALL'] behaves the same as 'ALL'."""
     result = sanitize_mem_level(["ALL"], "mi210")
     assert result == mi_gpu_specs.get_memory_levels("mi210")
 
 
-def test_sanitize_mem_level_supported_string():
+def test_sanitize_mem_level_supported_string() -> None:
     """A supported single string level is returned as a single-item list."""
     result = sanitize_mem_level("HBM", "mi210")
     assert result == ["HBM"]
 
 
-def test_sanitize_mem_level_supported_list():
+def test_sanitize_mem_level_supported_list() -> None:
     """A list of supported levels is returned unchanged."""
     result = sanitize_mem_level(["HBM", "L2"], "mi210")
     assert result == ["HBM", "L2"]
 
 
-def test_sanitize_mem_level_unsupported_falls_back_to_hierarchy():
+def test_sanitize_mem_level_unsupported_falls_back_to_hierarchy() -> None:
     """Fully unsupported input falls back to full memory levels, minus MALL."""
     result = sanitize_mem_level("HBM", "rdna35_halo")
     # rdna35_halo memory_levels includes MALL, which is stripped by sanitize_mem_level
@@ -223,20 +239,20 @@ def test_sanitize_mem_level_unsupported_falls_back_to_hierarchy():
     assert result == expected
 
 
-def test_sanitize_mem_level_mixed_filters_unsupported():
+def test_sanitize_mem_level_mixed_filters_unsupported() -> None:
     """Unsupported levels in a mixed list are filtered out."""
     # rdna35_halo supports L0, L1, L2, MALL, LDS — not HBM; MALL is also stripped
     result = sanitize_mem_level(["HBM", "L2"], "rdna35_halo")
     assert result == ["L2"]
 
 
-def test_sanitize_mem_level_mall_is_stripped():
+def test_sanitize_mem_level_mall_is_stripped() -> None:
     """MALL is always removed from results even when explicitly requested."""
     result = sanitize_mem_level("MALL", "rdna35_halo")
     assert "MALL" not in result
 
 
-def test_sanitize_mem_level_vl1d_normalised():
+def test_sanitize_mem_level_vl1d_normalised() -> None:
     """'vL1D' is normalised to 'L1' before filtering."""
     result = sanitize_mem_level("vL1D", "mi210")
     assert result == ["L1"]
@@ -316,14 +332,14 @@ ROOFLINE_DATATYPE_CASES = [
 ]
 
 
-class _MockMspec:
+class MockMspec:
     """Minimal stand-in for MachineSpecs; calc_ceilings only reads gpu_model."""
 
-    def __init__(self, gpu_model=MFMA_GPU_MODEL):
+    def __init__(self, gpu_model: str = MFMA_GPU_MODEL) -> None:
         self.gpu_model = gpu_model
 
 
-def _roofline_parameters(matrix_ops_type="MFMA"):
+def roofline_parameters(matrix_ops_type: str = "MFMA") -> dict[str, object]:
     # matrix_ops_type is "MFMA" for CDNA (MI-series) and "WMMA" for RDNA.
     return {
         "device_id": 0,
@@ -333,7 +349,7 @@ def _roofline_parameters(matrix_ops_type="MFMA"):
     }
 
 
-def _full_benchmark_data():
+def full_benchmark_data() -> dict[str, list[str]]:
     """Benchmark dict with every BW, PEAK_OPS and matrix column populated."""
     data = {col: [str(BW_VALUE)] for col in BW_COLUMNS}
     for col, value in PEAK_VALUES.items():
@@ -347,14 +363,18 @@ def _full_benchmark_data():
     ids=[f"{row[0]}-{row[2]}" for row in ROOFLINE_DATATYPE_CASES],
 )
 def test_calc_ceilings_roofline_datatype(
-    matrix_ops_type, gpu_model, dtype, valu_col, matrix_col
-):
+    matrix_ops_type: str,
+    gpu_model: str,
+    dtype: str,
+    valu_col: str | None,
+    matrix_col: str | None,
+) -> None:
     """Each datatype populates exactly its expected VALU and/or matrix roof."""
     result = calc_ceilings(
-        _roofline_parameters(matrix_ops_type),
+        roofline_parameters(matrix_ops_type),
         dtype,
-        _full_benchmark_data(),
-        _MockMspec(gpu_model),
+        full_benchmark_data(),
+        MockMspec(gpu_model),
     )
 
     if valu_col is None:
@@ -388,41 +408,43 @@ def test_calc_ceilings_roofline_datatype(
     ],
     ids=["MFMA", "WMMA"],
 )
-def test_bf16_uses_f16_matrix_column(matrix_ops_type, gpu_model, matrix_col):
+def test_bf16_uses_f16_matrix_column(
+    matrix_ops_type: str, gpu_model: str, matrix_col: str
+) -> None:
     """BF16 has no VALU roof and reads its matrix peak from the F16 column.
 
     Proves the ``f"F{dtype[2:]}"`` remap: BF16 -> F16 -> {prefix}F16Flops.
     """
     result = calc_ceilings(
-        _roofline_parameters(matrix_ops_type),
+        roofline_parameters(matrix_ops_type),
         "BF16",
-        _full_benchmark_data(),
-        _MockMspec(gpu_model),
+        full_benchmark_data(),
+        MockMspec(gpu_model),
     )
 
     assert result["valu"] == [], "BF16 is matrix-only; no VALU roof expected"
     assert result["matrix_ops"][2] == PEAK_VALUES[matrix_col]
 
 
-def test_fp8_special_mfma_only():
+def test_fp8_special_mfma_only() -> None:
     """FP8 is matrix-only and reads its peak from the dedicated MFMAF8 column.
 
     FP8 is a CDNA/MFMA datatype only.
     """
     result = calc_ceilings(
-        _roofline_parameters("MFMA"), "FP8", _full_benchmark_data(), _MockMspec()
+        roofline_parameters("MFMA"), "FP8", full_benchmark_data(), MockMspec()
     )
 
     assert result["valu"] == [], "FP8 is not a PEAK_OPS datatype; no VALU roof"
     assert result["matrix_ops"][2] == PEAK_VALUES["MFMAF8Flops"]
 
 
-def test_missing_peak_ops_column_returns_empty():
+def test_missing_peak_ops_column_returns_empty() -> None:
     """A PEAK_OPS datatype missing its Flops column returns empty ceilings."""
-    benchmark_data = _full_benchmark_data()
+    benchmark_data = full_benchmark_data()
     del benchmark_data["FP64Flops"]
 
-    result = calc_ceilings(_roofline_parameters(), "FP64", benchmark_data, _MockMspec())
+    result = calc_ceilings(roofline_parameters(), "FP64", benchmark_data, MockMspec())
 
     assert result == GraphPoints.empty().__dict__
 
@@ -436,20 +458,20 @@ def test_missing_peak_ops_column_returns_empty():
     ids=["MFMA", "WMMA"],
 )
 def test_missing_matrix_column_skips_matrix_roof(
-    matrix_ops_type, gpu_model, matrix_col
-):
+    matrix_ops_type: str, gpu_model: str, matrix_col: str
+) -> None:
     """A matrix datatype missing its matrix column emits no matrix roof.
 
     BF16 is matrix-only.
     """
-    benchmark_data = _full_benchmark_data()
+    benchmark_data = full_benchmark_data()
     del benchmark_data[matrix_col]
 
     result = calc_ceilings(
-        _roofline_parameters(matrix_ops_type),
+        roofline_parameters(matrix_ops_type),
         "BF16",
         benchmark_data,
-        _MockMspec(gpu_model),
+        MockMspec(gpu_model),
     )
 
     assert result["valu"] == [], "BF16 has no VALU roof regardless of matrix data"
