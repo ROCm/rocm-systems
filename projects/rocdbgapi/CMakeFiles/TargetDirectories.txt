@@ -1,0 +1,2 @@
+/home/rocm/Desktop/workspace/Github/ROCdbgapi-docs/CMakeFiles/edit_cache.dir
+/home/rocm/Desktop/workspace/Github/ROCdbgapi-docs/CMakeFiles/rebuild_cache.dir
