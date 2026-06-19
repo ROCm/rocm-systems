@@ -1519,6 +1519,17 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(void) {
     PrintMemorySubtestHeader("VA Alias Access Test");
   }
 
+#ifdef ROCRTST_ASAN
+  // The ASAN interceptors do not support multiple VA mappings of one handle,
+  // so skip this subtest under ASAN (bug to be filed to compiler-rt).
+  if (verbosity() > 0) {
+    std::cout << "    Skipping VA alias test under ASAN (vmem aliasing unsupported by interceptors)"
+              << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+  return;
+#endif
+
   bool supp = false;
   ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, (void*)&supp));
   if (!supp) {
