@@ -4035,7 +4035,8 @@ void VirtualGPU::submitNativeFn(amd::NativeFnCommand& cmd) {}
 
 // ================================================================================================
 void VirtualGPU::submitMarker(amd::Marker& vcmd) {
-  if (AMD_DIRECT_DISPATCH || vcmd.profilingInfo().marker_ts_) {
+  if (AMD_DIRECT_DISPATCH || vcmd.profilingInfo().marker_ts_ ||
+      vcmd.ipcCompletionSignal() != nullptr || vcmd.ipcDepSignal() != nullptr) {
     // Make sure VirtualGPU has an exclusive access to the resources
     amd::ScopedLock lock(execution());
     if (vcmd.CpuWaitRequested()) {
@@ -4047,10 +4048,31 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
       flush(vcmd.GetBatchHead());
     } else {
       profilingBegin(vcmd);
-      if (timestamp_ != nullptr) {
-        const Settings& settings = dev().settings();
-        int32_t releaseFlags = vcmd.getCommandEntryScope();
+      const Settings& settings = dev().settings();
+      hsa_signal_t ipc_s{0};
+      if (vcmd.ipcCompletionSignal() != nullptr) {
+        ipc_s.handle = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(vcmd.ipcCompletionSignal()->getGpuHandle()));
+      }
 
+      if (vcmd.ipcDepSignal() != nullptr) {
+        hsa_signal_t s;
+        s.handle = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
+            vcmd.ipcDepSignal()->getGpuHandle()));
+        WaitCompleteSignal(s);
+      } else if (timestamp_ != nullptr || ipc_s.handle != 0) {
+        // IPC event record: if ipc_s is non-zero, first dispatch a NOP barrier with
+        // the IPC signal as completion_signal; it fires when prior work completes.
+        if (ipc_s.handle != 0) {
+          if (settings.barrier_value_packet_) {
+            dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, false, hsa_signal_t{0}, 0,
+                                       0, HSA_SIGNAL_CONDITION_EQ, true, ipc_s);
+          } else {
+            dispatchBarrierPacket(kNopPacketHeader, true, ipc_s);
+          }
+        }
+
+        int32_t releaseFlags = vcmd.getCommandEntryScope();
         if (releaseFlags == Device::CacheState::kCacheStateIgnore) {
           if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
             dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);

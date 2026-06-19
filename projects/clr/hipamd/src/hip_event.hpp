@@ -186,19 +186,23 @@ class EventDD : public Event {
   virtual int64_t time(bool getStartTs) const;
 };
 
-class IPCEvent : public Event {
-  // IPC Events
+/// Emulated IPC event using POSIX shared memory + stream write/wait value.
+/// Used on PAL/Windows path where ROCr IPC signals are unavailable.
+class IPCEventEmulated : public Event {
+  /// IPC event metadata structure
   struct ihipIpcEvent_t {
-    std::string ipc_name_;
-    int ipc_fd_;
-    ihipIpcEventShmem_t* ipc_shmem_;
-    ihipIpcEvent_t() : ipc_name_("dummy"), ipc_fd_(0), ipc_shmem_(nullptr) {}
-    void setipcname(const char* name) { ipc_name_ = std::string(name); }
+    std::string ipc_name_;                //!< Name of the shared memory object for IPC
+    ihipIpcEventShmem_t* ipc_shmem_;      //!< Pointer to mapped IPC shared memory structure
+
+    ihipIpcEvent_t() : ipc_shmem_(nullptr) {
+      ipc_name_.reserve(32);  // Reserve space for typical IPC name "/hip_<pid>_<counter>"
+    }
   };
   ihipIpcEvent_t ipc_evt_;
 
  public:
-  ~IPCEvent() {
+  explicit IPCEventEmulated(uint32_t flags = hipEventInterprocess) : Event(flags) {}
+  ~IPCEventEmulated() override {
     if (ipc_evt_.ipc_shmem_) {
       int owners = --ipc_evt_.ipc_shmem_->owners;
       // Make sure event is synchronized
@@ -213,29 +217,55 @@ class IPCEvent : public Event {
     }
 #if !defined(_MSC_VER)
     // Clean up the POSIX shared memory object
-    if (!ipc_evt_.ipc_name_.empty() && ipc_evt_.ipc_name_ != "dummy") {
+    if (!ipc_evt_.ipc_name_.empty()) {
       shm_unlink(ipc_evt_.ipc_name_.c_str());
     }
 #endif
   }
-  IPCEvent() : Event(hipEventInterprocess) {}
   bool createIpcEventShmemIfNeeded();
-  hipError_t GetHandle(ihipIpcEventHandle_t* handle);
-  hipError_t OpenHandle(ihipIpcEventHandle_t* handle);
-  hipError_t synchronize();
-  hipError_t query();
+  hipError_t GetHandle(ihipIpcEventHandle_t* handle) override;
+  hipError_t OpenHandle(ihipIpcEventHandle_t* handle) override;
+  hipError_t synchronize() override;
+  hipError_t query() override;
 
-  hipError_t streamWait(hip::Stream* stream, uint flags);
+  hipError_t streamWait(hip::Stream* stream, uint flags) override;
 
   hipError_t recordCommand(amd::Command*& command, amd::HostQueue* queue, uint32_t flags = 0,
                            bool batch_flush = true) override;
-  hipError_t enqueueRecordCommand(hip::Stream* stream, amd::Command* command);
+  hipError_t enqueueRecordCommand(hip::Stream* stream, amd::Command* command) override;
 };
 
 
 struct CallbackData {
   int previous_read_index;
   hip::ihipIpcEventShmem_t* shmem;
+};
+
+/// True IPC event backed by a device::Signal with IPC capability.
+/// On ROCm, this uses ROCr IPC signals
+/// Record dispatches a standard barrier with an internal tracking signal, then
+/// registers an async handler that sets the IPC signal to 0 when work completes.
+/// StreamWait dispatches a barrier with the IPC signal as dep_signal;
+/// the GPU waits until the signal reaches 0 before proceeding.
+class IPCEvent : public Event {
+  amd::device::Signal* ipc_signal_;
+
+ public:
+  explicit IPCEvent(uint32_t flags = hipEventInterprocess)
+      : Event(flags), ipc_signal_(nullptr) {}
+  ~IPCEvent() override;
+
+  hipError_t GetHandle(ihipIpcEventHandle_t* handle) override;
+  hipError_t OpenHandle(ihipIpcEventHandle_t* handle) override;
+  hipError_t synchronize() override;
+  hipError_t query() override;
+  hipError_t streamWait(hip::Stream* stream, uint flags) override;
+  hipError_t recordCommand(amd::Command*& command, amd::HostQueue* queue, uint32_t flags = 0,
+                           bool batch_flush = true) override;
+  hipError_t enqueueRecordCommand(hip::Stream* stream, amd::Command* command) override;
+
+ private:
+  hipError_t createIpcSignalIfNeeded();
 };
 }  // namespace hip
 

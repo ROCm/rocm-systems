@@ -289,7 +289,15 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
   if (!illegalFlags) {
     hip::Event* e = nullptr;
     if (flags & hipEventInterprocess) {
-      e = new hip::IPCEvent();
+      auto* dev = g_devices[hip::getCurrentDevice()->deviceId()]->devices()[0];
+      // Probe whether the device supports IPC signals
+      auto* probe = dev->createIpcSignal();
+      if (probe != nullptr) {
+        delete probe;
+        e = new hip::IPCEvent(flags);
+      } else {
+        e = new hip::IPCEventEmulated(flags);
+      }
     } else {
       if (AMD_DIRECT_DISPATCH) {
         e = new hip::EventDD(flags);
@@ -312,6 +320,44 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
     return hipErrorInvalidValue;
   }
   return hipSuccess;
+}
+
+// ================================================================================================
+// Create an IPC event of a specific implementation type (ROCr or Emulated).
+// Used by hipIpcOpenEventHandle to match the opener to the exporter's type.
+hipError_t ihipCreateIpcEventByType(hipEvent_t* event, ihipIpcEventHandleType type) {
+  constexpr uint32_t kIpcEventFlags = hipEventDisableTiming | hipEventInterprocess;
+
+  hip::Event* e = nullptr;
+  switch (type) {
+    case kIpcEventHandleROCr:
+      e = new hip::IPCEvent(kIpcEventFlags);
+      break;
+    case kIpcEventHandleEmulated:
+      e = new hip::IPCEventEmulated(kIpcEventFlags);
+      break;
+    default:
+      return hipErrorInvalidValue;
+  }
+
+  if (e == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+
+  *event = reinterpret_cast<hipEvent_t>(e);
+  std::unique_lock lock(hip::eventSetLock);
+  hip::eventSet.insert(*event);
+  return hipSuccess;
+}
+
+// ================================================================================================
+// Destroy an event created by ihipCreateIpcEventByType (removes from eventSet + deletes).
+void ihipDestroyIpcEvent(hipEvent_t event) {
+  if (event == nullptr) return;
+  std::unique_lock lock(hip::eventSetLock);
+  hip::eventSet.erase(event);
+  lock.unlock();
+  delete reinterpret_cast<hip::Event*>(event);
 }
 
 // ================================================================================================
