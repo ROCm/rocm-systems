@@ -7,10 +7,7 @@
 Building ROCdbgapi
 -------------------
 
-This topic provides information required to build and install ROCdbgapi.
-
-System requirements
-====================
+To build the ROCdbgapi library, ensure your system includes the following prerequisites:
 
 * AMD ROCm-supported platform. See the list of `supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
 
@@ -50,7 +47,7 @@ System requirements
 
 .. note::
 
-   For OS-specific issues, see :ref:`troubleshooting`.
+     The ``doxygen`` 1.8.14 installed by RHEL 8.1 has a bug that prevents PDF creation. To avoid this issue, build ``doxygen`` 1.8.11 from source.
 
 An example command line to build the ROCdbgapi library on Linux:
 
@@ -115,12 +112,3 @@ The following packages provide ``/usr/share/libdrm/amdgpu.ids``:
 - RHEL: ``libdrm``
 
 - Debian and Ubuntu: ``libdrm-common``
-
-.. _troubleshooting:
-
-Troubleshooting
-================
-
-- ROCdbgapi might become unresponsive in SELinux-enabled distributions. To learn more about this issue, see `installation troubleshooting <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/install-faq.html#issue-10-rocm-debugging-tools-might-become-unresponsive-in-selinux-enabled-distributions>`_.
-
-- The ``doxygen`` 1.8.14 installed by RHEL 8.1 has a bug that prevents PDF creation. To avoid this issue, build ``doxygen`` 1.8.11 from source.
