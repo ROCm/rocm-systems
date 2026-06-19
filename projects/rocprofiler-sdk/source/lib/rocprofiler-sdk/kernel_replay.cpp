@@ -45,6 +45,8 @@ rocprofiler_configure_kernel_replay_counting_service(
 
     if(ctx->kernel_replay) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
+
+     // TODO[amd-vkale]: an optimization but should we allow kernel replay  without counter collection? Could be useful for warmups of replay.  <-- Mythreya and Vivek's question 
     if(ctx->dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
     auto st = rocprofiler::counters::configure_callback_dispatch(context_id,
