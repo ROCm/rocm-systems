@@ -121,3 +121,5 @@ gtest_add_tests(
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 set_tests_properties(${consumer-tests_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")
+
+add_subdirectory(benchmarks)
