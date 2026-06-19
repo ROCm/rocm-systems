@@ -69,6 +69,28 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     {
         PerfcounterFile(tool.config, static_cast<perfevent_t*>(trace_events), trace_size);
     }
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT)
+    {
+        auto* event = static_cast<const trace_event_t*>(trace_events);
+        for(size_t i = 0; i < trace_size; ++i)
+        {
+            tool.config.events.emplace_back(*event);
+            const auto* next =
+                static_cast<const char*>(static_cast<const void*>(event)) + event->size;
+            event = static_cast<const trace_event_t*>(static_cast<const void*>(next));
+        }
+    }
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH)
+    {
+        auto* dispatch = static_cast<const dispatch_t*>(trace_events);
+        for(size_t i = 0; i < trace_size; ++i)
+        {
+            tool.config.dispatches.emplace_back(*dispatch);
+            const auto* next =
+                static_cast<const char*>(static_cast<const void*>(dispatch)) + dispatch->size;
+            dispatch = static_cast<const dispatch_t*>(static_cast<const void*>(next));
+        }
+    }
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY)
     {
         if(tool.config.realtime && trace_size != 0)
