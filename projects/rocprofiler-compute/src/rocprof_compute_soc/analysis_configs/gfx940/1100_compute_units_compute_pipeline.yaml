@@ -14,39 +14,39 @@ Panel Config:
         pct_of_peak: Percent of Peak
       metric:
         VALU FLOPs:
-          value: SUM(64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + 2 * SQ_INSTS_VALU_FMA_F16) + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + 2 * SQ_INSTS_VALU_FMA_F32) + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + 2 * SQ_INSTS_VALU_FMA_F64)) / SUM(End_Timestamp - Start_Timestamp)
+          value: 64 * SUM(SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + 2 * SQ_INSTS_VALU_FMA_F64) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOPs
-          peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
           pct_of_peak: true
         MFMA FLOPs (F8):
-          value: SUM(SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / SUM(End_Timestamp - Start_Timestamp)
+          value: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F8) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOPs
-          peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 4096 / 1000
           pct_of_peak: true
         MFMA FLOPs (BF16):
-          value: SUM(SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / SUM(End_Timestamp - Start_Timestamp)
+          value: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_BF16) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOPs
-          peak: ((($max_sclk * $cu_per_gpu) * 2048) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 2048 / 1000
           pct_of_peak: true
         MFMA FLOPs (F16):
-          value: SUM(SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / SUM(End_Timestamp - Start_Timestamp)
+          value: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F16) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOPs
-          peak: ((($max_sclk * $cu_per_gpu) * 2048) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 2048 / 1000
           pct_of_peak: true
         MFMA FLOPs (F32):
-          value: SUM(SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) / SUM(End_Timestamp - Start_Timestamp)
+          value: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F32) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOPs
-          peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 256 / 1000
           pct_of_peak: true
         MFMA FLOPs (F64):
-          value: SUM(SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / SUM(End_Timestamp - Start_Timestamp)
+          value: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F64) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOPs
-          peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 256 / 1000
           pct_of_peak: true
         MFMA IOPs (INT8):
-          value: SUM(SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / SUM(End_Timestamp - Start_Timestamp)
+          value: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_I8) / SUM(End_Timestamp - Start_Timestamp)
           unit: GIOPs
-          peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 4096 / 1000
           pct_of_peak: true
   - metric_table:
       id: 1102
@@ -60,39 +60,33 @@ Panel Config:
       metric:
         IPC:
           avg: SUM(SQ_INSTS) / SUM(SQ_BUSY_CU_CYCLES)
-          min: MIN((SQ_INSTS / SQ_BUSY_CU_CYCLES))
-          max: MAX((SQ_INSTS / SQ_BUSY_CU_CYCLES))
+          min: MIN(SQ_INSTS / SQ_BUSY_CU_CYCLES)
+          max: MAX(SQ_INSTS / SQ_BUSY_CU_CYCLES)
           unit: Instructions per Cycle
         IPC (Issued):
           avg: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
-          min: MIN(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
-            + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS)
-            / SQ_ACTIVE_INST_ANY))
-          max: MAX(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
-            + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS)
-            / SQ_ACTIVE_INST_ANY))
+          min: MIN((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SQ_ACTIVE_INST_ANY)
+          max: MAX((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SQ_ACTIVE_INST_ANY)
           unit: Instructions per Cycle
         SALU Utilization:
-          avg: SUM(100 * SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-          max: MAX((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          avg: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(SQ_ACTIVE_INST_SCA / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
+          max: 100 * MAX(SQ_ACTIVE_INST_SCA / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
           unit: Percent
         VALU Utilization:
-          avg: SUM(100 * SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-          max: MAX((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          avg: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(SQ_ACTIVE_INST_VALU / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
+          max: 100 * MAX(SQ_ACTIVE_INST_VALU / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
           unit: Percent
         VMEM Utilization:
-          avg: SUM(100 * (SQ_ACTIVE_INST_FLAT+SQ_ACTIVE_INST_VMEM)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN((((100 * (SQ_ACTIVE_INST_FLAT+SQ_ACTIVE_INST_VMEM)) / $GRBM_GUI_ACTIVE_PER_XCD)
-            / $cu_per_gpu))
-          max: MAX((((100 * (SQ_ACTIVE_INST_FLAT+SQ_ACTIVE_INST_VMEM)) / $GRBM_GUI_ACTIVE_PER_XCD)
-            / $cu_per_gpu))
+          avg: 100 * SUM(SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN((SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
+          max: 100 * MAX((SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
           unit: Percent
         Branch Utilization:
-          avg: SUM(100 * SQ_ACTIVE_INST_MISC) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN((((100 * SQ_ACTIVE_INST_MISC) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-          max: MAX((((100 * SQ_ACTIVE_INST_MISC) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          avg: 100 * SUM(SQ_ACTIVE_INST_MISC) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(SQ_ACTIVE_INST_MISC / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
+          max: 100 * MAX(SQ_ACTIVE_INST_MISC / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
           unit: Percent
         VALU Active Threads:
           avg: SUM(SQ_THREAD_CYCLES_VALU) / SUM(SQ_ACTIVE_INST_VALU)
@@ -100,9 +94,9 @@ Panel Config:
           max: MAX(SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU)
           unit: Work-items
         MFMA Utilization:
-          avg: SUM(100 * SQ_VALU_MFMA_BUSY_CYCLES) / SUM(4 * $cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD)
-          min: MIN(((100 * SQ_VALU_MFMA_BUSY_CYCLES) / ((4 * $cu_per_gpu) * $GRBM_GUI_ACTIVE_PER_XCD)))
-          max: MAX(((100 * SQ_VALU_MFMA_BUSY_CYCLES) / ((4 * $cu_per_gpu) * $GRBM_GUI_ACTIVE_PER_XCD)))
+          avg: 100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) / (4 * SUM($cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))
+          min: 100 * MIN(SQ_VALU_MFMA_BUSY_CYCLES / (4 * $cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))
+          max: 100 * MAX(SQ_VALU_MFMA_BUSY_CYCLES / (4 * $cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))
           unit: Percent
         MFMA Instruction Cycles:
           avg: SUM(SQ_VALU_MFMA_BUSY_CYCLES) / SUM(SQ_INSTS_MFMA)
@@ -130,72 +124,44 @@ Panel Config:
         unit: Unit
       metric:
         FLOPs (Total):
-          avg: SUM(((((64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16)) + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2)) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32) + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2)) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / SUM($denom)
-          min: MIN((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) +
-            SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8)
-            + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16)))
-            + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32)
-            + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32))
-            + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64)
-            + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64))
-            / $denom))
-          max: MAX((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) +
-            SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8)
-            + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16)))
-            + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32)
-            + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32))
-            + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64)
-            + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64))
-            / $denom))
+          avg: SUM(64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / SUM($denom)
+          min: MIN((64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / $denom)
+          max: MAX((64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F8 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / $denom)
           unit: (FLOPs + $normUnit)
         IOPs (Total):
           avg: SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64) + SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / SUM($denom)
-          min: MIN(((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) + (SQ_INSTS_VALU_MFMA_MOPS_I8
-            * 512)) / $denom)
-          max: MAX(((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) + (SQ_INSTS_VALU_MFMA_MOPS_I8
-            * 512)) / $denom)
+          min: MIN((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64) + SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / $denom)
+          max: MAX((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64) + SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / $denom)
           unit: (FLOPs + $normUnit)
         F8 OPs:
-          avg: SUM(512 * SQ_INSTS_VALU_MFMA_MOPS_F8) / SUM($denom)
-          min: MIN(((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) / $denom))
-          max: MAX(((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) / $denom))
+          avg: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F8) / SUM($denom)
+          min: 512 * MIN(SQ_INSTS_VALU_MFMA_MOPS_F8 / $denom)
+          max: 512 * MAX(SQ_INSTS_VALU_MFMA_MOPS_F8 / $denom)
           unit: (FLOPs + $normUnit)
         F16 OPs:
           avg: SUM(64 * SQ_INSTS_VALU_ADD_F16 + 64 * SQ_INSTS_VALU_MUL_F16 + 64 * SQ_INSTS_VALU_TRANS_F16 + 128 * SQ_INSTS_VALU_FMA_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16) / SUM($denom)
-          min: MIN(((((((64 * SQ_INSTS_VALU_ADD_F16) + (64 * SQ_INSTS_VALU_MUL_F16))
-            + (64 * SQ_INSTS_VALU_TRANS_F16)) + (128 * SQ_INSTS_VALU_FMA_F16)) + (512
-            * SQ_INSTS_VALU_MFMA_MOPS_F16)) / $denom))
-          max: MAX(((((((64 * SQ_INSTS_VALU_ADD_F16) + (64 * SQ_INSTS_VALU_MUL_F16))
-            + (64 * SQ_INSTS_VALU_TRANS_F16)) + (128 * SQ_INSTS_VALU_FMA_F16)) + (512
-            * SQ_INSTS_VALU_MFMA_MOPS_F16)) / $denom))
+          min: MIN((64 * SQ_INSTS_VALU_ADD_F16 + 64 * SQ_INSTS_VALU_MUL_F16 + 64 * SQ_INSTS_VALU_TRANS_F16 + 128 * SQ_INSTS_VALU_FMA_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16) / $denom)
+          max: MAX((64 * SQ_INSTS_VALU_ADD_F16 + 64 * SQ_INSTS_VALU_MUL_F16 + 64 * SQ_INSTS_VALU_TRANS_F16 + 128 * SQ_INSTS_VALU_FMA_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16) / $denom)
           unit: (FLOPs + $normUnit)
         BF16 OPs:
-          avg: SUM(512 * SQ_INSTS_VALU_MFMA_MOPS_BF16) / SUM($denom)
-          min: MIN(((512 * SQ_INSTS_VALU_MFMA_MOPS_BF16) / $denom))
-          max: MAX(((512 * SQ_INSTS_VALU_MFMA_MOPS_BF16) / $denom))
+          avg: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_BF16) / SUM($denom)
+          min: 512 * MIN(SQ_INSTS_VALU_MFMA_MOPS_BF16 / $denom)
+          max: 512 * MAX(SQ_INSTS_VALU_MFMA_MOPS_BF16 / $denom)
           unit: (FLOPs + $normUnit)
         F32 OPs:
           avg: SUM(64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32) / SUM($denom)
-          min: MIN((((64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32)
-            + (SQ_INSTS_VALU_FMA_F32 * 2))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32))
-            / $denom))
-          max: MAX((((64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32)
-            + (SQ_INSTS_VALU_FMA_F32 * 2))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32))
-            / $denom))
+          min: MIN((64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32) / $denom)
+          max: MAX((64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32) / $denom)
           unit: (FLOPs + $normUnit)
         F64 OPs:
           avg: SUM(64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / SUM($denom)
-          min: MIN((((64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64)
-            + (SQ_INSTS_VALU_FMA_F64 * 2))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64))
-            / $denom))
-          max: MAX((((64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64)
-            + (SQ_INSTS_VALU_FMA_F64 * 2))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64))
-            / $denom))
+          min: MIN((64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / $denom)
+          max: MAX((64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / $denom)
           unit: (FLOPs + $normUnit)
         INT8 OPs:
-          avg: SUM(SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / SUM($denom)
-          min: MIN(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / $denom))
-          max: MAX(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / $denom))
+          avg: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_I8) / SUM($denom)
+          min: 512 * MIN(SQ_INSTS_VALU_MFMA_MOPS_I8 / $denom)
+          max: 512 * MAX(SQ_INSTS_VALU_MFMA_MOPS_I8 / $denom)
           unit: (FLOPs + $normUnit)
   metrics_description:
     VALU FLOPs: >-

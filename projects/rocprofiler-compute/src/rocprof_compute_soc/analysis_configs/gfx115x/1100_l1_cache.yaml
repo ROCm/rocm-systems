@@ -23,14 +23,14 @@ Panel Config:
         unit: Unit
       metric:
         GL1 Cache Busy:
-          avg: SUM(100 * GL1C_BUSY) / SUM(GL1C_CYCLE)
-          min: MIN(100 * GL1C_BUSY / GL1C_CYCLE)
-          max: MAX(100 * GL1C_BUSY / GL1C_CYCLE)
+          avg: 100 * SUM(GL1C_BUSY) / SUM(GL1C_CYCLE)
+          min: 100 * MIN(GL1C_BUSY / GL1C_CYCLE)
+          max: 100 * MAX(GL1C_BUSY / GL1C_CYCLE)
           unit: Percent
         GL1 Cache Starve:
-          avg: SUM(100 * GL1C_STARVE) / SUM(GL1C_CYCLE)
-          min: MIN(100 * GL1C_STARVE / GL1C_CYCLE)
-          max: MAX(100 * GL1C_STARVE / GL1C_CYCLE)
+          avg: 100 * SUM(GL1C_STARVE) / SUM(GL1C_CYCLE)
+          min: 100 * MIN(GL1C_STARVE / GL1C_CYCLE)
+          max: 100 * MAX(GL1C_STARVE / GL1C_CYCLE)
           unit: Percent
 
   # =========================================================================
@@ -81,9 +81,9 @@ Panel Config:
         unit: Unit
       metric:
         Hit Rate:
-          avg: SUM(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum)) / SUM(GL1C_REQ_sum)
-          min: MIN(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum)
-          max: MAX(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum)
+          avg: 100 * SUM(GL1C_REQ_sum - GL1C_REQ_MISS_sum) / SUM(GL1C_REQ_sum)
+          min: 100 * MIN((GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum)
+          max: 100 * MAX((GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum)
           unit: Percent
 
   # =========================================================================
