@@ -566,7 +566,7 @@ exclusive_scan
 
 Defined in cooperative_groups/hip_scan.h. Performs an exclusive scan using the operation ``op`` on the specified group, contributing the value ``val``. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
 
-The parameters are described here: :ref:`scan_operations`
+The parameters are described here: :ref:`cg_operations`
 
 The value returned for the first active lane is platform-dependent, and the programmer should not depend on one value or another being returned as it might change in the future; but as a reference, given a ``val`` of type ``T``, the returned value is:
 
