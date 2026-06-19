@@ -257,8 +257,8 @@ set(RCCL_PRIVATE_INCLUDES
     ${HIPIFY_SRC}/include/nccl_device
     ${HIPIFY_SRC}/include/ionic
     ${HIPIFY_SRC}/include/plugin
-    ${NET_IB_CAST_INCLUDE_DIRS}
-    ${DEVCOMM_INCLUDE_DIRS}
+    ${HIPIFY_SRC}/transport/net_ib_cast
+    ${HIPIFY_SRC}/devcomm
     ${HIPIFY_SRC}/transport
     ${HIPIFY_SRC}/transport/net_ib
     ${GEN_DIR}
