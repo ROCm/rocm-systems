@@ -1461,10 +1461,10 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
         {
             auto* profiler_record = static_cast<rocprofiler_record_counter_t*>(header->payload);
             auto  ritr            = std::find_if(counter_collection_bf_records.rbegin(),
-                                      counter_collection_bf_records.rend(),
-                                      [profiler_record](const profile_counting_record& itr) {
-                                          return itr == *profiler_record;
-                                      });
+                                     counter_collection_bf_records.rend(),
+                                     [profiler_record](const profile_counting_record& itr) {
+                                         return itr == *profiler_record;
+                                     });
             // The dispatch header for this value may not have been delivered yet because the
             // SDK flushes multiple internal buffers that can complete out of order. Park the
             // value and attach it when the header arrives rather than failing.
