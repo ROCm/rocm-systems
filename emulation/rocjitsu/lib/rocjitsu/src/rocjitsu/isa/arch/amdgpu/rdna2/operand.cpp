@@ -782,6 +782,8 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
     break;
   }
   case OperandType::OPR_EXEC: {
+    if (encoding_value_ == OpSelExec::OPR_EXEC_EXEC)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
     break;
   }
   case OperandType::OPR_FLAT_SCRATCH: {
@@ -799,9 +801,17 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SDST_EXEC: {
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SDST_M0: {
@@ -822,6 +832,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     if (encoding_value_ >= OpSelSrc::OPR_SRC_VGPR_MIN &&
         encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX)
       return RegisterRef{RegClass::VGPR,
@@ -836,6 +850,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcNolds::OPR_SRC_NOLDS_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     if (encoding_value_ >= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MIN &&
         encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MAX)
       return RegisterRef{
@@ -851,6 +869,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
         encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX)
       return RegisterRef{
@@ -899,6 +921,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SSRC_LANESEL: {
@@ -917,6 +943,10 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcNolds::OPR_SSRC_NOLDS_SGPR_MIN),
           reg_width};
+    if (encoding_value_ == OpSelSsrcNolds::OPR_SSRC_NOLDS_EXEC_LO)
+      return RegisterRef{RegClass::EXEC, 0, reg_width};
+    if (encoding_value_ == OpSelSsrcNolds::OPR_SSRC_NOLDS_EXEC_HI)
+      return RegisterRef{RegClass::EXEC, 1, reg_width};
     break;
   }
   case OperandType::OPR_SSRC_SPECIAL_SCC: {
