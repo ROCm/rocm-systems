@@ -1089,51 +1089,54 @@ class vmm_resize_class {
   void* ptrVmm;
   std::vector<hipMemGenericAllocationHandle_t> vhandle;
   std::vector<size_t> vsize;
+  // When true, use thread-safe check macros (call HIP_CHECK_THREAD_FINALIZE
+  // after joining). Set for objects constructed on worker threads.
+  bool threadSafe = false;
   // allocate initial VMM memory chunk
-  int allocate_vmm(hipDeviceptr_t* ptr, hipDevice_t device, size_t size) {
+  void allocate_vmm(hipDeviceptr_t* ptr, hipDevice_t device, size_t size) {
     size_t granularity = 0;
     hipMemAllocationProp prop{};
     prop.type = hipMemAllocationTypePinned;
     prop.location.type = hipMemLocationTypeDevice;
     prop.location.id = device;  // Current Devices
-    HIP_CHECK(
+    HIP_CHECK_OPT_THREAD(threadSafe,
         hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
-    REQUIRE(granularity > 0);
+    REQUIRE_OPT_THREAD(threadSafe, granularity > 0);
     size_t size_rounded = ((granularity + size - 1) / granularity) * granularity;
     hipMemGenericAllocationHandle_t handle;
     // Allocate physical memory
-    HIP_CHECK(hipMemCreate(&handle, size_rounded, &prop, 0));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemCreate(&handle, size_rounded, &prop, 0));
     // Store the handle for future reference
     vhandle.push_back(handle);
     vsize.push_back(size_rounded);
     // Allocate virtual address range
-    HIP_CHECK(hipMemAddressReserve(&ptrVmm, size_rounded, 0, 0, 0));
-    HIP_CHECK(hipMemMap(ptrVmm, size_rounded, 0, handle, 0));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemAddressReserve(&ptrVmm, size_rounded, 0, 0, 0));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemMap(ptrVmm, size_rounded, 0, handle, 0));
     // Set access
     hipMemAccessDesc accessDesc = {};
     accessDesc.location.type = hipMemLocationTypeDevice;
     accessDesc.location.id = device;
     accessDesc.flags = hipMemAccessFlagsProtReadWrite;
     // Make the address accessible to GPU device
-    HIP_CHECK(hipMemSetAccess(ptrVmm, size_rounded, &accessDesc, 1));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemSetAccess(ptrVmm, size_rounded, &accessDesc, 1));
     *ptr = reinterpret_cast<hipDeviceptr_t>(ptrVmm);
     current_size_tot += size;
     current_size_rounded_tot += size_rounded;
-    return 0;
   }
 
  public:
-  vmm_resize_class(hipDeviceptr_t* ptr, hipDevice_t device, size_t size)
+  vmm_resize_class(hipDeviceptr_t* ptr, hipDevice_t device, size_t size, bool threadSafe_ = false)
       : current_size_tot(0), current_size_rounded_tot(0) {
+    threadSafe = threadSafe_;
     allocate_vmm(ptr, device, size);
   }
   // Free all VMM
   void free_vmm() {
     for (hipMemGenericAllocationHandle_t& myhandle : vhandle) {
-      HIP_CHECK(hipMemRelease(myhandle));
+      HIP_CHECK_OPT_THREAD(threadSafe, hipMemRelease(myhandle));
     }
-    HIP_CHECK(hipMemUnmap(ptrVmm, current_size_rounded_tot));
-    HIP_CHECK(hipMemAddressFree(ptrVmm, current_size_rounded_tot));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemUnmap(ptrVmm, current_size_rounded_tot));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemAddressFree(ptrVmm, current_size_rounded_tot));
   }
   // grow memory chunk
   int grow_vmm(hipDeviceptr_t* ptr, hipDevice_t device, size_t size) {
@@ -1263,19 +1266,19 @@ void test_thread(hipDevice_t device) {
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
   // Create VMM Object of size buffer_size
-  vmm_resize_class vmmobj(&ptr, device, buffer_size);
+  vmm_resize_class vmmobj(&ptr, device, buffer_size, true);
   // Inititalize Host Buffer
   int* ptrA_h = static_cast<int*>(malloc(buffer_size));
-  REQUIRE(ptrA_h != nullptr);
+  REQUIRE_THREAD(ptrA_h != nullptr);
   for (int idx = 0; idx < N; idx++) {
     ptrA_h[idx] = idx;
   }
   // Copy to VMM
   CTX_CREATE();
-  HIP_CHECK(hipMemcpyHtoD(ptr, ptrA_h, buffer_size));
+  HIP_CHECK_THREAD(hipMemcpyHtoD(ptr, ptrA_h, buffer_size));
   int* ptrB_h = static_cast<int*>(malloc(buffer_size));
-  REQUIRE(ptrB_h != nullptr);
-  HIP_CHECK(hipMemcpyDtoH(ptrB_h, ptr, buffer_size));
+  REQUIRE_THREAD(ptrB_h != nullptr);
+  HIP_CHECK_THREAD(hipMemcpyDtoH(ptrB_h, ptr, buffer_size));
   bool bPassed = true;
   for (int idx = 0; idx < N; idx++) {
     if (ptrB_h[idx] != idx) {
@@ -1320,6 +1323,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Multithreaded) {
   for (int i = 0; i < NUM_THREADS; i++) {
     T[i].join();
   }
+  HIP_CHECK_THREAD_FINALIZE();
   REQUIRE(1 == bTestPassed.load());
   CTX_DESTROY();
 }

@@ -18,14 +18,18 @@ unsigned threadsPerBlock = 256;
 // Designed to stress a small number of simple smoke tests
 
 template <typename T = float, class P = HipTest::Unpinned, class C = HipTest::Memcpy>
-void simpleVectorAdd(size_t numElements, int iters, hipStream_t stream) {
+void simpleVectorAdd(size_t numElements, int iters, hipStream_t stream, bool threadSafe = false) {
   using HipTest::MemTraits;
   size_t Nbytes = numElements * sizeof(T);
 
   T *A_d, *B_d, *C_d;
   T *A_h, *B_h, *C_h;
 
-  HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, P::isPinned);
+  if (threadSafe) {
+    HipTest::initArraysT(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, P::isPinned);
+  } else {
+    HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, P::isPinned);
+  }
   for (size_t i = 0; i < numElements; i++) {
     A_h[i] = 1000.0f;
     B_h[i] = 2000.0f;
@@ -52,16 +56,25 @@ void simpleVectorAdd(size_t numElements, int iters, hipStream_t stream) {
 
     hipLaunchKernelGGL(HipTest::vectorADDReverse, dim3(blocks), dim3(threadsPerBlock), 0, 0,
                        static_cast<const T*>(A_d), static_cast<const T*>(B_d), C_d, numElements);
-    HIP_CHECK(hipGetLastError());
+    HIP_CHECK_OPT_THREAD(threadSafe, hipGetLastError());
 
     MemTraits<C>::Copy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream);
 
     HIPCHECK(hipDeviceSynchronize());
 
-    HipTest::checkVectorADD(A_h, B_h, C_h, numElements);
+    if (threadSafe) {
+      size_t mismatchCount = HipTest::checkVectorADD(A_h, B_h, C_h, numElements, true, false);
+      REQUIRE_THREAD(mismatchCount == 0);
+    } else {
+      HipTest::checkVectorADD(A_h, B_h, C_h, numElements);
+    }
   }
 
-  HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, P::isPinned);
+  if (threadSafe) {
+    HipTest::freeArraysT(A_d, B_d, C_d, A_h, B_h, C_h, P::isPinned);
+  } else {
+    HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, P::isPinned);
+  }
   HIPCHECK(hipDeviceSynchronize());
 }
 
@@ -70,11 +83,13 @@ void test_multiThread_1(hipStream_t stream0, hipStream_t stream1, bool serialize
   size_t numElements = N;
 
   // Test 2 threads operating on same stream:
-  std::thread t1(simpleVectorAdd<T, HipTest::Pinned, C>, numElements, p_iters /*iters*/, stream0);
+  std::thread t1(simpleVectorAdd<T, HipTest::Pinned, C>, numElements, p_iters /*iters*/, stream0,
+                 true);
   if (serialize) {
     t1.join();
   }
-  std::thread t2(simpleVectorAdd<T, HipTest::Pinned, C>, numElements, p_iters /*iters*/, stream1);
+  std::thread t2(simpleVectorAdd<T, HipTest::Pinned, C>, numElements, p_iters /*iters*/, stream1,
+                 true);
   if (serialize) {
     t2.join();
   }
@@ -84,6 +99,7 @@ void test_multiThread_1(hipStream_t stream0, hipStream_t stream1, bool serialize
     t2.join();
   }
 
+  HIP_CHECK_THREAD_FINALIZE();
   HIPCHECK(hipDeviceSynchronize());
 };
 

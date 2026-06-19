@@ -125,12 +125,13 @@ static bool validateStreamGetDevice() {
   int gpu = 0;
   hipDevice_t device_from_stream;
   hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamGetDevice(stream, &device_from_stream));
-  HIP_CHECK(hipStreamDestroy(stream));
-
-  REQUIRE(device_from_stream == gpu);
-  return true;
+  // Runs on worker threads: avoid thread-unsafe Catch2 macros. Fold the status
+  // into the return value and let the main thread validate it via REQUIRE.
+  bool res = (hipStreamCreate(&stream) == hipSuccess);
+  res = res && (hipStreamGetDevice(stream, &device_from_stream) == hipSuccess);
+  res = res && (hipStreamDestroy(stream) == hipSuccess);
+  res = res && (device_from_stream == gpu);
+  return res;
 }
 
 static void thread_Test(int threadNum) { thread_results[threadNum] = validateStreamGetDevice(); }
