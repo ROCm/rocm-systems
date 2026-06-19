@@ -1129,7 +1129,7 @@ For attachment profiling of running processes:
 
     att_options.add_argument(
         "--att-buffer-size",
-        help="Thread trace buffer size. Default 256MB",
+        help="Thread trace buffer size. Default 384MB",
         default=None,
         type=str,
     )
