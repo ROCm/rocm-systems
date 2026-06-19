@@ -5,13 +5,13 @@ FROM ubuntu:22.04
 RUN apt-get update && apt-get install -y curl
 
 # Define the tarball name as a variable
-# Check https://therock-nightly-tarball.s3.amazonaws.com/index.html for latest builds
-# Use therock-dist-linux-gfx<arch>-dcgpu-<rocm-version>.tar.gz naming convention
+# Check https://rocm.nightlies.amd.com/tarball-multi-arch/ for latest builds
+# Use therock-dist-linux-gfx<arch>-<dgpu|dcgpu|all>-<rocm-version>.tar.gz naming convention
 ARG TARBALL_NAME=<tarball_name>
 
 # Install ROCm from TheRock Nightly build
 RUN mkdir -p /rocm && \
-    curl -fLO https://therock-nightly-tarball.s3.amazonaws.com/${TARBALL_NAME} && \
+    curl -fLO https://rocm.nightlies.amd.com/tarball-multi-arch/${TARBALL_NAME} && \
     tar -xf ${TARBALL_NAME} -C /rocm && \
     rm ${TARBALL_NAME}
 
