@@ -49,6 +49,8 @@ public:
 
   SoC *soc() { return soc_; }
   const SoC *soc() const { return soc_; }
+  SoC *soc(uint32_t idx) { return idx < socs_.size() ? socs_[idx] : nullptr; }
+  uint32_t num_socs() const { return static_cast<uint32_t>(socs_.size()); }
   amdgpu::GpuMemory *memory() { return soc_->memory(); }
   const amdgpu::GpuMemory *memory() const { return soc_->memory(); }
   const Config &config() const { return config_; }
@@ -58,6 +60,7 @@ public:
 private:
   Config config_;
   SoC *soc_ = nullptr;
+  std::vector<SoC *> socs_;
   std::unique_ptr<SimulatedDriver> driver_;
 };
 

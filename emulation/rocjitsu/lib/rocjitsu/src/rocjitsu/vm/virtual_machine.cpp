@@ -37,9 +37,13 @@ VirtualMachine::VirtualMachine(std::vector<std::unique_ptr<SoC>> socs,
   for (size_t i = 0; i < socs.size(); ++i) {
     auto *p = socs[i].get();
     ptrs.push_back(p);
+    socs_.push_back(p);
     if (i == 0)
       soc_ = p;
-    adopt_children(*socs[i]);
+    auto wrapper = std::make_unique<simdojo::CompositeComponent>("gpu" + std::to_string(i));
+    wrapper->set_weight(0);
+    wrapper->adopt_children(*socs[i]);
+    add_child(std::move(wrapper));
     add_child(std::move(socs[i]));
   }
   driver_ = std::make_unique<SimulatedDriver>(ptrs, std::move(gpu_ids), daemon_mode);
