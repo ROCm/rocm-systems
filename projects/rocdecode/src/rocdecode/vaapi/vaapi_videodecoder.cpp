@@ -416,21 +416,12 @@ rocDecStatus VaapiVideoDecoder::ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_ha
         return ROCDEC_INVALID_PARAMETER;
     }
 
-    // Try direct NTHANDLE export first (supported by some VA-API drivers).
-    VAStatus va_status = vaExportSurfaceHandle(va_display_, va_surface_ids_[pic_idx],
-                VA_SURFACE_ATTRIB_MEM_TYPE_NTHANDLE,
-                VA_EXPORT_SURFACE_READ_ONLY |
-                VA_EXPORT_SURFACE_SEPARATE_LAYERS,
-                &nt_handle);
-    if (va_status == VA_STATUS_SUCCESS) {
-        InfoLog(g_rocdec_logger, "Exported surface via NTHANDLE (pic_idx=" + ROCDEC_TOSTR(pic_idx) + ")");
-        FunctionExitLog(g_rocdec_logger);
-        return ROCDEC_SUCCESS;
-    }
-    DebugLog(g_rocdec_logger, "NTHANDLE export not supported (status=" + ROCDEC_TOSTR(va_status) +
-             "), using pre-created shared D3D12 resource");
-
-    // Use our pre-created shared D3D12 resource (created with D3D12_HEAP_FLAG_SHARED in CreateSurfaces).
+    // Always use CreateSharedHandle on our pre-created D3D12 resource to produce the NT handle.
+    // This guarantees the handle type is a D3D12 shared handle, consistent with
+    // hipExternalMemoryHandleTypeD3D12Resource used by the caller.
+    // Note: vaExportSurfaceHandle(VA_SURFACE_ATTRIB_MEM_TYPE_NTHANDLE) is NOT used because
+    // the handle origin from vaon12 is unspecified — it may not be a D3D12 CreateSharedHandle
+    // handle, which would cause a type mismatch with hipImportExternalMemory.
     if (pic_idx >= d3d12_shared_resources_.size() || d3d12_shared_resources_[pic_idx] == nullptr) {
         CriticalLog(g_rocdec_logger, "No shared D3D12 resource for pic_idx=" + ROCDEC_TOSTR(pic_idx));
         FunctionExitLog(g_rocdec_logger);
@@ -445,7 +436,6 @@ rocDecStatus VaapiVideoDecoder::ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_ha
         return ROCDEC_RUNTIME_ERROR;
     }
 
-    InfoLog(g_rocdec_logger, "Exported surface via shared D3D12 resource (pic_idx=" + ROCDEC_TOSTR(pic_idx) + ")");
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
@@ -1053,6 +1043,26 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
     CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format, decoder_create_info_.width,
         decoder_create_info_.height, va_surface_ids_.data(), va_surface_ids_.size(), surf_attribs.data(), surf_attribs.size()));
 
+    // Log the actual D3D12 resource properties to confirm tiling mode.
+    {
+        D3D12_RESOURCE_DESC desc = d3d12_shared_resources_[0]->GetDesc();
+        const char* layout_str = "UNKNOWN";
+        switch (desc.Layout) {
+            case D3D12_TEXTURE_LAYOUT_UNKNOWN:                layout_str = "UNKNOWN (driver-managed tiled)"; break;
+            case D3D12_TEXTURE_LAYOUT_ROW_MAJOR:              layout_str = "ROW_MAJOR (linear)"; break;
+            case D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE: layout_str = "64KB_UNDEFINED_SWIZZLE"; break;
+            case D3D12_TEXTURE_LAYOUT_64KB_STANDARD_SWIZZLE:  layout_str = "64KB_STANDARD_SWIZZLE"; break;
+        }
+        D3D12_RESOURCE_ALLOCATION_INFO alloc_info = d3d12_device_->GetResourceAllocationInfo(0, 1, &desc);
+        InfoLog(g_rocdec_logger, "D3D12 decode surface[0]: Dimension=" + ROCDEC_TOSTR(desc.Dimension) +
+                " Format=" + ROCDEC_TOSTR(desc.Format) +
+                " " + ROCDEC_TOSTR(desc.Width) + "x" + ROCDEC_TOSTR(desc.Height) +
+                " Layout=" + ROCDEC_STR(layout_str) +
+                " Flags=0x" + ([](UINT f) { std::ostringstream o; o << std::hex << f; return o.str(); })(desc.Flags) +
+                " AllocSize=" + ROCDEC_TOSTR(alloc_info.SizeInBytes) +
+                " Alignment=" + ROCDEC_TOSTR(alloc_info.Alignment));
+    }
+
     // Create linear staging buffers for tiled→linear copy, and D3D12 copy infrastructure.
     if (!linear_layout) {
         // Size the staging buffer from GetSurfaceLayout (matches sample layer expectations).
@@ -1083,6 +1093,15 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
                 FunctionExitLog(g_rocdec_logger);
                 return ROCDEC_RUNTIME_ERROR;
             }
+        }
+
+        // Log staging buffer properties for confirmation.
+        {
+            D3D12_RESOURCE_DESC sdesc = d3d12_staging_buffers_[0]->GetDesc();
+            const char* slayout = (sdesc.Layout == D3D12_TEXTURE_LAYOUT_ROW_MAJOR) ? "ROW_MAJOR (linear)" : "OTHER";
+            InfoLog(g_rocdec_logger, "D3D12 staging buffer[0]: Dimension=" + ROCDEC_TOSTR(sdesc.Dimension) +
+                    " Size=" + ROCDEC_TOSTR(sdesc.Width) +
+                    " Layout=" + ROCDEC_STR(slayout));
         }
 
         // Create copy command queue, allocator, list, and fence.
