@@ -93,10 +93,15 @@ class TestShmem(RocprofsysTest):
             pytest.param("sys_run", marks=pytest.mark.rocpd("shmem_env")),
         ],
     )
-    def test_pingpong(self, mode, shmem_env, shmem_validated, shmem_rules):
+    def test_pingpong(self, mode, shmem_env, shmem_validated, shmem_rules, rocprof_config):
         valid, reason = shmem_validated
         if not valid:
             pytest.skip(f"{reason}")
+
+        try:
+            rocprof_config.get_target_executable("shmem_pingpong")
+        except FileNotFoundError:
+            pytest.skip("shmem_pingpong binary not found")
 
         result = self.run_test(
             mode,
