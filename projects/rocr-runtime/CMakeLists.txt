@@ -221,9 +221,9 @@ set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/RadeonOpenCompute/ROCR-Runtime")
 
 ## Process the Debian install/remove scripts to update the CPACK variables
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/Binary/postinst.in DEBIAN/Binary/postinst @ONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/Binary/prerm.in DEBIAN/Binary/prerm @ONLY)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/preinst DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/DEBIAN)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEB/Binary/postinst.in DEBIAN/Binary/postinst @ONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEB/Binary/prerm.in DEBIAN/Binary/prerm @ONLY)
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/DEB/preinst DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/DEBIAN)
 set (CPACK_DEBIAN_BINARY_PACKAGE_CONTROL_EXTRA "DEBIAN/preinst;DEBIAN/Binary/postinst;DEBIAN/Binary/prerm")
 # Needed since some packages still say they need hsakmt-roct
 set(CPACK_DEBIAN_DEV_PACKAGE_REPLACES "hsakmt-roct,hsakmt-roct-dev,hsa-ext-rocr-dev")

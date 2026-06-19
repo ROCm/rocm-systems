@@ -107,6 +107,7 @@ hipError_t hipMallocManaged(void** dev_ptr, size_t size, unsigned int flags) {
 // ================================================================================================
 hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device, hipStream_t stream) {
   HIP_INIT_API(hipMemPrefetchAsync, dev_ptr, count, device, stream);
+  CHECK_STREAM_DETACHED_API(stream);
   CHECK_STREAM_CAPTURE_SUPPORTED();
   hipMemLocation location;
   if (device == hipCpuDeviceId) {
@@ -123,6 +124,7 @@ hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device, hi
 hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location,
                                   unsigned int flags, hipStream_t stream) {
   HIP_INIT_API(hipMemPrefetchAsync_v2, dev_ptr, count, location, flags, stream);
+  CHECK_STREAM_DETACHED_API(stream);
   CHECK_STREAM_CAPTURE_SUPPORTED();
   if (flags != 0) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -413,6 +415,7 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
   }
 
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED_API(stream);
 
   if (flags != hipMemAttachGlobal && flags != hipMemAttachHost && flags != hipMemAttachSingle) {
     HIP_RETURN(hipErrorInvalidValue);

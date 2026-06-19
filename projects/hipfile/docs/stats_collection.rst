@@ -51,6 +51,7 @@ Stats Collected
 * Basic: Bandwidth for reads/writes on the fastpath/fallback backends.
 * Basic: Latency for reads/writes on the fastpath/fallback backends.
 * Basic: I/O error counts for reads/writes on the fastpath/fallback backends.
+* Basic: Number of unaligned I/O operations for reads/writes on the fastpath/fallback backends.
 * Basic: Histograms of above stats broken into buckets based on the size of the I/O.
 
 Output
@@ -72,21 +73,25 @@ Example output shape:
     Average Fastpath Read Bandwidth (GiB/s): 0.776272
     Average Fastpath Read Latency (us): 1258.02
     Total Fastpath Read Errors: 0
+    Total Fastpath Read Unaligned: 0
 
     Total Fastpath Write Size (B): 67108864
     Average Fastpath Write Bandwidth (GiB/s): 0.358882
     Average Fastpath Write Latency (us): 2721.12
     Total Fastpath Write Errors: 0
+    Total Fastpath Write Unaligned: 0
 
     Total Fallback Read Size (B): 0
     Average Fallback Read Bandwidth (GiB/s): 0
     Average Fallback Read Latency (us): 0
     Total Fallback Read Errors: 0
+    Total Fallback Read Unaligned: 0
 
     Total Fallback Write Size (B): 0
     Average Fallback Write Bandwidth (GiB/s): 0
     Average Fallback Write Latency (us): 0
     Total Fallback Write Errors: 0
+    Total Fallback Write Unaligned: 0
 
     GPU 0:
     IO Size Histogram
@@ -122,6 +127,10 @@ Example output shape:
     0-4                                              0                                 0                                 0                                 0
     ...
     65536-...                                        0                                 0                                 0                                 0
+    Fastpath Read Unaligned Count: 0
+    Fastpath Write Unaligned Count: 0
+    Fallback Read Unaligned Count: 0
+    Fallback Write Unaligned Count: 0
 
 Scope and Limitations
 ---------------------

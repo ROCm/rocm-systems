@@ -72,6 +72,61 @@ typedef struct rj_vm_unmap_t {
   uint64_t length; ///< Length in bytes to unmap.
 } rj_vm_unmap_t;
 
+/// @brief Simulated GPU metadata needed by daemon clients.
+typedef struct rj_vm_gpu_info_t {
+  uint32_t present; ///< Non-zero when this payload was populated.
+
+  uint32_t gpu_id;
+  uint32_t gfx_target_version;
+  uint32_t vendor_id;
+  uint32_t device_id;
+  uint32_t family_id;
+  uint64_t unique_id;
+  uint32_t location_id;
+  uint32_t domain;
+  uint64_t hive_id;
+  uint32_t drm_render_minor;
+  uint32_t revision_id;
+  uint32_t pci_revision_id;
+
+  uint32_t simd_count;
+  uint32_t max_waves_per_simd;
+  uint32_t num_shader_engines;
+  uint32_t num_shader_arrays_per_engine;
+  uint32_t num_cu_per_sh;
+  uint32_t simd_per_cu;
+  uint32_t wave_front_size;
+  uint32_t num_xcc;
+  uint32_t max_slots_scratch_cu;
+
+  uint64_t local_mem_size;
+  uint32_t vram_type;
+  uint32_t lds_size_kb;
+  uint32_t mem_width;
+  uint32_t mem_clk_max;
+
+  uint32_t l1_size_kb;
+  uint32_t l1_line_size;
+  uint32_t l1_assoc;
+  uint32_t l2_size_kb;
+  uint32_t l2_line_size;
+  uint32_t l2_assoc;
+
+  uint32_t num_sdma_engines;
+  uint32_t num_sdma_xgmi_engines;
+  uint32_t num_cp_queues;
+  uint32_t max_engine_clk_fcompute;
+
+  uint32_t capability;
+  uint32_t capability2;
+  uint64_t debug_prop;
+
+  uint32_t fw_version;
+  uint32_t sdma_fw_version;
+
+  char marketing_name[128];
+} rj_vm_gpu_info_t;
+
 /// @brief Create a VM from a JSON configuration file.
 ///
 /// @details Parses the JSON against the embedded FlatBuffers schema, constructs
@@ -209,6 +264,11 @@ RJ_API_EXPORT rj_status_t rj_vm_topology_path(rj_vm_t *vm, const char **path);
 /// @param[in] vm VM handle.
 /// @param[out] path Pointer to the DRM path string (owned by the VM).
 RJ_API_EXPORT rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path);
+
+/// @brief Get simulated GPU metadata.
+/// @param[in] vm VM handle.
+/// @param[out] info Simulated GPU metadata.
+RJ_API_EXPORT rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info);
 
 /// @brief Get the backing memory handle (local mode).
 RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem(rj_vm_t *vm, int64_t offset, rj_handle_t *handle);

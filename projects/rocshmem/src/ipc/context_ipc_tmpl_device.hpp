@@ -420,9 +420,7 @@ __device__ void IPCContext::internal_put_broadcast(
   if (my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
-      if (i != my_pe) {
         put_nbi_wg(dst, src, nelems, i);
-      }
     }
   }
 }
@@ -430,9 +428,7 @@ __device__ void IPCContext::internal_put_broadcast(
 template <typename T>
 __device__ void IPCContext::internal_get_broadcast(
   T *dst, const T *src, int nelems, int pe_root) {  // NOLINT(runtime/int)
-  if (my_pe != pe_root) {
     get_wg(dst, src, nelems, pe_root);
-  }
 }
 
 template <typename T>

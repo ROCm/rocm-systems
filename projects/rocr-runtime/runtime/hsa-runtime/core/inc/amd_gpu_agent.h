@@ -383,7 +383,7 @@ class GpuAgent : public GpuAgentInt {
 
   hsa_status_t Preload(uint64_t flags);
 
-  core::Agent* GetNearestCpuAgent(void) const;
+  core::Agent* GetNearestCpuAgent() const override;
 
   void RegisterGangPeer(core::Agent& gang_peer, unsigned int bandwidth_factor) override;
 
@@ -634,8 +634,14 @@ class GpuAgent : public GpuAgentInt {
   // @brief Current short duration scratch memory size.
   size_t scratch_used_large_;
 
+  struct HsaSignalLess {
+    bool operator()(const hsa_signal_t& lhs, const hsa_signal_t& rhs) const {
+      return lhs.handle < rhs.handle;
+    }
+  };
+
   // @brief Notifications for scratch release.
-  std::map<hsa_signal_t, hsa_signal_value_t> scratch_notifiers_;
+  std::map<hsa_signal_t, hsa_signal_value_t, HsaSignalLess> scratch_notifiers_;
 
   // @brief Default scratch size per queue.
   size_t queue_scratch_len_;

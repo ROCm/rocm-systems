@@ -282,12 +282,8 @@ inline void execute_ds_swizzle_b32_ds([[maybe_unused]] Inst &inst, [[maybe_unuse
       continue;
     uint32_t src_lane;
     if (offset & 0x8000) {
-      // QDMode: swizzle within 4-lane quads.
-      uint32_t and_mask = offset & 0x1F;
-      uint32_t or_mask = (offset >> 5) & 0x1F;
-      uint32_t xor_mask = (offset >> 10) & 0x1F;
-      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;
-      src_lane = (lane & ~0x3) | (src_lane & 0x3); // stay in quad
+      // QDMode: four packed 2-bit selectors within each quad.
+      src_lane = (lane & ~0x3u) | ((offset >> (2u * (lane & 0x3u))) & 0x3u);
     } else {
       // BitMode: full-wave swizzle.
       uint32_t and_mask = offset & 0x1F;
@@ -308,19 +304,15 @@ inline void execute_ds_swizzle_b32_vds([[maybe_unused]] Inst &inst,
   uint32_t vb = wf.vgpr_alloc().base;
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = cu.read_vgpr(vb + inst.inst_.data0, i);
+    src_data[i] = cu.read_vgpr(vb + inst.inst_.addr, i);
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t src_lane;
     if (offset & 0x8000) {
-      // QDMode: swizzle within 4-lane quads.
-      uint32_t and_mask = offset & 0x1F;
-      uint32_t or_mask = (offset >> 5) & 0x1F;
-      uint32_t xor_mask = (offset >> 10) & 0x1F;
-      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;
-      src_lane = (lane & ~0x3) | (src_lane & 0x3); // stay in quad
+      // QDMode: four packed 2-bit selectors within each quad.
+      src_lane = (lane & ~0x3u) | ((offset >> (2u * (lane & 0x3u))) & 0x3u);
     } else {
       // BitMode: full-wave swizzle.
       uint32_t and_mask = offset & 0x1F;
@@ -2984,7 +2976,6 @@ inline void execute_v_add_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_add_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return (a + b) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3026,7 +3017,6 @@ inline void execute_v_add_lshl_u32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_add_nc_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return (a + b) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3053,7 +3043,6 @@ inline void execute_v_add_nc_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_add_nc_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return (a + b) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3104,7 +3093,6 @@ inline void execute_v_add_u16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_add_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return (a + b) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3252,7 +3240,6 @@ inline void execute_v_alignbyte_b32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_and_b16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return (a & b) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3333,12 +3320,13 @@ inline void execute_v_ashrrev_i16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>([&]() {
-          auto v = static_cast<int16_t>(static_cast<int16_t>(inst.src1.read_lane(wf, lane)));
-          return static_cast<uint32_t>(static_cast<uint16_t>(
-              v >> (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) & 15u)));
-        }()))));
+    uint32_t opsel = vop3_opsel(inst.inst_);
+    uint32_t src0 = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
+    uint32_t src1 = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
+    auto v = static_cast<int16_t>(src1);
+    uint32_t result =
+        static_cast<uint32_t>(static_cast<uint16_t>(v >> (static_cast<int16_t>(src0) & 15u)));
+    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result);
   }
 }
 
@@ -4051,7 +4039,8 @@ template <typename Inst>
 inline void execute_v_cmp_class_f64_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_CLASS_F64(0x8000000000000000ull, [](auto s, auto m) {
-    using U = util::native<uint64_t>;
+    using U = std::decay_t<decltype(s)>;
+    using M = std::decay_t<decltype(m)>;
     U exp = (s >> 52) & 0x7FFu;
     U mant = s & 0xFFFFFFFFFFFFFull;
     auto sgn = ((s >> 63) & 1u) != 0u;
@@ -4072,7 +4061,7 @@ inline void execute_v_cmp_class_f64_vop3([[maybe_unused]] Inst &inst,
     util::stdx::where(is_den && !sgn, cls) = 0x080u;
     util::stdx::where(is_norm && !sgn, cls) = 0x100u;
     util::stdx::where(is_inf && !sgn, cls) = 0x200u;
-    auto cls32 = util::stdx::static_simd_cast<util::narrow32<uint32_t>>(cls);
+    auto cls32 = util::stdx::static_simd_cast<M>(cls);
     return (cls32 & m) != 0u;
   });
   uint64_t exec = wf.exec();
@@ -4124,7 +4113,8 @@ template <typename Inst>
 inline void execute_v_cmp_class_f64_vopc([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOPC_CLASS_F64([](auto s, auto m) {
-    using U = util::native<uint64_t>;
+    using U = std::decay_t<decltype(s)>;
+    using M = std::decay_t<decltype(m)>;
     U exp = (s >> 52) & 0x7FFu;
     U mant = s & 0xFFFFFFFFFFFFFull;
     auto sgn = ((s >> 63) & 1u) != 0u;
@@ -4145,7 +4135,7 @@ inline void execute_v_cmp_class_f64_vopc([[maybe_unused]] Inst &inst,
     util::stdx::where(is_den && !sgn, cls) = 0x080u;
     util::stdx::where(is_norm && !sgn, cls) = 0x100u;
     util::stdx::where(is_inf && !sgn, cls) = 0x200u;
-    auto cls32 = util::stdx::static_simd_cast<util::narrow32<uint32_t>>(cls);
+    auto cls32 = util::stdx::static_simd_cast<M>(cls);
     return (cls32 & m) != 0u;
   });
   uint64_t exec = wf.exec();
@@ -4331,10 +4321,6 @@ inline void execute_v_cmp_eq_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_eq_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) {
-    return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) ==
-           ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
-  });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4436,8 +4422,6 @@ inline void execute_v_cmp_eq_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_eq_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t,
-                                  [](auto a, auto b) { return (a & 0xFFFFu) == (b & 0xFFFFu); });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4968,10 +4952,6 @@ inline void execute_v_cmp_ge_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_ge_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) {
-    return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) >=
-           ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
-  });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5073,8 +5053,6 @@ inline void execute_v_cmp_ge_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_ge_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t,
-                                  [](auto a, auto b) { return (a & 0xFFFFu) >= (b & 0xFFFFu); });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5313,10 +5291,6 @@ inline void execute_v_cmp_gt_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_gt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) {
-    return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) >
-           ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
-  });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5418,8 +5392,6 @@ inline void execute_v_cmp_gt_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_gt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t,
-                                  [](auto a, auto b) { return (a & 0xFFFFu) > (b & 0xFFFFu); });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5659,10 +5631,6 @@ inline void execute_v_cmp_le_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_le_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) {
-    return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) <=
-           ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
-  });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5764,8 +5732,6 @@ inline void execute_v_cmp_le_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_le_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t,
-                                  [](auto a, auto b) { return (a & 0xFFFFu) <= (b & 0xFFFFu); });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6166,10 +6132,6 @@ inline void execute_v_cmp_lt_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_lt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) {
-    return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) <
-           ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
-  });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6271,8 +6233,6 @@ inline void execute_v_cmp_lt_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_lt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t,
-                                  [](auto a, auto b) { return (a & 0xFFFFu) < (b & 0xFFFFu); });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6369,10 +6329,6 @@ inline void execute_v_cmp_lt_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_ne_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t, [](auto a, auto b) {
-    return ((util::stdx::static_simd_cast<util::native<int32_t>>(a) << 16) >> 16) !=
-           ((util::stdx::static_simd_cast<util::native<int32_t>>(b) << 16) >> 16);
-  });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6474,8 +6430,6 @@ inline void execute_v_cmp_ne_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cmp_ne_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(uint32_t,
-                                  [](auto a, auto b) { return (a & 0xFFFFu) != (b & 0xFFFFu); });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -8679,15 +8633,17 @@ inline void execute_v_cvt_f32_bf8_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f32_bf8_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, float32_t,
-                               [](auto a) { return util::bf8_e5m2_to_f32_simd(a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(
-                             static_cast<uint8_t>(inst.src0.read_lane(wf, lane)))));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>(
+            ((inst.src0.read_lane(wf, lane) >> ((((amdgpu::vop3_opsel(inst.inst_) & 0x1u) << 1) |
+                                                 ((amdgpu::vop3_opsel(inst.inst_) & 0x2u) >> 1)) *
+                                                8u)) &
+             0xFFu)))));
   }
 }
 
@@ -8769,15 +8725,25 @@ inline void execute_v_cvt_f32_fp8_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f32_fp8_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, float32_t,
-                               [](auto a) { return util::fp8_e4m3_to_f32_simd(a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(
-                             static_cast<uint8_t>(inst.src0.read_lane(wf, lane)))));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>((amdgpu::vop3_fp8_decode_e5m3(inst))
+                                    ? util::fp8_e5m3_to_f32(static_cast<uint8_t>(
+                                          ((inst.src0.read_lane(wf, lane) >>
+                                            ((((amdgpu::vop3_opsel(inst.inst_) & 0x1u) << 1) |
+                                              ((amdgpu::vop3_opsel(inst.inst_) & 0x2u) >> 1)) *
+                                             8u)) &
+                                           0xFFu)))
+                                    : util::fp8_e4m3_to_f32(static_cast<uint8_t>(
+                                          ((inst.src0.read_lane(wf, lane) >>
+                                            ((((amdgpu::vop3_opsel(inst.inst_) & 0x1u) << 1) |
+                                              ((amdgpu::vop3_opsel(inst.inst_) & 0x2u) >> 1)) *
+                                             8u)) &
+                                           0xFFu)))));
   }
 }
 
@@ -9289,10 +9255,7 @@ template <typename Inst>
 inline void execute_v_cvt_i32_f64_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(int32_t, [](auto s) {
-    auto r = s;
-    util::stdx::where(util::stdx::isnan(s), r) = 0.0;
-    util::stdx::where(s >= 2147483648.0, r) = 2147483647.0;
-    util::stdx::where(s < -2147483648.0, r) = -2147483648.0;
+    auto r = util::cvt_i32_f64_saturate_input_simd(s);
     return util::stdx::static_simd_cast<util::narrow32<int32_t>>(r);
   });
   uint64_t exec = wf.exec();
@@ -9316,10 +9279,7 @@ template <typename Inst>
 inline void execute_v_cvt_i32_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(int32_t, [](auto s) {
-    auto r = s;
-    util::stdx::where(util::stdx::isnan(s), r) = 0.0;
-    util::stdx::where(s >= 2147483648.0, r) = 2147483647.0;
-    util::stdx::where(s < -2147483648.0, r) = -2147483648.0;
+    auto r = util::cvt_i32_f64_saturate_input_simd(s);
     return util::stdx::static_simd_cast<util::narrow32<int32_t>>(r);
   });
   uint64_t exec = wf.exec();
@@ -10030,9 +9990,7 @@ template <typename Inst>
 inline void execute_v_cvt_u32_f64_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(uint32_t, [](auto s) {
-    auto r = s;
-    util::stdx::where(util::stdx::isnan(s) || s < 0.0, r) = 0.0;
-    util::stdx::where(s >= 4294967296.0, r) = 4294967295.0;
+    auto r = util::cvt_u32_f64_saturate_input_simd(s);
     return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r);
   });
   uint64_t exec = wf.exec();
@@ -10054,9 +10012,7 @@ template <typename Inst>
 inline void execute_v_cvt_u32_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(uint32_t, [](auto s) {
-    auto r = s;
-    util::stdx::where(util::stdx::isnan(s) || s < 0.0, r) = 0.0;
-    util::stdx::where(s >= 4294967296.0, r) = 4294967295.0;
+    auto r = util::cvt_u32_f64_saturate_input_simd(s);
     return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r);
   });
   uint64_t exec = wf.exec();
@@ -12834,10 +12790,11 @@ inline void execute_v_lshlrev_b16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(
-                             (static_cast<uint16_t>(inst.src1.read_lane(wf, lane))
-                              << (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) & 15u)))));
+    uint32_t opsel = vop3_opsel(inst.inst_);
+    uint32_t src0 = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
+    uint32_t src1 = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
+    uint32_t result = (src1 << (src0 & 15u)) & 0xffffu;
+    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result);
   }
 }
 
@@ -12919,10 +12876,11 @@ inline void execute_v_lshrrev_b16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(
-                             (static_cast<uint16_t>(inst.src1.read_lane(wf, lane)) >>
-                              (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) & 15u)))));
+    uint32_t opsel = vop3_opsel(inst.inst_);
+    uint32_t src0 = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
+    uint32_t src1 = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
+    uint32_t result = src1 >> (src0 & 15u);
+    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result);
   }
 }
 
@@ -13219,18 +13177,19 @@ inline void execute_v_mad_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_mad_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu;
-  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-                             ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) *
-                               static_cast<int16_t>(inst.src1.read_lane(wf, lane))) +
-                              static_cast<int16_t>(inst.src2.read_lane(wf, lane)))))));
+    uint32_t opsel = vop3_opsel(inst.inst_);
+    uint32_t src0 = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
+    uint32_t src1 = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
+    uint32_t src2 = read_vop3_true16_src(inst.src2, wf, lane, opsel, 2);
+    int32_t a = static_cast<int16_t>(src0);
+    int32_t b = static_cast<int16_t>(src1);
+    int32_t c = static_cast<int16_t>(src2);
+    uint32_t result = static_cast<uint32_t>(static_cast<uint16_t>(a * b + c));
+    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result);
   }
 }
 
@@ -13406,9 +13365,6 @@ inline void execute_v_mad_legacy_f32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_mad_legacy_i16_vop3([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu;
-  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -13424,9 +13380,6 @@ inline void execute_v_mad_legacy_i16_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_mad_legacy_u16_vop3([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu;
-  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -13556,18 +13509,16 @@ inline void execute_v_mad_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_mad_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu;
-  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(
-                             ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *
-                               static_cast<uint16_t>(inst.src1.read_lane(wf, lane))) +
-                              static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
+    uint32_t opsel = vop3_opsel(inst.inst_);
+    uint32_t src0 = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
+    uint32_t src1 = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
+    uint32_t src2 = read_vop3_true16_src(inst.src2, wf, lane, opsel, 2);
+    uint32_t result = (src0 * src1 + src2) & 0xffffu;
+    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result);
   }
 }
 
@@ -17311,8 +17262,6 @@ inline void execute_v_mul_lo_u16_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_mul_lo_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(
-      uint32_t, [](auto a, auto b) { return ((a & 0xFFFFu) * (b & 0xFFFFu)) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -17386,7 +17335,6 @@ inline void execute_v_not_b16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_not_b16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) { return (~a) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -17433,7 +17381,6 @@ inline void execute_v_or3_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_or_b16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return (a | b) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -19236,7 +19183,7 @@ inline void execute_v_sqrt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_sqrt_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(double, [](auto a) { return util::stdx::sqrt(a); });
+  ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(double, [](auto a) { return util::sqrt_f64_simd(a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -19249,12 +19196,7 @@ inline void execute_v_sqrt_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_sqrt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64([](auto a) {
-    auto r = util::stdx::sqrt(a);
-    util::stdx::where(util::stdx::isnan(a), r) = a;
-    util::stdx::where(a < 0.0, r) = std::numeric_limits<double>::quiet_NaN();
-    return r;
-  });
+  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64([](auto a) { return util::sqrt_f64_simd(a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -19499,7 +19441,6 @@ inline void execute_v_sub_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_sub_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return (a - b) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -19526,7 +19467,6 @@ inline void execute_v_sub_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_sub_nc_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return (a - b) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -19553,7 +19493,6 @@ inline void execute_v_sub_nc_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_sub_nc_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return (a - b) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -19604,7 +19543,6 @@ inline void execute_v_sub_u16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_sub_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return (a - b) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -20241,7 +20179,6 @@ inline void execute_v_xor3_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_v_xor_b16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return (a ^ b) & 0xFFFFu; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

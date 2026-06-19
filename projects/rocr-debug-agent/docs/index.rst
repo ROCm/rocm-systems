@@ -14,7 +14,7 @@ The ROCr Debug Agent  is a library that can be loaded by the :doc:`ROCr Runtime 
 
 - Print the state of all AMD GPU wavefronts by sending a SIGQUIT signal to the process using ``kill -s SIGQUIT <pid>`` command or by pressing ``Ctrl-\``, while the program is executing.
 
-This functionality is provided for all AMD GPUs supported by the :doc:`ROCm Debugger API (ROCdbgpai) <rocdbgapi:index>`.
+This functionality is provided for all AMD GPUs supported by the :doc:`ROCm Debugger API (ROCdbgapi) <rocdbgapi:index>`.
 
 The code is open source and hosted at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocr-debug-agent>`__.
 
