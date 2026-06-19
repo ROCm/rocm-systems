@@ -269,6 +269,8 @@ static void binaryDump(PerThreadBuffer* b) {
   // net samples. Appending writes one self-describing [header|events|nets]
   // segment per dump; the reader iterates segments to EOF. (pid is in the
   // filename, so a fresh process never appends to a previous run's file.)
+  // rec_27 N4: today there are O(3) flushes/process so the file stays small; if
+  // dumps are ever added per-iteration, cap the count or rotate the file.
   FILE* f = fopen(path, "ab");
   if (!f) {
     WARN("BootstrapTrace: cannot open %s for write", path);

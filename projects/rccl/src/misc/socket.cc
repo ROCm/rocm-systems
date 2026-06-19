@@ -33,13 +33,10 @@ RCCL_PARAM(SocketLinger, "SOCKET_LINGER", -1);
 // Opt-in: suppress the receiver-side delayed-ACK timer (~40ms) on socket
 // (OOB/bootstrap) connections. TCP_QUICKACK is not sticky — the kernel reverts
 // to delayed-ACK after a few segments — so it is set at connect AND re-armed
-// after each recv below. Cached getenv read (self-contained, avoids init-order
-// issues with NCCL_PARAM defined later in this file). Default off.
-static int socketQuickAck() {
-  static int v = -1;
-  if (v < 0) { const char* e = getenv("NCCL_SOCKET_QUICKACK"); v = (e && atoi(e) > 0) ? 1 : 0; }
-  return v;
-}
+// after each recv below. Defined here (before socketProgressOpt) so the param
+// is parsed/logged like the other socket knobs (rec_27 N1). Default off.
+NCCL_PARAM(SocketQuickAck, "SOCKET_QUICKACK", 0);
+static int socketQuickAck() { return ncclParamSocketQuickAck() > 0; }
 
 static ncclResult_t socketProgressOpt(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int block, int* closed) {
   int bytes = 0;
@@ -69,7 +66,10 @@ static ncclResult_t socketProgressOpt(int op, struct ncclSocket* sock, void* ptr
     (*offset) += bytes;
 #ifdef TCP_QUICKACK
     // Re-arm quick-ack after a real receive so delayed-ACK stays suppressed
-    // across the bootstrap ring's repeated small exchanges.
+    // across the bootstrap ring's repeated small exchanges. Note (rec_27 N2):
+    // this is one setsockopt per non-empty recv while the knob is ON; fine for
+    // the low-volume OOB/bootstrap path, but it is the generic socket recv path,
+    // so leave it OFF (default) on any high-throughput socket transport.
     if (op == NCCL_SOCKET_RECV && bytes > 0 && socketQuickAck()) {
       int qa = 1;
       (void)setsockopt(sock->fd, IPPROTO_TCP, TCP_QUICKACK, (char*)&qa, sizeof(int));

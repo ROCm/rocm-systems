@@ -103,8 +103,9 @@ struct NetSample {
   uint32_t total_retrans; // tcpi_total_retrans (cumulative on this connection)
   uint32_t lost;          // tcpi_lost
   uint32_t unacked;       // tcpi_unacked
-  uint16_t ca_state;      // tcpi_ca_state (0=Open, !=0 => loss/recovery)
-  uint16_t reserved;      // pad to 8-byte multiple
+  uint16_t ca_state;      // tcpi_ca_state (kernel uint8; widened to u16 here for
+                          // 8-byte struct alignment) (0=Open, !=0 => loss/recovery)
+  uint16_t reserved;      // explicit pad to a 48B (8-byte multiple) record
 };
 static_assert(sizeof(NetSample) == 48, "NetSample must be packed to 48B");
 
@@ -120,6 +121,8 @@ struct PerThreadBuffer {
   NetSample netSamples[NET_SAMPLE_SIZE];
   int idx;
   int netIdx;
+  // Root thread uses rank = -1; stored into the uint32 Event/NetSample.rank as
+  // the sentinel 0xFFFFFFFF, which post-processors render as the ROOT track.
   int rank;
   int isRootThread;     // 0 = main rank thread, 1 = bootstrapRoot thread
   int eventOverflow;    // count of Event records dropped after ring filled

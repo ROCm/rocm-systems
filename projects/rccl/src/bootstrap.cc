@@ -1170,8 +1170,13 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   // piggyback isn't available (shrunk/split comms) we fall back below to the one-shot
   // bootstrapBidirRingSetup that does listen + handle exchange + connect/accept after
   // the forward ring is up.
-  BTRACE_BEGIN(__btrace_rev_connect);
+  // BTRACE_BEGIN only captures a start timestamp; it does NOT emit an event
+  // (only BTRACE_END does). The matching END below is guarded by wantNetBidir,
+  // so socket-only runs record no reverse_connect event at all (no orphan/garbage
+  // duration). Time only under wantNetBidir to avoid a set-but-unused timer. (rec_27 M1)
+  uint64_t __btrace_rev_connect = 0;
   if (wantNetBidir) {
+    __btrace_rev_connect = ncclBootstrapTrace::isEnabled() ? ncclBootstrapTrace::nowNs() : 0;
     NCCLCHECK(bootstrapBidirRingSetupStart(comm, state, nextPeer.revHandle, bidirPrevRevHandle, &bidirSplitStarted));
   }
 

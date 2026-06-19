@@ -263,7 +263,11 @@ def load_text_log(path: Path, net_out=None):
                 pname = mn.group("name")
                 phase = TEXT_PHASE_IDS.get(pname)
                 if phase is None:
-                    phase = next((pid for pid, nm in PHASE_NAMES.items() if nm == pname), -1)
+                    phase = next((pid for pid, nm in PHASE_NAMES.items() if nm == pname), None)
+                if phase is None:
+                    # Fall back to the numeric phase id from the line (rec_27 N6)
+                    # so an unknown name never collapses to a misleading phase_-1.
+                    phase = int(mn.group("p"))
                 net_out.append(NetSample(
                     int(mn.group("t_ns")), int(mn.group("rank")), phase,
                     int(mn.group("md")), int(mn.group("rtt")), int(mn.group("rttvar")),
