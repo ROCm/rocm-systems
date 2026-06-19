@@ -551,7 +551,7 @@ For arithmetic reduces (``plus``, ``less`` and ``greater``):
 
 * On AMD platform: there is hardware acceleration for ``int``, ``unsigned int``, ``unsigned long long``, ``long long``, ``half``/``float``/``double`` 
 
-For bitwise-reduces: (``bit_and``, ``bit_or``, ``bit_xor``)
+For bitwise-scans: (``bit_and``, ``bit_or``, ``bit_xor``)
 
 * On Nvidia platform: ``unsigned int``
 
