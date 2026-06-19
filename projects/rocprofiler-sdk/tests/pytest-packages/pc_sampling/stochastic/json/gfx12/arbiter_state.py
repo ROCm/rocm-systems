@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,18 +20,39 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-#
 
-set(PACKAGE_OUTPUT_DIR
-    ${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages/rocprofiler_sdk/pc_sampling/stochastic/csv
+from __future__ import absolute_import
+
+
+def _check_pipe(snapshot, pipe_name):
+    """Validate issue/stall for a single arbiter pipe.
+
+    Allowed combinations per pipe:
+        issue=0, stall=0  (idle)
+        issue=1, stall=0  (issued)
+        issue=0, stall=1  (stalled)
+
+    The only disallowed combination is issue=1 AND stall=1.
+    """
+    issue = snapshot[f"arb_state_issue_{pipe_name}"]
+    stall = snapshot[f"arb_state_stall_{pipe_name}"]
+    assert not (issue == 1 and stall == 1), (
+        f"{pipe_name} arbiter state check failed: "
+        f"issue=1 and stall=1 is not allowed (issue={issue}, stall={stall})"
     )
 
-set(PC_SAMPLING_PYTHON_SOURCES __init__.py)
 
-foreach(_FILE ${PC_SAMPLING_PYTHON_SOURCES})
-    configure_file(${CMAKE_CURRENT_LIST_DIR}/${_FILE} ${PACKAGE_OUTPUT_DIR}/${_FILE}
-                   COPYONLY)
-endforeach()
+_PIPES = [
+    "valu",
+    "scalar",
+    "vmem_tex",
+    "lds",
+    "exp",
+    "lds_direct",
+    "brmsg",
+]
 
-add_subdirectory(gfx9)
-add_subdirectory(gfx12)
+
+def validate_arbiter_state(snapshot):
+    for pipe in _PIPES:
+        _check_pipe(snapshot, pipe)
