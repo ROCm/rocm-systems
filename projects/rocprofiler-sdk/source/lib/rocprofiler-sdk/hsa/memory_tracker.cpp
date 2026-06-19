@@ -22,8 +22,6 @@
 
 #include "lib/rocprofiler-sdk/hsa/memory_tracker.hpp"
 
-#include "lib/common/logging.hpp"
-
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
@@ -39,9 +37,7 @@ namespace memory_tracker
 {
 namespace
 {
-// Fast-path gate. When false (no replay context configured), the hooks only do a chained call plus
-// this relaxed load. Matches design Section 4.2: "If no replay context is active, cost is a single
-// null-check."
+// Fast-path gate. When false the hooks only do the chained call plus this relaxed load.
 std::atomic<bool>&
 tracking_flag()
 {
@@ -63,12 +59,10 @@ inventory()
     return _v;
 }
 
-// Saved "next" function pointers (the already-installed tracing wrappers) we chain through. Types
-// taken from the HSA table members so signatures match exactly.
+// Saved "next" function pointers (the already-installed wrappers) we chain through. Types are taken
+// from the HSA table members so signatures match exactly.
 decltype(AmdExtTable{}.hsa_amd_memory_pool_allocate_fn) next_pool_allocate   = nullptr;
 decltype(AmdExtTable{}.hsa_amd_memory_pool_free_fn)     next_pool_free       = nullptr;
-decltype(AmdExtTable{}.hsa_amd_vmem_map_fn)             next_vmem_map        = nullptr;
-decltype(AmdExtTable{}.hsa_amd_vmem_unmap_fn)           next_vmem_unmap      = nullptr;
 decltype(CoreApiTable{}.hsa_memory_allocate_fn)         next_memory_allocate = nullptr;
 decltype(CoreApiTable{}.hsa_memory_free_fn)             next_memory_free     = nullptr;
 
@@ -77,7 +71,7 @@ pool_allocate_wrapper(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, v
 {
     auto st = next_pool_allocate(pool, size, flags, ptr);
     if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && ptr && *ptr)
-        record_alloc(*ptr, size, /*is_vmem=*/false);
+        record_alloc(*ptr, size);
     return st;
 }
 
@@ -95,7 +89,7 @@ memory_allocate_wrapper(hsa_region_t region, size_t size, void** ptr)
 {
     auto st = next_memory_allocate(region, size, ptr);
     if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && ptr && *ptr)
-        record_alloc(*ptr, size, /*is_vmem=*/false);
+        record_alloc(*ptr, size);
     return st;
 }
 
@@ -105,30 +99,6 @@ memory_free_wrapper(void* ptr)
     auto st = next_memory_free(ptr);
     if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && ptr)
         record_free(ptr);
-    return st;
-}
-
-// VMEM: the usable VA is established at map time (not at handle creation), so the map/unmap pair is
-// the third allocator path we must track (Kerncap kerncap.hip:613-644).
-hsa_status_t
-vmem_map_wrapper(void*                       va,
-                 size_t                      size,
-                 size_t                      in_offset,
-                 hsa_amd_vmem_alloc_handle_t memory_handle,
-                 uint64_t                    flags)
-{
-    auto st = next_vmem_map(va, size, in_offset, memory_handle, flags);
-    if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && va)
-        record_alloc(va, size, /*is_vmem=*/true);
-    return st;
-}
-
-hsa_status_t
-vmem_unmap_wrapper(void* va, size_t size)
-{
-    auto st = next_vmem_unmap(va, size);
-    if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && va)
-        record_free(va);
     return st;
 }
 }  // namespace
@@ -146,11 +116,10 @@ tracking_enabled()
 }
 
 void
-record_alloc(void* ptr, size_t size, bool is_vmem)
+record_alloc(void* ptr, size_t size)
 {
-    auto _lk = std::unique_lock<std::shared_mutex>{inventory_mutex()};
-    inventory()[ptr] =
-        memory_allocation_info_t{.size = size, .agent_id = {.handle = 0}, .is_vmem = is_vmem};
+    auto _lk         = std::unique_lock<std::shared_mutex>{inventory_mutex()};
+    inventory()[ptr] = size;
 }
 
 void
@@ -187,18 +156,6 @@ update_table(hsa_amd_ext_table_t* table)
     next_pool_free                         = table->hsa_amd_memory_pool_free_fn;
     table->hsa_amd_memory_pool_allocate_fn = pool_allocate_wrapper;
     table->hsa_amd_memory_pool_free_fn     = pool_free_wrapper;
-
-    // VMEM hooks may be absent on older HSA tables; only wrap if present.
-    if(table->hsa_amd_vmem_map_fn)
-    {
-        next_vmem_map              = table->hsa_amd_vmem_map_fn;
-        table->hsa_amd_vmem_map_fn = vmem_map_wrapper;
-    }
-    if(table->hsa_amd_vmem_unmap_fn)
-    {
-        next_vmem_unmap              = table->hsa_amd_vmem_unmap_fn;
-        table->hsa_amd_vmem_unmap_fn = vmem_unmap_wrapper;
-    }
 }
 }  // namespace memory_tracker
 }  // namespace hsa

@@ -101,8 +101,8 @@ struct spm_dispatch_counter_collection_service
 };
 
 /// @brief Kernel replay (multi-pass counter collection) service state.
-/// Dispatch counting callbacks are stored in dispatch_counter_collection; this service only
-/// marks that replay orchestration should run once implemented in the HSA queue path.
+/// Dispatch counting callbacks are stored in dispatch_counter_collection; this service marks that
+/// the HSA queue path should run the multi-pass replay loop for this context.
 struct kernel_replay_service
 {
     common::Synchronized<bool> enabled{false};

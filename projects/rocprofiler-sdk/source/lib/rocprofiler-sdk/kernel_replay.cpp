@@ -57,9 +57,9 @@ rocprofiler_configure_kernel_replay_counting_service(
     ctx->kernel_replay = std::make_unique<rocprofiler::context::kernel_replay_service>();
     ctx->kernel_replay->enabled.wlock([](bool& v) { v = true; });
 
-    // Turn on the memory tracker fast path so allocation/free/VMEM hooks begin populating the
-    // inventory that snap/restore will consume. Before this, the installed hooks are a single
-    // relaxed atomic load past the chained call.
+    // Turn on the memory tracker so allocation/free hooks begin populating the inventory that
+    // snap/restore consumes. Until this point the installed hooks are a single relaxed atomic load
+    // past the chained call.
     rocprofiler::hsa::memory_tracker::set_tracking_enabled(true);
 
     return ROCPROFILER_STATUS_SUCCESS;

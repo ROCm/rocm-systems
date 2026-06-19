@@ -24,8 +24,6 @@
 
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#include <rocprofiler-sdk/fwd.h>
-
 #include <cstddef>
 #include <unordered_map>
 
@@ -33,27 +31,19 @@ namespace rocprofiler
 {
 namespace hsa
 {
-// Maintains a flat inventory of all live GPU memory allocations across all agents for kernel
-// replay snapshot/restore. Ported from Kerncap (intellikit/kerncap, kerncap.hip) which maintains
-// the same flat pointer->size map plus a VMEM set, hooking pool/region allocate+free and the VMEM
-// map/unmap pair. Installed on top of the existing memory_allocation wrappers by replacing HSA
-// table function pointers a second time (see design doc Section 4.2); does not touch
-// memory_allocation.cpp.
+// Minimal inventory of live device allocations used by kernel-replay snap/restore.
+//
+// Only directly-allocated device memory is tracked (the HSA pool and region allocators). Unified /
+// managed memory is intentionally out of scope, so the VMEM map/unmap paths are not hooked.
+//
+// The tracker chains the existing HSA table function pointers; when tracking is disabled the hooks
+// cost a single relaxed atomic load on top of the chained call.
 namespace memory_tracker
 {
-// Inventory entry. agent_id is informational; the map is flat (not per-agent) so cross-agent
-// allocations (e.g. RCCL buffers on GPU-1 read by GPU-0) are snapshotted unconditionally.
-struct memory_allocation_info_t
-{
-    size_t                 size     = 0;
-    rocprofiler_agent_id_t agent_id = {.handle = 0};
-    bool                   is_vmem  = false;
-};
+// ptr -> allocation size in bytes.
+using alloc_map_t = std::unordered_map<void*, size_t>;
 
-using alloc_map_t = std::unordered_map<void*, memory_allocation_info_t>;
-
-// Enable/disable inventory population. When disabled (no replay context configured), each hook is
-// a single relaxed atomic load past the chained call -- effectively free.
+// Enable/disable inventory population. Disabled by default until a replay context is configured.
 void
 set_tracking_enabled(bool enabled);
 
@@ -61,7 +51,7 @@ bool
 tracking_enabled();
 
 void
-record_alloc(void* ptr, size_t size, bool is_vmem);
+record_alloc(void* ptr, size_t size);
 
 void
 record_free(void* ptr);
