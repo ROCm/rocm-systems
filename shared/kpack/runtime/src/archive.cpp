@@ -40,20 +40,20 @@ static kpack_error_t validate_header(FILE* file, uint32_t* version,
 
 // Returns file size, or 0 on error (caller should validate)
 static uint64_t get_file_size(FILE* file) {
-  long current = ftell(file);
+  int64_t current = kpack_ftell(file);
   if (current < 0) {
-    return 0;  // ftell() failed
+    return 0;
   }
-  if (fseek(file, 0, SEEK_END) != 0) {
-    return 0;  // fseek() failed
+  if (kpack_fseek(file, 0, SEEK_END) != 0) {
+    return 0;
   }
-  long size = ftell(file);
+  int64_t size = kpack_ftell(file);
   if (size < 0) {
-    fseek(file, current, SEEK_SET);  // Try to restore position
-    return 0;                        // ftell() failed
+    kpack_fseek(file, current, SEEK_SET);
+    return 0;
   }
-  if (fseek(file, current, SEEK_SET) != 0) {
-    return 0;  // fseek() failed to restore
+  if (kpack_fseek(file, current, SEEK_SET) != 0) {
+    return 0;
   }
   return static_cast<uint64_t>(size);
 }

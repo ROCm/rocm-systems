@@ -34,7 +34,6 @@
 #    include <rocprofiler-sdk/pc_sampling.h>
 #    include <rocprofiler-sdk/cxx/operators.hpp>
 
-#    include <glog/logging.h>
 #    include <hsa/hsa.h>
 #    include <hsa/hsa_api_trace.h>
 #    include <hsa/hsa_ven_amd_loader.h>
@@ -61,6 +60,13 @@ get_destroy_function()
     return _v;
 }
 
+RocAttachDispatchTable**
+get_attach_table()
+{
+    static auto* table = common::static_object<RocAttachDispatchTable*>::construct();
+    return table;
+}
+
 /**
  * @brief Flush internal PC sampling buffers and generate a marker record
  * for the code object load/unload event.
@@ -82,22 +88,16 @@ flush_pc_sampling_buffers(const rocprofiler::code_object::hsa::code_object& code
 
     // The PC sampling service is configured on the agent,
     // so flush its PC sampling buffer
-    // TODO: Creating a function that gives the buffer_id based on the agent_id?
-    const auto* pcs_service     = get_configured_pc_sampling_service().load();
-    const auto* agent_session   = pcs_service->agent_sessions.at(agent_id).get();
+    const auto* agent_session   = get_agent_session(agent_id);
     auto        agent_buffer_id = agent_session->buffer_id;
 
     // flush internal PC sampling buffers
     flush_internal_agent_buffers(agent_buffer_id);
 }
 
-hsa_status_t
-executable_freeze(hsa_executable_t executable, const char* options)
+void
+executable_freeze_internal(hsa_executable_t executable)
 {
-    // Call underlying function
-    hsa_status_t status = CHECK_NOTNULL(get_freeze_function())(executable, options);
-    if(status != HSA_STATUS_SUCCESS) return status;
-
     rocprofiler::code_object::iterate_loaded_code_objects(
         [&](const rocprofiler::code_object::hsa::code_object& code_object) {
             if(code_object.hsa_executable == executable)
@@ -110,12 +110,24 @@ executable_freeze(hsa_executable_t executable, const char* options)
                 flush_pc_sampling_buffers(code_object);
             }
         });
-
-    return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t
-executable_destroy(hsa_executable_t executable)
+executable_freeze(hsa_executable_t executable, const char* options)
+{
+    // Call underlying function
+    hsa_status_t status = CHECK_NOTNULL(get_freeze_function())(executable, options);
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
+    executable_freeze_internal(executable);
+    return HSA_STATUS_SUCCESS;
+}
+
+void
+executable_destroy_internal(hsa_executable_t executable)
 {
     rocprofiler::code_object::iterate_loaded_code_objects(
         [&](const rocprofiler::code_object::hsa::code_object& code_object) {
@@ -129,9 +141,36 @@ executable_destroy(hsa_executable_t executable)
                                     code_object_rocp.code_object_id});
             }
         });
+}
 
+hsa_status_t
+executable_destroy(hsa_executable_t executable)
+{
+    executable_destroy_internal(executable);
     // Call underlying function
     return CHECK_NOTNULL(get_destroy_function())(executable);
+}
+
+void
+attach_code_object_event(hsa_executable_t                       executable,
+                         rocprofiler_attach_code_object_phase_t phase,
+                         void* /*data*/)
+{
+    if(phase == ROCPROFILER_ATTACH_CODE_OBJECT_CREATED)
+    {
+        executable_freeze_internal(executable);
+    }
+    else
+    {
+        executable_destroy_internal(executable);
+    }
+}
+
+void
+load_attach_code_objects()
+{
+    auto* attach_table = CHECK_NOTNULL(*(get_attach_table()));
+    attach_table->rocprofiler_attach_add_code_object_cb(attach_code_object_event, nullptr);
 }
 }  // namespace
 
@@ -141,14 +180,36 @@ initialize(HsaApiTable* table)
     (void) table;
     auto& core_table = *table->core_;
 
-    get_freeze_function()                = CHECK_NOTNULL(core_table.hsa_executable_freeze_fn);
-    get_destroy_function()               = CHECK_NOTNULL(core_table.hsa_executable_destroy_fn);
-    core_table.hsa_executable_freeze_fn  = executable_freeze;
-    core_table.hsa_executable_destroy_fn = executable_destroy;
-    LOG_IF(FATAL, get_freeze_function() == core_table.hsa_executable_freeze_fn)
-        << "infinite recursion";
-    LOG_IF(FATAL, get_destroy_function() == core_table.hsa_executable_destroy_fn)
-        << "infinite recursion";
+    if(*(get_attach_table()))
+    {
+        // If attach table is available, use it to iterate existing code objects
+        // and register for new ones instead of hooking freeze/destroy
+        load_attach_code_objects();
+    }
+    else
+    {
+        // No attach table, use traditional freeze/destroy hooks
+        get_freeze_function()                = CHECK_NOTNULL(core_table.hsa_executable_freeze_fn);
+        get_destroy_function()               = CHECK_NOTNULL(core_table.hsa_executable_destroy_fn);
+        core_table.hsa_executable_freeze_fn  = executable_freeze;
+        core_table.hsa_executable_destroy_fn = executable_destroy;
+        LOG_IF(FATAL, get_freeze_function() == core_table.hsa_executable_freeze_fn)
+            << "infinite recursion";
+        LOG_IF(FATAL, get_destroy_function() == core_table.hsa_executable_destroy_fn)
+            << "infinite recursion";
+    }
+}
+
+void
+initialize(RocAttachDispatchTable* attach_table)
+{
+    // We need to save the attach table for later, when the code object module receives the HSA
+    // table and is initialized. We must get the attach table before HSA for correct behavior. This
+    // is guaranteed by rocprofiler-register.
+    ROCP_ERROR_IF(get_freeze_function())
+        << "PC sampling code object module was initialized before attach table was provided. "
+           "Future HSA code objects may not be instrumented correctly.";
+    *(get_attach_table()) = attach_table;
 }
 
 void

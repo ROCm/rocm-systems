@@ -1,0 +1,3 @@
+# TSan suppressions for profiler-hub.
+# Format: race:<symbol-or-file>  /  deadlock:<symbol>  /  thread:<symbol>
+# See https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions

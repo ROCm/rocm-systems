@@ -39,7 +39,17 @@ typedef void (*write_interceptor_t)(const void*,
                                     void*,
                                     hsa_amd_queue_intercept_packet_writer_t);
 
+typedef enum
+{
+    ROCPROFILER_ATTACH_QUEUE_CREATED,
+    ROCPROFILER_ATTACH_QUEUE_DESTROYED
+} rocprofiler_attach_queue_phase_t;
+
 typedef void (*rocprof_attach_queue_iterator_t)(hsa_queue_t*, hsa_agent_t, void*);
+typedef void (*rocprofiler_attach_queue_cb_t)(hsa_queue_t*,
+                                              hsa_agent_t,
+                                              rocprofiler_attach_queue_phase_t,
+                                              void*);
 
 int
 rocprofiler_attach_iterate_all_queues(rocprof_attach_queue_iterator_t func,
@@ -49,5 +59,11 @@ int
 rocprofiler_attach_set_write_interceptor(hsa_queue_t*        queue,
                                          write_interceptor_t func,
                                          void*               data) ROCPROFILER_API;
+
+int
+rocprofiler_attach_add_queue_cb(rocprofiler_attach_queue_cb_t cb, void* data) ROCPROFILER_API;
+
+int
+rocprofiler_attach_remove_queue_cb(rocprofiler_attach_queue_cb_t cb) ROCPROFILER_API;
 
 ROCPROFILER_EXTERN_C_FINI

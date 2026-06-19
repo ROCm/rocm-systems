@@ -232,10 +232,10 @@ int main(int argc, char **argv) {
                 std::cout << " ,total images that cannot be parsed: " << num_bad_jpegs;
             }
             if (num_jpegs_with_411_subsampling) {
-                std::cout << " ,total images with YUV 4:1:1 chroam subsampling: " << num_jpegs_with_411_subsampling;
+                std::cout << " ,total images with YUV 4:1:1 chroma subsampling: " << num_jpegs_with_411_subsampling;
             }
             if (num_jpegs_with_unknown_subsampling) {
-                std::cout << " ,total images with unknwon chroam subsampling: " << num_jpegs_with_unknown_subsampling;
+                std::cout << " ,total images with unknown chroma subsampling: " << num_jpegs_with_unknown_subsampling;
             }
             if (num_jpegs_with_unsupported_resolution) {
                 std::cout << " ,total images with unsupported_resolution: " << num_jpegs_with_unsupported_resolution;

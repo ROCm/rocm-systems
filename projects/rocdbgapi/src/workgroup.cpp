@@ -109,7 +109,7 @@ workgroup_t::xfer_segment_memory (const address_space_t &address_space,
                                   void *read, const void *write, size_t size)
 {
   auto [lowered_address_space, lowered_address]
-    = address_space.lower (segment_address);
+    = address_space.lower (agent (), segment_address);
 
   if (lowered_address_space.kind () == address_space_t::kind_t::local)
     return xfer_local_memory (lowered_address_space, lowered_address, read,

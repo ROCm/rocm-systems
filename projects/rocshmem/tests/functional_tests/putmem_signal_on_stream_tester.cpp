@@ -61,16 +61,9 @@ PutmemSignalOnStreamTester::PutmemSignalOnStreamTester(TesterArguments args)
   int total_bytes = num_bytes_stream * num_streams;
   buf_size = total_bytes;
 
-  source_buf = static_cast<char *>(rocshmem_malloc(buf_size));
-  dest_buf = static_cast<char *>(rocshmem_malloc(buf_size));
-  sig_addr = static_cast<uint64_t *>(rocshmem_malloc(num_streams * sizeof(uint64_t)));
-
-  if (source_buf == nullptr || dest_buf == nullptr || sig_addr == nullptr) {
-    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "source: " << source_buf << ", dest: " << dest_buf
-              << ", sig_addr: " << sig_addr << std::endl;
-    rocshmem_global_exit(1);
-  }
+  source_buf = static_cast<char *>(alloc_test_buffer(buf_size, args.local_buf_type));
+  dest_buf = static_cast<char *>(alloc_test_buffer(buf_size));
+  sig_addr = static_cast<uint64_t *>(alloc_test_buffer(num_streams * sizeof(uint64_t)));
 
   streams.resize(num_streams);
   start_events_timed.resize(num_streams);
@@ -88,9 +81,9 @@ PutmemSignalOnStreamTester::~PutmemSignalOnStreamTester() {
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
   }
-  rocshmem_free(source_buf);
-  rocshmem_free(dest_buf);
-  rocshmem_free(sig_addr);
+  free_test_buffer(source_buf, args.local_buf_type);
+  free_test_buffer(dest_buf);
+  free_test_buffer(sig_addr);
 }
 
 void PutmemSignalOnStreamTester::preLaunchKernel() {
@@ -104,7 +97,7 @@ void PutmemSignalOnStreamTester::postLaunchKernel() {
   }
 
   // Get elapsed time for each stream from HIP events
-  for (int stream_id = 0; stream_id < num_streams && stream_id < num_timers;
+  for (uint32_t stream_id = 0; stream_id < static_cast<uint32_t>(num_streams) && stream_id < static_cast<uint32_t>(num_timers);
        stream_id++) {
     float elapsed_time_ms = 0.0f;
     CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms,
@@ -122,7 +115,7 @@ void PutmemSignalOnStreamTester::postLaunchKernel() {
   }
 
   // Fill remaining timers with zero if num_timers > num_streams
-  for (int i = num_streams; i < num_timers; i++) {
+  for (uint32_t i = num_streams; i < static_cast<uint32_t>(num_timers); i++) {
     start_time[i] = 0;
     end_time[i] = 0;
   }
@@ -140,12 +133,12 @@ void PutmemSignalOnStreamTester::resetBuffers(size_t size) {
 
   // Clear destination buffer (will receive data from other PEs)
   std::memset(dest_buf, 0, buf_size);
-  
+
   // Clear signal addresses
   std::memset(sig_addr, 0, num_streams * sizeof(uint64_t));
 }
 
-void PutmemSignalOnStreamTester::launchKernel(dim3 gridSize, dim3 blockSize,
+void PutmemSignalOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[maybe_unused]] dim3 blockSize,
                                                int loop, size_t size) {
   uint64_t signal_value = 1;
 
@@ -202,7 +195,7 @@ void PutmemSignalOnStreamTester::verifyResults(size_t size) {
   // the data that was put from the PE that targets me
   // We need to find which PE writes to me: pe_source where (pe_source + 1) % n_pes == my_pe
   int pe_source = (my_pe - 1 + n_pes) % n_pes;
-  
+
   for (int stream_id = 0; stream_id < num_streams; stream_id++) {
     int idx = stream_id * size;
     // Expected value is from pe_source
@@ -214,7 +207,7 @@ void PutmemSignalOnStreamTester::verifyResults(size_t size) {
           static_cast<unsigned char>(expected_value)) {
         std::cerr << "PE " << my_pe << ": Data verification failed for stream "
                   << stream_id << " at byte " << k << std::endl;
-        std::cerr << "Expected value from PE " << pe_source << ": " 
+        std::cerr << "Expected value from PE " << pe_source << ": "
                   << expected_value
                   << ", Got: " << static_cast<int>(dest_buf[idx + k])
                   << std::endl;

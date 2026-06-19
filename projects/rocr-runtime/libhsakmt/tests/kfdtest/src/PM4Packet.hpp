@@ -30,6 +30,7 @@
 #include "pm4_pkt_struct_ci.h"
 #include "pm4_pkt_struct_ai.h"
 #include "pm4_pkt_struct_nv.h"
+#include "pm4_pkt_struct_gfx125x.h"
 #include "IndirectBuffer.hpp"
 
 // @class PM4Packet: Marks a group of all PM4 packets
@@ -62,7 +63,7 @@ class PM4WriteDataPacket : public PM4Packet {
 
     virtual ~PM4WriteDataPacket(void) {}
     // @returns Packet size in bytes
-    virtual unsigned int SizeInBytes() const;
+    virtual unsigned int SizeInBytes() const { return m_packetSize; };
     // @returns Pointer to the packet
     virtual const void *GetPacket() const { return m_pPacketData; }
     // @brief Initialise the packet
@@ -79,8 +80,8 @@ class PM4WriteDataPacket : public PM4Packet {
 
  protected:
     unsigned int m_ndw;
-    // PM4WRITE_DATA_CI struct contains all the packet's data
-    PM4WRITE_DATA_CI  *m_pPacketData;
+    void *m_pPacketData;
+    unsigned int m_packetSize;
 };
 
 // @class PM4ReleaseMemoryPacket
@@ -105,6 +106,8 @@ class PM4ReleaseMemoryPacket : public PM4Packet {
     void InitPacketAI(bool isPolling, uint64_t address, uint64_t data,
                  bool is64bit = false, bool isTimeStamp = false);
     void InitPacketNV(bool isPolling, uint64_t address, uint64_t data,
+                 bool is64bit = false, bool isTimeStamp = false);
+    void InitPacketGfx125x(bool isPolling, uint64_t address, uint64_t data,
                  bool is64bit = false, bool isTimeStamp = false);
 
     void *m_pPacketData;
@@ -146,6 +149,7 @@ class PM4AcquireMemoryPacket : public PM4Packet {
  private:
     void InitPacketAI(void);
     void InitPacketNV(void);
+    void InitPacketGfx125x(void);
     void *m_pPacketData;
     unsigned int  m_packetSize;
 };

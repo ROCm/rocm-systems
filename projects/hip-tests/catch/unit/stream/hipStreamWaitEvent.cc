@@ -63,7 +63,7 @@ HIP_TEST_CASE(Unit_hipStreamWaitEvent_Default) {
   REQUIRE(stream != nullptr);
   REQUIRE(waitEvent != nullptr);
 
-  LaunchDelayKernel(std::chrono::milliseconds(2000), stream);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 2000), stream);
 
   HIP_CHECK(hipEventRecord(waitEvent, stream));
 

@@ -141,7 +141,7 @@ This function creates a separate context for each workgroup to avoid contention 
 default context, allowing parallel execution across multiple streams.
 
 ROCSHMEM_ALLTOALLV
------------------
+------------------
 
 .. cpp:function:: __device__ void rocshmem_TYPENAME_alltoallv_wg(rocshmem_team_t team, TYPE *dest, const size_t dest_nelems[], const size_t dest_displs[], TYPE *source, const size_t source_nelems[], const size_t source_displs[]);
 

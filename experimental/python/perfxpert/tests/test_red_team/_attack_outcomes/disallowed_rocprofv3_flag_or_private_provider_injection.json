@@ -1,0 +1,12 @@
+{
+  "attack_id": "disallowed_rocprofv3_flag_or_private_provider_injection",
+  "status": "defeated",
+  "details": {
+    "flags_tested": [
+      "--hip-api-trace",
+      "--kernel-names evil_name",
+      "--exec-shell /bin/sh",
+      "--output-dir /etc/"
+    ]
+  }
+}

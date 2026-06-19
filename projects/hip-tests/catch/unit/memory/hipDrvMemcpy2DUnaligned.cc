@@ -257,8 +257,6 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_FuncTst) {
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Basic) {
-  CHECK_IMAGE_SUPPORT
-
   SECTION("Device to Device") {
     SECTION("Peer access enabled") {
       Memcpy2DDeviceToDeviceShell<false, true, true>(DrvMemcpy2DUnalignedAdapter());
@@ -286,8 +284,6 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Basic) {
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior) {
-  CHECK_IMAGE_SUPPORT
-
   HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("Host to Device") { Memcpy2DHtoDSyncBehavior<true>(DrvMemcpy2DUnalignedAdapter(), true); }

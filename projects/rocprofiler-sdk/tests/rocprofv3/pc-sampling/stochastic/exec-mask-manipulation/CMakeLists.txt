@@ -64,6 +64,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_pc_sampling_stochastic.csv
          --input-json
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_results.json
+         --input-agent-info-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_agent_info.csv
          --all-sampled
          False
     TIMEOUT 60
@@ -99,6 +101,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_pc_sampling_stochastic.csv
          --input-json
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_results.json
+         --input-agent-info-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_agent_info.csv
          --all-sampled
          False
     TIMEOUT 60
@@ -133,6 +137,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_pc_sampling_stochastic.csv
          --input-json
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_results.json
+         --input-agent-info-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_agent_info.csv
          --all-sampled
          False
     TIMEOUT 60

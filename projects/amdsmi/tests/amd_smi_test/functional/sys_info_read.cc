@@ -89,20 +89,21 @@ void TestSysInfoRead::Run(void) {
           std::cout << "\t**VBIOS read: Not supported on this machine" << std::endl;
         }
         // Verify api support checking functionality is working
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_vbios_info", "gpu=" + std::to_string(i), VERB(STANDARD));
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_vbios_info(nullptr)", "gpu=" + std::to_string(i),
+                           VERB(STANDARD));
         err = amdsmi_get_gpu_vbios_info(processor_handles_[i], nullptr);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_NOT_SUPPORTED);
         ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
       } else {
         // Verify api support checking functionality is working
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_vbios_info", "gpu=" + std::to_string(i), VERB(STANDARD));
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_vbios_info(nullptr)", "gpu=" + std::to_string(i),
+                           VERB(STANDARD));
         err = amdsmi_get_gpu_vbios_info(processor_handles_[i], nullptr);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-
-        CHK_ERR_ASRT(err)
       }
     } else {
+      CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) { std::cout << "\t**VBIOS Version: " << vbios_info.version << std::endl; }
     }
 
@@ -272,7 +273,7 @@ void TestSysInfoRead::Run(void) {
       IF_VERB(STANDARD) {
         std::cout << "\t**KFD ID: " << std::dec << kfd_info.kfd_id << "\n";
         std::cout << "\t**Node ID: " << std::dec << kfd_info.node_id << "\n";
-        std::cout << "\t**Current Parition ID: " << std::dec << kfd_info.current_partition_id
+        std::cout << "\t**Current Partition ID: " << std::dec << kfd_info.current_partition_id
                   << "\n";
       }
       EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);

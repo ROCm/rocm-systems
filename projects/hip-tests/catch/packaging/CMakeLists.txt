@@ -135,6 +135,7 @@ endforeach()
 foreach(CATCH_SCRIPT_FILE ${INSTALL_SCRIPT_FILES})
   install(FILES ${CATCH_SCRIPT_FILE} DESTINATION ${INSTALL_DIR_SCRIPT})
 endforeach()
+install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/run_hiptests.py DESTINATION ${INSTALL_DIR_TESTS})
 
 # install cmake include files
 foreach(CTEST_INCLUDE_FILE ${INSTALL_CTEST_INCLUDE_FILES})
@@ -166,10 +167,6 @@ install(FILES
         DESTINATION ${INSTALL_DIR})
 # install catchinfo
 install(FILES ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt DESTINATION ${INSTALL_DIR})
-# install hip test config
-install(DIRECTORY
-        ${HIP_TEST_CONFIG_BINARY_DIR}
-        DESTINATION ${INSTALL_DIR_TESTS})
 # workaround to make the built test binaries portable
 # CPACK_GENERATOR executes this packaging/CMakeLists.txt multiple times
 # there is no way to check which generator is being used. 

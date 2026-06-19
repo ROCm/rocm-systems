@@ -14,6 +14,8 @@ __device__ __managed__ int var = 0;
 enum class StreamAttachTestType { NullStream = 0, StreamPerThread, CreatedStream };
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
   hipStream_t stream{nullptr};
 
   auto streamType =
@@ -69,6 +71,8 @@ constexpr size_t size = 1024;
 __device__ __managed__ int m_memory[size];
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
   hipStream_t stream{nullptr};
 
   auto streamType =

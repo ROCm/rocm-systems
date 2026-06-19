@@ -65,6 +65,8 @@ class IBVWrapper {
     int dealloc_pd(struct ibv_pd *pd);
 
     struct ibv_mr* reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access, HIPAllocator *allocator = nullptr);
+    struct ibv_mr* reg_mr_iova2(struct ibv_pd *pd, void *addr, size_t length, uint64_t iova, int access);
+    struct ibv_mr* reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access);
     int dereg_mr(struct ibv_mr *mr);
 
     struct ibv_cq_ex* create_cq_ex(struct ibv_context *context,
@@ -77,9 +79,10 @@ class IBVWrapper {
     int modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
     int destroy_qp(struct ibv_qp *qp);
 
-    int resolve_eth_l2_from_gid(struct ibv_context *context, struct ibv_ah_attr *attr,
-                                uint8_t eth_mac[ETHERNET_LL_SIZE], uint16_t *vid);
     uint16_t flow_label_to_udp_sport(uint32_t fl);
+
+    struct ibv_ah* create_ah(struct ibv_pd *pd, struct ibv_ah_attr *attr);
+    int destroy_ah(struct ibv_ah *ah);
 
   private:
     struct ibv_funcs_t {
@@ -120,8 +123,8 @@ class IBVWrapper {
       int (*modify_qp)(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
       int (*destroy_qp)(struct ibv_qp *qp);
 
-      int (*resolve_eth_l2_from_gid)(struct ibv_context *context, struct ibv_ah_attr *attr,
-                                     uint8_t eth_mac[ETHERNET_LL_SIZE], uint16_t *vid);
+      struct ibv_ah* (*create_ah)(struct ibv_pd *pd, struct ibv_ah_attr *attr);
+      int (*destroy_ah)(struct ibv_ah *ah);
     };
 
     /**

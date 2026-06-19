@@ -41,8 +41,13 @@
 
 #include "core/commandbuffermgr.hpp"
 
+#ifdef _WIN32
+#define CONSTRUCTOR_API
+#define DESTRUCTOR_API
+#else
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
+#endif
 #define ERR_CHECK(cond, err, msg) \
   {                               \
     if (cond) {                   \
@@ -599,6 +604,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
     aql_profile::Pm4Factory* pm4_factory = aql_profile::Pm4Factory::Create(profile);
     const bool is_concurrent = pm4_factory->IsConcurrent();
     const uint32_t xcc_num = pm4_factory->GetXccNumber();
+    const uint32_t xcc_per_aid = pm4_factory->GetXccPerAid();
     const uint32_t se_number = pm4_factory->GetShaderEnginesNumber() / xcc_num;
     const uint32_t sa_number = pm4_factory->GetShaderArraysNumber();
 
@@ -619,11 +625,9 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
         sample_info.pmc_data.event = *p;
         sample_info.pmc_data.result = *samples;
 #if DEBUG_TRACE == 2
-        printf(
-            "DATA: sample index(%u) id(%u) bloc id(%u) index(%u) counter id(%u) "
-            "res(%lu)\n",
-            sample_index, sample_id, p->block_name, p->block_index, p->counter_id,
-            samples[sample_index]);
+        std::clog << "DATA: sample id(" << sample_id << ") block id(" << p->block_name << ") index("
+                  << p->block_index << ") counter id(" << p->counter_id << ") res(" << *samples
+                  << ")" << std::endl;
 #endif
 
         status = callback(HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA, &sample_info, data);
@@ -640,6 +644,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
           // this check needs to be the first check as it takes care of a corner case
           // in which a UMC event is the last event in profile->events
           if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockAidAttr) continue;
+          if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockGrbmaAttr) continue;
 
           if ((char*)samples > (char*)profile->output_buffer.ptr + profile->output_buffer.size)
             return HSA_STATUS_ERROR;
@@ -658,10 +663,44 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
             sample_info.sample_id = blk;
             sample_info.pmc_data.event = *p;
 #if DEBUG_TRACE == 2
-            printf("DATA: xcc(%u) id(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
-                   xcc_index, blk, p->block_name, p->block_index, p->counter_id, *samples);
+            std::clog << "DATA: xcc(" << xcc_index << ") id(" << blk << ") block id("
+                      << p->block_name << ") index(" << p->block_index << ") counter id("
+                      << p->counter_id << ") res(" << *samples << ")" << " @(" << samples << ")"
+                      << std::endl;
 #endif
+            sample_info.pmc_data.result = *samples;
+            status = callback(HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA, &sample_info, data);
+            if (status == HSA_STATUS_INFO_BREAK) {
+              status = HSA_STATUS_SUCCESS;
+              break;
+            }
+            if (status != HSA_STATUS_SUCCESS) break;
+            samples++;
+          }
+        }
+      }
+      // AIGC blocks
+      for (uint32_t xcc_index = 0; xcc_index < xcc_num; xcc_index += xcc_per_aid) {
+        for (const hsa_ven_amd_aqlprofile_event_t* p = profile->events;
+             p < profile->events + profile->event_count; ++p) {
+          if (!(pm4_factory->GetBlockInfo(p)->attr & CounterBlockGrbmaAttr)) continue;
 
+          if ((char*)samples > (char*)profile->output_buffer.ptr + profile->output_buffer.size)
+            return HSA_STATUS_ERROR;
+
+          // AIGC counter event
+          uint32_t block_samples_count = 1;
+
+          for (uint32_t blk = 0; blk < block_samples_count; ++blk) {
+            hsa_ven_amd_aqlprofile_info_data_t sample_info;
+            sample_info.sample_id = blk;
+            sample_info.pmc_data.event = *p;
+#if DEBUG_TRACE == 2
+            std::clog << "DATA: xcc(" << xcc_index << ") id(" << blk << ") block id("
+                      << p->block_name << ") index(" << p->block_index << ") counter id("
+                      << p->counter_id << ") res(" << *samples << ")" << " @(" << samples << ")"
+                      << std::endl;
+#endif
             sample_info.pmc_data.result = *samples;
             status = callback(HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA, &sample_info, data);
             if (status == HSA_STATUS_INFO_BREAK) {
@@ -815,3 +854,20 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_att_marker(
 }
 
 }  // extern "C"
+
+#ifdef _WIN32
+#include <windows.h>
+extern "C" BOOL WINAPI DllMain(HINSTANCE /*hinstDLL*/, DWORD fdwReason, LPVOID /*lpvReserved*/) {
+  switch (fdwReason) {
+    case DLL_PROCESS_ATTACH:
+      aql_profile::constructor();
+      break;
+    case DLL_PROCESS_DETACH:
+      aql_profile::destructor();
+      break;
+    default:
+      break;
+  }
+  return TRUE;
+}
+#endif

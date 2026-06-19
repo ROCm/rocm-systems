@@ -1,26 +1,8 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "binary/address_range.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -102,9 +84,9 @@ bool
 address_range::overlaps(address_range _v) const
 {
     if(contains(_v)) return false;
-    int64_t _lhs_diff = (high - low);
-    int64_t _rhs_diff = (_v.high - _v.low);
-    int64_t _diff     = (std::max(high, _v.high) - std::min(low, _v.low));
+    std::int64_t _lhs_diff = (high - low);
+    std::int64_t _rhs_diff = (_v.high - _v.low);
+    std::int64_t _diff     = (std::max(high, _v.high) - std::min(low, _v.low));
     return (_diff < (_lhs_diff + _rhs_diff));
 }
 

@@ -1,0 +1,13 @@
+[codespell]
+# AMD/ROCm domain-specific terms that are not typos
+# renderD = DRM device node path (/dev/dri/renderD128)
+# OURCE = intentional sed removal target in packaging scripts
+# utiliz = variable name in perf_cntr_read_write.cc
+# bootup = AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT enum context
+# DEBUGG = intentional invalid log level for CLI failure test
+# reenable = valid systemctl command in packaging scripts
+ignore-words-list = hsa,valu,inout,cant,indx,traid,ue,wite,esponse,renderD,OURCE,utiliz,bootup,DEBUGG,reenable,buildd,nd,subtile,subtiles,anc,unsecured
+# Skip generated files, build artifacts, external dependencies
+# Note that pre-commit hook for codespell ignores these. You have to modify the regex in .pre-commit-config.yaml.
+skip = build,.git,esmi_ib_library,third_party
+quiet-level = 2

@@ -63,6 +63,19 @@ Event::~Event() {
 
 // ================================================================================================
 AccumulateCommand::~AccumulateCommand() {
+  // Drop the kernel-names owner pin taken in the constructor (e.g. the
+  // GraphExec). Done first so it always runs, regardless of the owns_hw_events_
+  // early return. Releasing here -- after ReportActivity() has read the names --
+  // is what makes the borrowed kernel-name strings safe without copying them.
+  if (kernelNamesOwner_ != nullptr) {
+    kernelNamesOwner_->release();
+    kernelNamesOwner_ = nullptr;
+  }
+  // When an external owner (e.g. the graph signal pool) reclaims the signals,
+  // do not destroy them here.
+  if (!owns_hw_events_) {
+    return;
+  }
   // Release all retained HW events per device
   for (auto& device_events_pair : hw_events_) {
     Device* dev = device_events_pair.first;
@@ -149,7 +162,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
       releaseResources();
     }
 
-    if (profilingInfo().enabled_ && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+    if (profilingInfo().enabled_) {
       amd::activity_prof::ReportActivity(command());
     }
 
@@ -296,10 +309,19 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
 
 const Event::EventWaitList Event::nullWaitList(0);
 
+static bool IsActivityEnabledAndCommit(cl_command_type type) {
+  auto op = amd::activity_prof::OperationId(type);
+  if (amd::activity_prof::IsEnabled(op)) {
+    amd::activity_prof::CommitRecord(op);
+    return true;
+  }
+  return false;
+}
+
 // ================================================================================================
 Command::Command(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
                  uint32_t commandWaitBits, const Event* waitingEvent)
-    : Event(queue, amd::activity_prof::IsEnabled(amd::activity_prof::OperationId(type)) ||
+    : Event(queue, IsActivityEnabledAndCommit(type) ||
                        queue.properties().test(CL_QUEUE_PROFILING_ENABLE) ||
                        Agent::shouldPostEventEvents()),
       queue_(&queue),
@@ -394,7 +416,7 @@ void Command::enqueue() {
       queue_->ResetSubmissionBatch();
     } else {
       submit(*queue_->vdev());
-      queue_->FlushSubmissionBatch(this);
+      queue_->FlushSubmissionBatch();
     }
   } else {
     queue_->append(*this);

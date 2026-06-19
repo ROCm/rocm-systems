@@ -60,7 +60,8 @@ rocprofiler_add_interface_library(rocprofiler-sdk-rt "Build flags for runtime li
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-atomic "atomic library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-gtest "Google Test library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-sdk-glog "Google Log library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-abseil "Abseil logging library"
+                                  INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-fmt "C++ format string library"
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-cxx-filesystem "C++ filesystem library"
@@ -80,7 +81,8 @@ rocprofiler_add_interface_library(rocprofiler-sdk-hip "HIP library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-hsa-runtime "HSA runtime library"
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-amd-comgr "AMD comgr library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-sdk-hsa-aql "AQL library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-aqlprofile-external
+                                  "(External) AQL library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-hsakmt
                                   "HSAKMT library for AMD KFD support" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-drm "drm (amdgpu) library" INTERNAL)

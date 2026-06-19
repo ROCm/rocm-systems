@@ -45,6 +45,7 @@ class TestCrossProcessSerialization : public TestBase {
 
  private:
   bool holder_process_;
+  bool is_child_process_;
   int child_;
   std::string orig_cross_process_env_;
   bool orig_cross_process_env_was_set_;

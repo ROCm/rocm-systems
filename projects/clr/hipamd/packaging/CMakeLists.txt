@@ -227,14 +227,12 @@ configure_file(hip-devel.prerm    ${CMAKE_CURRENT_BINARY_DIR}/dev/prerm @ONLY)
 set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/dev/postinst;${CMAKE_CURRENT_BINARY_DIR}/dev/prerm")
 # Dev/devel package dependencies
 set(HIP_DEV_ROCM_PKG_DEPENDENCIES "hip-runtime-amd, rocm-llvm, rocm-core")
-set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS "perl (>= 5.0), libfile-copy-recursive-perl, libfile-listing-perl, libfile-which-perl, liburi-perl")
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "libc6, file, ${HIP_DEV_ROCM_PKG_DEPENDENCIES}, hsa-rocr-dev, hipcc")
 set(CPACK_DEBIAN_DEV_PACKAGE_PROVIDES "hip-base")
 set(CPACK_DEBIAN_DEV_PACKAGE_REPLACES "hip-base")
 
 set(CPACK_RPM_DEV_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/dev/postinst")
 set(CPACK_RPM_DEV_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/dev/prerm")
-set(CPACK_RPM_DEV_PACKAGE_SUGGESTS "perl >= 5.0, perl-File-Which, perl-File-Listing, perl-URI")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES "file, ${HIP_DEV_ROCM_PKG_DEPENDENCIES}, hsa-rocr-devel, hipcc")
 
 set(CPACK_RPM_DEV_PACKAGE_PROVIDES "hip-base")

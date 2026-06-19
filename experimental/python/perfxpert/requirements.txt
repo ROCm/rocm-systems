@@ -1,0 +1,16 @@
+# perfxpert — full installation (LLM providers + rich output)
+# Equivalent to: pip install -e ".[all]"
+#
+# Core analysis works with stdlib only (zero mandatory deps).
+# Install this file to enable all optional features.
+
+# LLM providers
+anthropic>=0.18
+openai>=1.0
+
+# Rich terminal output
+rich>=13.0
+
+# --llm anthropic|openai|ollama|private|opencode are the supported
+# provider values; configure keys via ANTHROPIC_API_KEY / OPENAI_API_KEY /
+# PERFXPERT_LLM_PRIVATE_API_KEY (see docs/guides/getting-started.md §10).

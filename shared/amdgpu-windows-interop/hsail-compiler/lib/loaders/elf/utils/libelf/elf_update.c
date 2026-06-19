@@ -650,7 +650,7 @@ _libelf_resync_elf(Elf *e, struct _Elf_Extent_List *extents)
     /*
      * If we are a read only elf that has not had its
      * headers loaded, or a read/write elf that is not
-     * based on a file descripter and had its headers
+     * based on a file descriptor and had its headers
      * loaded, then lets load the headers.
      * If the loading of the headers fails, return -1.
      */

@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <ctype.h>
 #include <fstream>
 #include <iostream>
@@ -169,14 +170,10 @@ bool NullDevice::init() {
         (isa->xnack() == amd::Isa::Feature::Any)) {
       continue;
     }
-    bool isOnline = false;
+
     // Check if the particular device is online
-    for (size_t i = 0; i < devices.size(); i++) {
-      if (&(devices[i]->isa()) == isa) {
-        isOnline = true;
-        break;
-      }
-    }
+    bool isOnline = std::any_of(devices.begin(), devices.end(),
+                                [isa](Device* device) { return &(device->isa()) == isa; });
     if (isOnline) {
       continue;
     }
@@ -294,7 +291,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
                                ? palProp.gfxipProperties.shaderCore.numAvailableCus / 2
                                : palProp.gfxipProperties.shaderCore.numAvailableCus;
   info_.maxPhysicalComputeUnits_ = info_.maxComputeUnits_;
-  info_.numberOfShaderEngines = palProp.gfxipProperties.shaderCore.numShaderEngines;
+  info_.numberOfShaderEngines_ = palProp.gfxipProperties.shaderCore.numShaderEngines;
 
   // SI parts are scalar.  Also, reads don't need to be 128-bits to get peak rates.
   // For example, float4 is not faster than float as long as all threads fetch the same
@@ -494,6 +491,10 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.maxWorkItemSizes_[2] = info_.maxWorkGroupSize_;
   info_.preferredWorkGroupSize_ = settings().preferredWorkGroupSize_;
 
+  info_.maxGridDim_[0] = std::numeric_limits<int32_t>::max();
+  info_.maxGridDim_[1] = std::numeric_limits<uint16_t>::max();
+  info_.maxGridDim_[2] = std::numeric_limits<uint16_t>::max();
+
   info_.localMemType_ = CL_LOCAL;
   info_.localMemSize_ = settings().hwLDSSize_;
   info_.extensions_ = getExtensionString();
@@ -612,10 +613,12 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 #endif  // _WIN64
   }
   info_.virtualMemoryManagement_ = true;
+  info_.gpuDirectRdmaWithHipVmmSupported_ =
+      info_.virtualMemoryManagement_ && info_.dmabufSupported_;
   info_.virtualMemAllocGranularityMinimum_ =
       static_cast<size_t>(palProp.gpuMemoryProperties.virtualMemAllocGranularity);
   info_.virtualMemAllocGranularityRecommended_ =
-      static_cast<size_t>(palProp.gpuMemoryProperties.virtualMemAllocGranularity);
+      static_cast<size_t>(palProp.gpuMemoryProperties.largePageSizeInBytes);
   info_.vgprAllocGranularity_ = palProp.gfxipProperties.shaderCore.vgprAllocGranularity;
   info_.vgprsPerSimd_ = palProp.gfxipProperties.shaderCore.vgprsPerSimd;
   info_.availableVGPRs_ = palProp.gfxipProperties.shaderCore.numAvailableVgprs;
@@ -970,8 +973,7 @@ bool Device::create(Pal::IDevice* device) {
   computeEnginesId_.resize(std::min(numComputeEngines(), settings().numComputeRings_));
 
   amd::Context::Info info = {0};
-  std::vector<amd::Device*> devices;
-  devices.push_back(this);
+  std::vector<amd::Device*> devices{this};
 
   // Create a dummy context
   context_ = new amd::Context(devices, info);
@@ -2336,7 +2338,7 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
 }
 
 void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
-                        const void* agentInfo) const {
+                        const void* agentInfo, bool allowAllAgentsAccess) const {
   // for discrete gpu, we only reserve,no commit yet.
   return amd::Os::reserveMemory(nullptr, size, alignment, amd::Os::MEM_PROT_NONE);
 }
@@ -2465,6 +2467,137 @@ bool Device::virtualFree(void* addr) {
 
 static inline address NextSubBufferPtr(const amd::Memory* mem) {
   return reinterpret_cast<address>(mem->getSvmPtr()) + mem->getSize();
+}
+
+// ================================================================================================
+// Direct synchronous map path bypassing VirtualMapCommand. Reuses the
+// device-level VirtualGPU (xferQueue_).
+// Locks execution() to serialize against this device's command submission,
+// then issues Pal::IQueue::RemapVirtualMemoryPages on MainEngine and waits
+// the fence. The HIP layer is responsible for draining peer-device queues
+// from the CPU side before calling virtualMap
+cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
+  if (phys == nullptr) {
+    LogError("PAL virtualMap: phys is nullptr");
+    return CL_INVALID_VALUE;
+  }
+
+  VirtualGPU* vgpu = xferQueue_;
+  if (vgpu == nullptr) {
+    LogError("PAL virtualMap: device has no VirtualGPU available");
+    return CL_INVALID_VALUE;
+  }
+
+  // Serialize against this device's command submission.
+  std::scoped_lock lock(vgpu->execution());
+
+  amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(va);
+  if (vaddr_base_obj == nullptr || !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+    LogPrintfError("PAL virtualMap: no virtual VA reservation for va: %p", va);
+    return CL_INVALID_VALUE;
+  }
+
+  amd::Memory* vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
+  if (vaddr_sub_obj == nullptr) {
+    LogError("PAL virtualMap: MapMemObjBookkeeping failed");
+    return CL_INVALID_VALUE;
+  }
+
+  pal::Memory* phys_pal_mem = getGpuMemory(phys);
+  Pal::IGpuMemory* phymem_igpu_mem = phys_pal_mem->iMem();
+  size_t phys_offset = phys_pal_mem->offset();
+
+  size_t vaddr_offset = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
+                        reinterpret_cast<address>(vaddr_base_obj->getSvmPtr());
+
+  pal::Memory* vaddr_pal_mem = getGpuMemory(vaddr_base_obj);
+  Pal::VirtualMemoryRemapRange range{
+      vaddr_pal_mem->iMem(), vaddr_offset, phymem_igpu_mem,
+      phys_offset,           size,         Pal::VirtualGpuMemAccessMode::NoAccess};
+
+  vgpu->eventBegin(MainEngine);
+  auto result = vgpu->queue(MainEngine).iQueue_->RemapVirtualMemoryPages(1, &range, false, nullptr);
+  GpuEvent event;
+  vgpu->eventEnd(MainEngine, event);
+  vgpu->setGpuEvent(event);
+  vgpu->waitForEvent(&event);
+
+  if (result != Pal::Result::Success) {
+    LogPrintfError("PAL virtualMap: RemapVirtualMemoryPages (map) failed: %d",
+                   static_cast<int>(result));
+    // Roll back sub_obj — FinalizeMapMemObjBookkeeping was not called, so
+    // MemObjMap doesn't contain va and the cross-links aren't wired. Tear
+    // down the sub-buffer view directly.
+    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+    vaddr_sub_obj->release();
+    return CL_OUT_OF_HOST_MEMORY;
+  }
+
+  constexpr bool kImportVmmForInterprocess = false;
+  FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
+  return CL_SUCCESS;
+}
+
+// ================================================================================================
+// Direct synchronous unmap path. Symmetric to virtualMap, but preceded by
+// WaitForIdleCompute/Sdma on this device only. HIP layer must handle device sync
+cl_int Device::virtualUnmap(void* va, size_t size) {
+  VirtualGPU* vgpu = xferQueue_;
+  if (vgpu == nullptr) {
+    LogError("PAL virtualUnmap: device has no VirtualGPU available");
+    return CL_INVALID_VALUE;
+  }
+
+  // Serialize against this device's command submission.
+  std::scoped_lock lock(vgpu->execution());
+
+  amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va);
+  if (vaddr_sub_obj == nullptr) {
+    LogPrintfError("PAL virtualUnmap: no sub_obj for va: %p", va);
+    return CL_INVALID_VALUE;
+  }
+
+  amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(va);
+  if (vaddr_base_obj == nullptr || !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+    LogPrintfError("PAL virtualUnmap: no virtual VA reservation for va: %p", va);
+    return CL_INVALID_VALUE;
+  }
+
+  size_t vaddr_offset = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
+                        reinterpret_cast<address>(vaddr_base_obj->getSvmPtr());
+
+  pal::Memory* vaddr_pal_mem = getGpuMemory(vaddr_base_obj);
+  // Unmap: no physical backing on the range.
+  Pal::VirtualMemoryRemapRange range{vaddr_pal_mem->iMem(),
+                                     vaddr_offset,
+                                     nullptr,
+                                     0,
+                                     size,
+                                     Pal::VirtualGpuMemAccessMode::NoAccess};
+
+  // Drain in-flight work touching the VA range on this device's queues.
+  vgpu->WaitForIdleCompute();
+  vgpu->WaitForIdleSdma();
+
+  vgpu->eventBegin(MainEngine);
+  auto result = vgpu->queue(MainEngine).iQueue_->RemapVirtualMemoryPages(1, &range, false, nullptr);
+  GpuEvent event;
+  vgpu->eventEnd(MainEngine, event);
+  vgpu->setGpuEvent(event);
+  vgpu->waitForEvent(&event);
+
+  if (result != Pal::Result::Success) {
+    LogPrintfError("PAL virtualUnmap: RemapVirtualMemoryPages (unmap) failed: %d",
+                   static_cast<int>(result));
+    // Keep HW state and bookkeeping consistent — bail out before tearing
+    // down sub_obj/MemObjMap entries.
+    return CL_INVALID_VALUE;
+  }
+
+  constexpr bool kDestroyVirtualBuffer = true;
+  constexpr bool kReleaseSubObj = true;
+  UnmapMemObjBookkeeping(vaddr_sub_obj, va, kDestroyVirtualBuffer, kReleaseSubObj);
+  return CL_SUCCESS;
 }
 
 // ================================================================================================
@@ -2709,8 +2842,7 @@ bool Device::createBlitProgram() {
   // note: It's not critical for runtime functionality to fail trap handler initialization
   auto asm_program = new amd::Program(*context_, TrapHandlerAsm.c_str(), amd::Program::Assembly);
   if (asm_program != nullptr) {
-    std::vector<amd::Device*> devices;
-    devices.push_back(this);
+    std::vector<amd::Device*> devices{this};
     std::string opt = "-cl-internal-kernel ";
     if (auto retval =
             asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {

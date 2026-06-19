@@ -180,12 +180,16 @@ static void checkPartitionIdChanges(amdsmi_processor_handle* const processor_han
   // re-initialize to ensure new device ordering is followed
   if (reinitialize) {
     if (isVerbose) {
-      std::cout << "\t**REINITIALIZING device list due to parition changes.\n";
+      std::cout << "\t**REINITIALIZING device list due to partition changes.\n";
     }
     DISPLAY_AMDSMI_API("amdsmi_shut_down", "", isVerbose);
-    amdsmi_shut_down();
+    amdsmi_status_t reinit_ret = amdsmi_shut_down();
+    DISPLAY_AMDSMI_STATUS(isVerbose, __FILE__, __LINE__, reinit_ret, AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(reinit_ret, AMDSMI_STATUS_SUCCESS);
     DISPLAY_AMDSMI_API("amdsmi_init", "AMDSMI_INIT_AMD_GPUS", isVerbose);
-    amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+    reinit_ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+    DISPLAY_AMDSMI_STATUS(isVerbose, __FILE__, __LINE__, reinit_ret, AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(reinit_ret, AMDSMI_STATUS_SUCCESS);
   }
 
   smi_amdgpu_get_device_count(&current_num_devices);
@@ -198,7 +202,7 @@ static void checkPartitionIdChanges(amdsmi_processor_handle* const processor_han
   }
   // Allocate the memory for the device handlers on the socket
   std::vector<amdsmi_processor_handle> curr_processor_handles(current_num_devices);
-  getProcessorHandles(&curr_processor_handles[0], current_num_devices);
+  getProcessorHandles(curr_processor_handles.data(), current_num_devices);
 
   if (current_partition == "SPX" || current_partition == "N/A") {
     max_loop = MAX_SPX_PARTITIONS;

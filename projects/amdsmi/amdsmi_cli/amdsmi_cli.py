@@ -31,16 +31,12 @@ except ImportError as e:
     logging.debug(f"Unhandled import error: {e}")
     logging.debug("argcomplete module not found. Autocomplete will not work.")
 
-# from typing import TYPE_CHECKING
-# # only used for type checking
-# # pyright trips up and cannot find amdsmi scripts without it
-# if TYPE_CHECKING:
-#     from amdsmi_commands import AMDSMICommands
-#     from amdsmi_parser import AMDSMIParser
-#     from amdsmi_logger import AMDSMILogger
-#     import amdsmi_cli_exceptions
-#     from amdsmi import amdsmi_interface
-#     from amdsmi import amdsmi_exception
+from typing import TYPE_CHECKING
+
+# only used for type checking
+# pyright trips up and cannot find amdsmi scripts without it
+if TYPE_CHECKING:
+    from amdsmi import amdsmi_exception
 
 # Set the environment variable for GPU metrics cache duration
 gpu_metrics_cache_ms = os.environ.setdefault("AMDSMI_GPU_METRICS_CACHE_MS", "100")
@@ -49,6 +45,10 @@ logging.debug("AMDSMI_GPU_METRICS_CACHE_MS = %sms", gpu_metrics_cache_ms)
 # Set the environment variable for ASIC cache duration
 asic_info_cache_ms = os.environ.setdefault("AMDSMI_ASIC_INFO_CACHE_MS", "10000")  # 10 seconds
 logging.debug("AMDSMI_ASIC_INFO_CACHE_MS = %sms", asic_info_cache_ms)
+
+# Set the environment variable for process info cache duration
+process_info_cache_ms = os.environ.setdefault("AMDSMI_PROCESS_INFO_CACHE_MS", "100")
+logging.debug("AMDSMI_PROCESS_INFO_CACHE_MS = %sms", process_info_cache_ms)
 
 try:
     from amdsmi_init import *
@@ -150,7 +150,7 @@ if __name__ == "__main__":
     amd_smi_commands = AMDSMICommands(helpers=amd_smi_helpers)
     amd_smi_parser = AMDSMIParser(
         amd_smi_commands.version,
-        amd_smi_commands.list,
+        amd_smi_commands.list_devices,
         amd_smi_commands.static,
         amd_smi_commands.firmware,
         amd_smi_commands.bad_pages,
@@ -166,6 +166,7 @@ if __name__ == "__main__":
         amd_smi_commands.partition,
         amd_smi_commands.ras,
         amd_smi_commands.node,
+        amd_smi_commands.fabric,
         amd_smi_commands.rocm_smi,
         amd_smi_commands.default,
         sys_argv=sys.argv,
@@ -230,27 +231,46 @@ if __name__ == "__main__":
 
     try:
         if len(sys.argv) == 1:
-            args = amd_smi_parser.parse_args(args=['default'])
-        elif sys.tracebacklimit == 10 and (sys.argv[1] == '--loglevel'):
-            args = amd_smi_parser.parse_args(args=['default', '--loglevel'] + sys.argv[2:])
+            args = amd_smi_parser.parse_args(args=["default"])
+        elif sys.tracebacklimit == 10 and (sys.argv[1] == "--loglevel"):
+            args = amd_smi_parser.parse_args(args=["default", "--loglevel"] + sys.argv[2:])
         elif sys.argv[1] in valid_commands:
             args = amd_smi_parser.parse_args(args=None)
         else:
-            raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(sys.argv[1],amd_smi_commands.logger.destination)
+            raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(
+                sys.argv[1], amd_smi_commands.logger.destination
+            )
 
         # Handle command modifiers before subcommand execution
         # human readable is the default output format
-        if hasattr(args, 'json') and args.json:
+        if hasattr(args, "json") and args.json:
             amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.json.value
-        if hasattr(args, 'csv') and args.csv:
+        if hasattr(args, "csv") and args.csv:
             amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.csv.value
-        if hasattr(args, 'file') and args.file:
+        if hasattr(args, "file") and args.file:
             amd_smi_commands.logger.destination = args.file
         configure_logging_and_execute(args, amd_smi_commands)
     except amdsmi_cli_exceptions.AmdSmiException as e:
-        _print_error(f"{type(e).__module__}.{type(e).__name__}: {str(e)}", amd_smi_commands.logger.destination)
+        _print_error(
+            f"{type(e).__module__}.{type(e).__name__}: {str(e)}",
+            amd_smi_commands.logger.destination,
+        )
         sys.exit(abs(e.value))
     except amdsmi_exception.AmdSmiLibraryException as e:
-        exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(amd_smi_commands.logger.format, e.get_error_code())
-        _print_error(f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}", amd_smi_commands.logger.destination)
+        exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+            amd_smi_commands.logger.format, e.get_error_code()
+        )
+        _print_error(
+            f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
+            amd_smi_commands.logger.destination,
+        )
+        sys.exit(abs(exc.value))
+    except PermissionError as e:
+        command = sys.argv[1] if len(sys.argv) > 1 else ""
+        outputformat = amd_smi_commands.logger.format
+        exc = amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command, outputformat)
+        _print_error(
+            f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
+            amd_smi_commands.logger.destination,
+        )
         sys.exit(abs(exc.value))

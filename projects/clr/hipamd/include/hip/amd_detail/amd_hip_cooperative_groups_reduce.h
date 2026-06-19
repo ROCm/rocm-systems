@@ -97,6 +97,21 @@ namespace impl {
   };
 }
 
+/** \ingroup CooperativeGAPI
+  *
+  * \brief   Returns the result of the reduction of the specified cooperative group using a
+  *          specified functor
+  * \details A collective operation that can be used with a thread_block_tile whose size is known
+  *          at compile-time or a coalesced_group.
+  *
+  * \tparam  TyGroup  The cooperative group class template parameter.
+  * \tparam  TyVal    The type of the value this thread contributes for the reduction.
+  * \tparam  TyFn     The type of the function object
+  *
+  * \param group  The group to reduce.
+  * \param val    The value this thread contributes to the reduction.
+  * \param op     The function object whose operator() will be called.
+  */
 template <typename TyGroup, typename TyVal, typename TyFn>
 __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> decltype(op(val, val)) {
   using Op = typename __hip_internal::remove_cvref<TyFn>::type;
@@ -119,8 +134,6 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   }
 
   // for coalesced_groups, the mask is simply the activemask
-  // for tiled groups, it is legal for some threads in a tile to not participate so we also
-  // need to apply the active mask
   mask &= __activemask();
 
   if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&

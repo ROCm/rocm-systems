@@ -11,7 +11,7 @@ This example demonstrates profiling across process boundaries by forking child p
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - C++ compiler with pthreads support
 - rocprofiler-systems user library
 - (Optional) HIP runtime for `hipMallocConcurrencyMproc`
@@ -45,7 +45,7 @@ cmake --build build --target fork-example
 **Arguments:**
 
 | Position | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | 1 | Number of child processes to fork | 4 |
 | 2 | Number of fork/wait cycles to repeat | 1 |
 
@@ -58,7 +58,7 @@ rocprof-sys-run -- ./fork-example 4 2
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace with cross-process events |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Sample call stacks in parent and child processes |

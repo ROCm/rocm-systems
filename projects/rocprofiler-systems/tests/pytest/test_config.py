@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 General configuration file tests.
@@ -11,7 +11,10 @@ from pathlib import Path
 import shutil
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.rocprof_config, pytest.mark.ci_enable]
+pytestmark = [
+    pytest.mark.rocprof_config,
+    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
+]
 
 
 # =============================================================================
@@ -54,7 +57,6 @@ class TestConfig(RocprofsysTest):
             "runtime_instrument",
             target=config_target,
             env=env,
-            timeout=400,  # In xdist, it can take much longer
             fail_on_pass=True,  # Expected to fail
         )
 
@@ -64,6 +66,7 @@ class TestConfig(RocprofsysTest):
             use_abort_fail_regex=False,
         )
 
+    @pytest.mark.timeout(120)
     def test_missing(self, test_output_dir: Path, config_target: str):
         """Test that missing config file causes failure."""
         # Use a path to a config file that doesn't exist
@@ -75,7 +78,6 @@ class TestConfig(RocprofsysTest):
             "runtime_instrument",
             target=config_target,
             env=env,
-            timeout=120,
             fail_on_pass=True,  # Expected to fail
         )
 
@@ -83,4 +85,29 @@ class TestConfig(RocprofsysTest):
             result,
             pass_regex=[r"Error reading configuration file"],
             use_abort_fail_regex=False,
+        )
+
+    @pytest.mark.timeout(120)
+    def test_trace_category_enabled_in_runtime(self, config_target: str):
+        """Perfetto settings must appear in the runtime config print when tracing is on.
+
+        Regression for the phantom ``ROCPROFSYS_USE_TRACE`` key: the perfetto
+        setting category was gated on an unregistered key, so it was always
+        disabled at runtime and every perfetto setting (including
+        ``ROCPROFSYS_TRACE``) was silently dropped from the printed
+        configuration. The canonical switch is ``ROCPROFSYS_TRACE``.
+        """
+        env = {
+            "ROCPROFSYS_TRACE": "ON",
+            "ROCPROFSYS_VERBOSE": "2",
+        }
+
+        result = self.run_test("sampling", target=config_target, env=env)
+
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"ROCPROFSYS_TRACE\s+=\s+(true|false)",
+                r"ROCPROFSYS_PERFETTO_\w+\s+=",
+            ],
         )

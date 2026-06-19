@@ -1,10 +1,12 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ------------------------------------------------------------------------------#
 #
 # rocprofiler-systems user library
 #
 # ------------------------------------------------------------------------------#
 
-set(CMAKE_BUILD_TYPE "Release")
 set(CMAKE_SKIP_RPATH OFF)
 set(BUILD_RPATH_USE_ORIGIN ON)
 set(CMAKE_CXX_VISIBILITY_PRESET "hidden")

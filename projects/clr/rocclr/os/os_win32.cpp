@@ -561,6 +561,15 @@ bool Os::CloseFileHandle(FileDesc fdesc) {
   return true;
 }
 
+amd::Os::FileDesc Os::DupFileHandle(FileDesc fdesc) {
+  HANDLE out = nullptr;
+  if (!DuplicateHandle(GetCurrentProcess(), fdesc, GetCurrentProcess(), &out, 0, FALSE,
+                       DUPLICATE_SAME_ACCESS)) {
+    return FDescInit();
+  }
+  return out;
+}
+
 bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
   if ((fd_ptr == nullptr) || (sz_ptr == nullptr)) {
     return false;
@@ -730,11 +739,11 @@ void Os::PrintLibraryLocation() {
           (LPCSTR)&Os::loadLibrary, &hm)) {
     char cszDllPath[1024] = {0};
     if (GetModuleFileNameA(hm, cszDllPath, sizeof(cszDllPath))) {
-      ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: %s", cszDllPath);
+      ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Runtime Library Path: %s", cszDllPath);
       return;
     }
   }
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: <unknown>");
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Runtime Library Path: <unknown>");
 }
 
 // ================================================================================================
@@ -809,6 +818,18 @@ bool NumaNode::SchedSetAffinity() {
     return false;
   }
   return true;
+}
+
+// ================================================================================================
+bool NumaNode::SchedSetAffinityIfAllowed() {
+  // Windows keeps the previous behavior for now. The Linux implementation avoids
+  // overriding application-provided affinity masks.
+  return SchedSetAffinity();
+}
+
+// ================================================================================================
+bool resetThreadAffinity() {
+  return false;
 }
 
 }  // namespace numa

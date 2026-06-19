@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["isolation_rules", "error_codes"],
+  "properties": {
+    "isolation_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule", "counters", "reason"],
+        "properties": {
+          "rule": {"type": "string"},
+          "counters": {"type": "array", "items": {"type": "string"}},
+          "reason": {"type": "string"},
+          "severity": {"type": "string", "enum": ["error", "warning"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "error_codes": {
+      "type": "object",
+      "patternProperties": {
+        "^[0-9]+$": {
+          "type": "object",
+          "required": ["message"],
+          "properties": {
+            "message": {"type": "string"},
+            "remedy": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

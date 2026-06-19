@@ -6,7 +6,7 @@
 Using the rocDecode RocVideoDecoder
 ********************************************************************
 
-rocDecode provides two methods fpr decoding a video stream: using the rocDecode RocVideoDecoder on the GPU or using the FFmpeg decoder on the CPU. 
+rocDecode provides two methods for decoding a video stream: using the rocDecode RocVideoDecoder on the GPU or using the FFmpeg decoder on the CPU. 
 
 
 This topic covers how to decode a video stream using the RocVideoDecoder class in |roc_video_dec|_. The RocVideoDecode class provides high-level calls to the core APIs in the |apifolder|_ of the rocDecode GitHub repository. For information about the core APIs, see :doc:`Using the rocDecode core APIs <../reference/rocDecode-core-APIs>`.

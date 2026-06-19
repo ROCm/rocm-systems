@@ -217,7 +217,7 @@ HIP_TEST_CASE(Unit_hipCtxAPIs_not_supported) {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-HIP_TEST_CASE(hipDevicePrimaryCtxGetState_Negative) {
+HIP_TEST_CASE(Unit_hipDevicePrimaryCtxGetState_Negative) {
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
   hipCtx_t primaryCtx = nullptr;

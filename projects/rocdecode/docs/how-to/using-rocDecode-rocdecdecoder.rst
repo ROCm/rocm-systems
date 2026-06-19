@@ -20,7 +20,7 @@ The sample decodes raw elementary video frame files as input and produces indivi
 ``rocdecdecode.cpp`` takes the following arguments:
 
 .. list-table:: 
-    :widths: 10 60 30 
+    :widths: 20 60 30 
     :header-rows: 1
 
     * - Argument      
@@ -54,7 +54,15 @@ The sample decodes raw elementary video frame files as input and produces indivi
 
     * - ``-m`` 
       - The output surface memory type. The memory type where the surface data, such as the decoded frames, resides. Set this to 0 for intermediate GPU memory, to 1 for GPU memory, and to 2 for CPU memory. See :doc:`Surface data memory locations <../conceptual/rocDecode-memory-types>` for more information. 
-      - Optional. Set to 0 by default. 
+      - Optional. Set to 0 by default.
+
+    * - ``-f``
+      - Number of decoded frames to be decoded.
+      - Optional.
+
+    * - ``-o_format``
+      - Output surface format; [NV12, P016].
+      - Optional. If not set: auto-detected from stream.
 
 The ``DecoderInfo`` struct defined in the sample is used to store user-supplied parameters as well as the decoder and parser handles. 
 

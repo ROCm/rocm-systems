@@ -51,6 +51,69 @@ enum rocprofiler_profile_counter_instance_types
     ROCPROFILER_DIMENSION_LAST
 };
 
+// Variable bit allocation for each dimension type
+// Layout (48 bits total for dimensions):
+//   XCC:          6 bits (supports up to 64)
+//   AID:          6 bits (supports up to 64)
+//   SHADER_ENGINE: 6 bits (supports up to 64)
+//   AGENT:        6 bits (supports up to 64)
+//   SHADER_ARRAY: 6 bits (supports up to 64)
+//   WGP:          6 bits (supports up to 64)
+//   INSTANCE:    10 bits (supports up to 1024 instances)
+//   Total used:  46 bits, 2 bits reserved
+constexpr uint8_t DIM_BIT_LENGTHS[ROCPROFILER_DIMENSION_LAST] = {
+    0,   // DIMENSION_NONE
+    6,   // DIMENSION_XCC
+    6,   // DIMENSION_AID
+    6,   // DIMENSION_SHADER_ENGINE
+    6,   // DIMENSION_AGENT
+    6,   // DIMENSION_SHADER_ARRAY
+    6,   // DIMENSION_WGP
+    10,  // DIMENSION_INSTANCE
+};
+
+// Precomputed bit offsets for each dimension
+// Offset is the starting bit position within the 48-bit dimension field
+constexpr uint8_t DIM_BIT_OFFSETS[ROCPROFILER_DIMENSION_LAST] = {
+    0,   // DIMENSION_NONE
+    0,   // DIMENSION_XCC: bits 0-5
+    6,   // DIMENSION_AID: bits 6-11
+    12,  // DIMENSION_SHADER_ENGINE: bits 12-17
+    18,  // DIMENSION_AGENT: bits 18-23
+    24,  // DIMENSION_SHADER_ARRAY: bits 24-29
+    30,  // DIMENSION_WGP: bits 30-35
+    36,  // DIMENSION_INSTANCE: bits 36-45
+};
+
+// Compile-time validation that dimension bit allocation does not exceed 48 bits
+static_assert(DIM_BIT_OFFSETS[ROCPROFILER_DIMENSION_INSTANCE] +
+                      DIM_BIT_LENGTHS[ROCPROFILER_DIMENSION_INSTANCE] <=
+                  DIM_BIT_LENGTH,
+              "Dimension bit allocation exceeds 48-bit limit");
+
+// Helper function to get bit length for a dimension
+constexpr uint64_t
+get_dim_bit_length(rocprofiler_profile_counter_instance_types dim)
+{
+    return (dim < ROCPROFILER_DIMENSION_LAST) ? DIM_BIT_LENGTHS[dim] : 0;
+}
+
+// Helper function to get bit offset for a dimension
+constexpr uint64_t
+get_dim_bit_offset(rocprofiler_profile_counter_instance_types dim)
+{
+    return (dim < ROCPROFILER_DIMENSION_LAST) ? DIM_BIT_OFFSETS[dim] : 0;
+}
+
+// Helper function to get the bitmask for a dimension (shifted to correct position)
+constexpr uint64_t
+get_dim_mask(rocprofiler_profile_counter_instance_types dim)
+{
+    uint64_t bit_length = get_dim_bit_length(dim);
+    uint64_t bit_offset = get_dim_bit_offset(dim);
+    return ((1ULL << bit_length) - 1) << bit_offset;
+}
+
 using DimensionMap =
     std::unordered_map<rocprofiler_profile_counter_instance_types, std::string_view>;
 
@@ -103,27 +166,25 @@ rocprofiler::counters::set_dim_in_rec(rocprofiler_counter_instance_id_t&        
                                       rocprofiler_profile_counter_instance_types dim,
                                       size_t                                     value)
 {
-    uint64_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
-
     if(dim == ROCPROFILER_DIMENSION_NONE)
     {
         // Set all 48 bits of dimension
-        id         = (id & ~(MAX_64 >> COUNTER_BIT_LENGTH)) | value;
-        bit_length = DIM_BIT_LENGTH;
-    }
-    else
-    {
-        uint64_t mask = (MAX_64 >> (BITS_IN_UINT64 - bit_length)) << ((dim - 1) * bit_length);
-        // Reset bits to 0 for dimension. Does so by getting the bit length as F's then
-        // shifiting that into the position of dim. Not's that value and then and's it
-        // with id.
-        id = (id & ~(mask));
-        // Set the value for the dimenstion
-        id = id | (value << ((dim - 1) * bit_length));
+        id = (id & ~(MAX_64 >> COUNTER_BIT_LENGTH)) | value;
+        CHECK(value <= (MAX_64 >> COUNTER_BIT_LENGTH)) << "Dimension value exceeds max allowed";
+        return;
     }
 
-    CHECK(value <= (MAX_64 >> (BITS_IN_UINT64 - bit_length)))
-        << "Dimension value exceeds max allowed";
+    uint64_t bit_length = get_dim_bit_length(dim);
+    uint64_t bit_offset = get_dim_bit_offset(dim);
+    uint64_t mask       = get_dim_mask(dim);
+
+    CHECK(bit_length > 0) << "Invalid dimension type";
+    CHECK(value <= ((1ULL << bit_length) - 1))
+        << "Dimension value " << value << " exceeds max allowed for dimension "
+        << static_cast<int>(dim) << " (max: " << ((1ULL << bit_length) - 1) << ")";
+
+    // Reset bits to 0 for dimension, then set the value
+    id = (id & ~mask) | (value << bit_offset);
 }
 
 void
@@ -152,9 +213,10 @@ rocprofiler::counters::rec_to_dim_pos(rocprofiler_counter_instance_id_t         
         return id & (MAX_64 >> COUNTER_BIT_LENGTH);
     }
 
-    size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
-    id = id & ((MAX_64 >> (BITS_IN_UINT64 - bit_length)) << ((dim - 1) * bit_length));
-    return id >> ((dim - 1) * bit_length);
+    uint64_t bit_offset = get_dim_bit_offset(dim);
+    uint64_t mask       = get_dim_mask(dim);
+
+    return (id & mask) >> bit_offset;
 }
 
 // Counter ID encoding/decoding implementations

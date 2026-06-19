@@ -29,7 +29,7 @@
 
 /**
  * @file templates.hpp
- * @brief Internal header that declares templates for rocSHMEM's implentation
+ * @brief Internal header that declares templates for rocSHMEM's implementation
  * of the user-facing device APIs.
  *
  * This file contains templates for the OpenSHMEM APIs that take have
@@ -412,7 +412,7 @@ __device__ int rocshmem_test(T *ivars, int cmp, T val);
 
 /**
  * @brief Perform a broadcast between PEs in the active set. The caller
- * is blocked until the broadcase completes.
+ * is blocked until the broadcast completes.
  *
  * This function must be called as a work-group collective.
  *

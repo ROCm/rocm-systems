@@ -54,6 +54,9 @@ GpuMemory::GpuMemory(WDDMDevice *device) : device_(device) {
 }
 
 GpuMemory::~GpuMemory() {
+  // Release the Lock2 pin before tearing down the allocation handles, since
+  // DestroyAllocation invalidates the handles Unlock2 needs.
+  UnlockSystemMemory();
   FreeGpuVirtualAddress(GpuAddress(), Size());
   FreePhysicalMemory();
   if (desc_.handle_ape_addr > 0)
@@ -128,8 +131,20 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
   if (code != ErrorCode::Success)
     return code;
 
-  if (!GetDevice()->WaitOnPagingFenceFromCpu())
+  // Pin kSystem backing pages via D3DKMTLock2 so KMD cannot evict/trim them.
+  // Excludes imported/exporter sysmem-fd paths which manage their own lifetime.
+  if (IsSystem() && !IsSysMemFd() && !IsSysMemExporter()) {
+    auto lock_code = LockSystemMemory();
+    if (lock_code != ErrorCode::Success) {
+      code = lock_code;
+      return code;
+    }
+  }
+
+  if (!GetDevice()->WaitOnPagingFenceFromCpu()) {
+    (void)UnlockSystemMemory();
     code = ErrorCode::Unknown;
+  }
 
   return code;
 }
@@ -437,6 +452,65 @@ ErrorCode GpuMemory::MakeResident() {
   return code;
 }
 
+ErrorCode GpuMemory::LockSystemMemory() {
+  // Issue D3DKMTLock2 per allocation handle so KMD/VidMm pins the backing
+  // system-memory pages for the lifetime of the allocation.
+  if (is_sysmem_locked_)
+    return ErrorCode::Success;
+
+  const auto num_chunks = NumChunks();
+  for (size_t i = 0; i < num_chunks; i++) {
+    D3DKMT_LOCK2 args = {};
+    args.hDevice = device_->DeviceHandle();
+    args.hAllocation = GetAllocationHandle(i);
+
+    auto code = d3dthunk::Lock2(&args);
+    if (code != ErrorCode::Success) {
+      pr_err("[sysmem-lock] D3DKMTLock2 failed on chunk %zu/%zu (code=%d) "
+             "size=%llu mem_flags=0x%x\n",
+             i, num_chunks, static_cast<int>(code),
+             static_cast<unsigned long long>(desc_.size),
+             static_cast<unsigned>(desc_.mem_flags));
+
+      // Unwind the chunks we already locked so we don't leak pins.
+      for (size_t j = 0; j < i; j++) {
+        D3DKMT_UNLOCK2 unlock_args = {};
+        unlock_args.hDevice = device_->DeviceHandle();
+        unlock_args.hAllocation = GetAllocationHandle(j);
+        (void)d3dthunk::Unlock2(&unlock_args);
+      }
+      return code;
+    }
+  }
+
+  is_sysmem_locked_ = true;
+  return ErrorCode::Success;
+}
+
+ErrorCode GpuMemory::UnlockSystemMemory() {
+  if (!is_sysmem_locked_)
+    return ErrorCode::Success;
+
+  auto final_code = ErrorCode::Success;
+  const auto num_chunks = NumChunks();
+  for (size_t i = 0; i < num_chunks; i++) {
+    D3DKMT_UNLOCK2 args = {};
+    args.hDevice = device_->DeviceHandle();
+    args.hAllocation = GetAllocationHandle(i);
+
+    auto code = d3dthunk::Unlock2(&args);
+    if (code != ErrorCode::Success) {
+      pr_err("[sysmem-lock] D3DKMTUnlock2 failed on chunk %zu/%zu (code=%d)\n",
+             i, num_chunks, static_cast<int>(code));
+      final_code = code;
+      // Continue unlocking remaining chunks regardless.
+    }
+  }
+
+  is_sysmem_locked_ = false;
+  return final_code;
+}
+
 ErrorCode GpuMemory::Evict() {
 
   D3DKMT_EVICT args = {};
@@ -450,7 +524,6 @@ ErrorCode GpuMemory::Evict() {
 ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
                                                D3DKMT_HANDLE device_handle,
                                                D3DKMT_OPENRESOURCE** out_open_resource) {
-#if defined(WIN32)
   D3DKMT_QUERYRESOURCEINFO query_args{};
   query_args.hDevice = device_handle;
   query_args.hGlobalShare = buffer_handle;
@@ -513,7 +586,6 @@ ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
   }
 
   return ret;
-#endif
 }
 
 ErrorCode GpuMemory::OpenResourceFromNTHandle(HANDLE buffer_handle, D3DKMT_HANDLE device_handle,
@@ -653,15 +725,6 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
   SharedHandleInfo shared_info{};
   SharedHandleInfo* shared_info_ptr = &shared_info;
   auto finalize_import = [&](SharedHandleInfo* shared_info_ptr) {
-    if (shared_info_ptr->pid == dxg_runtime->parent_pid && create_info.flags.alloc_va &&
-        IsSameAdapter(shared_info_ptr->adapter_luid) && shared_info_ptr->gpu_addr) {
-      pr_info(
-          "import from same device and same process, va is required. "
-          "a buffer can't be mapped to 2 va. delete the imported buffer, use the existing one.\n");
-      if (gpu_addr) *gpu_addr = shared_info_ptr->gpu_addr;
-      return ErrorCode::SameProcessSameDevice;
-    }
-
     desc_.size = shared_info_ptr->size;
     desc_.client_size = shared_info_ptr->client_size;
     desc_.domain = shared_info_ptr->domain;

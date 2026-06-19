@@ -130,7 +130,7 @@ class DmaBlitManager : public device::HostBlitManager {
 
   //! Copies multiple buffer objects in a batch
   virtual bool copyBufferBatch(
-      std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
+      const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const;
 
   //! Copies an image object to a buffer object
@@ -173,6 +173,20 @@ class DmaBlitManager : public device::HostBlitManager {
   //! Stream memory write operation - Write a 'value' at 'memory'.
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
                               uint64_t value, size_t offset, size_t sizeBytes) const {
+    assert(!"Unimplemented");
+    return false;
+  }
+
+  //! Stream memory increment operation - Increment memory by a 'value'.
+  virtual bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const {
+    assert(!"Unimplemented");
+    return false;
+  }
+
+  //! Stream memory decrement operation - Decrement memory by a 'value'.
+  virtual bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const {
     assert(!"Unimplemented");
     return false;
   }
@@ -292,6 +306,9 @@ class KernelBlitManager : public DmaBlitManager {
     GwsInit,
     InitHeap,
     BatchMemOp,
+    StreamOpsIncrement,
+    StreamOpsDecrement,
+    BlitCopyBufferBatch,
     BlitLinearTotal,
     FillImage = BlitLinearTotal,
     BlitCopyImage,
@@ -367,7 +384,7 @@ class KernelBlitManager : public DmaBlitManager {
 
   //! Copies multiple buffer objects in a batch
   virtual bool copyBufferBatch(
-      std::vector<amd::BatchCopyOp>& copyOps                //!< Batch of copy operations
+      const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const;
 
   //! Copies a buffer object to an image object
@@ -505,6 +522,14 @@ class KernelBlitManager : public DmaBlitManager {
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
                               uint64_t value, size_t offset, size_t sizeBytes) const;
 
+  //! Stream memory increment operation - Increment memory by a 'value'.
+  virtual bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const;
+
+  //! Stream memory decrement operation - Decrement memory by a 'value'.
+  virtual bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const;
+
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
   virtual bool streamOpsWait(
       device::Memory& memory,  //!< Memory contents to compare the 'value' against
@@ -579,6 +604,18 @@ class KernelBlitManager : public DmaBlitManager {
                         const uint32_t blitWg, amd::CopyMetadata copyMetadata,
                         bool attachSignal = false) const;
 
+  //! Returns true if a linear buffer copy should use the shader path.
+  bool useShaderCopyBufferPath(const Memory& srcMemory, const Memory& dstMemory, size_t size,
+                               amd::CopyMetadata copyMetadata,
+                               bool* useLimitedP2pBlitWg = nullptr) const;
+
+  //! Copies a batch of buffers using a single/multiple shader dispatch
+  bool ShaderCopyBufferBatch(const std::vector<amd::BatchCopyOp>& copy_ops) const;
+
+  //! Atomically updates a memory location (i.e. writes, increments or decrements the memory).
+  bool streamOpsUpdate(uint blitType, device::Memory& memory, uint64_t value, size_t offset,
+                       size_t sizeBytes) const;
+
   //! Disable copy constructor
   KernelBlitManager(const KernelBlitManager&);
 
@@ -592,14 +629,16 @@ class KernelBlitManager : public DmaBlitManager {
 };
 
 static const char* BlitName[KernelBlitManager::BlitTotal] = {
-    "__amd_rocclr_fillBufferAligned", "__amd_rocclr_fillBufferAligned2D",
-    "__amd_rocclr_copyBuffer",        "__amd_rocclr_copyBufferAligned",
-    "__amd_rocclr_copyBufferRect",    "__amd_rocclr_copyBufferRectAligned",
-    "__amd_rocclr_streamOpsWrite",    "__amd_rocclr_streamOpsWait",
-    "__amd_rocclr_scheduler",         "__amd_rocclr_gwsInit",
-    "__amd_rocclr_initHeap",          "__amd_rocclr_batchMemOp",
-    "__amd_rocclr_fillImage",         "__amd_rocclr_copyImage",
-    "__amd_rocclr_copyImage1DA",      "__amd_rocclr_copyImageToBuffer",
+    "__amd_rocclr_fillBufferAligned",  "__amd_rocclr_fillBufferAligned2D",
+    "__amd_rocclr_copyBuffer",         "__amd_rocclr_copyBufferAligned",
+    "__amd_rocclr_copyBufferRect",     "__amd_rocclr_copyBufferRectAligned",
+    "__amd_rocclr_streamOpsWrite",     "__amd_rocclr_streamOpsWait",
+    "__amd_rocclr_scheduler",          "__amd_rocclr_gwsInit",
+    "__amd_rocclr_initHeap",           "__amd_rocclr_batchMemOp",
+    "__amd_rocclr_streamOpsIncrement", "__amd_rocclr_streamOpsDecrement",
+    "__amd_rocclr_copyBufferBatch",
+    "__amd_rocclr_fillImage",          "__amd_rocclr_copyImage",
+    "__amd_rocclr_copyImage1DA",       "__amd_rocclr_copyImageToBuffer",
     "__amd_rocclr_copyBufferToImage"};
 
 inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, size_t size,

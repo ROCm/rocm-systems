@@ -1,0 +1,25 @@
+# ATT (Advanced Thread Trace) stats_*.csv schema + thresholds.
+# Ref: llm-reference-guide.md lines 1160-1231.
+
+csv_schema:
+  columns:
+    - name: dispatch_id
+      type: int
+    - name: kernel_name
+      type: string
+    - name: cu_id
+      type: int
+    - name: stall_ratio
+      type: float
+    - name: hitcount
+      type: int
+    - name: instruction_addr
+      type: hex
+
+stall_ratio_thresholds:
+  critical: 0.80   # > 80% stalled — severe bottleneck
+  high:     0.60   # 60-80%
+  medium:   0.40   # 40-60%
+  low:      0.00   # < 40% — not significant
+
+hitcount_minimum: 6400    # statistical significance floor

@@ -1,0 +1,126 @@
+FROM rocm/dev-ubuntu-24.04:latest
+# You can also pick a specific rocm version, Ubuntu version
+#FROM rocm/dev-ubuntu-24.04:7.2.1
+#FROM rocm/dev-ubuntu-22.04:7.2.1
+# If you plan on testing VLLM/DeepEP this is a good base
+#FROM rocm/pytorch:rocm7.2_ubuntu24.04_py3.12_pytorch_release_2.9.1
+
+LABEL org.opencontainers.image.title="ROCm rocSHMEM Container"
+LABEL org.opencontainers.image.description="Container for rocSHMEM development with MPI support"
+LABEL org.opencontainers.image.authors="rocshmem-maintainers@amd.com"
+LABEL org.opencontainers.image.documentation="https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/docker"
+LABEL org.opencontainers.image.source="https://github.com/ROCm/rocm-systems/projects/rocshmem"
+
+WORKDIR /app
+COPY README.md help perf-compare /app/
+RUN chmod +x /app/help /app/perf-compare
+ENV PATH="${PATH}:/app/"
+
+# Enable CRB and install system dependencies
+RUN apt-get update \
+ && apt-get install -y software-properties-common \
+ && apt-get update \
+ && apt-get install -y \
+      build-essential autoconf libtool flex bison pkg-config cmake git wget curl ca-certificates \
+      libibverbs-dev ibverbs-utils libibumad-dev libpci-dev librdmacm-dev rdma-core infiniband-diags \
+      python3-venv \
+# OPTIONAL: reqired to use mpirun launcher
+      openssh-server \
+# OPTIONAL: required to build VLLM/DeepEP
+#      libsqlite3-dev libfmt-dev libmsgpack-dev libsuitesparse-dev \
+#      libboost-all-dev \
+#      libgrpc++-dev protobuf-compiler-grpc protobuf-compiler libprotobuf-dev \
+#      libaio-dev liburing-dev pybind11-dev ninja-build libgflags-dev \
+# OPTIONAL: devel tooling to modify code and tweak inside the image
+#      vim cmake-curses-gui \
+# Cleanup
+ && apt-get autoremove -y \
+ && apt-get clean && rm -rf /var/lib/apt/lists/* \
+# Optional: remove sccache if present
+ && (rm -f "$(which sccache)" 2>/dev/null || true) \
+ && (python3 -m pip uninstall -y sccache || true)
+# Install Python dependencies for VLLM/DeepEP
+#RUN pip3 install --upgrade pip && \
+#    pip3 install "pybind11[global]" meson==0.64.0 && \
+#    pip install setuptools==75.1.0 &&
+
+# OPTIONAL: Setup ssh (only needed to use mpirun launch method, e.g., rocshmem functional tests)
+# The following block is OPTIONAL and can be commented out if you only want to run 1-node testing
+# Note: all deployed containers must share the SAME KEY!
+#   Same docker image build must be deployed on all nodes (docker save, docker load)
+ARG SSH_PORT=2222
+RUN ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+# Alternative: comment line above, uncomment lines below:
+#   import an invariant ssh-key from outside the docker (so you can build the docker on each nodes)
+#COPY id_ed25519 /root/.ssh/id_ed25519
+#COPY id_ed25519.pub /root/.ssh/id_ed25519.pub
+RUN cat ~/.ssh/id_ed25519.pub >~/.ssh/authorized_keys && \
+    sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config && \
+    mkdir -p /run/sshd && ssh-keygen -A && \
+    echo " StrictHostKeyChecking=accept-new" >>/root/.ssh/config
+CMD ["sh", "-c", "\
+        set -e; \
+        src/tools/rocshmem_info \
+     && echo \"Starting SSH server for mpiexec with OMPI_MCA_plm_rsh_arg=$OMPI_MCA_plm_rsh_args\" \
+     && exec /usr/sbin/sshd -D"]
+# End of ssh setup
+
+# OPTIONAL: Install rocm-enabled IB perftest (used to validate if network config is sane)
+# The following block is OPTIONAL and can be commented out if you only want to run rocSHMEM
+WORKDIR /app
+RUN git clone https://github.com/ROCm/rdma-perftest
+WORKDIR /app/rdma-perftest/
+RUN ./autogen.sh \
+ && ./configure --enable-rocm --with-rocm=/opt/rocm \
+ && make -j 8 #install
+
+# Clone rocSHMEM
+WORKDIR /app
+RUN git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git && cd rocm-systems \
+ && git sparse-checkout set --cone projects/rocshmem \
+ && git checkout develop
+
+# Install dependencies
+# OPTIONAL: install UCX/MPI to test RO (MPI with host-proxy) conduit
+RUN INSTALL_DIR=/app/ompi bash /app/rocm-systems/projects/rocshmem/scripts/install_dependencies.sh
+ENV PATH="/app/ompi/bin:${PATH}"
+
+# Build rocSHMEM develop
+WORKDIR /app/rocm-systems/projects/rocshmem
+RUN mkdir -p /app/build
+WORKDIR /app/build
+RUN /app/rocm-systems/projects/rocshmem/scripts/build_configs/all_backends \
+      -DUSE_EXTERNAL_MPI=OFF \
+      -DMPI_ROOT=/app/ompi
+
+# OPTIONAL: Build a rocSHMEM PR for easy comparison with develop
+ARG PR_NUM
+WORKDIR /app/rocm-systems/projects/rocshmem
+RUN test -n "$PR_NUM" \
+ && git fetch origin pull/$PR_NUM/head \
+ && git checkout FETCH_HEAD \
+#&& git rebase develop \
+ || test -z "$PR_NUM"
+RUN test -n "$PR_NUM" \
+ && mkdir -p /app/build$PR_NUM && cd /app/build$PR_NUM \
+ && /app/rocm-systems/projects/rocshmem/scripts/build_configs/all_backends \
+      -DUSE_EXTERNAL_MPI=OFF \
+      -DMPI_ROOT=/app/ompi \
+ || test -z "$PR_NUM"
+# WORKDIR defaults to the PR build, or develop build if PR not built
+WORKDIR /app/build${PR_NUM}
+
+# Add environment for running, tune as needed
+ENV ROCSHMEM_TEST_UUID=1 ROCSHMEM_HEAP_SIZE=6442450944
+# FOR One node GDA testing
+#ENV ROCSHMEM_DISABLE_MIXED_IPC=1
+ENV OMPI_MCA_plm_rsh_args=-p$SSH_PORT \
+    OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+# System dependent: you may need to select a different PML on some network types, note RO should not be used in this configuration
+#ENV OMPI_MCA_pml=ob1 OMPI_MCA_osc=rdma
+# System dependent: you may need to force the bootstrap TCP interface if autodetection picks a non-routable iface
+#ENV OMPI_MCA_oob_tcp_if_include=
+#ENV ROCSHMEM_BOOTSTRAP_SOCKET_IFNAME=
+# System dependent: Ignore service/backend RoCE ifaces
+#ENV ROCSHMEM_HCA_LIST=^mlx5_6
+

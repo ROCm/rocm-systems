@@ -197,8 +197,8 @@ roctx_api_impl<TableIdx, OpIdx>::functor(Args... args)
     auto  buffer_record    = common::init_public_api_struct(buffered_api_data_t{});
     auto  callback_data    = common::init_public_api_struct(callback_api_data_t{});
     auto* corr_id          = tracing::correlation_service::construct(ref_count);
-    auto  internal_corr_id = corr_id->internal;
-    auto  ancestor_corr_id = corr_id->ancestor;
+    auto  internal_corr_id = CHECK_NOTNULL(corr_id)->internal;
+    auto  ancestor_corr_id = CHECK_NOTNULL(corr_id)->ancestor;
 
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,

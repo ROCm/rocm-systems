@@ -49,5 +49,4 @@ private:
     AvcodecVideoDecoder avcodec_video_decoder_;
     RocDecoderHostCreateInfo decoder_create_info_;
 
-    RocDecLogger logger_;
 };

@@ -111,7 +111,7 @@ option(BUILD_PROFILER "Build targets for librdc_rocp.so" OFF)
 
 # When cmake -DBUILD_RVS=off, it will not build the librdc_rvs.so
 # which requires the RocmValidationSuite
-option(BUILD_RVS "Build targets for librdc_rvs.so" ON)
+option(BUILD_RVS "Build targets for librdc_rvs.so" OFF)
 
 # When cmake -DBUILD_TESTS=off, it will not build RDC tests.
 option(BUILD_TESTS "Build test suite" OFF)
@@ -437,7 +437,7 @@ install(
 )
 
 #Identify between SLES and Centos for setting symlink for rdc.service
-#SLES need serice file in /usr/lib/systemd/system/rdc.service
+#SLES need service file in /usr/lib/systemd/system/rdc.service
 #CENTOS/RHEL Require file in /lib/systemd/system/rdc.service
 file(STRINGS /etc/os-release LINUX_DISTRO LIMIT_COUNT 1 REGEX "NAME=")
 message("Using Linux Distro: ${LINUX_DISTRO}")

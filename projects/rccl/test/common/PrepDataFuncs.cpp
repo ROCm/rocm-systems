@@ -27,7 +27,7 @@ namespace RcclUnitTesting
     case ncclCollSend:          return DefaultPrepData_Send(collArgs);
     case ncclCollRecv:          return DefaultPrepData_Recv(collArgs);
     default:
-      TEST_ERROR("Unknown func type %d\n", collArgs.funcType);
+      TEST_ERROR("Unknown func type %d", collArgs.funcType);
       return TEST_FAIL;
     }
   }
@@ -36,14 +36,14 @@ namespace RcclUnitTesting
   {
     if (collArgs.numInputElements > collArgs.numInputElementsAllocated)
     {
-      TEST_ERROR("Number of input elements (%lu) exceeds the number of allocated input elements (%lu)\n",
+      TEST_ERROR("Number of input elements (%lu) exceeds the number of allocated input elements (%lu)",
             collArgs.numInputElements, collArgs.numInputElementsAllocated);
       return TEST_FAIL;
     }
 
     if (collArgs.numOutputElements > collArgs.numOutputElementsAllocated)
     {
-      TEST_ERROR("Number of output elements (%lu) exceeds the number of allocated output elements (%lu)\n",
+      TEST_ERROR("Number of output elements (%lu) exceeds the number of allocated output elements (%lu)",
             collArgs.numOutputElements, collArgs.numOutputElementsAllocated);
       return TEST_FAIL;
     }
@@ -53,12 +53,12 @@ namespace RcclUnitTesting
     {
       if (collArgs.numBiasElements == 0 || collArgs.numBiasBytesAllocated == 0)
       {
-        TEST_ERROR("Bias is enabled but bias buffers are not allocated\n");
+        TEST_ERROR("Bias is enabled but bias buffers are not allocated");
         return TEST_FAIL;
       }
       if (collArgs.numBiasElements != collArgs.numOutputElements)
       {
-        TEST_ERROR("Number of bias elements (%lu) must match number of output elements (%lu)\n",
+        TEST_ERROR("Number of bias elements (%lu) must match number of output elements (%lu)",
               collArgs.numBiasElements, collArgs.numOutputElements);
         return TEST_FAIL;
       }
@@ -71,7 +71,7 @@ namespace RcclUnitTesting
     CHECK_CALL(CheckAllocation(collArgs));
     if (collArgs.numInputElements != collArgs.numOutputElements)
     {
-      TEST_ERROR("Number of input elements must match number of output elements for Broadcast\n");
+      TEST_ERROR("Number of input elements must match number of output elements for Broadcast");
       return TEST_FAIL;
     }
 
@@ -98,7 +98,7 @@ namespace RcclUnitTesting
     CHECK_CALL(CheckAllocation(collArgs));
     if (collArgs.numInputElements != collArgs.numOutputElements)
     {
-      TEST_ERROR("Number of input elements must match number of output elements for Reduce\n");
+      TEST_ERROR("Number of input elements must match number of output elements for Reduce");
       return TEST_FAIL;
     }
 
@@ -215,7 +215,7 @@ namespace RcclUnitTesting
     CHECK_CALL(CheckAllocation(collArgs));
     if (collArgs.totalRanks * collArgs.numInputElements != collArgs.numOutputElements)
     {
-      TEST_ERROR("# of output elements must be total ranks * # input elements for AllGather\n");
+      TEST_ERROR("# of output elements must be total ranks * # input elements for AllGather");
       return TEST_FAIL;
     }
 
@@ -253,7 +253,7 @@ namespace RcclUnitTesting
     CHECK_CALL(CheckAllocation(collArgs));
     if (collArgs.numInputElements != collArgs.numOutputElements * collArgs.totalRanks)
     {
-      TEST_ERROR("# of input elements must be total ranks * # output elements for ReduceScatter\n");
+      TEST_ERROR("# of input elements must be total ranks * # output elements for ReduceScatter");
       return TEST_FAIL;
     }
 
@@ -284,7 +284,7 @@ namespace RcclUnitTesting
       {
         if (hipMemcpy(collArgs.inputGpu.ptr, tempInputCpu.ptr, numInputBytes, hipMemcpyHostToDevice) != hipSuccess)
         {
-          TEST_ERROR("hipMemcpy to input failed\n");
+          TEST_ERROR("hipMemcpy to input failed");
           CHECK_CALL(tempInputCpu.FreeCpuMem());
           CHECK_CALL(tempResultCpu.FreeCpuMem());
           return TEST_FAIL;
@@ -330,7 +330,7 @@ namespace RcclUnitTesting
     CHECK_CALL(CheckAllocation(collArgs));
     if (collArgs.numInputElements != collArgs.numOutputElements * collArgs.totalRanks)
     {
-      TEST_ERROR("# of input elements must be total ranks * # output elements for Scatter\n");
+      TEST_ERROR("# of input elements must be total ranks * # output elements for Scatter");
       return TEST_FAIL;
     }
 
@@ -350,7 +350,7 @@ namespace RcclUnitTesting
     {
       if (hipMemcpy(collArgs.inputGpu.ptr, tempInput.ptr, numInputBytes, hipMemcpyHostToDevice) != hipSuccess)
       {
-        TEST_ERROR("hipMemcpy to input failed\n");
+        TEST_ERROR("hipMemcpy to input failed");
         tempInput.FreeCpuMem();
         return TEST_FAIL;
       }
@@ -372,12 +372,12 @@ namespace RcclUnitTesting
     CHECK_CALL(CheckAllocation(collArgs));
     if (collArgs.numInputElements != collArgs.numOutputElements)
     {
-      TEST_ERROR("Number of input elements must match number of output elements for AllToAll\n");
+      TEST_ERROR("Number of input elements must match number of output elements for AllToAll");
       return TEST_FAIL;
     }
     if (collArgs.numInputElements % collArgs.totalRanks)
     {
-      TEST_ERROR("Input / Output size for AllToAll must be a multiple of %d\n", collArgs.totalRanks);
+      TEST_ERROR("Input / Output size for AllToAll must be a multiple of %d", collArgs.totalRanks);
       return TEST_FAIL;
     }
     size_t const numInputBytes = collArgs.numInputElements * DataTypeToBytes(collArgs.dataType);

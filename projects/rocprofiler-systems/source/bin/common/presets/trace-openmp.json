@@ -1,0 +1,45 @@
+{
+    "domains": {
+        "parallel": {
+            "enabled": true,
+            "runtimes": {
+                "openmp": {
+                    "enabled": true
+                }
+            }
+        },
+        "rocm": {
+            "api_domains": {
+                "hip_runtime_api": {
+                    "enabled": true
+                },
+                "hsa_api": {
+                    "enabled": false
+                },
+                "kernel_dispatch": {
+                    "enabled": true
+                },
+                "marker_api": {
+                    "enabled": true
+                },
+                "memory_copy": {
+                    "enabled": true
+                }
+            },
+            "enabled": true
+        }
+    },
+    "metadata": {
+        "category": "hpc",
+        "cli_flag": "--trace-openmp",
+        "description": "OpenMP workloads: tracing kernel dispatch, memory copy, and OMPT enabled",
+        "name": "trace-openmp",
+        "use_case": "OpenMP applications using target directives on AMD GPUs"
+    },
+    "profiling": {
+        "enabled": false
+    },
+    "tracing": {
+        "enabled": true
+    }
+}

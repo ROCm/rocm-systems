@@ -86,6 +86,14 @@ class RdcRocpBase {
   static const uint32_t collection_duration_us_k = 10000;
 
   /**
+   * @brief SIMD_UTILIZATION is a derived metric (SQ_BUSY_CU_CYCLES/GRBM_COUNT/CU_NUM).
+   * The 10ms default window is too short for workloads with multi-second compute/idle
+   * cycles and produces oscillating 0/0.2/0.4 readings. 500ms averages across those
+   * cycles and matches the stable value reported by direct rocprofiler kernel tracing.
+   */
+  static const uint32_t simd_utilization_duration_us_k = 500000;
+
+  /**
    * @brief By default all profiler values are read as doubles
    */
   rdc_status_t run_profiler(uint32_t agent_index, rdc_field_t field, double* value);

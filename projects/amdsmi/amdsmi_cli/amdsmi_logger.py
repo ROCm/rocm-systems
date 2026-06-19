@@ -318,7 +318,7 @@ class AMDSMILogger:
         # First Capitalize all keys in the json object
         capitalized_json = self._capitalize_keys(json_object)
 
-        # Increase tabbing for device arguments by pulling them out of the main dictionary and assiging them to an empty string
+        # Increase tabbing for device arguments by pulling them out of the main dictionary and assigning them to an empty string
         tabbed_dictionary = {}
         for key, value in capitalized_json.items():
             if key not in ["GPU", "CPU", "CORE", "BRCM_NIC", "BRCM_SWITCH", "AI_NIC"]:
@@ -357,20 +357,22 @@ class AMDSMILogger:
         yaml_output = yaml_output.replace("AMDSMI_SPACING_REMOVAL:\n", "")
         yaml_output = yaml_output.replace("'", "")  # Remove ''
 
-        # Remove process_info indicies for Host parity:
+        # Remove process_info indices for Host parity:
         yaml_output = re.sub(r"PROCESS_INFO_[0-9]+:", "PROCESS_INFO:", yaml_output)
 
         clean_yaml_output = ""
         for line in yaml_output.splitlines():
-            line = line.split(":")
+            # Continuation lines (no ":") must not run replace("  ", "    ") on leading
+            # spaces or multiline-aligned fields (e.g. LOCAL_ACTIVE_ACCELERATORS) break.
+            if ":" not in line:
+                clean_yaml_output += line + "\n"
+                continue
 
-            # Remove dashes and increase tabbing split key
-            line[0] = line[0].replace("-", " ", 1)
-            line[0] = line[0].replace("  ", "    ")
-
-            # Join cleaned output
-            line = ":".join(line) + "\n"
-            clean_yaml_output += line
+            parts = line.split(":")
+            # Remove dashes and increase tabbing split key (key is before first ":")
+            parts[0] = parts[0].replace("-", " ", 1)
+            parts[0] = parts[0].replace("  ", "    ")
+            clean_yaml_output += ":".join(parts) + "\n"
 
         return clean_yaml_output
 
@@ -391,7 +393,19 @@ class AMDSMILogger:
                     else:  # If the list is not a dictionary, print it as a string
                         yaml_string += "  " * (indent + 1) + f"- {item}\n"
             else:
-                yaml_string += "  " * indent + f"{key}: {value}\n"
+                key_prefix = "  " * indent
+                if isinstance(value, str) and "\n" in value:
+                    lines = value.split("\n")
+                    # Match _convert_json_to_human_readable: expand "  " -> "    " in the key column
+                    # so continuation lines align with the first row of the value after post-process.
+                    key_column = (key_prefix + str(key)).replace("-", " ", 1).replace("  ", "    ")
+                    data_column = len(key_column) + len(": ")
+                    yaml_string += key_prefix + f"{key}: {lines[0]}\n"
+                    cont = " " * data_column
+                    for extra in lines[1:]:
+                        yaml_string += cont + extra + "\n"
+                else:
+                    yaml_string += key_prefix + f"{key}: {value}\n"
         return yaml_string
 
     def flatten_dict(self, target_dict, topology_override=False):
@@ -418,7 +432,7 @@ class AMDSMILogger:
         output_dict = {}
         # First flatten out values
 
-        # separetly handle ras and process and firmware
+        # separately handle ras and process and firmware
 
         # If there are multi values, and the values are all dicts
         # Then flatten the sub values with parent key
@@ -691,7 +705,7 @@ class AMDSMILogger:
         dual_csv_output=False,
         dynamic=False,
     ):
-        """Print current output acording to format and then destination
+        """Print current output according to format and then destination
         params:
             multiple_device_enabled (bool) - True if printing output from
                 multiple devices
@@ -1195,8 +1209,6 @@ class AMDSMILogger:
 
         # print the version information first
         amd_smi_version = str(output["version_info"]["amd-smi"])
-        if len(amd_smi_version) > 60:
-            amd_smi_version = amd_smi_version[:57] + "..."
         rocm_version = "N/A"
         if output["version_info"]["rocm version"][0]:
             rocm_version = str(output["version_info"]["rocm version"][1]).ljust(8)
@@ -1218,28 +1230,49 @@ class AMDSMILogger:
         fw_pldm_version = str(output["version_info"]["fw pldm version"])
         vbios_version = str(output["version_info"]["vbios version"])
         kernel_version = str(output["version_info"]["kernel version"])
+        _COL_WIDTH = 57  # inner column width for the default output table
 
+        def _trunc(s):
+            """Truncate string to _COL_WIDTH chars, appending '...' if it was cut."""
+            return s[: _COL_WIDTH - 3] + "..." if len(s) > _COL_WIDTH else s
+
+        amd_smi_version = _trunc(amd_smi_version)
+        rocm_version = _trunc(rocm_version)
+        amdgpu_version = _trunc(amdgpu_version)
+        fw_pldm_version = _trunc(fw_pldm_version)
+        vbios_version = _trunc(vbios_version)
+        kernel_version = _trunc(kernel_version)
+
+        #####################################################################################
+        # FORMATTING LOGIC:                                                                 #
+        # Each version field is left-aligned within a fixed _COL_WIDTH column. Fields that  #
+        # exceed the column width are truncated with "..." to keep the box border intact.   #
+        # Fields that are "N/A" are skipped entirely to avoid cluttering the output.        #
+        #####################################################################################
         # print GPU info
         print(default_line_1)
-        # Split the version line into 3 lines, each wrapping to the same width
-        print("| AMD-SMI          {0:40s} {1:19s}|".format(amd_smi_version.ljust(40), ""))
+        print("| AMD-SMI            {0:<{w}s} |".format(amd_smi_version, w=_COL_WIDTH))
 
         # Print amdgpu or kernel version based on availability, if neither then don't print
         if amdgpu_version.strip() != "N/A":
-            print("| amdgpu Version:  {0:40s} {1:19s}|".format(amdgpu_version, ""))
+            print("| amdgpu Version:    {0:<{w}s} |".format(amdgpu_version, w=_COL_WIDTH))
         elif kernel_version.strip() != "N/A":
-            print("| OS kernel Version:  {0:40s} {1:19s}|".format(kernel_version, ""))
+            print("| OS kernel Version: {0:<{w}s} |".format(kernel_version, w=_COL_WIDTH))
 
         if rocm_version != "N/A":
-            print("| ROCm Version:    {0:40s} {1:19s}|".format(rocm_version, ""))
+            print("| ROCm Version:      {0:<{w}s} |".format(rocm_version, w=_COL_WIDTH))
 
         # only print if the version is not "N/A"
         if vbios_version != "N/A":
-            print("| VBIOS Version:   {0:22s}  {1:35s} |".format(vbios_version, ""))
+            print("| VBIOS Version:     {0:<{w}s} |".format(vbios_version, w=_COL_WIDTH))
         if fw_pldm_version != "N/A":
-            print("| FW PLDM:         {0:15s}  {1:42s} |".format(fw_pldm_version, ""))
+            print("| FW PLDM:           {0:<{w}s} |".format(fw_pldm_version, w=_COL_WIDTH))
 
-        print("| Platform:        {0:25.25s} {1:34s}|".format(str(self.helpers.os_info()), ""))
+        print(
+            "| Platform:          {0:<{w}s} |".format(
+                _trunc(str(self.helpers.os_info())), w=_COL_WIDTH
+            )
+        )
         print(default_line_2)
         print("| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |")
         print("| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |")

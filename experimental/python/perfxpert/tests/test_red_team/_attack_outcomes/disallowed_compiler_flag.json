@@ -1,0 +1,13 @@
+{
+  "attack_id": "disallowed_compiler_flag",
+  "status": "defeated",
+  "details": {
+    "flags_tested": [
+      "-Xlinker --wrap,write",
+      "-Wl,-rpath,/evil",
+      "-include /etc/passwd",
+      "-D_FORTIFY_SOURCE=-1",
+      "-fno-stack-protector"
+    ]
+  }
+}

@@ -34,9 +34,10 @@ if(BUILD_RVS)
 
     set(RDC_LIB_MODULES ${RDC_LIB_MODULES} ${RDC_RVS_LIB} PARENT_SCOPE)
     add_library(${RDC_RVS_LIB} SHARED ${RDC_RVS_LIB_SRC_LIST} ${RDC_RVS_LIB_INC_LIST})
+    find_package(yaml-cpp REQUIRED)
     target_link_libraries(
         ${RDC_RVS_LIB}
-        PRIVATE ${RDC_LIB} ${BOOTSTRAP_LIB} rvs::rvs pthread dl
+        PRIVATE ${RDC_LIB} ${BOOTSTRAP_LIB} rvs::rvs yaml-cpp pthread dl
     )
     target_include_directories(
         ${RDC_RVS_LIB}
@@ -61,15 +62,6 @@ if(BUILD_RVS)
     # Set the VERSION and SOVERSION values
     set_property(TARGET ${RDC_RVS_LIB} PROPERTY SOVERSION "${VERSION_MAJOR}")
     set_property(TARGET ${RDC_RVS_LIB} PROPERTY VERSION "${SO_VERSION_STRING}")
-
-    # If the library is a release, strip the target library
-    if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-        add_custom_command(
-            TARGET ${RDC_RVS_LIB}
-            POST_BUILD
-            COMMAND ${CMAKE_STRIP} ${RDC_RVS_LIB_COMPONENT}.so
-        )
-    endif()
 
     # Install RVS config files into /opt/rocm/share/rdc/conf/rvs/
     install(

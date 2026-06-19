@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -32,7 +13,6 @@
 #include <timemory/defines.h>
 #include <timemory/enum.h>
 #include <timemory/mpl/type_traits.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/type_list.hpp>
 #include <timemory/variadic/macros.hpp>
 
@@ -41,38 +21,23 @@
 struct unknown
 {};
 
-template <typename T, typename U = typename T::value_type>
-constexpr bool
-available_value_type_alias(int)
-{
-    return true;
-}
-
-template <typename T, typename U = unknown>
-constexpr bool
-available_value_type_alias(long)
-{
-    return false;
-}
-
-template <typename Type, bool>
-struct component_value_type;
+template <typename T>
+concept has_value_type = requires { typename T::value_type; };
 
 template <typename Type>
-struct component_value_type<Type, true>
+struct component_value_type
+{
+    using type = unknown;
+};
+
+template <has_value_type Type>
+struct component_value_type<Type>
 {
     using type = typename Type::value_type;
 };
 
 template <typename Type>
-struct component_value_type<Type, false>
-{
-    using type = unknown;
-};
-
-template <typename Type>
-using component_value_type_t =
-    typename component_value_type<Type, available_value_type_alias<Type>(0)>::type;
+using component_value_type_t = typename component_value_type<Type>::type;
 
 //--------------------------------------------------------------------------------------//
 
@@ -152,7 +117,7 @@ get_availability<Type>::get_info()
                               : std::string("");
     auto description =
         (has_metadata) ? metadata_t::description() : Type::get_description();
-    auto     data_type = demangle<value_type>();
+    auto     data_type = rocprofsys::utility::demangle<value_type>();
     string_t enum_type = property_t::enum_string();
     string_t id_type   = property_t::id();
     auto     ids_set   = property_t::ids();

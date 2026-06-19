@@ -132,6 +132,15 @@ class Memory : public amd::RuntimeObject {
     kArenaMemoryPtr = 0x100,
   };
 
+  //<! Enum for Handle type for vmm
+  enum HandleType : uint32_t {
+      kHandleNone      = 0x0,
+      kHandlePosixFD   = 0x1,
+      kHandleWin32     = 0x2,
+      kHandleWin32Kmt  = 0x4,
+      kHandleFabric    = 0x8
+  };
+
   struct UserData {
     int deviceId = 0;  //!< Device ID memory is allocated on
     int locationType =
@@ -140,6 +149,7 @@ class Memory : public amd::RuntimeObject {
     amd::Memory* phys_mem_obj = nullptr;   //<! Physical mem obj, only set on virtual mem
     amd::Memory* vaddr_mem_obj = nullptr;  //<! Virtual address mem obj, only set on virtual mem
     uint64_t hsa_handle = 0;               //!< Opaque hsa handle saved for Virtual memories
+    HandleType hsa_handle_type = kHandleNone; //!<Handle type for VMM
     unsigned int flags = 0;                //!< HIP memory flags
     //! hipMallocPitch allocates buffer using width & height and returns pitch & device pointer.
     //! Since device pointer is void*, It looses the values of width & height used for allocation.
@@ -195,6 +205,7 @@ class Memory : public amd::RuntimeObject {
       uint32_t canBeCached_ : 1;       //!< flag to if the object can be cached
       uint32_t p2pAccess_ : 1;         //!< Memory object allows P2P access
       uint32_t ipcShared_ : 1;         //!< Memory shared between processes
+      uint32_t vmmImported_ : 1;       //!< VMM buffer whose physical memory may be on another device
       uint32_t largeBarSystem_ : 1;    //!< VRAM is visiable for host
       uint32_t image_view_ : 1;        //!< Memory object is an image view
     };
@@ -398,6 +409,11 @@ class Memory : public amd::RuntimeObject {
   void setIpcShared(bool ipcShared) { ipcShared_ = ipcShared; }
   //! Check if this object allows IPC
   bool ipcShared() const { return ipcShared_; }
+
+  //! Set vmmImported status (VMM buffer backed by imported physical memory)
+  void setVmmImported(bool vmmImported) { vmmImported_ = vmmImported; }
+  //! Check if this VMM buffer's physical memory may reside on another device
+  bool vmmImported() const { return vmmImported_; }
 
   //! Returns the base device memory object for possible P2P access
   device::Memory* BaseP2PMemory() const { return deviceMemories_[0].value_; }

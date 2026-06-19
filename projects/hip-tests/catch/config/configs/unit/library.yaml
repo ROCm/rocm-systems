@@ -18,9 +18,75 @@ library:
   Unit_hipKernelGetAttribute_Negative_Parameters:
     <<: *level_2
     tags: [module]
+  Unit_hipKernelSetAttribute_Positive_LaunchAfterSet:
+    <<: *level_2
+    tags: [module]
   Unit_hipKernelSetAttribute_Negative_Parameters:
     <<: *level_2
     tags: [module]
   Unit_hipKernelGetFunction_Negative_Parameters:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetGlobal_Negative:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetGlobal_Positive:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetGlobal_OneNullParam:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetGlobal_HipMemcpyInterop:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetManaged_Negative:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetManaged_Positive:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetManaged_HipMemcpyInterop:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetKernel_CountAndEnumerate:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetKernel_OrderingWithGetGlobal:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGet_CrossKindRejection:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetGlobal_CO_Negative:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetGlobal_CO_Values:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetManaged_CO_Negative:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetManaged_CO_Values:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryEnumerateKernels_ZeroMax:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryEnumerateKernels_PartialFill:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryEnumerateKernels_HandlesUsable:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibrary_RepeatedQueriesAreStable:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetGlobal_MatchesModuleGetGlobal:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibrary_KernelGlobalLookupOrderIndependent:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibrary_LoadUnloadCycle:
     <<: *level_2
     tags: [module]

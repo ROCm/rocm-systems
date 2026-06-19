@@ -40,7 +40,7 @@ class TestMutualExclusion : public TestBase {
   // @Brief: Core measurement execution
   virtual void Run();
 
-  // @Brief: Clean up and retrive the resource
+  // @Brief: Clean up and retrieve the resource
   virtual void Close();
 
   // @Brief: Display  results
@@ -54,6 +54,11 @@ class TestMutualExclusion : public TestBase {
   int child_;
   std::string orig_cross_process_env_;
   bool orig_cross_process_env_was_set_;
+  // Pipe-based init handshake (replaces sleep-based ordering):
+  //   init_pipe_:         sleeper → tester  (sleeper amdsmi_init complete)
+  //   tester_ready_pipe_: tester → sleeper  (tester amdsmi_init complete)
+  int init_pipe_[2];
+  int tester_ready_pipe_[2];
 };
 
 #endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_

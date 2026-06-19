@@ -7,6 +7,7 @@ These tests simulate real artifact splitting scenarios with mock data.
 import shutil
 from argparse import Namespace
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -16,7 +17,7 @@ from rocm_kpack.artifact_splitter import (
     ExtractedKernel,
 )
 from rocm_kpack.artifact_utils import read_artifact_manifest, write_artifact_manifest
-from rocm_kpack.database_handlers import RocBLASHandler
+from rocm_kpack.database_handlers import MIOpenHandler, RocBLASHandler
 from rocm_kpack.tools.split_artifacts import batch_split, parse_artifact_name
 from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
 
@@ -411,6 +412,7 @@ class TestArtifactSplitterIntegration:
             split_databases=None,
             verbose=False,
             tmp_dir=tmp_path / "tmp",
+            gpu_targets=None,
         )
 
         # Run batch split
@@ -464,6 +466,7 @@ class TestArtifactSplitterIntegration:
             split_databases=["rocblas"],
             verbose=False,
             tmp_dir=tmp_path / "tmp",
+            gpu_targets=None,
         )
 
         # Run batch split
@@ -721,3 +724,370 @@ class TestArtifactSplitterIntegration:
         assert (
             len(kpm_files) == 0
         ), f"Should have no .kpm manifest files (patterns replace manifests), got {kpm_files}"
+
+    def test_ck_so_classified_as_database_not_fat_binary(self, toolchain, tmp_path):
+        """
+        Test that a CK per-arch .so matched by MIOpenHandler is classified as a
+        database file, not a fat binary, even when is_fat_binary returns True.
+
+        This verifies that database handlers are checked before the fat binary
+        check in FileClassificationVisitor.visit_file().
+        """
+        test_dir = tmp_path / "prefix"
+        lib_dir = test_dir / "lib"
+        lib_dir.mkdir(parents=True)
+
+        ck_so = lib_dir / "libMIOpenCKGroupedConv_gfx942.so"
+        ck_so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        visitor = FileClassificationVisitor(
+            toolchain=toolchain,
+            database_handlers=[MIOpenHandler()],
+            verbose=False,
+        )
+
+        with patch("rocm_kpack.artifact_splitter.is_fat_binary", return_value=True):
+            visitor.visit_file(ck_so, test_dir)
+
+        # Should be in database_files_by_arch, NOT in fat_binaries
+        assert len(visitor.fat_binaries) == 0, (
+            "CK .so should not be classified as a fat binary"
+        )
+        assert "gfx942" in visitor.database_files_by_arch
+        assert len(visitor.database_files_by_arch["gfx942"]) == 1
+        assert visitor.database_files_by_arch["gfx942"][0][0] == ck_so
+        assert ck_so in visitor.exclude_from_generic
+
+    def test_ck_dll_classified_as_database_not_fat_binary(self, toolchain, tmp_path):
+        """
+        Test that a Windows CK per-arch .dll (no lib prefix) matched by MIOpenHandler
+        is classified as a database file, not a fat binary.
+        """
+        test_dir = tmp_path / "prefix"
+        lib_dir = test_dir / "lib"
+        lib_dir.mkdir(parents=True)
+
+        ck_dll = lib_dir / "MIOpenCKGroupedConv_gfx942.dll"
+        ck_dll.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        visitor = FileClassificationVisitor(
+            toolchain=toolchain,
+            database_handlers=[MIOpenHandler()],
+            verbose=False,
+        )
+
+        with patch("rocm_kpack.artifact_splitter.is_fat_binary", return_value=True):
+            visitor.visit_file(ck_dll, test_dir)
+
+        # Should be in database_files_by_arch, NOT in fat_binaries
+        assert len(visitor.fat_binaries) == 0, (
+            "CK .dll should not be classified as a fat binary"
+        )
+        assert "gfx942" in visitor.database_files_by_arch
+        assert len(visitor.database_files_by_arch["gfx942"]) == 1
+        assert visitor.database_files_by_arch["gfx942"][0][0] == ck_dll
+        assert ck_dll in visitor.exclude_from_generic
+
+    def test_gpu_targets_filters_database_files(self, toolchain, tmp_path):
+        """
+        Test that gpu_targets filters which per-arch directories are created.
+
+        When gpu_targets is set, only the specified architectures should get
+        per-arch directories. Database files for other architectures should
+        remain in the generic artifact (not lost).
+        """
+        # Create artifact with MIOpen database files for multiple architectures
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+
+        prefix = "ml-libs/MIOpen/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        prefix_dir = input_dir / prefix
+
+        # Create MIOpen-style database files for three architectures
+        db_dir = prefix_dir / "share" / "miopen" / "db"
+        db_dir.mkdir(parents=True)
+        (db_dir / "gfx942_68.HIP.model").write_text("mock gfx942 db")
+        (db_dir / "gfx1100_68.HIP.model").write_text("mock gfx1100 db")
+        (db_dir / "gfx90a_68.HIP.model").write_text("mock gfx90a db")
+
+        # Create a regular library (not per-arch)
+        lib_dir = prefix_dir / "lib"
+        lib_dir.mkdir(parents=True)
+        (lib_dir / "libMIOpen.so").write_text("mock library")
+
+        output_dir = tmp_path / "output"
+
+        # Split with only gfx942 in gpu_targets
+        splitter = ArtifactSplitter(
+            artifact_prefix="miopen_lib",
+            toolchain=toolchain,
+            database_handlers=[MIOpenHandler()],
+            verbose=True,
+            gpu_targets=["gfx942"],
+        )
+        splitter.split(input_dir, output_dir)
+
+        # gfx942 per-arch directory should exist with its database file
+        gfx942_dir = output_dir / "miopen_lib_gfx942"
+        assert gfx942_dir.exists(), "gfx942 per-arch directory should exist"
+        gfx942_db = gfx942_dir / prefix / "share/miopen/db/gfx942_68.HIP.model"
+        assert gfx942_db.exists(), "gfx942 db file should be in per-arch dir"
+
+        # gfx942 db file should NOT be in generic
+        generic_dir = output_dir / "miopen_lib_generic"
+        generic_gfx942_db = generic_dir / prefix / "share/miopen/db/gfx942_68.HIP.model"
+        assert not generic_gfx942_db.exists(), (
+            "gfx942 db file should not be in generic artifact"
+        )
+
+        # Filtered-out architectures should NOT have per-arch directories
+        assert not (output_dir / "miopen_lib_gfx1100").exists(), (
+            "gfx1100 per-arch directory should not exist when filtered out"
+        )
+        assert not (output_dir / "miopen_lib_gfx90a").exists(), (
+            "gfx90a per-arch directory should not exist when filtered out"
+        )
+
+        # Filtered-out database files should NOT be in generic either
+        # (per-arch content doesn't belong in generic — the correct arch job produces it)
+        generic_gfx1100_db = (
+            generic_dir / prefix / "share/miopen/db/gfx1100_68.HIP.model"
+        )
+        generic_gfx90a_db = (
+            generic_dir / prefix / "share/miopen/db/gfx90a_68.HIP.model"
+        )
+        assert not generic_gfx1100_db.exists(), (
+            "gfx1100 db file should not be in generic artifact"
+        )
+        assert not generic_gfx90a_db.exists(), (
+            "gfx90a db file should not be in generic artifact"
+        )
+
+        # Regular library should be in generic
+        generic_lib = generic_dir / prefix / "lib/libMIOpen.so"
+        assert generic_lib.exists(), "libMIOpen.so should be in generic artifact"
+
+    def test_no_gpu_targets_creates_all_arches(self, toolchain, tmp_path):
+        """
+        Test that when gpu_targets is None, all architectures get per-arch directories.
+
+        This is the default behavior — no filtering applied.
+        """
+        # Create artifact with MIOpen database files for multiple architectures
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+
+        prefix = "ml-libs/MIOpen/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        prefix_dir = input_dir / prefix
+
+        # Create MIOpen-style database files for three architectures
+        db_dir = prefix_dir / "share" / "miopen" / "db"
+        db_dir.mkdir(parents=True)
+        (db_dir / "gfx942_68.HIP.model").write_text("mock gfx942 db")
+        (db_dir / "gfx1100_68.HIP.model").write_text("mock gfx1100 db")
+        (db_dir / "gfx90a_68.HIP.model").write_text("mock gfx90a db")
+
+        # Create a regular library
+        lib_dir = prefix_dir / "lib"
+        lib_dir.mkdir(parents=True)
+        (lib_dir / "libMIOpen.so").write_text("mock library")
+
+        output_dir = tmp_path / "output"
+
+        # Split WITHOUT gpu_targets (None — default)
+        splitter = ArtifactSplitter(
+            artifact_prefix="miopen_lib",
+            toolchain=toolchain,
+            database_handlers=[MIOpenHandler()],
+            verbose=True,
+            gpu_targets=None,
+        )
+        splitter.split(input_dir, output_dir)
+
+        # All three per-arch directories should exist
+        assert (output_dir / "miopen_lib_gfx942").exists(), (
+            "gfx942 per-arch directory should exist"
+        )
+        assert (output_dir / "miopen_lib_gfx1100").exists(), (
+            "gfx1100 per-arch directory should exist"
+        )
+        assert (output_dir / "miopen_lib_gfx90a").exists(), (
+            "gfx90a per-arch directory should exist"
+        )
+
+        # All database files should be in their respective per-arch directories
+        assert (
+            output_dir
+            / "miopen_lib_gfx942"
+            / prefix
+            / "share/miopen/db/gfx942_68.HIP.model"
+        ).exists()
+        assert (
+            output_dir
+            / "miopen_lib_gfx1100"
+            / prefix
+            / "share/miopen/db/gfx1100_68.HIP.model"
+        ).exists()
+        assert (
+            output_dir
+            / "miopen_lib_gfx90a"
+            / prefix
+            / "share/miopen/db/gfx90a_68.HIP.model"
+        ).exists()
+
+        # No database files should remain in generic
+        generic_dir = output_dir / "miopen_lib_generic"
+        generic_db_dir = generic_dir / prefix / "share/miopen/db"
+        if generic_db_dir.exists():
+            assert not (generic_db_dir / "gfx942_68.HIP.model").exists()
+            assert not (generic_db_dir / "gfx1100_68.HIP.model").exists()
+            assert not (generic_db_dir / "gfx90a_68.HIP.model").exists()
+
+    def test_gpu_targets_strips_feature_flags(self, toolchain, tmp_path):
+        """
+        Test that gpu_targets with feature flags (e.g., gfx942:sramecc+:xnack-)
+        works the same as the bare architecture name (gfx942).
+
+        Feature flags are stripped before matching against database file architectures.
+        """
+        # Create artifact with MIOpen database files for multiple architectures
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+
+        prefix = "ml-libs/MIOpen/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        prefix_dir = input_dir / prefix
+
+        # Create MIOpen-style database files for three architectures
+        db_dir = prefix_dir / "share" / "miopen" / "db"
+        db_dir.mkdir(parents=True)
+        (db_dir / "gfx942_68.HIP.model").write_text("mock gfx942 db")
+        (db_dir / "gfx1100_68.HIP.model").write_text("mock gfx1100 db")
+        (db_dir / "gfx90a_68.HIP.model").write_text("mock gfx90a db")
+
+        # Create a regular library
+        lib_dir = prefix_dir / "lib"
+        lib_dir.mkdir(parents=True)
+        (lib_dir / "libMIOpen.so").write_text("mock library")
+
+        output_dir = tmp_path / "output"
+
+        # Split with feature-flagged gpu_targets
+        splitter = ArtifactSplitter(
+            artifact_prefix="miopen_lib",
+            toolchain=toolchain,
+            database_handlers=[MIOpenHandler()],
+            verbose=True,
+            gpu_targets=["gfx942:sramecc+:xnack-"],
+        )
+        splitter.split(input_dir, output_dir)
+
+        # Only gfx942 per-arch directory should exist (feature flags stripped)
+        assert (output_dir / "miopen_lib_gfx942").exists(), (
+            "gfx942 per-arch directory should exist despite feature flags in target"
+        )
+        assert not (output_dir / "miopen_lib_gfx1100").exists(), (
+            "gfx1100 per-arch directory should not exist when filtered out"
+        )
+        assert not (output_dir / "miopen_lib_gfx90a").exists(), (
+            "gfx90a per-arch directory should not exist when filtered out"
+        )
+
+    def test_gpu_targets_filters_fat_binary_kernels(self, toolchain, tmp_path):
+        """
+        Test that gpu_targets filters code objects extracted from fat binaries.
+
+        When a fat binary contains code objects for multiple architectures
+        (e.g., gfx906 and gfx1100), only the architectures in gpu_targets
+        should produce kpack artifacts. Without this filter, a cross-arch
+        build can produce spurious per-arch kpack artifacts.
+        """
+        # Set up a fake prefix with a placeholder binary
+        prefix = "math-libs/BLAS/rocSOLVER/stage"
+        prefix_path = tmp_path / prefix
+        lib_dir = prefix_path / "lib"
+        lib_dir.mkdir(parents=True)
+
+        fat_binary = lib_dir / "librocsolver.so.0"
+        fat_binary.write_text("placeholder")
+
+        # Create mock unbundled code objects for two architectures
+        mock_dest_dir = tmp_path / "unbundled"
+        mock_dest_dir.mkdir()
+        mock_targets = [
+            ("hipv4-amdgcn-amd-amdhsa--gfx906", "gfx906.hsaco"),
+            ("hipv4-amdgcn-amd-amdhsa--gfx1100", "gfx1100.hsaco"),
+        ]
+        for _, fname in mock_targets:
+            (mock_dest_dir / fname).write_bytes(b"\x00" * 100)
+
+        mock_unbundled = type(
+            "MockUnbundled",
+            (),
+            {
+                "target_list": mock_targets,
+                "dest_dir": mock_dest_dir,
+                "__enter__": lambda s: s,
+                "__exit__": lambda s, *a: None,
+            },
+        )()
+
+        with patch(
+            "rocm_kpack.artifact_splitter.BundledBinary"
+        ) as MockBinary:
+            MockBinary.return_value.unbundle.return_value = mock_unbundled
+
+            # With gpu_targets=["gfx1100"], only gfx1100 kernels should appear
+            splitter = ArtifactSplitter(
+                artifact_prefix="blas_lib",
+                toolchain=toolchain,
+                database_handlers=[],
+                verbose=True,
+                gpu_targets=["gfx1100"],
+            )
+            result_filtered = splitter.process_fat_binaries(
+                [fat_binary], prefix, prefix_path
+            )
+
+            # Recreate mock files consumed by the first call
+            for _, fname in mock_targets:
+                (mock_dest_dir / fname).write_bytes(b"\x00" * 100)
+
+            # Without gpu_targets, both architectures should appear
+            splitter_all = ArtifactSplitter(
+                artifact_prefix="blas_lib",
+                toolchain=toolchain,
+                database_handlers=[],
+                verbose=True,
+                gpu_targets=None,
+            )
+            result_unfiltered = splitter_all.process_fat_binaries(
+                [fat_binary], prefix, prefix_path
+            )
+
+        # Filtered: only targeted architecture should be present
+        assert "gfx1100" in result_filtered, (
+            "gfx1100 should be in filtered results (in gpu_targets)"
+        )
+        assert len(result_filtered["gfx1100"]) == 1, (
+            "gfx1100 kernel should be preserved intact"
+        )
+        assert result_filtered["gfx1100"][0].kernel_data == b"\x00" * 100, (
+            "gfx1100 kernel data should be unchanged by filtering"
+        )
+        assert "gfx906" not in result_filtered, (
+            "gfx906 should not be in filtered results (not in gpu_targets)"
+        )
+
+        # Unfiltered: all architectures should be present
+        assert "gfx1100" in result_unfiltered, (
+            "gfx1100 should be in unfiltered results"
+        )
+        assert "gfx906" in result_unfiltered, (
+            "gfx906 should be in unfiltered results"
+        )

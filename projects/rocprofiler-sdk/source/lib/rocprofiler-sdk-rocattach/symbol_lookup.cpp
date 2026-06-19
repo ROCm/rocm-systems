@@ -35,6 +35,7 @@
 #include <link.h>
 
 #include <optional>
+#include <sstream>
 #include <unordered_map>
 #include <vector>
 
@@ -118,7 +119,7 @@ get_library_handle(std::string_view _lib_name)
         }
     }
 
-    // try to load with the absoulte path
+    // try to load with the absolute path
     if(!_lib_handle)
     {
         _lib_path   = _lib_path_abs;
@@ -165,20 +166,28 @@ find_library(void*& addr, int inpid, const std::string& library)
     }
 
     std::string line;
+    bool        found = false;
     while(std::getline(maps, line))
     {
-        if(line.find(library) != std::string::npos)
-        {
-            ROCP_TRACE << "[rocprofiler-sdk-rocattach] Entry in pid " << inpid
-                       << " maps file is: " << line;
-            break;
-        }
+        if(line.find(library) == std::string::npos) continue;
+
+        std::istringstream iss(line);
+        std::string        addr_range;
+        std::string        perms;
+        std::string        offset_str;
+        if(!(iss >> addr_range >> perms >> offset_str)) continue;
+        if(std::stoull(offset_str, nullptr, 16) != 0) continue;
+
+        ROCP_TRACE << "[rocprofiler-sdk-rocattach] Entry in pid " << inpid
+                   << " maps file is: " << line;
+        found = true;
+        break;
     }
 
-    if(!maps)
+    if(!found)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find library " << library << " in "
-                   << filename.str();
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find library " << library
+                   << " (with file offset 0) in " << filename.str();
         return false;
     }
 
@@ -230,7 +239,7 @@ find_symbol(int target_pid, void*& addr, const std::string& library, const std::
         return false;
     }
 
-    // Caluclate the offset
+    // Calculate the offset
     size_t offset =
         reinterpret_cast<size_t>(symboladdr) - reinterpret_cast<size_t>(hostlibraryaddr);
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Offset of " << symbol << " into " << library

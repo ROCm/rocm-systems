@@ -37,17 +37,18 @@
 #include "ipc/backend_ipc.hpp"
 #endif
 
+#include "log.hpp"
+
 #include <cassert>
+#include <cstdint>
 
 namespace rocshmem {
 
-#define NET_CHECK(cmd)                                       \
-  {                                                          \
-    if (cmd != MPI_SUCCESS) {                                \
-      fprintf(stderr, "Unrecoverable error: MPI Failure\n"); \
-      abort() ;                                              \
-    }                                                        \
-  }
+#define NET_CHECK(cmd) do {                                  \
+  if (cmd != MPI_SUCCESS) {                                  \
+    LOG_ERROR_ABORT("Unrecoverable error: MPI Failure");     \
+  }                                                          \
+} while(0)
 
 Backend::Backend(MPI_Comm comm) : heap(comm, nullptr) {
   init();
@@ -78,16 +79,20 @@ void Backend::init(void) {
   CHECK_HIP(hipDeviceGetAttribute(&num_cus, hipDeviceAttributeMultiprocessorCount, hip_dev_id));
 
   /*
-   * Initialize 'print_lock' global and copy to the device memory space.
+   * Copy log state to device constant memory for device-side logging.
    */
-  CHECK_HIP(hipMalloc(&print_lock, sizeof(*print_lock)));
-  *print_lock = 0;
-
-  int* print_lock_addr{nullptr};
-  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&print_lock_addr),
-                                HIP_SYMBOL(print_lock)));
-
-  CHECK_HIP(hipMemcpy(print_lock_addr, &print_lock, sizeof(print_lock),
+  uint32_t log_flags = 0;
+  if (envvar::log_flags.show_error) log_flags |= logd_constants::SHOW_ERROR;
+  if (envvar::log_flags.show_warn)  log_flags |= logd_constants::SHOW_WARN;
+  if (envvar::log_flags.show_info)  log_flags |= logd_constants::SHOW_INFO;
+  if (envvar::log_flags.show_api)   log_flags |= logd_constants::SHOW_API;
+  if (envvar::log_flags.show_trace) log_flags |= logd_constants::SHOW_TRACE;
+  if (envvar::log_flags.show_color) log_flags |= logd_constants::SHOW_COLOR;
+  struct logd_constants host_logd_constants{log_pe_number, log_flags};
+  struct logd_constants* logd_constants_addr{nullptr};
+  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&logd_constants_addr),
+                                HIP_SYMBOL(logd_constants)));
+  CHECK_HIP(hipMemcpy(logd_constants_addr, &host_logd_constants, sizeof(host_logd_constants),
                       hipMemcpyDefault));
 
   /*
@@ -143,9 +148,12 @@ void Backend::destroy_remaining_ctxs() {
 }
 
 Backend::~Backend() {
-  CHECK_HIP(hipFree(print_lock));
   if (backend_comm != MPI_COMM_NULL)
     NET_CHECK(mpilib_ftable_.Comm_free(&backend_comm));
+
+  if (done_init) {
+    CHECK_HIP(hipHostFree(done_init));
+  }
 }
 
 void Backend::dump_stats() {
@@ -207,6 +215,7 @@ void Backend::dump_stats() {
   printf("Sync %llu\n", device_stats.getStat(NUM_SYNC));
   printf("WAVE_Sync %llu\n", device_stats.getStat(NUM_SYNC_WAVE));
   printf("WG_Sync %llu\n", device_stats.getStat(NUM_SYNC_WG));
+  printf("Reduce %llu\n", device_stats.getStat(NUM_REDUCE));
 
   const auto& host_stats{globalHostStats};
   printf("HOST STATS\n");
@@ -243,6 +252,7 @@ void Backend::dump_stats() {
   printf("Tests %llu\n", host_stats.getStat(NUM_HOST_TEST));
   printf("SHMEM_PTR %llu\n", host_stats.getStat(NUM_HOST_SHMEM_PTR));
   printf("SyncAll %llu\n", host_stats.getStat(NUM_HOST_SYNC_ALL));
+  printf("Reduce %llu\n", host_stats.getStat(NUM_HOST_REDUCE));
 
   dump_backend_stats();
 }
@@ -252,6 +262,87 @@ void Backend::reset_stats() {
   globalHostStats.resetStats();
 
   reset_backend_stats();
+}
+
+int Backend::buffer_register(void *addr, size_t length) {
+  LOG_TRACE("Backend::buffer_register addr=%p length=%zu", addr, length);
+
+  if (addr == nullptr) {
+    LOG_TRACE("Backend::buffer_register FAIL: addr is null");
+    return ROCSHMEM_ERROR;
+  }
+
+  if (length == 0) {
+    LOG_TRACE("Backend::buffer_register FAIL: length is 0");
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t start = reinterpret_cast<uintptr_t>(addr);
+
+  // Check for overflow when computing end address
+  if (start > UINTPTR_MAX - length) {
+    LOG_TRACE("Backend::buffer_register FAIL: overflow start=0x%lx length=%zu", start, length);
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t end = start + length;
+
+  // Find first entry with start >= our start
+  auto it = user_buffer_regions.lower_bound(start);
+
+  // Check entry at or after our start for overlap
+  if (it != user_buffer_regions.end() && it->first < end) {
+    LOG_TRACE("Backend::buffer_register FAIL: overlap with existing region "
+              "[0x%lx, +%zu], new [0x%lx, +%zu]",
+              it->first, it->second, start, length);
+    return ROCSHMEM_ERROR;
+  }
+
+  // Check entry just before our start for overlap
+  if (it != user_buffer_regions.begin()) {
+    auto prev = std::prev(it);
+    uintptr_t prev_end = prev->first + prev->second;
+    if (prev_end > start) {
+      LOG_TRACE("Backend::buffer_register FAIL: overlap with preceding region "
+                "[0x%lx, +%zu] (ends at 0x%lx), new start=0x%lx",
+                prev->first, prev->second, prev_end, start);
+      return ROCSHMEM_ERROR;
+    }
+  }
+
+  user_buffer_regions[start] = length;
+  LOG_TRACE("Backend::buffer_register OK: registered [0x%lx, +%zu] (total regions: %zu)",
+            start, length, user_buffer_regions.size());
+  return ROCSHMEM_SUCCESS;
+}
+
+int Backend::buffer_unregister(void *addr) {
+  if (addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t target = reinterpret_cast<uintptr_t>(addr);
+
+  // Find first entry with start > target
+  auto it = user_buffer_regions.upper_bound(target);
+
+  if (it != user_buffer_regions.begin()) {
+    auto prev = std::prev(it);
+    uintptr_t start = prev->first;
+    uintptr_t end = start + prev->second;
+
+    // Check if target falls within [start, end)
+    if (target < end) {
+      user_buffer_regions.erase(prev);
+      return ROCSHMEM_SUCCESS;
+    }
+  }
+
+  return ROCSHMEM_ERROR;
+}
+
+void Backend::buffer_unregister_all() {
+  user_buffer_regions.clear();
 }
 
 }  // namespace rocshmem

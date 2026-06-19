@@ -28,14 +28,14 @@
 
 #include "device_proxy.hpp"
 #include "backend_ipc.hpp"
+#include "memory/hip_allocator.hpp"
 
 namespace rocshmem {
 
 class IPCBackend;
 
-template <typename ALLOCATOR>
 class IPCDefaultContextProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, IPCContext>;
+  using ProxyT = DeviceProxy<HIPAllocator, IPCContext>;
 
  public:
   IPCDefaultContextProxy() = default;
@@ -44,8 +44,9 @@ class IPCDefaultContextProxy {
    * Placement new the memory which is allocated by proxy_
    */
   explicit IPCDefaultContextProxy(IPCBackend* backend, TeamInfo *tinfo,
+                                  [[maybe_unused]] const HIPAllocator& alloc = HIPAllocator(),
                                   size_t num_elems = 1)
-  : constructed_{true}, proxy_{num_elems} {
+  : proxy_{num_elems}, constructed_{true} {
     auto ctx{proxy_.get()};
     new (ctx) IPCContext(reinterpret_cast<Backend*>(backend), 0);
     ctx->tinfo = tinfo;
@@ -87,8 +88,6 @@ class IPCDefaultContextProxy {
    */
   bool constructed_{false};
 };
-
-using IPCDefaultContextProxyT = IPCDefaultContextProxy<HIPAllocator>;
 
 }  // namespace rocshmem
 

@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/vaapi_gotcha.hpp"
 #include "core/common.hpp"
@@ -27,6 +8,7 @@
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>
@@ -84,8 +66,8 @@ vaapi_gotcha::configure()
         vaapi_gotcha_t::configure<9, VAStatus, VADisplay, VAContextID>(
             "vaDestroyContext");
         vaapi_gotcha_t::configure<10, VAStatus, VADisplay, VAContextID>("vaEndPicture");
-        vaapi_gotcha_t::configure<11, VAStatus, VADisplay, VASurfaceID, uint32_t,
-                                  uint32_t, void*>("vaExportSurfaceHandle");
+        vaapi_gotcha_t::configure<11, VAStatus, VADisplay, VASurfaceID, std::uint32_t,
+                                  std::uint32_t, void*>("vaExportSurfaceHandle");
         vaapi_gotcha_t::configure<12, VAStatus, VADisplay, VAProfile, VAEntrypoint,
                                   VAConfigAttrib*, int>("vaGetConfigAttributes");
         vaapi_gotcha_t::configure<13, VAStatus, VADisplay, int*, int*>("vaInitialize");
@@ -140,6 +122,22 @@ vaapi_gotcha::start()
 void
 vaapi_gotcha::stop()
 {}
+
+std::mutex vaapi_gotcha::s_mutex = {};
+
+void
+vaapi_gotcha::pause()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    vaapi_gotcha_t::set_ready(false);
+}
+
+void
+vaapi_gotcha::resume()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    vaapi_gotcha_t::set_ready(true);
+}
 
 // vaBeginPicture
 void
@@ -278,7 +276,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 // vaExportSurfaceHandle
 void
 vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
-                    VASurfaceID surface_id, uint32_t mem_type, uint32_t flags,
+                    VASurfaceID surface_id, std::uint32_t mem_type, std::uint32_t flags,
                     void* descriptor)
 {
     category_region<category::vaapi>::start(

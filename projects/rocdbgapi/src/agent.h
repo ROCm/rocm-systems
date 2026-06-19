@@ -28,11 +28,13 @@
 #include "os_driver.h"
 
 #include <cstddef>
+#include <unordered_set>
 #include <vector>
 
 namespace amd::dbgapi
 {
 
+class address_space_t;
 class architecture_t;
 class process_t;
 class watchpoint_t;
@@ -41,12 +43,23 @@ class watchpoint_t;
 
 class agent_t : public detail::handle_object<amd_dbgapi_agent_id_t>
 {
+public:
+  struct aperture_t
+  {
+    amd_dbgapi_segment_address_t base;
+    amd_dbgapi_segment_address_t limit;
+    const address_space_t &encoding;
+    const std::unordered_set<amd_dbgapi_address_space_id_t,
+                             hash<amd_dbgapi_address_space_id_t>> from;
+  };
+
 private:
   os_agent_info_t const m_os_agent_info;
   os_exception_mask_t m_exceptions{ os_exception_mask_t::none };
   epoch_t m_mark{ 0 };
 
   std::vector<const watchpoint_t *> m_watchpoints;
+  const std::vector<aperture_t> m_apertures;
   const architecture_t *const m_architecture;
   process_t &m_process;
 
@@ -118,6 +131,8 @@ public:
 
   void get_info (amd_dbgapi_agent_info_t query, size_t value_size,
                  void *value) const;
+
+  const auto &apertures () const { return m_apertures; }
 
   const architecture_t *architecture () const { return m_architecture; }
 

@@ -216,6 +216,9 @@ public:
     /* Size of the local data share.  */
     virtual size_t lds_size () const = 0;
 
+    /* Size of the hwreg block, in dwords.  */
+    virtual size_t hwreg_count () const = 0;
+
     virtual std::optional<agent_address_t>
     register_address (amdgpu_regnum_t regnum) const = 0;
 
@@ -303,6 +306,9 @@ public:
   virtual bool
   is_address_class_supported (const address_class_t &address_class) const
     = 0;
+
+  virtual std::vector<agent_t::aperture_t>
+  get_apertures (const os_agent_info_t &os) const = 0;
 
   /* Return the watchpoints for which an exception was generated in the given
      stopped wave.  */

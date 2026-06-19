@@ -1,0 +1,28 @@
+diff --git a/packages/opencode/src/cli/cmd/tui/app.tsx b/packages/opencode/src/cli/cmd/tui/app.tsx
+--- a/packages/opencode/src/cli/cmd/tui/app.tsx
++++ b/packages/opencode/src/cli/cmd/tui/app.tsx
+@@ -636,6 +636,24 @@
+       category: "System",
+     },
+     {
++      title: "About PerfXpert",
++      value: "about.perfxpert",
++      slash: {
++        name: "about",
++      },
++      onSelect: (dialog) => {
++        toast.show({
++          variant: "info",
++          title: "AMD ROCm PerfXpert",
++          message:
++            "GPU performance optimization assistant. Built on opencode (MIT) by Sam Stephenson — https://github.com/sst/opencode",
++          duration: 10000,
++        })
++        dialog.clear()
++      },
++      category: "System",
++    },
++    {
+       title: "Open docs",
+       value: "docs.open",
+       onSelect: () => {

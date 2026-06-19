@@ -13,12 +13,14 @@ set(TEST_SRC
     hipMemPrftchAsyncStressTst.cc
     hipHostMallocStress.cc
     hipHostRegisterStress.cc
+    hipMallocConcurrency.cc
 )
 
 if(UNIX)
   set(TEST_SRC ${TEST_SRC}
                hipHmmOvrSubscriptionTst.cc)
   add_executable(hold_memory EXCLUDE_FROM_ALL hold_memory.cc)
+  target_link_libraries(hold_memory hip::host)
   add_dependencies(stress_test hold_memory)
 endif()
 

@@ -32,6 +32,29 @@
 
 namespace amd {
 
+// Compile-time upper bound for DynDataPrefetch region arrays.
+// The actual device limit is queried at runtime via hipDeviceAttributeMaxDynDataPrefetchRegions.
+constexpr uint32_t kDynDataPrefetchMaxRegions = 2;
+
+struct DynDataPrefetchRegion {
+  void*    baseAddress;
+  size_t   burstSize;
+  uint32_t numBursts;
+  uint32_t stride;
+};
+
+struct DynDataPrefetchConfig {
+  uint32_t             numRegions;
+  uint8_t              hints;
+  DynDataPrefetchRegion regions[kDynDataPrefetchMaxRegions];
+
+  DynDataPrefetchConfig() : numRegions(0), hints(0) {
+    memset(regions, 0, sizeof(regions));
+  }
+
+  bool isEnabled() const { return numRegions > 0; }
+};
+
 /*! \addtogroup Runtime
  *  @{
  *
@@ -53,7 +76,7 @@ class Event : public RuntimeObject {
   typedef void(CL_CALLBACK* CallBackFunction)(cl_event event, int32_t command_exec_status,
                                               void* user_data);
 
-  struct CallBackEntry : public HeapObject {
+  struct CallBackEntry {
     struct CallBackEntry* next_;  //!< the next entry in the callback list.
 
     std::atomic<CallBackFunction> callback_;  //!< callback function pointer.
@@ -217,7 +240,7 @@ class Event : public RuntimeObject {
   }
 
   //! Set dependent hardware events
-  void setDepHwEvents(std::vector<void*> hw_events) {
+  void setDepHwEvents(const std::vector<void*> &hw_events) {
     dep_hw_events_ = hw_events;
   }
 
@@ -259,9 +282,8 @@ union CopyMetadata {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
     uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
-    uint32_t preferCE_ : 1;             //!< Prefer compute engine over SDMA
     uint32_t copyOpType_ : 3;           //!< Operation type (CopyOpType)
-    uint32_t reserved_ : 23;            //!< Reserved for future use
+    uint32_t reserved_ : 24;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
@@ -269,7 +291,6 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(kSrcAccessOrderStream),
-        preferCE_(0),
         copyOpType_(kCopyOpLinear),
         reserved_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
@@ -277,7 +298,6 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(srcAccessOrder),
-        preferCE_(0),
         copyOpType_(kCopyOpLinear),
         reserved_(0) {}
 };
@@ -401,6 +421,7 @@ class Command : public Event {
 
   //! Update with the list of events this command needs to wait on before dispatch
   void updateEventWaitList(const EventWaitList& waitList) {
+    eventWaitList_.reserve(eventWaitList_.size() + waitList.size());
     for (auto event : waitList) {
       event->retain();
       eventWaitList_.push_back(event);
@@ -421,6 +442,10 @@ class Command : public Event {
    *  \note This function will execute in the command queue thread.
    */
   virtual void submit(device::VirtualDevice& device) = 0;
+
+  //! True only for marker commands; lets the device layer keep its coalescing
+  //! window across markers while resetting it for any other (intervening) command.
+  virtual bool isMarkerCommand() const { return false; }
 
   //! Release the resources associated with this event.
   virtual void releaseResources();
@@ -1172,7 +1197,7 @@ class BatchCopyMemoryCommand : public Command {
   virtual void submit(device::VirtualDevice& device) { device.submitBatchCopyMemory(*this); }
 
   //! Return the vector of copy operations
-  std::vector<BatchCopyOp>& copyOps() { return copyOps_; }
+  const std::vector<BatchCopyOp>& copyOps() const { return copyOps_; }
 
   //! Return the number of copy operations in the batch
   size_t count() const { return copyOps_.size(); }
@@ -1279,6 +1304,7 @@ class MigrateMemObjectsCommand : public Command {
                            const std::vector<amd::Memory*>& memObjects,
                            cl_mem_migration_flags flags)
       : Command(queue, type, eventWaitList), migrationFlags_(flags) {
+    memObjects_.reserve(memObjects.size());
     for (const auto& it : memObjects) {
       if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
         it->retain();
@@ -1324,6 +1350,7 @@ class NDRangeKernelCommand : public Command {
   uint64_t allGridSum_;      //!< A sum of all grids in multi GPU launch
   uint32_t firstDevice_;     //!< Device index of the first device in the gridc
   uint32_t numWorkgroups_;   //!< Total number of workgroups in the current launch
+  DynDataPrefetchConfig dynDataPrefetchConfig_;  //!< Dynamic data prefetch configuration
 
  public:
   enum {
@@ -1392,6 +1419,9 @@ class NDRangeKernelCommand : public Command {
   uint64_t firstDevice() const { return firstDevice_; }
 
   uint32_t numWorkgroups() const { return numWorkgroups_; }
+
+  const DynDataPrefetchConfig& dynDataPrefetchConfig() const { return dynDataPrefetchConfig_; }
+  void setDynDataPrefetchConfig(const DynDataPrefetchConfig& cfg) { dynDataPrefetchConfig_ = cfg; }
 
   //! Set the local work size.
   void setLocalWorkSize(const NDRange& local) { sizes_.local() = local; }
@@ -1469,6 +1499,13 @@ class ExternalSemaphoreCmd : public Command {
 
 
 class Marker : public Command {
+  device::Signal* ipc_completion_signal_ = nullptr;
+  device::Signal* ipc_dep_signal_ = nullptr;
+  //! Monotonic client (HIP) coalesce identity for detecting consecutive records;
+  //! a non-zero value also opts the record into coalescing. 0 = not coalesceable.
+  uint64_t coalesce_event_ = 0;
+  bool synced_since_record_ = false;  //!< Client synced the event since its last record
+
  public:
   //! Create a new Marker
   Marker(HostQueue& queue, bool userVisible, const EventWaitList& eventWaitList = nullWaitList,
@@ -1476,6 +1513,23 @@ class Marker : public Command {
       : Command(queue, userVisible ? CL_COMMAND_MARKER : 0, eventWaitList, 0, waitingEvent) {
     cpu_wait_ = cpu_wait;
   }
+
+  //! Attach an IPC signal as completion_signal on the barrier packet (for event record)
+  void setIpcCompletionSignal(device::Signal* s) { ipc_completion_signal_ = s; }
+  device::Signal* ipcCompletionSignal() const { return ipc_completion_signal_; }
+
+  //! Attach an IPC signal as dep_signal on the barrier packet (for stream wait)
+  void setIpcDepSignal(device::Signal* s) { ipc_dep_signal_ = s; }
+  device::Signal* ipcDepSignal() const { return ipc_dep_signal_; }
+
+  //! Coalescing metadata set by the client layer (opaque to rocclr). A non-zero
+  //! coalesceEvent() both identifies the event and marks the record eligible.
+  void setCoalesceEvent(uint64_t id) { coalesce_event_ = id; }
+  uint64_t coalesceEvent() const { return coalesce_event_; }
+  void setSyncedSinceRecord(bool v) { synced_since_record_ = v; }
+  bool syncedSinceRecord() const { return synced_since_record_; }
+
+  bool isMarkerCommand() const override { return true; }
 
   //! The actual command implementation.
   virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }
@@ -1486,29 +1540,62 @@ class AccumulateCommand : public Command {
   //! Kernel names and timestamps list for activity profiling
   std::vector<const std::string*> kernelNames_;
   const std::vector<const std::string*>* kernelNamesRef_ = nullptr;
+  //! Optional owner of the borrowed kernel-name strings (e.g. the GraphExec
+  //! whose nodes own them). Retained while this command lives so the strings
+  //! outlive ReportActivity(), which runs at the end of setStatus(CL_COMPLETE)
+  //! -- after OnLaunchComplete() may have dropped the launch's reference. This
+  //! ties the strings' lifetime to the consumer (this command) rather than to
+  //! the graph launch, with no string copies. Set via the constructor.
+  ReferenceCountedObject* kernelNamesOwner_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
+  //! When false, the destructor does not destroy hw_events_ (an external owner,
+  //! e.g. the graph signal pool, reclaims them instead).
+  bool owns_hw_events_ = true;
 
  public:
-  //! Create a new Marker
+  //! Create a new accumulate command. kernelNamesOwner, when given, is the
+  //! object that owns the borrowed kernel-name strings (e.g. the GraphExec);
+  //! it is retained for the command's whole lifetime and released in the
+  //! destructor, so the borrowed strings stay valid through ReportActivity()
+  //! even after OnLaunchComplete() drops the launch's reference -- with no
+  //! string copies.
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
-                    const Event* waitingEvent = nullptr)
-      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
+                    const Event* waitingEvent = nullptr,
+                    ReferenceCountedObject* kernelNamesOwner = nullptr)
+      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent),
+        kernelNamesOwner_(kernelNamesOwner) {
+    if (kernelNamesOwner_ != nullptr) {
+      kernelNamesOwner_->retain();
+    }
+  }
 
   //! Destructor - release all retained HW events
   virtual ~AccumulateCommand();
 
-  //! Add HW event to the list for later cleanup
+  //! Add HW event to the list for later cleanup.
+  //! Does not retain — caller owns the reference. By default (owns_hw_events_ ==
+  //! true) attached events are released via ReleaseGlobalSignal in
+  //! ~AccumulateCommand after graph completion. If an external owner recycles
+  //! them (see setOwnsHwEvents(false), e.g. the graph signal pool), the
+  //! destructor leaves them untouched.
   void addHwEvent(void* hw_event, Device* device = nullptr) {
     if (hw_event != nullptr) {
       Device* dev = (device != nullptr) ? device : const_cast<Device*>(device_);
       if (dev != nullptr) {
-        dev->RetainGlobalSignal(hw_event);
         hw_events_[dev].push_back(hw_event);
       }
     }
   }
+
+  //! Get HW events map (for profiling pre-patched graph signals)
+  const std::unordered_map<Device*, std::vector<void*>>& getHwEvents() const { return hw_events_; }
+
+  //! Control whether the destructor destroys the attached HW event signals.
+  //! Set to false when an external owner (e.g. the graph signal pool) recycles
+  //! them across launches instead.
+  void setOwnsHwEvents(bool owns) { owns_hw_events_ = owns; }
 
   //! Add kernel name to the list if available
   void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }
@@ -1518,7 +1605,9 @@ class AccumulateCommand : public Command {
     kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
   }
 
-  //! Set kernel names by reference
+  //! Set kernel names by reference (cheap; borrows the caller's vector and
+  //! strings). Safe only while that storage outlives this command. Used on the
+  //! hot path when no profiler is active, where the names are never read.
   void setKernelNamesRef(const std::vector<const std::string*>* kernelNames) {
     kernelNamesRef_ = kernelNames;
   }
@@ -1553,6 +1642,7 @@ class ExtObjectsCommand : public Command {
   ExtObjectsCommand(HostQueue& queue, const EventWaitList& eventWaitList, uint32_t num_objects,
                     const std::vector<amd::Memory*>& memoryObjects, cl_command_type type)
       : Command(queue, type, eventWaitList) {
+    memObjects_.reserve(memoryObjects.size());
     for (const auto& it : memoryObjects) {
       if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
         it->retain();
@@ -1784,6 +1874,7 @@ class MakeBuffersResidentCommand : public Command {
                              const std::vector<amd::Memory*>& memObjects,
                              cl_bus_address_amd* busAddr)
       : Command(queue, type, eventWaitList), busAddresses_(busAddr) {
+    memObjects_.reserve(memObjects.size());
     for (const auto& it : memObjects) {
       if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
         it->retain();
@@ -2014,6 +2105,61 @@ class SvmPrefetchAsyncCommand : public Command {
   int numa_id() const { return numa_id_; }
 };
 
+/*! \brief      Batch prefetch command for SVM memory
+ *
+ *  \details    Prefetches multiple SVM memory ranges into their destination devices or CPU
+ */
+class SvmPrefetchBatchAsyncCommand : public Command {
+ public:
+  SvmPrefetchBatchAsyncCommand(HostQueue& queue, std::vector<void*>& dev_ptrs,
+                               std::vector<size_t>& sizes,
+                               std::vector<amd::Device*>& target_devices)
+      : Command(queue, 1),
+        dev_ptrs_(std::move(dev_ptrs)),
+        sizes_(std::move(sizes)),
+        target_devices_(std::move(target_devices)),
+        count_(dev_ptrs_.size()) {
+    assert(sizes_.size() == count_ && "sizes vector must match dev_ptrs size");
+    assert(target_devices_.size() == count_ && "target_devices vector must match dev_ptrs size");
+  }
+
+  virtual void submit(device::VirtualDevice& device) { device.SubmitSvmPrefetchBatchAsync(*this); }
+
+  void* const* DevicePointers() const { return dev_ptrs_.data(); }
+  const size_t* Sizes() const { return sizes_.data(); }
+  size_t Count() const { return count_; }
+  amd::Device* const* TargetDevices() const { return target_devices_.data(); }
+
+ private:
+  std::vector<void*> dev_ptrs_;               //!< Array of device pointers to memory for prefetch
+  std::vector<size_t> sizes_;                 //!< Array of sizes for prefetch
+  std::vector<amd::Device*> target_devices_;  //!< Array of device pointers (one per operation)
+  size_t count_;                              //!< Number of prefetch operations
+};
+
+class SvmDiscardBatchAsyncCommand : public Command {
+ public:
+  SvmDiscardBatchAsyncCommand(HostQueue& queue, std::vector<void*>& dev_ptrs,
+                              std::vector<size_t>& sizes)
+      : Command(queue, 1),
+        dev_ptrs_(std::move(dev_ptrs)),
+        sizes_(std::move(sizes)),
+        count_(dev_ptrs_.size()) {
+    assert(sizes_.size() == count_ && "sizes vector must match dev_ptrs size");
+  }
+
+  virtual void submit(device::VirtualDevice& device) { device.SubmitSvmDiscardBatchAsync(*this); }
+
+  void* const* DevicePointers() const { return dev_ptrs_.data(); }
+  const size_t* Sizes() const { return sizes_.data(); }
+  size_t Count() const { return count_; }
+
+ private:
+  std::vector<void*> dev_ptrs_;  //!< Array of device pointers to memory for discard
+  std::vector<size_t> sizes_;    //!< Array of sizes for discard
+  size_t count_;                 //!< Number of discard operations
+};
+
 /*! \brief  A virtual map memory command.
  *
  */
@@ -2085,6 +2231,8 @@ union ComputeCommand {
   SvmPrefetchAsyncCommand cmd26;
   VirtualMapCommand cmd27;
   BatchMemoryOperationCommand cmd28;
+  SvmPrefetchBatchAsyncCommand cmd29;
+  SvmDiscardBatchAsyncCommand cmd30;
   ComputeCommand() {}
   ~ComputeCommand() {}
 };

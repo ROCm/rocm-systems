@@ -56,8 +56,7 @@ global: amd_dbgapi_address_class_get_info;
 } @AMD_DBGAPI_NAME@_0.58;
 
 @AMD_DBGAPI_NAME@_0.64 {
-global: amd_dbgapi_address_dependency;
-        amd_dbgapi_process_workgroup_list;
+global: amd_dbgapi_process_workgroup_list;
         amd_dbgapi_wave_get_info;
         amd_dbgapi_workgroup_get_info;
 } @AMD_DBGAPI_NAME@_0.62;
@@ -91,11 +90,18 @@ global: amd_dbgapi_displaced_stepping_complete;
 } @AMD_DBGAPI_NAME@_0.70;
 
 @AMD_DBGAPI_NAME@_0.77 {
-global: amd_dbgapi_process_get_info;
-        amd_dbgapi_set_alu_exceptions_precision;
+global: amd_dbgapi_set_alu_exceptions_precision;
 } @AMD_DBGAPI_NAME@_0.76;
 
 @AMD_DBGAPI_NAME@_0.78 {
 global: amd_dbgapi_read_memory;
         amd_dbgapi_write_memory;
 } @AMD_DBGAPI_NAME@_0.77;
+
+@AMD_DBGAPI_NAME@_0.79 {
+global:	amd_dbgapi_address_dependency;
+} @AMD_DBGAPI_NAME@_0.78;
+
+@AMD_DBGAPI_NAME@_0.80 {
+global: amd_dbgapi_process_get_info;
+} @AMD_DBGAPI_NAME@_0.79;

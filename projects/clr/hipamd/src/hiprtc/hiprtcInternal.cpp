@@ -73,7 +73,7 @@ bool RTCCompileProgram::addSource(const std::string& source, const std::string& 
 // addSource_impl is a different function because we need to add source when we track mangled
 // objects
 bool RTCCompileProgram::addSource_impl() {
-  std::vector<char> vsource(source_code_.begin(), source_code_.end());
+  std::string_view vsource(source_code_.data(), source_code_.size());
   if (!hip::helpers::addCodeObjData(compile_input_, vsource, source_name_,
                                     AMD_COMGR_DATA_KIND_SOURCE)) {
     return false;
@@ -86,7 +86,7 @@ bool RTCCompileProgram::addHeader(const std::string& source, const std::string& 
     LogError("Error in hiprtc: source or name is of size 0 in addHeader");
     return false;
   }
-  std::vector<char> vsource(source.begin(), source.end());
+  std::string_view vsource(source.data(), source.size());
   if (!hip::helpers::addCodeObjData(compile_input_, vsource, name, AMD_COMGR_DATA_KIND_INCLUDE)) {
     return false;
   }
@@ -94,7 +94,7 @@ bool RTCCompileProgram::addHeader(const std::string& source, const std::string& 
 }
 
 bool RTCCompileProgram::addBuiltinHeader() {
-  std::vector<char> source(__hipRTC_header, __hipRTC_header + __hipRTC_header_size);
+  std::string_view source(__hipRTC_header, __hipRTC_header_size);
   std::string name{"hiprtc_runtime.h"};
   if (!hip::helpers::addCodeObjData(compile_input_, source, name, AMD_COMGR_DATA_KIND_INCLUDE)) {
     return false;

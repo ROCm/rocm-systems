@@ -1,0 +1,13 @@
+# codespell config file docs:
+#    https://github.com/codespell-project/codespell#using-a-config-file
+
+# NOTE: The GitHub action does NOT use this file, but instead uses the
+#       .codespellignore file in projects/hipfile. Keep this updated
+#       for running codespell locally, though.
+
+[codespell]
+check-hidden = true
+skip = ./.git
+
+# HSA gets flagged as a typo for 'has'
+ignore-words-list = hsa,

@@ -50,7 +50,7 @@ constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_INVALID = 0;
 #if defined(__linux__)
 constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MIN = 8;
 #elif defined(_WIN32)
-constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MIN = 11;
+constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MIN = 10;
 #endif
 constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MAX = 11;
 

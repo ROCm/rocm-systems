@@ -297,7 +297,7 @@ class Options {
             (f & DUMP_ENCRYPT));
   }
 
-  std::string getStringFromStringVec(std::vector<std::string>& stringVec);
+  std::string getStringFromStringVec(const std::vector<std::string>& stringVec);
   void setDumpFileName(const char* val);
 
  public:

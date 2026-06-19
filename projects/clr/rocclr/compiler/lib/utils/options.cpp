@@ -1531,7 +1531,7 @@ bool Options::setOptionVariablesAs(const Options& other) {
   return true;
 }
 
-std::string Options::getStringFromStringVec(std::vector<std::string>& stringVec) {
+std::string Options::getStringFromStringVec(const std::vector<std::string>& stringVec) {
   const char* const delim = " ";
   std::ostringstream strstr;
   std::copy(stringVec.begin(), stringVec.end(), std::ostream_iterator<std::string>(strstr, delim));

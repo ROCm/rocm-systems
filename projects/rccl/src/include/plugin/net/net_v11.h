@@ -1,13 +1,18 @@
-/*
- * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
- */
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NET_V11_H_
 #define NET_V11_H_
 
+#define NCCL_NET_MAX_DEVS_PER_NIC_V11 4
+
 typedef struct {
   int ndevs;
-  int devs[NCCL_NET_MAX_DEVS_PER_NIC];
+  int devs[NCCL_NET_MAX_DEVS_PER_NIC_V11];
 } ncclNetVDeviceProps_v11_t;
 
 #define NCCL_NET_TRAFFIC_CLASS_UNDEF -1
@@ -16,7 +21,6 @@ typedef struct {
   // Plugin-specific TC value
   int trafficClass;
 } ncclNetCommConfig_v11_t;
-
 
 typedef struct {
   char* name;                      // Used mostly for logging.
@@ -184,5 +188,4 @@ typedef struct {
   // Finalize the collective network.
   ncclResult_t (*finalize)(void* ctx);
 } ncclCollNet_v11_t;
-
 #endif // end include guard

@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -248,6 +248,9 @@ hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
       assert(regions_.size() != 0 && "No device local memory found!");
       *static_cast<bool*>(value) = true;
       break;
+    case HSA_AMD_AGENT_INFO_NEAREST_CPU:
+      *static_cast<hsa_agent_t*>(value) = GetNearestCpuAgent()->public_handle();
+      break;
     case HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES:
       std::memset(value, 0, sizeof(uint8_t) * 8);
       break;
@@ -262,10 +265,16 @@ hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
   return HSA_STATUS_SUCCESS;
 }
 
+core::Agent* AieAgent::GetNearestCpuAgent() const {
+  // AIE agents are currently associated with the first CPU agent.
+  assert(!core::Runtime::runtime_singleton_->cpu_agents().empty());
+  return core::Runtime::runtime_singleton_->cpu_agents()[0];
+}
+
 hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                                    core::HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
-                                   core::Queue** queue) {
+                                   bool metadata_queue, core::Queue** queue) {
   if ((flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0 ||
       (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0) {
     // AIE agents do not currently support queue creation in device memory.
@@ -298,28 +307,31 @@ hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 }
 
 void AieAgent::InitRegionList() {
-  /// AIE itself currently has no memory regions of its own, all memory is just the system DRAM.
+  // AIE itself currently has no memory regions of its own, all memory is just the system DRAM.
   const uint64_t total_system_memory = os::HostTotalPhysicalMemory();
 
-  /// For allocating kernel arguments or other objects that only need
-  /// system memory.
+  // For allocating kernel arguments or other objects that only need system memory.
   HsaMemoryProperties sys_mem_props = {};
   sys_mem_props.HeapType = HSA_HEAPTYPE_SYSTEM;
   sys_mem_props.SizeInBytes = total_system_memory;
 
-  /// For any other allocation, e.g., buffers.
+  // For any other allocation, e.g., buffers.
   HsaMemoryProperties other_mem_props = {};
   other_mem_props.HeapType = HSA_HEAPTYPE_SYSTEM;
   other_mem_props.SizeInBytes = total_system_memory;
 
-  /// For allocating memory for programmable device image (PDI) files. These
-  /// need to be mapped to the device so the hardware can access the PDIs.
+  // For allocating memory for device instructions. These need to be mapped to the device so the
+  // hardware can access them.
+  // We use HSA_HEAPTYPE_DEVICE_SVM so that the recommended
+  // HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE is 0. We can use that to determine if a pool
+  // is regular pool or dev heap.
+  // The system will report the max allocatable size as MemoryRegion::max_sysmem_alloc_size_, but
+  // this is incorrect. The pool is exactly XdnaDriver::GetDevHeapByteSize() bytes.
   HsaMemoryProperties dev_mem_props = {};
   dev_mem_props.HeapType = HSA_HEAPTYPE_DEVICE_SVM;
   dev_mem_props.SizeInBytes = XdnaDriver::GetDevHeapByteSize();
 
-  /// As of now the AIE devices support coarse-grain memory regions that require
-  /// explicit sync operations.
+  // AIE devices support only coarse-grain memory regions that require explicit sync operations.
   regions_.reserve(3);
   regions_.push_back(
     std::make_shared<MemoryRegion>(false, true, false, false, true, this, sys_mem_props));

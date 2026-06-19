@@ -30,7 +30,7 @@ Use the following instructions to install AMDGPU using ROCm:
 Building ROCm SMI
 ******************
 
-Addtional required software
+Additional required software
 ============================
 
 To build the ROCm SMI library, the following components are required.

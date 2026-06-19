@@ -30,8 +30,8 @@
 
 namespace rocshmem {
 
-IPCTeam::IPCTeam(Backend *backend, TeamInfo *team_info_parent,
-                 TeamInfo *team_info_world, int num_pes, int my_pe,
+IPCTeam::IPCTeam(Backend *backend, const TeamInfo& team_info_parent,
+                 const TeamInfo& team_info_world, int num_pes, int my_pe,
                  MPI_Comm mpi_comm, int pool_index)
     : Team(backend, team_info_parent, team_info_world, num_pes, my_pe,
            mpi_comm) {

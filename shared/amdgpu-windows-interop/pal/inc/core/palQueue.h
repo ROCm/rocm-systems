@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -196,19 +196,15 @@ struct QueueCreateInfo
     };
 
     uint32 numReservedCu;           ///< The number of reserved compute units for RT CU queue
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 914
-    uint32 persistentCeRamOffset;   ///< Byte offset to the beginning of the region of CE RAM which this Queue should
-                                    ///  preserve across consecutive submissions.  Must be a multiple of 32.  It is an
-                                    ///  error to specify a nonzero value here if the the Device does not support
-                                    ///  @ref supportPersistentCeRam for the Engine this Queue will attach to.
-    uint32 persistentCeRamSize;     ///< Amount of CE RAM space which this Queue should preserve across consecutive
-                                    ///  submissions.  Units are in DWORDs, and this must be a multiple of 8.  It is an
-                                    ///  error to specify a nonzero value here if the the Device does not support
-                                    ///  @ref supportPersistentCeRam for the Engine this Queue will attach to.
-#endif
-
     uintptr_t aqlPacketList;        ///< Location of the HIP runtime's info about this queue
+};
+
+/// Contains general information about a living IQueue which the client might want to query.
+///
+/// @note Anything added here must be constant for the life of the queue.
+struct QueueProperties
+{
+    uint32 deviceIndex; ///< This queue is owned by the device at this position in the platform's IDevice array.
 };
 
 /// Specifies the portion of @ref SubmitInfo that is specific to each sub-queue in a multi-queue object (@see
@@ -355,7 +351,7 @@ struct PresentSwapChainInfo
     PresentMode presentMode;    ///< Chooses between windowed and fullscreen present.
     IImage*     pSrcImage;      ///< The image to be presented.
     ISwapChain* pSwapChain;     ///< The swap chain associated with the source image.
-    uint32      imageIndex;     ///< The index of the source image within the swap chain. Owership of this image
+    uint32      imageIndex;     ///< The index of the source image within the swap chain. Ownership of this image
                                 ///  index will be released back to the swap chain if this call succeeds.
     uint32      rectangleCount; ///< Number of valid rectangles in the pRectangles array.
     uint32      syncInterval;   ///< Applicable only when syncIntervalOverride is set
@@ -464,6 +460,13 @@ struct KernelContextInfo
 class IQueue : public IDestroyable
 {
 public:
+    /// Gets this queue's QueueProperties constants. The returned reference is guaranteed to:
+    ///   1. Be valid until this queue is destroyed.
+    ///   2. Refer to the same address on every call to this queue.
+    ///
+    /// @returns A reference to this queue's QueueProperties.
+    virtual const QueueProperties& Properties() const = 0;
+
     /// Submits a group of root command buffers for execution on this queue.
     ///
     /// @param [in] submitInfo Specifies all command buffers to execute along with other residency and synchronization
@@ -571,7 +574,7 @@ public:
     /// the presentable image index, eventually deadlocking the swap chain.
     ///
     /// Overall support for direct presents can be queried at platform creation time via supportNonSwapChainPresents
-    /// in @ref PlatformProperties.  Support for particular present modes is specifed via supportedDirectPresentModes
+    /// in @ref PlatformProperties.  Support for particular present modes is specified via supportedDirectPresentModes
     /// in @ref DeviceProperties.
     ///
     /// @note  Any images specified in presentInfo must be made resident before calling this function.

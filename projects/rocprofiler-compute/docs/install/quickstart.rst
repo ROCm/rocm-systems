@@ -61,13 +61,13 @@ Ensure ROCm is installed and follow the steps:
 
 2. Check the Python environment.
 
-.. code-block:: shell-session
+   .. code-block:: shell-session
 
-   python3 --version   # Requires Python 3.8+
+      python3 --version   # Requires Python 3.8+
 
 3. Check the installation dependencies.
 
-.. code-block:: shell-session
+   .. code-block:: shell-session
 
       pip install -r <ROCM_PATH>/libexec/rocprofiler-compute/requirements.txt
 
@@ -160,7 +160,7 @@ Collect the counters to compute the metric for compute throughput utilization, s
 
     $ rocprof-compute profile --name vcopy --set compute_thruput_util --no-roof -- ./vcopy -n 1048576 -b 256
 
-List the available blocks/metrics for profiling 
+List the available blocks/metrics for profiling
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 The blocks/metrics are listed by page, because the list is long. Note the index for each section.

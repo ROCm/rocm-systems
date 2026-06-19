@@ -5,7 +5,7 @@
 # this is normally done in a docker container with a controlled clang and python-clang versions
 set(clang_ver 16.0)
 set(clang_ver_py 16.0.1)
-set(ctypeslib_ver_py 2.3.4)
+set(ctypeslib_ver_py 2.4.0)
 
 set(PY_BUILD_DIR "python_package")
 # amdsmi part of this string is the directory containing all python files
@@ -83,12 +83,15 @@ add_custom_command(
         ${PY_PACKAGE_DIR}/__init__.py
         ${PY_PACKAGE_DIR}/amdsmi_exception.py
         ${PY_PACKAGE_DIR}/amdsmi_interface.py
+        ${PY_PACKAGE_DIR}/amdsmi_interface_utils.py
         ${PY_PACKAGE_DIR}/README.md
         ${PY_PACKAGE_DIR}/LICENSE
     DEPENDS python_wrapper
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_exception.py ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_interface.py ${PY_PACKAGE_DIR}/
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_interface_utils.py ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${PY_PACKAGE_DIR}/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/LICENSE ${PY_PACKAGE_DIR}/
 )
@@ -110,6 +113,7 @@ add_custom_target(
         ${PY_PACKAGE_DIR}/__init__.py
         ${PY_PACKAGE_DIR}/amdsmi_exception.py
         ${PY_PACKAGE_DIR}/amdsmi_interface.py
+        ${PY_PACKAGE_DIR}/amdsmi_interface_utils.py
         ${PY_PACKAGE_DIR}/README.md
         ${PY_PACKAGE_DIR}/LICENSE
         ${PY_PACKAGE_DIR}/libamd_smi.so

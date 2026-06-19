@@ -133,7 +133,7 @@ namespace RcclUnitTesting
                                        this->expected,
                                        true,
                                        isMatch));
-    if (!isMatch) TEST_ERROR("Mismatch for %s\n", this->GetDescription().c_str());
+    if (!isMatch) TEST_ERROR("Mismatch for %s", this->GetDescription().c_str());
     return isMatch ? TEST_SUCCESS : TEST_FAIL;
   }
 

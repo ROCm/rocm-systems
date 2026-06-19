@@ -101,7 +101,7 @@ static const struct option long_options[] = {
 static const char* short_options = "i:v:m:s:p:d:bfur";
 
 static void PrintHelp(void) {
-  std::cout << "Optional rdctst Arguments:\n"
+  std::cout << "Optional rdcd Arguments:\n"
                "--batch_mode, -b run in embedded mode with no interactive prompts\n"
                "--dont_fail, -f if set, don't fail test when individual test fails; "
                "default is to fail when an individual test fails\n"

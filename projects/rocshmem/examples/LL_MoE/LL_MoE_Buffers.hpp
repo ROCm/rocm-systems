@@ -99,9 +99,7 @@ struct LLMoEBufferLayout {
   }
 
   LLMoEBufferLayout(void* rdma_buffer, const int num_tokens, const int hidden,
-      const int num_ranks, const int num_experts) {
-    
-    const int num_local_experts = num_experts / num_ranks;
+      [[maybe_unused]] const int num_ranks, const int num_experts) {
 
     // Message sizes
     size_t num_bytes_per_dispatch_msg = sizeof(int) + hidden * sizeof(T);

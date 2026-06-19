@@ -40,11 +40,12 @@ struct correlation_tracing_service;
 namespace tracing
 {
 template <typename Tp, size_t N>
-using small_vector_t                = common::container::small_vector<Tp, N>;
-using correlation_service           = context::correlation_tracing_service;
-using context_t                     = context::context;
-using context_array_t               = common::container::small_vector<const context_t*>;
-using external_correlation_id_map_t = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+using small_vector_t      = common::container::small_vector<Tp, N>;
+using correlation_service = context::correlation_tracing_service;
+using context_t           = context::context;
+using context_array_t     = common::container::small_vector<const context_t*>;
+using external_correlation_id_map_t =
+    common::container::small_vector<std::pair<const context_t*, rocprofiler_user_data_t>, 8>;
 
 constexpr auto context_data_vec_size = 2;
 constexpr auto empty_user_data       = rocprofiler_user_data_t{.value = 0};

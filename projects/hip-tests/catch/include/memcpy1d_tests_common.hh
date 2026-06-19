@@ -119,19 +119,17 @@ void MemcpyDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = 
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
   HIP_CHECK(hipSetDevice(src_device));
-  if constexpr (enable_peer_access) {
-    if (src_device == dst_device) {
-      return;
-    }
+  if (src_device != dst_device) {
     int can_access_peer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
     if (!can_access_peer) {
-      std::string msg = "Skipped as peer access cannot be enabled between devices " +
-          std::to_string(src_device) + " " + std::to_string(dst_device);
-      HipTest::HIP_SKIP_TEST(msg.c_str());
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
-    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
+    if constexpr (enable_peer_access) {
+      HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
+    }
+  } else if constexpr (enable_peer_access) {
+    return;
   }
 
   LinearAllocGuard<int> src_allocation(LinearAllocs::hipMalloc, allocation_size);
@@ -172,9 +170,11 @@ void MemcpyWithDirectionCommonTests(F memcpy_func, const hipStream_t kernel_stre
         std::bind(memcpy_func, _1, _2, _3, hipMemcpyDeviceToHost), kernel_stream);
   }
 
-  SECTION("Device to host with default kind") {
-    MemcpyDeviceToHostShell<should_synchronize>(
-        std::bind(memcpy_func, _1, _2, _3, hipMemcpyDefault), kernel_stream);
+  if (!isQuickLevel()) {
+    SECTION("Device to host with default kind") {
+      MemcpyDeviceToHostShell<should_synchronize>(
+          std::bind(memcpy_func, _1, _2, _3, hipMemcpyDefault), kernel_stream);
+    }
   }
 
   SECTION("Host to device") {
@@ -182,9 +182,11 @@ void MemcpyWithDirectionCommonTests(F memcpy_func, const hipStream_t kernel_stre
         std::bind(memcpy_func, _1, _2, _3, hipMemcpyHostToDevice), kernel_stream);
   }
 
-  SECTION("Host to device with default kind") {
-    MemcpyHostToDeviceShell<should_synchronize>(
-        std::bind(memcpy_func, _1, _2, _3, hipMemcpyDefault), kernel_stream);
+  if (!isQuickLevel()) {
+    SECTION("Host to device with default kind") {
+      MemcpyHostToDeviceShell<should_synchronize>(
+          std::bind(memcpy_func, _1, _2, _3, hipMemcpyDefault), kernel_stream);
+    }
   }
 
   SECTION("Host to host") {
@@ -192,9 +194,11 @@ void MemcpyWithDirectionCommonTests(F memcpy_func, const hipStream_t kernel_stre
         std::bind(memcpy_func, _1, _2, _3, hipMemcpyHostToHost), kernel_stream);
   }
 
-  SECTION("Host to host with default kind") {
-    MemcpyHostToHostShell<should_synchronize>(std::bind(memcpy_func, _1, _2, _3,
-                                              hipMemcpyDefault), kernel_stream);
+  if (!isQuickLevel()) {
+    SECTION("Host to host with default kind") {
+      MemcpyHostToHostShell<should_synchronize>(std::bind(memcpy_func, _1, _2, _3,
+                                                hipMemcpyDefault), kernel_stream);
+    }
   }
 
   SECTION("Device to device") {
@@ -208,14 +212,16 @@ void MemcpyWithDirectionCommonTests(F memcpy_func, const hipStream_t kernel_stre
     }
   }
 
-  SECTION("Device to device with default kind") {
-    SECTION("Peer access enabled") {
-      MemcpyDeviceToDeviceShell<should_synchronize, true>(
-          std::bind(memcpy_func, _1, _2, _3, hipMemcpyDefault), kernel_stream);
-    }
-    SECTION("Peer access disabled") {
-      MemcpyDeviceToDeviceShell<should_synchronize, false>(
-          std::bind(memcpy_func, _1, _2, _3, hipMemcpyDefault), kernel_stream);
+  if (!isQuickLevel()) {
+    SECTION("Device to device with default kind") {
+      SECTION("Peer access enabled") {
+        MemcpyDeviceToDeviceShell<should_synchronize, true>(
+            std::bind(memcpy_func, _1, _2, _3, hipMemcpyDefault), kernel_stream);
+      }
+      SECTION("Peer access disabled") {
+        MemcpyDeviceToDeviceShell<should_synchronize, false>(
+            std::bind(memcpy_func, _1, _2, _3, hipMemcpyDefault), kernel_stream);
+      }
     }
   }
 }

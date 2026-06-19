@@ -1,29 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "dynamic_library.hpp"
 #include "common.hpp"
 
-#include <timemory/environment.hpp>
+#include "common/environment.hpp"
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/procfs/maps.hpp>
@@ -54,7 +35,7 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
     auto _paths = std::vector<std::string>{};
     for(const std::string& itr : _env_vars)
     {
-        auto _env_val = get_env(itr, std::string{});
+        auto _env_val = get_env(itr.c_str(), std::string{});
         for(auto vitr : tim::delimit(_env_val, ":"))
             if(!vitr.empty()) _paths.emplace_back(vitr);
     }
@@ -79,7 +60,7 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
 }
 
 dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flags,
-                                 bool _open, bool _query_env, bool _store)
+                                 bool _open, bool _query_env)
 : envname{ std::move(_env) }
 , filename{ std::move(_fname) }
 , flags{ _flags }
@@ -89,7 +70,7 @@ dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flag
 
     if(_query_env)
     {
-        auto _env_val = get_env(envname, std::string{}, _store);
+        auto _env_val = common::get_env(envname.c_str(), std::string{});
         // if the environment variable is set to an absolute path that exists,
         // override with value
         if(!_env_val.empty())

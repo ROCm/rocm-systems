@@ -1,0 +1,48 @@
+diff --git a/packages/opencode/src/cli/cmd/mcp.ts b/packages/opencode/src/cli/cmd/mcp.ts
+index a5751ce83..3c0ff39c5 100644
+--- a/packages/opencode/src/cli/cmd/mcp.ts
++++ b/packages/opencode/src/cli/cmd/mcp.ts
+@@ -118,14 +118,14 @@ export const McpListCommand = cmd({
+       directory: process.cwd(),
+       async fn() {
+         UI.empty()
+-        prompts.intro("MCP Servers")
++        prompts.intro("AMD ROCm PerfXpert — MCP Servers")
+ 
+         const { config, statuses, stored } = await listState()
+         const servers = configuredServers(config)
+ 
+         if (servers.length === 0) {
+           prompts.log.warn("No MCP servers configured")
+-          prompts.outro("Add servers with: opencode mcp add")
++          prompts.outro("Add servers with: perfxpert-code mcp add")
+           return
+         }
+ 
+@@ -190,7 +190,7 @@ export const McpAuthCommand = cmd({
+       directory: process.cwd(),
+       async fn() {
+         UI.empty()
+-        prompts.intro("MCP OAuth Authentication")
++        prompts.intro("PerfXpert — MCP OAuth Authentication")
+ 
+         const { config, auth } = await authState()
+         const mcpServers = config.mcp ?? {}
+@@ -322,7 +322,7 @@ export const McpAuthListCommand = cmd({
+       directory: process.cwd(),
+       async fn() {
+         UI.empty()
+-        prompts.intro("MCP OAuth Status")
++        prompts.intro("PerfXpert — MCP OAuth Status")
+ 
+         const { config, auth } = await authState()
+         const servers = oauthServers(config)
+@@ -361,7 +361,7 @@ export const McpLogoutCommand = cmd({
+       directory: process.cwd(),
+       async fn() {
+         UI.empty()
+-        prompts.intro("MCP OAuth Logout")
++        prompts.intro("PerfXpert — MCP OAuth Logout")
+ 
+         const credentials = await AppRuntime.runPromise(McpAuth.Service.use((auth) => auth.all()))
+         const serverNames = Object.keys(credentials)

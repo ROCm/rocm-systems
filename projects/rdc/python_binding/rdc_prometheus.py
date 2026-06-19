@@ -71,7 +71,7 @@ class PrometheusReader(RdcReader):
                 gpu_group_name=group_name,
             )
 
-        # Supress internal metrics from prometheus_client
+        # Suppress internal metrics from prometheus_client
         if enable_plugin_monitoring == False:
             REGISTRY.unregister(PROCESS_COLLECTOR)
             REGISTRY.unregister(PLATFORM_COLLECTOR)

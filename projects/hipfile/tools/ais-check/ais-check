@@ -1,0 +1,167 @@
+#! /usr/bin/env python3
+# pylint: disable=invalid-name
+"""
+Check if the necessary AMD Infinity Storage (AIS) components are installed
+
+If all necessary components are installed the program exits with exit code 0.
+If components are missing the program exits with a non-zero exit code.
+"""
+
+# pylint: enable=invalid-name
+
+import argparse
+import ctypes
+import ctypes.util
+import gzip
+import os
+import sys
+
+
+def kernel_supports_p2pdma():
+    """
+    Check for P2P DMA support in the kernel
+    """
+
+    kr = os.uname().release
+    configs_found = False
+
+    for path, opener in [
+        (f"/boot/config-{kr}", open),
+        (f"/lib/modules/{kr}/build/.config", open),
+        ("/proc/config.gz", gzip.open),
+    ]:
+        try:
+            with opener(path, "rt") as f:
+                configs_found = True
+                for line in f:
+                    if line.startswith("CONFIG_PCI_P2PDMA=y") or line.startswith(
+                        "CONFIG_PCI_P2PDMA=m"
+                    ):
+                        return True
+        except OSError:
+            continue
+
+    if not configs_found:
+        print("No kernel config files found!", file=sys.stderr)
+    return False
+
+
+def hip_runtime_supports_ais():
+    """
+    Check if hipAmdFileRead and hipAmdFileWrite are available in HIP
+    """
+    hip_path = ctypes.util.find_library("amdhip64")
+    if hip_path is None:
+        return False
+
+    hip = ctypes.CDLL(hip_path)
+
+    hipError_t = ctypes.c_int
+    hipDriverProcAddressQueryResult = ctypes.c_int
+
+    hip.hipRuntimeGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    hip.hipRuntimeGetVersion.restype = hipError_t
+
+    hip.hipGetProcAddress.argtypes = [
+        ctypes.c_char_p,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_int,
+        ctypes.c_uint64,
+        ctypes.POINTER(hipDriverProcAddressQueryResult),
+    ]
+    hip.hipGetProcAddress.restype = hipError_t
+
+    hip.hipGetErrorString.argtypes = [hipError_t]
+    hip.hipGetErrorString.restype = ctypes.c_char_p
+
+    version = ctypes.c_int()
+    err = hip.hipRuntimeGetVersion(ctypes.byref(version))
+    if err != 0:
+        err_str = hip.hipGetErrorString(err).decode("utf-8")
+        print(
+            f"hipRuntimeGetVersion failed with err code {err} ({err_str})",
+            file=sys.stderr,
+        )
+        return False
+
+    for symbol in [b"hipAmdFileWrite", b"hipAmdFileRead"]:
+        func_ptr = ctypes.c_void_p()
+        symbol_status = hipDriverProcAddressQueryResult()
+        err = hip.hipGetProcAddress(
+            symbol,
+            ctypes.byref(func_ptr),
+            version.value,
+            0,
+            ctypes.byref(symbol_status),
+        )
+        if err != 0:
+            if symbol_status.value != 1:
+                symbol = symbol.decode("utf-8")
+                err_str = hip.hipGetErrorString(err).decode("utf-8")
+                print(
+                    f"hipGetProcAddress({symbol}) failed with err code"
+                    f" {err} ({err_str}) and symbolStatus"
+                    f" {symbol_status.value}",
+                    file=sys.stderr,
+                )
+            return False
+
+    return True
+
+
+def amdgpu_supports_ais():
+    """
+    Check if kfd_ais_rw_file is in the kernel's symbol table
+    """
+    try:
+        with open("/proc/kallsyms", "r", encoding="utf-8") as kallsyms:
+            for line in kallsyms:
+                if "kfd_ais_rw_file" in line:
+                    return True
+    except FileNotFoundError:
+        print(
+            "Unable to open /proc/kallsyms: file not found",
+            file=sys.stderr,
+        )
+    except PermissionError:
+        print(
+            "Unable to open /proc/kallsyms: permission denied",
+            file=sys.stderr,
+        )
+    return False
+
+
+def main():
+    """
+    Parse command-line arguments, check AIS support in kernel/libraries,
+    optionally print the results, and return an exit code indicating
+    whether all required components support AIS.
+    """
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-q", "--quiet", action="store_true", help="Silence regular output"
+    )
+    args = parser.parse_args()
+
+    component_support = [
+        ("Kernel P2PDMA support", kernel_supports_p2pdma()),
+        ("HIP runtime", hip_runtime_supports_ais()),
+        ("amdgpu", amdgpu_supports_ais()),
+    ]
+
+    if not args.quiet:
+        u = os.uname()
+        print()
+        print(u.sysname, u.nodename, u.release, u.version, u.machine)
+        print()
+
+        print("AIS support in:")
+        for name, supported in component_support:
+            print(f"\t{name:<24}: {supported}")
+
+    return int(not all(supported for (_, supported) in component_support))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

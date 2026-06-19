@@ -135,6 +135,7 @@ void TestIdInfoRead::Run(void) {
       ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) { std::cout << "\t**Device Vram Vendor name: " << buffer << std::endl; }
     }
 
     amdsmi_vram_info_t vram_info;

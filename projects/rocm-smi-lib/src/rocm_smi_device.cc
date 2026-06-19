@@ -777,11 +777,7 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string* retStr) {
   return 0;
 }
 
-int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr, bool returnWriteErr) {
-  // returnWriteErr = false, backwards compatability (old calls)
-  // returnWriteErr = true, improvement - allows us to detect errors
-  // when writing to file
-  // (such as EBUSY)
+int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
   auto sysfs_path = path_;
   sysfs_path += "/device/";
   sysfs_path += kDevAttribNameMap.at(type);
@@ -808,18 +804,18 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr, bool returnWr
     ss << "Successfully wrote device info string (" << valStr << ") for DevInfoType ("
        << get_type_string(type) << "), returning RSMI_STATUS_SUCCESS";
     LOG_INFO(ss);
-    ret = RSMI_STATUS_SUCCESS;
+    ret = 0;
   } else {
-    if (returnWriteErr) {
-      ret = errno;
-    } else {
-      ret = RSMI_STATUS_NOT_SUPPORTED;
+    ret = errno;
+    if (ret == 0) {
+      ret = ENOTSUP;  // Fallback if errno was not set by the driver
     }
     fs.flush();
     fs.close();
     ss << __PRETTY_FUNCTION__ << " | Issue: Could not write to file; "
        << "Could not write device info string (" << valStr << ") for DevInfoType ("
-       << get_type_string(type) << "), returning " << getRSMIStatusString(ErrnoToRsmiStatus(ret));
+       << get_type_string(type) << "), errno=" << ret << " (" << std::strerror(ret)
+       << "), returning " << getRSMIStatusString(ErrnoToRsmiStatus(ret));
     ss << " | " << (fs.is_open() ? "[ERROR] File stream open" : "[GOOD] File stream closed")
        << " | "
        << (fs.bad() ? "[ERROR] Bad write operation"
@@ -886,7 +882,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
       return writeDevInfoStr(type, val);
     case kDevComputePartition:
     case kDevMemoryPartition:
-      return writeDevInfoStr(type, val, true);
+      return writeDevInfoStr(type, val);
 
     default:
       return EINVAL;

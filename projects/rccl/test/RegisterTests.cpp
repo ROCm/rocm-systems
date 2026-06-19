@@ -193,11 +193,11 @@ static void testDeregisterNullHandle() {
 // Test configuration helpers
 //==============================================================================
 
-// Environment configuration for disabled registration (default)
+// Environment configuration for explicitly disabled local registration
 static ProcessIsolatedTestRunner::TestConfig
 makeDisabledConfig(const std::string& name, std::function<void()> testFn) {
     return ProcessIsolatedTestRunner::TestConfig(name, testFn)
-        .clearVariable("NCCL_LOCAL_REGISTER");
+        .withEnvironment({{"NCCL_LOCAL_REGISTER", "0"}});
 }
 
 // Environment configuration for enabled registration
@@ -213,10 +213,11 @@ makeEnabledConfig(const std::string& name, std::function<void()> testFn) {
  * This test suite verifies that:
  * 1. A device buffer can be registered with ncclCommRegister (API returns success)
  * 2. When NCCL_LOCAL_REGISTER=1, the registration returns a valid (non-NULL) handle
- * 3. When NCCL_LOCAL_REGISTER is not set, NULL handle is expected (default behavior)
+ * 3. When NCCL_LOCAL_REGISTER=0, NULL handle is expected (local registration off)
  * 4. The buffer can be deregistered with ncclCommDeregister
  *
- * Note: NCCL_LOCAL_REGISTER defaults to 0 (disabled) in RCCL.
+ * Note: On newer HIP, NCCL_LOCAL_REGISTER defaults to 1 when unset; the "disabled"
+ * cases therefore set NCCL_LOCAL_REGISTER=0 explicitly rather than clearing the var.
  */
 TEST(Register, ProcessIsolatedRegisterTests)
 {

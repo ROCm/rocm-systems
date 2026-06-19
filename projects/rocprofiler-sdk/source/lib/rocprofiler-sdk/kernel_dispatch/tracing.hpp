@@ -42,15 +42,16 @@ struct context;
 namespace kernel_dispatch
 {
 using context_t              = context::context;
-using user_data_map_t        = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+using user_data_map_t        = tracing::external_correlation_id_map_t;
 using external_corr_id_map_t = user_data_map_t;
-
-using profiling_time = tracing::profiling_time;
+using queue_info_session_t   = hsa::queue_info_session_t;
+using packet_data_t          = hsa::packet_data_t;
+using profiling_time         = tracing::profiling_time;
 
 profiling_time
-get_dispatch_time(const hsa::queue_info_session& session);
+get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data);
 
 void
-dispatch_complete(hsa::queue_info_session&, profiling_time);
+dispatch_complete(queue_info_session_t& session, packet_data_t& packet_data, profiling_time);
 }  // namespace kernel_dispatch
 }  // namespace rocprofiler

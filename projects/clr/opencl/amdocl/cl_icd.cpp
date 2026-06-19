@@ -118,6 +118,8 @@ CL_API_ENTRY cl_int CL_API_CALL clIcdGetPlatformIDsKHR(cl_uint num_entries,
 
   if (!amd::Runtime::initialized()) {
     amd::Runtime::init();
+    // Print the current path of the library
+    amd::Os::PrintLibraryLocation();
   }
 
   if (num_platforms != NULL && platforms == NULL) {

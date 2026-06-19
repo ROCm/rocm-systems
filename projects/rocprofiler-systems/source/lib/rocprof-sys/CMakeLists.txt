@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ------------------------------------------------------------------------------#
 #
 # rocprofiler-systems object library
@@ -28,6 +31,13 @@ target_link_libraries(
     PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library
 )
 
+# Preserve frame pointers so that libunwind can reliably unwind through
+# this code when the causal profiling sampling signal fires.
+target_compile_options(
+    rocprofiler-systems-object-library
+    PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fno-omit-frame-pointer>
+)
+
 # ------------------------------------------------------------------------------#
 #
 # rocprofiler-systems static library
@@ -39,6 +49,12 @@ add_library(
     STATIC
     $<TARGET_OBJECTS:rocprofiler-systems-object-library>
 )
+
+target_sources(
+    rocprofiler-systems-static-library
+    PRIVATE $<TARGET_OBJECTS:rocprofiler-systems-pmc-library>
+)
+
 add_library(
     rocprofiler-systems::librocprofiler-systems-static
     ALIAS rocprofiler-systems-static-library
@@ -68,6 +84,12 @@ add_library(
     SHARED
     $<TARGET_OBJECTS:rocprofiler-systems-object-library>
 )
+
+target_sources(
+    rocprofiler-systems-shared-library
+    PRIVATE $<TARGET_OBJECTS:rocprofiler-systems-pmc-library>
+)
+
 add_library(
     rocprofiler-systems::librocprofiler-systems-shared
     ALIAS rocprofiler-systems-shared-library
@@ -83,6 +105,11 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-interface-library
         rocprofiler-systems::rocprofiler-systems-core
         rocprofiler-systems::rocprofiler-systems-binary
+)
+
+target_link_options(
+    rocprofiler-systems-shared-library
+    PRIVATE "LINKER:--exclude-libs=ALL"
 )
 
 set_target_properties(

@@ -14,6 +14,12 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hip/**/*'
 
+"project: hipfile":
+- changed-files:
+  - any-glob-to-any-file:
+    - 'projects/hipfile/**/*'
+    - '.github/workflows/hipfile-*'
+
 "project: hipother":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipother/**/*'
@@ -37,6 +43,10 @@
 "project: rocm-core":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocm-core/**/*'
+
+"project: rocjitsu":
+- changed-files:
+  - any-glob-to-any-file: 'emulation/rocjitsu/**/*'
 
 "project: rocminfo":
 - changed-files:

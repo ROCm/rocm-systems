@@ -30,7 +30,7 @@ using namespace oclelfutils;
 #endif
 
 /*
-   Opague data type definition.
+   Opaque data type definition.
 */
 struct symbol_handle {
   union {
@@ -1076,7 +1076,7 @@ OclElf::addSectionData (
 /*
    getShdrNdx() returns an index to the .shstrtab in 'outNdx' for "name" if it
    is in .shstrtab (outNdx == 0 means it is not in .shstrtab). It return true if
-   it is successful; return false if en error occured.
+   it is successful; return false if en error occurred.
    */
   bool
 OclElf::getShstrtabNdx(Elf64_Word& outNdx, const char* name)

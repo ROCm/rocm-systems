@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "common/environment.hpp"
 #include "filesystem.hpp"
@@ -269,7 +250,7 @@ TEST_F(DiscoverLlvmLibdirTest, EmptyRocmVersionDir)
     EXPECT_EQ(result, llvm_lib);
 }
 
-TEST_F(DiscoverLlvmLibdirTest, VerboseModeDoesNotCrash)
+TEST_F(DiscoverLlvmLibdirTest, FoundLibDoesNotThrow)
 {
     std::string rocm_path = m_test_dir + "/rocm";
     std::string llvm_lib  = rocm_path + "/llvm/lib";
@@ -278,10 +259,10 @@ TEST_F(DiscoverLlvmLibdirTest, VerboseModeDoesNotCrash)
     set_rocm_path(rocm_path);
     clear_rocmv_dir();
 
-    EXPECT_NO_THROW({ discover_llvm_libdir_for_ompt(true); });
+    EXPECT_NO_THROW({ discover_llvm_libdir_for_ompt(); });
 }
 
-TEST_F(DiscoverLlvmLibdirTest, VerboseModeNoLibFound)
+TEST_F(DiscoverLlvmLibdirTest, NoLibFoundDoesNotThrow)
 {
     std::string rocm_path = m_test_dir + "/rocm";
     create_directory(rocm_path);
@@ -289,7 +270,7 @@ TEST_F(DiscoverLlvmLibdirTest, VerboseModeNoLibFound)
     set_rocm_path(rocm_path);
     clear_rocmv_dir();
 
-    EXPECT_NO_THROW({ discover_llvm_libdir_for_ompt(true); });
+    EXPECT_NO_THROW({ discover_llvm_libdir_for_ompt(); });
 }
 
 TEST_F(DiscoverLlvmLibdirTest, RocmVersionDirLlvmLibPreferredOverLib)

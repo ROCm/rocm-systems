@@ -6,8 +6,16 @@
 
 # Device bitcode for JIT linking: librocshmem_device_{arch}.bc
 
-find_program(LLVM_CLANG clang++ PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH QUIET)
-find_program(LLVM_LINK llvm-link PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH QUIET)
+find_program(LLVM_CLANG clang++
+             PATHS
+               ${ROCM_PATH}/llvm/bin
+               ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
+             NO_DEFAULT_PATH QUIET)
+find_program(LLVM_LINK llvm-link
+             PATHS
+               ${ROCM_PATH}/llvm/bin
+               ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
+               NO_DEFAULT_PATH QUIET)
 
 if(NOT LLVM_CLANG OR NOT LLVM_LINK)
   message(WARNING "ROCm LLVM tools (clang++, llvm-link) not found under "
@@ -26,9 +34,38 @@ function(strip_arch_features targets_list out_var)
   set(${out_var} "${_result}" PARENT_SCOPE)
 endfunction()
 
+# Convert arch feature suffix to a list of llc -mattr=<feature> flags.
+# gfx950:sramecc+:xnack-  →  CMake list: "-mattr=+sramecc;-mattr=-xnack"
+# Caller uses the list directly in add_custom_command COMMAND so each element
+# becomes a separate shell argument (avoiding comma-joining issues).
+function(arch_features_to_mattr_flags full_arch out_var)
+  # Split the full arch string on ":" into a list
+  string(REPLACE ":" ";" _all_tokens "${full_arch}")
+  # Skip the first token (the base arch name) and process the rest as features
+  list(LENGTH _all_tokens _ntokens)
+  set(_flags "")
+  if(_ntokens GREATER 1)
+    list(SUBLIST _all_tokens 1 -1 _feat_tokens)
+    foreach(_tok ${_feat_tokens})
+      if(_tok STREQUAL "")
+        continue()
+      endif()
+      # "sramecc+" → "+sramecc", "xnack-" → "-xnack"
+      string(REGEX REPLACE "([a-zA-Z0-9_]+)([+-])$" "\\2\\1" _part "${_tok}")
+      list(APPEND _flags "-mattr=${_part}")
+    endforeach()
+  endif()
+  set(${out_var} "${_flags}" PARENT_SCOPE)
+endfunction()
+
 # Resolve the default arch list: GPU_TARGETS if set, otherwise auto-detect local GPUs.
 if(GPU_TARGETS)
-  strip_arch_features("${GPU_TARGETS}" _BITCODE_DEFAULT_ARCHS)
+  # Convert comma-separated string to CMake list (semicolon-separated)
+  # This handles both -DGPU_TARGETS=gfx942,gfx950 and -DGPU_TARGETS="gfx942;gfx950"
+  string(REPLACE "," ";" _GPU_TARGETS_LIST "${GPU_TARGETS}")
+  # Ensure it's treated as a list even if already semicolon-separated
+  set(_GPU_TARGETS_LIST ${_GPU_TARGETS_LIST})
+  strip_arch_features("${_GPU_TARGETS_LIST}" _BITCODE_DEFAULT_ARCHS)
 elseif(COMMAND rocm_local_targets)
   rocm_local_targets(_LOCAL_GPUS)
   if(_LOCAL_GPUS)
@@ -45,11 +82,15 @@ set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architecture
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and llc.
 set(BITCODE_COMPILE_FLAGS_BASE
+    -Wall
+    -Wextra
     -x hip
     --cuda-device-only
     -std=c++17
     -emit-llvm
     -fvisibility=default
+    -O3
+    -Xclang -mcode-object-version=none
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/rocshmem
     -I${CMAKE_CURRENT_SOURCE_DIR}/include
     -I${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -74,6 +115,7 @@ endif()
 # the device-side create_ctx/destroy_ctx dispatchers)
 set(BITCODE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rocshmem_gpu.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rocshmem_tile_gpu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ipc_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/team.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/sync/abql_block_mutex.cpp

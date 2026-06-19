@@ -19,13 +19,25 @@ make
 ## Usage
 
 ```bash
-./topo_expl -m model_id [-n numNodes=1]
+./topo_expl [-m|--model model_id] [-n|--nodes numNodes=1] [-a|--arch gpu_arch] [-t] [-h]
 ```
 
 ### Parameters
 
-- `-m model_id`: Specifies the topology model to use (required)
-- `-n numNodes`: Number of nodes to simulate (default: 1)
+- `-m, --model id`: Specifies the topology model to use (required to run a model)
+- `-n, --nodes N`: Number of nodes to simulate (default: 1)
+- `-a, --arch arch`: Show available models by GPU architecture (e.g., gfx906, gfx908, gfx910, gfx942, gfx950)
+- `-t, --test`: Run comprehensive test suite (all models with 1,2,4,8,16 nodes by default)
+- `-h, --help`: Display help message and available models
+
+### Test Suite Options
+
+When using `-t` or `--test`, you can further customize the test run:
+
+- `--include-models=ids`: Comma-separated model IDs to test (e.g., `--include-models=0,1,2,4,8`)
+- `--include-nodes=counts`: Comma-separated node counts to test (e.g., `--include-nodes=1,4,8`)
+- `--exclude-models=ids`: Comma-separated model IDs to exclude from test (e.g., `--exclude-models=57,59`)
+- `--exclude-nodes=counts`: Comma-separated node counts to exclude from test (e.g., `--exclude-nodes=16`)
 
 ### Available Models
 
@@ -39,11 +51,19 @@ The tool is typically run with the `NCCL_DEBUG=INFO` environment variable to sho
 # List available models
 ./topo_expl
 
+# List models for a specific GPU architecture
+./topo_expl -a gfx942
+# Or: ./topo_expl --arch gfx942
+
+# Display help message
+./topo_expl -h
+
 # Test MI300 configuration (model 55)
 NCCL_DEBUG=version ./topo_expl -m 55
 
 # Test a multi-node MI300 configuration with 8 nodes
 NCCL_DEBUG=version ./topo_expl -m 55 -n 8
+# Or: ./topo_expl --model 55 --nodes 8
 
 # Test a multi-node MI350 configuration with 2 nodes
 NCCL_DEBUG=version ./topo_expl -m 59 -n 2
@@ -55,11 +75,35 @@ NCCL_DEBUG=version ./topo_expl -m 42
 NCCL_DEBUG=version ./topo_expl -m 42 -n 4
 ```
 
+## Test Suite Usage
+
+The integrated test suite allows comprehensive testing of all models with various node configurations:
+
+```bash
+# Run test suite for all models with default node counts (1,2,4,8,16)
+./topo_expl -t
+
+# Test only specific models
+./topo_expl -t --include-models=0,1,2,4,8
+
+# Test all models with specific node counts
+./topo_expl -t --include-nodes=1,4
+
+# Test all models except specific ones
+./topo_expl -t --exclude-models=57,59
+
+# Test all models except 16-node configurations
+./topo_expl -t --exclude-nodes=16
+
+# Combine include and exclude options
+./topo_expl -t --include-models=0,1,2 --include-nodes=1,4 --exclude-models=1
+```
+
 
 ## Sample output
 
 ```bash
-# cmd used
+# cmd used (-m/-n or --model/--nodes)
 NCCL_DEBUG=version ./topo_expl -m 55 -n 8
 ```
 

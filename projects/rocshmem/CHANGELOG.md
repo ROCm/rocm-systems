@@ -1,7 +1,34 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.3.0 for ROCm x.x.x
+## Unreleased - rocSHMEM 3.6.0 for ROCm x.x.x
+## rocSHMEM 3.5.0 for ROCm 7.14
+
 ### Added
 * Added new APIs:
+   * `rocshmem_align`
+   * `rocshmem_calloc`
+   * `rocshmem_buffer_unregister_all`
+   * `rocshmem_buffer_register/unregister` for GDA backend
+   * `rocshmem_reduce_on_stream`
+   * `rocshmem_team_split_2D`
+   * Tile-granular RMA operations for the IPC backend
+   * Host-initiated RMA operations in the IPC backend for the non-MPI
+     bootstrapping path
+   * Team creation using non-contiguous parent teams in the IPC backend
+   * Python bindings of memory-management APIs
+   * Python bindings coverage for team APIs
+* Performance optimizations:
+   * Separate put/get memcpy primitives to apply correct cache coherence semantics and fences
+   * O(1) IPC availability check using pattern detection
+   * Use constmem for backend variables and provider muxing
+* Added support for GPU initiated operations using the SDMA engines
+* Added ASAN build support
+* Change default ROCSHMEM_DEBUG_LEVEL from WARN to ERROR
+
+## rocSHMEM 3.4.0 for ROCm 7.13
+### Added
+* Added new APIs:
+   * `rocshmem_quiet_on_stream`
+   * `rocshmem_sync_all_on_stream`
    * `rocshmem_TYPENAME_alltoall_wg`
    * `rocshmem_TYPENAME_alltoallv_wg`
    * `rocshmem_team_my_pe`
@@ -9,9 +36,22 @@
    * `rocshmem_barrier`
    * `rocshmem_barrier_wave`
    * `rocshmem_barrier_wg`
-* Added `ROCSHMEM_TEAM_WORLD` for the device code
-* Added new Enviroment variable:
+   * `rocshmem_buffer_register`
+   * `rocshmem_buffer_unregister`
+   * `rocshmem_info_get_version`
+   * `rocshmem_info_get_name`
+   * `rocshmem_vendor_get_version_info`
+* Added library constants: `ROCSHMEM_MAJOR_VERSION`, `ROCSHMEM_MINOR_VERSION`,
+  `ROCSHMEM_MAX_NAME_LEN`, `ROCSHMEM_VENDOR_STRING`, `ROCSHMEM_VERSION`,
+  `ROCSHMEM_VENDOR_MAJOR_VERSION`, `ROCSHMEM_VENDOR_MINOR_VERSION`,
+  `ROCSHMEM_VENDOR_PATCH_VERSION`
+* Added vendor string and backend metadata to the `rocshmem_info` output
+* Added `ROCSHMEM_TEAM_WORLD` for device code
+* Added `ROCSHMEM_TEAM_SHARED` predefined team for PEs sharing a common memory domain (same node)
+* Added new environment variables:
   * `OVERRIDE_NIC_FIRMWARE_CHECK`
+  * `ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX`
+  * `ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX`
 * Added VMM POSIX memory allocator (`USE_HEAP_DEVICE_VMM_POSIX`)
    * Uses HIP Virtual Memory Management (VMM) APIs for fine-grained memory control
    * Requires ROCm 7.0+ and Linux kernel 5.6+
@@ -63,7 +103,7 @@
    a shared memory region when the IPC transport is available to reach that region.
    Previously, it would return a null pointer.
 * `ROCSHMEM_RO_DISABLE_IPC` was renamed to `ROCSHMEM_DISABLE_MIXED_IPC`.
-  This enviroment variable was not documented for prior releases.
+  This environment variable was not documented for prior releases.
   It is now documented to inform users who were using this undocumented feature.
 
 ### Removed

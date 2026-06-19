@@ -60,7 +60,7 @@ Output File:
 
 Command line examples:
 <details close>
-  <summary>Click for example: <i><b>From amdsmi root directory with test ouput in build directory</i></b></summary>
+  <summary>Click for example: <i><b>From amdsmi root directory with test output in build directory</i></b></summary>
 
 ~~~shell
 api_summary.py
@@ -72,7 +72,7 @@ api_summary.py --output summary_dir
 </details>
 
 <details close>
-  <summary>Click for example: <i><b>From amdsmi root directory with test ouput in current directory</i></b></summary>
+  <summary>Click for example: <i><b>From amdsmi root directory with test output in current directory</i></b></summary>
 
 ~~~shell
 api_summary.py --log_dir .

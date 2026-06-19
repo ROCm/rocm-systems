@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 Python tests.
@@ -75,10 +75,11 @@ def get_cat_command() -> list[str]:
 
 @pytest.mark.python_versions
 class TestPython(RocprofsysTest):
-    # Timemory validation uses hierarchical output with multiple entries at different depths
-    PYTHON_SOURCE_TIMEMORY = {
-        "metric": "trip_count",
-        "file": "trip_count.json",
+
+    PYTHON_SOURCE_GENERAL = {
+        "metric": "trip_count",  # Timemory
+        "file": "trip_count.json",  # Timemory
+        "categories": ["python", "user"],  # Perfetto
         "labels": [
             "main_loop",
             "run",
@@ -94,18 +95,10 @@ class TestPython(RocprofsysTest):
         "depths": [0, 1, 2, 3, 4, 5, 6, 2, 3],
     }
 
-    # Perfetto (cached mode) aggregates entries by name
-    PYTHON_SOURCE_PERFETTO = {
-        "categories": ["python", "user"],
-        "labels": ["main_loop", "run", "fib", "inefficient", "_sum"],
-        "counts": [5, 3, 24, 3, 3],
-        "depths": [0, 1, 2, 2, 3],
-    }
-
-    # Timemory validation for builtin profiling - hierarchical output with multiple entries at different depths
-    PYTHON_BUILTIN_TIMEMORY = {
-        "metric": "trip_count",
-        "file": "trip_count.json",
+    PYTHON_BUILTIN_GENERAL = {
+        "metric": "trip_count",  # Timemory
+        "file": "trip_count.json",  # Timemory
+        "categories": ["python"],  # Perfetto
         "labels": [
             "[run][builtin.py:31]",
             "[fib][builtin.py:13]",
@@ -124,19 +117,7 @@ class TestPython(RocprofsysTest):
         "depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1],
     }
 
-    # Perfetto validation with trace caching aggregates all calls to the same function,
-    # so we only expect one entry per unique label rather than hierarchical entries.
-    PYTHON_BUILTIN_PERFETTO = {
-        "categories": ["python"],
-        "labels": [
-            "[run][builtin.py:31]",
-            "[fib][builtin.py:13]",
-            "[inefficient][builtin.py:17]",
-        ],
-        "counts": [5, 445, 5],
-        "depths": [0, 1, 1],
-    }
-
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "annotated, exclude",
         [
@@ -158,7 +139,6 @@ class TestPython(RocprofsysTest):
             annotated=annotated,
             python_version=python_version,
             run_args=["-v", "10", "-n", "5"],
-            timeout=120,
         )
         self.assert_regex(result)
 
@@ -180,6 +160,7 @@ class TestPython(RocprofsysTest):
                 fail_regex=[r"(\|_inefficient).*(\|_sum)"],
             )
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "annotated",
         [
@@ -198,7 +179,6 @@ class TestPython(RocprofsysTest):
             annotated=annotated,
             python_version=python_version,
             run_args=["-v", "10", "-n", "5"],
-            timeout=120,
         )
         self.assert_regex(result)
         if not annotated:
@@ -208,24 +188,25 @@ class TestPython(RocprofsysTest):
             )
             self.assert_timemory(
                 result,
-                file_name=self.PYTHON_BUILTIN_TIMEMORY["file"],
-                metric=self.PYTHON_BUILTIN_TIMEMORY["metric"],
-                labels=self.PYTHON_BUILTIN_TIMEMORY["labels"],
-                counts=self.PYTHON_BUILTIN_TIMEMORY["counts"],
-                depths=self.PYTHON_BUILTIN_TIMEMORY["depths"],
+                file_name=self.PYTHON_BUILTIN_GENERAL["file"],
+                metric=self.PYTHON_BUILTIN_GENERAL["metric"],
+                labels=self.PYTHON_BUILTIN_GENERAL["labels"],
+                counts=self.PYTHON_BUILTIN_GENERAL["counts"],
+                depths=self.PYTHON_BUILTIN_GENERAL["depths"],
             )
             self.assert_perfetto(
                 result,
-                categories=self.PYTHON_BUILTIN_PERFETTO["categories"],
-                labels=self.PYTHON_BUILTIN_PERFETTO["labels"],
-                counts=self.PYTHON_BUILTIN_PERFETTO["counts"],
-                depths=self.PYTHON_BUILTIN_PERFETTO["depths"],
+                categories=self.PYTHON_BUILTIN_GENERAL["categories"],
+                labels=self.PYTHON_BUILTIN_GENERAL["labels"],
+                counts=self.PYTHON_BUILTIN_GENERAL["counts"],
+                depths=self.PYTHON_BUILTIN_GENERAL["depths"],
             )
             self.assert_rocpd(
                 result,
                 rules_files=python_builtin_rocpd_rules,
             )
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "annotated",
         [
@@ -241,7 +222,6 @@ class TestPython(RocprofsysTest):
             annotated=annotated,
             python_version=python_version,
             run_args=["-v", "15", "-n", "5"],
-            timeout=120,
         )
         self.assert_regex(result)
         if not annotated:
@@ -252,34 +232,30 @@ class TestPython(RocprofsysTest):
             )
 
     @pytest.mark.rocpd("python_rocpd_env")
-    def test_python_source(
-        self, python_version, python_rocpd_env, python_source_rocpd_rules
-    ):
+    def test_source(self, python_version, python_rocpd_env, python_source_rocpd_rules):
         result = self.run_test(
             "python",
             target="source.py",
             env=python_rocpd_env,
-            profile_args=["-v", "5", "-n", "5", "-s", "3"],
             python_version=python_version,
             run_args=["-v", "5", "-n", "5", "-s", "3"],
             standalone=True,
-            timeout=120,
         )
         self.assert_regex(result)
         self.assert_timemory(
             result,
-            file_name=self.PYTHON_SOURCE_TIMEMORY["file"],
-            metric=self.PYTHON_SOURCE_TIMEMORY["metric"],
-            labels=self.PYTHON_SOURCE_TIMEMORY["labels"],
-            counts=self.PYTHON_SOURCE_TIMEMORY["counts"],
-            depths=self.PYTHON_SOURCE_TIMEMORY["depths"],
+            file_name=self.PYTHON_SOURCE_GENERAL["file"],
+            metric=self.PYTHON_SOURCE_GENERAL["metric"],
+            labels=self.PYTHON_SOURCE_GENERAL["labels"],
+            counts=self.PYTHON_SOURCE_GENERAL["counts"],
+            depths=self.PYTHON_SOURCE_GENERAL["depths"],
         )
         self.assert_perfetto(
             result,
-            categories=self.PYTHON_SOURCE_PERFETTO["categories"],
-            labels=self.PYTHON_SOURCE_PERFETTO["labels"],
-            counts=self.PYTHON_SOURCE_PERFETTO["counts"],
-            depths=self.PYTHON_SOURCE_PERFETTO["depths"],
+            categories=self.PYTHON_SOURCE_GENERAL["categories"],
+            labels=self.PYTHON_SOURCE_GENERAL["labels"],
+            counts=self.PYTHON_SOURCE_GENERAL["counts"],
+            depths=self.PYTHON_SOURCE_GENERAL["depths"],
         )
         self.assert_rocpd(
             result,

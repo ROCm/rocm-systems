@@ -14,6 +14,81 @@
  * @ingroup AtomicsTest
  */
 
+// Helper function to run atomicSub_system tests for peer GPUs
+template <typename TestType>
+static void runAtomicSubSystemPeerGPUsTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < 1; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
+          2, 2, 1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
+          2, 2, warp_size, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
+          2, 2, warp_size, cache_line_size);
+    }
+  }
+}
+
+// Helper function to run atomicSub_system tests for host and GPU
+template <typename TestType>
+static void runAtomicSubSystemHostAndGPUTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < 1; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
+          1, 1, 1, sizeof(TestType), 4);
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
+          1, 1, warp_size, sizeof(TestType), 4);
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
+          1, 1, warp_size, cache_line_size, 4);
+    }
+  }
+}
+
+// Helper function to run atomicSub_system tests for host and peer GPUs
+template <typename TestType>
+static void runAtomicSubSystemHostAndPeerGPUsTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < 1; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
+          2, 2, 1, sizeof(TestType), 4);
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
+          2, 2, warp_size, sizeof(TestType), 4);
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
+          2, 2, warp_size, cache_line_size, 4);
+    }
+  }
+}
+
 /**
  * Test Description
  * ------------------------
@@ -38,29 +113,13 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_atomicSub_system_Positive_Peer_GPUs,
-                   int, unsigned int, unsigned long, unsigned long long, float,
-                   double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
-          2, 2, 1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
-          2, 2, warp_size, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
-          2, 2, warp_size, cache_line_size);
-    }
-  }
+HIP_TEST_CASE(Unit_atomicSub_system_Positive_Peer_GPUs) {
+  SECTION("int") { runAtomicSubSystemPeerGPUsTest<int>(); }
+  SECTION("unsigned int") { runAtomicSubSystemPeerGPUsTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicSubSystemPeerGPUsTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicSubSystemPeerGPUsTest<unsigned long long>(); }
+  SECTION("float") { runAtomicSubSystemPeerGPUsTest<float>(); }
+  SECTION("double") { runAtomicSubSystemPeerGPUsTest<double>(); }
 }
 
 /**
@@ -88,29 +147,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_atomicSub_system_Positive_Peer_GPUs,
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_atomicSub_system_Positive_Host_And_GPU,
-                   int, unsigned int, unsigned long, unsigned long long, float,
-                   double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
-          1, 1, 1, sizeof(TestType), 4);
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
-          1, 1, warp_size, sizeof(TestType), 4);
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
-          1, 1, warp_size, cache_line_size, 4);
-    }
-  }
+HIP_TEST_CASE(Unit_atomicSub_system_Positive_Host_And_GPU) {
+  SECTION("int") { runAtomicSubSystemHostAndGPUTest<int>(); }
+  SECTION("unsigned int") { runAtomicSubSystemHostAndGPUTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicSubSystemHostAndGPUTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicSubSystemHostAndGPUTest<unsigned long long>(); }
+  SECTION("float") { runAtomicSubSystemHostAndGPUTest<float>(); }
+  SECTION("double") { runAtomicSubSystemHostAndGPUTest<double>(); }
 }
 
 /**
@@ -138,29 +181,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_atomicSub_system_Positive_Host_And_GPU,
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_atomicSub_system_Positive_Host_And_Peer_GPUs,
-                   int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
-          2, 2, 1, sizeof(TestType), 4);
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
-          2, 2, warp_size, sizeof(TestType), 4);
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kSubSystem>(
-          2, 2, warp_size, cache_line_size, 4);
-    }
-  }
+HIP_TEST_CASE(Unit_atomicSub_system_Positive_Host_And_Peer_GPUs) {
+  SECTION("int") { runAtomicSubSystemHostAndPeerGPUsTest<int>(); }
+  SECTION("unsigned int") { runAtomicSubSystemHostAndPeerGPUsTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicSubSystemHostAndPeerGPUsTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicSubSystemHostAndPeerGPUsTest<unsigned long long>(); }
+  SECTION("float") { runAtomicSubSystemHostAndPeerGPUsTest<float>(); }
+  SECTION("double") { runAtomicSubSystemHostAndPeerGPUsTest<double>(); }
 }
 
 /**

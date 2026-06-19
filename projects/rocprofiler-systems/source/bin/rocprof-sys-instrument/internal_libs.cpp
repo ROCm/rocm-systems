@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "internal_libs.hpp"
 #include "binary/analysis.hpp"
@@ -27,6 +8,8 @@
 #include "binary/scope_filter.hpp"
 #include "binary/symbol.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
+#include "common/environment.hpp"
 #include "core/demangler.hpp"
 #include "core/utility.hpp"
 #include "fwd.hpp"
@@ -36,7 +19,6 @@
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/environment/types.hpp>
 #include <timemory/log/macros.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 #include <timemory/utility/types.hpp>
@@ -51,8 +33,8 @@
 namespace
 {
 namespace filepath = ::tim::filepath;
+using rocprofsys::get_env;
 using ::tim::delimit;
-using ::tim::get_env;
 using ::timemory::join::join;
 using strview_init_t   = std::initializer_list<std::string_view>;
 using strview_set_t    = std::set<std::string_view>;
@@ -197,10 +179,10 @@ get_library_search_paths_impl()
     };
 
     // search paths from environment variables
-    for(const auto& itr : delimit(get_env("LD_LIBRARY_PATH", std::string{}, false), ":"))
+    for(const auto& itr : delimit(get_env("LD_LIBRARY_PATH", std::string{}), ":"))
         _emplace_if_exists(itr);
 
-    for(const auto& itr : { get_env<std::string>("ROCPROFSYS_ROCM_PATH", ""),
+    for(const auto& itr : { get_env<std::string>(rocprofsys::env_vars::ROCM_PATH, ""),
                             get_env<std::string>("ROCM_PATH", ""),
                             std::string{ ROCPROFSYS_DEFAULT_ROCM_PATH } })
     {

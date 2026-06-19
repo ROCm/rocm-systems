@@ -13,22 +13,22 @@
 
 #define PIPE_READ(childId, val)                                                         \
   {                                                                                     \
-    if (ev.verbose) TEST_INFO("Calling PIPE_READ to Child %d\n", childId); \
+    if (ev.verbose) TEST_INFO("Calling PIPE_READ to Child %d", childId); \
     ssize_t retval = read(childList[childId]->parentReadFd, &val, sizeof(val)); \
-    if (ev.verbose) TEST_INFO("Got PIPE_READ %ld from Child %d\n", retval, childId); \
+    if (ev.verbose) TEST_INFO("Got PIPE_READ %ld from Child %d", retval, childId); \
     if (retval == -1)                                                                   \
     {                                                                                   \
-      TEST_ERROR("Unable to read from child %d: Error %s\n", childId, strerror(errno));      \
+      TEST_ERROR("Unable to read from child %d: Error %s", childId, strerror(errno));      \
       FAIL();                                                                           \
     }                                                                                   \
     else if (retval == 0)                                                               \
     {                                                                                   \
-      TEST_ERROR("Child %d pipe closed unexpectedly\n", childId);                            \
+      TEST_ERROR("Child %d pipe closed unexpectedly", childId);                            \
       exit(1);                                                                          \
     }                                                                                   \
     else if (retval < sizeof(int))                                                      \
     {                                                                                   \
-      TEST_ERROR("Child %d pipe read incomplete (%ld / %lu)\n", childId, retval, sizeof(val)); \
+      TEST_ERROR("Child %d pipe read incomplete (%ld / %lu)", childId, retval, sizeof(val)); \
       exit(1);                                                                          \
     }                                                                                   \
   }
@@ -39,7 +39,7 @@
     PIPE_READ(childId, response);                   \
     if (response != TEST_SUCCESS)                   \
     {                                               \
-      TEST_ERROR("Child %d reports failure\n", childId); \
+      TEST_ERROR("Child %d reports failure", childId); \
       ASSERT_EQ(response, TEST_SUCCESS);            \
       FAIL();                                       \
     }                                               \
@@ -54,7 +54,7 @@ namespace RcclUnitTesting
   {
     // Collect the number of GPUs
     this->numDevicesAvailable = ev.maxGpus;
-    if (ev.verbose) TEST_INFO("Detected %d GPUs\n", this->numDevicesAvailable);
+    if (ev.verbose) TEST_INFO("Detected %d GPUs", this->numDevicesAvailable);
   }
 
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
@@ -74,7 +74,7 @@ namespace RcclUnitTesting
     this->numStreamsPerGroup = numStreamsPerGroup;
     this->rankToChildMap.clear();
     this->rankToDeviceMap.clear();
-    if (ev.verbose) TEST_INFO("Setting up %d active child processes\n", this->numActiveChildren);
+    if (ev.verbose) TEST_INFO("Setting up %d active child processes", this->numActiveChildren);
 
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
     {
@@ -89,7 +89,7 @@ namespace RcclUnitTesting
     // Check that no children currently exist
     if (childList.size() > 0)
     {
-      TEST_ERROR("DestroyComms must be called prior to subsequent call to InitComms\n");
+      TEST_ERROR("DestroyComms must be called prior to subsequent call to InitComms");
       return;
     }
 
@@ -100,7 +100,7 @@ namespace RcclUnitTesting
       childList[childId] = new TestBedChild(childId, ev.verbose, ev.printValues, ev.useMultithreading);
       if (childList[childId]->InitPipes() != TEST_SUCCESS)
       {
-        TEST_ERROR("Unable to create pipes to child process\n");
+        TEST_ERROR("Unable to create pipes to child process");
         return;
       }
 
@@ -122,14 +122,14 @@ namespace RcclUnitTesting
 
     // If debugging is enabled, pause here to allow users to attach debugger
     if (ev.debugPause) {
-      TEST_INFO("============================================================\n");
-      TEST_INFO(" Pausing for debug attach: (e.g. sudo rocgdb -p <PID>)\n");
-      TEST_INFO("============================================================\n");
+      TEST_INFO("============================================================");
+      TEST_INFO(" Pausing for debug attach: (e.g. sudo rocgdb -p <PID>)");
+      TEST_INFO("============================================================");
       for (int childId = 0; childId < this->numActiveChildren; ++childId) {
-        TEST_INFO(" Child %02d: processID: %d\n", childId, childList[childId]->pid);
+        TEST_INFO(" Child %02d: processID: %d", childId, childList[childId]->pid);
       }
-      TEST_INFO("============================================================\n");
-      TEST_INFO("<Press enter to continue>\n");
+      TEST_INFO("============================================================");
+      TEST_INFO("<Press enter to continue>");
       scanf("%*c");
     }
 
@@ -153,7 +153,7 @@ namespace RcclUnitTesting
     int rankOffset = 0;
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
     {
-      if (ev.verbose) TEST_INFO("Sending InitComm event to child %d\n", childId);
+      if (ev.verbose) TEST_INFO("Sending InitComm event to child %d", childId);
       PIPE_WRITE(childId, cmd);
 
       // Send unique ID to child process
@@ -228,7 +228,7 @@ namespace RcclUnitTesting
 
     if (streamIdx < 0 || streamIdx >= this->numStreamsPerGroup[groupId])
     {
-      TEST_ERROR("StreamIdx for group %d collective %d is out of bounds (%d/%d):\n", groupId, collId, streamIdx, numStreamsPerGroup[groupId]);
+      TEST_ERROR("StreamIdx for group %d collective %d is out of bounds (%d/%d):", groupId, collId, streamIdx, numStreamsPerGroup[groupId]);
       FAIL();
     }
 
@@ -474,16 +474,43 @@ namespace RcclUnitTesting
     InteractiveWait("Starting DestroyComms");
 
     int const cmd = TestBedChild::CHILD_DESTROY_COMMS;
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
+
+    // Send DestroyComms command to all active child processes first so they can
+    // work in parallel, then collect acknowledgements in a second pass. Run the
+    // pipe traffic inside a lambda: the PIPE_WRITE/PIPE_CHECK macros call
+    // gtest's ASSERT_*/FAIL() which return on failure, so a failed write to one
+    // child would otherwise skip Finalize() and orphan the remaining children.
+    // The lambda confines that early return, so Finalize() always runs.
+    using Clock = std::chrono::steady_clock;
+    [&]()
     {
-      // Send DestroyComms command to each active child process
-      PIPE_WRITE(childId, cmd);
+      // Timestamps are only consumed when verbose, so skip the clock reads on
+      // the common (non-verbose) path, which is hot in the test suite.
+      Clock::time_point sendStart, waitStart;
+      if (ev.verbose) sendStart = Clock::now();
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
+        PIPE_WRITE(childId, cmd);
+      }
+      if (ev.verbose) waitStart = Clock::now();
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
+        // Wait for child acknowledgement
+        PIPE_CHECK(childId);
+      }
 
-      // Wait for child acknowledgement
-      PIPE_CHECK(childId);
-    }
+      if (ev.verbose)
+      {
+        using std::chrono::duration_cast;
+        using std::chrono::milliseconds;
+        long long const sendMs = duration_cast<milliseconds>(waitStart - sendStart).count();
+        long long const waitMs = duration_cast<milliseconds>(Clock::now() - waitStart).count();
+        TEST_INFO("DestroyComms: %d children, send %lld ms, parallel teardown %lld ms",
+                  this->numActiveChildren, sendMs, waitMs);
+      }
+    }();
 
-    // Close any open child processes
+    // Close any open child processes (always, even if the teardown above failed)
     Finalize();
 
     InteractiveWait("Finishing DestroyComms");
@@ -496,12 +523,15 @@ namespace RcclUnitTesting
     int const cmd = TestBedChild::CHILD_DESTROY_GRAPHS;
     for (int currGroup = 0; currGroup < this->numGroupCalls; ++currGroup)
     {
+      // Send DestroyGraphs command to all active child processes first so they
+      // can work in parallel, then collect acknowledgements in a second pass.
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
       {
-        // Send DestroyGraphs command to each active child process
         PIPE_WRITE(childId, cmd);
         PIPE_WRITE(childId, currGroup);
-
+      }
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
         // Wait for child acknowledgement
         PIPE_CHECK(childId);
       }
@@ -535,7 +565,7 @@ namespace RcclUnitTesting
       waitpid(childList[childId]->pid, &returnVal, 0);
       if (returnVal != 0)
       {
-        TEST_ERROR("Child process %d exited with code %d\n", childId, returnVal);
+        TEST_ERROR("Child process %d exited with code %d", childId, returnVal);
       }
       delete(childList[childId]);
     }
@@ -785,7 +815,7 @@ namespace RcclUnitTesting
 
             if (ev.showNames)
             {
-              TEST_INFO("%s [%9d elements]\n", name.c_str(), numInputElements);
+              TEST_INFO("%s [%9d elements]", name.c_str(), numInputElements);
             }
 
             std::vector<int> currentRanksEmpty = {};
@@ -802,7 +832,7 @@ namespace RcclUnitTesting
             this->ValidateResults(isCorrect);
             if (!isCorrect)
             {
-              TEST_ERROR("Incorrect output for %s\n", name.c_str());
+              TEST_ERROR("Incorrect output for %s", name.c_str());
             }
           }
         }
@@ -817,8 +847,8 @@ namespace RcclUnitTesting
   {
     if (ev.useInteractive)
     {
-      TEST_INFO("%s\n", message.c_str());
-      TEST_INFO("<Hit any key to continue>\n");
+      TEST_INFO("%s", message.c_str());
+      TEST_INFO("<Hit any key to continue>");
       scanf("%*c");
     }
   }

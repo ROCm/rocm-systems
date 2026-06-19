@@ -40,8 +40,6 @@ static char memSetVal = 'a';
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEMPLATE_TEST_CASE(Unit_hipGraphAddMemsetNode_Positive_Basic, uint8_t, uint16_t, uint32_t) {
-  CHECK_IMAGE_SUPPORT
-
   const auto f = [](hipMemsetParams* params) {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -115,8 +113,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_Negative_Parameters) {
  * hipGraphAddMemcpyNode. Verify the results.
  */
 HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_2D) {
-  CHECK_IMAGE_SUPPORT
-
   size_t width = SIZE * sizeof(char), numW{SIZE}, numH{SIZE}, pitch_A;
   char* A_d;
 
@@ -182,8 +178,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_2D) {
  * hipGraphAddMemcpyNode. Verify the results.
  */
 HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_1D) {
-  CHECK_IMAGE_SUPPORT
-
   size_t width = SIZE * sizeof(char), numW{SIZE}, pitch_A;
   char* A_d;
 
@@ -243,8 +237,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_1D) {
  * hipGraphAddMemcpyNode. Verify the results.
  */
 HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_2D) {
-  CHECK_IMAGE_SUPPORT
-
   size_t width = SIZE * sizeof(char);
   size_t numW = SIZE, numH = SIZE;
 
@@ -320,8 +312,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_2D) {
  * memory to host using hipGraphAddMemcpyNode. Verify the results.
  */
 HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_1D) {
-  CHECK_IMAGE_SUPPORT
-
   size_t width = SIZE * sizeof(char);
   size_t numW = SIZE;
 
@@ -449,10 +439,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc_1D) {
 }
 
 HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocManaged) {
-  int managed = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-  INFO("hipDeviceAttributeManagedMemory: " << managed);
-  if (managed != 1) {
+  if (!HipTest::isManagedMemorySupportedOnDevice(0)) {
     WARN(
         "GPU 0 doesn't support hipDeviceAttributeManagedMemory attribute"
         "so defaulting to system memory.");

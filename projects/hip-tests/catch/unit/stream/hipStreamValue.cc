@@ -71,7 +71,6 @@ bool streamWaitValueSupported() {
     auto getAttributeError = hipDeviceGetAttribute(
         &waitValueSupport, hipDeviceAttributeCanUseStreamWaitValue, device_id);
     if (getAttributeError != hipSuccess) {
-      HipTest::HIP_SKIP_TEST("attribute not supported");
       return false;
     }
     if (waitValueSupport == 1) return true;
@@ -237,8 +236,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType:
                    (TestParams<uint64_t, PtrType::DevicePtrToHost>)) {
 #endif
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
   }
 
   using UIntT = typename TestType::UIntType;
@@ -289,8 +287,7 @@ void syncAndCheckData(hipStream_t stream, UIntT* dataPtr, TestPtr signalPtr, siz
 template <typename TestType, bool isBlocking>
 void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
   }
   using UIntT = typename TestType::UIntType;
   constexpr auto ptrType = TestType::ptrType;
@@ -345,8 +342,7 @@ void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
 // Combined blocking test case for both uint32_t and uint64_t
 HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
   }
 
   using UIntT = TestType;
@@ -556,8 +552,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
 // Negative Tests
 HIP_TEST_CASE(Unit_hipStreamValue_Negative_InvalidMemory) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
   }
 
   hipStream_t stream{nullptr};
@@ -588,8 +583,7 @@ HIP_TEST_CASE(Unit_hipStreamValue_Negative_InvalidMemory) {
 // Merge the two similar negative tests
 HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Negative_StreamAndFlag, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
   }
 
   SECTION("Invalid Stream handle") {
@@ -643,8 +637,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Negative_StreamAndFlag, uint32_t, uin
 
 HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWriteValue_Default, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
   }
 
   hipStream_t stream{nullptr};
@@ -667,6 +660,145 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWriteValue_Default, uint32_t, uint64_t) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
+TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Increment_Default", "", uint32_t, uint64_t) {
+  if (!streamWaitValueSupported()) {
+    HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
+  }
+
+  hipStream_t stream{nullptr};
+  HIP_CHECK(hipStreamCreate(&stream));
+  REQUIRE(stream != nullptr);
+
+  TestType initial_value = 10;
+  TestType* mem;
+  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory));
+  __atomic_store(mem, &initial_value, __ATOMIC_RELEASE);
+
+  const TestType increment_value = 2;
+  HIP_CHECK(writeFunc<TestType>(stream, mem, increment_value, hipExtStreamWriteValueIncrement));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  const TestType expected_value = initial_value + increment_value;
+  REQUIRE(*mem == expected_value);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(mem));
+}
+
+TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement_Default", "", uint32_t, uint64_t) {
+  if (!streamWaitValueSupported()) {
+    HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
+  }
+
+  hipStream_t stream{nullptr};
+  HIP_CHECK(hipStreamCreate(&stream));
+  REQUIRE(stream != nullptr);
+
+  TestType initial_value = 0;
+  TestType* mem;
+  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory));
+  __atomic_store(mem, &initial_value, __ATOMIC_RELEASE);
+
+  const TestType decrement_value = 10;
+  HIP_CHECK(writeFunc<TestType>(stream, mem, decrement_value, hipExtStreamWriteValueDecrement));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  const TestType expected_value = initial_value - decrement_value;
+  REQUIRE(*mem == expected_value);
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(mem));
+}
+
+template <typename TestType>
+void testIncrementDecrementMultiStreamMultiDevice(uint32_t operationFlag) {
+  if (!streamWaitValueSupported()) {
+    HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
+  }
+
+  constexpr size_t streams_per_device = 2;
+  constexpr size_t iterations = 10;
+  constexpr TestType increment_value = 2;
+  TestType initial_value = 10;
+
+  int deviceCount = 0;
+  HIP_CHECK(hipGetDeviceCount(&deviceCount));
+
+  std::vector<std::vector<hipStream_t>> streams(deviceCount);
+
+  TestType* mem;
+  HIP_CHECK(hipHostMalloc(&mem, sizeof(TestType), hipMallocSignalMemory));
+  __atomic_store(mem, &initial_value, __ATOMIC_RELEASE);
+
+  for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
+    for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
+      HIP_CHECK(hipSetDevice(device_idx));
+
+      hipStream_t stream{nullptr};
+      HIP_CHECK(hipStreamCreate(&stream));
+      REQUIRE(stream != nullptr);
+
+      streams[device_idx].push_back(stream);
+    }
+  }
+
+  for (int cur_iter = 0; cur_iter < iterations; ++cur_iter) {
+    for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
+      HIP_CHECK(hipSetDevice(device_idx));
+      for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
+        HIP_CHECK(writeFunc<TestType>(streams[device_idx][stream_idx], mem, increment_value,
+                                      operationFlag));
+      }
+    }
+  }
+
+  for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
+    HIP_CHECK(hipSetDevice(device_idx));
+    for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
+      HIP_CHECK(hipStreamSynchronize(streams[device_idx][stream_idx]));
+    }
+  }
+
+  TestType expected_value;
+  switch (operationFlag) {
+    case hipExtStreamWriteValueIncrement: {
+      expected_value =
+          initial_value + (increment_value * iterations * streams_per_device * deviceCount);
+      break;
+    }
+    case hipExtStreamWriteValueDecrement: {
+      expected_value =
+          initial_value - (increment_value * iterations * streams_per_device * deviceCount);
+      break;
+    }
+    default: {
+      assert(false);
+      break;
+    }
+  }
+
+  REQUIRE(*mem == expected_value);
+
+  for (int device_idx = 0; device_idx < deviceCount; ++device_idx) {
+    HIP_CHECK(hipSetDevice(device_idx));
+    for (int stream_idx = 0; stream_idx < streams_per_device; ++stream_idx) {
+      HIP_CHECK(hipStreamDestroy(streams[device_idx][stream_idx]));
+    }
+  }
+
+  HIP_CHECK(hipHostFree(mem));
+}
+
+TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Increment_MultiStream_MultiDevice", "", uint32_t,
+                   uint64_t) {
+  testIncrementDecrementMultiStreamMultiDevice<TestType>(hipExtStreamWriteValueIncrement);
+}
+
+
+TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement_MultiStream_MultiDevice", "", uint32_t,
+                   uint64_t) {
+  testIncrementDecrementMultiStreamMultiDevice<TestType>(hipExtStreamWriteValueDecrement);
+}
+
 template <typename T> __global__ void add(T* a, T* b, T* c, size_t size) {
   size_t i = threadIdx.x;
   if (i < size) c[i] = a[i] + b[i];
@@ -674,8 +806,7 @@ template <typename T> __global__ void add(T* a, T* b, T* c, size_t size) {
 
 HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWaitValue_Default, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
   }
 
   auto size = GENERATE(as<size_t>{}, 100, 500, 1000);

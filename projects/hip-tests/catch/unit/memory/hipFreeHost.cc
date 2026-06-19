@@ -114,4 +114,10 @@ HIP_TEST_CASE(Unit_hipFreeHost_Capture_negative) {
   BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
   HIP_CHECK_ERROR(hipFreeHost(ptr), capture_error);
   END_CAPTURE_SYNC(capture_error);
+
+  // When the free is rejected during capture it is a no-op, so the allocation
+  // is still owned by the test and must be released to avoid leaking it.
+  if (capture_error != hipSuccess) {
+    HIP_CHECK(hipFreeHost(ptr));
+  }
 }

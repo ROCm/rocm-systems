@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "code",
+      "name",
+      "root_cause",
+      "mitigation"
+    ],
+    "properties": {
+      "code": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "root_cause": {
+        "type": "string"
+      },
+      "mitigation": {
+        "type": "string"
+      }
+    }
+  }
+}

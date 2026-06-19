@@ -15,11 +15,13 @@ Command line profiler
 
 Launch and profile the target application using the command line profiler.
 
-The command line profiler launches the target application, calls the
-ROCProfiler API via the ``rocprof`` binary, and collects profile results for
-the specified kernels, dispatches, and hardware components. If not
-specified, ROCm Compute Profiler defaults to collecting all available counters for all
-kernels and dispatches launched by the your executable.
+The command line profiler launches the target application and collects
+hardware performance counter data for the specified kernels, dispatches, and
+hardware components. By default, ROCm Compute Profiler collects all available
+counters for all kernels and dispatches launched by the executable. Profiling
+is performed using :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`; see
+:ref:`core-install-rocprof-var` for details on backend selection and the
+native counter collection tool.
 
 To collect the default set of data for all kernels in the target
 application, launch, for example:
@@ -34,12 +36,6 @@ for example, ``./workloads/vcopy_data/MI200/``, where name is configurable
 via the ``-n`` argument. When an MPI rank is detected, the default output
 directory appends the rank (``./workloads/vcopy_data/<rank>/``) instead of
 the gpu model. Use ``--output-directory`` to override the output location.
-
-.. note::
-
-   ``--path`` and ``--subpath`` are deprecated for profile mode and will be
-   removed in a future release. Use ``--output-directory`` with parameterized
-   placeholders instead.
 
 .. note::
 
@@ -123,7 +119,7 @@ Profile mode
 
 ``profile``
    Launches the target application on the local system using
-   :doc:`ROCProfiler <rocprofiler:index>`. Depending on the profiling options
+   :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`. Depending on the profiling options
    chosen, selected kernels, dispatches, and or hardware components used by the
    application are profiled. It stores results locally in an output folder:
    ``./workloads/\<name>`` (or rank-specific subdirectories when using MPI).
@@ -146,7 +142,7 @@ Analyze mode
    generated metrics. It generates metrics from the entirety of your profiled
    application or a subset identified through the ROCm Compute Profiler CLI analysis filters.
 
-   To generate a lightweight GUI interface, you can add the ``--gui`` flag to your
+   To generate a lightweight GUI interface, you can add the ``--experimental --gui`` flags to your
    analysis command.
 
    .. code-block:: shell
@@ -155,11 +151,11 @@ Analyze mode
 
    Analyze mode now supports a lightweight Text-based User Interface (TUI) that
    provides an interactive terminal experience for enhanced usability. To enable TUI mode,
-   use the ``--tui`` flag when running the analyze command:
+   use the ``--experimental --tui`` flags when running the analyze command:
 
    .. code-block:: shell
 
-      $ rocprof-compute analyze --tui
+      $ rocprof-compute analyze --experimental --tui
 
 See :doc:`analyze/mode` to learn about these modes in depth and to get started
 with analysis using ROCm Compute Profiler.
@@ -216,7 +212,7 @@ The following table lists ROCm Compute Profiler's basic operations, their
 
    * - :doc:`Launch standalone GUI from CLI </how-to/analyze/standalone-gui>`
      - ``analyze``
-     - ``--path``, ``--gui``
+     - ``--path``, ``--experimental``, ``--gui``
 
    * - :doc:`Interact with profiling results from CLI </how-to/analyze/cli>`
      - ``analyze``

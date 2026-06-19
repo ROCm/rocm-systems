@@ -37,7 +37,6 @@
 namespace rocshmem {
 
 class IPCBackend : public Backend {
-  const unsigned MAX_NUM_BLOCKS{65536};
 
  public:
   /**
@@ -98,9 +97,10 @@ class IPCBackend : public Backend {
   /**
    * @copydoc Backend::create_new_team
    */
-  void create_new_team(Team *parent_team, TeamInfo *team_info_wrt_parent,
-                       TeamInfo *team_info_wrt_world, int num_pes,
-                       int my_pe_in_new_team, MPI_Comm team_comm,
+  void create_new_team(Team *parent_team,
+                       const TeamInfo& team_info_wrt_parent,
+                       const TeamInfo& team_info_wrt_world, int num_pes,
+                       int my_pe_in_new_team, MPI_Comm new_team_comm,
                        rocshmem_team_t *new_team) override;
 
   /**
@@ -195,6 +195,15 @@ class IPCBackend : public Backend {
   void setup_team_world();
 
   /**
+   * @brief Allocate and initialize team shared.
+   *
+   * In the IPC backend all PEs are on the same node, so TEAM_SHARED
+   * contains the same set of PEs as TEAM_WORLD but uses its own
+   * pool slot and sync/work resources.
+   */
+  void setup_team_shared();
+
+  /**
    * @brief Initialize the resources required to support teams
    */
   void teams_init();
@@ -229,7 +238,7 @@ class IPCBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  IPCDefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  IPCDefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.
@@ -239,7 +248,7 @@ class IPCBackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, IPCContext *> ctx_free_list{};
+  FreeListProxy<IPCContext *> ctx_free_list{};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool
@@ -298,7 +307,9 @@ class IPCBackend : public Backend {
   /**
    * @brief
    */
-  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes, Team *team);
+  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,
+                            const TeamInfo& new_team_info_wrt_world,
+                            int num_pes, int my_pe_in_new_team);
 
 };
 

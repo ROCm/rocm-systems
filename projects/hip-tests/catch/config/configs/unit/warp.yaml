@@ -38,23 +38,19 @@ warp:
     tags: [deviceLib, vote]
   Unit_Warp_Shfl_Positive_Basic:
     <<: *level_2
-    # SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    # === SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23 ===
+    disabled: [amd_windows, amd_wsl]
     tags: [deviceLib, intrinsic, shuffle]
   Unit_Warp_Shfl_XOR_Positive_Basic:
     <<: *level_2
-    # SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    # === SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23 ===
+    disabled: [amd_windows, amd_wsl]
     tags: [deviceLib, intrinsic, shuffle]
   Unit_Warp_Shfl_Up_Positive_Basic:
     <<: *level_2
-    # SWDEV-443630 : Below test failed in stress test on 19/01/24
-    disabled: [gfx90a, gfx942, gfx950]
     tags: [deviceLib, intrinsic, shuffle]
   Unit_Warp_Shfl_Down_Positive_Basic:
     <<: *level_2
-    # SWDEV-443630 : Below test failed in stress test on 19/01/24
-    disabled: [gfx90a, gfx942, gfx950]
     tags: [deviceLib, intrinsic, shuffle]
   Unit_hipReduceSingleMasks:
     <<: *level_2

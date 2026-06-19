@@ -1,0 +1,38 @@
+{
+  "total_signals": 9,
+  "agreements": 9,
+  "agreement_rate": 1.0,
+  "threshold": 0.95,
+  "per_fixture": [
+    {
+      "fixture_id": "minimal_parity_compute_bound",
+      "agreements": {
+        "bottleneck": true,
+        "rec_type": true,
+        "rec_technique": true
+      },
+      "diffs": [],
+      "duration_s": 0.07007837295532227
+    },
+    {
+      "fixture_id": "minimal_parity_memory_transfer",
+      "agreements": {
+        "bottleneck": true,
+        "rec_type": true,
+        "rec_technique": true
+      },
+      "diffs": [],
+      "duration_s": 0.048897743225097656
+    },
+    {
+      "fixture_id": "minimal_parity_launch_overhead",
+      "agreements": {
+        "bottleneck": true,
+        "rec_type": true,
+        "rec_technique": true
+      },
+      "diffs": [],
+      "duration_s": 0.037604331970214844
+    }
+  ]
+}

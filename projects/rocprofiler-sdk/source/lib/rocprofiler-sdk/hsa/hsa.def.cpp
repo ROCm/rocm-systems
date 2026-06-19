@@ -546,6 +546,63 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
                           num_dep_signals,
                           dep_signals)
 #        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0B
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_agent_preload,
+                          hsa_amd_agent_preload,
+                          hsa_amd_agent_preload_fn,
+                          agent,
+                          flags)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0C
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_svm_discard_batch_async,
+                          hsa_amd_svm_discard_batch_async,
+                          hsa_amd_svm_discard_batch_async_fn,
+                          ptrs,
+                          sizes,
+                          count,
+                          num_dep_signals,
+                          dep_signals,
+                          completion_signal)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_get_event_id,
+                          hsa_amd_signal_get_event_id,
+                          hsa_amd_signal_get_event_id_fn,
+                          signal,
+                          event_id)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_external_semaphore_handle_open,
+                          hsa_amd_external_semaphore_handle_open,
+                          hsa_amd_external_semaphore_handle_open_fn,
+                          agent,
+                          desc,
+                          out_sem)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_external_semaphore_handle_close,
+                          hsa_amd_external_semaphore_handle_close,
+                          hsa_amd_external_semaphore_handle_close_fn,
+                          sem)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0F
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_export_fabric_handle,
+                          hsa_amd_vmem_export_fabric_handle,
+                          hsa_amd_vmem_export_fabric_handle_fn,
+                          fabric_handle,
+                          handle,
+                          flags)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_import_fabric_handle,
+                          hsa_amd_vmem_import_fabric_handle,
+                          hsa_amd_vmem_import_fabric_handle_fn,
+                          fabric_handle,
+                          handle)
+#        endif
 #    endif
 
 #elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL) &&                              \

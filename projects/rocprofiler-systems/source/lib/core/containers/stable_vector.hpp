@@ -1,30 +1,11 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/containers/aligned_static_vector.hpp"
 #include "core/containers/operators.hpp"
-#include "core/defines.hpp"
 
 #include <algorithm>
 #include <initializer_list>
@@ -156,10 +137,10 @@ public:
     explicit stable_vector(size_type count, const Tp& value);
     explicit stable_vector(size_type count);
 
-    template <typename InputItrT,
-              typename = std::enable_if_t<std::is_convertible<
-                  typename std::iterator_traits<InputItrT>::iterator_category,
-                  std::input_iterator_tag>::value>>
+    template <typename InputItrT>
+        requires std::convertible_to<
+            typename std::iterator_traits<InputItrT>::iterator_category,
+            std::input_iterator_tag>
     stable_vector(InputItrT first, InputItrT last);
 
     stable_vector(std::initializer_list<Tp>);
@@ -256,7 +237,10 @@ stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(size_type count)
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-template <typename InputItrT, typename>
+template <typename InputItrT>
+    requires std::convertible_to<
+        typename std::iterator_traits<InputItrT>::iterator_category,
+        std::input_iterator_tag>
 stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(InputItrT first, InputItrT last)
 {
     for(; first != last; ++first)

@@ -318,7 +318,6 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
     endif()
 
     set(_TEST_FILE "${_DIR}/${CHECKOUT_TEST_FILE}")
-    set(_SUBMODULE "${PROJECT_SOURCE_DIR}/.gitmodules")
 
     set(_TEST_FILE_EXISTS OFF)
     if(EXISTS "${_TEST_FILE}" AND NOT IS_DIRECTORY "${_TEST_FILE}")
@@ -330,6 +329,32 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
     endif()
 
     find_package(Git REQUIRED)
+
+    # .gitmodules lives at the monorepo root, not under PROJECT_SOURCE_DIR, because
+    # rocprofiler-systems was moved into the rocm-systems monorepo. Use git rev-parse
+    # to locate the root (result cached in CMakeCache.txt after first configure run).
+    if(NOT DEFINED CACHE{ROCPROFILER_SYSTEMS_GIT_TOPLEVEL})
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} rev-parse --show-toplevel
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+            OUTPUT_VARIABLE _GIT_TOPLEVEL
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _GIT_TOPLEVEL_RET
+        )
+        if(NOT _GIT_TOPLEVEL_RET EQUAL 0)
+            message(
+                FATAL_ERROR
+                "Failed to determine git top-level directory. "
+                "Ensure this project is inside a git repository."
+            )
+        endif()
+        set(ROCPROFILER_SYSTEMS_GIT_TOPLEVEL
+            "${_GIT_TOPLEVEL}"
+            CACHE INTERNAL
+            "Git top-level directory"
+        )
+    endif()
+    set(_SUBMODULE "${ROCPROFILER_SYSTEMS_GIT_TOPLEVEL}/.gitmodules")
 
     set(_SUBMODULE_EXISTS OFF)
     if(EXISTS "${_SUBMODULE}" AND NOT IS_DIRECTORY "${_SUBMODULE}")

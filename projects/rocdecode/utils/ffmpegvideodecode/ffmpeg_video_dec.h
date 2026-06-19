@@ -63,13 +63,13 @@ class FFMpegVideoDecoder: public RocVideoDecoder {
         ~FFMpegVideoDecoder();
 
         /**
-         * @brief this function decodes a frame and returns the number of frames avalable for display
+         * @brief this function decodes a frame and returns the number of frames available for display
          * 
          * @param data - pointer to the compressed data buffer that is to be decoded
          * @param size - size of the data buffer in bytes
          * @param pts - presentation timestamp
          * @param flags - video packet flags
-         * @param num_decoded_pics - nummber of pictures decoded in this call
+         * @param num_decoded_pics - number of pictures decoded in this call
          * @return int - num of frames to display
          */
         int DecodeFrame(const uint8_t *data, size_t size, int pkt_flags, int64_t pts = 0, int *num_decoded_pics = nullptr) override;
@@ -95,7 +95,7 @@ class FFMpegVideoDecoder: public RocVideoDecoder {
          * @param pTimestamp - timestamp of the frame to be released (unmapped)
          * @param b_flushing - true when flushing
          * @return true      - success
-         * @return false     - falied
+         * @return false     - failed
          */
         bool ReleaseFrame(int64_t pTimestamp, bool b_flushing = false) override;
 

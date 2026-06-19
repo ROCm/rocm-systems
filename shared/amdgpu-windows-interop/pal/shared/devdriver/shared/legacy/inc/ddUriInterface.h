@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -277,7 +277,7 @@ namespace DevDriver
         virtual Result HandleRequest(IURIRequestContext* pContext) = 0;
 
         // Determines the size limit for post data requests for the client request.  By default services
-        // will not accept any post data.  The pArguments paramter must remain non-const because the
+        // will not accept any post data.  The pArguments parameter must remain non-const because the
         // service may need to manipulate it for further processing.
         virtual size_t QueryPostSizeLimit(char* pArguments) const
         {

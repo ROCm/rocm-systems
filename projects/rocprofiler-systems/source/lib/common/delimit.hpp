@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -33,48 +14,44 @@ inline namespace common
 namespace
 {
 template <typename ContainerT, typename... Args>
+concept has_emplace_back = requires(ContainerT& _c, Args&&... _args) {
+    _c.emplace_back(std::forward<Args>(_args)...);
+};
+
+template <typename ContainerT, typename... Args>
+    requires has_emplace_back<ContainerT, Args...>
 inline auto
-emplace_impl(ContainerT& _c, int,
-             Args&&... _args) -> decltype(_c.emplace_back(std::forward<Args>(_args)...))
+emplace(ContainerT& _c, Args&&... _args)
 {
     return _c.emplace_back(std::forward<Args>(_args)...);
 }
 
 template <typename ContainerT, typename... Args>
+    requires(!has_emplace_back<ContainerT, Args...>)
 inline auto
-emplace_impl(ContainerT& _c, long,
-             Args&&... _args) -> decltype(_c.emplace(std::forward<Args>(_args)...))
+emplace(ContainerT& _c, Args&&... _args)
 {
     return _c.emplace(std::forward<Args>(_args)...);
 }
 
-template <typename ContainerT, typename... Args>
-inline auto
-emplace(ContainerT& _c, Args&&... _args)
-{
-    return emplace_impl(_c, 0, std::forward<Args>(_args)...);
-}
+template <typename ContainerT, typename ArgT>
+concept has_reserve = requires(ContainerT& _c, ArgT _arg) { _c.reserve(_arg); };
 
 template <typename ContainerT, typename ArgT>
-inline auto
-reserve_impl(ContainerT& _c, int, ArgT _arg) -> decltype(_c.reserve(_arg), bool())
+    requires has_reserve<ContainerT, ArgT>
+inline bool
+reserve(ContainerT& _c, ArgT _arg)
 {
     _c.reserve(_arg);
     return true;
 }
 
 template <typename ContainerT, typename ArgT>
-inline auto
-reserve_impl(ContainerT&, long, ArgT)
+    requires(!has_reserve<ContainerT, ArgT>)
+inline bool
+reserve(ContainerT&, ArgT)
 {
     return false;
-}
-
-template <typename ContainerT, typename ArgT>
-inline auto
-reserve(ContainerT& _c, ArgT _arg)
-{
-    return reserve_impl(_c, 0, _arg);
 }
 
 template <typename ContainerT = std::vector<std::string>>

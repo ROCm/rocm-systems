@@ -68,9 +68,10 @@ void RdcConfigSettingsImpl::monitorSettings() {
         for (unsigned int i = 0; i < rdc_group_info.count; ++i) {
           status = get_processor_handle_from_id(rdc_group_info.entity_ids[i], &processor_handle);
           if (status != AMDSMI_STATUS_SUCCESS) {
-            RDC_LOG(RDC_ERROR,
-                    "RdcConfigSettingsImpl::monitorSettings(): get_processor_handle_from_id faied: "
-                        << status);
+            RDC_LOG(
+                RDC_ERROR,
+                "RdcConfigSettingsImpl::monitorSettings(): get_processor_handle_from_id failed: "
+                    << status);
             continue;
           }
 

@@ -5,6 +5,7 @@
  */
 
 #include <hip_test_common.hh>
+#include <algorithm>
 #include <initializer_list>
 #include <memory>
 #include "hip/driver_types.h"
@@ -105,7 +106,10 @@ hipExtent generateExtent(AllocationApi api) {
   hipExtent extent;
   if (api == AllocationApi::hipMalloc3D) {
     auto& extents3D = ExtentGenerator::getInstance().extents3D;
-    extent = GENERATE_REF(from_range(extents3D.begin(), extents3D.end()));
+    // At level_0: 4 edge cases + 4 random = 8 extents (vs 24 normally)
+    auto end3D = isQuickLevel() ? extents3D.begin() + std::min(extents3D.size(), size_t(8))
+                                : extents3D.end();
+    extent = GENERATE_REF(from_range(extents3D.begin(), end3D));
   } else {
     auto& extents2D = ExtentGenerator::getInstance().extents2D;
     extent = GENERATE_REF(from_range(extents2D.begin(), extents2D.end()));
@@ -116,7 +120,6 @@ hipExtent generateExtent(AllocationApi api) {
 
 
 HIP_TEST_CASE(Unit_hipMalloc3D_ValidatePitch) {
-  CHECK_IMAGE_SUPPORT
 
   hipPitchedPtr hipPitchedPtr;
   hipExtent validExtent{generateExtent(AllocationApi::hipMalloc3D)};
@@ -127,7 +130,6 @@ HIP_TEST_CASE(Unit_hipMalloc3D_ValidatePitch) {
 }
 
 HIP_TEST_CASE(Unit_hipMemAllocPitch_ValidatePitch) {
-  CHECK_IMAGE_SUPPORT
 
   size_t pitch = 0;
   hipDeviceptr_t ptr;
@@ -148,7 +150,6 @@ HIP_TEST_CASE(Unit_hipMemAllocPitch_ValidatePitch) {
 }
 
 HIP_TEST_CASE(Unit_hipMallocPitch_ValidatePitch) {
-  CHECK_IMAGE_SUPPORT
 
   size_t pitch = 0;
   void* ptr;
@@ -159,7 +160,6 @@ HIP_TEST_CASE(Unit_hipMallocPitch_ValidatePitch) {
 }
 
 HIP_TEST_CASE(Unit_hipMalloc3D_Negative) {
-  CHECK_IMAGE_SUPPORT
 
   SECTION("Invalid ptr") {
     hipExtent validExtent{1, 1, 1};
@@ -197,7 +197,6 @@ HIP_TEST_CASE(Unit_hipMalloc3D_Negative) {
 }
 
 HIP_TEST_CASE(Unit_hipMallocPitch_Negative) {
-  CHECK_IMAGE_SUPPORT
 
   size_t pitch = 0;
   void* ptr;
@@ -224,7 +223,6 @@ HIP_TEST_CASE(Unit_hipMallocPitch_Negative) {
 }
 
 HIP_TEST_CASE(Unit_hipMallocPitch_Zero_Dims) {
-  CHECK_IMAGE_SUPPORT
 
   void* ptr = nullptr;
   size_t pitch = 0;
@@ -241,7 +239,6 @@ HIP_TEST_CASE(Unit_hipMallocPitch_Zero_Dims) {
 }
 
 HIP_TEST_CASE(Unit_hipMemAllocPitch_Negative) {
-  CHECK_IMAGE_SUPPORT
 
   size_t pitch = 0;
   hipDeviceptr_t ptr{};
@@ -314,9 +311,12 @@ static constexpr auto ROWS{8};
 static constexpr auto CHUNK_LOOP{100};
 
 
-template <typename T> __global__ void copy_var(T* A, T* B, size_t ROWS, size_t pitch_A) {
-  for (uint64_t i = 0; i < ROWS * pitch_A; i = i + pitch_A) {
-    A[i] = B[i];
+template <typename T> __global__ void copy_var(T* A, T* B, size_t ROWS, size_t pitch_A, size_t pitch_B) {
+  const size_t pitcha = pitch_A / sizeof(T), pitchb = pitch_B / sizeof(T);
+  const size_t sizea = ROWS * pitcha, sizeb = ROWS * pitchb;
+
+  for (size_t ia = 0, ib = 0; ia < sizea && ib < sizeb; ia += pitcha, ib += sizeb) {
+    B[ib] = A[ia];
   }
 }
 template <typename T> static bool validateResult(T* A, T* B, size_t pitch_A) {
@@ -374,7 +374,6 @@ static void threadFunc(int gpu) { MemoryAllocDiffSizes<float>(gpu); }
  *
  */
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_Basic, int, unsigned int, float) {
-  CHECK_IMAGE_SUPPORT
 
   TestType* A_d;
   size_t pitch_A = 0;
@@ -390,7 +389,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_Basic, int, unsigned int, float) {
  */
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_SmallandBigChunks, int, unsigned int,
                    float) {
-  CHECK_IMAGE_SUPPORT
 
   MemoryAllocDiffSizes<TestType>(0);
 }
@@ -400,7 +398,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_SmallandBigChunks, int, unsigned int,
  * by performing Memcpy2D on the allocated memory.
  */
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_Memcpy2D, int, float, double) {
-  CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr}, *B_d{nullptr};
@@ -445,7 +442,6 @@ and verifies the hipMallocPitch API with small and big chunks data
 */
 
 HIP_TEST_CASE(Unit_hipMallocPitch_MultiThread) {
-  CHECK_IMAGE_SUPPORT
 
   std::vector<std::thread> threadlist;
   int devCnt = 0;
@@ -468,7 +464,6 @@ HIP_TEST_CASE(Unit_hipMallocPitch_MultiThread) {
  *  3. Validating the result
  */
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_KernelLaunch, int, float, double) {
-  CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr}, *B_d{nullptr};
@@ -484,9 +479,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_KernelLaunch, int, float, double) {
   HIP_CHECK(hipMemcpy2D(A_d, pitch_A, A_h, COLUMNS * sizeof(TestType), COLUMNS * sizeof(TestType),
                         ROWS, hipMemcpyHostToDevice));
 
-
   hipLaunchKernelGGL(copy_var<TestType>, dim3(1), dim3(1), 0, 0, static_cast<TestType*>(A_d),
-                     static_cast<TestType*>(B_d), ROWS, pitch_A);
+                     static_cast<TestType*>(B_d), ROWS, pitch_A, pitch_B);
   HIP_CHECK(hipGetLastError());
 
 

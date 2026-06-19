@@ -1,27 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/type_registry.hpp"
 #include "mocked_types.hpp"
+#include <cstdint>
 
 #include <gtest/gtest.h>
 
@@ -35,9 +17,9 @@ protected:
 
 TEST_F(type_registry_test, test_get_type_sample_1)
 {
-    test_sample_1        test_value{ 42, "hello" };
-    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<uint8_t> buffer(buffer_size);
+    test_sample_1             test_value{ 42, "hello" };
+    size_t                    buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<std::uint8_t> buffer(buffer_size);
     rocprofsys::trace_cache::serialize(buffer.data(), test_value);
 
     auto* buffer_data = buffer.data();
@@ -54,9 +36,9 @@ TEST_F(type_registry_test, test_get_type_sample_1)
 
 TEST_F(type_registry_test, test_get_type_sample_2)
 {
-    test_sample_2        test_value{ 3.14, 123 };
-    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<uint8_t> buffer(buffer_size);
+    test_sample_2             test_value{ 3.14, 123 };
+    size_t                    buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<std::uint8_t> buffer(buffer_size);
     rocprofsys::trace_cache::serialize(buffer.data(), test_value);
 
     auto* buffer_data = buffer.data();
@@ -73,8 +55,8 @@ TEST_F(type_registry_test, test_get_type_sample_2)
 
 TEST_F(type_registry_test, test_get_type_unknown_id)
 {
-    uint8_t  dummy_data = 0;
-    uint8_t* data       = &dummy_data;
+    std::uint8_t  dummy_data = 0;
+    std::uint8_t* data       = &dummy_data;
 
     auto result = type_registry.get_type(test_type_identifier_t::fragmented_space, data);
 
@@ -99,8 +81,8 @@ TEST_F(type_registry_test, test_multiple_calls_same_type)
     size_t buffer_size1 = rocprofsys::trace_cache::get_size(test_value1);
     size_t buffer_size2 = rocprofsys::trace_cache::get_size(test_value2);
 
-    std::vector<uint8_t> buffer1(buffer_size1);
-    std::vector<uint8_t> buffer2(buffer_size2);
+    std::vector<std::uint8_t> buffer1(buffer_size1);
+    std::vector<std::uint8_t> buffer2(buffer_size2);
 
     rocprofsys::trace_cache::serialize(buffer1.data(), test_value1);
     rocprofsys::trace_cache::serialize(buffer2.data(), test_value2);
@@ -135,9 +117,9 @@ protected:
 
 TEST_F(type_registry_optional_test, test_get_type_sample_5_with_value)
 {
-    test_sample_5        test_value{ std::optional<uint32_t>{ 42 } };
-    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<uint8_t> buffer(buffer_size);
+    test_sample_5             test_value{ std::optional<std::uint32_t>{ 42 } };
+    size_t                    buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<std::uint8_t> buffer(buffer_size);
     rocprofsys::trace_cache::serialize(buffer.data(), test_value);
 
     auto* buffer_data = buffer.data();
@@ -154,9 +136,9 @@ TEST_F(type_registry_optional_test, test_get_type_sample_5_with_value)
 
 TEST_F(type_registry_optional_test, test_get_type_sample_5_nullopt)
 {
-    test_sample_5        test_value{ std::nullopt };
-    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<uint8_t> buffer(buffer_size);
+    test_sample_5             test_value{ std::nullopt };
+    size_t                    buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<std::uint8_t> buffer(buffer_size);
     rocprofsys::trace_cache::serialize(buffer.data(), test_value);
 
     auto* buffer_data = buffer.data();

@@ -258,7 +258,7 @@ record_header_buffer::emplace(uint64_t _hash, Tp& _v)
     {
         // if there is space in the buffer, atomically get an index
         // for where the header record should be placed.
-        // NOTE: m_headers was resized to be large enough to accomodate
+        // NOTE: m_headers was resized to be large enough to accommodate
         // sizeof(Tp) == 1 for every entry in buffer
         auto idx = m_index.fetch_add(1, std::memory_order_release);
 
@@ -301,7 +301,7 @@ record_header_buffer::emplace(uint32_t _category, uint32_t _kind, Tp& _v)
     {
         // if there is space in the buffer, atomically get an index
         // for where the header record should be placed.
-        // NOTE: m_headers was resized to be large enough to accomodate
+        // NOTE: m_headers was resized to be large enough to accommodate
         // sizeof(Tp) == 1 for every entry in buffer
         auto idx = m_index.fetch_add(1, std::memory_order_release);
 

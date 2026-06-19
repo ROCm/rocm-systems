@@ -1,29 +1,11 @@
-// MIT License
-//
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "function_signature.hpp"
 #include "fwd.hpp"
+#include <cstdint>
 
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
@@ -45,8 +27,13 @@ struct module_function
     static void             reset_width();
     static void             update_width(const module_function& rhs);
     static void             write_header(std::ostream& os);
+    static string_t         get_source_object_name(procedure_t* func);
 
-    TIMEMORY_DEFAULT_OBJECT(module_function)
+    module_function()                                      = default;
+    module_function(const module_function&)                = default;
+    module_function(module_function&&) noexcept            = default;
+    module_function& operator=(const module_function&)     = default;
+    module_function& operator=(module_function&&) noexcept = default;
 
     module_function(module_t* mod, procedure_t* proc);
 
@@ -59,6 +46,7 @@ struct module_function
     // instrumentation
     std::pair<size_t, size_t> operator()(address_space_t* _addr_space,
                                          procedure_t*     _entr_trace,
+                                         procedure_t*     _entr_trace_args,
                                          procedure_t*     _exit_trace) const;
 
     // applies logic for all "is_*" and "can_*" checks below
@@ -96,20 +84,20 @@ struct module_function
     bool is_visibility_constrained() const;
     bool is_linkage_constrained() const;
 
-    size_t                                      start_address     = 0;
-    uint64_t                                    address_range     = 0;
-    uint64_t                                    num_instructions  = 0;
-    module_t*                                   module            = nullptr;
-    procedure_t*                                function          = nullptr;
-    symtab_func_t*                              symtab_function   = nullptr;
-    flow_graph_t*                               flow_graph        = nullptr;
-    string_t                                    module_name       = {};
-    string_t                                    function_name     = {};
-    function_signature                          signature         = {};
-    basic_block_set_t                           basic_blocks      = {};
-    basic_loop_vec_t                            loop_blocks       = {};
-    std::map<instruction_category_t, int64_t>   instruction_types = {};
-    std::vector<std::vector<instr_addr_pair_t>> instructions      = {};
+    size_t                                         start_address     = 0;
+    std::uint64_t                                  address_range     = 0;
+    std::uint64_t                                  num_instructions  = 0;
+    module_t*                                      module            = nullptr;
+    procedure_t*                                   function          = nullptr;
+    symtab_func_t*                                 symtab_function   = nullptr;
+    flow_graph_t*                                  flow_graph        = nullptr;
+    string_t                                       module_name       = {};
+    string_t                                       function_name     = {};
+    function_signature                             signature         = {};
+    basic_block_set_t                              basic_blocks      = {};
+    basic_loop_vec_t                               loop_blocks       = {};
+    std::map<instruction_category_t, std::int64_t> instruction_types = {};
+    std::vector<std::vector<instr_addr_pair_t>>    instructions      = {};
 
     mutable str_msg_vec_t messages = {};
 

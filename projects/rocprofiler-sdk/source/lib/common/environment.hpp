@@ -25,6 +25,7 @@
 #include "lib/common/logging.hpp"
 
 #include <unistd.h>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -37,6 +38,8 @@ namespace impl
 {
 struct sfinae
 {};
+
+std::optional<std::string> get_env_direct(std::string_view);
 
 std::string get_env(std::string_view, std::string_view);
 
@@ -59,6 +62,32 @@ template <typename Tp>
 int
 set_env(std::string_view, Tp, int override = 0);
 }  // namespace impl
+
+// Get environment variable value, distinguishing "not set" from "set to empty".
+//
+// This is the lowest-level API for reading environment variables when you need
+// to distinguish between:
+//   - Variable not set:         returns std::nullopt
+//   - Variable set to "":       returns std::optional("")
+//   - Variable set to "value":  returns std::optional("value")
+//
+// Usage:
+//   auto val = get_env_optional("MY_VAR");
+//   if(!val) {
+//       // Not set
+//   } else if(val->empty()) {
+//       // Set to empty string
+//   } else {
+//       // Set with value: *val
+//   }
+//
+// To check presence: if(get_env_optional("MY_VAR").has_value()) { ... }
+// For most cases, use get_env(name, default) instead.
+inline std::optional<std::string>
+get_env_optional(std::string_view env_id)
+{
+    return impl::get_env_direct(env_id);
+}
 
 template <typename Tp>
 inline auto
@@ -87,20 +116,22 @@ struct env_config
 {
     std::string env_name  = {};
     std::string env_value = {};
-    int         overwrite = 0;
+    int         overwrite = 0;  // -1=only if set, 0=no overwrite, 1=overwrite
 
     auto operator()(bool _verbose = false) const
     {
-        if(env_name.empty())
-            return -1;
+        if(env_name.empty()) return -1;
+        // overwrite < 0: only modify if variable already exists
+        if(overwrite < 0 && !get_env_optional(env_name).has_value())
+            return 0;
         else if(_verbose)
         {
             ROCP_INFO << "[rocprofiler][set_env] setenv(\"" << env_name << "\", \"" << env_value
                       << "\", " << overwrite << ")\n";
         }
-        return (env_value.empty() && overwrite > 0)
-                   ? unsetenv(env_name.c_str())
-                   : setenv(env_name.c_str(), env_value.c_str(), overwrite);
+        auto _ow = (overwrite < 0) ? 1 : overwrite;
+        return (env_value.empty() && _ow > 0) ? unsetenv(env_name.c_str())
+                                              : setenv(env_name.c_str(), env_value.c_str(), _ow);
     }
 };
 
@@ -132,7 +163,7 @@ env_store::env_store(ContainerT<env_config, TailT...>&& _container)
     for(const auto& itr : _container)
     {
         m_original.emplace_back(env_config{itr.env_name, get_env(itr.env_name, ""), 1});
-        m_modified.emplace_back(env_config{itr.env_name, itr.env_value, 1});
+        m_modified.emplace_back(env_config{itr.env_name, itr.env_value, itr.overwrite});
     }
 }
 }  // namespace common

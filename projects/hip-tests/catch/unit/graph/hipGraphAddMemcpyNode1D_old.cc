@@ -115,7 +115,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Functional) {
     }
 
     if (!peerAccess) {
-      WARN("Skipping test as peer device access is not found!");
+      WARN("Skipping peer memcpy section: peer access is not available between devices.");
       return;
     }
     validateMemcpyNode1DArray(true);

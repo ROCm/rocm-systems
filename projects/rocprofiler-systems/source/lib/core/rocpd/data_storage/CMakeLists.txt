@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 set(data_storage_sources ${CMAKE_CURRENT_LIST_DIR}/database.cpp)
 
 set(data_storage_headers

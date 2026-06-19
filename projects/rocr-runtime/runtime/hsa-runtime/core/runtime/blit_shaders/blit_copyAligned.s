@@ -71,6 +71,22 @@
 	.endif
 .endm
 
+.macro S_WAITCNT_KMCNT
+  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
+    s_wait_kmcnt             0
+  .else
+    s_waitcnt                lgkmcnt(0)
+  .endif
+.endm
+
+.macro S_WAITCNT_LOADCNT
+  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
+    s_wait_loadcnt           0
+  .else
+    s_waitcnt                vmcnt(0)
+  .endif
+.endm
+
 .p2align 8
 
 CopyAligned:
@@ -95,7 +111,7 @@ compute_pgm_rsrc1_vgprs = CopyAlignedRsrc1VGPRs
   s_load_dwordx4  s[16:19], s[0:1], 0x30
   s_load_dwordx4  s[20:23], s[0:1], 0x40
   s_load_dword    s24, s[0:1], 0x50
-  s_waitcnt                lgkmcnt(0)
+  S_WAITCNT_KMCNT
 
   .if (.amdgcn.gfx_generation_number == 12)
     s_lshl_b32              s2, ttmp9, 0x6
@@ -122,7 +138,7 @@ compute_pgm_rsrc1_vgprs = CopyAlignedRsrc1VGPRs
 
 
     FLAT_LOAD_UBYTE         v1, v[2:3]
-    s_waitcnt               vmcnt(0)
+    S_WAITCNT_LOADCNT
     V_ADD_CO_U32            v2, v2, s24
     V_ADD_CO_CI_U32         v3, v3, 0x0
 
@@ -180,7 +196,7 @@ compute_pgm_rsrc1_vgprs = CopyAlignedRsrc1VGPRs
 
 mCopyAlignedPhase2Load 0, (kCopyAlignedUnroll - 1)
 
-  s_waitcnt                vmcnt(0)
+  S_WAITCNT_LOADCNT
 
 .macro mCopyAlignedPhase2Store iter iter_end
     .if kCopyAlignedVecWidth == 4
@@ -192,10 +208,9 @@ mCopyAlignedPhase2Load 0, (kCopyAlignedUnroll - 1)
 	V_ADD_CO_U32         v4, v4, s25
 	V_ADD_CO_CI_U32      v5, v5, 0x0
 
-
-    .if (\iter_end - \iter)
-      mCopyAlignedPhase2Store (\iter + 1), \iter_end
-    .endif
+  .if (\iter_end - \iter)
+    mCopyAlignedPhase2Store (\iter + 1), \iter_end
+  .endif
 .endm
 
 mCopyAlignedPhase2Store 0, (kCopyAlignedUnroll - 1)
@@ -225,7 +240,7 @@ mCopyAlignedPhase2Store 0, (kCopyAlignedUnroll - 1)
     FLAT_LOAD_DWORD         v1, v[2:3]
     V_ADD_CO_U32            v2, v2, s25
     V_ADD_CO_CI_U32         v3, v3, 0x0
-    s_waitcnt               vmcnt(0)
+    S_WAITCNT_LOADCNT
 
 
     flat_store_dword        v[4:5], v1
@@ -251,7 +266,7 @@ mCopyAlignedPhase2Store 0, (kCopyAlignedUnroll - 1)
     s_and_b64               exec, exec, vcc
 
     FLAT_LOAD_UBYTE         v1, v[2:3]
-    s_waitcnt               vmcnt(0)
+    S_WAITCNT_LOADCNT
 
     FLAT_STORE_BYTE         v[4:5], v1
 

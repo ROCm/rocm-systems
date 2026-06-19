@@ -99,12 +99,12 @@ View the help menu of ``rocprof-sys-sample`` with the ``-h`` / ``--help`` option
                                                 --process-duration (count: 1)
                                                 --cpus (count: unlimited, dtype: int or range)
                                                 --gpus (count: unlimited, dtype: int or range)
-                                                --freq (count: 1)
+                                                --sampling-freq (count: 1)
                                                 --sampling-wait (count: 1)
                                                 --sampling-duration (count: 1)
                                                 --tids (min: 1)
-                                                --cputime (min: 0)
-                                                --realtime (min: 0)
+                                                --sample-cputime (min: 0)
+                                                --sample-realtime (min: 0)
                                                 --include (count: unlimited)
                                                 --exclude (count: unlimited)
                                                 --cpu-events (count: unlimited)
@@ -183,7 +183,7 @@ View the help menu of ``rocprof-sys-sample`` with the ``-h`` / ``--help`` option
 
       [GENERAL SAMPLING OPTIONS] General options for timer-based sampling per-thread
 
-      -f, --freq                     Set the default sampling frequency (number of interrupts per second) (count: 1)
+      -f, --sampling-freq             Set the default sampling frequency (number of interrupts per second) (count: 1)
       --sampling-wait                Set the default wait time (i.e. delay) before taking first sample (in seconds). This delay time is based on the clock
                                     of the sampler, i.e., a delay of 1 second for CPU-clock sampler may not equal 1 second of realtime (count: 1)
       --sampling-duration            Set the duration of the sampling (in seconds of realtime). I.e., it is possible (currently) to set a CPU-clock time
@@ -193,14 +193,14 @@ View the help menu of ``rocprof-sys-sample`` with the ``-h`` / ``--help`` option
 
       [SAMPLING TIMER OPTIONS] These options determine the heuristic for deciding when to take a sample
 
-      --cputime                      Sample based on a CPU-clock timer (default). Accepts zero or more arguments:
+      --sample-cputime               Sample based on a CPU-clock timer (default). Accepts zero or more arguments:
                                           0. Enables sampling based on CPU-clock timer.
                                           1. Interrupts per second. E.g., 100 == sample every 10 milliseconds of CPU-time.
                                           2. Delay (in seconds of CPU-clock time). I.e., how long each thread should wait before taking first sample.
                                           3+ Thread IDs to target for sampling, starting at 0 (the main thread).
                                              May be specified as index or range, e.g., '0 2-4' will be interpreted as:
                                                 sample the main thread (0), do not sample the first child thread but sample the 2nd, 3rd, and 4th child threads (min: 0)
-      --realtime                     Sample based on a real-clock timer. Accepts zero or more arguments:
+      --sample-realtime              Sample based on a real-clock timer. Accepts zero or more arguments:
                                           0. Enables sampling based on real-clock timer.
                                           1. Interrupts per second. E.g., 100 == sample every 10 milliseconds of realtime.
                                           2. Delay (in seconds of real-clock time). I.e., how long each thread should wait before taking first sample.
@@ -229,7 +229,7 @@ View the help menu of ``rocprof-sys-sample`` with the ``-h`` / ``--help`` option
       --hsa-interrupt [ 0 | 1 ]      Set the value of the HSA_ENABLE_INTERRUPT environment variable.
                                        ROCm version 5.2 and older have a bug which will cause a deadlock if a sample is taken while waiting for the signal
                                        that a kernel completed -- which happens when sampling with a real-clock timer. We require this option to be set to
-                                       when --realtime is specified to make users aware that, while this may fix the bug, it can have a negative impact on
+                                       when --sample-realtime is specified to make users aware that, while this may fix the bug, it can have a negative impact on
                                        performance.
                                        Values:
                                           0     avoid triggering the bug, potentially at the cost of reduced performance

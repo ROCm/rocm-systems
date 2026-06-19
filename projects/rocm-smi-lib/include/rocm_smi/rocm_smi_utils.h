@@ -225,7 +225,7 @@ struct ScopedPthread {
  private:
   ScopedPthread(const ScopedPthread&);
   pthread_wrap& pthrd_ref_;
-  bool mutex_not_acquired_;  // Use for AcquireNB (not for Aquire())
+  bool mutex_not_acquired_;  // Use for AcquireNB (not for Acquire())
 };
 
 #define PASTE2(x, y) x##y
