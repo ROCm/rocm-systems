@@ -619,7 +619,7 @@ void __global__ reduceKernel(T* output,
                              unsigned long long* extraMasks,
                              AggregationType* aggType)
 {
-  int tid = threadIdx.x;
+  int tid = __lane_id();
   int laneId = tid % warpSize;
   cg::thread_block mygroup = cg::this_thread_block();
   auto mytile = cg::tiled_partition<TileSize>(mygroup);
@@ -657,7 +657,7 @@ void __global__ reduceKernelCoalesced(T* output,
                                       unsigned long long* extraMasks,
                                       AggregationType* aggType)
 {
-  int tid = threadIdx.x;
+  int tid = __lane_id();
   int laneId = tid % warpSize;
 
   for (int i = 0; i < kNumReduces; i++) {
@@ -689,7 +689,8 @@ void __global__ reduceKernelCoalesced(T* output,
 
 // @TileSize the tile size or 0 when testing coalesced groups
 template <size_t TileSize, class Op, class T>
-void aggregateForTypeAndOp(AggregationType aggType)
+void aggregateForTypeAndOp(AggregationType aggType,
+                           dim3 blockDim)
 {
   using distribution = typename DistributionType<T>::type;
   int wavefrontSize = getWarpSize();
@@ -705,7 +706,6 @@ void aggregateForTypeAndOp(AggregationType aggType)
   LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
   std::mt19937_64 gen(Catch::rngSeed());
   dim3 gridDim = { 1 };
-  dim3 blockDim = { static_cast<unsigned short>(wavefrontSize) };
   hipError_t status;
   typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
                                          (std::is_signed<T>::value? -1023 : 0);
@@ -812,33 +812,33 @@ void aggregateForTypeAndOp(AggregationType aggType)
 }
 
 template <class Op, class T>
-void aggregateCoopTiles(AggregationType, const std::index_sequence<>)
+void aggregateCoopTiles(AggregationType, dim3, const std::index_sequence<>)
 {
 }
 
 template <class Op, class T, size_t TileSize, size_t... TileSizes>
-void aggregateCoopTiles(AggregationType aggType, const std::index_sequence<TileSize, TileSizes...>)
+void aggregateCoopTiles(AggregationType aggType, dim3 blockDim, const std::index_sequence<TileSize, TileSizes...>)
 {
   const std::index_sequence<TileSizes...> remainingTiles;
 
-  aggregateForTypeAndOp<TileSize, Op, T>(aggType);
-  aggregateCoopTiles<Op, T>(aggType, remainingTiles);
+  aggregateForTypeAndOp<TileSize, Op, T>(aggType, blockDim);
+  aggregateCoopTiles<Op, T>(aggType, blockDim, remainingTiles);
 }
 
 template <bool Coalesced, class Op, class T, int MaxTileSize>
-void runAggregationRandomForType(AggregationType aggType)
+void runAggregationRandomForType(AggregationType aggType, dim3 blockDim)
 {
   if constexpr (Coalesced) {
-    aggregateForTypeAndOp<0, Op, T>(aggType);
+    aggregateForTypeAndOp<0, Op, T>(aggType, blockDim);
   } else if constexpr (MaxTileSize <= 4) {
     std::index_sequence<1, 2, 4> tileSizes;
-    aggregateCoopTiles<Op, T>(aggType, tileSizes);
+    aggregateCoopTiles<Op, T>(aggType, blockDim, tileSizes);
   } else if constexpr (MaxTileSize <= 32) {
     std::index_sequence<1, 2, 4, 8, 16, 32> tileSizes;
-    aggregateCoopTiles<Op, T>(aggType, tileSizes);
+    aggregateCoopTiles<Op, T>(aggType, blockDim, tileSizes);
   } else {
     std::index_sequence<1, 2, 4, 8, 16, 32, 64> tileSizes;
-    aggregateCoopTiles<Op, T>(aggType, tileSizes);
+    aggregateCoopTiles<Op, T>(aggType, blockDim, tileSizes);
   }
 }
 
@@ -851,8 +851,10 @@ template <bool Coalesced, class T, int WarpSize, class Op, class... Ops>
 void runAggregationRandomForOps(AggregationType aggType, const std::tuple<Op, Ops...>)
 {
   const std::tuple<Ops...> remainingOps;
+  int wavefrontSize = getWarpSize();
+  dim3 blockDim = {static_cast<unsigned int>(wavefrontSize)};
 
-  runAggregationRandomForType<Coalesced, Op, T, WarpSize>(aggType);
+  runAggregationRandomForType<Coalesced, Op, T, WarpSize>(aggType, blockDim);
   runAggregationRandomForOps<Coalesced, T, WarpSize>(aggType, remainingOps);
 }
 
@@ -864,8 +866,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_arithmetic, int, uns
   std::tuple<cooperative_groups::plus<TestType>,
              cooperative_groups::less<TestType>,
              cooperative_groups::greater<TestType>> types;
+  int wavefrontSize = getWarpSize();
+  dim3 blockDim = {static_cast<unsigned int>(wavefrontSize)};
 
-  if (getWarpSize() == 32) {
+  if (wavefrontSize == 32) {
     runAggregationRandomForOps<false, TestType, 32>(AggregationType::Reduce, types);
   } else {
     runAggregationRandomForOps<false, TestType, 64>(AggregationType::Reduce, types);
@@ -889,17 +893,22 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_boolean, int, unsign
 // passes a custom operator to cooperative_groups::reduce()
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Custom_Op)
 {
-  if (getWarpSize() == 32) {
-    runAggregationRandomForType<false, MaxOfAbsolute<int>, int, 32>(AggregationType::Reduce);
+  int wavefrontSize = getWarpSize();
+
+  dim3 blockDim = {static_cast<unsigned int>(wavefrontSize)};
+  if (wavefrontSize == 32) {
+    runAggregationRandomForType<false, MaxOfAbsolute<int>, int, 32>(AggregationType::Reduce, blockDim);
   } else {
-    runAggregationRandomForType<false, MaxOfAbsolute<int>, int, 64>(AggregationType::Reduce);
+    runAggregationRandomForType<false, MaxOfAbsolute<int>, int, 64>(AggregationType::Reduce, blockDim);
   }
 }
 
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Scan_Custom_Op)
 {
-  // only using 4 to avoid long long overflows
-  runAggregationRandomForType<false, NonCommutativeOp<long long>, long long, 4>(AggregationType::InclusiveScan);
+  dim3 blockDim = {static_cast<unsigned int>(getWarpSize())};
+  // only using 4 threads to avoid long long overflows
+  runAggregationRandomForType<false, NonCommutativeOp<long long>, long long, 4>(
+    AggregationType::InclusiveScan, blockDim);
 }
 
 struct Vector {
@@ -1540,6 +1549,40 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int
       runAggregationRandomForOps<false, TestType, 32>(AggregationType::ExclusiveScan, types);
     } else {
       runAggregationRandomForOps<false, TestType, 64>(AggregationType::ExclusiveScan, types);
+    }
+  }
+}
+
+// make sures that tiled blocks that use the y or z dimension work correctly
+TEST_CASE(Unit_Thread_Block_Tile_2D_3D_Blocks)
+{
+  int wavefrontSize = getWarpSize();
+
+  SECTION("2D") {
+    dim3 blockDim {1, 2, static_cast<unsigned int>(wavefrontSize / 2)};
+
+    if (wavefrontSize == 32) {
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::Reduce, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::InclusiveScan, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::ExclusiveScan, blockDim);
+    } else {
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::Reduce, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::InclusiveScan, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::ExclusiveScan, blockDim);
+    }
+  }
+
+  SECTION("3D") {
+    dim3 blockDim {static_cast<unsigned int>(wavefrontSize) / 2, 2, 1};
+
+    if (wavefrontSize == 32) {
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::Reduce, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::InclusiveScan, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::ExclusiveScan, blockDim);
+    } else {
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::Reduce, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::InclusiveScan, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::ExclusiveScan, blockDim);
     }
   }
 }

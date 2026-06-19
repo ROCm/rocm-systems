@@ -1462,7 +1462,7 @@ __CG_QUALIFIER__ unsigned long long groupMask(const TyGroup& group)
     // we cannot simply just use the __activemask() here, because more than one tile could have active
     // threads at a time; we need to mask away the threads that not part of this tile first
     mask >>= (64 - group.num_threads());
-    mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
+    mask <<= (((internal::workgroup::thread_rank() % warpSize) / group.num_threads()) * group.num_threads());
   }
 
   return mask;

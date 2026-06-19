@@ -279,6 +279,10 @@ cooperativeGrps:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows, amd_wsl]
+  Unit_Thread_Block_Tile_2D_3D_Blocks:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows, amd_wsl]
   Unit_Thread_Block_Coalesced_Scan_arithmetic:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
