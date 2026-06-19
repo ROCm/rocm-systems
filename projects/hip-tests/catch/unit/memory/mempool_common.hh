@@ -310,6 +310,7 @@ class streamMemAllocTest {
       : size(N), threadSafe(threadSafe) {
     byte_size = N*sizeof(int);
   }
+  void setThreadSafe(bool ts) { threadSafe = ts; }
   // Create host buffers and initialize them with input data
   void createHostBufferWithData() {
     A_h = reinterpret_cast<int*>(malloc(byte_size));
