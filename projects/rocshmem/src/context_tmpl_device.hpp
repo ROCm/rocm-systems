@@ -202,7 +202,7 @@ __device__ void Context::fcollect(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void Context::broadcast(rocshmem_team_t team, T *dest,
+__device__ void Context::broadcast_wg(rocshmem_team_t team, T *dest,
                                    const T *source, int nelems, int pe_root) {
   if (nelems == 0) {
     return;
@@ -212,11 +212,11 @@ __device__ void Context::broadcast(rocshmem_team_t team, T *dest,
     ctxStats.incStat(NUM_BROADCAST);
   }
 
-  DISPATCH(broadcast<T>(team, dest, source, nelems, pe_root));
+  DISPATCH(broadcast_wg<T>(team, dest, source, nelems, pe_root));
 }
 
 template <typename T>
-__device__ void Context::broadcast(T *dest, const T *source, int nelems,
+__device__ void Context::broadcast_wg(T *dest, const T *source, int nelems,
                                    int pe_root, int pe_start, int log_pe_stride,
                                    int pe_size,
                                    long *p_sync) {  // NOLINT(runtime/int)
@@ -228,7 +228,7 @@ __device__ void Context::broadcast(T *dest, const T *source, int nelems,
     ctxStats.incStat(NUM_BROADCAST);
   }
 
-  DISPATCH(broadcast<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride,
+  DISPATCH(broadcast_wg<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride,
                         pe_size, p_sync));
 }
 

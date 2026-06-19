@@ -145,7 +145,7 @@ class IPCContext : public Context {
                                    int nreduce);
 
   template <typename T>
-  __device__ void broadcast(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
                             int nelems, int pe_root);
 
   template <typename T>
@@ -367,17 +367,17 @@ class IPCContext : public Context {
 
   //internal functions used by collective operations
   template <typename T>
-  __device__ void internal_broadcast(T *dest, const T *source, int nelems, int pe_root,
+  __device__ void internal_broadcast_wg(T *dest, const T *source, int nelems, int pe_root,
                                      int pe_start, int stride, int pe_size,
                                      long *p_sync);  // NOLINT(runtime/int)
 
   template <typename T>
-  __device__ void internal_put_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_put_broadcast_wg(T *dst, const T *src, int nelems,
                                          int pe_root, int PE_start,
                                          int logPE_stride, int PE_size);  // NOLINT(runtime/int)
 
   template <typename T>
-  __device__ void internal_get_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_get_broadcast_wg(T *dst, const T *src, int nelems,
                                          int pe_root);  // NOLINT(runtime/int)
 
   __device__ void internal_broadcastmem_wave(void *dst, const void *src, int nelems,

@@ -660,7 +660,7 @@ __device__ void rocshmem_broadcast_wg(rocshmem_ctx_t ctx,
   LOGD_API("device::broadcast_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d, root=%d)",
     ctx.ctx_opaque, team, dest, source, nelem, pe_root);
 
-  get_internal_ctx(ctx)->broadcast<T>(team, dest, source, nelem, pe_root);
+  get_internal_ctx(ctx)->broadcast_wg<T>(team, dest, source, nelem, pe_root);
 }
 
 #define BROADCAST_WAVE_IMP_GEN(T, TNAME) \
