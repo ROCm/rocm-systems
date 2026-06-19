@@ -7,10 +7,15 @@
 #include "debug.h"
 
 #include <atomic>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <pthread.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -41,9 +46,19 @@ static void ensureGlobalInit() {
     }
     if (s_enabled) {
       if (s_outDir[0]) {
-        mkdir(s_outDir, 0755);
-        INFO(NCCL_BOOTSTRAP, "BootstrapTrace: enabled, log-dump + binary dump dir=%s", s_outDir);
-      } else {
+        // rec_26 M3: a discarded mkdir() makes the binary-dump path look
+        // enabled even when the directory can't be created. Check it; on
+        // failure (other than EEXIST) clear s_outDir so we skip binary dumps
+        // and warn the user instead of silently dropping every fopen().
+        if (mkdir(s_outDir, 0755) != 0 && errno != EEXIST) {
+          WARN("BootstrapTrace: cannot create dump dir %s (%s); binary dump disabled, log-dump only",
+               s_outDir, strerror(errno));
+          s_outDir[0] = '\0';
+        } else {
+          INFO(NCCL_BOOTSTRAP, "BootstrapTrace: enabled, log-dump + binary dump dir=%s", s_outDir);
+        }
+      }
+      if (!s_outDir[0]) {
         INFO(NCCL_BOOTSTRAP, "BootstrapTrace: enabled, log-dump only (set NCCL_BOOTSTRAP_TRACE_DIR for binary dump)");
       }
     }
@@ -56,6 +71,13 @@ static void ensureGlobalInit() {
 }
 
 bool isEnabled() {
+  // rec_26 M4: fast path on hot callers (kernel launch). Once initialised this
+  // is a single acquire atomic load + predicted-not-taken branch; no spin.
+  // Acquire (not relaxed) is required so that observing state==2 also makes the
+  // s_enabled store visible on weak-memory architectures (paired with the
+  // release store in ensureGlobalInit).
+  if (__builtin_expect(s_initState.load(std::memory_order_acquire) == 2, 1))
+    return s_enabled;
   ensureGlobalInit();
   return s_enabled;
 }
@@ -65,16 +87,22 @@ const char* outputDir() {
   return s_outDir;
 }
 
-static thread_local PerThreadBuffer* tl_buf = nullptr;
+// rec_26 C1: a bare `thread_local PerThreadBuffer*` allocated with new is never
+// freed, leaking 216 KB per thread in worker-pool / thread-cycling frameworks.
+// A thread_local unique_ptr ties the buffer lifetime to thread teardown.
+static thread_local std::unique_ptr<PerThreadBuffer> tl_buf;
 
 PerThreadBuffer* getBuffer() {
-  if (tl_buf == nullptr && isEnabled()) {
-    tl_buf = new PerThreadBuffer();
+  if (!tl_buf && isEnabled()) {
+    tl_buf.reset(new PerThreadBuffer());
     tl_buf->idx = 0;
+    tl_buf->netIdx = 0;
     tl_buf->rank = -1;
     tl_buf->isRootThread = 0;
+    tl_buf->eventOverflow = 0;
+    tl_buf->netOverflow = 0;
   }
-  return tl_buf;
+  return tl_buf.get();
 }
 
 void initThreadBuffer(int rank, int isRootThread) {
@@ -85,11 +113,21 @@ void initThreadBuffer(int rank, int isRootThread) {
   b->isRootThread = isRootThread;
 }
 
+// rec_26 M2: warn exactly once (process-wide) when a ring fills, so a truncated
+// trace is never mistaken for a complete one. Per-thread overflow counts are
+// also written to the binary dump header.
+static std::atomic<int> s_overflowWarned{0};
+static void warnOverflowOnce() {
+  int expected = 0;
+  if (s_overflowWarned.compare_exchange_strong(expected, 1))
+    WARN("BootstrapTrace: ring buffer full, events dropped (per-thread overflow counts in dump header)");
+}
+
 void recordEvent(uint16_t phase, uint16_t md, uint64_t startNs, uint32_t bytes) {
   if (!isEnabled()) return;
   PerThreadBuffer* b = getBuffer();
   if (!b) return;
-  if (b->idx >= RING_BUFFER_SIZE) return;
+  if (b->idx >= RING_BUFFER_SIZE) { b->eventOverflow++; warnOverflowOnce(); return; }
   uint64_t now = nowNs();
   Event& e = b->events[b->idx++];
   e.t_ns   = startNs;
@@ -104,7 +142,7 @@ void recordInstant(uint16_t phase, uint16_t md) {
   if (!isEnabled()) return;
   PerThreadBuffer* b = getBuffer();
   if (!b) return;
-  if (b->idx >= RING_BUFFER_SIZE) return;
+  if (b->idx >= RING_BUFFER_SIZE) { b->eventOverflow++; warnOverflowOnce(); return; }
   Event& e = b->events[b->idx++];
   e.t_ns   = nowNs();
   e.rank   = (uint32_t)b->rank;
@@ -112,6 +150,32 @@ void recordInstant(uint16_t phase, uint16_t md) {
   e.md     = md;
   e.dur_us = 0;
   e.bytes  = 0;
+}
+
+void recordNetStat(uint16_t phase, uint16_t md, int fd) {
+  if (!isEnabled() || fd < 0) return;
+  PerThreadBuffer* b = getBuffer();
+  if (!b) return;
+  struct tcp_info ti;
+  socklen_t len = sizeof(ti);
+  memset(&ti, 0, sizeof(ti));
+  // Non-TCP sockets / closed fds simply yield no sample.
+  if (getsockopt(fd, IPPROTO_TCP, TCP_INFO, &ti, &len) != 0) return;
+  if (b->netIdx >= NET_SAMPLE_SIZE) { b->netOverflow++; warnOverflowOnce(); return; }
+  NetSample& s = b->netSamples[b->netIdx++];
+  s.t_ns          = nowNs();
+  s.rank          = (uint32_t)b->rank;
+  s.phase         = phase;
+  s.md            = md;
+  s.rtt_us        = ti.tcpi_rtt;
+  s.rttvar_us     = ti.tcpi_rttvar;
+  s.rto_us        = ti.tcpi_rto;
+  s.snd_cwnd      = ti.tcpi_snd_cwnd;
+  s.total_retrans = ti.tcpi_total_retrans;
+  s.lost          = ti.tcpi_lost;
+  s.unacked       = ti.tcpi_unacked;
+  s.ca_state      = ti.tcpi_ca_state;
+  s.reserved      = 0;
 }
 
 static const char* phaseName(uint16_t p) {
@@ -168,14 +232,23 @@ static const char* phaseName(uint16_t p) {
 // Grep with `grep BTRACE` on the user's NCCL log; one INFO call per line keeps
 // each event on its own logger line for easy filtering.
 static void logDump(PerThreadBuffer* b) {
-  INFO(NCCL_BOOTSTRAP, "BTRACE dump begin rank=%d root=%d events=%d",
-       b->rank, b->isRootThread, b->idx);
+  INFO(NCCL_BOOTSTRAP, "BTRACE dump begin rank=%d root=%d events=%d net=%d ev_overflow=%d net_overflow=%d",
+       b->rank, b->isRootThread, b->idx, b->netIdx, b->eventOverflow, b->netOverflow);
   for (int i = 0; i < b->idx; ++i) {
     const Event& e = b->events[i];
     INFO(NCCL_BOOTSTRAP,
          "BTRACE rank=%d root=%d p=%u name=%s t_ns=%llu dur_us=%u md=%u bytes=%u",
          b->rank, b->isRootThread, (unsigned)e.phase, phaseName(e.phase),
          (unsigned long long)e.t_ns, e.dur_us, (unsigned)e.md, e.bytes);
+  }
+  // TCP_INFO samples on their own grep-able line prefix (BNETSTAT).
+  for (int i = 0; i < b->netIdx; ++i) {
+    const NetSample& s = b->netSamples[i];
+    INFO(NCCL_BOOTSTRAP,
+         "BNETSTAT rank=%d root=%d p=%u name=%s t_ns=%llu md=%u rtt_us=%u rttvar_us=%u rto_us=%u cwnd=%u retrans=%u lost=%u unacked=%u ca_state=%u",
+         b->rank, b->isRootThread, (unsigned)s.phase, phaseName(s.phase),
+         (unsigned long long)s.t_ns, (unsigned)s.md, s.rtt_us, s.rttvar_us, s.rto_us,
+         s.snd_cwnd, s.total_retrans, s.lost, s.unacked, (unsigned)s.ca_state);
   }
   INFO(NCCL_BOOTSTRAP, "BTRACE dump end rank=%d root=%d", b->rank, b->isRootThread);
 }
@@ -189,21 +262,45 @@ static void binaryDump(PerThreadBuffer* b) {
     snprintf(path, sizeof(path), "%s/rank%05d_pid%d.bin",
              s_outDir, b->rank, (int)getpid());
   }
-  FILE* f = fopen(path, "wb");
+  // Append, not truncate: dumpThreadBuffer() is called multiple times per
+  // thread across the deployment timeline (bootstrap end, deploy init end,
+  // kernel launch). Each call flushes and resets the ring, so truncating here
+  // would keep only the last batch and silently drop the bootstrap phases and
+  // net samples. Appending writes one self-describing [header|events|nets]
+  // segment per dump; the reader iterates segments to EOF. (pid is in the
+  // filename, so a fresh process never appends to a previous run's file.)
+  FILE* f = fopen(path, "ab");
   if (!f) {
     WARN("BootstrapTrace: cannot open %s for write", path);
     return;
   }
-  // Header: magic(4), version(4), rank(4), isRoot(4), count(4), reserved(4)
-  uint32_t hdr[6] = {
-      0xB007F00D,
-      1u,
+  // Header (all uint32, native byte order):
+  //   [0] magic        0xB007F00D
+  //   [1] version      FORMAT_VERSION
+  //   [2] endian_mark  0x01020304  (rec_26 C2: reader detects byte order and
+  //                                 swaps if it reads it as 0x04030201)
+  //   [3] rank
+  //   [4] isRoot
+  //   [5] eventCount
+  //   [6] netCount
+  //   [7] eventOverflow
+  //   [8] netOverflow
+  //   [9] reserved
+  // Followed by eventCount Event records, then netCount NetSample records.
+  uint32_t hdr[10] = {
+      0xB007F00Du,
+      FORMAT_VERSION,
+      0x01020304u,
       (uint32_t)b->rank,
       (uint32_t)b->isRootThread,
       (uint32_t)b->idx,
+      (uint32_t)b->netIdx,
+      (uint32_t)b->eventOverflow,
+      (uint32_t)b->netOverflow,
       0u};
   fwrite(hdr, sizeof(hdr), 1, f);
   fwrite(b->events, sizeof(Event), b->idx, f);
+  fwrite(b->netSamples, sizeof(NetSample), b->netIdx, f);
   fclose(f);
 }
 
@@ -218,8 +315,9 @@ void dumpThreadBuffer() {
   // Optional binary dump when NCCL_BOOTSTRAP_TRACE_DIR was set.
   if (s_outDir[0]) binaryDump(b);
 
-  // Reset idx after dump to avoid double-write if init is re-entered.
+  // Reset after dump to avoid double-write if init is re-entered.
   b->idx = 0;
+  b->netIdx = 0;
 }
 
 }  // namespace ncclBootstrapTrace

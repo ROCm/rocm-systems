@@ -11,7 +11,10 @@
  *   NCCL_BOOTSTRAP_TRACE=1                       # accumulate + log-dump
  *   NCCL_BOOTSTRAP_TRACE_DIR=/path/to/dump_dir   # ALSO write binary dump
  *
- * No measurable overhead when disabled (single bool check + early return).
+ * Overhead when disabled: one relaxed atomic load on the fast path of
+ * isEnabled() (branch-predicted false). Not literally zero, but negligible;
+ * callers on hot paths (e.g. kernel launch) still gate every record behind
+ * this single predicted-not-taken branch.
  *************************************************************************/
 #ifndef BOOTSTRAP_TRACE_H_
 #define BOOTSTRAP_TRACE_H_
@@ -83,13 +86,44 @@ struct Event {
 };
 static_assert(sizeof(Event) == 24, "Event must be packed to 24B");
 
-constexpr int RING_BUFFER_SIZE = 8192;  // 192 KB per thread
+// Kernel TCP_INFO sample, captured from a connected socket fd at the end of a
+// network phase. Lets offline analysis attribute bootstrap latency variance to
+// transport behaviour (RTT spikes, retransmits, congestion-control state) vs.
+// CPU/scheduling. Recorded into a separate, smaller ring so the common Event
+// hot path stays 24B and untouched.
+struct NetSample {
+  uint64_t t_ns;          // capture time (CLOCK_MONOTONIC_RAW abs ns)
+  uint32_t rank;          // global rank
+  uint16_t phase;         // Phase this sample is attached to
+  uint16_t md;            // peer rank (or 0)
+  uint32_t rtt_us;        // tcpi_rtt (smoothed RTT, microseconds)
+  uint32_t rttvar_us;     // tcpi_rttvar
+  uint32_t rto_us;        // tcpi_rto (retransmission timeout)
+  uint32_t snd_cwnd;      // tcpi_snd_cwnd (segments)
+  uint32_t total_retrans; // tcpi_total_retrans (cumulative on this connection)
+  uint32_t lost;          // tcpi_lost
+  uint32_t unacked;       // tcpi_unacked
+  uint16_t ca_state;      // tcpi_ca_state (0=Open, !=0 => loss/recovery)
+  uint16_t reserved;      // pad to 8-byte multiple
+};
+static_assert(sizeof(NetSample) == 48, "NetSample must be packed to 48B");
+
+constexpr int RING_BUFFER_SIZE = 8192;     // 192 KB per thread (Event)
+constexpr int NET_SAMPLE_SIZE  = 512;      // 24 KB per thread (NetSample)
+
+// Binary dump format version. Bump on ANY change to Event/NetSample layout or
+// header so the Python reader rejects stale/mismatched files (rec_26 m3).
+constexpr uint32_t FORMAT_VERSION = 2;
 
 struct PerThreadBuffer {
   Event events[RING_BUFFER_SIZE];
+  NetSample netSamples[NET_SAMPLE_SIZE];
   int idx;
+  int netIdx;
   int rank;
-  int isRootThread;  // 0 = main rank thread, 1 = bootstrapRoot thread
+  int isRootThread;     // 0 = main rank thread, 1 = bootstrapRoot thread
+  int eventOverflow;    // count of Event records dropped after ring filled
+  int netOverflow;      // count of NetSample records dropped after ring filled
 };
 
 // Global state
@@ -105,6 +139,11 @@ void initThreadBuffer(int rank, int isRootThread);
 // Raw event recording.
 void recordEvent(uint16_t phase, uint16_t md, uint64_t startNs, uint32_t bytes);
 void recordInstant(uint16_t phase, uint16_t md);
+
+// Capture kernel TCP_INFO from a connected TCP socket fd and store as a
+// NetSample attached to `phase` (md = peer rank). No-op if fd < 0, the trace
+// is disabled, or the getsockopt fails (e.g. non-TCP socket).
+void recordNetStat(uint16_t phase, uint16_t md, int fd);
 
 // Flush current thread's buffer. Always emits a text dump via NCCL INFO into
 // the user's RCCL log; additionally writes a .bin dump if outputDir() is set.
@@ -137,6 +176,14 @@ inline uint64_t nowNs() {
   do { \
     if (ncclBootstrapTrace::isEnabled()) \
       ncclBootstrapTrace::recordInstant((phase), (md)); \
+  } while (0)
+
+// Capture kernel TCP_INFO from a connected socket fd at the end of a network
+// phase. Only meaningful for the socket OOB path (fd is a real TCP socket).
+#define BTRACE_NETSTAT(phase, md, fd) \
+  do { \
+    if (ncclBootstrapTrace::isEnabled()) \
+      ncclBootstrapTrace::recordNetStat((phase), (md), (fd)); \
   } while (0)
 
 #endif  // BOOTSTRAP_TRACE_H_

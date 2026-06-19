@@ -1228,6 +1228,12 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   }
   BTRACE_END(ncclBootstrapTrace::PHASE_FORWARD_CONNECT, 0, __btrace_fwd_connect, 0);
   BTRACE_INSTANT(ncclBootstrapTrace::PHASE_TCP_READY, 0);
+  // Socket OOB path only: snapshot kernel TCP_INFO on the forward send socket
+  // right after the handshake is ready, so offline analysis can attribute
+  // connect/ready latency variance to transport state (RTT, retransmits, cwnd).
+  if (!bootstrapNetEnabledEffective(nranks)) {
+    BTRACE_NETSTAT(ncclBootstrapTrace::PHASE_TCP_READY, 0, STATE_RING(state, socket.send).fd);
+  }
 
   // Optionally bring up the second (reverse) ring used by the bidirectional bootstrap
   // AllGather. The reverse listen + handle are piggybacked through the root rendezvous
@@ -1251,6 +1257,12 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   NCCLCHECKGOTO(ringAllInfo(comm, state, state->peerP2pAddresses, state->peerProxyAddresses, state->peerProxyAddressesUDS, rasRanks), result, fail);
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_RING]);
   BTRACE_END(ncclBootstrapTrace::PHASE_RING_ALLGATHER, 0, __btrace_ring, 0);
+  // Socket OOB path only: snapshot TCP_INFO again after the ring allgather so
+  // the cumulative retransmit/RTT delta over the small-message ring exchange is
+  // captured for the same connection sampled at tcp.ready above.
+  if (!bootstrapNetEnabledEffective(nranks)) {
+    BTRACE_NETSTAT(ncclBootstrapTrace::PHASE_RING_ALLGATHER, 0, STATE_RING(state, socket.send).fd);
+  }
 
   // Create the service proxy and get the UDS
   BTRACE_BEGIN(__btrace_proxy);

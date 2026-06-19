@@ -30,6 +30,17 @@ static void msleep(unsigned int time_msec) {
 RCCL_PARAM(SocketReuseAddr, "SOCKET_REUSEADDR", 0);
 RCCL_PARAM(SocketLinger, "SOCKET_LINGER", -1);
 
+// Opt-in: suppress the receiver-side delayed-ACK timer (~40ms) on socket
+// (OOB/bootstrap) connections. TCP_QUICKACK is not sticky — the kernel reverts
+// to delayed-ACK after a few segments — so it is set at connect AND re-armed
+// after each recv below. Cached getenv read (self-contained, avoids init-order
+// issues with NCCL_PARAM defined later in this file). Default off.
+static int socketQuickAck() {
+  static int v = -1;
+  if (v < 0) { const char* e = getenv("NCCL_SOCKET_QUICKACK"); v = (e && atoi(e) > 0) ? 1 : 0; }
+  return v;
+}
+
 static ncclResult_t socketProgressOpt(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int block, int* closed) {
   int bytes = 0;
   *closed = 0;
@@ -56,6 +67,14 @@ static ncclResult_t socketProgressOpt(int op, struct ncclSocket* sock, void* ptr
       }
     }
     (*offset) += bytes;
+#ifdef TCP_QUICKACK
+    // Re-arm quick-ack after a real receive so delayed-ACK stays suppressed
+    // across the bootstrap ring's repeated small exchanges.
+    if (op == NCCL_SOCKET_RECV && bytes > 0 && socketQuickAck()) {
+      int qa = 1;
+      (void)setsockopt(sock->fd, IPPROTO_TCP, TCP_QUICKACK, (char*)&qa, sizeof(int));
+    }
+#endif
     if (sock->abortFlag && __atomic_load_n(sock->abortFlag, __ATOMIC_ACQUIRE)) {
       INFO(NCCL_NET, "socketProgressOpt: abort called");
       return ncclInternalError;
@@ -468,6 +487,17 @@ static ncclResult_t socketTryAccept(struct ncclSocket* sock) {
 
 NCCL_PARAM(SocketMaxRecvBuff, "SOCKET_RCVBUF", -1);
 NCCL_PARAM(SocketMaxSendBuff, "SOCKET_SNDBUF", -1);
+// Opt-in latency knob: BUSY_POLL (microseconds) trades CPU for lower wakeup
+// latency/jitter. QUICKACK is handled by socketQuickAck() above (re-armed per
+// recv). Both default off (=keep kernel defaults).
+NCCL_PARAM(SocketBusyPoll, "SOCKET_BUSY_POLL", 0);
+// Opt-in: thin-stream recovery. The bootstrap ring is a "thin" stream (few
+// packets in flight), so on a loss it falls back to the RTO timer (floored at
+// ~200ms) and then doubles it (200->400->800ms). TCP_THIN_LINEAR_TIMEOUTS keeps
+// retransmit timeouts linear (no exponential backoff) and TCP_THIN_DUPACK
+// triggers fast-retransmit on the first dup-ACK — both cut the deep RTO pile-up
+// seen at scale without needing CAP_NET_ADMIN. Default off.
+NCCL_PARAM(SocketThinTimeouts, "SOCKET_THIN_TIMEOUTS", 0);
 
 static ncclResult_t socketSetFlags(struct ncclSocket* sock) {
   const int one = 1;
@@ -482,6 +512,32 @@ static ncclResult_t socketSetFlags(struct ncclSocket* sock) {
   int rcvBuf = ncclParamSocketMaxRecvBuff(), sndBuf = ncclParamSocketMaxSendBuff();
   if (sndBuf > 0) SYSCHECK(setsockopt(sock->fd, SOL_SOCKET, SO_SNDBUF, (char*)&sndBuf, sizeof(int)), "setsockopt SO_SNDBUF");
   if (rcvBuf > 0) SYSCHECK(setsockopt(sock->fd, SOL_SOCKET, SO_RCVBUF, (char*)&rcvBuf, sizeof(int)), "setsockopt SO_RCVBUF");
+  // Best-effort latency knobs (never fail the connection if unsupported).
+#ifdef TCP_QUICKACK
+  if (socketQuickAck()) {
+    int qa = 1;
+    if (setsockopt(sock->fd, IPPROTO_TCP, TCP_QUICKACK, (char*)&qa, sizeof(int)) != 0)
+      INFO(NCCL_NET, "setsockopt TCP_QUICKACK failed (%d), continuing", errno);
+  }
+#endif
+#ifdef SO_BUSY_POLL
+  int busy = (int)ncclParamSocketBusyPoll();
+  if (busy > 0) {
+    if (setsockopt(sock->fd, SOL_SOCKET, SO_BUSY_POLL, (char*)&busy, sizeof(int)) != 0)
+      INFO(NCCL_NET, "setsockopt SO_BUSY_POLL failed (%d), continuing", errno);
+  }
+#endif
+  if (ncclParamSocketThinTimeouts() > 0) {
+    int thin = 1;
+#ifdef TCP_THIN_LINEAR_TIMEOUTS
+    if (setsockopt(sock->fd, IPPROTO_TCP, TCP_THIN_LINEAR_TIMEOUTS, (char*)&thin, sizeof(int)) != 0)
+      INFO(NCCL_NET, "setsockopt TCP_THIN_LINEAR_TIMEOUTS failed (%d), continuing", errno);
+#endif
+#ifdef TCP_THIN_DUPACK
+    if (setsockopt(sock->fd, IPPROTO_TCP, TCP_THIN_DUPACK, (char*)&thin, sizeof(int)) != 0)
+      INFO(NCCL_NET, "setsockopt TCP_THIN_DUPACK failed (%d), continuing", errno);
+#endif
+  }
   return ncclSuccess;
 }
 

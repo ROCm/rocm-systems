@@ -54,9 +54,9 @@ static void deploy_log(const char* phase, uint64_t start_ns, uint64_t end_ns, in
   uint64_t dur_us = end_ns > start_ns ? (end_ns - start_ns) / 1000ULL : 0ULL;
   char line[512];
   int n = snprintf(line, sizeof(line),
-      "DEPLOY_TRACE rank=%d pid=%d phase=%s t_ns=%llu dur_us=%llu md=%d bytes=%zu detail=%s\n",
+      "DEPLOY_TRACE rank=%d pid=%d phase=%s t_ns=%llu dur_us=%llu md=%d bytes=%lu detail=%s\n",
       rank, pid, phase, (unsigned long long)start_ns, (unsigned long long)dur_us,
-      md, bytes, detail ? detail : "none");
+      md, (unsigned long)bytes, detail ? detail : "none");
   if (n <= 0) return;
 
   const char* tmpl = getenv("RCCL_DEPLOY_TRACE_FILE");
