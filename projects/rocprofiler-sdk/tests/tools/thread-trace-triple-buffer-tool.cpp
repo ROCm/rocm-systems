@@ -254,17 +254,22 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             else if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
             {
                 auto& current_sdata = *static_cast<uint32_t*>(userdata);
+                bool invalid = false;
 
                 auto* sdata = static_cast<rocprofiler_thread_trace_decoder_shaderdata_t*>(events);
                 for(size_t i = 0; i < num_events; i++)
                 {
                     if(sdata[i].value < current_sdata)
                     {
-                        std::cerr << "Error: Invalid sdata value " << sdata[i].value << std::endl;
-                        abort();
+                        std::cerr << i << "Error: Invalid sdata value " << sdata[i].value << " vs " << current_sdata << std::endl;
+                        invalid = true;
                     }
                     current_sdata = sdata[i].value;
                 }
+                if (num_events > 0)
+                std::cerr << "Going from " << current_sdata << " to " << sdata[num_events-1].value << std::endl;
+
+                if (invalid) abort();
             }
         };
 
