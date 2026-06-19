@@ -4,13 +4,8 @@
 
 rocprofiler_activate_clang_tidy()
 
-set(TOOL_HEADERS
-    att_no_intercept.hpp
-    att_no_intercept_impl.hpp
-    config.hpp
-    execution_profile.hpp
-    helper.hpp
-    stream_stack.hpp)
+set(TOOL_HEADERS att_no_intercept.hpp att_no_intercept_impl.hpp config.hpp
+                 execution_profile.hpp helper.hpp stream_stack.hpp)
 
 set(TOOL_SOURCES att_no_intercept.cpp config.cpp main.c tool.cpp stream_stack.cpp)
 
