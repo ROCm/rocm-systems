@@ -78,3 +78,24 @@ contract:
   Contract_Device_CurrentOrdinal_IsWithinDeviceCount:
     <<: *level_0
     tags: [device]
+  Contract_Stream_CreateDestroy_Succeeds:
+    <<: *level_0
+    tags: [stream]
+  Contract_Stream_SynchronizeEmptyStream_Succeeds:
+    <<: *level_0
+    tags: [stream]
+  Contract_Stream_QueryEmptyStream_ReturnsSuccess:
+    <<: *level_0
+    tags: [stream]
+  Contract_Event_CreateDestroy_Succeeds:
+    <<: *level_0
+    tags: [event]
+  Contract_Event_RecordThenSynchronize_Succeeds:
+    <<: *level_0
+    tags: [event]
+  Contract_Event_QueryBeforeCompletion_ReturnsNotReadyOrSuccess:
+    <<: *level_0
+    tags: [event]
+  Contract_Stream_WaitEvent_OrdersDependentWork:
+    <<: *level_0
+    tags: [stream, event]

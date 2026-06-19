@@ -10,6 +10,7 @@ The first domains are:
 - `transfer`: synchronous copy contracts
 - `runtime`: runtime initialization, device visibility, version, and error-state contracts
 - `device`: portable current-device property contracts
+- `stream_event`: stream and event lifecycle, query, synchronization, and wait-event ordering contracts
 
 Run the layer with:
 
