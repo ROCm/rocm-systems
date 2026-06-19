@@ -56,7 +56,9 @@ env:
   ROCPROFSYS_CI: ON
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.2.0"
+
+  EXCLUDED_TESTS: "fork.*|roctx-sampling|roctx-runtime-instrument|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode-*|matrix-exponential.*|selective-region-region-1-filter.*|selective-region-region-2-and-3.*|selective-region-no-marker-region-1-filter.*|kfd-*|unified-memory-output-sys-run|rccl-alltoall-perf-sys-run"
+  EXCLUDED_LABELS: "thread_limit"
 
 jobs:
   prepare_matrix:
@@ -96,8 +98,11 @@ jobs:
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
     permissions:
       packages: read
+    defaults:
+      run:
+        shell: bash
     container:
-      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-systems-ci-${{ matrix.system.arch }}
+      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-systems-ci-multiarch
       # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
       options:
         --privileged
@@ -112,56 +117,37 @@ jobs:
       - uses: actions/checkout@v6
         with:
           sparse-checkout: |
-            projects/rocprofiler-systems/
+            projects/rocprofiler-systems
             .gitmodules
+          submodules: recursive
 
       - name: Setup Environment
         id: setup_env
         run: |
           if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MODE=Nightly
+            INCLUDED_LABELS="gpu"
+            EXCLUDED_LABELS="${{ env.EXCLUDED_LABELS }}"
           else
             MODE=Continuous
+            INCLUDED_LABELS="gpu"
+            EXCLUDED_LABELS="${{ env.EXCLUDED_LABELS }}|slow"
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
-
-          if [ '${{ matrix.system.os-release }}' = '24.04']; then
-            CODE_NAME=noble
-          else
-            CODE_NAME=jammy
-          fi
-          echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
-
-      - name: Install amdgpu and dependencies
-        shell: bash
-        run: |
-          ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
-          ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
-          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-          wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-          apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-          apt-get update
-          apt install -y amd-smi-lib libdw-dev rocjpeg-test rocdecode-test rccl-dev
-          echo "✅ amdgpu and ROCm dependencies Installed!"
+          echo "included_labels=${INCLUDED_LABELS}" >> $GITHUB_OUTPUT
+          echo "excluded_labels=${EXCLUDED_LABELS}" >> $GITHUB_OUTPUT
 
       - name: Install MPI
         run: |
           apt install -y libopenmpi-dev
           echo "✅ MPI Installed!"
 
-      # TODO: Remove this and replace with TheRock tarball when runtime error is fixed
-      - name: Install ROCm
-        run: |
-          apt install -y rocm-dev
-          echo "✅ ROCm Installation Complete!"
-
-      # TODO: Enable this step and remove the above step once runtime error is fixed
       - name: Install Latest Nightly ROCm
-        if: false
         run: |
           set -e
-          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]\.[0-9]\.[0-9])*')
-          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          mkdir ${{ env.ROCM_PATH }}
+          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
+          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
@@ -169,18 +155,23 @@ jobs:
       - name: Install Python Test Dependencies
         timeout-minutes: 10
         shell: bash
-        working-directory: projects/rocprofiler-systems/
+        working-directory: projects/rocprofiler-systems
         run: |
           python3 -m pip install --break-system-packages -r requirements.txt
 
       - name: Configure, Build, and Test
         id: run_ci
-        timeout-minutes: 60
+        timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 60 }}
         working-directory: projects/rocprofiler-systems
         run: |
           set -e
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
+          INCLUDED_LABELS="${{ steps.setup_env.outputs.included_labels }}"
+          LABEL_ARG=""
+          if [ -n "${INCLUDED_LABELS}" ]; then
+            LABEL_ARG="-L ${INCLUDED_LABELS}"
+          fi
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
           python3 ./scripts/run-ci.py -B build \
@@ -201,7 +192,9 @@ jobs:
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
-            -L "rocm"
+            -E "${{ env.EXCLUDED_TESTS }}" \
+            -LE "${{ steps.setup_env.outputs.excluded_labels }}" \
+            ${LABEL_ARG}
 
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5

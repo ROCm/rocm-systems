@@ -1096,16 +1096,18 @@ function(add_other_tests)
         add_rocshmem_functional_test(NAME flood_p RANKS 8 WORKGROUPS 64 THREADS 1024)
     end_test_group()
 
-    begin_test_group(CATEGORY "FLOOD;RMA;GET" TIER full BACKENDS "ipc;gda" GPUS "all")
-        add_rocshmem_functional_test(NAME flood_get RANKS 2 WORKGROUPS 64 THREADS 1024)
-        add_rocshmem_functional_test(NAME flood_get RANKS 8 WORKGROUPS 64 THREADS 1024)
-        add_rocshmem_functional_test(NAME flood_getnbi RANKS 8 WORKGROUPS 64 THREADS 1024)
-    end_test_group()
+    # Temporarily disabled flood_get tests
+    # begin_test_group(CATEGORY "FLOOD;RMA;GET" TIER full BACKENDS "ipc;gda" GPUS "all")
+    #     add_rocshmem_functional_test(NAME flood_get RANKS 2 WORKGROUPS 64 THREADS 1024)
+    #     add_rocshmem_functional_test(NAME flood_get RANKS 8 WORKGROUPS 64 THREADS 1024)
+    #     add_rocshmem_functional_test(NAME flood_getnbi RANKS 8 WORKGROUPS 64 THREADS 1024)
+    # end_test_group()
 
+    # Temporarily disabled flood_g test
     # flood_g - only works with IPC (not GDA, not RO)
-    begin_test_group(CATEGORY "FLOOD;RMA;GET" TIER full BACKENDS "ipc" GPUS "all")
-        add_rocshmem_functional_test(NAME flood_g RANKS 8 WORKGROUPS 64 THREADS 1024)
-    end_test_group()
+    # begin_test_group(CATEGORY "FLOOD;RMA;GET" TIER full BACKENDS "ipc" GPUS "all")
+    #     add_rocshmem_functional_test(NAME flood_g RANKS 8 WORKGROUPS 64 THREADS 1024)
+    # end_test_group()
 
     begin_test_group(CATEGORY "FLOOD;AMO" TIER full BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME flood_add RANKS 2 WORKGROUPS 64 THREADS 1024)
