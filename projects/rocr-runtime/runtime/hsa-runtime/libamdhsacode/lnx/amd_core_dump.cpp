@@ -671,7 +671,6 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
     return HSA_STATUS_SUCCESS;
   }
 
-  // Use posix_fallocate for regular files
   struct stat fd_stat;
   bool is_reg_file = false;
   if (fstat(fd, &fd_stat) == 0 && S_ISREG(fd_stat.st_mode)) {
@@ -706,14 +705,6 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
   if (write(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr)) {
     perror("Failed to write ELF header to pipe");
     return HSA_STATUS_ERROR;
-  }
-
-  if (is_reg_file) {
-    int error = posix_fallocate(fd, sizeof(Elf64_Ehdr), segments.size() * sizeof(Elf64_Phdr));
-    if (error != 0) {
-      fprintf(stderr, "Failed to allocate file: %s\n", strerror(error));
-      return HSA_STATUS_ERROR;
-    }
   }
 
   // Write program headers
@@ -785,14 +776,6 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
       }
       // Stop writing segments but return success - we wrote valid headers
       return HSA_STATUS_SUCCESS;
-    }
-
-    if (is_reg_file) {
-      int error = posix_fallocate(fd, phdr.p_offset, phdr.p_filesz);
-      if (error != 0) {
-        fprintf(stderr, "Failed to allocate file: %s\n", strerror(error));
-        return HSA_STATUS_ERROR;
-      }
     }
 
     size_t remaining = phdr.p_filesz;
