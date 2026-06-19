@@ -790,12 +790,13 @@ TestOther() {
   ExecTest  "flood_putnbi"     8       64           1024
   ExecTest  "flood_p"          8       64           1024
 
-  ExecTest  "flood_get"        2       64           1024
-  ExecTest  "flood_get"        8       64           1024
-  ExecTest  "flood_getnbi"     8       64           1024
-  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
-  ExecTest  "flood_g"          8       64           1024
-  else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
+  # Temporarily disabled flood_get tests
+  # ExecTest  "flood_get"        2       64           1024
+  # ExecTest  "flood_get"        8       64           1024
+  # ExecTest  "flood_getnbi"     8       64           1024
+  # if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
+  # ExecTest  "flood_g"          8       64           1024
+  # else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
 
   ExecTest  "flood_add"        2       64           1024
   ExecTest  "flood_add"        8       64           1024

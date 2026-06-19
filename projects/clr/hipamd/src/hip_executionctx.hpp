@@ -48,7 +48,9 @@ public:
   /// Per-context mutex for callers that need exclusive access.
   std::recursive_mutex& lock() { return lock_; }
 
-  /// Register a stream created under this context.
+  /// Register a stream created under this context. The context takes a
+  /// strong reference (retain) on the stream so the stream object outlives
+  /// the user calling hipStreamDestroy before hipExecutionCtxDestroy.
   void addStream(hip::Stream* stream);
 
   /// Block until all streams in this context have completed.

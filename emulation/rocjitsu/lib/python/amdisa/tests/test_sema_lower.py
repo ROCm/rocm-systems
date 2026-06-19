@@ -407,7 +407,62 @@ class TestLowerVectorAdd:
 
         assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in result
         assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in result
-        assert 'inst_.opsel & 0x8u' in result
+        assert (
+            '::rocjitsu::amdgpu::write_vop3_true16_dst('
+            'vdst, wf, lane, inst_.opsel & 0x8u, src_half);' in result
+        )
+
+    def test_true16_cndmask_keeps_selector_scalar(self):
+        b16 = SemaType('B', 16)
+        cond = SemaNode(
+            SemaNodeKind.ARRAYDEREF,
+            ty=SemaType.U1,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='VCC', ty=SemaType.U64),
+                SemaNode(SemaNodeKind.ID, id_name='laneId', ty=SemaType.U32),
+            ),
+        )
+        body = SemaNode(
+            SemaNodeKind.ASSIGN,
+            children=(
+                _cast(_dst(0), b16),
+                SemaNode(
+                    SemaNodeKind.TERNARY,
+                    ty=b16,
+                    children=(cond, _cast(_src(1), b16), _cast(_src(0), b16)),
+                ),
+            ),
+        )
+        block = SemaBlock('V_CNDMASK_B16', ExecModel.VECTOR, body)
+        omap = OperandMap(
+            src_bindings={
+                0: OperandBinding('src0', RegClass.VGPR, 16),
+                1: OperandBinding('src1', RegClass.VGPR, 16),
+                2: OperandBinding('src2', RegClass.SGPR, 64),
+            },
+            dst_bindings={0: OperandBinding('vdst', RegClass.VGPR, 16)},
+        )
+        ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR,
+            operand_map=omap,
+            true16_dst_select='inst_.opsel & 0x8u',
+            true16_src_selects={
+                0: 'inst_.opsel & 0x1u',
+                1: 'inst_.opsel & 0x2u',
+            },
+            vcc_read='src2.read_scalar64(wf)',
+        )
+
+        result = lower_sema_block(block, ctx)
+
+        assert 'src2.read_scalar64(wf)' in result
+        assert 'src2.read_lane' not in result
+        assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in result
+        assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in result
+        assert (
+            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);'
+            in result
+        )
 
     def test_true16_bf16_destination_converts_float_result(self):
         body = SemaNode(
@@ -438,6 +493,10 @@ class TestLowerVectorAdd:
         assert 'util::bf16_to_f32' in result
         assert (
             'uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_bf16('
+            in result
+        )
+        assert (
+            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);'
             in result
         )
         assert 'std::cos' in result
