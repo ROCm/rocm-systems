@@ -1052,7 +1052,7 @@ class TestExecutor:
             if description:
                 print(f"  Description: {description}")
             print(f"  Type:    {'gtest' if is_gtest else 'non-gtest'}")
-            print(f"  Binary:  {binary}")
+            print(f"  Binary:  {os.path.expanduser(expand_env_vars(str(binary)))}")
             print(f"  Filter:  {test_filter}")
             print(f"  Ranks:   {num_ranks}")
             print(f"  Nodes:   {num_nodes}")
