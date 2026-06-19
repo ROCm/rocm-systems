@@ -12,6 +12,7 @@ The first domains are:
 - `device`: portable current-device property contracts
 - `stream_event`: stream and event lifecycle, query, synchronization, and wait-event ordering contracts
 - `async_transfer`: async copy visibility and invalid-kind consistency contracts
+- `memset`: byte, word, dword, and async memset contracts
 
 Run the layer with:
 

@@ -111,3 +111,21 @@ contract:
   Contract_AsyncTransfer_InvalidDirection_ReturnsConsistentError:
     <<: *level_0
     tags: [async_transfer]
+  Contract_Memset_DeviceBuffer_IsFilledWithBytePattern:
+    <<: *level_0
+    tags: [memset]
+  Contract_Memset_ZeroBytes_Succeeds:
+    <<: *level_0
+    tags: [memset]
+  Contract_MemsetAsync_DeviceBuffer_IsFilledAfterStreamSynchronize:
+    <<: *level_0
+    tags: [memset]
+  Contract_MemsetD8_DeviceBuffer_IsFilledWithBytePattern:
+    <<: *level_0
+    tags: [memset]
+  Contract_MemsetD16_DeviceBuffer_IsFilledWithWordPattern:
+    <<: *level_0
+    tags: [memset]
+  Contract_MemsetD32_DeviceBuffer_IsFilledWithDwordPattern:
+    <<: *level_0
+    tags: [memset]
