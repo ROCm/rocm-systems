@@ -81,7 +81,7 @@ bool decodes_mnemonic_within(Decoder &decoder, std::span<const uint8_t> text, ui
 
 } // namespace
 
-// Shared fixture: loads vector_add_gfx90a.o and rj_nop_probe_gfx90a.hsaco,
+// Shared fixture: loads vector_add_probe_gfx90a.o and rj_nop_probe_gfx90a.hsaco,
 // resolves rj_nop_probe, finds the first relocatable anchor that the probe-call
 // resource policy accepts, and patches it via Instrumentor's probe-call path
 // (InstrumentationPoint::probe_obj + probe_symbol). Two empty derived classes
@@ -89,9 +89,13 @@ bool decodes_mnemonic_within(Decoder &decoder, std::span<const uint8_t> text, ui
 class HsaDbiNopProbeFixture : public ::testing::Test {
 protected:
   void SetUp() override {
-    // Load the gfx90a vector_add kernel (the instrumentation target).
-    Executable kexec(kernel_path("vector_add_gfx90a"));
-    ASSERT_TRUE(kexec.is_valid()) << "Failed to load vector_add_gfx90a.o";
+    // Load the gfx90a vector_add kernel (the instrumentation target). This is
+    // the register-padded build (vector_add_probe.hip): the probe's link pair
+    // s[30:31] must be granted by the kernel's SGPR allocation, which a normal
+    // ~12-SGPR vector_add does not provide. Auto-growing the allocation in the
+    // instrumentor is a follow-up; until then the fixture kernel reserves >=32.
+    Executable kexec(kernel_path("vector_add_probe_gfx90a"));
+    ASSERT_TRUE(kexec.is_valid()) << "Failed to load vector_add_probe_gfx90a.o";
     ASSERT_GT(kexec.num_code_objects(ROCJITSU_CODE_TARGET_GFX90A), 0u);
     const AmdGpuCodeObject *co = kexec.code_object(ROCJITSU_CODE_TARGET_GFX90A, 0);
     ASSERT_NE(co, nullptr);
@@ -137,7 +141,7 @@ protected:
         cur += static_cast<uint64_t>(inst.size());
       }
     }
-    ASSERT_FALSE(candidates.empty()) << "No relocatable anchor in vector_add_gfx90a.o; "
+    ASSERT_FALSE(candidates.empty()) << "No relocatable anchor in vector_add_probe_gfx90a.o; "
                                         "did the compiler change the lowering?";
 
     // Pick the first anchor whose probe-call patch the resource/spill policy
