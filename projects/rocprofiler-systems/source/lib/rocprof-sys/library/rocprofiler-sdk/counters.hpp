@@ -3,6 +3,7 @@
 
 #pragma once
 
+// All rocprofiler-sdk headers come transitively through fwd.hpp -> backend shim.
 #include "common/synchronized.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
@@ -10,16 +11,6 @@
 #include <cstdint>
 
 #include <timemory/utility/types.hpp>
-
-#include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/buffer_tracing.h>
-#include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/cxx/hash.hpp>
-#include <rocprofiler-sdk/cxx/name_info.hpp>
-#include <rocprofiler-sdk/cxx/operators.hpp>
-#include <rocprofiler-sdk/dispatch_counting_service.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/registration.h>
 
 #include <memory>
 #include <unordered_map>
@@ -51,8 +42,8 @@ struct counter_event
     : record{ _v }
     {}
 
-    void operator()(const client_data* tool_data, counter_track_type*,
-                    const std::string& track_name, timing_interval _timing,
+    void operator()(const client_data_t* tool_data, counter_track_type*,
+                    const std::string& track_name, timing_interval_t _timing,
                     scope::config _scope) const;
 
     counter_dispatch_record record = {};
@@ -60,7 +51,7 @@ struct counter_event
 
 struct counter_storage
 {
-    const client_data*                    tool_data          = nullptr;
+    const client_data_t*                  tool_data          = nullptr;
     std::uint64_t                         device_id          = 0;
     std::int64_t                          index              = 0;
     std::string                           metric_name        = {};
@@ -71,7 +62,7 @@ struct counter_storage
     std::unique_ptr<counter_storage_type> storage            = {};
     std::unique_ptr<counter_track_type>   track              = {};
 
-    counter_storage(const client_data* _tool_data, std::uint64_t _devid, size_t _idx,
+    counter_storage(const client_data_t* _tool_data, std::uint64_t _devid, size_t _idx,
                     std::string_view _name);
 
     ~counter_storage()                                 = default;
@@ -86,7 +77,7 @@ struct counter_storage
                std::tie(rhs.storage_name, rhs.device_id, rhs.index);
     }
 
-    void operator()(const counter_event& _event, timing_interval _timing,
+    void operator()(const counter_event& _event, timing_interval_t _timing,
                     scope::config _scope = scope::get_default()) const;
 
     void write_zero(rocprofiler_timestamp_t timestamp) const;

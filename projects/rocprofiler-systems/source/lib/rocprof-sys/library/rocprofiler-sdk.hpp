@@ -112,7 +112,7 @@ public:
 
     // ─── Static data members (formerly anon-namespace globals) ───────────────
 
-    static client_data*                    tool_data;
+    static client_data<Backend>*           tool_data;
     static std::shared_ptr<roctx_client<>> g_roctx_client;
     static std::atomic<bool>               tool_fini_done;
     static std::atomic<bool>               tool_init_done;
@@ -187,8 +187,8 @@ private:
 
     static void start_context(typename Backend::context_id ctx);
     static void stop_context(typename Backend::context_id ctx);
-    static void start_context(const client_data::context_id_vec_t& ctxs);
-    static void stop_context(const client_data::context_id_vec_t& ctxs);
+    static void start_context(const client_data<Backend>::context_id_vec_t& ctxs);
+    static void stop_context(const client_data<Backend>::context_id_vec_t& ctxs);
     static void flush();
 
     // ─── roctx / counter / finalization helpers ───────────────────────────────
@@ -226,7 +226,8 @@ private:
     template <typename CorrelationIdType>
     static std::uint64_t get_parent_stack_id(const CorrelationIdType& correlation_id);
 
-    static const kernel_symbol_data_t* get_kernel_symbol_info(std::uint64_t kernel_id);
+    static const kernel_symbol_data_t<Backend>* get_kernel_symbol_info(
+        std::uint64_t kernel_id);
     static const typename Backend::code_object_load_data* get_code_object_info(
         std::uint64_t code_object_id);
 
@@ -287,7 +288,7 @@ private:
 
     static std::vector<typename Backend::counter_id> create_agent_profile(
         typename Backend::agent_id agent_id, const std::vector<std::string>& counters,
-        client_data* data = nullptr);
+        client_data<Backend>* data = nullptr);
 
     static int set_kernel_rename_and_stream_correlation_id(
         typename Backend::thread_id thr_id, typename Backend::context_id ctx_id,
@@ -466,7 +467,7 @@ namespace rocprofsys::rocprofiler_sdk
 // ─── Static member definitions ───────────────────────────────────────────────
 
 template <typename Backend>
-client_data* library_sdk<Backend>::tool_data = new client_data{};
+client_data<Backend>* library_sdk<Backend>::tool_data = new client_data<Backend>{};
 
 template <typename Backend>
 std::shared_ptr<roctx_client<>> library_sdk<Backend>::g_roctx_client = {};
@@ -676,7 +677,7 @@ library_sdk<Backend>::stop_context(typename Backend::context_id ctx)
 
 template <typename Backend>
 void
-library_sdk<Backend>::start_context(const client_data::context_id_vec_t& ctxs)
+library_sdk<Backend>::start_context(const client_data<Backend>::context_id_vec_t& ctxs)
 {
     std::for_each(std::begin(ctxs), std::end(ctxs),
                   [](const auto& ctx) { start_context(ctx); });
@@ -684,7 +685,7 @@ library_sdk<Backend>::start_context(const client_data::context_id_vec_t& ctxs)
 
 template <typename Backend>
 void
-library_sdk<Backend>::stop_context(const client_data::context_id_vec_t& ctxs)
+library_sdk<Backend>::stop_context(const client_data<Backend>::context_id_vec_t& ctxs)
 {
     std::for_each(std::begin(ctxs), std::end(ctxs),
                   [](const auto& ctx) { stop_context(ctx); });
@@ -830,7 +831,7 @@ library_sdk<Backend>::get_rocm_events_info()
 {
     if(!tool_data)
     {
-        auto _tool_data_v = client_data{};
+        auto _tool_data_v = client_data<Backend>{};
         _tool_data_v.initialize_event_info();
         return _tool_data_v.events_info;
     }
@@ -1045,7 +1046,7 @@ library_sdk<Backend>::get_scratch_mem_alloc_size(
 // ─── Kernel / code object info lookups ───────────────────────────────────────
 
 template <typename Backend>
-const kernel_symbol_data_t*
+const kernel_symbol_data_t<Backend>*
 library_sdk<Backend>::get_kernel_symbol_info(std::uint64_t kernel_id)
 {
     return tool_data->get_kernel_symbol_info(kernel_id);
@@ -1120,7 +1121,7 @@ auto&
 library_sdk<Backend>::get_kernel_dispatch_timestamps()
 {
     static auto _v =
-        std::unordered_map<typename Backend::dispatch_id_t, timing_interval>{};
+        std::unordered_map<typename Backend::dispatch_id_t, timing_interval<Backend>>{};
     return _v;
 }
 
@@ -1196,7 +1197,7 @@ template <typename Backend>
 std::vector<typename Backend::counter_id>
 library_sdk<Backend>::create_agent_profile(typename Backend::agent_id      agent_id,
                                            const std::vector<std::string>& counters,
-                                           client_data*                    data)
+                                           client_data<Backend>*           data)
 {
     using counter_vec_t = std::vector<typename Backend::counter_id>;
     if(!data) data = tool_data;
@@ -1335,7 +1336,8 @@ library_sdk<Backend>::tool_code_object_callback(
             else if(record.operation ==
                     ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
             {
-                auto data_v = *static_cast<kernel_symbol_data_t*>(record.payload);
+                auto data_v =
+                    *static_cast<kernel_symbol_data_t<Backend>*>(record.payload);
                 tool_data->kernel_symbol_records.wlock(
                     [ts, &record, &data_v](auto& _data) {
                         _data.emplace_back(
@@ -1684,7 +1686,8 @@ library_sdk<Backend>::tool_tracing_callback(
                         record.payload);
                     get_kernel_dispatch_timestamps().emplace(
                         _data->dispatch_info.dispatch_id,
-                        timing_interval{ _data->start_timestamp, _data->end_timestamp });
+                        timing_interval<Backend>{ _data->start_timestamp,
+                                                  _data->end_timestamp });
                 }
                 break;
 #if(ROCPROFILER_VERSION >= 600)
@@ -2536,7 +2539,7 @@ library_sdk<Backend>::counter_record_callback(
     auto _dispatch_id = dispatch_data.dispatch_info.dispatch_id;
     auto _agent_id    = dispatch_data.dispatch_info.agent_id;
     auto _scope       = scope::get_default();
-    auto _interval    = timing_interval{};
+    auto _interval    = timing_interval<Backend>{};
     auto _aggregate   = std::unordered_map<typename Backend::counter_id,
                                            typename Backend::counter_record>{};
 
@@ -2596,7 +2599,7 @@ library_sdk<Backend>::dispatch_counting_service_callback(
     typename Backend::counter_config_id*     config,
     typename Backend::user_data_t* /*user_data*/, void* callback_data_arg)
 {
-    auto* _data = as_client_data(callback_data_arg);
+    auto* _data = as_client_data<Backend>(callback_data_arg);
     if(!_data || !config) return;
     if(auto itr =
            _data->agent_counter_profiles.find(dispatch_data.dispatch_info.agent_id);
@@ -2663,7 +2666,7 @@ library_sdk<Backend>::tool_init(typename Backend::client_finalize_t fini_func,
     auto _version          = sdk_core<Backend>::get_version();
     if(_version.formatted == 0) LOG_WARNING("rocprofiler-sdk version not initialized");
 
-    auto* _data        = as_client_data(user_data);
+    auto* _data        = as_client_data<Backend>(user_data);
     _data->client_fini = fini_func;
 
     _data->initialize();
@@ -2953,7 +2956,7 @@ library_sdk<Backend>::tool_fini(void* callback_data)
         }
     }
 
-    auto* _data        = as_client_data(callback_data);
+    auto* _data        = as_client_data<Backend>(callback_data);
     _data->client_id   = nullptr;
     _data->client_fini = nullptr;
     delete tool_data;
@@ -3041,7 +3044,7 @@ library_sdk<Backend>::sdk_tool_configure(std::uint32_t                  version,
 
     id->name = "rocprofsys";
 
-    if(!tool_data) tool_data = new client_data{};
+    if(!tool_data) tool_data = new client_data<Backend>{};
     tool_data->client_id = id;
 
     std::uint32_t major = version / 10000;

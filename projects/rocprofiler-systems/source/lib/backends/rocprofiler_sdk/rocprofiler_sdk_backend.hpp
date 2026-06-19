@@ -108,8 +108,10 @@ struct backend
     // ─── Buffer/callback tracing record types ────────────────────────────────────
     using record_header_t         = rocprofiler_record_header_t;
     using user_data_t             = rocprofiler_user_data_t;
+    using kernel_id_t             = rocprofiler_kernel_id_t;
     using kernel_dispatch_record  = rocprofiler_buffer_tracing_kernel_dispatch_record_t;
     using kernel_dispatch_data    = rocprofiler_callback_tracing_kernel_dispatch_data_t;
+    using dimension_info_t        = rocprofiler_record_dimension_info_t;
     using memory_copy_record      = rocprofiler_buffer_tracing_memory_copy_record_t;
     using scratch_memory_record   = rocprofiler_buffer_tracing_scratch_memory_record_t;
     using callback_tracing_record = rocprofiler_callback_tracing_record_t;

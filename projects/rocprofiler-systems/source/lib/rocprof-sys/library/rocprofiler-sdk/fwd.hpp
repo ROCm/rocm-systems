@@ -3,75 +3,97 @@
 
 #pragma once
 
+// All rocprofiler-sdk headers come transitively through the backend shim.
+#include "backends/rocprofiler_sdk/rocprofiler_sdk_backend.hpp"
 #include "common/synchronized.hpp"
 #include "core/agent_manager.hpp"
 #include "core/perfetto.hpp"
+#include "core/state.hpp"
 #include "core/timemory.hpp"
-#include <cstdint>
-
-#include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/buffer_tracing.h>
-#include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/counters.h>
-#include <rocprofiler-sdk/cxx/hash.hpp>
-#include <rocprofiler-sdk/cxx/name_info.hpp>
-#include <rocprofiler-sdk/cxx/operators.hpp>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/registration.h>
-
 #include "logger/debug.hpp"
 
+#include <spdlog/fmt/ranges.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <exception>
 #include <memory>
+#include <optional>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
+
 using hardware_counter_info = ::tim::hardware_counters::info;
+using callback_arg_array_t  = std::vector<std::pair<std::string, std::string>>;
+using rocprofsys_agent_t    = agent;
 
-using kernel_symbol_data_t =
-    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
+// ─── Template type aliases ────────────────────────────────────────────────────
+
+template <typename Backend>
+using kernel_symbol_data_t = typename Backend::kernel_symbol_data;
+
+template <typename Backend>
 using kernel_symbol_map_t =
-    std::unordered_map<rocprofiler_kernel_id_t, kernel_symbol_data_t>;
-using callback_arg_array_t = std::vector<std::pair<std::string, std::string>>;
+    std::unordered_map<typename Backend::kernel_id_t, kernel_symbol_data_t<Backend>>;
 
-using rocprofsys_agent_t = agent;
+// ─── code_object_callback_record_t<Backend> ──────────────────────────────────
 
+template <typename Backend>
 struct code_object_callback_record_t
 {
-    std::uint64_t                                        timestamp = 0;
-    rocprofiler_callback_tracing_record_t                record    = {};
-    rocprofiler_callback_tracing_code_object_load_data_t payload   = {};
+    std::uint64_t                             timestamp = 0;
+    typename Backend::callback_tracing_record record    = {};
+    typename Backend::code_object_load_data   payload   = {};
 };
 
+// ─── kernel_symbol_callback_record_t<Backend> ────────────────────────────────
+
+template <typename Backend>
 struct kernel_symbol_callback_record_t
 {
-    std::uint64_t                         timestamp = 0;
-    rocprofiler_callback_tracing_record_t record    = {};
-    kernel_symbol_data_t                  payload   = {};
+    std::uint64_t                             timestamp = 0;
+    typename Backend::callback_tracing_record record    = {};
+    kernel_symbol_data_t<Backend>             payload   = {};
 };
 
-struct rocprofiler_tool_counter_info_t : rocprofiler_counter_info_v0_t
+// ─── timing_interval<Backend> ────────────────────────────────────────────────
+
+template <typename Backend>
+struct timing_interval
 {
-    using this_type            = rocprofiler_tool_counter_info_t;
-    using parent_type          = rocprofiler_counter_info_v0_t;
-    using dimension_info_vec_t = std::vector<rocprofiler_record_dimension_info_t>;
+    typename Backend::timestamp_t start = 0;
+    typename Backend::timestamp_t end   = 0;
+};
 
-    rocprofiler_tool_counter_info_t(rocprofiler_agent_id_t _agent_id, parent_type _info,
-                                    dimension_info_vec_t&& _dim_info);
+// ─── tool_counter_info_t<Backend> ────────────────────────────────────────────
 
-    rocprofiler_tool_counter_info_t()                                           = default;
-    ~rocprofiler_tool_counter_info_t()                                          = default;
-    rocprofiler_tool_counter_info_t(const rocprofiler_tool_counter_info_t&)     = default;
-    rocprofiler_tool_counter_info_t(rocprofiler_tool_counter_info_t&&) noexcept = default;
-    rocprofiler_tool_counter_info_t& operator=(const rocprofiler_tool_counter_info_t&) =
-        default;
-    rocprofiler_tool_counter_info_t& operator=(
-        rocprofiler_tool_counter_info_t&&) noexcept = default;
+template <typename Backend>
+struct tool_counter_info_t : Backend::counter_info_v0_t
+{
+    using this_type            = tool_counter_info_t<Backend>;
+    using parent_type          = typename Backend::counter_info_v0_t;
+    using dimension_info_vec_t = std::vector<typename Backend::dimension_info_t>;
 
-    rocprofiler_agent_id_t                           agent_id       = {};
-    std::vector<rocprofiler_record_dimension_info_t> dimension_info = {};
+    tool_counter_info_t(typename Backend::agent_id _agent_id, parent_type _info,
+                        dimension_info_vec_t&& _dim_info)
+    : parent_type{ _info }
+    , agent_id{ _agent_id }
+    , dimension_info{ std::move(_dim_info) }
+    {}
+
+    tool_counter_info_t()                                          = default;
+    ~tool_counter_info_t()                                         = default;
+    tool_counter_info_t(const tool_counter_info_t&)                = default;
+    tool_counter_info_t(tool_counter_info_t&&) noexcept            = default;
+    tool_counter_info_t& operator=(const tool_counter_info_t&)     = default;
+    tool_counter_info_t& operator=(tool_counter_info_t&&) noexcept = default;
+
+    typename Backend::agent_id                      agent_id       = {};
+    std::vector<typename Backend::dimension_info_t> dimension_info = {};
 };
 
 struct tool_agent
@@ -80,29 +102,33 @@ struct tool_agent
     const rocprofsys_agent_t* agent     = nullptr;
 };
 
-struct timing_interval
-{
-    rocprofiler_timestamp_t start = 0;
-    rocprofiler_timestamp_t end   = 0;
-};
+// ─── Aggregated map aliases ───────────────────────────────────────────────────
 
+template <typename Backend>
 using agent_counter_info_map_t =
-    std::unordered_map<rocprofiler_agent_id_t,
-                       std::vector<rocprofiler_tool_counter_info_t>>;
+    std::unordered_map<typename Backend::agent_id,
+                       std::vector<tool_counter_info_t<Backend>>>;
 
+template <typename Backend>
 using agent_counter_profile_map_t =
-    std::unordered_map<rocprofiler_agent_id_t,
-                       std::optional<rocprofiler_profile_config_id_t>>;
+    std::unordered_map<typename Backend::agent_id,
+                       std::optional<typename Backend::counter_config_id>>;
 
-using counter_id_vec_t = std::vector<rocprofiler_counter_id_t>;
+template <typename Backend>
+using counter_id_vec_t = std::vector<typename Backend::counter_id>;
 
+template <typename Backend>
 using agent_counter_id_map_t =
-    std::unordered_map<rocprofiler_agent_id_t, counter_id_vec_t>;
+    std::unordered_map<typename Backend::agent_id, counter_id_vec_t<Backend>>;
 
+template <typename Backend>
 using backtrace_operation_map_t =
-    std::unordered_map<rocprofiler_callback_tracing_kind_t,
-                       std::unordered_set<rocprofiler_tracing_operation_t>>;
+    std::unordered_map<typename Backend::callback_tracing_kind,
+                       std::unordered_set<typename Backend::tracing_operation>>;
 
+// ─── client_data<Backend> ────────────────────────────────────────────────────
+
+template <typename Backend>
 struct client_data
 {
     static constexpr size_t num_buffers  = 11;
@@ -110,87 +136,176 @@ struct client_data
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
     using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
-    using kernel_symbol_vec_t  = std::vector<kernel_symbol_callback_record_t>;
-    using code_object_vec_t    = std::vector<code_object_callback_record_t>;
-    using buffer_id_vec_t      = std::array<rocprofiler_buffer_id_t, num_buffers>;
-    using context_id_vec_t     = std::array<rocprofiler_context_id_t, num_contexts>;
-    using agent_vec_t          = std::vector<rocprofiler_agent_v0_t>;
+    using kernel_symbol_vec_t  = std::vector<kernel_symbol_callback_record_t<Backend>>;
+    using code_object_vec_t    = std::vector<code_object_callback_record_t<Backend>>;
+    using buffer_id_vec_t      = std::array<typename Backend::buffer_id, num_buffers>;
+    using context_id_vec_t     = std::array<typename Backend::context_id, num_contexts>;
+    using agent_vec_t          = std::vector<typename Backend::agent_t>;
 
-    rocprofiler_client_id_t*                  client_id                 = nullptr;
-    rocprofiler_client_finalize_t             client_fini               = nullptr;
-    rocprofiler_context_id_t                  primary_ctx               = { 0 };
-    rocprofiler_context_id_t                  counter_ctx               = { 0 };
-    rocprofiler_context_id_t                  code_object_ctx           = { 0 };
-    rocprofiler_context_id_t                  control_ctx               = { 0 };
-    rocprofiler_buffer_id_t                   kernel_dispatch_buffer    = { 0 };
-    rocprofiler_buffer_id_t                   scratch_memory_buffer     = { 0 };
-    rocprofiler_buffer_id_t                   memory_copy_buffer        = { 0 };
-    rocprofiler_buffer_id_t                   memory_alloc_buffer       = { 0 };
-    rocprofiler_buffer_id_t                   counter_collection_buffer = { 0 };
-    rocprofiler_buffer_id_t                   kfd_page_fault_buffer     = { 0 };
-    rocprofiler_buffer_id_t                   kfd_page_migrate_buffer   = { 0 };
-    rocprofiler_buffer_id_t                   kfd_queue_buffer          = { 0 };
-    rocprofiler_buffer_id_t                   kfd_event_queue_buffer    = { 0 };
-    rocprofiler_buffer_id_t                   kfd_event_unmap_buffer    = { 0 };
-    rocprofiler_buffer_id_t                   kfd_event_dropped_buffer  = { 0 };
+    typename Backend::client_id_t*            client_id                 = nullptr;
+    typename Backend::client_finalize_t       client_fini               = nullptr;
+    typename Backend::context_id              primary_ctx               = { 0 };
+    typename Backend::context_id              counter_ctx               = { 0 };
+    typename Backend::context_id              code_object_ctx           = { 0 };
+    typename Backend::context_id              control_ctx               = { 0 };
+    typename Backend::buffer_id               kernel_dispatch_buffer    = { 0 };
+    typename Backend::buffer_id               scratch_memory_buffer     = { 0 };
+    typename Backend::buffer_id               memory_copy_buffer        = { 0 };
+    typename Backend::buffer_id               memory_alloc_buffer       = { 0 };
+    typename Backend::buffer_id               counter_collection_buffer = { 0 };
+    typename Backend::buffer_id               kfd_page_fault_buffer     = { 0 };
+    typename Backend::buffer_id               kfd_page_migrate_buffer   = { 0 };
+    typename Backend::buffer_id               kfd_queue_buffer          = { 0 };
+    typename Backend::buffer_id               kfd_event_queue_buffer    = { 0 };
+    typename Backend::buffer_id               kfd_event_unmap_buffer    = { 0 };
+    typename Backend::buffer_id               kfd_event_dropped_buffer  = { 0 };
     std::vector<tool_agent>                   cpu_agents                = {};
     std::vector<tool_agent>                   gpu_agents                = {};
     std::vector<hardware_counter_info>        events_info               = {};
-    agent_counter_id_map_t                    agent_events              = {};
-    agent_counter_info_map_t                  agent_counter_info        = {};
-    agent_counter_profile_map_t               agent_counter_profiles    = {};
+    agent_counter_id_map_t<Backend>           agent_events              = {};
+    agent_counter_info_map_t<Backend>         agent_counter_info        = {};
+    agent_counter_profile_map_t<Backend>      agent_counter_profiles    = {};
     common::synchronized<code_object_vec_t>   code_object_records       = {};
     common::synchronized<kernel_symbol_vec_t> kernel_symbol_records     = {};
     buffer_name_info_t                        buffered_tracing_info     = {};
     callback_name_info_t                      callback_tracing_info     = {};
-    backtrace_operation_map_t                 backtrace_operations      = {};
+    backtrace_operation_map_t<Backend>        backtrace_operations      = {};
 
-    void                        initialize();
-    void                        initialize_event_info();
-    void                        set_agents();
-    context_id_vec_t            get_all_contexts() const;
-    context_id_vec_t            get_main_contexts() const;
-    rocprofiler_context_id_t    get_control_context() const;
-    rocprofiler_context_id_t    get_code_obj_context() const;
-    buffer_id_vec_t             get_buffers() const;
-    const rocprofsys_agent_t*   get_agent(rocprofiler_agent_id_t _id) const;
-    const tool_agent*           get_gpu_tool_agent(rocprofiler_agent_id_t id) const;
-    const kernel_symbol_data_t* get_kernel_symbol_info(std::uint64_t _kernel_id) const;
-    const rocprofiler_tool_counter_info_t* get_tool_counter_info(
-        rocprofiler_agent_id_t _agent_id, rocprofiler_counter_id_t _counter_id) const;
-    const rocprofiler_callback_tracing_code_object_load_data_t* get_code_object_info(
+    void initialize();
+    void initialize_event_info();
+    void set_agents();
+
+    context_id_vec_t             get_all_contexts() const;
+    context_id_vec_t             get_main_contexts() const;
+    typename Backend::context_id get_control_context() const;
+    typename Backend::context_id get_code_obj_context() const;
+    buffer_id_vec_t              get_buffers() const;
+
+    const rocprofsys_agent_t* get_agent(typename Backend::agent_id _id) const;
+    const tool_agent*         get_gpu_tool_agent(typename Backend::agent_id id) const;
+
+    const kernel_symbol_data_t<Backend>* get_kernel_symbol_info(
+        std::uint64_t _kernel_id) const;
+
+    const tool_counter_info_t<Backend>* get_tool_counter_info(
+        typename Backend::agent_id   _agent_id,
+        typename Backend::counter_id _counter_id) const;
+
+    const typename Backend::code_object_load_data* get_code_object_info(
         std::uint64_t code_object_id) const;
+
+private:
+    // ─── Counter query callbacks ──────────────────────────────────────────────
+
+    static typename Backend::status_t dimensions_info_callback(
+        typename Backend::counter_id /*id*/,
+        const typename Backend::dimension_info_t* dim_info, long unsigned int num_dims,
+        void* user_data)
+    {
+        auto* dimensions_info =
+            static_cast<std::vector<typename Backend::dimension_info_t>*>(user_data);
+        dimensions_info->reserve(num_dims);
+        for(size_t j = 0; j < num_dims; j++)
+            dimensions_info->emplace_back(dim_info[j]);
+        return Backend::STATUS_SUCCESS;
+    }
+
+    static typename Backend::status_t counters_supported_callback(
+        typename Backend::agent_id agent_id, typename Backend::counter_id* counters,
+        size_t num_counters, void* user_data)
+    {
+        using value_type = typename agent_counter_info_map_t<Backend>::mapped_type;
+
+        auto* data_v = static_cast<agent_counter_info_map_t<Backend>*>(user_data);
+        data_v->emplace(agent_id, value_type{});
+        for(size_t i = 0; i < num_counters; ++i)
+        {
+            auto _info     = typename Backend::counter_info_v0_t{};
+            auto _dim_info = std::vector<typename Backend::dimension_info_t>{};
+
+            ROCPROFILER_CALL(Backend::query_counter_info(
+                counters[i], Backend::COUNTER_INFO_VERSION_0, &_info));
+            ROCPROFILER_CALL(Backend::iterate_counter_dimensions(
+                counters[i], dimensions_info_callback, &_dim_info));
+
+            if(!_info.is_constant)
+                data_v->at(agent_id).emplace_back(agent_id, _info, std::move(_dim_info));
+        }
+        return Backend::STATUS_SUCCESS;
+    }
+
+    static agent_counter_info_map_t<Backend> get_agent_counter_info(
+        const std::vector<tool_agent>& _agents)
+    {
+        auto _data = agent_counter_info_map_t<Backend>{};
+        for(const auto& itr : _agents)
+        {
+            const auto& _agent_id = typename Backend::agent_id{ itr.agent->handle };
+
+            auto status = Backend::iterate_agent_supported_counters(
+                _agent_id, counters_supported_callback, &_data);
+
+            if(status != Backend::STATUS_SUCCESS)
+            {
+                LOG_WARNING("iterate_agent_supported_counters failed for agent {} "
+                            "with status {} (Agent HW architecture may not be supported)",
+                            _agent_id.handle, static_cast<int>(status));
+                continue;
+            }
+
+            auto agent_it = _data.find(_agent_id);
+            if(agent_it != _data.end())
+            {
+                std::sort(agent_it->second.begin(), agent_it->second.end(),
+                          [](const auto& lhs, const auto& rhs) {
+                              return (lhs.id.handle < rhs.id.handle);
+                          });
+                for(auto& citr : agent_it->second)
+                {
+                    std::sort(citr.dimension_info.begin(), citr.dimension_info.end(),
+                              [](const auto& lhs, const auto& rhs) {
+                                  return (lhs.id < rhs.id);
+                              });
+                }
+            }
+        }
+        return _data;
+    }
 };
 
-inline client_data::context_id_vec_t
-client_data::get_all_contexts() const
+// ─── client_data method implementations ──────────────────────────────────────
+
+template <typename Backend>
+typename client_data<Backend>::context_id_vec_t
+client_data<Backend>::get_all_contexts() const
 {
     return context_id_vec_t{ primary_ctx, counter_ctx, code_object_ctx, control_ctx };
 }
 
-inline client_data::context_id_vec_t
-client_data::get_main_contexts() const
+template <typename Backend>
+typename client_data<Backend>::context_id_vec_t
+client_data<Backend>::get_main_contexts() const
 {
-    return context_id_vec_t{
-        primary_ctx,
-        counter_ctx,
-    };
+    return context_id_vec_t{ primary_ctx, counter_ctx };
 }
 
-inline rocprofiler_context_id_t
-client_data::get_control_context() const
+template <typename Backend>
+typename Backend::context_id
+client_data<Backend>::get_control_context() const
 {
     return control_ctx;
 }
 
-inline rocprofiler_context_id_t
-client_data::get_code_obj_context() const
+template <typename Backend>
+typename Backend::context_id
+client_data<Backend>::get_code_obj_context() const
 {
     return code_object_ctx;
 }
 
-inline client_data::buffer_id_vec_t
-client_data::get_buffers() const
+template <typename Backend>
+typename client_data<Backend>::buffer_id_vec_t
+client_data<Backend>::get_buffers() const
 {
     return buffer_id_vec_t{ kernel_dispatch_buffer,    scratch_memory_buffer,
                             memory_copy_buffer,        memory_alloc_buffer,
@@ -200,27 +315,29 @@ client_data::get_buffers() const
                             kfd_event_dropped_buffer };
 }
 
-inline const rocprofsys_agent_t*
-client_data::get_agent(rocprofiler_agent_id_t _id) const
+template <typename Backend>
+const rocprofsys_agent_t*
+client_data<Backend>::get_agent(typename Backend::agent_id _id) const
 {
-    const auto& agent = get_agent_manager_instance().get_agent_by_handle(_id.handle);
-
-    return &agent;
+    const auto& agent_ref = get_agent_manager_instance().get_agent_by_handle(_id.handle);
+    return &agent_ref;
 }
 
-inline const tool_agent*
-client_data::get_gpu_tool_agent(rocprofiler_agent_id_t id) const
+template <typename Backend>
+const tool_agent*
+client_data<Backend>::get_gpu_tool_agent(typename Backend::agent_id id) const
 {
     for(const auto& itr : gpu_agents)
         if(id.handle == itr.agent->handle) return &itr;
     return nullptr;
 }
 
-inline const kernel_symbol_data_t*
-client_data::get_kernel_symbol_info(std::uint64_t _kernel_id) const
+template <typename Backend>
+const kernel_symbol_data_t<Backend>*
+client_data<Backend>::get_kernel_symbol_info(std::uint64_t _kernel_id) const
 {
     return kernel_symbol_records.rlock(
-        [_kernel_id](const auto& _data) -> const kernel_symbol_data_t* {
+        [_kernel_id](const auto& _data) -> const kernel_symbol_data_t<Backend>* {
             for(const auto& itr : _data)
             {
                 if(_kernel_id == itr.payload.kernel_id)
@@ -233,9 +350,10 @@ client_data::get_kernel_symbol_info(std::uint64_t _kernel_id) const
         });
 }
 
-inline const rocprofiler_tool_counter_info_t*
-client_data::get_tool_counter_info(rocprofiler_agent_id_t   _agent_id,
-                                   rocprofiler_counter_id_t _counter_id) const
+template <typename Backend>
+const tool_counter_info_t<Backend>*
+client_data<Backend>::get_tool_counter_info(
+    typename Backend::agent_id _agent_id, typename Backend::counter_id _counter_id) const
 {
     for(const auto& itr : agent_counter_info.at(_agent_id))
     {
@@ -244,12 +362,13 @@ client_data::get_tool_counter_info(rocprofiler_agent_id_t   _agent_id,
     return nullptr;
 }
 
-inline const rocprofiler_callback_tracing_code_object_load_data_t*
-client_data::get_code_object_info(std::uint64_t code_object_id) const
+template <typename Backend>
+const typename Backend::code_object_load_data*
+client_data<Backend>::get_code_object_info(std::uint64_t code_object_id) const
 {
+    using load_data_t = typename Backend::code_object_load_data;
     return code_object_records.rlock(
-        [code_object_id](const auto& _data)
-            -> const rocprofiler_callback_tracing_code_object_load_data_t* {
+        [code_object_id](const auto& _data) -> const load_data_t* {
             for(const auto& itr : _data)
             {
                 if(code_object_id == itr.payload.code_object_id)
@@ -262,15 +381,158 @@ client_data::get_code_object_info(std::uint64_t code_object_id) const
         });
 }
 
-inline constexpr client_data*
+template <typename Backend>
+void
+client_data<Backend>::initialize()
+{
+    buffered_tracing_info = Backend::get_buffer_tracing_names();
+    callback_tracing_info = Backend::get_callback_tracing_names();
+    set_agents();
+}
+
+template <typename Backend>
+void
+client_data<Backend>::initialize_event_info()
+{
+    auto& agent_mngr = get_agent_manager_instance();
+
+    if(agent_mngr.get_agents().empty())
+        initialize();
+    else if(gpu_agents.empty() && cpu_agents.empty())
+        set_agents();
+
+    if(agent_counter_info.size() != gpu_agents.size())
+        agent_counter_info = get_agent_counter_info(gpu_agents);
+
+    try
+    {
+        using qualifier_t     = tim::hardware_counters::qualifier;
+        using qualifier_vec_t = std::vector<qualifier_t>;
+
+        for(const auto& aitr : gpu_agents)
+        {
+            auto        _dev_index = aitr.device_id;
+            const auto& _agent_id  = typename Backend::agent_id{ aitr.agent->handle };
+            auto        _device_qualifier_sym = fmt::format(":device={}", _dev_index);
+            auto        _device_qualifier =
+                tim::hardware_counters::qualifier{ true, static_cast<int>(_dev_index),
+                                                   _device_qualifier_sym,
+                                                   fmt::format("Device {}", _dev_index) };
+
+            auto agent_info_it = agent_counter_info.find(_agent_id);
+            if(agent_info_it == agent_counter_info.end())
+            {
+                LOG_WARNING("Skipping GPU device {} ({}, handle=0x{:X}) due to "
+                            "counter not found for the specified architecture",
+                            _dev_index, aitr.agent->name, aitr.agent->handle);
+                continue;
+            }
+
+            auto _counter_info = agent_info_it->second;
+            std::sort(_counter_info.begin(), _counter_info.end(),
+                      [](const tool_counter_info_t<Backend>& lhs,
+                         const tool_counter_info_t<Backend>& rhs) {
+                          if(lhs.is_constant && rhs.is_constant)
+                              return lhs.id < rhs.id;
+                          else if(lhs.is_constant)
+                              return true;
+                          else if(rhs.is_constant)
+                              return false;
+                          if(!lhs.is_derived && !rhs.is_derived)
+                              return lhs.id < rhs.id;
+                          else if(!lhs.is_derived)
+                              return true;
+                          else if(!rhs.is_derived)
+                              return false;
+                          return lhs.id < rhs.id;
+                      });
+
+            for(const auto& ditr : _counter_info)
+            {
+                auto _long_desc = std::string{ ditr.description };
+                auto _units     = std::string{};
+                auto _pysym     = std::string{};
+
+                if(ditr.is_constant) continue;
+
+                if(ditr.is_derived)
+                {
+                    auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
+                    auto _short_desc =
+                        fmt::format("Derived counter: {}", ditr.expression);
+                    events_info.emplace_back(hardware_counter_info(
+                        true, tim::hardware_counters::api::rocm, events_info.size(), 0,
+                        _sym, _pysym, _short_desc, _long_desc, _units,
+                        qualifier_vec_t{ _device_qualifier }));
+                }
+                else
+                {
+                    auto _dim_info = std::vector<std::string>{};
+                    for(const auto& itr : ditr.dimension_info)
+                    {
+                        auto _info =
+                            (itr.instance_size > 1)
+                                ? fmt::format("{}[0:{}]", itr.name, itr.instance_size - 1)
+                                : std::string{};
+                        if(!_info.empty()) _dim_info.emplace_back(_info);
+                    }
+                    auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
+                    auto _short_desc =
+                        fmt::format("{} on device {}", ditr.name, _dev_index);
+                    if(!_dim_info.empty())
+                        _short_desc += fmt::format("{}", fmt::join(_dim_info, ". "));
+                    events_info.emplace_back(hardware_counter_info(
+                        true, tim::hardware_counters::api::rocm, events_info.size(), 0,
+                        _sym, _pysym, _short_desc, _long_desc, _units,
+                        qualifier_vec_t{ _device_qualifier }));
+                }
+            }
+        }
+    } catch(std::exception& _e)
+    {
+        LOG_WARNING("Constructing ROCm event info failed: {}", _e.what());
+    }
+}
+
+template <typename Backend>
+void
+client_data<Backend>::set_agents()
+{
+    auto& agent_mngr = get_agent_manager_instance();
+
+    auto fill_agents = [&](agent_type type, std::vector<tool_agent>& out) {
+        const auto& _agents = agent_mngr.get_agents_by_type(type);
+        for(const auto& agent_ptr : _agents)
+        {
+            out.emplace_back(tool_agent{ agent_ptr->device_type_index, agent_ptr.get() });
+        }
+    };
+
+    fill_agents(agent_type::GPU, gpu_agents);
+    fill_agents(agent_type::CPU, cpu_agents);
+}
+
+// ─── as_client_data helper ────────────────────────────────────────────────────
+
+template <typename Backend>
+constexpr client_data<Backend>*
 as_client_data(void* _ptr)
 {
-    return static_cast<client_data*>(_ptr);
+    return static_cast<client_data<Backend>*>(_ptr);
 }
+
+// ─── Production type aliases (for non-generic subdirectory code) ──────────────
+// kfd_events, counters, rccl etc. are not templated; they use these fixed aliases.
+
+using client_data_t     = client_data<backend>;
+using timing_interval_t = timing_interval<backend>;
+
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
 
-#if !defined(ROCPROFILER_CALL)
+// The ROCPROFILER_CALL macro uses raw SDK identifiers which remain accessible
+// via the transitive SDK includes from the backend shim.
+#ifndef ROCPROFILER_CALL
 #    define ROCPROFILER_CALL(result)                                                     \
         {                                                                                \
             rocprofiler_status_t ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) =          \
