@@ -139,14 +139,14 @@ def add_general_group(
         "--list-metrics",
         dest="list_metrics",
         metavar="",
-        choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
+        choices=supported_archs.keys(),
         help=print_avail_arch(list(supported_archs.keys()), "metrics"),
     )
     general_group.add_argument(
         "--list-blocks",
         dest="list_blocks",
         metavar="",
-        choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
+        choices=supported_archs.keys(),
         help=print_avail_arch(list(supported_archs.keys()), "blocks"),
     )
     general_group.add_argument(
@@ -172,6 +172,8 @@ def add_general_group(
             "   TUI (--tui)\n"
             "   Spatial multiplexing (--spatial-multiplexing)\n"
             "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
+            "   PC Sampling (--pc-sampling, --pc-sampling-method, "
+            "--pc-sampling-interval)\n"
         ),
     )
 
@@ -446,30 +448,6 @@ Examples:
         help=("\t\t\tSet the format of output file of rocprof."),
     )
     profile_group.add_argument(
-        "--pc-sampling-method",
-        required=False,
-        metavar="",
-        dest="pc_sampling_method",
-        default="stochastic",
-        help=(
-            "\t\t\tSet the method of pc sampling, stochastic or host_trap. "
-            "Support stochastic only >= MI300"
-        ),
-    )
-    profile_group.add_argument(
-        "--pc-sampling-interval",
-        required=False,
-        metavar="",
-        dest="pc_sampling_interval",
-        default=1048576,
-        help=(
-            "\t\t\tSet the interval of pc sampling.\n"
-            "\t\t\t  For stochastic sampling, the interval is in cycles.\n"
-            "\t\t\t  For host_trap sampling, the interval is in microsecond "
-            "(DEFAULT: 1048576)."
-        ),
-    )
-    profile_group.add_argument(
         "--rocprofiler-sdk-tool-path",
         type=resolve_rocm_library_path,
         dest="rocprofiler_sdk_tool_path",
@@ -577,6 +555,55 @@ Examples:
         help="\t\t\tEnable block 30 (memory bandwidth specific) for profile mode.",
     )
 
+    profile_group.add_argument(
+        "--pc-sampling",
+        dest="pc_sampling",
+        required=False,
+        default=False,
+        base_action="store_const",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="PC Sampling",
+        nargs=0,
+        const=True,
+        help="\t\t\tEnable PC sampling (block 21) for profile mode.",
+    )
+    profile_group.add_argument(
+        "--pc-sampling-method",
+        required=False,
+        metavar="",
+        dest="pc_sampling_method",
+        default="stochastic",
+        choices=["stochastic", "host_trap"],
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="PC Sampling",
+        help=(
+            "\t\t\tSet the method of pc sampling, stochastic or host_trap. "
+            "Support stochastic only >= MI300"
+        ),
+    )
+    profile_group.add_argument(
+        "--pc-sampling-interval",
+        required=False,
+        metavar="",
+        dest="pc_sampling_interval",
+        default=None,
+        type=int,
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="PC Sampling",
+        help=(
+            "\t\t\tSet the interval of pc sampling.\n"
+            "\t\t\t  For stochastic sampling, the interval is in cycles; it "
+            "must be a power of 2 and at least 65536 (DEFAULT: 1048576).\n"
+            "\t\t\t  For host_trap sampling, the interval is in microseconds "
+            "(DEFAULT: 512)."
+        ),
+    )
+
     ## Analyze Command Line Options
     ## ----------------------------
     analyze_parser = subparsers.add_parser(
@@ -656,7 +683,7 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="Torch operator filter",
         help=(
-            "\t\tFilter operators using PurePosixPath glob patterns,\n"
+            "\t\tFilter operators using shell-style glob patterns (fnmatch),\n"
             "\t\t\tselect their kernels, and display metrics.\n"
             "\t\t\tWith no arguments, matches all operators (default: **).\n"
             "\t\t\tExamples (operator hierarchy is /-separated):\n"

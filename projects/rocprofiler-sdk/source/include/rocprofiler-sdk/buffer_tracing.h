@@ -615,7 +615,7 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
  *
  * @param [in] kind Buffer tracing domain
  * @param [out] name If non-null and the name is a constant string that does not require dynamic
- * allocation, this paramter will be set to the address of the string literal, otherwise it will
+ * allocation, this parameter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
  * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)
@@ -637,7 +637,7 @@ rocprofiler_query_buffer_tracing_kind_name(rocprofiler_buffer_tracing_kind_t kin
  * @param [in] kind Buffer tracing domain
  * @param [in] operation Enumeration id value which maps to a specific API function or event type
  * @param [out] name If non-null and the name is a constant string that does not require dynamic
- * allocation, this paramter will be set to the address of the string literal, otherwise it will
+ * allocation, this parameter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
  * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)
@@ -676,7 +676,7 @@ rocprofiler_iterate_buffer_tracing_kinds(rocprofiler_buffer_tracing_kind_cb_t ca
  * @brief Iterates over all the operations for a given @ref
  * rocprofiler_buffer_tracing_kind_t and invokes the callback with the kind and operation
  * id. This is useful to build a map of the operation names during tool initialization instead of
- * querying rocprofiler everytime in the callback hotpath.
+ * querying rocprofiler every time in the callback hotpath.
  *
  * @param [in] kind which buffer tracing kind operations to iterate over
  * @param [in] callback Callback function invoked for each operation associated with @ref

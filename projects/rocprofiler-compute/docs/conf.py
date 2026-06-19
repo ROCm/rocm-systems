@@ -91,78 +91,78 @@ for context_name, section_name in cdna_section_map.items():
                 "data": arch_metrics[arch][section_name],
             }
 
-# Load gfx1151 (RDNA) metrics YAML
-with open("data/metrics/gfx1151_metrics.yaml") as f:
-    gfx1151_metrics = yaml.safe_load(f)
+# Load gfx115x (RDNA 3.5) metrics YAML
+with open("data/metrics/gfx115x_metrics.yaml") as f:
+    gfx115x_metrics = yaml.safe_load(f)
 
-# RDNA gfx1151 section mapping: jinja context id -> YAML section name
-rdna_gfx1151_section_map = {
-    "sys-sol-gfx1151": "System Speed-of-Light",
-    "rdna1151-roofline-performance-rates-gfx1151": "Roofline Performance Rates",
-    "rdna1151-roofline-plot-points-gfx1151": "Roofline Plot Points",
-    "rdna1151-wgp-utilization-gfx1151": "WGP Utilization",
-    "rdna1151-wavefront-launch-stats-gfx1151": "Wavefront Launch Stats",
-    "rdna1151-wave-dispatch-gfx1151": "Wave Dispatch",
-    "rdna1151-wave-life-gfx1151": "Wave Life",
-    "rdna1151-wave-instruction-mix-gfx1151": "Wave Instruction Mix",
-    "rdna1151-vmem-instruction-mix-gfx1151": "VMEM Instruction Mix",
-    "rdna1151-lds-instruction-mix-gfx1151": "LDS Instruction Mix",
-    "rdna1151-wait-state-analysis-gfx1151": "Wait State Analysis",
-    "rdna1151-wgp-instruction-cache-gfx1151": "WGP Instruction Cache",
-    "rdna1151-wgp-scalar-data-cache-gfx1151": "WGP Scalar Data Cache",
-    "rdna1151-gpu-utilization-gfx1151": "GPU Utilization",
-    "rdna1151-shader-engine-utilization-gfx1151": "Shader Engine Utilization",
-    "rdna1151-spi-utilization-gfx1151": "SPI Utilization",
-    "rdna1151-wave-dispatch-statistics-gfx1151": "Wave Dispatch Statistics",
-    "rdna1151-cpc-utilization-gfx1151": "CPC Utilization",
-    "rdna1151-cpc-interface-utilization-gfx1151": "CPC Interface Utilization",
-    "rdna1151-mec-stall-cycles-gfx1151": "MEC Stall Cycles",
-    "rdna1151-cpc-memory-requests-gfx1151": "CPC Memory Requests",
-    "rdna1151-mec-instruction-cache-gfx1151": "MEC Instruction Cache",
-    "rdna1151-gl0-utilization-gfx1151": "GL0 Utilization",
-    "rdna1151-gl0-request-statistics-gfx1151": "GL0 Request Statistics",
-    "rdna1151-gl0-cache-performance-gfx1151": "GL0 Cache Performance",
-    "rdna1151-gl0-gl1-interface-gfx1151": "GL0-GL1 Interface",
-    "rdna1151-gl0-stalls-gfx1151": "GL0 Stalls",
-    "rdna1151-gl1-cache-utilization-gfx1151": "GL1 Cache Utilization",
-    "rdna1151-gl1-cache-request-statistics-gfx1151": "GL1 Cache Request Statistics",
-    "rdna1151-gl1-cache-performance-gfx1151": "GL1 Cache Performance",
-    "rdna1151-gl1-cache-stalls-gfx1151": "GL1 Cache Stalls",
-    "rdna1151-gl1-gl2-interface-gfx1151": "GL1-GL2 Interface",
-    "rdna1151-gl2-cache-performance-gfx1151": "GL2 Cache Performance",
-    "rdna1151-gl2-cache-request-statistics-gfx1151": "GL2 Cache Request Statistics",
-    "rdna1151-gl2-cache-bandwidth-gfx1151": "GL2 Cache Bandwidth",
-    "rdna1151-dram-read-interface-gfx1151": "DRAM Read Interface",
-    "rdna1151-dram-write-interface-gfx1151": "DRAM Write Interface",
-    "rdna1151-system-arbiter-sarb-gfx1151": "System Arbiter (SARB)",
-    "rdna1151-return-interface-gfx1151": "Return Interface",
-    "rdna1151-memory-chart-instruction-cache-gfx1151": (
+# RDNA gfx115x section mapping: jinja context id -> YAML section name
+rdna_gfx115x_section_map = {
+    "sys-sol-gfx115x": "System Speed-of-Light",
+    "rdna115x-roofline-performance-rates-gfx115x": "Roofline Performance Rates",
+    "rdna115x-roofline-plot-points-gfx115x": "Roofline Plot Points",
+    "rdna115x-wgp-utilization-gfx115x": "WGP Utilization",
+    "rdna115x-wavefront-launch-stats-gfx115x": "Wavefront Launch Stats",
+    "rdna115x-wave-dispatch-gfx115x": "Wave Dispatch",
+    "rdna115x-wave-life-gfx115x": "Wave Life",
+    "rdna115x-wave-instruction-mix-gfx115x": "Wave Instruction Mix",
+    "rdna115x-vmem-instruction-mix-gfx115x": "VMEM Instruction Mix",
+    "rdna115x-lds-instruction-mix-gfx115x": "LDS Instruction Mix",
+    "rdna115x-wait-state-analysis-gfx115x": "Wait State Analysis",
+    "rdna115x-wgp-instruction-cache-gfx115x": "WGP Instruction Cache",
+    "rdna115x-wgp-scalar-data-cache-gfx115x": "WGP Scalar Data Cache",
+    "rdna115x-gpu-utilization-gfx115x": "GPU Utilization",
+    "rdna115x-shader-engine-utilization-gfx115x": "Shader Engine Utilization",
+    "rdna115x-spi-utilization-gfx115x": "SPI Utilization",
+    "rdna115x-wave-dispatch-statistics-gfx115x": "Wave Dispatch Statistics",
+    "rdna115x-cpc-utilization-gfx115x": "CPC Utilization",
+    "rdna115x-cpc-interface-utilization-gfx115x": "CPC Interface Utilization",
+    "rdna115x-mec-stall-cycles-gfx115x": "MEC Stall Cycles",
+    "rdna115x-cpc-memory-requests-gfx115x": "CPC Memory Requests",
+    "rdna115x-mec-instruction-cache-gfx115x": "MEC Instruction Cache",
+    "rdna115x-gl0-utilization-gfx115x": "GL0 Utilization",
+    "rdna115x-gl0-request-statistics-gfx115x": "GL0 Request Statistics",
+    "rdna115x-gl0-cache-performance-gfx115x": "GL0 Cache Performance",
+    "rdna115x-gl0-gl1-interface-gfx115x": "GL0-GL1 Interface",
+    "rdna115x-gl0-stalls-gfx115x": "GL0 Stalls",
+    "rdna115x-gl1-cache-utilization-gfx115x": "GL1 Cache Utilization",
+    "rdna115x-gl1-cache-request-statistics-gfx115x": "GL1 Cache Request Statistics",
+    "rdna115x-gl1-cache-performance-gfx115x": "GL1 Cache Performance",
+    "rdna115x-gl1-cache-stalls-gfx115x": "GL1 Cache Stalls",
+    "rdna115x-gl1-gl2-interface-gfx115x": "GL1-GL2 Interface",
+    "rdna115x-gl2-cache-performance-gfx115x": "GL2 Cache Performance",
+    "rdna115x-gl2-cache-request-statistics-gfx115x": "GL2 Cache Request Statistics",
+    "rdna115x-gl2-cache-bandwidth-gfx115x": "GL2 Cache Bandwidth",
+    "rdna115x-dram-read-interface-gfx115x": "DRAM Read Interface",
+    "rdna115x-dram-write-interface-gfx115x": "DRAM Write Interface",
+    "rdna115x-system-arbiter-sarb-gfx115x": "System Arbiter (SARB)",
+    "rdna115x-return-interface-gfx115x": "Return Interface",
+    "rdna115x-memory-chart-instruction-cache-gfx115x": (
         "Memory chart - Instruction Cache"
     ),
-    "rdna1151-memory-chart-scalar-data-cache-gfx1151": (
+    "rdna115x-memory-chart-scalar-data-cache-gfx115x": (
         "Memory chart - Scalar Data Cache"
     ),
-    "rdna1151-memory-chart-tcp-cache-gfx1151": ("Memory chart - TCP Cache"),
-    "rdna1151-memory-chart-lds-local-data-share-gfx1151": (
+    "rdna115x-memory-chart-tcp-cache-gfx115x": ("Memory chart - TCP Cache"),
+    "rdna115x-memory-chart-lds-local-data-share-gfx115x": (
         "Memory chart - LDS (Local Data Share)"
     ),
-    "rdna1151-memory-chart-tcp-gl1-interface-gfx1151": (
+    "rdna115x-memory-chart-tcp-gl1-interface-gfx115x": (
         "Memory chart - TCP-GL1 Interface"
     ),
-    "rdna1151-memory-chart-gl1-cache-gfx1151": ("Memory chart - GL1 Cache"),
-    "rdna1151-memory-chart-gl1-gl2-interface-gfx1151": (
+    "rdna115x-memory-chart-gl1-cache-gfx115x": ("Memory chart - GL1 Cache"),
+    "rdna115x-memory-chart-gl1-gl2-interface-gfx115x": (
         "Memory chart - GL1-GL2 Interface"
     ),
-    "rdna1151-memory-chart-gl2-cache-gfx1151": ("Memory chart - GL2 Cache"),
-    "rdna1151-memory-chart-gcea-to-system-memory-gfx1151": (
+    "rdna115x-memory-chart-gl2-cache-gfx115x": ("Memory chart - GL2 Cache"),
+    "rdna115x-memory-chart-gcea-to-system-memory-gfx115x": (
         "Memory chart - GCEA to System Memory"
     ),
 }
 
-# Generate gfx1151 jinja contexts
-for context_name, section_name in rdna_gfx1151_section_map.items():
+# Generate gfx115x jinja contexts
+for context_name, section_name in rdna_gfx115x_section_map.items():
     jinja_contexts[context_name] = {
-        "data": gfx1151_metrics.get(section_name, {}),
+        "data": gfx115x_metrics.get(section_name, {}),
     }
 
 external_toc_path = "./sphinx/_toc.yml"

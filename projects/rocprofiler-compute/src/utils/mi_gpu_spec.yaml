@@ -406,7 +406,28 @@ mi_gpu_spec:
   #########################################################
   #Note: in the future, we might set a seperate file for NAVI
   - gpu_series: navi3
+    # for memory_die, APU does not have separate MCDs like dGPU,
+    # mark it as unified memory
     gpu_archs:
+      - gpu_arch: gfx1150
+        perfmon_config:
+            SQ: 8
+            TA: 2
+            GRBM: 2
+            CPC:  2
+            GCEA: 2
+            TCP:  4
+            SPI:  6
+            GL1A: 4
+            GL1C: 4
+            GL2A: 4
+            GL2C: 4
+        models:
+          - gpu_model: rdna35_point_1
+            design:
+              memory_die: 1
+            chip_ids:
+              physical: 5390
       - gpu_arch: gfx1151
         perfmon_config:
             SQ: 8
@@ -423,9 +444,26 @@ mi_gpu_spec:
         models:
           - gpu_model: rdna35_halo
             design:
-              # APU does not have separate MCDs like dGPU,
-              # mark it as unified memory
               memory_die: 1
             chip_ids:
               physical: 5510
+      - gpu_arch: gfx1152
+        perfmon_config:
+            SQ: 8
+            TA: 2
+            GRBM: 2
+            CPC:  2
+            GCEA: 2
+            TCP:  4
+            SPI:  6
+            GL1A: 4
+            GL1C: 4
+            GL2A: 4
+            GL2C: 4
+        models:
+          - gpu_model: rdna35_point_2
+            design:
+              memory_die: 1
+            chip_ids:
+              physical: 4372
   #########################################################

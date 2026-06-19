@@ -923,9 +923,11 @@ bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint6
   void* priv_data = alloca(priv_size);
   memset(priv_data, 0, priv_size);
   Wkmi::FillinAqlSubmitPrivData(priv_data, fence_value);
+  // HwQueueProgressFenceId is UINT64 in the DDI; drop the 32-bit
+  // truncation so the full fence value reaches WDDM.
   D3DKMT_SUBMITCOMMANDTOHWQUEUE args = {
       .hHwQueue = queue->queue,
-      .HwQueueProgressFenceId = static_cast<ULONG>(fence_value + 1),
+      .HwQueueProgressFenceId = fence_value + 1,
       .CommandBuffer = command_addr,
       .CommandLength = static_cast<UINT>(command_size),
       .PrivateDriverDataSize = static_cast<UINT>(priv_size),

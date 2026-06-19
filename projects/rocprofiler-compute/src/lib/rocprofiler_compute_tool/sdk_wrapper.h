@@ -41,6 +41,9 @@ public:
 
     virtual void query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                          rocprofiler_counter_id_t*         counter_id) = 0;
+
+    virtual void at_intercept_table_registration_hsa(rocprofiler_intercept_library_cb_t callback,
+                                                     void* user_data) = 0;
 };
 
 class SdkWrapperImpl : public SdkWrapper
@@ -72,5 +75,8 @@ public:
                                rocprofiler_counter_config_id_t* config_id) override;
     void query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                  rocprofiler_counter_id_t*         counter_id) override;
+
+    void at_intercept_table_registration_hsa(rocprofiler_intercept_library_cb_t callback,
+                                             void*                              user_data) override;
 };
 }  // namespace rocprofiler_compute_tool

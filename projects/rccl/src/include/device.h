@@ -587,10 +587,10 @@ struct ncclKernelComm {
   int nNodes;
   int buffSizes[NCCL_NUM_PROTOCOLS];
   int p2pChunkSize;
+  bool p2pCrossClique;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
-  int warpLevelComm;
   int* collNetDenseToUserRank;
 
   // Flag to ask NCCL kernels to abort
@@ -631,11 +631,13 @@ struct channelMasks {
 
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
+#ifdef ENABLE_WARP_SPEED
+  int warpLevelComm;
+#endif
   struct channelMasks channelMask;
   enum ncclDevWorkStorageType workStorageType;
   uint32_t workMask;
   void* workBuf;
-  int warpLevelComm;
   // A channel's first batch is at `blockIdx.x`. Use `nextJump` to follow rest of list.
   // struct ncclDevWorkBatch batches[];
 };
@@ -680,7 +682,7 @@ __host__ __device__ constexpr T max_constexpr(T a, T b, Ts ...c) {
 }
 
 constexpr int ncclDevMaxChannelsForArgsBytes(size_t argsBytes) {
-  return min_constexpr<size_t>(MAXCHANNELS, (argsBytes - sizeof(struct ncclDevKernelArgs))/sizeof(struct ncclDevWorkBatch));
+  return (int)min_constexpr<size_t>(MAXCHANNELS, (argsBytes - sizeof(struct ncclDevKernelArgs))/sizeof(struct ncclDevWorkBatch));
 }
 
 // Calculate the unroll factor given:
@@ -717,6 +719,10 @@ __device__ constexpr int ncclShmemScratchWarpSize(int cudaArch = NCCL_CUDA_ARCH)
       // NVLS needs an extra 16B to read unaligned data.
       /*NVLS  */WARP_SIZE*(cudaArch >= 900 ? ncclNvlsUnrollBytes(cudaArch) : 0) + 16
     ) + 15) & -16; // pad to 16 bytes
+}
+
+__host__ __device__ constexpr int ncclTmaShmemScratchWarpSize(void) {
+  return 10 << 10;
 }
 
 // RCCL has its own varient of ncclShmemDynamicSize and ncclShmemScratchWarpSize

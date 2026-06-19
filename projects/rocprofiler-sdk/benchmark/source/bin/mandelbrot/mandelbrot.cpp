@@ -345,7 +345,7 @@ public:
     void run(unsigned int testCase, unsigned int deviceId);
     void printResults(void);
 
-    // array of funtion pointers
+    // array of function pointers
     typedef void (hipPerfMandelBrot::*funPtr)(uint*        out,
                                               uint         width,
                                               float        xPos,

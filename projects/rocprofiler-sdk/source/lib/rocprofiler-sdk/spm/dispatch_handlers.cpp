@@ -219,10 +219,10 @@ pre_kernel_call(const context::context*                                  ctx,
 
 /**
  * @brief Callback called by HSA interceptor when the kernel has completed processing.
- * Destroys the depedency signal of barrier packet2
+ * Destroys the dependency signal of barrier packet2
  * Invokes KFD SPM stop
  * Removes entry in packet_return_map
- * Puts the aql packet into config's packets cache for re-use
+ * Puts the aql packet into config's packets cache for reuse
  */
 void
 post_kernel_call(const context::context*                           ctx,

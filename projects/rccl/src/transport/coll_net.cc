@@ -130,7 +130,7 @@ struct recvResources {
   int netDev;
   enum ncclTopoGdrMode useGdr;
   int useDmaBuf;
-  int needFlush;
+  enum ncclTopoFlushType needFlush;
   uint64_t* gdcSync;
   uint64_t* gdcFlush;
   void* gdrDesc;
@@ -161,7 +161,7 @@ static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
 struct setupReq {
   int netDev;
   enum ncclTopoGdrMode useGdr;
-  int needFlush;
+  enum ncclTopoFlushType needFlush;
   struct ncclCollNetSharedRes* collNet;
 };
 
@@ -590,9 +590,12 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   map->mems[NCCL_NET_MAP_HOSTMEM].gpuPtr = map->mems[NCCL_NET_MAP_HOSTMEM].cpuPtr;
   if (ncclGdrCopy) {
     uint64_t *cpuPtr, *gpuPtr;
-    NCCLCHECK(ncclGdrCudaCalloc(&cpuPtr, &gpuPtr, 2, &resources->gdrDesc, proxyState->memManager));
+    uint32_t gdcFlag = ncclGdcPinFlag(resources->needFlush);
+    NCCLCHECK(ncclGdrCudaCalloc(&cpuPtr, &gpuPtr, 2, &resources->gdrDesc, proxyState->memManager, gdcFlag));
 
     if (ncclParamGdrCopySyncEnable()) {
+      // No flush needed if control flow is mapped on the PCIe instead of C2C
+      if (gdcFlag == GDR_PIN_FLAG_FORCE_PCIE) resources->needFlush = ncclTopoFlushNone;
       resources->gdcSync = cpuPtr;
       struct connectMapMem* gdcMem = map->mems+NCCL_NET_MAP_GDCMEM;
       gdcMem->cpuPtr = (char*)cpuPtr;

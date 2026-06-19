@@ -349,7 +349,7 @@ create_task_group(size_t pool_size)
 task_group_t*
 create_task_group(void* addr, size_t pool_size)
 {
-    // notify that rocprofiler library is about to create an inernal thread
+    // notify that rocprofiler library is about to create an internal thread
     notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
 
     // placement new to construct task group at provided address
