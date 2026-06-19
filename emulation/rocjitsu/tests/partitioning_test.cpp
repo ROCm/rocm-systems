@@ -11,8 +11,10 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 
 namespace {
@@ -20,6 +22,7 @@ namespace {
 using namespace rocjitsu;
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
+const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4_kmd_2gpu.json";
 
 struct PartitionedTopology {
   config::LoadedConfig loaded;
@@ -76,6 +79,58 @@ TEST(XcdPartitioningTest, FourThreadsDistributesCdna4XcdsRoundRobinWithoutSplits
 
   for (uint32_t i = 0; i < topology.soc->num_xcds(); ++i)
     expect_subtree_partition(topology.soc->xcd(i), i % 4);
+}
+
+TEST(XcdPartitioningTest, SinglePartitionIsNoopWithoutManualPartitions) {
+  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
+  simdojo::Topology topology;
+  topology.set_root(loaded.take_root());
+  loaded.wire_links(topology);
+
+  for (uint32_t num_partitions : {0u, 1u}) {
+    SCOPED_TRACE(::testing::Message() << "num_partitions=" << num_partitions);
+    EXPECT_FALSE(amdgpu::partition_topology_by_xcds(topology, soc, num_partitions));
+    EXPECT_TRUE(topology.partitions().empty());
+    EXPECT_EQ(soc->partition_id(), simdojo::INVALID_PARTITION_ID);
+    for (uint32_t i = 0; i < soc->num_xcds(); ++i)
+      EXPECT_EQ(soc->xcd(i)->partition_id(), simdojo::INVALID_PARTITION_ID);
+  }
+}
+
+TEST(XcdPartitioningTest, ThreeThreadsDistributesCdna4XcdsRoundRobinWithoutSplits) {
+  auto topology = build_partitioned_topology(3);
+
+  ASSERT_TRUE(topology.partitioned);
+  ASSERT_EQ(topology.engine->topology().partitions().size(), 3u);
+  ASSERT_EQ(topology.soc->num_xcds(), 8u);
+
+  for (uint32_t i = 0; i < topology.soc->num_xcds(); ++i)
+    expect_subtree_partition(topology.soc->xcd(i), i % 3);
+}
+
+TEST(XcdPartitioningTest, SpanOverMultipleSocsUsesGlobalXcdIndex) {
+  auto loaded = config::load_config(CONFIG_2GPU_PATH, rocjitsu::kEmbeddedSchema);
+  ASSERT_EQ(loaded.extra_gpu_builds.size(), 1u);
+
+  auto root = std::make_unique<simdojo::CompositeComponent>("system");
+  auto *soc0 = dynamic_cast<SoC *>(root->add_child(loaded.take_root()));
+  auto *soc1 = dynamic_cast<SoC *>(root->add_child(std::move(loaded.extra_gpu_builds[0].root)));
+  ASSERT_NE(soc0, nullptr);
+  ASSERT_NE(soc1, nullptr);
+
+  simdojo::Topology topology;
+  topology.set_root(std::move(root));
+  std::array<SoC *, 2> socs = {soc0, soc1};
+  ASSERT_TRUE(amdgpu::partition_topology_by_xcds(topology, std::span<SoC *>(socs), 3));
+  ASSERT_EQ(topology.partitions().size(), 3u);
+
+  uint32_t global_xcd_index = 0;
+  for (auto *soc : socs) {
+    ASSERT_EQ(soc->num_xcds(), 8u);
+    for (uint32_t i = 0; i < soc->num_xcds(); ++i, ++global_xcd_index)
+      expect_subtree_partition(soc->xcd(i), global_xcd_index % 3);
+  }
 }
 
 TEST(XcdPartitioningTest, NonXcdComponentsStayOnPartitionZero) {

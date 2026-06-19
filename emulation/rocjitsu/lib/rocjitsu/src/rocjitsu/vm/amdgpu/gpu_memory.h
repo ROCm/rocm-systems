@@ -293,6 +293,8 @@ public:
   }
 
 private:
+  static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
+
   // Thread-local translation caches keep these pointers only while the simulated
   // process is active; driver teardown unregisters after GPU work is drained.
   struct VmidEntry {
@@ -334,7 +336,7 @@ private:
           uint8_t *host_ptr = nullptr;
           if (pt_it != cache.page_table->end())
             host_ptr = pt_it->second.host_ptr;
-          else if (passthrough_)
+          else if (passthrough_ && addr < kUserSpaceLimit)
             host_ptr = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
           cache.page_key = page_key;
           cache.host_ptr = host_ptr;
@@ -352,14 +354,13 @@ private:
         uint8_t *host_ptr = nullptr;
         if (pt_it != entry.page_table->end())
           host_ptr = pt_it->second.host_ptr;
-        else if (passthrough_)
+        else if (passthrough_ && addr < kUserSpaceLimit)
           host_ptr = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
         cache = {this,     instance_id_,     vmid,        table_generation, page_key, generation,
                  host_ptr, entry.page_table, entry.mutex, entry.generation};
         return host_ptr;
       }
     }
-    static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
     if (passthrough_ && addr < kUserSpaceLimit)
       return reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
     return nullptr;
