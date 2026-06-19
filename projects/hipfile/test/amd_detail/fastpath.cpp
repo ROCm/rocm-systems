@@ -742,11 +742,7 @@ TEST_P(FastpathIoParam, IoWithFallbackThrowsAFallbackIneligibleException)
     auto m_fallback = std::make_shared<StrictMock<MBackend>>();
     backend->register_fallback_backend(m_fallback);
 
-    EXPECT_CALL(mcfg, fastpath()).WillOnce(Return(true));
-    EXPECT_CALL(mhip, hipInit).WillRepeatedly(Return());
-    EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<void *>(DEFAULT_BUFFER_ADDR)));
-    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(DEFAULT_BUFFER_LENGTH));
-    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(DEFAULT_UNBUFFERED_FD));
+    expect_io();
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -772,11 +768,7 @@ TEST_P(FastpathIoParam, IoWithFallbackThrowsHipRuntimeException)
     auto m_fallback = std::make_shared<StrictMock<MBackend>>();
     backend->register_fallback_backend(m_fallback);
 
-    EXPECT_CALL(mcfg, fastpath()).WillOnce(Return(true));
-    EXPECT_CALL(mhip, hipInit).WillOnce(Return());
-    EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<void *>(DEFAULT_BUFFER_ADDR)));
-    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(DEFAULT_BUFFER_LENGTH));
-    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(DEFAULT_UNBUFFERED_FD));
+    expect_io();
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -801,11 +793,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENODEV)
     auto m_fallback = std::make_shared<StrictMock<MBackend>>();
     backend->register_fallback_backend(m_fallback);
 
-    EXPECT_CALL(mcfg, fastpath()).WillOnce(Return(true));
-    EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<void *>(DEFAULT_BUFFER_ADDR)));
-    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(DEFAULT_BUFFER_LENGTH));
-    EXPECT_CALL(mhip, hipInit).WillOnce(Return());
-    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(DEFAULT_UNBUFFERED_FD));
+    expect_io();
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -833,11 +821,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleEREMOTEIO)
     auto m_fallback = std::make_shared<StrictMock<MBackend>>();
     backend->register_fallback_backend(m_fallback);
 
-    EXPECT_CALL(mcfg, fastpath()).WillOnce(Return(true));
-    EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<void *>(DEFAULT_BUFFER_ADDR)));
-    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(DEFAULT_BUFFER_LENGTH));
-    EXPECT_CALL(mhip, hipInit).WillOnce(Return());
-    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(DEFAULT_UNBUFFERED_FD));
+    expect_io();
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -871,11 +855,7 @@ TEST_P(FastpathIoParam, FallbackRejectsIoRequest)
     auto m_fallback = std::make_shared<StrictMock<MBackend>>();
     backend->register_fallback_backend(m_fallback);
 
-    EXPECT_CALL(mcfg, fastpath()).WillOnce(Return(true));
-    EXPECT_CALL(mhip, hipInit).WillRepeatedly(Return());
-    EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<void *>(DEFAULT_BUFFER_ADDR)));
-    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(DEFAULT_BUFFER_LENGTH));
-    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(DEFAULT_UNBUFFERED_FD));
+    expect_io();
     EXPECT_CALL(*m_fallback, score).WillOnce(Return(SCORE_REJECT));
     EXPECT_CALL(mstats, error).Times(1);
 
