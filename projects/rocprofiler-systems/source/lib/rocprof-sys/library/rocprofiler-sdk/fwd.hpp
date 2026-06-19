@@ -29,8 +29,7 @@
         {                                                                                \
             rocprofiler_status_t ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) =          \
                 (result);                                                                \
-            if(ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) !=                           \
-               ROCPROFILER_STATUS_SUCCESS)                                               \
+            if(ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) != Wrapper::STATUS_SUCCESS)  \
             {                                                                            \
                 auto        msg        = std::stringstream{};                            \
                 std::string status_msg = rocprofiler_get_status_string(                  \

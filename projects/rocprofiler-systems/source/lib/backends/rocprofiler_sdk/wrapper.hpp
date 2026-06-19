@@ -170,6 +170,62 @@ struct backend
 #if ROCPROFILER_VERSION >= 600
     using ompt_data_t      = rocprofiler_callback_tracing_ompt_data_t;
     using ompt_operation_t = rocprofiler_ompt_operation_t;
+
+    // ─── OMPT operation constants ─────────────────────────────────────────────
+    static constexpr ompt_operation_t OMPT_ID_NONE = ROCPROFILER_OMPT_ID_NONE;
+    static constexpr ompt_operation_t OMPT_ID_thread_begin =
+        ROCPROFILER_OMPT_ID_thread_begin;
+    static constexpr ompt_operation_t OMPT_ID_thread_end = ROCPROFILER_OMPT_ID_thread_end;
+    static constexpr ompt_operation_t OMPT_ID_parallel_begin =
+        ROCPROFILER_OMPT_ID_parallel_begin;
+    static constexpr ompt_operation_t OMPT_ID_parallel_end =
+        ROCPROFILER_OMPT_ID_parallel_end;
+    static constexpr ompt_operation_t OMPT_ID_task_create =
+        ROCPROFILER_OMPT_ID_task_create;
+    static constexpr ompt_operation_t OMPT_ID_task_schedule =
+        ROCPROFILER_OMPT_ID_task_schedule;
+    static constexpr ompt_operation_t OMPT_ID_implicit_task =
+        ROCPROFILER_OMPT_ID_implicit_task;
+    static constexpr ompt_operation_t OMPT_ID_device_initialize =
+        ROCPROFILER_OMPT_ID_device_initialize;
+    static constexpr ompt_operation_t OMPT_ID_device_finalize =
+        ROCPROFILER_OMPT_ID_device_finalize;
+    static constexpr ompt_operation_t OMPT_ID_device_load =
+        ROCPROFILER_OMPT_ID_device_load;
+    static constexpr ompt_operation_t OMPT_ID_sync_region_wait =
+        ROCPROFILER_OMPT_ID_sync_region_wait;
+    static constexpr ompt_operation_t OMPT_ID_mutex_released =
+        ROCPROFILER_OMPT_ID_mutex_released;
+    static constexpr ompt_operation_t OMPT_ID_dependences =
+        ROCPROFILER_OMPT_ID_dependences;
+    static constexpr ompt_operation_t OMPT_ID_task_dependence =
+        ROCPROFILER_OMPT_ID_task_dependence;
+    static constexpr ompt_operation_t OMPT_ID_work   = ROCPROFILER_OMPT_ID_work;
+    static constexpr ompt_operation_t OMPT_ID_masked = ROCPROFILER_OMPT_ID_masked;
+    static constexpr ompt_operation_t OMPT_ID_sync_region =
+        ROCPROFILER_OMPT_ID_sync_region;
+    static constexpr ompt_operation_t OMPT_ID_lock_init = ROCPROFILER_OMPT_ID_lock_init;
+    static constexpr ompt_operation_t OMPT_ID_lock_destroy =
+        ROCPROFILER_OMPT_ID_lock_destroy;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquire =
+        ROCPROFILER_OMPT_ID_mutex_acquire;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquired =
+        ROCPROFILER_OMPT_ID_mutex_acquired;
+    static constexpr ompt_operation_t OMPT_ID_nest_lock  = ROCPROFILER_OMPT_ID_nest_lock;
+    static constexpr ompt_operation_t OMPT_ID_flush      = ROCPROFILER_OMPT_ID_flush;
+    static constexpr ompt_operation_t OMPT_ID_cancel     = ROCPROFILER_OMPT_ID_cancel;
+    static constexpr ompt_operation_t OMPT_ID_reduction  = ROCPROFILER_OMPT_ID_reduction;
+    static constexpr ompt_operation_t OMPT_ID_dispatch   = ROCPROFILER_OMPT_ID_dispatch;
+    static constexpr ompt_operation_t OMPT_ID_target_emi = ROCPROFILER_OMPT_ID_target_emi;
+    static constexpr ompt_operation_t OMPT_ID_target_data_op_emi =
+        ROCPROFILER_OMPT_ID_target_data_op_emi;
+    static constexpr ompt_operation_t OMPT_ID_target_submit_emi =
+        ROCPROFILER_OMPT_ID_target_submit_emi;
+    static constexpr ompt_operation_t OMPT_ID_error = ROCPROFILER_OMPT_ID_error;
+    static constexpr ompt_operation_t OMPT_ID_callback_functions =
+        ROCPROFILER_OMPT_ID_callback_functions;
+    static constexpr ompt_operation_t OMPT_ID_LAST = ROCPROFILER_OMPT_ID_LAST;
+
     using rccl_api_data    = rocprofiler_callback_tracing_rccl_api_data_t;
     using rccl_api_id_t    = rocprofiler_rccl_api_id_t;
     using nccl_data_type_t = ncclDataType_t;
@@ -230,6 +286,11 @@ struct backend
     using kfd_event_dropped_record =
         rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t;
     using kfd_event_queue_operation_t = rocprofiler_kfd_event_queue_operation_t;
+    using kfd_event_unmap_from_gpu_operation_t =
+        rocprofiler_kfd_event_unmap_from_gpu_operation_t;
+    using kfd_page_fault_operation_t   = rocprofiler_kfd_page_fault_operation_t;
+    using kfd_page_migrate_operation_t = rocprofiler_kfd_page_migrate_operation_t;
+    using kfd_queue_operation_t        = rocprofiler_kfd_queue_operation_t;
 #endif
 
     // ─── Status constants ────────────────────────────────────────────────────────
@@ -434,8 +495,85 @@ struct backend
 
 #if ROCPROFILER_VERSION >= 10000
     // ─── KFD event queue operation constants ─────────────────────────────────────
+    static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_NONE =
+        ROCPROFILER_KFD_EVENT_QUEUE_NONE;
+    static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_EVICT_SVM =
+        ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SVM;
+    static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_EVICT_USERPTR =
+        ROCPROFILER_KFD_EVENT_QUEUE_EVICT_USERPTR;
+    static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_EVICT_TTM =
+        ROCPROFILER_KFD_EVENT_QUEUE_EVICT_TTM;
+    static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_EVICT_SUSPEND =
+        ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SUSPEND;
+    static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_EVICT_CRIU_CHECKPOINT =
+        ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_CHECKPOINT;
+    static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE =
+        ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE;
     static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_RESTORE_RESCHEDULED =
         ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED;
+    static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_RESTORE =
+        ROCPROFILER_KFD_EVENT_QUEUE_RESTORE;
+    static constexpr kfd_event_queue_operation_t KFD_EVENT_QUEUE_LAST =
+        ROCPROFILER_KFD_EVENT_QUEUE_LAST;
+
+    // ─── KFD unmap-from-GPU operation constants ───────────────────────────────────
+    static constexpr kfd_event_unmap_from_gpu_operation_t KFD_EVENT_UNMAP_FROM_GPU_NONE =
+        ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_NONE;
+    static constexpr kfd_event_unmap_from_gpu_operation_t
+        KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY =
+            ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY;
+    static constexpr kfd_event_unmap_from_gpu_operation_t
+        KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY_MIGRATE =
+            ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY_MIGRATE;
+    static constexpr kfd_event_unmap_from_gpu_operation_t
+        KFD_EVENT_UNMAP_FROM_GPU_UNMAP_FROM_CPU =
+            ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_UNMAP_FROM_CPU;
+    static constexpr kfd_event_unmap_from_gpu_operation_t KFD_EVENT_UNMAP_FROM_GPU_LAST =
+        ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_LAST;
+
+    // ─── KFD page fault operation constants ──────────────────────────────────────
+    static constexpr kfd_page_fault_operation_t KFD_PAGE_FAULT_NONE =
+        ROCPROFILER_KFD_PAGE_FAULT_NONE;
+    static constexpr kfd_page_fault_operation_t KFD_PAGE_FAULT_READ_FAULT_MIGRATED =
+        ROCPROFILER_KFD_PAGE_FAULT_READ_FAULT_MIGRATED;
+    static constexpr kfd_page_fault_operation_t KFD_PAGE_FAULT_READ_FAULT_UPDATED =
+        ROCPROFILER_KFD_PAGE_FAULT_READ_FAULT_UPDATED;
+    static constexpr kfd_page_fault_operation_t KFD_PAGE_FAULT_WRITE_FAULT_MIGRATED =
+        ROCPROFILER_KFD_PAGE_FAULT_WRITE_FAULT_MIGRATED;
+    static constexpr kfd_page_fault_operation_t KFD_PAGE_FAULT_WRITE_FAULT_UPDATED =
+        ROCPROFILER_KFD_PAGE_FAULT_WRITE_FAULT_UPDATED;
+    static constexpr kfd_page_fault_operation_t KFD_PAGE_FAULT_LAST =
+        ROCPROFILER_KFD_PAGE_FAULT_LAST;
+
+    // ─── KFD page migrate operation constants ─────────────────────────────────────
+    static constexpr kfd_page_migrate_operation_t KFD_PAGE_MIGRATE_NONE =
+        ROCPROFILER_KFD_PAGE_MIGRATE_NONE;
+    static constexpr kfd_page_migrate_operation_t KFD_PAGE_MIGRATE_PREFETCH =
+        ROCPROFILER_KFD_PAGE_MIGRATE_PREFETCH;
+    static constexpr kfd_page_migrate_operation_t KFD_PAGE_MIGRATE_PAGEFAULT_GPU =
+        ROCPROFILER_KFD_PAGE_MIGRATE_PAGEFAULT_GPU;
+    static constexpr kfd_page_migrate_operation_t KFD_PAGE_MIGRATE_PAGEFAULT_CPU =
+        ROCPROFILER_KFD_PAGE_MIGRATE_PAGEFAULT_CPU;
+    static constexpr kfd_page_migrate_operation_t KFD_PAGE_MIGRATE_TTM_EVICTION =
+        ROCPROFILER_KFD_PAGE_MIGRATE_TTM_EVICTION;
+    static constexpr kfd_page_migrate_operation_t KFD_PAGE_MIGRATE_LAST =
+        ROCPROFILER_KFD_PAGE_MIGRATE_LAST;
+
+    // ─── KFD queue evict operation constants ──────────────────────────────────────
+    static constexpr kfd_queue_operation_t KFD_QUEUE_NONE = ROCPROFILER_KFD_QUEUE_NONE;
+    static constexpr kfd_queue_operation_t KFD_QUEUE_EVICT_SVM =
+        ROCPROFILER_KFD_QUEUE_EVICT_SVM;
+    static constexpr kfd_queue_operation_t KFD_QUEUE_EVICT_USERPTR =
+        ROCPROFILER_KFD_QUEUE_EVICT_USERPTR;
+    static constexpr kfd_queue_operation_t KFD_QUEUE_EVICT_TTM =
+        ROCPROFILER_KFD_QUEUE_EVICT_TTM;
+    static constexpr kfd_queue_operation_t KFD_QUEUE_EVICT_SUSPEND =
+        ROCPROFILER_KFD_QUEUE_EVICT_SUSPEND;
+    static constexpr kfd_queue_operation_t KFD_QUEUE_EVICT_CRIU_CHECKPOINT =
+        ROCPROFILER_KFD_QUEUE_EVICT_CRIU_CHECKPOINT;
+    static constexpr kfd_queue_operation_t KFD_QUEUE_EVICT_CRIU_RESTORE =
+        ROCPROFILER_KFD_QUEUE_EVICT_CRIU_RESTORE;
+    static constexpr kfd_queue_operation_t KFD_QUEUE_LAST = ROCPROFILER_KFD_QUEUE_LAST;
 #endif
 
     // ─── SDK function wrappers ────────────────────────────────────────────────────

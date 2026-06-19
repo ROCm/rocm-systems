@@ -72,105 +72,100 @@ namespace rocprofsys::rocprofiler_sdk
 namespace kfd_events_detail
 {
 
-template <typename RecordT>
+template <typename Wrapper, typename RecordT>
 const char*
 get_kfd_operation_name([[maybe_unused]] const RecordT* record)
 {
     return "KFD Event";
 }
 
-template <>
+template <typename Wrapper>
 inline const char*
 get_kfd_operation_name(const backend::kfd_page_fault_record* record)
 {
     switch(record->operation)
     {
-        case ROCPROFILER_KFD_PAGE_FAULT_READ_FAULT_MIGRATED:
+        case Wrapper::KFD_PAGE_FAULT_READ_FAULT_MIGRATED:
             return "PAGE_FAULT_READ_FAULT_MIGRATED";
-        case ROCPROFILER_KFD_PAGE_FAULT_READ_FAULT_UPDATED:
+        case Wrapper::KFD_PAGE_FAULT_READ_FAULT_UPDATED:
             return "PAGE_FAULT_READ_FAULT_UPDATED";
-        case ROCPROFILER_KFD_PAGE_FAULT_WRITE_FAULT_MIGRATED:
+        case Wrapper::KFD_PAGE_FAULT_WRITE_FAULT_MIGRATED:
             return "PAGE_FAULT_WRITE_FAULT_MIGRATED";
-        case ROCPROFILER_KFD_PAGE_FAULT_WRITE_FAULT_UPDATED:
+        case Wrapper::KFD_PAGE_FAULT_WRITE_FAULT_UPDATED:
             return "PAGE_FAULT_WRITE_FAULT_UPDATED";
         default: return "PAGE_FAULT";
     }
 }
 
-template <>
+template <typename Wrapper>
 inline const char*
 get_kfd_operation_name(const backend::kfd_page_migrate_record* record)
 {
     switch(record->operation)
     {
-        case ROCPROFILER_KFD_PAGE_MIGRATE_PREFETCH: return "PAGE_MIGRATE_PREFETCH";
-        case ROCPROFILER_KFD_PAGE_MIGRATE_PAGEFAULT_GPU:
-            return "PAGE_MIGRATE_PAGEFAULT_GPU";
-        case ROCPROFILER_KFD_PAGE_MIGRATE_PAGEFAULT_CPU:
-            return "PAGE_MIGRATE_PAGEFAULT_CPU";
-        case ROCPROFILER_KFD_PAGE_MIGRATE_TTM_EVICTION:
-            return "PAGE_MIGRATE_TTM_EVICTION";
+        case Wrapper::KFD_PAGE_MIGRATE_PREFETCH: return "PAGE_MIGRATE_PREFETCH";
+        case Wrapper::KFD_PAGE_MIGRATE_PAGEFAULT_GPU: return "PAGE_MIGRATE_PAGEFAULT_GPU";
+        case Wrapper::KFD_PAGE_MIGRATE_PAGEFAULT_CPU: return "PAGE_MIGRATE_PAGEFAULT_CPU";
+        case Wrapper::KFD_PAGE_MIGRATE_TTM_EVICTION: return "PAGE_MIGRATE_TTM_EVICTION";
         default: return "PAGE_MIGRATE";
     }
 }
 
-template <>
+template <typename Wrapper>
 inline const char*
 get_kfd_operation_name(const backend::kfd_queue_record* record)
 {
     switch(record->operation)
     {
-        case ROCPROFILER_KFD_QUEUE_EVICT_SVM: return "QUEUE_EVICT_SVM";
-        case ROCPROFILER_KFD_QUEUE_EVICT_USERPTR: return "QUEUE_EVICT_USERPTR";
-        case ROCPROFILER_KFD_QUEUE_EVICT_TTM: return "QUEUE_EVICT_TTM";
-        case ROCPROFILER_KFD_QUEUE_EVICT_SUSPEND: return "QUEUE_EVICT_SUSPEND";
-        case ROCPROFILER_KFD_QUEUE_EVICT_CRIU_CHECKPOINT:
+        case Wrapper::KFD_QUEUE_EVICT_SVM: return "QUEUE_EVICT_SVM";
+        case Wrapper::KFD_QUEUE_EVICT_USERPTR: return "QUEUE_EVICT_USERPTR";
+        case Wrapper::KFD_QUEUE_EVICT_TTM: return "QUEUE_EVICT_TTM";
+        case Wrapper::KFD_QUEUE_EVICT_SUSPEND: return "QUEUE_EVICT_SUSPEND";
+        case Wrapper::KFD_QUEUE_EVICT_CRIU_CHECKPOINT:
             return "QUEUE_EVICT_CRIU_CHECKPOINT";
-        case ROCPROFILER_KFD_QUEUE_EVICT_CRIU_RESTORE: return "QUEUE_EVICT_CRIU_RESTORE";
+        case Wrapper::KFD_QUEUE_EVICT_CRIU_RESTORE: return "QUEUE_EVICT_CRIU_RESTORE";
         default: return "QUEUE_EVICT";
     }
 }
 
-template <>
+template <typename Wrapper>
 inline const char*
 get_kfd_operation_name(const backend::kfd_event_queue_record* record)
 {
     switch(record->operation)
     {
-        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SVM: return "QUEUE_EVICT_SVM_EVENT";
-        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_USERPTR:
-            return "QUEUE_EVICT_USERPTR_EVENT";
-        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_TTM: return "QUEUE_EVICT_TTM_EVENT";
-        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SUSPEND:
-            return "QUEUE_EVICT_SUSPEND_EVENT";
-        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_CHECKPOINT:
+        case Wrapper::KFD_EVENT_QUEUE_EVICT_SVM: return "QUEUE_EVICT_SVM_EVENT";
+        case Wrapper::KFD_EVENT_QUEUE_EVICT_USERPTR: return "QUEUE_EVICT_USERPTR_EVENT";
+        case Wrapper::KFD_EVENT_QUEUE_EVICT_TTM: return "QUEUE_EVICT_TTM_EVENT";
+        case Wrapper::KFD_EVENT_QUEUE_EVICT_SUSPEND: return "QUEUE_EVICT_SUSPEND_EVENT";
+        case Wrapper::KFD_EVENT_QUEUE_EVICT_CRIU_CHECKPOINT:
             return "QUEUE_EVICT_CRIU_CHECKPOINT_EVENT";
-        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE:
+        case Wrapper::KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE:
             return "QUEUE_EVICT_CRIU_RESTORE_EVENT";
-        case ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED:
+        case Wrapper::KFD_EVENT_QUEUE_RESTORE_RESCHEDULED:
             return "QUEUE_RESTORE_RESCHEDULED_EVENT";
-        case ROCPROFILER_KFD_EVENT_QUEUE_RESTORE: return "QUEUE_RESTORE_EVENT";
+        case Wrapper::KFD_EVENT_QUEUE_RESTORE: return "QUEUE_RESTORE_EVENT";
         default: return "QUEUE_EVICT_EVENT";
     }
 }
 
-template <>
+template <typename Wrapper>
 inline const char*
 get_kfd_operation_name(const backend::kfd_event_unmap_record* record)
 {
     switch(record->operation)
     {
-        case ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY:
+        case Wrapper::KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY:
             return "UNMAP_FROM_GPU_MMU_NOTIFY";
-        case ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY_MIGRATE:
+        case Wrapper::KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY_MIGRATE:
             return "UNMAP_FROM_GPU_MMU_NOTIFY_MIGRATE";
-        case ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_UNMAP_FROM_CPU:
+        case Wrapper::KFD_EVENT_UNMAP_FROM_GPU_UNMAP_FROM_CPU:
             return "UNMAP_FROM_GPU_UNMAP_FROM_CPU";
         default: return "UNMAP_FROM_GPU";
     }
 }
 
-template <>
+template <typename Wrapper>
 inline const char*
 get_kfd_operation_name(const backend::kfd_event_dropped_record* /*record*/)
 {
@@ -179,21 +174,21 @@ get_kfd_operation_name(const backend::kfd_event_dropped_record* /*record*/)
 
 // ─── get_kfd_pmc_value ────────────────────────────────────────────────────────
 
-template <typename RecordT>
+template <typename Wrapper, typename RecordT>
 std::uint64_t
 get_kfd_pmc_value([[maybe_unused]] const RecordT* record)
 {
     return 1;
 }
 
-template <>
+template <typename Wrapper>
 inline std::uint64_t
 get_kfd_pmc_value(const backend::kfd_page_fault_record* record)
 {
     return record->address.value;
 }
 
-template <>
+template <typename Wrapper>
 inline std::uint64_t
 get_kfd_pmc_value(const backend::kfd_page_migrate_record* record)
 {
@@ -206,21 +201,21 @@ get_kfd_pmc_value(const backend::kfd_page_migrate_record* record)
     return record->end_address.value - record->start_address.value;
 }
 
-template <>
+template <typename Wrapper>
 inline std::uint64_t
 get_kfd_pmc_value(const backend::kfd_queue_record* /*record*/)
 {
     return 1;
 }
 
-template <>
+template <typename Wrapper>
 inline std::uint64_t
 get_kfd_pmc_value(const backend::kfd_event_dropped_record* record)
 {
     return record->count;
 }
 
-template <>
+template <typename Wrapper>
 inline std::uint64_t
 get_kfd_pmc_value(const backend::kfd_event_unmap_record* record)
 {
@@ -386,7 +381,7 @@ tool_kfd_page_fault_callback(const client_data<Wrapper>*           tool_data,
 
     auto        _beg_ns   = record->start_timestamp;
     auto        _end_ns   = record->end_timestamp;
-    const auto* _name     = get_kfd_operation_name(record);
+    const auto* _name     = get_kfd_operation_name<Wrapper>(record);
     auto        _pid      = record->pid;
     auto        _agent_id = record->agent_id;
     auto        _address  = record->address.value;
@@ -404,7 +399,7 @@ tool_kfd_page_fault_callback(const client_data<Wrapper>*           tool_data,
                                     "1;;string;;agent;;{};;",
                                   _address, _agent_nid);
 
-    auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
+    auto pmc_value = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid, _name, _beg_ns, _end_ns, std::move(args_str),
         trait::name<category::rocm_kfd_page_fault>::value, std::move(track_name), "{}",
@@ -426,7 +421,7 @@ tool_kfd_page_migrate_callback(const client_data<Wrapper>*             tool_data
 
     auto        _beg_ns          = record->start_timestamp;
     auto        _end_ns          = record->end_timestamp;
-    const auto* _name            = get_kfd_operation_name(record);
+    const auto* _name            = get_kfd_operation_name<Wrapper>(record);
     auto        _pid             = record->pid;
     auto        _start_addr      = record->start_address.value;
     auto        _end_addr        = record->end_address.value;
@@ -461,7 +456,7 @@ tool_kfd_page_migrate_callback(const client_data<Wrapper>*             tool_data
         agent_node_id_str(_dst_tool_agent), agent_node_id_str(_prefetch_tool_agent),
         agent_node_id_str(_preferred_tool_agent), _error_code);
 
-    auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
+    auto pmc_value = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
 
     if(!_src_tool_agent || !_src_tool_agent->agent)
         LOG_WARNING("KFD page migrate: source agent not found for agent_id={}",
@@ -492,7 +487,7 @@ tool_kfd_queue_callback(const client_data<Wrapper>*      tool_data,
 
     auto        _beg_ns   = record->start_timestamp;
     auto        _end_ns   = record->end_timestamp;
-    const auto* _name     = get_kfd_operation_name(record);
+    const auto* _name     = get_kfd_operation_name<Wrapper>(record);
     auto        _pid      = record->pid;
     auto        _agent_id = record->agent_id;
 
@@ -505,7 +500,7 @@ tool_kfd_queue_callback(const client_data<Wrapper>*      tool_data,
     cache_add_track(track_name.c_str(), tid);
 
     auto args_str  = fmt::format("0;;string;;agent;;{};;", agent_node_id_str(_agent));
-    auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
+    auto pmc_value = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
 
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid, _name, _beg_ns, _end_ns, std::move(args_str),
@@ -525,10 +520,10 @@ tool_kfd_event_queue_callback(const client_data<Wrapper>*            tool_data,
 {
     using namespace kfd_events_detail;
     if(!record) return;
-    if(record->operation != ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED) return;
+    if(record->operation != Wrapper::KFD_EVENT_QUEUE_RESTORE_RESCHEDULED) return;
 
     auto        _timestamp = record->timestamp;
-    const auto* _name      = get_kfd_operation_name(record);
+    const auto* _name      = get_kfd_operation_name<Wrapper>(record);
     auto        _pid       = record->pid;
     auto        _agent_id  = record->agent_id;
 
@@ -541,7 +536,7 @@ tool_kfd_event_queue_callback(const client_data<Wrapper>*            tool_data,
     cache_add_track(track_name.c_str(), tid);
 
     auto args_str  = fmt::format("0;;string;;agent;;{};;", agent_node_id_str(_agent));
-    auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
+    auto pmc_value = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
 
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid, _name, _timestamp, _timestamp, std::move(args_str),
@@ -563,7 +558,7 @@ tool_kfd_event_unmap_from_gpu_callback(const client_data<Wrapper>*            to
     if(!record) return;
 
     auto        _timestamp  = record->timestamp;
-    const auto* _name       = get_kfd_operation_name(record);
+    const auto* _name       = get_kfd_operation_name<Wrapper>(record);
     auto        _pid        = record->pid;
     auto        _agent_id   = record->agent_id;
     auto        _start_addr = record->start_address.value;
@@ -581,7 +576,7 @@ tool_kfd_event_unmap_from_gpu_callback(const client_data<Wrapper>*            to
                                   "1;;std::uint64_t;;start_address;;{:#x};;"
                                   "2;;std::uint64_t;;end_address;;{:#x};;",
                                  agent_node_id_str(_agent), _start_addr, _end_addr);
-    auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
+    auto pmc_value = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
 
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid, _name, _timestamp, _timestamp, std::move(args_str),
@@ -604,7 +599,7 @@ tool_kfd_event_dropped_events_callback(const client_data<Wrapper>* /*tool_data*/
     if(!record) return;
 
     auto        _timestamp = record->timestamp;
-    const auto* _name      = get_kfd_operation_name(record);
+    const auto* _name      = get_kfd_operation_name<Wrapper>(record);
     auto        _pid       = record->pid;
     auto        _count     = record->count;
 
@@ -615,7 +610,7 @@ tool_kfd_event_dropped_events_callback(const client_data<Wrapper>* /*tool_data*/
     cache_add_track(track_name.c_str(), tid);
 
     auto args_str  = fmt::format("0;;std::uint64_t;;count;;{};;", _count);
-    auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
+    auto pmc_value = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
 
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid, _name, _timestamp, _timestamp, std::move(args_str),

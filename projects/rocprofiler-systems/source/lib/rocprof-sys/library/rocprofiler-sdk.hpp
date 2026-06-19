@@ -645,7 +645,7 @@ library_sdk<Wrapper>::is_active(typename Wrapper::context_id ctx)
 {
     int  status = 0;
     auto errc   = Wrapper::context_is_active(ctx, &status);
-    return (errc == ROCPROFILER_STATUS_SUCCESS && status > 0);
+    return (errc == Wrapper::STATUS_SUCCESS && status > 0);
 }
 
 template <typename Wrapper>
@@ -654,7 +654,7 @@ library_sdk<Wrapper>::is_valid(typename Wrapper::context_id ctx)
 {
     int  status = 0;
     auto errc   = Wrapper::context_is_valid(ctx, &status);
-    return (errc == ROCPROFILER_STATUS_SUCCESS && status > 0);
+    return (errc == Wrapper::STATUS_SUCCESS && status > 0);
 }
 
 template <typename Wrapper>
@@ -704,7 +704,7 @@ library_sdk<Wrapper>::flush()
         if(itr.handle > 0)
         {
             auto status = Wrapper::flush_buffer(itr);
-            if(status != ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
+            if(status != Wrapper::STATUS_ERROR_BUFFER_BUSY)
             {
                 ROCPROFILER_CALL(status);
             }
@@ -1323,11 +1323,11 @@ library_sdk<Wrapper>::tool_code_object_callback(
     auto ts = typename Wrapper::timestamp_t{};
     ROCPROFILER_CALL(Wrapper::get_timestamp(&ts));
 
-    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT)
+    if(record.kind == Wrapper::CALLBACK_TRACING_CODE_OBJECT)
     {
-        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        if(record.phase == Wrapper::CALLBACK_PHASE_ENTER)
         {
-            if(record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
+            if(record.operation == Wrapper::CODE_OBJECT_LOAD)
             {
                 auto data_v = *static_cast<typename Wrapper::code_object_load_data*>(
                     record.payload);
@@ -1338,7 +1338,7 @@ library_sdk<Wrapper>::tool_code_object_callback(
                 trace_cache::get_metadata_registry().add_code_object(data_v);
             }
             else if(record.operation ==
-                    ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+                    Wrapper::CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
             {
                 auto data_v =
                     *static_cast<kernel_symbol_data_t<Wrapper>*>(record.payload);
@@ -1498,19 +1498,19 @@ library_sdk<Wrapper>::tool_tracing_callback(
     };
 
 #if(ROCPROFILER_VERSION >= 600)
-    if(record.kind == ROCPROFILER_CALLBACK_TRACING_OMPT)
+    if(record.kind == Wrapper::CALLBACK_TRACING_OMPT)
     {
         auto* payload_data = static_cast<typename Wrapper::ompt_data_t*>(record.payload);
         if(!payload_data) return;
         switch(record.operation)
         {
-            case ROCPROFILER_OMPT_ID_implicit_task:
+            case Wrapper::OMPT_ID_implicit_task:
             {
                 int flag = payload_data->args.implicit_task.flags;
                 if(flag & ompt_task_initial) return;
                 break;
             }
-            case ROCPROFILER_OMPT_ID_thread_begin:
+            case Wrapper::OMPT_ID_thread_begin:
             {
                 ompt_thread_t thread_type = payload_data->args.thread_begin.thread_type;
                 if(thread_type == ompt_thread_initial) return;
@@ -1539,58 +1539,58 @@ library_sdk<Wrapper>::tool_tracing_callback(
         return;
     }
 
-    if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    if(record.phase == Wrapper::CALLBACK_PHASE_ENTER)
     {
         user_data->value = ts;
         switch(record.kind)
         {
-            case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
+            case Wrapper::CALLBACK_TRACING_HSA_CORE_API:
+            case Wrapper::CALLBACK_TRACING_HSA_AMD_EXT_API:
+            case Wrapper::CALLBACK_TRACING_HSA_IMAGE_EXT_API:
+            case Wrapper::CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
                 tool_tracing_callback_start(category::rocm_hsa_api{}, record, user_data,
                                             ts);
                 break;
-            case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
-            case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
+            case Wrapper::CALLBACK_TRACING_HIP_RUNTIME_API:
+            case Wrapper::CALLBACK_TRACING_HIP_COMPILER_API:
                 tool_tracing_callback_start(category::rocm_hip_api{}, record, user_data,
                                             ts);
                 break;
 #if(ROCPROFILER_VERSION >= 600)
-            case ROCPROFILER_CALLBACK_TRACING_OMPT:
+            case Wrapper::CALLBACK_TRACING_OMPT:
                 ompt_tracing_callback_start(record, user_data, ts);
                 ompt_push_standard_callback(record, ts);
                 break;
-            case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
+            case Wrapper::CALLBACK_TRACING_ROCDECODE_API:
                 tool_tracing_callback_start(category::rocm_rocdecode_api{}, record,
                                             user_data, ts);
                 break;
 #endif
 #if(ROCPROFILER_VERSION >= 700)
-            case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
+            case Wrapper::CALLBACK_TRACING_ROCJPEG_API:
                 tool_tracing_callback_start(category::rocm_rocjpeg_api{}, record,
                                             user_data, ts);
                 break;
 #endif
-            case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
+            case Wrapper::CALLBACK_TRACING_RCCL_API:
                 tool_tracing_callback_start(category::rocm_rccl_api{}, record, user_data,
                                             ts);
                 break;
-            case ROCPROFILER_CALLBACK_TRACING_NONE:
-            case ROCPROFILER_CALLBACK_TRACING_LAST:
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
-            case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
-            case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
-            case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
-            case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
+            case Wrapper::CALLBACK_TRACING_NONE:
+            case Wrapper::CALLBACK_TRACING_LAST:
+            case Wrapper::CALLBACK_TRACING_MARKER_CONTROL_API:
+            case Wrapper::CALLBACK_TRACING_MARKER_CORE_API:
+            case Wrapper::CALLBACK_TRACING_MARKER_NAME_API:
+            case Wrapper::CALLBACK_TRACING_CODE_OBJECT:
+            case Wrapper::CALLBACK_TRACING_SCRATCH_MEMORY:
+            case Wrapper::CALLBACK_TRACING_KERNEL_DISPATCH:
+            case Wrapper::CALLBACK_TRACING_MEMORY_COPY:
 #if(ROCPROFILER_VERSION >= 600)
-            case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
-            case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
+            case Wrapper::CALLBACK_TRACING_MEMORY_ALLOCATION:
+            case Wrapper::CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
 #if(ROCPROFILER_VERSION >= 700)
-            case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
+            case Wrapper::CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
                 LOG_CRITICAL("Unhandled callback record: {}",
@@ -1606,40 +1606,40 @@ library_sdk<Wrapper>::tool_tracing_callback(
                 break;
         }
     }
-    else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+    else if(record.phase == Wrapper::CALLBACK_PHASE_EXIT)
     {
         populate_backtrace_data();
         switch(record.kind)
         {
-            case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
+            case Wrapper::CALLBACK_TRACING_HSA_CORE_API:
+            case Wrapper::CALLBACK_TRACING_HSA_AMD_EXT_API:
+            case Wrapper::CALLBACK_TRACING_HSA_IMAGE_EXT_API:
+            case Wrapper::CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
                 tool_tracing_callback_stop(category::rocm_hsa_api{}, record, user_data,
                                            ts, _bt_data);
                 break;
-            case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
-            case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
+            case Wrapper::CALLBACK_TRACING_HIP_RUNTIME_API:
+            case Wrapper::CALLBACK_TRACING_HIP_COMPILER_API:
                 tool_tracing_callback_stop(category::rocm_hip_api{}, record, user_data,
                                            ts, _bt_data);
                 break;
 #if(ROCPROFILER_VERSION >= 600)
-            case ROCPROFILER_CALLBACK_TRACING_OMPT:
+            case Wrapper::CALLBACK_TRACING_OMPT:
                 ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
                 ompt_pop_standard_callback(record, ts, _bt_data);
                 break;
-            case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
+            case Wrapper::CALLBACK_TRACING_ROCDECODE_API:
                 tool_tracing_callback_stop(category::rocm_rocdecode_api{}, record,
                                            user_data, ts, _bt_data);
                 break;
 #endif
 #if(ROCPROFILER_VERSION >= 700)
-            case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
+            case Wrapper::CALLBACK_TRACING_ROCJPEG_API:
                 tool_tracing_callback_stop(category::rocm_rocjpeg_api{}, record,
                                            user_data, ts, _bt_data);
                 break;
 #endif
-            case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
+            case Wrapper::CALLBACK_TRACING_RCCL_API:
             {
                 auto* rccl_payload =
                     static_cast<typename Wrapper::rccl_api_data*>(record.payload);
@@ -1649,21 +1649,21 @@ library_sdk<Wrapper>::tool_tracing_callback(
                                            ts, _bt_data);
                 break;
             }
-            case ROCPROFILER_CALLBACK_TRACING_NONE:
-            case ROCPROFILER_CALLBACK_TRACING_LAST:
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
-            case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
-            case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
-            case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
-            case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
+            case Wrapper::CALLBACK_TRACING_NONE:
+            case Wrapper::CALLBACK_TRACING_LAST:
+            case Wrapper::CALLBACK_TRACING_MARKER_CONTROL_API:
+            case Wrapper::CALLBACK_TRACING_MARKER_CORE_API:
+            case Wrapper::CALLBACK_TRACING_MARKER_NAME_API:
+            case Wrapper::CALLBACK_TRACING_CODE_OBJECT:
+            case Wrapper::CALLBACK_TRACING_SCRATCH_MEMORY:
+            case Wrapper::CALLBACK_TRACING_KERNEL_DISPATCH:
+            case Wrapper::CALLBACK_TRACING_MEMORY_COPY:
 #if(ROCPROFILER_VERSION >= 600)
-            case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
-            case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
+            case Wrapper::CALLBACK_TRACING_MEMORY_ALLOCATION:
+            case Wrapper::CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
 #if(ROCPROFILER_VERSION >= 700)
-            case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
+            case Wrapper::CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
                 LOG_CRITICAL("Unhandled callback record: {}",
@@ -1679,12 +1679,12 @@ library_sdk<Wrapper>::tool_tracing_callback(
                 break;
         }
     }
-    else if(record.phase == ROCPROFILER_CALLBACK_PHASE_NONE)
+    else if(record.phase == Wrapper::CALLBACK_PHASE_NONE)
     {
         switch(record.kind)
         {
-            case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
-                if(record.operation == ROCPROFILER_KERNEL_DISPATCH_COMPLETE)
+            case Wrapper::CALLBACK_TRACING_KERNEL_DISPATCH:
+                if(record.operation == Wrapper::KERNEL_DISPATCH_COMPLETE)
                 {
                     auto* _data = static_cast<typename Wrapper::kernel_dispatch_data*>(
                         record.payload);
@@ -1695,12 +1695,12 @@ library_sdk<Wrapper>::tool_tracing_callback(
                 }
                 break;
 #if(ROCPROFILER_VERSION >= 600)
-            case ROCPROFILER_CALLBACK_TRACING_OMPT:
+            case Wrapper::CALLBACK_TRACING_OMPT:
             {
                 static const std::set<typename Wrapper::ompt_operation_t>
                     ompt_no_process = {
-                        ROCPROFILER_OMPT_ID_callback_functions,
-                        ROCPROFILER_OMPT_ID_thread_end,
+                        Wrapper::OMPT_ID_callback_functions,
+                        Wrapper::OMPT_ID_thread_end,
                     };
                 auto ompt_operation_type =
                     static_cast<typename Wrapper::ompt_operation_t>(record.operation);
@@ -1709,32 +1709,32 @@ library_sdk<Wrapper>::tool_tracing_callback(
                 populate_backtrace_data();
                 switch(ompt_operation_type)
                 {
-                    case ROCPROFILER_OMPT_ID_parallel_begin:
+                    case Wrapper::OMPT_ID_parallel_begin:
                         ompt_tracing_callback_start(record, user_data, ts);
                         ompt_push_parallel_callback(record, ts);
                         break;
-                    case ROCPROFILER_OMPT_ID_parallel_end:
+                    case Wrapper::OMPT_ID_parallel_end:
                         ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
                         ompt_pop_parallel_callback(record, ts, _bt_data);
                         break;
-                    case ROCPROFILER_OMPT_ID_thread_begin:
-                    case ROCPROFILER_OMPT_ID_lock_init:
-                    case ROCPROFILER_OMPT_ID_lock_destroy:
-                    case ROCPROFILER_OMPT_ID_nest_lock:
-                    case ROCPROFILER_OMPT_ID_dispatch:
-                    case ROCPROFILER_OMPT_ID_flush:
-                    case ROCPROFILER_OMPT_ID_cancel:
-                    case ROCPROFILER_OMPT_ID_device_initialize:
-                    case ROCPROFILER_OMPT_ID_device_finalize:
-                    case ROCPROFILER_OMPT_ID_device_load:
-                    case ROCPROFILER_OMPT_ID_task_create:
-                    case ROCPROFILER_OMPT_ID_task_schedule:
-                    case ROCPROFILER_OMPT_ID_mutex_released:
-                    case ROCPROFILER_OMPT_ID_mutex_acquire:
-                    case ROCPROFILER_OMPT_ID_mutex_acquired:
-                    case ROCPROFILER_OMPT_ID_dependences:
-                    case ROCPROFILER_OMPT_ID_task_dependence:
-                    case ROCPROFILER_OMPT_ID_error:
+                    case Wrapper::OMPT_ID_thread_begin:
+                    case Wrapper::OMPT_ID_lock_init:
+                    case Wrapper::OMPT_ID_lock_destroy:
+                    case Wrapper::OMPT_ID_nest_lock:
+                    case Wrapper::OMPT_ID_dispatch:
+                    case Wrapper::OMPT_ID_flush:
+                    case Wrapper::OMPT_ID_cancel:
+                    case Wrapper::OMPT_ID_device_initialize:
+                    case Wrapper::OMPT_ID_device_finalize:
+                    case Wrapper::OMPT_ID_device_load:
+                    case Wrapper::OMPT_ID_task_create:
+                    case Wrapper::OMPT_ID_task_schedule:
+                    case Wrapper::OMPT_ID_mutex_released:
+                    case Wrapper::OMPT_ID_mutex_acquire:
+                    case Wrapper::OMPT_ID_mutex_acquired:
+                    case Wrapper::OMPT_ID_dependences:
+                    case Wrapper::OMPT_ID_task_dependence:
+                    case Wrapper::OMPT_ID_error:
                     {
                         auto instant_ts = ts;
                         ompt_tracing_callback_start(record, user_data, instant_ts);
@@ -1778,8 +1778,8 @@ library_sdk<Wrapper>::ompt_get_unified_name(
 {
     std::string_view _name =
         tool_data->callback_tracing_info.at(record.kind, record.operation);
-    if(record.operation == ROCPROFILER_OMPT_ID_parallel_begin ||
-       record.operation == ROCPROFILER_OMPT_ID_parallel_end)
+    if(record.operation == Wrapper::OMPT_ID_parallel_begin ||
+       record.operation == Wrapper::OMPT_ID_parallel_end)
         _name = "omp_parallel";
     return _name;
 }
@@ -1796,8 +1796,8 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
 
     auto ompt_operation_type =
         static_cast<typename Wrapper::ompt_operation_t>(record.operation);
-    auto max_deref = (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER ||
-                      ompt_operation_type == ROCPROFILER_OMPT_ID_parallel_begin)
+    auto max_deref = (record.phase == Wrapper::CALLBACK_PHASE_ENTER ||
+                      ompt_operation_type == Wrapper::OMPT_ID_parallel_begin)
                          ? 1
                          : 2;
 
@@ -1809,9 +1809,9 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
             record, iterate_args_callback, max_deref, &args);
 
     static const auto ompt_has_flags = std::set<typename Wrapper::ompt_operation_t>{
-        ROCPROFILER_OMPT_ID_parallel_begin, ROCPROFILER_OMPT_ID_parallel_end,
-        ROCPROFILER_OMPT_ID_task_create,    ROCPROFILER_OMPT_ID_implicit_task,
-        ROCPROFILER_OMPT_ID_cancel,
+        Wrapper::OMPT_ID_parallel_begin, Wrapper::OMPT_ID_parallel_end,
+        Wrapper::OMPT_ID_task_create,    Wrapper::OMPT_ID_implicit_task,
+        Wrapper::OMPT_ID_cancel,
     };
     if(ompt_has_flags.find(ompt_operation_type) == ompt_has_flags.end()) return;
 
@@ -1830,28 +1830,26 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
 
     switch(ompt_operation_type)
     {
-        case ROCPROFILER_OMPT_ID_parallel_begin:
+        case Wrapper::OMPT_ID_parallel_begin:
             flags_val = payload_data->args.parallel_begin.flags;
             break;
-        case ROCPROFILER_OMPT_ID_parallel_end:
+        case Wrapper::OMPT_ID_parallel_end:
             flags_val = payload_data->args.parallel_end.flags;
             break;
-        case ROCPROFILER_OMPT_ID_task_create:
+        case Wrapper::OMPT_ID_task_create:
             flags_val = payload_data->args.task_create.flags;
             break;
-        case ROCPROFILER_OMPT_ID_implicit_task:
+        case Wrapper::OMPT_ID_implicit_task:
             flags_val = payload_data->args.implicit_task.flags;
             break;
-        case ROCPROFILER_OMPT_ID_cancel:
-            flags_val = payload_data->args.cancel.flags;
-            break;
+        case Wrapper::OMPT_ID_cancel: flags_val = payload_data->args.cancel.flags; break;
         default: break;
     }
 
     switch(ompt_operation_type)
     {
-        case ROCPROFILER_OMPT_ID_parallel_begin:
-        case ROCPROFILER_OMPT_ID_parallel_end:
+        case Wrapper::OMPT_ID_parallel_begin:
+        case Wrapper::OMPT_ID_parallel_end:
         {
             const auto ft = std::string{ "ompt_parallel_flag_t" };
             if(flags_val & ompt_parallel_invoker_program)
@@ -1864,7 +1862,7 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
                 append(ft, "invoker_cause", "parallel_construct");
             break;
         }
-        case ROCPROFILER_OMPT_ID_task_create:
+        case Wrapper::OMPT_ID_task_create:
         {
             const auto ft = std::string{ "ompt_task_flag_t" };
             if(flags_val & ompt_task_initial)
@@ -1889,7 +1887,7 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
             append(ft, "properties", props);
             break;
         }
-        case ROCPROFILER_OMPT_ID_implicit_task:
+        case Wrapper::OMPT_ID_implicit_task:
         {
             const auto ft = std::string{ "flags" };
             if(flags_val & ompt_task_initial)
@@ -1898,7 +1896,7 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
                 append(ft, "kind", "implicit");
             break;
         }
-        case ROCPROFILER_OMPT_ID_cancel:
+        case Wrapper::OMPT_ID_cancel:
         {
             const auto ft = std::string{ "ompt_cancel_flag_t" };
             if(flags_val & ompt_cancel_parallel)
@@ -2179,9 +2177,9 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
     {
         auto* header = headers[i];
 
-        if(ROCPROFSYS_LIKELY(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING))
+        if(ROCPROFSYS_LIKELY(header->category == Wrapper::BUFFER_CATEGORY_TRACING))
         {
-            if(header->kind == ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH)
+            if(header->kind == Wrapper::BUFFER_TRACING_KERNEL_DISPATCH)
             {
                 auto* record = static_cast<typename Wrapper::kernel_dispatch_record*>(
                     header->payload);
@@ -2288,7 +2286,7 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                     }
                 }
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
+            else if(header->kind == Wrapper::BUFFER_TRACING_SCRATCH_MEMORY)
             {
                 auto* record = static_cast<typename Wrapper::scratch_memory_record*>(
                     header->payload);
@@ -2365,7 +2363,7 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                     }
                 }
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
+            else if(header->kind == Wrapper::BUFFER_TRACING_MEMORY_COPY)
             {
                 auto* record =
                     static_cast<typename Wrapper::memory_copy_record*>(header->payload);
@@ -2453,7 +2451,7 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                 }
             }
 #if(ROCPROFILER_VERSION >= 600)
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
+            else if(header->kind == Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION)
             {
                 auto* record =
                     static_cast<typename Wrapper::memory_alloc_record*>(header->payload);
@@ -2464,45 +2462,45 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
             }
 #endif
 #if(ROCPROFILER_VERSION >= 10000)
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
+            else if(header->kind == Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT)
             {
                 auto* record = static_cast<typename Wrapper::kfd_page_fault_record*>(
                     header->payload);
                 tool_kfd_page_fault_callback(tool_data, record);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
+            else if(header->kind == Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE)
             {
                 auto* record = static_cast<typename Wrapper::kfd_page_migrate_record*>(
                     header->payload);
                 tool_kfd_page_migrate_callback(tool_data, record);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
+            else if(header->kind == Wrapper::BUFFER_TRACING_KFD_QUEUE)
             {
                 auto* record =
                     static_cast<typename Wrapper::kfd_queue_record*>(header->payload);
                 tool_kfd_queue_callback(tool_data, record);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
+            else if(header->kind == Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE)
             {
                 auto* record = static_cast<typename Wrapper::kfd_event_queue_record*>(
                     header->payload);
                 tool_kfd_event_queue_callback(tool_data, record);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
+            else if(header->kind == Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
             {
                 auto* record = static_cast<typename Wrapper::kfd_event_unmap_record*>(
                     header->payload);
                 tool_kfd_event_unmap_from_gpu_callback(tool_data, record);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
+            else if(header->kind == Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
             {
                 auto* record = static_cast<typename Wrapper::kfd_event_dropped_record*>(
                     header->payload);
                 tool_kfd_event_dropped_events_callback(tool_data, record);
             }
 #endif
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
-                    header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API)
+            else if(header->kind == Wrapper::BUFFER_TRACING_HSA_CORE_API ||
+                    header->kind == Wrapper::BUFFER_TRACING_HSA_AMD_EXT_API)
             {
                 continue;
             }
@@ -2621,24 +2619,24 @@ library_sdk<Wrapper>::tool_hip_stream_callback(
     typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t* /*user_data*/, void* /*data*/)
 {
-    if(record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM) return;
+    if(record.kind != Wrapper::CALLBACK_TRACING_HIP_STREAM) return;
     auto* stream_handle_data =
         static_cast<typename Wrapper::hip_stream_data*>(record.payload);
     auto stream_id = stream_handle_data->stream_id;
 
-    if(record.operation == ROCPROFILER_HIP_STREAM_CREATE)
+    if(record.operation == Wrapper::HIP_STREAM_CREATE)
     {
-        LOG_TRACE(" operation = ROCPROFILER_HIP_STREAM_CREATE");
+        LOG_TRACE(" operation = Wrapper::HIP_STREAM_CREATE");
     }
-    else if(record.operation == ROCPROFILER_HIP_STREAM_DESTROY)
+    else if(record.operation == Wrapper::HIP_STREAM_DESTROY)
     {
-        LOG_TRACE(" operation = ROCPROFILER_HIP_STREAM_DESTROY");
+        LOG_TRACE(" operation = Wrapper::HIP_STREAM_DESTROY");
     }
-    else if(record.operation == ROCPROFILER_HIP_STREAM_SET)
+    else if(record.operation == Wrapper::HIP_STREAM_SET)
     {
-        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        if(record.phase == Wrapper::CALLBACK_PHASE_ENTER)
             stream_id_push(stream_id);
-        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+        else if(record.phase == Wrapper::CALLBACK_PHASE_EXIT)
             stream_id_pop();
     }
     else
@@ -2680,16 +2678,16 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
     ROCPROFILER_CALL(Wrapper::create_context(&_data->primary_ctx));
     ROCPROFILER_CALL(Wrapper::create_context(&_data->code_object_ctx));
     ROCPROFILER_CALL(Wrapper::configure_callback_tracing_service(
-        _data->code_object_ctx, ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,
+        _data->code_object_ctx, Wrapper::CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,
         tool_code_object_callback, _data));
     ROCPROFILER_CALL(Wrapper::create_context(&_data->control_ctx));
 
     auto external_corr_id_request_kinds =
         std::array<typename Wrapper::external_correlation_request_kind, 3>{
-            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
-            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
+            Wrapper::EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+            Wrapper::EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
 #if(ROCPROFILER_VERSION >= 600)
-            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION
+            Wrapper::EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION
 #endif
         };
 
@@ -2699,19 +2697,19 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
     }
 
     for(auto itr : {
-            ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-            ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-            ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
-            ROCPROFILER_CALLBACK_TRACING_RCCL_API,
+            Wrapper::CALLBACK_TRACING_HSA_CORE_API,
+            Wrapper::CALLBACK_TRACING_HSA_AMD_EXT_API,
+            Wrapper::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+            Wrapper::CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+            Wrapper::CALLBACK_TRACING_HIP_RUNTIME_API,
+            Wrapper::CALLBACK_TRACING_HIP_COMPILER_API,
+            Wrapper::CALLBACK_TRACING_RCCL_API,
 #if(ROCPROFILER_VERSION >= 600)
-            ROCPROFILER_CALLBACK_TRACING_OMPT,
-            ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
+            Wrapper::CALLBACK_TRACING_OMPT,
+            Wrapper::CALLBACK_TRACING_ROCDECODE_API,
 #endif
 #if(ROCPROFILER_VERSION >= 700)
-            ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
+            Wrapper::CALLBACK_TRACING_ROCJPEG_API,
 #endif
         })
     {
@@ -2735,50 +2733,50 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
         set_kernel_rename_and_stream_correlation_id, _data));
 
 #if(ROCPROFILER_VERSION >= 700)
-    if((_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0) ||
-       (_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0))
+    if((_buffered_domain.count(Wrapper::BUFFER_TRACING_KERNEL_DISPATCH) > 0) ||
+       (_buffered_domain.count(Wrapper::BUFFER_TRACING_MEMORY_COPY) > 0))
     {
         ROCPROFILER_CALL(Wrapper::configure_callback_tracing_service(
-            _data->primary_ctx, ROCPROFILER_CALLBACK_TRACING_HIP_STREAM, nullptr, 0,
+            _data->primary_ctx, Wrapper::CALLBACK_TRACING_HIP_STREAM, nullptr, 0,
             tool_hip_stream_callback, nullptr));
     }
 #endif
 
-    if(_callback_domains.count(ROCPROFILER_CALLBACK_TRACING_RCCL_API) > 0)
+    if(_callback_domains.count(Wrapper::CALLBACK_TRACING_RCCL_API) > 0)
         rocprofiler_sdk::rccl_comm_data_initialize();
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0)
+    if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KERNEL_DISPATCH) > 0)
     {
         ROCPROFILER_CALL(Wrapper::create_buffer(
             _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
             tool_tracing_buffered, tool_data, &_data->kernel_dispatch_buffer));
         ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH, nullptr, 0,
+            _data->primary_ctx, Wrapper::BUFFER_TRACING_KERNEL_DISPATCH, nullptr, 0,
             _data->kernel_dispatch_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0)
+    if(_buffered_domain.count(Wrapper::BUFFER_TRACING_MEMORY_COPY) > 0)
     {
         ROCPROFILER_CALL(Wrapper::create_buffer(
             _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
             tool_tracing_buffered, tool_data, &_data->memory_copy_buffer));
         ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0,
+            _data->primary_ctx, Wrapper::BUFFER_TRACING_MEMORY_COPY, nullptr, 0,
             _data->memory_copy_buffer));
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY) > 0)
+    if(_buffered_domain.count(Wrapper::BUFFER_TRACING_SCRATCH_MEMORY) > 0)
     {
         ROCPROFILER_CALL(Wrapper::create_buffer(
             _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
             tool_tracing_buffered, tool_data, &_data->scratch_memory_buffer));
         ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY, nullptr, 0,
+            _data->primary_ctx, Wrapper::BUFFER_TRACING_SCRATCH_MEMORY, nullptr, 0,
             _data->scratch_memory_buffer));
     }
 
 #if(ROCPROFILER_VERSION >= 600)
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION) > 0)
+    if(_buffered_domain.count(Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION) > 0)
     {
         ROCPROFILER_CALL(Wrapper::create_buffer(
             _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
@@ -2790,79 +2788,79 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
             ::std::abort();
         }
         ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION, nullptr, 0,
+            _data->primary_ctx, Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION, nullptr, 0,
             _data->memory_alloc_buffer));
     }
 #endif
 
 #if(ROCPROFILER_VERSION >= 10000)
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
+    if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
+       _buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||
+       _buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_QUEUE) > 0 ||
+       _buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE) > 0 ||
+       _buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0 ||
+       _buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
     {
         rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0)
+    if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT) > 0)
     {
         ROCPROFILER_CALL(Wrapper::create_buffer(
             _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
             tool_tracing_buffered, tool_data, &_data->kfd_page_fault_buffer));
         ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT, nullptr, 0,
+            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT, nullptr, 0,
             _data->kfd_page_fault_buffer));
     }
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0)
+    if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0)
     {
         ROCPROFILER_CALL(Wrapper::create_buffer(
             _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
             tool_tracing_buffered, tool_data, &_data->kfd_page_migrate_buffer));
         ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE, nullptr, 0,
+            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE, nullptr, 0,
             _data->kfd_page_migrate_buffer));
     }
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0)
+    if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_QUEUE) > 0)
     {
         ROCPROFILER_CALL(Wrapper::create_buffer(
             _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
             tool_tracing_buffered, tool_data, &_data->kfd_queue_buffer));
         ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_QUEUE, nullptr, 0,
+            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_QUEUE, nullptr, 0,
             _data->kfd_queue_buffer));
     }
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0)
+    if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE) > 0)
     {
         ROCPROFILER_CALL(Wrapper::create_buffer(
             _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
             tool_tracing_buffered, tool_data, &_data->kfd_event_queue_buffer));
         auto kfd_event_queue_ops = std::array<typename Wrapper::tracing_operation, 1>{
-            ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED
+            Wrapper::KFD_EVENT_QUEUE_RESTORE_RESCHEDULED
         };
         ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE,
             kfd_event_queue_ops.data(), kfd_event_queue_ops.size(),
             _data->kfd_event_queue_buffer));
     }
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0)
+    if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0)
     {
         ROCPROFILER_CALL(Wrapper::create_buffer(
             _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
             tool_tracing_buffered, tool_data, &_data->kfd_event_unmap_buffer));
         ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-            nullptr, 0, _data->kfd_event_unmap_buffer));
+            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU, nullptr,
+            0, _data->kfd_event_unmap_buffer));
     }
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
+    if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
     {
         ROCPROFILER_CALL(Wrapper::create_buffer(
             _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
             tool_tracing_buffered, tool_data, &_data->kfd_event_dropped_buffer));
         ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
-            nullptr, 0, _data->kfd_event_dropped_buffer));
+            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS, nullptr,
+            0, _data->kfd_event_dropped_buffer));
     }
 #endif
 
@@ -2877,10 +2875,10 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
 
         ROCPROFILER_CALL(Wrapper::create_context(&_data->counter_ctx));
         auto _operations = std::array<typename Wrapper::tracing_operation, 1>{
-            ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
+            Wrapper::KERNEL_DISPATCH_COMPLETE,
         };
         ROCPROFILER_CALL(Wrapper::configure_callback_tracing_service(
-            _data->counter_ctx, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+            _data->counter_ctx, Wrapper::CALLBACK_TRACING_KERNEL_DISPATCH,
             _operations.data(), _operations.size(), tool_tracing_callback, _data));
         ROCPROFILER_CALL(Wrapper::configure_callback_dispatch_counting_service(
             _data->counter_ctx, dispatch_counting_service_callback, _data,
@@ -2955,7 +2953,7 @@ library_sdk<Wrapper>::tool_fini(void* callback_data)
     for(auto itr : tool_data->get_buffers())
     {
         while(itr.handle > 0 &&
-              Wrapper::destroy_buffer(itr) == ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
+              Wrapper::destroy_buffer(itr) == Wrapper::STATUS_ERROR_BUFFER_BUSY)
         {
             std::this_thread::yield();
         }
@@ -3062,8 +3060,8 @@ library_sdk<Wrapper>::sdk_tool_configure(std::uint32_t                  version,
     ROCPROFILER_CALL(Wrapper::at_internal_thread_create(
         &library_sdk::thread_precreate, &library_sdk::thread_postcreate,
         static_cast<typename Wrapper::runtime_library_t>(
-            ROCPROFILER_LIBRARY | ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
-            ROCPROFILER_MARKER_LIBRARY),
+            Wrapper::LIBRARY | Wrapper::HSA_LIBRARY | Wrapper::HIP_LIBRARY |
+            Wrapper::MARKER_LIBRARY),
         nullptr));
 
     return true;
