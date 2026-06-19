@@ -28,16 +28,9 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
 
-        # Build LD_PRELOAD: preserve user's existing, then append our libs.
-        # Order: [user's existing LD_PRELOAD] : [native tool] : [rocprofiler-sdk tool]
-        # The native collector tool must be loaded BEFORE the rocprofiler-sdk
-        # (rocprofv3) tool so that it registers as the primary rocprofiler-sdk
-        # client (priority 0). When the workload itself links rocprofiler-sdk and
-        # force-configures it at startup (e.g. PyTorch's libkineto RocprofLogger
-        # calls rocprofiler_force_configure on import), having the native tool as
-        # a secondary client triggers its configure callback before its output
-        # path is available, aborting with "Output path is empty". Loading the
-        # native tool first avoids this race.
+        # Native tool must precede the rocprofiler-sdk tool in LD_PRELOAD so it is the
+        # primary client; else workloads that force-configure on import (PyTorch libkineto)
+        # abort with "Output path is empty".
         ld_preload_parts = [
             os.environ.get("LD_PRELOAD"),  # User's existing LD_PRELOAD (if any)
             native_tool_path,  # Native tool (if provided) — must be primary
