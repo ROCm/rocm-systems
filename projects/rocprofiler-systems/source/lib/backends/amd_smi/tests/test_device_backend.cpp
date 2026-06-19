@@ -346,7 +346,7 @@ TEST_F(DeviceBackendTest, get_metrics_error_message_contains_function_name)
                 static_cast<void>(sut.get_metrics());
             } catch(const std::runtime_error& ex)
             {
-                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_metrics_info"));
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_metrics_info"));
                 throw;
             }
         },
