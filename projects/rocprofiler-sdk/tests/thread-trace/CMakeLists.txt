@@ -97,41 +97,31 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
-# Collects a lot of data, and check if parsing works successfully. Intermittently aborts
-# with "SQTT memory error received" during teardown (the SQTT engine is not guaranteed to
-# be fully quiesced/drained before the trace buffers and queue are torn down). Kept
-# unstable until that runtime race is resolved.
+# Collects a lot of data, and check if parsing works successfully
 rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-hammer-test
     TARGET thread-trace-test-app
     TIMEOUT 240
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=0;ATT_SLOW_CALLBACK=0"
-    UNSTABLE
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
-# Tests for proper handling of when the tool is very slow. Shares the same SQTT teardown
-# race as the hammer test and intermittently aborts with "SQTT memory error received", so
-# it is kept unstable until that runtime race is resolved.
+# Tests for proper handling of when the tool is very slow
 rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-slow-test
     TARGET thread-trace-test-app
     TIMEOUT 120
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
-    UNSTABLE
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
-# Tests for thread trace not paused during application run (global destructor). This
-# intermittently aborts during teardown when run back-to-back with the other triple-buffer
-# tests, so it is kept unstable until that runtime race is resolved.
+# Tests for thread trace not paused during application run (global destructor)
 rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-no-pause-test
     TARGET thread-trace-test-app
     TIMEOUT 120
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;EXECUTE_PAUSE=0"
-    UNSTABLE
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
 # Tests for thread trace starting and stopping multiple times during the application
