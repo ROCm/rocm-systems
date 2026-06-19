@@ -8,6 +8,7 @@ The first domains are:
 
 - `memory`: allocation and free contracts
 - `transfer`: synchronous copy contracts
+- `runtime`: runtime initialization, device visibility, version, and error-state contracts
 
 Run the layer with:
 

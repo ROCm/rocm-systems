@@ -27,3 +27,33 @@ contract:
   Contract_Transfer_InvalidDirection_ReturnsInvalidMemcpyDirection:
     <<: *level_0
     tags: [transfer]
+  Contract_Runtime_InitZeroFlags_Succeeds:
+    <<: *level_0
+    tags: [runtime]
+  Contract_Runtime_GetDeviceCount_ReturnsPositiveCount:
+    <<: *level_0
+    tags: [runtime]
+  Contract_Runtime_GetDevice_ReturnsValidOrdinal:
+    <<: *level_0
+    tags: [runtime]
+  Contract_Runtime_SetCurrentDevice_RoundTripsThroughGetDevice:
+    <<: *level_0
+    tags: [runtime]
+  Contract_Runtime_RuntimeVersion_ReturnsPositiveVersion:
+    <<: *level_0
+    tags: [runtime]
+  Contract_Runtime_DriverVersion_ReturnsNonNegativeVersion:
+    <<: *level_0
+    tags: [runtime]
+  Contract_Runtime_GetErrorNameSuccess_ReturnsSuccessString:
+    <<: *level_0
+    tags: [runtime]
+  Contract_Runtime_GetErrorStringSuccess_ReturnsSuccessString:
+    <<: *level_0
+    tags: [runtime]
+  Contract_Runtime_GetLastError_ClearsPreviousError:
+    <<: *level_0
+    tags: [runtime]
+  Contract_Runtime_PeekAtLastError_DoesNotClearPreviousError:
+    <<: *level_0
+    tags: [runtime]

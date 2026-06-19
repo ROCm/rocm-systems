@@ -6,3 +6,4 @@ add_custom_target(contract_tests)
 
 add_subdirectory(memory)
 add_subdirectory(transfer)
+add_subdirectory(runtime)
