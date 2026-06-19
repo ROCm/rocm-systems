@@ -1,4 +1,4 @@
 # License
 
-```{include} ../ROCdbgapi/LICENSE.txt
+```{include} ../LICENSE.txt
 ```
