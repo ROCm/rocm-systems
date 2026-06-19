@@ -785,8 +785,10 @@ __device__ volatile char *ROContext::get_status_flag() {
   return status_addr;
 }
 
-__device__ int ROContext::alltoallmem_wave(rocshmem_team_t team, void* dest, 
-                                  const void* source, int nelems){
+__device__ int ROContext::alltoallmem_wave([[maybe_unused]] rocshmem_team_t team, 
+                                           [[maybe_unused]] void* dest, 
+                                           [[maybe_unused]] const void* source, 
+                                           [[maybe_unused]] int nelems){
   LOGD_WARN("Alltoallmem not implemented for reverse offload backend");
   return ROCSHMEM_ERROR;
 }

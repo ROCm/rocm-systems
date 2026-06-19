@@ -408,8 +408,10 @@ __device__ void GDAContext::internal_broadcastmem_wg(void *dst, const void *src,
   internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
 }
 
-__device__ int GDAContext::alltoallmem_wave(rocshmem_team_t team, void* dest, 
-                                  const void* source, int nelems) {
+__device__ int GDAContext::alltoallmem_wave([[maybe_unused]] rocshmem_team_t team, 
+                                            [[maybe_unused]] void* dest, 
+                                            [[maybe_unused]] const void* source, 
+                                            [[maybe_unused]] int nelems) {
   LOGD_WARN("Alltoallmem not implemented for GDA backend");
   return ROCSHMEM_ERROR;
 }

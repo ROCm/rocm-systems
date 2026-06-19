@@ -151,7 +151,7 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoall_wg(
  *
  * @return int; zero on success, non-zero otherwise
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
+__device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
     rocshmem_team_t team, void *dest, const void *source, int nelems);
 
 /**

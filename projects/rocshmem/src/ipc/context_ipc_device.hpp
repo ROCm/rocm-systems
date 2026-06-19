@@ -460,6 +460,12 @@ class IPCContext : public Context {
   __device__ void internal_getmem_wave(void *dest, const void *source,
                                       size_t nelems, int pe);
 
+  __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
+                                            const void *src, int nelems);
+
+  __device__ void alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
+      void *dst, const void *src, int nelems);
+
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};
 
