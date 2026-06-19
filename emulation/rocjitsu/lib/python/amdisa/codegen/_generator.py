@@ -6951,16 +6951,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
     @staticmethod
     def _named_reg_ref(operand_name: str) -> tuple[str, int] | None:
-        """Map a named special register to (RegClass, index) for to_register_ref.
-
-        Only EXEC is surfaced today: static analyses (e.g. EXEC-mask state
-        tracking) need to see that an instruction reads/writes EXEC — most
-        importantly the generic `s_mov_b64 exec, ...` form, whose EXEC operand
-        is otherwise indistinguishable from a literal/SGPR at the analysis
-        layer. EXEC is not tracked by RegisterSet, so this does not affect
-        SGPR/VGPR liveness. Other special registers stay nullopt until a
-        consumer needs them.
-        """
+        """Map a named special register to (RegClass, index) for to_register_ref."""
         match operand_name.upper():
             case 'EXEC' | 'EXEC_LO':
                 return ('RegClass::EXEC', 0)
@@ -7817,8 +7808,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '}\n'
             '\n'
             # Wavefront-free constant value: the register-state-free subset of
-            # read_scalar(). Registers (incl. VGPR-index destinations, which
-            # to_register_ref() resolves) are not constants and return nullopt,
+            # read_scalar(). Registers are not constants and return nullopt,
             # which also keeps inline-const resolution from misreading a raw
             # register index as a small immediate.
             'std::optional<uint64_t> Operand::const_value() const {\n'

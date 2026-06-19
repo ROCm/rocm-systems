@@ -8,26 +8,6 @@
 /// every lane (a real kill) or only the active lanes (inactive lanes keep their
 /// old values, so it is not a kill). This pass computes a conservative
 /// approximation of the EXEC mask at each program point as a two-point lattice:
-///
-///   * `Full`    - EXEC is provably all-ones (every lane active).
-///   * `Unknown` - EXEC may be partial.
-///
-/// It is a *must* analysis: `Full` is only ever reported when it can be proven,
-/// so a consumer can safely treat an EXEC-masked write as a kill exactly when
-/// the state is `Full`. The lattice meet at a CFG join is `Full` iff every
-/// in-scope predecessor is `Full`, and the kernel entry is assumed `Unknown`
-/// (a wavefront may launch with a partial mask — e.g. the last wave of a
-/// workgroup). Consequently the only thing that introduces `Full` is an
-/// instruction that provably writes an all-ones EXEC mask; any other EXEC write
-/// (narrowing, restore-from-register, save/restore, v_cmpx, ...) yields
-/// `Unknown`.
-///
-/// The per-instruction EXEC classification is intentionally conservative: an
-/// instruction is treated as writing EXEC when it carries the WRITES_EXEC flag
-/// or a destination operand resolves to RegClass::EXEC, and as writing an
-/// all-ones mask only when its single source is a compile-time all-ones
-/// constant. Anything it cannot prove leaves the state `Unknown`, which is the
-/// safe direction for the liveness consumer.
 
 #pragma once
 
@@ -44,8 +24,8 @@ class Instruction;
 
 /// @brief Approximated EXEC mask state at a program point.
 enum class ExecState : uint8_t {
-  Full,    ///< EXEC is provably all-ones (every lane active).
-  Unknown, ///< EXEC may be partial; the conservative top of the lattice.
+  Full,
+  Unknown,
 };
 
 /// @brief Forward "EXEC is provably full" analysis over one kernel CFG scope.
@@ -66,9 +46,9 @@ private:
   void analyze(KernelBlockScope blocks);
 
   struct BlockExec {
-    ExecState in = ExecState::Full;  ///< State entering the block.
-    ExecState out = ExecState::Full; ///< State leaving the block.
-    bool is_entry = false;           ///< No in-scope predecessor.
+    ExecState in = ExecState::Full;
+    ExecState out = ExecState::Full;
+    bool is_entry = false;
   };
 
   std::vector<BlockExec> states_;

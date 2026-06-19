@@ -1,14 +1,7 @@
 # Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for EXEC-mask instruction flag emission in the C++ generator.
-
-``_exec_mask_flag_stmts`` turns an instruction's derived semantic properties
-into ``flags_ |= ...;`` constructor statements (EXEC_MASKED / IGNORES_EXEC /
-WRITES_EXEC / READS_EXEC). Generic liveness/dataflow analyses consume these
-flags, so the mapping from instruction semantics to flags must stay stable
-across the range of instruction kinds below.
-"""
+"""Tests for EXEC-mask instruction flag emission."""
 
 import pytest
 
@@ -24,7 +17,7 @@ def _flags(sem):
     return {s[len('flags_ |= ') : -1] for s in _exec_mask_flag_stmts(sem)}
 
 
-# (id, InstructionSemantics, expected-present flags). Anything in ALL but not in
+# (InstructionSemantics, expected-present flags, id). Anything in ALL but not in
 # the expected set must be ABSENT — see the test below.
 _CASES = [
     # Scalar EXEC writers: write EXEC, but are not themselves EXEC-masked.

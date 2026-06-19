@@ -16,9 +16,9 @@ namespace {
 
 /// @brief How an instruction affects the EXEC mask.
 enum class ExecWrite {
-  None,      ///< Does not write EXEC.
-  Narrowing, ///< Writes EXEC, but not a provable all-ones value.
-  AllOnes,   ///< Provably writes an all-ones EXEC mask.
+  None,
+  Narrowing,
+  AllOnes,
 };
 
 [[nodiscard]] bool writes_exec(const Instruction &inst) {

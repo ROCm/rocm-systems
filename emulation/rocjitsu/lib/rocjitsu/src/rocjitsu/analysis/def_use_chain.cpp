@@ -12,12 +12,9 @@ namespace {
 
 // A vector def (VGPR/AccVGPR) normally preserves inactive lanes under EXEC, so
 // it cannot be treated as an unconditional kill. The exception is instructions
-// flagged IGNORES_EXEC (e.g. branch-class ops), whose writes are not EXEC
-// gated. We default to "EXEC masked" when the flag is absent so that
-// instructions without derived semantics — or generated sources predating the
-// EXEC flags — stay conservative (never over-kill). Program-point EXEC state
-// (see analysis/exec_state.h) further promotes these to real kills where EXEC
-// is provably full.
+// flagged IGNORES_EXEC (e.g. branch-class ops). We default to "EXEC masked" when
+// the flag is absent so that instructions without derived semantics — or generated
+// sources predating the EXEC flags — stay conservative (never over-kill).
 [[nodiscard]] bool is_vector_def(RegisterRef ref) {
   return ref.cls == RegClass::VGPR || ref.cls == RegClass::ACC_VGPR;
 }
