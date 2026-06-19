@@ -545,7 +545,7 @@ The parameters are described here: :ref:`cg_operations`
 **Performance**
 On AMD, when ``group`` is of the same size as the warp size and ``T`` primitive type, DPP instructions will be used, which means the operation would be significantly faster than with other group sizes. The primitive types are:
 
-For arithmetic reduces (``plus``, ``less`` and ``greater``):
+For arithmetic scans (``plus``, ``less`` and ``greater``):
 
 * On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
 
