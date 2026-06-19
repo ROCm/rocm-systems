@@ -394,6 +394,9 @@ memory:
     <<: *level_2
     # Tests behaviour after free which throws off the sanitizer
     disabled: [asan]
+  Unit_hipHostRegister_DuplicateAndDisjoint:
+    <<: *level_2
+    tags: [alloc]
   Unit_hipHostRegister_Capture:
     <<: *level_2
     tags: [alloc]

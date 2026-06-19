@@ -1379,6 +1379,11 @@ hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags)
                 hipExtHostRegisterUncached | hipHostRegisterIoMemory)) {
     return hipErrorInvalidValue;
   } else {
+    // Reject duplicate/overlapping registration of the same host range.
+    if (amd::MemObjMap::FindOverlap(hostPtr, sizeBytes) != nullptr) {
+      return hipErrorHostMemoryAlreadyRegistered;
+    }
+
     unsigned int memFlags = CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS;
     if (flags & hipExtHostRegisterUncached) {
       if (IS_WINDOWS) {
