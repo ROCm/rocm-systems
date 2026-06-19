@@ -182,7 +182,7 @@ int main() {
         std::cout << "\t\t\tSuccessfully retrieved Fabric telemetry data" << std::endl;
 
         // Display telemetry information
-        const* telem_name;
+        const char* telem_name;
         for (int cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE;
              cat < static_cast<int>(AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX); cat++) {
           auto category = static_cast<amdsmi_fabric_telemetry_category_t>(cat);

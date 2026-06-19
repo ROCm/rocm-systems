@@ -5723,7 +5723,7 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char* telem_name);
+amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char** telem_name);
 
 /**
  *  @brief Free Fabric telemetry storage
