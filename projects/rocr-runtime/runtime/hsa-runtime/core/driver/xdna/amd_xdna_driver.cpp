@@ -959,6 +959,12 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 }
 
 hsa_status_t XdnaDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
+  // Close the dmabuf_fd.
+  if (handle->dmabuf_fd >= 0) {
+    close(handle->dmabuf_fd);
+  }
+
+  // Close the BO handle.
   drm_gem_close close_params = {};
   close_params.handle = handle->handle;
   hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_params);
