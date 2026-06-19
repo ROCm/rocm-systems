@@ -48,7 +48,9 @@
 #include "core/inc/amd_memory_region.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <mutex>
+#include <vector>
 #include <shared_mutex>
 
 #include "core/inc/runtime.h"
@@ -133,8 +135,72 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
 
 MemoryRegion::~MemoryRegion() {}
 
+#if defined(SANITIZER_AMDGPU)
+namespace {
+// Per-thread lock nesting depth; non-zero means this thread holds an
+// agent_memory_lock_.
+thread_local unsigned tls_agent_lock_depth = 0;
+
+// Deferred free: region pointer, address, and size.
+struct DeferredFree {
+  const MemoryRegion* region;
+  void* address;
+  size_t size;
+};
+
+// Per-thread queue of deferred frees, drained when outermost lock exits.
+thread_local std::vector<DeferredFree> tls_deferred_frees;
+}  // namespace
+
+MemoryRegion::ScopedAgentMemoryLock::ScopedAgentMemoryLock(std::mutex& mutex) : mutex_(mutex) {
+  mutex_.lock();
+  ++tls_agent_lock_depth;  // Mark this thread as holding the lock.
+}
+
+MemoryRegion::ScopedAgentMemoryLock::~ScopedAgentMemoryLock() {
+  --tls_agent_lock_depth;
+  mutex_.unlock();
+  if (tls_agent_lock_depth == 0) DrainDeferredFrees();
+}
+
+bool MemoryRegion::DeferFreeIfLockHeld(void* address, size_t size) const {
+  if (tls_agent_lock_depth == 0) return false;
+  // Thread already holds the lock; defer to avoid re-entrant deadlock.
+  tls_deferred_frees.push_back(DeferredFree{this, address, size});
+  return true;
+}
+
+void MemoryRegion::DrainDeferredFrees() {
+  // Replay queued frees under lock. Re-entrant frees (from ASAN quarantine) are
+  // appended to the queue and handled by loop iterations (no recursion).  The
+  // queue terminates because the quarantine evicts a bounded number of blocks.
+  while (!tls_deferred_frees.empty()) {
+    const DeferredFree item = tls_deferred_frees.back();
+    tls_deferred_frees.pop_back();
+
+    std::lock_guard<std::mutex> guard(item.region->owner()->agent_memory_lock_);
+    ++tls_agent_lock_depth;
+    MAKE_SCOPE_GUARD([&]() { --tls_agent_lock_depth; });
+
+    try {
+      hsa_status_t status = item.region->FreeImpl(item.address, item.size);
+      if (status != HSA_STATUS_SUCCESS) {
+        fprintf(stderr, "ROCR: Deferred free failed: %p size=%zu status=%d\n", item.address,
+                item.size, static_cast<int>(status));
+      }
+    } catch (...) {
+      fprintf(stderr, "ROCR: Deferred free threw: %p size=%zu\n", item.address, item.size);
+    }
+  }
+}
+#endif  // SANITIZER_AMDGPU
+
 hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** mem, int agent_node_id) const {
+#if defined(SANITIZER_AMDGPU)
+  ScopedAgentMemoryLock lock(owner()->agent_memory_lock_);
+#else
   std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
+#endif
   return AllocateImpl(size, alloc_flags, mem, agent_node_id);
 }
 
@@ -164,7 +230,13 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 }
 
 hsa_status_t MemoryRegion::Free(void* address, size_t size) const {
+#if defined(SANITIZER_AMDGPU)
+  // If re-entrant (under ASAN), defer; otherwise take lock and free normally.
+  if (DeferFreeIfLockHeld(address, size)) return HSA_STATUS_SUCCESS;
+  ScopedAgentMemoryLock lock(owner()->agent_memory_lock_);
+#else
   std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
+#endif
   return FreeImpl(address, size);
 }
 
@@ -176,7 +248,11 @@ hsa_status_t MemoryRegion::FreeImpl(void* address, size_t size) const {
 
 // TODO:  Look into a better name and/or making this process transparent to exporting.
 hsa_status_t MemoryRegion::IPCFragmentExport(void* address) const {
+#if defined(SANITIZER_AMDGPU)
+  ScopedAgentMemoryLock lock(owner()->agent_memory_lock_);
+#else
   std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
+#endif
   if (!fragment_allocator_.discardBlock(address)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   return HSA_STATUS_SUCCESS;
 }

@@ -201,6 +201,28 @@ private:
   // Operational body for Free.  Recursive.
   hsa_status_t FreeImpl(void* address, size_t size) const;
 
+#if defined(SANITIZER_AMDGPU)
+  // ASAN re-entrancy guard: avoid deadlock when ASAN quarantine evicts a GPU
+  // block while this thread already holds an agent_memory_lock_.  Defer the
+  // re-entrant free until the outermost critical section exits.
+  class ScopedAgentMemoryLock {
+    public:
+      explicit ScopedAgentMemoryLock(std::mutex& mutex);
+      ~ScopedAgentMemoryLock();
+
+    private:
+      std::mutex& mutex_;
+      DISALLOW_COPY_AND_ASSIGN(ScopedAgentMemoryLock);
+  };
+
+  // Queue free if an agent_memory_lock_ is already held by this thread; returns
+  // true if the free was deferred, false if the caller should free normally.
+  bool DeferFreeIfLockHeld(void* address, size_t size) const;
+
+  // Drain queued frees after the outermost lock release.
+  static void DrainDeferredFrees();
+#endif  // SANITIZER_AMDGPU
+
   class BlockAllocator {
    private:
     MemoryRegion& region_;
