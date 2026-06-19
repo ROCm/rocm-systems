@@ -27,6 +27,7 @@ subtree_to_project_map = {
     "projects/rocr-debug-agent": "debug_tools-debug-agent",
     "projects/hotswap": "runtimes",
     "projects/rocr-runtime": "runtimes",
+    "projects/hipfile": "storage_libs",
     "projects/rocshmem": "rocshmem",
     "projects/roctracer": "profiler",
     "shared/amdgpu-windows-interop": "runtimes",
@@ -73,6 +74,10 @@ project_map = {
     "rocshmem": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_ROCSHMEM=ON"],
         "projects_to_test": "",  # rocshmem testing to be enabled in a future PR
+    },
+    "storage_libs": {
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_STORAGE_LIBS=ON"],
+        "projects_to_test": "",  # hipfile testing to be enabled in a future PR
     },
     # Also test rocr-debug-agent and rocgdb since those depend on runtimes.
     "runtimes": {
