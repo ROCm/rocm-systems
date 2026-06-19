@@ -129,3 +129,21 @@ contract:
   Contract_MemsetD32_DeviceBuffer_IsFilledWithDwordPattern:
     <<: *level_0
     tags: [memset]
+  Contract_ErrorApi_GetErrorNameSuccess_ReturnsNonEmptyString:
+    <<: *level_0
+    tags: [error_api]
+  Contract_ErrorApi_GetErrorStringSuccess_ReturnsNonEmptyString:
+    <<: *level_0
+    tags: [error_api]
+  Contract_ErrorApi_GetErrorNameInvalidValue_ReturnsNonEmptyString:
+    <<: *level_0
+    tags: [error_api]
+  Contract_ErrorApi_GetErrorStringInvalidValue_ReturnsNonEmptyString:
+    <<: *level_0
+    tags: [error_api]
+  Contract_ErrorApi_GetErrorNameUnknownError_ReturnsNonNullString:
+    <<: *level_0
+    tags: [error_api]
+  Contract_ErrorApi_GetErrorStringUnknownError_ReturnsNonNullString:
+    <<: *level_0
+    tags: [error_api]

@@ -13,6 +13,7 @@ The first domains are:
 - `stream_event`: stream and event lifecycle, query, synchronization, and wait-event ordering contracts
 - `async_transfer`: async copy visibility and invalid-kind consistency contracts
 - `memset`: byte, word, dword, and async memset contracts
+- `error_api`: error name and string API contracts without backend-specific text assumptions
 
 Run the layer with:
 
