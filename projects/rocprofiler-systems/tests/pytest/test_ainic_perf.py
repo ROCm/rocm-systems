@@ -103,6 +103,7 @@ class TestAINIC(RocprofsysTest):
         ainic_download_url_1,
         ainic_download_url_2,
         ainic_rocpd_rules,
+        test_output_dir,
     ):
         target = shutil.which("wget")
         if not target:

@@ -3,7 +3,9 @@
         {
             "name_prefix": "rocpd_string_",
             "min_rows": 1,
-            "required_columns": ["string"],
+            "required_columns": [
+                "string"
+            ],
             "validation_queries": [
                 {
                     "description": "Check for ainic_rx_rdma_ucast_bytes track name",
@@ -74,6 +76,87 @@
                     "comparison": "greater_than",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) as count FROM {table_name} WHERE string = 'ainic_req_rx_impl_nak_seq_err'"
+                }
+            ]
+        },
+        {
+            "name_prefix": "rocpd_info_pmc_",
+            "min_rows": 10,
+            "required_columns": [
+                "name",
+                "units",
+                "value_type"
+            ],
+            "validation_queries": [
+                {
+                    "description": "Check PMC description row for nic_rx_ucast_pkts",
+                    "error_message": "No info_pmc row for PMC name 'nic_rx_ucast_pkts' \u2014 add_pmc_info() was not called for this counter",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'nic_rx_ucast_pkts'"
+                },
+                {
+                    "description": "Check PMC description row for nic_tx_ucast_pkts",
+                    "error_message": "No info_pmc row for PMC name 'nic_tx_ucast_pkts' \u2014 add_pmc_info() was not called for this counter",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'nic_tx_ucast_pkts'"
+                },
+                {
+                    "description": "Check PMC description row for nic_rx_cnp_pkts",
+                    "error_message": "No info_pmc row for PMC name 'nic_rx_cnp_pkts' \u2014 add_pmc_info() was not called for this counter",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'nic_rx_cnp_pkts'"
+                },
+                {
+                    "description": "Check PMC description row for nic_tx_cnp_pkts",
+                    "error_message": "No info_pmc row for PMC name 'nic_tx_cnp_pkts' \u2014 add_pmc_info() was not called for this counter",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'nic_tx_cnp_pkts'"
+                },
+                {
+                    "description": "Check PMC description row for nic_rx_ucast_bytes",
+                    "error_message": "No info_pmc row for PMC name 'nic_rx_ucast_bytes' \u2014 add_pmc_info() was not called for this counter",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'nic_rx_ucast_bytes'"
+                },
+                {
+                    "description": "Check PMC description row for nic_tx_ucast_bytes",
+                    "error_message": "No info_pmc row for PMC name 'nic_tx_ucast_bytes' \u2014 add_pmc_info() was not called for this counter",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'nic_tx_ucast_bytes'"
+                },
+                {
+                    "description": "Check PMC description row for nic_tx_rdma_ack_timeout",
+                    "error_message": "No info_pmc row for PMC name 'nic_tx_rdma_ack_timeout' \u2014 add_pmc_info() was not called for this counter",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'nic_tx_rdma_ack_timeout'"
+                },
+                {
+                    "description": "Check PMC description row for nic_resp_tx_pkt_seq_err",
+                    "error_message": "No info_pmc row for PMC name 'nic_resp_tx_pkt_seq_err' \u2014 add_pmc_info() was not called for this counter",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'nic_resp_tx_pkt_seq_err'"
+                },
+                {
+                    "description": "Check PMC description row for nic_req_rx_pkt_seq_err",
+                    "error_message": "No info_pmc row for PMC name 'nic_req_rx_pkt_seq_err' \u2014 add_pmc_info() was not called for this counter",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'nic_req_rx_pkt_seq_err'"
+                },
+                {
+                    "description": "Check PMC description row for nic_req_rx_impl_nak_seq_err",
+                    "error_message": "No info_pmc row for PMC name 'nic_req_rx_impl_nak_seq_err' \u2014 add_pmc_info() was not called for this counter",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'nic_req_rx_impl_nak_seq_err'"
                 }
             ]
         }
