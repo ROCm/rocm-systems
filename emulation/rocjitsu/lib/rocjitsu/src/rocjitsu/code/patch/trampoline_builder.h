@@ -36,7 +36,7 @@ struct InlineAsmItem {
 /// Coordinates are .text-relative byte offsets. The orchestrator fills this
 /// after validation and layout, then hands it to TrampolineBuilder.
 struct TrampolinePlan {
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
 
   uint64_t anchor_offset = 0;
   uint32_t original_size = 0; // 4 or 8 for the inline-nop smoke build.
@@ -62,6 +62,7 @@ public:
   ///
   /// Returns std::nullopt and writes a human-readable explanation to
   /// @p error_out (if non-null) on:
+  ///   - arch left at ROCJITSU_CODE_ARCH_INVALID (caller forgot to set it)
   ///   - original_size other than 4 or 8
   ///   - original_words size mismatch with original_size
   ///   - Forward or return branch outside s_branch simm16 range

@@ -173,6 +173,23 @@ TEST(TrampolineBuilder, RejectsOriginalWordsSizeMismatch) {
   EXPECT_FALSE(err.empty()) << "Builder must explain the mismatch";
 }
 
+// arch defaults to ROCJITSU_CODE_ARCH_INVALID; a caller who forgets to set it
+// must be rejected loudly rather than silently emitting a wrong-ISA encoding.
+TEST(TrampolineBuilder, RejectsUnsetArch) {
+  TrampolinePlan plan; // arch left at its ROCJITSU_CODE_ARCH_INVALID default.
+  plan.anchor_offset = 0x100;
+  plan.original_size = 4;
+  plan.trampoline_offset = 0x200;
+  plan.return_target = 0x104;
+  plan.original_words = {0xDEADBEEFu};
+  plan.emit_original = true;
+
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::build(plan, &err).has_value());
+  EXPECT_NE(err.find("arch"), std::string::npos)
+      << "Diagnostic must identify the unset arch, got: " << err;
+}
+
 TEST(TrampolineBuilder, ReturnBranchOverflowFails) {
   // With forward_simm16 = INT16_MAX = 32767 (just in range) and
   // original_size = 4, the return branch needs simm16 = -32770 (one past

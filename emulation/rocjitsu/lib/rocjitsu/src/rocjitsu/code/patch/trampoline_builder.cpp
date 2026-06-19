@@ -13,6 +13,10 @@ namespace rocjitsu {
 namespace {
 
 [[nodiscard]] bool check_size_and_words(const TrampolinePlan &plan, std::string *err) {
+  if (plan.arch == ROCJITSU_CODE_ARCH_INVALID) {
+    report(err, "trampoline plan: arch was not set");
+    return false;
+  }
   if (plan.original_size != 4 && plan.original_size != 8) {
     report(err, "trampoline plan: original_size must be 4 or 8");
     return false;
