@@ -501,7 +501,7 @@ All cooperative groups operations receive the same arguments:
 
   + ``cooperative_groups::bit_xor`` (bitwise xor)
 
-Overloads without the ``op`` parameter, use cooperative_groups::plus.
+Overloads without the ``op`` parameter use ``cooperative_groups::plus``.
 
 Reduce
 ---------
