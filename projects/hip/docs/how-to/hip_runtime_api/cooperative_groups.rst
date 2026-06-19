@@ -483,8 +483,6 @@ Operations
 
 All cooperative groups operations receive the same arguments:
 
-.. code-block:: cpp
-
 * ``group`` is either a ``coalesced_group`` or a ``thread_block_tile``
 
 * ``val`` needs to be a type ``T`` that is trivially copyable, default constructible and up to 32 bytes in size.
