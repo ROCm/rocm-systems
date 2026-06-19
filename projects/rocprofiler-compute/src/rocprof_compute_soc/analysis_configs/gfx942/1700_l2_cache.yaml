@@ -12,14 +12,13 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          value: SUM(TCC_BUSY_sum * 100) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)
+          value: 100 * SUM(TCC_BUSY_sum) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)
           unit: Percent
         Peak Bandwidth:
-          value: ((100 * SUM((TCC_REQ_sum * 128)) / SUM((End_Timestamp - Start_Timestamp)))
-            / ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan)))
+          value: 100 * 128 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 128 * TO_INT($total_l2_chan))
           unit: Percent
         Hit Rate:
-          value: SUM(100 * TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
+          value: 100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
           unit: Percent
         L2-Fabric Read BW:
           value: SUM(128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -50,46 +49,44 @@ Panel Config:
             - Start_Timestamp)))
           unit: Gbps
         HBM Read Traffic:
-          avg: SUM(100 * TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)
-          min: MIN(100 * TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum)
-          max: MAX(100 * TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum)
+          avg: 100 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)
+          min: 100 * MIN(TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum)
+          max: 100 * MAX(TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum)
           unit: Percent
         Remote Read Traffic:
-          avg: SUM(100 * NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM(TCC_EA0_RDREQ_sum)
-          min: MIN(100 * NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum)
-          max: MAX(100 * NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum)
+          avg: 100 * SUM(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM(TCC_EA0_RDREQ_sum)
+          min: 100 * MIN(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum)
+          max: 100 * MAX(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum)
           unit: Percent
         Uncached Read Traffic:
-          avg: SUM(100 * TCC_EA0_RD_UNCACHED_32B_sum) / SUM(TCC_EA0_RDREQ_sum)
-          min: MIN(100 * TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum)
-          max: MAX(100 * TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum)
+          avg: 100 * SUM(TCC_EA0_RD_UNCACHED_32B_sum) / SUM(TCC_EA0_RDREQ_sum)
+          min: 100 * MIN(TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum)
+          max: 100 * MAX(TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum)
           unit: Percent
         Write and Atomic BW:
           avg: SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-            * 32)) / (End_Timestamp - Start_Timestamp)))
-          max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-            * 32)) / (End_Timestamp - Start_Timestamp)))
+          min: MIN((TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / (End_Timestamp - Start_Timestamp))
+          max: MAX((TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / (End_Timestamp - Start_Timestamp))
           unit: Gbps
         HBM Write and Atomic Traffic:
-          avg: SUM(100 * TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)
-          min: MIN(100 * TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum)
-          max: MAX(100 * TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum)
+          avg: 100 * SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)
+          min: 100 * MIN(TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum)
+          max: 100 * MAX(TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum)
           unit: Percent
         Remote Write and Atomic Traffic:
-          avg: SUM(100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM(TCC_EA0_WRREQ_sum)
-          min: MIN(100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
-          max: MAX(100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
+          avg: 100 * SUM(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM(TCC_EA0_WRREQ_sum)
+          min: 100 * MIN(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
+          max: 100 * MAX(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
           unit: Percent
         Atomic Traffic:
-          avg: SUM(100 * TCC_EA0_ATOMIC_sum) / SUM(TCC_EA0_WRREQ_sum)
-          min: MIN(100 * TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum)
-          max: MAX(100 * TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum)
+          avg: 100 * SUM(TCC_EA0_ATOMIC_sum) / SUM(TCC_EA0_WRREQ_sum)
+          min: 100 * MIN(TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum)
+          max: 100 * MAX(TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum)
           unit: Percent
         Uncached Write and Atomic Traffic:
-          avg: SUM(100 * TCC_EA0_WR_UNCACHED_32B_sum) / SUM(TCC_EA0_WRREQ_sum)
-          min: MIN(100 * TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum)
-          max: MAX(100 * TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum)
+          avg: 100 * SUM(TCC_EA0_WR_UNCACHED_32B_sum) / SUM(TCC_EA0_WRREQ_sum)
+          min: 100 * MIN(TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum)
+          max: 100 * MAX(TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum)
           unit: Percent
         Read Latency:
           avg: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum)
@@ -117,99 +114,99 @@ Panel Config:
         unit: Unit
       metric:
         Bandwidth:
-          avg: SUM(TCC_REQ_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
-          max: MAX((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+          avg: 128 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: 128 * MIN(TCC_REQ_sum / (End_Timestamp - Start_Timestamp))
+          max: 128 * MAX(TCC_REQ_sum / (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Req:
           avg: SUM(TCC_REQ_sum) / SUM($denom)
-          min: MIN((TCC_REQ_sum / $denom))
-          max: MAX((TCC_REQ_sum / $denom))
+          min: MIN(TCC_REQ_sum / $denom)
+          max: MAX(TCC_REQ_sum / $denom)
           unit: (Req + $normUnit)
         Read Req:
           avg: SUM(TCC_READ_sum) / SUM($denom)
-          min: MIN((TCC_READ_sum / $denom))
-          max: MAX((TCC_READ_sum / $denom))
+          min: MIN(TCC_READ_sum / $denom)
+          max: MAX(TCC_READ_sum / $denom)
           unit: (Req + $normUnit)
         Write Req:
           avg: SUM(TCC_WRITE_sum) / SUM($denom)
-          min: MIN((TCC_WRITE_sum / $denom))
-          max: MAX((TCC_WRITE_sum / $denom))
+          min: MIN(TCC_WRITE_sum / $denom)
+          max: MAX(TCC_WRITE_sum / $denom)
           unit: (Req + $normUnit)
         Atomic Req:
           avg: SUM(TCC_ATOMIC_sum) / SUM($denom)
-          min: MIN((TCC_ATOMIC_sum / $denom))
-          max: MAX((TCC_ATOMIC_sum / $denom))
+          min: MIN(TCC_ATOMIC_sum / $denom)
+          max: MAX(TCC_ATOMIC_sum / $denom)
           unit: (Req + $normUnit)
         Streaming Req:
           avg: SUM(TCC_STREAMING_REQ_sum) / SUM($denom)
-          min: MIN((TCC_STREAMING_REQ_sum / $denom))
-          max: MAX((TCC_STREAMING_REQ_sum / $denom))
+          min: MIN(TCC_STREAMING_REQ_sum / $denom)
+          max: MAX(TCC_STREAMING_REQ_sum / $denom)
           unit: (Req + $normUnit)
         Probe Req:
           avg: SUM(TCC_PROBE_sum) / SUM($denom)
-          min: MIN((TCC_PROBE_sum / $denom))
-          max: MAX((TCC_PROBE_sum / $denom))
+          min: MIN(TCC_PROBE_sum / $denom)
+          max: MAX(TCC_PROBE_sum / $denom)
           unit: (Req + $normUnit)
         Cache Hit:
-          avg: SUM(100 * TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
-          min: MIN(100 * TCC_HIT_sum / (TCC_HIT_sum + TCC_MISS_sum))
-          max: MAX(100 * TCC_HIT_sum / (TCC_HIT_sum + TCC_MISS_sum))
+          avg: 100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
+          min: 100 * MIN(TCC_HIT_sum / (TCC_HIT_sum + TCC_MISS_sum))
+          max: 100 * MAX(TCC_HIT_sum / (TCC_HIT_sum + TCC_MISS_sum))
           unit: Percent
         Hits:
           avg: SUM(TCC_HIT_sum) / SUM($denom)
-          min: MIN((TCC_HIT_sum / $denom))
-          max: MAX((TCC_HIT_sum / $denom))
+          min: MIN(TCC_HIT_sum / $denom)
+          max: MAX(TCC_HIT_sum / $denom)
           unit: (Hits + $normUnit)
         Misses:
           avg: SUM(TCC_MISS_sum) / SUM($denom)
-          min: MIN((TCC_MISS_sum / $denom))
-          max: MAX((TCC_MISS_sum / $denom))
+          min: MIN(TCC_MISS_sum / $denom)
+          max: MAX(TCC_MISS_sum / $denom)
           unit: (Misses + $normUnit)
         Writeback:
           avg: SUM(TCC_WRITEBACK_sum) / SUM($denom)
-          min: MIN((TCC_WRITEBACK_sum / $denom))
-          max: MAX((TCC_WRITEBACK_sum / $denom))
+          min: MIN(TCC_WRITEBACK_sum / $denom)
+          max: MAX(TCC_WRITEBACK_sum / $denom)
           unit: (Cachelines + $normUnit)
         Writeback (Internal):
           avg: SUM(TCC_NORMAL_WRITEBACK_sum) / SUM($denom)
-          min: MIN((TCC_NORMAL_WRITEBACK_sum / $denom))
-          max: MAX((TCC_NORMAL_WRITEBACK_sum / $denom))
+          min: MIN(TCC_NORMAL_WRITEBACK_sum / $denom)
+          max: MAX(TCC_NORMAL_WRITEBACK_sum / $denom)
           unit: (Cachelines + $normUnit)
         Writeback (vL1D Req):
           avg: SUM(TCC_ALL_TC_OP_WB_WRITEBACK_sum) / SUM($denom)
-          min: MIN((TCC_ALL_TC_OP_WB_WRITEBACK_sum / $denom))
-          max: MAX((TCC_ALL_TC_OP_WB_WRITEBACK_sum / $denom))
+          min: MIN(TCC_ALL_TC_OP_WB_WRITEBACK_sum / $denom)
+          max: MAX(TCC_ALL_TC_OP_WB_WRITEBACK_sum / $denom)
           unit: (Cachelines + $normUnit)
         Evict (Internal):
           avg: SUM(TCC_NORMAL_EVICT_sum) / SUM($denom)
-          min: MIN((TCC_NORMAL_EVICT_sum / $denom))
-          max: MAX((TCC_NORMAL_EVICT_sum / $denom))
+          min: MIN(TCC_NORMAL_EVICT_sum / $denom)
+          max: MAX(TCC_NORMAL_EVICT_sum / $denom)
           unit: (Cachelines + $normUnit)
         Evict (vL1D Req):
           avg: SUM(TCC_ALL_TC_OP_INV_EVICT_sum) / SUM($denom)
-          min: MIN((TCC_ALL_TC_OP_INV_EVICT_sum / $denom))
-          max: MAX((TCC_ALL_TC_OP_INV_EVICT_sum / $denom))
+          min: MIN(TCC_ALL_TC_OP_INV_EVICT_sum / $denom)
+          max: MAX(TCC_ALL_TC_OP_INV_EVICT_sum / $denom)
           unit: (Cachelines + $normUnit)
         NC Req:
           avg: SUM(TCC_NC_REQ_sum) / SUM($denom)
-          min: MIN((TCC_NC_REQ_sum / $denom))
-          max: MAX((TCC_NC_REQ_sum / $denom))
+          min: MIN(TCC_NC_REQ_sum / $denom)
+          max: MAX(TCC_NC_REQ_sum / $denom)
           unit: (Req + $normUnit)
         UC Req:
           avg: SUM(TCC_UC_REQ_sum) / SUM($denom)
-          min: MIN((TCC_UC_REQ_sum / $denom))
-          max: MAX((TCC_UC_REQ_sum / $denom))
+          min: MIN(TCC_UC_REQ_sum / $denom)
+          max: MAX(TCC_UC_REQ_sum / $denom)
           unit: (Req + $normUnit)
         CC Req:
           avg: SUM(TCC_CC_REQ_sum) / SUM($denom)
-          min: MIN((TCC_CC_REQ_sum / $denom))
-          max: MAX((TCC_CC_REQ_sum / $denom))
+          min: MIN(TCC_CC_REQ_sum / $denom)
+          max: MAX(TCC_CC_REQ_sum / $denom)
           unit: (Req + $normUnit)
         RW Req:
           avg: SUM(TCC_RW_REQ_sum) / SUM($denom)
-          min: MIN((TCC_RW_REQ_sum / $denom))
-          max: MAX((TCC_RW_REQ_sum / $denom))
+          min: MIN(TCC_RW_REQ_sum / $denom)
+          max: MAX(TCC_RW_REQ_sum / $denom)
           unit: (Req + $normUnit)
   - metric_table:
       id: 1704
@@ -238,9 +235,9 @@ Panel Config:
         Write - Credit Starvation:
           type: Credit Starvation
           transaction: Write
-          avg: SUM(100 * TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM(TCC_BUSY_sum)
-          min: MIN(100 * TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)
-          max: MAX(100 * TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)
+          avg: 100 * SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM(TCC_BUSY_sum)
+          min: 100 * MIN(TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)
+          max: 100 * MAX(TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)
           unit: Percent
   - metric_table:
       id: 1706
@@ -254,66 +251,63 @@ Panel Config:
       metric:
         Read (32B):
           avg: SUM(TCC_EA0_RDREQ_32B_sum) / SUM($denom)
-          min: MIN((TCC_EA0_RDREQ_32B_sum / $denom))
-          max: MAX((TCC_EA0_RDREQ_32B_sum / $denom))
+          min: MIN(TCC_EA0_RDREQ_32B_sum / $denom)
+          max: MAX(TCC_EA0_RDREQ_32B_sum / $denom)
           unit: (Req + $normUnit)
         Read (64B):
-          avg: AVG(NOISE_CLAMP(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum)
-            / $denom), TCC_EA0_RDREQ_sum))
-          min: MIN(NOISE_CLAMP(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum)
-            / $denom), TCC_EA0_RDREQ_sum))
-          max: MAX(NOISE_CLAMP(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum)
-            / $denom), TCC_EA0_RDREQ_sum))
+          avg: AVG(NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) / $denom, TCC_EA0_RDREQ_sum))
+          min: MIN(NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) / $denom, TCC_EA0_RDREQ_sum))
+          max: MAX(NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) / $denom, TCC_EA0_RDREQ_sum))
           unit: (Req + $normUnit)
         Read (128B):
           avg: SUM(TCC_BUBBLE_sum) / SUM($denom)
-          min: MIN(((TCC_BUBBLE_sum) / $denom))
-          max: MAX(((TCC_BUBBLE_sum) / $denom))
+          min: MIN(TCC_BUBBLE_sum / $denom)
+          max: MAX(TCC_BUBBLE_sum / $denom)
           unit: (Req + $normUnit)
         Read (Uncached):
           avg: SUM(TCC_EA0_RD_UNCACHED_32B_sum) / SUM($denom)
-          min: MIN((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
-          max: MAX((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
+          min: MIN(TCC_EA0_RD_UNCACHED_32B_sum / $denom)
+          max: MAX(TCC_EA0_RD_UNCACHED_32B_sum / $denom)
           unit: (Req + $normUnit)
         HBM Read:
           avg: SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM($denom)
-          min: MIN((TCC_EA0_RDREQ_DRAM_sum / $denom))
-          max: MAX((TCC_EA0_RDREQ_DRAM_sum / $denom))
+          min: MIN(TCC_EA0_RDREQ_DRAM_sum / $denom)
+          max: MAX(TCC_EA0_RDREQ_DRAM_sum / $denom)
           unit: (Req + $normUnit)
         Remote Read:
           avg: SUM(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM($denom)
-          min: MIN((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
-          max: MAX((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
+          min: MIN(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum) / $denom)
+          max: MAX(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum) / $denom)
           unit: (Req + $normUnit)
         Write and Atomic (32B):
-          avg: AVG(NOISE_CLAMP(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), TCC_EA0_WRREQ_sum))
-          min: MIN(NOISE_CLAMP(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), TCC_EA0_WRREQ_sum))
-          max: MAX(NOISE_CLAMP(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), TCC_EA0_WRREQ_sum))
+          avg: AVG(NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom, TCC_EA0_WRREQ_sum))
+          min: MIN(NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom, TCC_EA0_WRREQ_sum))
+          max: MAX(NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom, TCC_EA0_WRREQ_sum))
           unit: (Req + $normUnit)
         Write and Atomic (Uncached):
           avg: SUM(TCC_EA0_WR_UNCACHED_32B_sum) / SUM($denom)
-          min: MIN((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
-          max: MAX((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
+          min: MIN(TCC_EA0_WR_UNCACHED_32B_sum / $denom)
+          max: MAX(TCC_EA0_WR_UNCACHED_32B_sum / $denom)
           unit: (Req + $normUnit)
         Write and Atomic (64B):
           avg: SUM(TCC_EA0_WRREQ_64B_sum) / SUM($denom)
-          min: MIN((TCC_EA0_WRREQ_64B_sum / $denom))
-          max: MAX((TCC_EA0_WRREQ_64B_sum / $denom))
+          min: MIN(TCC_EA0_WRREQ_64B_sum / $denom)
+          max: MAX(TCC_EA0_WRREQ_64B_sum / $denom)
           unit: (Req + $normUnit)
         HBM Write and Atomic:
           avg: SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM($denom)
-          min: MIN((TCC_EA0_WRREQ_DRAM_sum / $denom))
-          max: MAX((TCC_EA0_WRREQ_DRAM_sum / $denom))
+          min: MIN(TCC_EA0_WRREQ_DRAM_sum / $denom)
+          max: MAX(TCC_EA0_WRREQ_DRAM_sum / $denom)
           unit: (Req + $normUnit)
         Remote Write and Atomic:
           avg: SUM(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM($denom)
-          min: MIN((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
-          max: MAX((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
+          min: MIN(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum) / $denom)
+          max: MAX(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum) / $denom)
           unit: (Req + $normUnit)
         Atomic:
           avg: SUM(TCC_EA0_ATOMIC_sum) / SUM($denom)
-          min: MIN((TCC_EA0_ATOMIC_sum / $denom))
-          max: MAX((TCC_EA0_ATOMIC_sum / $denom))
+          min: MIN(TCC_EA0_ATOMIC_sum / $denom)
+          max: MAX(TCC_EA0_ATOMIC_sum / $denom)
           unit: (Req + $normUnit)
   metrics_description:
     Utilization: The ratio of the number of cycles an L2 channel was active, summed
