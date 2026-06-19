@@ -80,7 +80,6 @@ tests/amd_smi_test/
     │   ├── events/
     │   │   └── evt_notif_read_write.{h,cc}
     │   ├── identity/
-    │   │   ├── api_support_read.{h,cc}
     │   │   ├── id_info_read.{h,cc}
     │   │   └── version_read.{h,cc}
     │   ├── memory/
@@ -184,13 +183,14 @@ machine regardless of GPU** (see `mock_cper/README.md` for provenance).
 
 ### CMake integration
 
-`tests/amd_smi_test/CMakeLists.txt` uses `file(GLOB_RECURSE ...)` to collect all sources under
-`unit/` and `functional/` automatically, so adding a new file to any subdirectory requires no
-CMake change:
+`tests/amd_smi_test/CMakeLists.txt` uses `file(GLOB_RECURSE ... CONFIGURE_DEPENDS)` to collect all
+sources under `unit/` and `functional/` automatically. `CONFIGURE_DEPENDS` re-globs at build time,
+so a new test file added to any subdirectory is picked up on the next build with no manual `cmake`
+re-run:
 
 ```cmake
-file(GLOB_RECURSE unitSources  ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
-file(GLOB_RECURSE functSources ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
+file(GLOB_RECURSE unitSources  CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
+file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
 
 add_executable(amdsmitst
     main.cc test_base.cc test_common.cc test_utils.cc
@@ -312,7 +312,7 @@ tests/python/
 ├── unit/                              # No hardware required — pure logic tests only
 │   ├── __init__.py
 │   └── bdf/
-│       └── test_bdf.py                # BDF string parsing, formatting, and error-code helpers
+│       └── test_bdf.py                # BDF string parsing and formatting
 │
 ├── functional/                        # Requires live hardware
 │   ├── __init__.py
@@ -394,7 +394,8 @@ tests/python/
 ### Running Python tests
 
 Three top-level runner scripts install under `python_unittest/`, keeping the same path as before.
-All support `-v`, `-b`, `-q`, and `-k "pattern"`. Run from source by substituting
+All support `-v`, `-b`, `-q`, `-k "pattern"` (include), and `-x "pattern"` (exclude — the inverse
+of `-k`, skips tests whose id contains the pattern). Run from source by substituting
 `tests/python/` for the install path.
 
 **List all available tests** (no hardware, no execution):
@@ -444,18 +445,21 @@ as running a pytest test file directly. Always go through a runner with a `-k` f
 /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -k "unit.bdf.test_bdf" -v
 ```
 
-**Equivalent matrix between Python and C++:**
+**Equivalent matrix between Python and C++.**  
+The two suites are structurally asymmetric: Python has **three independent runners** (`unit_tests.py`, `integration_test.py`, `cli_unit_test.py`),
+while C++ is a **single `amdsmitst` binary** filtered with `--gtest_filter`. Some concepts map only
+one way — **CLI tests are Python-only**, and the **read-only/read-write split is C++-only**.
 
 | Intent | Python | C++ (`amdsmitst`) |
 | :--- | :--- | :--- |
-| List all tests | `unit_tests.py --list` / `-l` | `--gtest_list_tests` |
+| List all tests | `--list` / `-l` on each runner (`unit_tests.py`, `integration_test.py`, `cli_unit_test.py`) | `--gtest_list_tests` |
 | Unit only (no hardware) | `unit_tests.py -v` | `--gtest_filter="*Unit*"` |
 | All functional | `integration_test.py -v` | `--gtest_filter="*Functional*"` |
-| Functional read-only | `integration_test.py -v` | `--gtest_filter="*FunctionalReadOnly*"` |
-| Functional read/write | `integration_test.py -v` | `--gtest_filter="*FunctionalReadWrite*"` |
-| CLI tests | `cli_unit_test.py -v` | N/A |
-| Feature filter | `unit_tests.py -k power -v` | `--gtest_filter="*.*Power*"` |
-| All tests | `unit_tests.py -v && integration_test.py -v` | `./amdsmitst` |
+| Functional read-only / read-write | Not distinguished — Python groups functional tests by component/feature, not by RO/RW | `--gtest_filter="*FunctionalReadOnly*"` / `"*FunctionalReadWrite*"` |
+| CLI tests | `cli_unit_test.py -v` | _Python-only — no C++ equivalent_ |
+| Feature filter (e.g. power) | `integration_test.py -k power -v` (use the runner that owns that test type) | `--gtest_filter="*.*Power*"` |
+| Exclude / negate | `integration_test.py -x partition -v` (skip tests whose id contains `partition`) | `--gtest_filter="-*.*Partition*"` |
+| Everything | `unit_tests.py -v && integration_test.py -v && cli_unit_test.py -v` | `./amdsmitst` |
 
 ### CMake integration
 
@@ -478,7 +482,7 @@ install(
 
 | Old path (`tests/amd_smi_test/`) | New path (`tests/amd_smi_test/`) |
 | :--- | :--- |
-| `functional/api_support_read.{h,cc}` | `functional/gpu/identity/api_support_read.{h,cc}` |
+| `functional/api_support_read.{h,cc}` | _Removed_ — amd-smi has no supported-function iterator API to exercise (support is reported per call via `AMDSMI_STATUS_NOT_SUPPORTED`), so the ported test had an empty `Run()`. |
 | `functional/computepartition_read_write.{h,cc}` | `functional/gpu/partition/computepartition_read_write.{h,cc}` |
 | `functional/dynamic_metrics_test.cc` | `unit/gpu/dynamic_metrics.cc` |
 | `functional/cper_read.cc` | `unit/gpu/cper_read.cc` |
