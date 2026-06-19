@@ -61,7 +61,7 @@
                     "description": "Check for amd-smi monitoring GPU temperature",
                     "error_message": "Less than expected number of captured amd-smi-temperature samples!",
                     "expected_result": 5,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_temp'",
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_temp%'",
                     "requires": "temp"
                 },
                 {
