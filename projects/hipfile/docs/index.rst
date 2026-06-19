@@ -42,15 +42,14 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
       * :doc:`hipFile buffer registration <reference/hipFile-buffer-registration>`
       * :doc:`hipFile reference counting <reference/hipFile-reference-count>`
       * :doc:`hipFile ais-stats tool <reference/hipFile-ais-stats-tool>`
-      * :doc:`hipFile environment variables <reference/hipFile-environment-variables>`\]
-      * API reference
-         * :doc:`/reference/api-synchronous-io`
-         * :doc:`/reference/api-driver`
-         * :doc:`/reference/api-file-and-buffer`
-         * :doc:`/reference/api-async`
-         * :doc:`/reference/api-batch`
-         * :doc:`/reference/api-errors`
-         * :doc:`/reference/api-python`
+      * :doc:`hipFile environment variables <reference/hipFile-environment-variables>`
+      * :doc:`Synchronous read and write API reference <reference/api-synchronous-io>`
+      * :doc:`Driver lifecycle and configuration API reference <reference/api-driver>`
+      * :doc:`File handle, buffer, and RDMA API reference <reference/api-file-and-buffer>`
+      * :doc:`Asynchronous I/O API reference <reference/api-async>`
+      * :doc:`Batch I/O API reference <reference/api-batch>`
+      * :doc:`Error handling API reference <reference/api-errors>`
+      * :doc:`Python API reference <reference/api-python>`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
