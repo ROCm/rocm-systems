@@ -3617,7 +3617,7 @@ typedef union rocprofiler_hip_api_args_t
     } hipDrvMemDiscardAndPrefetchBatchAsync;
 #endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 31
-    struct 
+    struct
     {
         hipModuleLoadingMode_t* mode;
     } hipModuleGetLoadingMode;

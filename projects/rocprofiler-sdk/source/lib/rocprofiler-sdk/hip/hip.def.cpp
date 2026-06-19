@@ -713,7 +713,7 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync, hipDrvMemDiscardAndPrefetchBatchAsync, hipDrvMemDiscardAndPrefetchBatchAsync_fn, dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
 #endif
 
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 30
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 31
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleGetLoadingMode, hipModuleGetLoadingMode, hipModuleGetLoadingMode_fn, mode);
 #endif
 
