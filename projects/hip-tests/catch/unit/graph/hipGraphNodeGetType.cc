@@ -271,16 +271,11 @@ static void ChkNodeType(hipGraph_t graph, const std::map<hipGraphNodeType, int>*
     HIP_CHECK_OPT_THREAD(threadSafe, hipGraphNodeGetType(nodes[i], &nodeType));
     cntNode[nodeType] += 1;
   }
-  std::map<hipGraphNodeType, int>::iterator iter;
-  std::map<hipGraphNodeType, int>::const_iterator iter1 = nodeTypeToQuery->begin();
-  for (iter = cntNode.begin(); iter != cntNode.end(); iter++) {
-    REQUIRE_OPT_THREAD(threadSafe, iter->first == iter1->first);
-    REQUIRE_OPT_THREAD(threadSafe, iter->second == iter1->second);
-    if (iter1 == nodeTypeToQuery->end())
-      break;
-    else
-      iter1++;
-  }
+  // Compare the counted node types directly against the expected map. std::map
+  // equality checks both the size and every key/value pair, which avoids walking
+  // two iterators in lock-step and the resulting end() dereference when the maps
+  // differ in size.
+  REQUIRE_OPT_THREAD(threadSafe, cntNode == *nodeTypeToQuery);
   free(nodes);
 }
 // Thread Function
