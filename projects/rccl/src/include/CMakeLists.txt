@@ -1,13 +1,6 @@
-# RCCL src/include/CMakeLists.txt
-#
-# >>> RCCL-DELTA: ENTIRE FILE IS RCCL-ONLY.
-# NCCL has no src/include/CMakeLists.txt: NCCL compiles CUDA directly and never lists
-# headers in CMake. RCCL must hipify every public/internal header (copy + CUDA->HIP
-# convert into HIPIFY_DIR) so the hipified translation units can #include them. This file
-# enumerates the src/include/ tree and exposes it as INCLUDE_HEADERS for the hipify loop
-# in src/CMakeLists.txt. There is no NCCL counterpart, so it will never conflict on merge.
-# (SMI headers amdsmi_wrap.h / rocm_smi_wrap.h are intentionally NOT here; they live in the
-#  conditional SMI_SOURCES block in src/CMakeLists.txt.)
+# RCCL include headers
+
+# >>> RCCL-DELTA: ENTIRE FILE IS RCCL-ONLY. Needed for hipify to copy the headers into HIPIFY_DIR.
 set(INCLUDE_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/alloc.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mem_manager.h

@@ -22,9 +22,7 @@ list(APPEND MISC_SOURCES
 )
 endif()
 
-# >>> RCCL-DELTA: remove NCCL sources that RCCL does not build.
-# cudawrap/gdrwrap/nvmlwrap are CUDA/NVML host shims (RCCL uses rocmwrap.cc + nvmlwrap_stub.cc);
-# git_version.cc is replaced by RCCL's generated git_version.cpp (update_git_version target).
+# >>> RCCL-DELTA: NCCL sources that RCCL does not build.
 list(REMOVE_ITEM MISC_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/cudawrap.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/gdrwrap.cc
@@ -33,7 +31,7 @@ list(REMOVE_ITEM MISC_SOURCES
 )
 # <<< RCCL-DELTA
 
-# >>> RCCL-DELTA: RCCL-only sources in src/misc (AMD additions that merge cleanly here).
+# >>> RCCL-DELTA: RCCL-only sources
 list(APPEND MISC_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/alt_rsmi.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/archinfo.cc

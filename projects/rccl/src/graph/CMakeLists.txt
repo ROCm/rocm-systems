@@ -10,8 +10,7 @@ set(GRAPH_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/trees.cc
 )
 
-# >>> RCCL-DELTA: RCCL-only sources/headers in src/graph (rome_* topology models are AMD
-# additions; the *.h are listed so the hipify pipeline copies/converts them into HIPIFY_DIR).
+# >>> RCCL-DELTA
 list(APPEND GRAPH_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/rome_models.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/rome_topo_consensus.cc
