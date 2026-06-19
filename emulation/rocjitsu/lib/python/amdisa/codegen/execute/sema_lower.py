@@ -1351,7 +1351,8 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
     ' return static_cast<uint32_t>(a * b); }}()',
     'mul_lo_u16': 'static_cast<uint32_t>(static_cast<uint16_t>('
-    'static_cast<uint16_t>({0}) * static_cast<uint16_t>({1})))',
+    'static_cast<uint32_t>(static_cast<uint16_t>({0})) * '
+    'static_cast<uint32_t>(static_cast<uint16_t>({1}))))',
     'std::min': 'std::min({0}, {1})',
     'std::max': 'std::max({0}, {1})',
     'std::fmin': 'std::fmin({0}, {1})',
@@ -1617,25 +1618,25 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' float hi = util::f16_to_f32(static_cast<uint16_t>(a >> 16))'
     ' * util::f16_to_f32(static_cast<uint16_t>(b >> 16));'
     ' return std::bit_cast<uint32_t>(lo + hi + c); }}()',
-    'dot4c': '[&]() {{ uint32_t a = {0}, b = {1}; int32_t c = static_cast<int32_t>({2});'
-    ' int32_t sum = c;'
+    'dot4c': '[&]() {{ uint32_t a = {0}, b = {1}; uint32_t sum = static_cast<uint32_t>({2});'
     ' for (int i = 0; i < 4; ++i)'
-    '   sum += static_cast<int32_t>(static_cast<int8_t>((a >> (i*8)) & 0xFF))'
-    '        * static_cast<int32_t>(static_cast<int8_t>((b >> (i*8)) & 0xFF));'
-    ' return static_cast<uint32_t>(sum); }}()',
-    'dot8c': '[&]() {{ uint32_t a = {0}, b = {1}; int32_t c = static_cast<int32_t>({2});'
-    ' int32_t sum = c;'
+    '   sum += static_cast<uint32_t>('
+    'static_cast<int32_t>(static_cast<int8_t>((a >> (i*8)) & 0xFF))'
+    '        * static_cast<int32_t>(static_cast<int8_t>((b >> (i*8)) & 0xFF)));'
+    ' return sum; }}()',
+    'dot8c': '[&]() {{ uint32_t a = {0}, b = {1}; uint32_t sum = static_cast<uint32_t>({2});'
     ' for (int i = 0; i < 8; ++i) {{'
     '   int32_t av = static_cast<int32_t>((a >> (i*4)) & 0xF);'
     '   if (av & 8) av |= ~0xF;'
     '   int32_t bv = static_cast<int32_t>((b >> (i*4)) & 0xF);'
     '   if (bv & 8) bv |= ~0xF;'
-    '   sum += av * bv; }}'
-    ' return static_cast<uint32_t>(sum); }}()',
+    '   sum += static_cast<uint32_t>(av * bv); }}'
+    ' return sum; }}()',
     'mad_32_16': '[&]() {{ int32_t a = static_cast<int32_t>(static_cast<int16_t>({0}));'
     ' int32_t b = static_cast<int32_t>(static_cast<int16_t>({1}));'
-    ' int32_t c = static_cast<int32_t>({2});'
-    ' return static_cast<uint32_t>(a * b + c); }}()',
+    ' uint32_t c = static_cast<uint32_t>({2});'
+    ' int64_t dot = static_cast<int64_t>(a) * b;'
+    ' return c + static_cast<uint32_t>(dot); }}()',
     'v_writelane': '(lane == {2}) ? {1} : {0}',
     'util::bfe': '[&]() {{ uint32_t base = {0};'
     ' uint32_t offset = {1};'
