@@ -55,7 +55,15 @@ enum InstFlags : uint64_t {
   /// @brief Writes the EXEC mask.
   WRITES_EXEC = (1ULL << 14),
   /// @brief Reads the EXEC mask.
-  READS_EXEC = (1ULL << 15)
+  READS_EXEC = (1ULL << 15),
+  /// @brief The destination value is a plain copy of a single source operand
+  /// (e.g. s_mov). Lets EXEC-state analysis prove an all-ones EXEC write from an
+  /// all-ones source.
+  RESULT_COPY = (1ULL << 16),
+  /// @brief The destination value is the bitwise OR of the source operands
+  /// (e.g. s_or, s_or_saveexec). OR with an all-ones operand is all-ones
+  /// regardless of the others.
+  RESULT_OR = (1ULL << 17)
 };
 
 class BasicBlock;

@@ -57,33 +57,57 @@ enum class ExecWrite {
   return ~0ULL;
 }
 
+/// @brief True when @p op is a compile-time all-ones constant across @p mask.
+[[nodiscard]] bool src_const_is_all_ones(const Operand *op, uint64_t mask) {
+  if (op == nullptr)
+    return false;
+  const std::optional<uint64_t> cv = op->const_value();
+  return cv && (*cv & mask) == mask;
+}
+
+/// @brief How the value written to the destination is formed from the sources.
+enum class Combinator { Other, Copy, Or };
+
+[[nodiscard]] Combinator combinator(const Instruction &inst) {
+  if (inst.flags() & RESULT_OR)
+    return Combinator::Or;
+  if (inst.flags() & RESULT_COPY)
+    return Combinator::Copy;
+  return Combinator::Other;
+}
+
 /// @brief True when the instruction provably assigns an all-ones EXEC mask.
 ///
-/// @details Conservative: the single source must expose an all-ones compile-time
-/// value through Operand::const_value(), which resolves both literals
-/// (`s_mov_b64 exec, 0xffffffffffffffff`) and inline constants
-/// (`s_mov_b64 exec, -1`) without any wavefront. Restores from a register,
-/// save/restore, AND/OR/XOR narrowing, and v_cmpx all fail this test (their
-/// source is not a compile-time constant) and therefore yield `Unknown`.
-/// Missing a real all-ones write only costs precision (the point stays
-/// `Unknown`); it is never unsound.
-[[nodiscard]] bool writes_all_ones(const Instruction &inst) {
-  if (inst.num_src_operands() != 1)
-    return false;
-  const Operand *src = inst.src_operand(0);
-  if (src == nullptr)
-    return false;
-  const std::optional<uint64_t> cv = src->const_value();
-  if (!cv)
-    return false;
+/// @details Operation-aware, so it only claims all-ones when it can prove it
+/// from the instruction's result combinator and compile-time-constant sources
+/// (`const_value()` resolves literals and inline constants without a wavefront):
+///   * `Copy` (`exec = src`):     the single source is all-ones.
+///   * `Or`   (`exec = a | b …`): any source is an all-ones constant — OR with
+///                                an all-ones operand is all-ones regardless of
+///                                the rest (covers `exec = exec | -1`).
+///   * everything else (and/xor/not/cmpx/register restores/...): not provable.
+/// AND-style writes (incl. `s_and_saveexec exec, -1`, where `exec & -1 == exec`)
+/// fall through to `Other` and therefore stay `Unknown` — never a false `Full`.
+[[nodiscard]] bool exec_write_is_all_ones(const Instruction &inst) {
   const uint64_t mask = exec_width_mask(inst);
-  return (*cv & mask) == mask;
+  switch (combinator(inst)) {
+  case Combinator::Copy:
+    return inst.num_src_operands() == 1 && src_const_is_all_ones(inst.src_operand(0), mask);
+  case Combinator::Or:
+    for (int i = 0; i < inst.num_src_operands(); ++i)
+      if (src_const_is_all_ones(inst.src_operand(i), mask))
+        return true;
+    return false;
+  case Combinator::Other:
+    return false;
+  }
+  return false;
 }
 
 [[nodiscard]] ExecWrite classify(const Instruction &inst) {
   if (!writes_exec(inst))
     return ExecWrite::None;
-  return writes_all_ones(inst) ? ExecWrite::AllOnes : ExecWrite::Narrowing;
+  return exec_write_is_all_ones(inst) ? ExecWrite::AllOnes : ExecWrite::Narrowing;
 }
 
 [[nodiscard]] ExecState transfer(ExecState in, const Instruction &inst) {

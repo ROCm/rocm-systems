@@ -141,6 +141,31 @@ def _exec_mask_flag_stmts(sem) -> list[str]:
     ]
 
 
+def _result_combinator_flag_stmts(sem) -> list[str]:
+    """Return ``flags_ |= ...;`` for how the instruction forms its result value.
+
+    EXEC-state analysis uses this to prove an all-ones EXEC write:
+
+    * ``RESULT_COPY`` - result is a plain copy of a single source (s_mov).
+    * ``RESULT_OR``   - result is the bitwise OR of its sources (s_or,
+      s_or_saveexec); OR with an all-ones operand is all-ones regardless of the
+      rest.
+
+    Derived from the per-opcode semantic class/operation. Other operations
+    (and, xor, not, cmov, ...) get no flag, so the analysis cannot prove
+    all-ones and stays conservative.
+    """
+    if sem is None:
+        return []
+    cls = sem.semantic_class
+    op = (sem.operation or '').lower()
+    if cls == 'scalar_mov':
+        return ['flags_ |= RESULT_COPY;']
+    if cls in ('scalar_binop', 'scalar_saveexec') and op == 'or':
+        return ['flags_ |= RESULT_OR;']
+    return []
+
+
 @dataclass
 class _SourceImplUnit:
     file_stem: str | None
@@ -5384,6 +5409,9 @@ class CodeGenerator:
                     # derived from the instruction's semantic AST (see
                     # _exec_mask_flag_stmts).
                     ctor_body_parts.extend(_exec_mask_flag_stmts(_mem_sem))
+                    # Result-combinator metadata (RESULT_COPY / RESULT_OR) for
+                    # EXEC-state all-ones reasoning.
+                    ctor_body_parts.extend(_result_combinator_flag_stmts(_mem_sem))
 
                     # Per-instruction size overrides (e.g., VOP3PX2 128-bit
                     # instructions decoded under 64-bit VOP3P_MFMA).

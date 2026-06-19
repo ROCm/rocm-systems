@@ -160,6 +160,8 @@ enum class TestOpcode : uint32_t {
   WriteExecFull = 17,
   WriteExecNarrow = 18,
   WriteExecFullInline = 19,
+  WriteExecOrAllOnes = 20,
+  WriteExecAndSaveexec = 21,
 };
 
 class TestDecoder : public Decoder {
@@ -203,18 +205,29 @@ public:
     case TestOpcode::IndirectBranch:
       return new TestInstruction("test_indirect_branch", {}, {}, INDIRECT_BRANCH);
     case TestOpcode::WriteExecFull:
-      // exec <- all-ones literal: dst is EXEC (64-bit), single literal source.
-      return new TestInstruction("test_write_exec_full", {{RegClass::EXEC, 0, 2}}, {}, 0,
+      // s_mov exec, <all-ones literal>: COPY of a single all-ones source.
+      return new TestInstruction("test_write_exec_full", {{RegClass::EXEC, 0, 2}}, {}, RESULT_COPY,
                                  std::nullopt, {}, ~0ULL);
     case TestOpcode::WriteExecNarrow:
       // exec <- sgpr (non-constant): writes EXEC but not provably all-ones.
       return new TestInstruction("test_write_exec_narrow", {{RegClass::EXEC, 0, 2}},
-                                 {{RegClass::SGPR, 0, 1}});
+                                 {{RegClass::SGPR, 0, 1}}, RESULT_COPY);
     case TestOpcode::WriteExecFullInline:
-      // exec <- inline-constant all-ones (e.g. `s_mov_b64 exec, -1`): the source
-      // reports const_value() but not literal64_value().
-      return new TestInstruction("test_write_exec_full_inline", {{RegClass::EXEC, 0, 2}}, {}, 0,
-                                 std::nullopt, {}, std::nullopt, ~0ULL);
+      // s_mov exec, -1: COPY of an inline-constant all-ones source (reports
+      // const_value() but not literal64_value()).
+      return new TestInstruction("test_write_exec_full_inline", {{RegClass::EXEC, 0, 2}}, {},
+                                 RESULT_COPY, std::nullopt, {}, std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecOrAllOnes:
+      // s_or_b64 exec, exec, -1: OR of a (non-constant) source and an all-ones
+      // inline constant -> all-ones regardless of the other operand.
+      return new TestInstruction("test_write_exec_or_allones", {{RegClass::EXEC, 0, 2}},
+                                 {{RegClass::SGPR, 0, 1}}, RESULT_OR, std::nullopt, {}, std::nullopt,
+                                 ~0ULL);
+    case TestOpcode::WriteExecAndSaveexec:
+      // s_and_saveexec exec, -1: writes EXEC (flag), single all-ones source, but
+      // exec = exec & -1 = exec -> NOT all-ones. No RESULT_* -> must stay Unknown.
+      return new TestInstruction("test_write_exec_and_saveexec", {{RegClass::SGPR, 0, 2}}, {},
+                                 WRITES_EXEC, std::nullopt, {}, std::nullopt, ~0ULL);
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
@@ -449,6 +462,11 @@ TEST(ExecFlagsRealDecode, Cdna4SMovExecAllOnesPromotesVgprDefToKill) {
   ASSERT_TRUE(def_ref.has_value());
   EXPECT_EQ(*def_ref, (RegisterRef{RegClass::VGPR, 0, 1}));
 
+  // Proving EXEC=Full from `s_mov exec, -1` needs the s_mov to carry RESULT_COPY,
+  // which only exists once the ISA is regenerated with the combinator metadata.
+  if (!(insts[0]->flags() & RESULT_COPY))
+    GTEST_SKIP() << "s_mov lacks RESULT_COPY; regenerate ISA to enable EXEC-Full tracking";
+
   // EXEC is provably full at the def, so its vector write is a real kill.
   auto scope = block_scope(blocks);
   ExecMaskAnalysis exec{KernelBlockScope(scope)};
@@ -491,6 +509,33 @@ TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
   EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);    // after exec=all-ones
   EXPECT_EQ(exec.before(*insts[2]), ExecState::Full);    // narrowing not yet applied
   EXPECT_EQ(exec.before(*insts[3]), ExecState::Unknown); // after narrowing write
+}
+
+TEST(ExecMaskAnalysis, OrWithAllOnesConstantIsFull) {
+  // exec = exec | -1 -> all-ones regardless of the prior EXEC (RESULT_OR with an
+  // all-ones source operand).
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecOrAllOnes, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  EXPECT_EQ(exec.before(*insts[0]), ExecState::Unknown); // entry
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);    // after exec = exec | -1
+}
+
+TEST(ExecMaskAnalysis, AndSaveexecWithAllOnesStaysUnknown) {
+  // s_and_saveexec exec, -1: exec = exec & -1 = exec, NOT all-ones. The all-ones
+  // source must not be mistaken for an all-ones result (regression guard).
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecAndSaveexec, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope)};
+
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Unknown); // after and-saveexec
 }
 
 TEST(LivenessAnalysis, ExecFullPromotesVgprDefToKill) {

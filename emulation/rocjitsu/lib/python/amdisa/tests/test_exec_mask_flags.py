@@ -5,7 +5,10 @@
 
 import pytest
 
-from amdisa.codegen._generator import _exec_mask_flag_stmts
+from amdisa.codegen._generator import (
+    _exec_mask_flag_stmts,
+    _result_combinator_flag_stmts,
+)
 from amdisa.semantics import InstructionSemantics
 
 # Flag names emitted for EXEC tracking.
@@ -113,3 +116,42 @@ class TestExecMaskFlagStmts:
         for s in stmts:
             assert s.startswith('flags_ |= ')
             assert s.endswith(';')
+
+
+class TestResultCombinatorFlagStmts:
+    """RESULT_COPY / RESULT_OR drive EXEC-state all-ones reasoning."""
+
+    def _combinator(self, sem):
+        return {s[len('flags_ |= ') : -1] for s in _result_combinator_flag_stmts(sem)}
+
+    def test_scalar_mov_is_copy(self):
+        sem = InstructionSemantics('S_MOV_B64', 'scalar_mov', data_type='b64')
+        assert self._combinator(sem) == {'RESULT_COPY'}
+
+    def test_binop_or_is_or(self):
+        sem = InstructionSemantics(
+            'S_OR_B64', 'scalar_binop', operation='or', data_type='b64'
+        )
+        assert self._combinator(sem) == {'RESULT_OR'}
+
+    def test_saveexec_or_is_or(self):
+        sem = InstructionSemantics(
+            'S_OR_SAVEEXEC_B64', 'scalar_saveexec', operation='or', data_type='b64'
+        )
+        assert self._combinator(sem) == {'RESULT_OR'}
+
+    def test_saveexec_and_is_other(self):
+        # exec = exec & src -> not provably all-ones; no combinator flag.
+        sem = InstructionSemantics(
+            'S_AND_SAVEEXEC_B64', 'scalar_saveexec', operation='and', data_type='b64'
+        )
+        assert _result_combinator_flag_stmts(sem) == []
+
+    def test_binop_and_is_other(self):
+        sem = InstructionSemantics(
+            'S_AND_B64', 'scalar_binop', operation='and', data_type='b64'
+        )
+        assert _result_combinator_flag_stmts(sem) == []
+
+    def test_none_is_empty(self):
+        assert _result_combinator_flag_stmts(None) == []
