@@ -168,7 +168,7 @@ event_callback(rocprofiler_thread_trace_decoder_record_type_t type,
         {
             const auto& ev = events[i];
 
-            if (!(ev.flags & ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE)) continue;
+            if(!(ev.flags & ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE)) continue;
 
             if(cl->cut_target_in_call && !cl->cut_ready && ev.me_id == cl->target_me &&
                ev.pipe_id == cl->target_pipe && ev.byte_offset > cl->cut_offset_begin)

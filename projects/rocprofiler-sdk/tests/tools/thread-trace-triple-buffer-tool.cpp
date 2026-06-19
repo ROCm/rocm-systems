@@ -145,7 +145,7 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
             auto lk = std::unique_lock{agent_output_buffer->reorder_mut};
             agent_output_buffer->next_expected_chunk = chunk_index + 1;
 
-            if (shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END)
+            if(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END)
                 agent_output_buffer->end_chunks.push_back(location + data_size);
         }
         agent_output_buffer->reorder_cv.notify_all();
@@ -254,34 +254,31 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             else if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
             {
                 auto& current_sdata = *static_cast<uint32_t*>(userdata);
-                bool invalid = false;
 
                 auto* sdata = static_cast<rocprofiler_thread_trace_decoder_shaderdata_t*>(events);
                 for(size_t i = 0; i < num_events; i++)
                 {
-                    if(sdata[i].value < current_sdata)
+                    // Ignoring the last token because it may have been cutoff
+                    if(i != num_events - 1 && sdata[i].value < current_sdata)
                     {
-                        std::cerr << i << "Error: Invalid sdata value " << sdata[i].value << " vs " << current_sdata << std::endl;
-                        invalid = true;
+                        std::cerr << i << " Error: Invalid sdata value " << sdata[i].value << " vs "
+                                  << current_sdata << std::endl;
+                        abort();
                     }
                     current_sdata = sdata[i].value;
                 }
-                if (num_events > 0)
-                std::cerr << "Going from " << current_sdata << " to " << sdata[num_events-1].value << std::endl;
-
-                if (invalid) abort();
             }
         };
 
         size_t total_size = 0;
         for(auto& output_buffer : *agent_buffers)
         {
-            auto     lk            = std::unique_lock{output_buffer.reorder_mut};
-            auto&    buffer        = output_buffer.output_buffer;
-            size_t   output_size   = std::min(output_buffer.output_size.exchange(0), buffer.size());
+            auto   lk          = std::unique_lock{output_buffer.reorder_mut};
+            auto&  buffer      = output_buffer.output_buffer;
+            size_t output_size = std::min(output_buffer.output_size.exchange(0), buffer.size());
 
             size_t current_byte = 0;
-            for (auto& end_byte : output_buffer.end_chunks)
+            for(auto& end_byte : output_buffer.end_chunks)
             {
                 uint32_t current_sdata = 0;
                 char*    ptr           = buffer.data() + current_byte;
@@ -293,7 +290,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             total_size += output_size;
 
             output_buffer.next_expected_chunk = 0;
-            output_buffer.end_chunks = {};
+            output_buffer.end_chunks          = {};
         }
 
         static bool ignore_size = std::getenv("STARTSTOP") ? atoi(std::getenv("STARTSTOP")) : false;

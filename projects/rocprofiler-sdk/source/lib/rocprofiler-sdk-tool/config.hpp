@@ -157,8 +157,8 @@ struct config : output_config
     std::string mpi_size_env_variable = get_env(mpi_size_env_var_name, "");
     uint64_t    att_param_shader_engine_mask =
         get_env<uint64_t>("ROCPROF_ATT_PARAM_SHADER_ENGINE_MASK", 0x1);
-    // 256MB
-    uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x10000000);
+    // 384MB
+    uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x18000000);
     uint64_t att_param_simd_select = get_env<uint64_t>("ROCPROF_ATT_PARAM_SIMD_SELECT", 0xF);
     uint64_t att_param_target_cu   = get_env<uint64_t>("ROCPROF_ATT_PARAM_TARGET_CU", 1);
     uint64_t att_param_perf_ctrl   = get_env<uint64_t>("ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL", 0);
