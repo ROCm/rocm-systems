@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// All kfd_events<Backend> template implementations are defined in kfd_events.hpp.
+// All kfd_events<Wrapper> template implementations are defined in kfd_events.hpp.
 // This explicit instantiation stamps out the production specialisation.
 
 #include "library/rocprofiler-sdk/kfd_events.hpp"

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "backends/rocprofiler_sdk/rocprofiler_sdk_backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "core/timemory.hpp"
@@ -32,7 +32,7 @@ struct version_info
     std::uint32_t formatted = 0;  // major * 10000 + minor * 100 + patch
 };
 
-template <typename Backend>
+template <typename Wrapper>
 class sdk_core
 {
 public:
@@ -40,23 +40,23 @@ public:
 
     static version_info& get_version();
 
-    static std::unordered_set<typename Backend::callback_tracing_kind>
+    static std::unordered_set<typename Wrapper::callback_tracing_kind>
     get_callback_domains();
 
-    static std::unordered_set<typename Backend::buffer_tracing_kind>
+    static std::unordered_set<typename Wrapper::buffer_tracing_kind>
     get_buffered_domains();
 
-    static std::vector<std::int32_t> get_operations(Backend::callback_tracing_kind kindv);
+    static std::vector<std::int32_t> get_operations(Wrapper::callback_tracing_kind kindv);
 
-    static std::vector<std::int32_t> get_operations(Backend::buffer_tracing_kind kindv);
+    static std::vector<std::int32_t> get_operations(Wrapper::buffer_tracing_kind kindv);
 
     static std::vector<std::string> get_rocm_events();
 
     static std::unordered_set<std::int32_t> get_backtrace_operations(
-        Backend::callback_tracing_kind kindv);
+        Wrapper::callback_tracing_kind kindv);
 
     static std::unordered_set<std::int32_t> get_backtrace_operations(
-        Backend::buffer_tracing_kind kindv);
+        Wrapper::buffer_tracing_kind kindv);
 
     // Pure filtering logic — public so it can be unit-tested directly.
     static std::vector<std::int32_t> get_operations_impl(
@@ -72,10 +72,10 @@ public:
     // Test-only: directly inject operation options for a tracing kind without
     // running config_settings(). Enables unit-testing get_operations() and
     // get_backtrace_operations() without the settings infrastructure.
-    static void set_operation_options(Backend::callback_tracing_kind kind,
+    static void set_operation_options(Wrapper::callback_tracing_kind kind,
                                       std::string include, std::string exclude,
                                       std::string backtrace);
-    static void set_operation_options(Backend::buffer_tracing_kind kind,
+    static void set_operation_options(Wrapper::buffer_tracing_kind kind,
                                       std::string include, std::string exclude,
                                       std::string backtrace);
 
@@ -86,16 +86,16 @@ public:
         std::string operations_annotate_backtrace = {};
     };
 
-    static std::unordered_map<typename Backend::callback_tracing_kind, operation_options>
+    static std::unordered_map<typename Wrapper::callback_tracing_kind, operation_options>
         callback_operation_option_names;
-    static std::unordered_map<typename Backend::buffer_tracing_kind, operation_options>
+    static std::unordered_map<typename Wrapper::buffer_tracing_kind, operation_options>
         buffered_operation_option_names;
 
     static std::unordered_set<std::int32_t> get_operations_impl(
-        Backend::callback_tracing_kind kindv, const std::string& optname = {});
+        Wrapper::callback_tracing_kind kindv, const std::string& optname = {});
 
     static std::unordered_set<std::int32_t> get_operations_impl(
-        Backend::buffer_tracing_kind kindv, const std::string& optname = {});
+        Wrapper::buffer_tracing_kind kindv, const std::string& optname = {});
 
     template <typename Tp>
     static auto insert_config_setting(
@@ -116,10 +116,10 @@ namespace rocprofsys::rocprofiler_sdk
 
 // ─── Private helpers ─────────────────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 template <typename Tp>
 std::string
-sdk_core<Backend>::to_lower(const Tp& val)
+sdk_core<Wrapper>::to_lower(const Tp& val)
 {
     auto str = std::string{ val };
     for(auto& ch : str)
@@ -127,9 +127,9 @@ sdk_core<Backend>::to_lower(const Tp& val)
     return str;
 }
 
-template <typename Backend>
+template <typename Wrapper>
 std::string
-sdk_core<Backend>::get_setting_name(std::string val)
+sdk_core<Wrapper>::get_setting_name(std::string val)
 {
     constexpr auto prefix = tim::string_view_t{ "rocprofsys_" };
     for(auto& ch : val)
@@ -140,9 +140,9 @@ sdk_core<Backend>::get_setting_name(std::string val)
 
 // ─── set_operation_options ────────────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-sdk_core<Backend>::set_operation_options(Backend::callback_tracing_kind kind,
+sdk_core<Wrapper>::set_operation_options(Wrapper::callback_tracing_kind kind,
                                          std::string include, std::string exclude,
                                          std::string backtrace)
 {
@@ -150,9 +150,9 @@ sdk_core<Backend>::set_operation_options(Backend::callback_tracing_kind kind,
                                               std::move(backtrace) };
 }
 
-template <typename Backend>
+template <typename Wrapper>
 void
-sdk_core<Backend>::set_operation_options(Backend::buffer_tracing_kind kind,
+sdk_core<Wrapper>::set_operation_options(Wrapper::buffer_tracing_kind kind,
                                          std::string include, std::string exclude,
                                          std::string backtrace)
 {
@@ -162,24 +162,24 @@ sdk_core<Backend>::set_operation_options(Backend::buffer_tracing_kind kind,
 
 // ─── Static data members ─────────────────────────────────────────────────────
 
-template <typename Backend>
-std::unordered_map<typename Backend::callback_tracing_kind,
-                   typename sdk_core<Backend>::operation_options>
-    sdk_core<Backend>::callback_operation_option_names{};
+template <typename Wrapper>
+std::unordered_map<typename Wrapper::callback_tracing_kind,
+                   typename sdk_core<Wrapper>::operation_options>
+    sdk_core<Wrapper>::callback_operation_option_names{};
 
-template <typename Backend>
-std::unordered_map<typename Backend::buffer_tracing_kind,
-                   typename sdk_core<Backend>::operation_options>
-    sdk_core<Backend>::buffered_operation_option_names{};
+template <typename Wrapper>
+std::unordered_map<typename Wrapper::buffer_tracing_kind,
+                   typename sdk_core<Wrapper>::operation_options>
+    sdk_core<Wrapper>::buffered_operation_option_names{};
 
 // ─── Private method implementations ──────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 std::unordered_set<std::int32_t>
-sdk_core<Backend>::get_operations_impl(Backend::callback_tracing_kind kindv,
+sdk_core<Wrapper>::get_operations_impl(Wrapper::callback_tracing_kind kindv,
                                        const std::string&             optname)
 {
-    static const auto callback_tracing_info = Backend::get_callback_tracing_names();
+    static const auto callback_tracing_info = Wrapper::get_callback_tracing_names();
 
     if(optname.empty())
     {
@@ -219,12 +219,12 @@ sdk_core<Backend>::get_operations_impl(Backend::callback_tracing_kind kindv,
     return _ret;
 }
 
-template <typename Backend>
+template <typename Wrapper>
 std::unordered_set<std::int32_t>
-sdk_core<Backend>::get_operations_impl(Backend::buffer_tracing_kind kindv,
+sdk_core<Wrapper>::get_operations_impl(Wrapper::buffer_tracing_kind kindv,
                                        const std::string&           optname)
 {
-    static const auto buffered_tracing_info = Backend::get_buffer_tracing_names();
+    static const auto buffered_tracing_info = Wrapper::get_buffer_tracing_names();
 
     if(optname.empty())
     {
@@ -263,9 +263,9 @@ sdk_core<Backend>::get_operations_impl(Backend::buffer_tracing_kind kindv,
     return _ret;
 }
 
-template <typename Backend>
+template <typename Wrapper>
 std::vector<std::int32_t>
-sdk_core<Backend>::get_operations_impl(const std::unordered_set<std::int32_t>& _complete,
+sdk_core<Wrapper>::get_operations_impl(const std::unordered_set<std::int32_t>& _complete,
                                        const std::unordered_set<std::int32_t>& _include,
                                        const std::unordered_set<std::int32_t>& _exclude)
 {
@@ -287,10 +287,10 @@ sdk_core<Backend>::get_operations_impl(const std::unordered_set<std::int32_t>& _
     return _convert(_ret);
 }
 
-template <typename Backend>
+template <typename Wrapper>
 template <typename Tp>
 auto
-sdk_core<Backend>::insert_config_setting(
+sdk_core<Wrapper>::insert_config_setting(
     const std::shared_ptr<settings>& config, std::string_view env_name,
     std::string_view description, Tp initial_value,
     std::initializer_list<std::string_view> extra_categories)
@@ -314,9 +314,9 @@ sdk_core<Backend>::insert_config_setting(
 
 /// @brief Return the version of the rocprofiler-sdk
 /// @return The version of the rocprofiler-sdk or 0 if not initialized
-template <typename Backend>
+template <typename Wrapper>
 version_info&
-sdk_core<Backend>::get_version()
+sdk_core<Wrapper>::get_version()
 {
     static auto _version = version_info{};
 
@@ -325,7 +325,7 @@ sdk_core<Backend>::get_version()
         std::uint32_t _major = 0;
         std::uint32_t _minor = 0;
         std::uint32_t _patch = 0;
-        Backend::get_version(&_major, &_minor, &_patch);
+        Wrapper::get_version(&_major, &_minor, &_patch);
         _version.major     = _major;
         _version.minor     = _minor;
         _version.patch     = _patch;
@@ -335,12 +335,12 @@ sdk_core<Backend>::get_version()
     return _version;
 }
 
-template <typename Backend>
+template <typename Wrapper>
 void
-sdk_core<Backend>::config_settings(const std::shared_ptr<settings>& _config)
+sdk_core<Wrapper>::config_settings(const std::shared_ptr<settings>& _config)
 {
-    const auto buffered_tracing_info = Backend::get_buffer_tracing_names();
-    const auto callback_tracing_info = Backend::get_callback_tracing_names();
+    const auto buffered_tracing_info = Wrapper::get_buffer_tracing_names();
+    const auto callback_tracing_info = Wrapper::get_callback_tracing_names();
 
     auto _skip_domains =
         std::unordered_set<std::string_view>{ "none",
@@ -419,7 +419,7 @@ sdk_core<Backend>::config_settings(const std::shared_ptr<settings>& _config)
     _add_domain("hsa_api");
     _add_domain("marker_api");
     _add_domain("roctx");
-    if constexpr(Backend::compile_time_version >= 10000) _add_domain("kfd_events");
+    if constexpr(Wrapper::compile_time_version >= 10000) _add_domain("kfd_events");
 
     for(const auto& itr : buffered_tracing_info)
         _add_domain(itr.name);
@@ -433,7 +433,7 @@ sdk_core<Backend>::config_settings(const std::shared_ptr<settings>& _config)
                     fmt::join(_domain_choices, ", "));
     auto _domain_defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
                                          "memory_copy,scratch_memory" };
-    if constexpr(Backend::compile_time_version < 10000)
+    if constexpr(Wrapper::compile_time_version < 10000)
         _domain_defaults.append(",page_migration");
 
     insert_config_setting<std::string>(_config, env_vars::ROCM_DOMAINS,
@@ -452,7 +452,7 @@ sdk_core<Backend>::config_settings(const std::shared_ptr<settings>& _config)
     _skip_domains.emplace("page_migration");
 
     _add_operation_settings(
-        "MARKER_API", callback_tracing_info[Backend::CALLBACK_TRACING_MARKER_CORE_API],
+        "MARKER_API", callback_tracing_info[Wrapper::CALLBACK_TRACING_MARKER_CORE_API],
         callback_operation_option_names);
 
     for(const auto& itr : callback_tracing_info)
@@ -473,39 +473,39 @@ sdk_core<Backend>::config_settings(const std::shared_ptr<settings>& _config)
     }
 }
 
-template <typename Backend>
-std::unordered_set<typename Backend::callback_tracing_kind>
-sdk_core<Backend>::get_callback_domains()
+template <typename Wrapper>
+std::unordered_set<typename Wrapper::callback_tracing_kind>
+sdk_core<Wrapper>::get_callback_domains()
 {
-    using kind_t             = typename Backend::callback_tracing_kind;
-    const auto callback_info = Backend::get_callback_tracing_names();
+    using kind_t             = typename Wrapper::callback_tracing_kind;
+    const auto callback_info = Wrapper::get_callback_tracing_names();
     auto       supported     = std::unordered_set<kind_t>{
-        Backend::CALLBACK_TRACING_HSA_CORE_API,
-        Backend::CALLBACK_TRACING_HSA_AMD_EXT_API,
-        Backend::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-        Backend::CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-        Backend::CALLBACK_TRACING_HIP_RUNTIME_API,
-        Backend::CALLBACK_TRACING_HIP_COMPILER_API,
-        Backend::CALLBACK_TRACING_MARKER_CORE_API,
-        Backend::CALLBACK_TRACING_CODE_OBJECT,
+        Wrapper::CALLBACK_TRACING_HSA_CORE_API,
+        Wrapper::CALLBACK_TRACING_HSA_AMD_EXT_API,
+        Wrapper::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+        Wrapper::CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+        Wrapper::CALLBACK_TRACING_HIP_RUNTIME_API,
+        Wrapper::CALLBACK_TRACING_HIP_COMPILER_API,
+        Wrapper::CALLBACK_TRACING_MARKER_CORE_API,
+        Wrapper::CALLBACK_TRACING_CODE_OBJECT,
     };
 
     auto _version = get_version();
     if(_version.formatted == 0) LOG_WARNING("rocprofiler-sdk version not initialized");
 
-    if constexpr(Backend::compile_time_version >= 600)
+    if constexpr(Wrapper::compile_time_version >= 600)
     {
         if(_version.formatted >= 600)
         {
-            supported.emplace(Backend::CALLBACK_TRACING_RCCL_API);
-            supported.emplace(Backend::CALLBACK_TRACING_OMPT);
-            supported.emplace(Backend::CALLBACK_TRACING_ROCDECODE_API);
+            supported.emplace(Wrapper::CALLBACK_TRACING_RCCL_API);
+            supported.emplace(Wrapper::CALLBACK_TRACING_OMPT);
+            supported.emplace(Wrapper::CALLBACK_TRACING_ROCDECODE_API);
         }
     }
-    if constexpr(Backend::compile_time_version >= 700)
+    if constexpr(Wrapper::compile_time_version >= 700)
     {
         if(_version.formatted >= 700)
-            supported.emplace(Backend::CALLBACK_TRACING_ROCJPEG_API);
+            supported.emplace(Wrapper::CALLBACK_TRACING_ROCJPEG_API);
     }
 
     auto _data    = std::unordered_set<kind_t>{};
@@ -514,12 +514,12 @@ sdk_core<Backend>::get_callback_domains()
             .value_or(std::string{}),
         " ,;:\t\n");
 
-    if constexpr(Backend::compile_time_version >= 600)
+    if constexpr(Wrapper::compile_time_version >= 600)
     {
         if(config::get_use_rcclp() && _version.formatted >= 600)
-            _data.emplace(Backend::CALLBACK_TRACING_RCCL_API);
+            _data.emplace(Wrapper::CALLBACK_TRACING_RCCL_API);
         if(config::get_use_ompt() && _version.formatted >= 600)
-            _data.emplace(Backend::CALLBACK_TRACING_OMPT);
+            _data.emplace(Wrapper::CALLBACK_TRACING_OMPT);
     }
 
     const auto valid_choices =
@@ -537,21 +537,21 @@ sdk_core<Backend>::get_callback_domains()
 
         if(itr == "hsa_api")
         {
-            for(auto eitr : { Backend::CALLBACK_TRACING_HSA_CORE_API,
-                              Backend::CALLBACK_TRACING_HSA_AMD_EXT_API,
-                              Backend::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-                              Backend::CALLBACK_TRACING_HSA_FINALIZE_EXT_API })
+            for(auto eitr : { Wrapper::CALLBACK_TRACING_HSA_CORE_API,
+                              Wrapper::CALLBACK_TRACING_HSA_AMD_EXT_API,
+                              Wrapper::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+                              Wrapper::CALLBACK_TRACING_HSA_FINALIZE_EXT_API })
                 _data.emplace(eitr);
         }
         else if(itr == "hip_api")
         {
-            for(auto eitr : { Backend::CALLBACK_TRACING_HIP_RUNTIME_API,
-                              Backend::CALLBACK_TRACING_HIP_COMPILER_API })
+            for(auto eitr : { Wrapper::CALLBACK_TRACING_HIP_RUNTIME_API,
+                              Wrapper::CALLBACK_TRACING_HIP_COMPILER_API })
                 _data.emplace(eitr);
         }
         else if(itr == "marker_api" || itr == "roctx")
         {
-            _data.emplace(Backend::CALLBACK_TRACING_MARKER_CORE_API);
+            _data.emplace(Wrapper::CALLBACK_TRACING_MARKER_CORE_API);
         }
         else
         {
@@ -571,36 +571,36 @@ sdk_core<Backend>::get_callback_domains()
     return _data;
 }
 
-template <typename Backend>
-std::unordered_set<typename Backend::buffer_tracing_kind>
-sdk_core<Backend>::get_buffered_domains()
+template <typename Wrapper>
+std::unordered_set<typename Wrapper::buffer_tracing_kind>
+sdk_core<Wrapper>::get_buffered_domains()
 {
-    using kind_t           = typename Backend::buffer_tracing_kind;
-    const auto buffer_info = Backend::get_buffer_tracing_names();
+    using kind_t           = typename Wrapper::buffer_tracing_kind;
+    const auto buffer_info = Wrapper::get_buffer_tracing_names();
     auto       supported   = std::unordered_set<kind_t>{
-        Backend::BUFFER_TRACING_KERNEL_DISPATCH,
-        Backend::BUFFER_TRACING_MEMORY_COPY,
-        Backend::BUFFER_TRACING_SCRATCH_MEMORY,
+        Wrapper::BUFFER_TRACING_KERNEL_DISPATCH,
+        Wrapper::BUFFER_TRACING_MEMORY_COPY,
+        Wrapper::BUFFER_TRACING_SCRATCH_MEMORY,
     };
-    if constexpr(Backend::compile_time_version >= 600)
-        supported.emplace(Backend::BUFFER_TRACING_MEMORY_ALLOCATION);
-    if constexpr(Backend::compile_time_version < 10000)
-        supported.emplace(Backend::BUFFER_TRACING_PAGE_MIGRATION);
-    if constexpr(Backend::compile_time_version >= 10000)
+    if constexpr(Wrapper::compile_time_version >= 600)
+        supported.emplace(Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION);
+    if constexpr(Wrapper::compile_time_version < 10000)
+        supported.emplace(Wrapper::BUFFER_TRACING_PAGE_MIGRATION);
+    if constexpr(Wrapper::compile_time_version >= 10000)
     {
-        supported.emplace(Backend::BUFFER_TRACING_KFD_PAGE_FAULT);
-        supported.emplace(Backend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
-        supported.emplace(Backend::BUFFER_TRACING_KFD_QUEUE);
-        supported.emplace(Backend::BUFFER_TRACING_KFD_EVENT_QUEUE);
-        supported.emplace(Backend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
-        supported.emplace(Backend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
+        supported.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT);
+        supported.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+        supported.emplace(Wrapper::BUFFER_TRACING_KFD_QUEUE);
+        supported.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE);
+        supported.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
+        supported.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
     }
 
     // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with
     // undefined node IDs (0xFFFFFFFF). Guard at runtime to avoid abort().
     version_info kfd_version{};
     bool         kfd_supported_by_runtime = false;
-    if constexpr(Backend::compile_time_version >= 10000)
+    if constexpr(Wrapper::compile_time_version >= 10000)
     {
         constexpr std::uint32_t kfd_min_version = 10202;  // 1.2.2
         kfd_version                             = get_version();
@@ -627,37 +627,37 @@ sdk_core<Backend>::get_buffered_domains()
 
         if(itr == "hsa_api")
         {
-            for(auto eitr : { Backend::BUFFER_TRACING_HSA_CORE_API,
-                              Backend::BUFFER_TRACING_HSA_AMD_EXT_API,
-                              Backend::BUFFER_TRACING_HSA_IMAGE_EXT_API,
-                              Backend::BUFFER_TRACING_HSA_FINALIZE_EXT_API })
+            for(auto eitr : { Wrapper::BUFFER_TRACING_HSA_CORE_API,
+                              Wrapper::BUFFER_TRACING_HSA_AMD_EXT_API,
+                              Wrapper::BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                              Wrapper::BUFFER_TRACING_HSA_FINALIZE_EXT_API })
                 _data.emplace(eitr);
         }
         else if(itr == "hip_api")
         {
-            for(auto eitr : { Backend::BUFFER_TRACING_HIP_COMPILER_API,
-                              Backend::BUFFER_TRACING_HIP_RUNTIME_API })
+            for(auto eitr : { Wrapper::BUFFER_TRACING_HIP_COMPILER_API,
+                              Wrapper::BUFFER_TRACING_HIP_RUNTIME_API })
                 _data.emplace(eitr);
         }
         else if(itr == "marker_api" || itr == "roctx")
         {
-            _data.emplace(Backend::BUFFER_TRACING_MARKER_CORE_API);
+            _data.emplace(Wrapper::BUFFER_TRACING_MARKER_CORE_API);
         }
         else if(itr == "memory_allocation")
         {
-            if constexpr(Backend::compile_time_version >= 600)
-                _data.emplace(Backend::BUFFER_TRACING_MEMORY_ALLOCATION);
+            if constexpr(Wrapper::compile_time_version >= 600)
+                _data.emplace(Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION);
         }
         else if(itr == "memory_copy")
         {
-            _data.emplace(Backend::BUFFER_TRACING_MEMORY_COPY);
+            _data.emplace(Wrapper::BUFFER_TRACING_MEMORY_COPY);
         }
         else if(itr == "kfd_events" || itr == "kfd_page_fault" ||
                 itr == "kfd_page_migrate" || itr == "kfd_queue" ||
                 itr == "kfd_event_queue" || itr == "kfd_event_unmap_from_gpu" ||
                 itr == "kfd_event_dropped_events")
         {
-            if constexpr(Backend::compile_time_version >= 10000)
+            if constexpr(Wrapper::compile_time_version >= 10000)
             {
                 if(!kfd_supported_by_runtime)
                 {
@@ -675,26 +675,26 @@ sdk_core<Backend>::get_buffered_domains()
                 }
                 if(itr == "kfd_events")
                 {
-                    for(auto eitr : { Backend::BUFFER_TRACING_KFD_PAGE_FAULT,
-                                      Backend::BUFFER_TRACING_KFD_PAGE_MIGRATE,
-                                      Backend::BUFFER_TRACING_KFD_QUEUE,
-                                      Backend::BUFFER_TRACING_KFD_EVENT_QUEUE,
-                                      Backend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-                                      Backend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS })
+                    for(auto eitr : { Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT,
+                                      Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                                      Wrapper::BUFFER_TRACING_KFD_QUEUE,
+                                      Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE,
+                                      Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                                      Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS })
                         _data.emplace(eitr);
                 }
                 else if(itr == "kfd_page_fault")
-                    _data.emplace(Backend::BUFFER_TRACING_KFD_PAGE_FAULT);
+                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT);
                 else if(itr == "kfd_page_migrate")
-                    _data.emplace(Backend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE);
                 else if(itr == "kfd_queue")
-                    _data.emplace(Backend::BUFFER_TRACING_KFD_QUEUE);
+                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_QUEUE);
                 else if(itr == "kfd_event_queue")
-                    _data.emplace(Backend::BUFFER_TRACING_KFD_EVENT_QUEUE);
+                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE);
                 else if(itr == "kfd_event_unmap_from_gpu")
-                    _data.emplace(Backend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
+                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
                 else if(itr == "kfd_event_dropped_events")
-                    _data.emplace(Backend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
+                    _data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
             }
         }
         else
@@ -712,7 +712,7 @@ sdk_core<Backend>::get_buffered_domains()
         }
     }
 
-    if constexpr(Backend::compile_time_version >= 10000)
+    if constexpr(Wrapper::compile_time_version >= 10000)
     {
         if(config::get_use_unified_memory_profiling())
         {
@@ -721,8 +721,8 @@ sdk_core<Backend>::get_buffered_domains()
                 LOG_INFO(
                     "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON: implicitly enabling "
                     "KFD page_fault and page_migrate buffered tracing domains");
-                _data.emplace(Backend::BUFFER_TRACING_KFD_PAGE_FAULT);
-                _data.emplace(Backend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+                _data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT);
+                _data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE);
             }
             else
             {
@@ -737,9 +737,9 @@ sdk_core<Backend>::get_buffered_domains()
     return _data;
 }
 
-template <typename Backend>
+template <typename Wrapper>
 std::vector<std::string>
-sdk_core<Backend>::get_rocm_events()
+sdk_core<Wrapper>::get_rocm_events()
 {
     return tim::delimit(
         get_setting_value<std::string>(std::string{ env_vars::ROCM_EVENTS })
@@ -747,9 +747,9 @@ sdk_core<Backend>::get_rocm_events()
         " ,;\t\n");
 }
 
-template <typename Backend>
+template <typename Wrapper>
 std::vector<std::int32_t>
-sdk_core<Backend>::get_operations(Backend::callback_tracing_kind kindv)
+sdk_core<Wrapper>::get_operations(Wrapper::callback_tracing_kind kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
@@ -774,9 +774,9 @@ sdk_core<Backend>::get_operations(Backend::callback_tracing_kind kindv)
     return get_operations_impl(_complete, _include, _exclude);
 }
 
-template <typename Backend>
+template <typename Wrapper>
 std::vector<std::int32_t>
-sdk_core<Backend>::get_operations(Backend::buffer_tracing_kind kindv)
+sdk_core<Wrapper>::get_operations(Wrapper::buffer_tracing_kind kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {
@@ -799,9 +799,9 @@ sdk_core<Backend>::get_operations(Backend::buffer_tracing_kind kindv)
     return get_operations_impl(_complete, _include, _exclude);
 }
 
-template <typename Backend>
+template <typename Wrapper>
 std::unordered_set<std::int32_t>
-sdk_core<Backend>::get_backtrace_operations(Backend::callback_tracing_kind kindv)
+sdk_core<Wrapper>::get_backtrace_operations(Wrapper::callback_tracing_kind kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
@@ -820,9 +820,9 @@ sdk_core<Backend>::get_backtrace_operations(Backend::callback_tracing_kind kindv
     return { _vec.begin(), _vec.end() };
 }
 
-template <typename Backend>
+template <typename Wrapper>
 std::unordered_set<std::int32_t>
-sdk_core<Backend>::get_backtrace_operations(Backend::buffer_tracing_kind kindv)
+sdk_core<Wrapper>::get_backtrace_operations(Wrapper::buffer_tracing_kind kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {

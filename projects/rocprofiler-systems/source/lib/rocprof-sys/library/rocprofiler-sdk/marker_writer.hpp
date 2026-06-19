@@ -60,8 +60,8 @@ struct default_marker_policy
 /// Delegates raw API calls to the policy, which can be mocked for testing.
 ///
 /// @tparam MarkerWriterPolicy Compile-time policy providing thin API wrappers.
-/// @tparam Backend            SDK backend policy (controls SDK type aliases).
-template <typename Backend, typename MarkerWriterPolicy = default_marker_policy>
+/// @tparam Wrapper            SDK backend policy (controls SDK type aliases).
+template <typename Wrapper, typename MarkerWriterPolicy = default_marker_policy>
 class marker_writer
 {
 public:
@@ -91,7 +91,7 @@ public:
 
     void write_end(std::string_view name, std::uint64_t begin_ts, std::uint64_t end_ts,
                    const std::string&                        args,
-                   typename Backend::callback_tracing_record record) const
+                   typename Wrapper::callback_tracing_record record) const
     {
         if(m_use_timemory)
         {

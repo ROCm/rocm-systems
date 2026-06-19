@@ -25,38 +25,38 @@ namespace rocprofiler_sdk
 
 // ─── Public template functions ────────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-kfd_event_metadata_initialize(const client_data<Backend>* tool_data);
+kfd_event_metadata_initialize(const client_data<Wrapper>* tool_data);
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_page_fault_callback(const client_data<Backend>*           tool_data,
+tool_kfd_page_fault_callback(const client_data<Wrapper>*           tool_data,
                              const backend::kfd_page_fault_record* record);
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_page_migrate_callback(const client_data<Backend>*             tool_data,
+tool_kfd_page_migrate_callback(const client_data<Wrapper>*             tool_data,
                                const backend::kfd_page_migrate_record* record);
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_queue_callback(const client_data<Backend>*      tool_data,
+tool_kfd_queue_callback(const client_data<Wrapper>*      tool_data,
                         const backend::kfd_queue_record* record);
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_event_queue_callback(const client_data<Backend>*            tool_data,
+tool_kfd_event_queue_callback(const client_data<Wrapper>*            tool_data,
                               const backend::kfd_event_queue_record* record);
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_event_unmap_from_gpu_callback(const client_data<Backend>*            tool_data,
+tool_kfd_event_unmap_from_gpu_callback(const client_data<Wrapper>*            tool_data,
                                        const backend::kfd_event_unmap_record* record);
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_event_dropped_events_callback(const client_data<Backend>*              tool_data,
+tool_kfd_event_dropped_events_callback(const client_data<Wrapper>*              tool_data,
                                        const backend::kfd_event_dropped_record* record);
 
 }  // namespace rocprofiler_sdk
@@ -255,9 +255,9 @@ cache_add_track(const char* track_name, std::uint64_t tid)
     trace_cache::get_metadata_registry().add_track({ track_name, tid, "{}" });
 }
 
-template <typename Backend>
+template <typename Wrapper>
 inline const tool_agent*
-get_tool_agent(const client_data<Backend>* tool_data, typename Backend::agent_id agent_id)
+get_tool_agent(const client_data<Wrapper>* tool_data, typename Wrapper::agent_id agent_id)
 {
     const auto* ag = tool_data->get_gpu_tool_agent(agent_id);
     if(ag) return ag;
@@ -284,11 +284,11 @@ agent_node_id_str(const tool_agent* _agent)
 
 }  // namespace kfd_events_detail
 
-// ─── kfd_event_metadata_initialize<Backend> ───────────────────────────────────
+// ─── kfd_event_metadata_initialize<Wrapper> ───────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-kfd_event_metadata_initialize(const client_data<Backend>* tool_data)
+kfd_event_metadata_initialize(const client_data<Wrapper>* tool_data)
 {
     using namespace kfd_events_detail;
 
@@ -374,11 +374,11 @@ kfd_event_metadata_initialize(const client_data<Backend>* tool_data)
     }
 }
 
-// ─── tool_kfd_page_fault_callback<Backend> ────────────────────────────────────
+// ─── tool_kfd_page_fault_callback<Wrapper> ────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_page_fault_callback(const client_data<Backend>*           tool_data,
+tool_kfd_page_fault_callback(const client_data<Wrapper>*           tool_data,
                              const backend::kfd_page_fault_record* record)
 {
     using namespace kfd_events_detail;
@@ -414,11 +414,11 @@ tool_kfd_page_fault_callback(const client_data<Backend>*           tool_data,
         std::optional<std::int64_t>(_pid) });
 }
 
-// ─── tool_kfd_page_migrate_callback<Backend> ─────────────────────────────────
+// ─── tool_kfd_page_migrate_callback<Wrapper> ─────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_page_migrate_callback(const client_data<Backend>*             tool_data,
+tool_kfd_page_migrate_callback(const client_data<Wrapper>*             tool_data,
                                const backend::kfd_page_migrate_record* record)
 {
     using namespace kfd_events_detail;
@@ -480,11 +480,11 @@ tool_kfd_page_migrate_callback(const client_data<Backend>*             tool_data
         std::optional<std::int64_t>(_pid) });
 }
 
-// ─── tool_kfd_queue_callback<Backend> ────────────────────────────────────────
+// ─── tool_kfd_queue_callback<Wrapper> ────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_queue_callback(const client_data<Backend>*      tool_data,
+tool_kfd_queue_callback(const client_data<Wrapper>*      tool_data,
                         const backend::kfd_queue_record* record)
 {
     using namespace kfd_events_detail;
@@ -516,11 +516,11 @@ tool_kfd_queue_callback(const client_data<Backend>*      tool_data,
         std::optional<std::int64_t>(_pid) });
 }
 
-// ─── tool_kfd_event_queue_callback<Backend> ───────────────────────────────────
+// ─── tool_kfd_event_queue_callback<Wrapper> ───────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_event_queue_callback(const client_data<Backend>*            tool_data,
+tool_kfd_event_queue_callback(const client_data<Wrapper>*            tool_data,
                               const backend::kfd_event_queue_record* record)
 {
     using namespace kfd_events_detail;
@@ -552,11 +552,11 @@ tool_kfd_event_queue_callback(const client_data<Backend>*            tool_data,
         std::optional<std::int64_t>(_pid) });
 }
 
-// ─── tool_kfd_event_unmap_from_gpu_callback<Backend> ─────────────────────────
+// ─── tool_kfd_event_unmap_from_gpu_callback<Wrapper> ─────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_event_unmap_from_gpu_callback(const client_data<Backend>*            tool_data,
+tool_kfd_event_unmap_from_gpu_callback(const client_data<Wrapper>*            tool_data,
                                        const backend::kfd_event_unmap_record* record)
 {
     using namespace kfd_events_detail;
@@ -593,11 +593,11 @@ tool_kfd_event_unmap_from_gpu_callback(const client_data<Backend>*            to
         std::optional<std::int64_t>(_pid) });
 }
 
-// ─── tool_kfd_event_dropped_events_callback<Backend> ─────────────────────────
+// ─── tool_kfd_event_dropped_events_callback<Wrapper> ─────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-tool_kfd_event_dropped_events_callback(const client_data<Backend>* /*tool_data*/,
+tool_kfd_event_dropped_events_callback(const client_data<Wrapper>* /*tool_data*/,
                                        const backend::kfd_event_dropped_record* record)
 {
     using namespace kfd_events_detail;

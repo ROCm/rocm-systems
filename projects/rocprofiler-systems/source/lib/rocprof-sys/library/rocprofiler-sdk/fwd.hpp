@@ -4,7 +4,7 @@
 #pragma once
 
 // All rocprofiler-sdk headers come transitively through the backend shim.
-#include "backends/rocprofiler_sdk/rocprofiler_sdk_backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/synchronized.hpp"
 #include "core/agent_manager.hpp"
 #include "core/perfetto.hpp"
@@ -56,52 +56,52 @@ using rocprofsys_agent_t    = agent;
 
 // ─── Template type aliases ────────────────────────────────────────────────────
 
-template <typename Backend>
-using kernel_symbol_data_t = typename Backend::kernel_symbol_data;
+template <typename Wrapper>
+using kernel_symbol_data_t = typename Wrapper::kernel_symbol_data;
 
-template <typename Backend>
+template <typename Wrapper>
 using kernel_symbol_map_t =
-    std::unordered_map<typename Backend::kernel_id_t, kernel_symbol_data_t<Backend>>;
+    std::unordered_map<typename Wrapper::kernel_id_t, kernel_symbol_data_t<Wrapper>>;
 
-// ─── code_object_callback_record_t<Backend> ──────────────────────────────────
+// ─── code_object_callback_record_t<Wrapper> ──────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 struct code_object_callback_record_t
 {
     std::uint64_t                             timestamp = 0;
-    typename Backend::callback_tracing_record record    = {};
-    typename Backend::code_object_load_data   payload   = {};
+    typename Wrapper::callback_tracing_record record    = {};
+    typename Wrapper::code_object_load_data   payload   = {};
 };
 
-// ─── kernel_symbol_callback_record_t<Backend> ────────────────────────────────
+// ─── kernel_symbol_callback_record_t<Wrapper> ────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 struct kernel_symbol_callback_record_t
 {
     std::uint64_t                             timestamp = 0;
-    typename Backend::callback_tracing_record record    = {};
-    kernel_symbol_data_t<Backend>             payload   = {};
+    typename Wrapper::callback_tracing_record record    = {};
+    kernel_symbol_data_t<Wrapper>             payload   = {};
 };
 
-// ─── timing_interval<Backend> ────────────────────────────────────────────────
+// ─── timing_interval<Wrapper> ────────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 struct timing_interval
 {
-    typename Backend::timestamp_t start = 0;
-    typename Backend::timestamp_t end   = 0;
+    typename Wrapper::timestamp_t start = 0;
+    typename Wrapper::timestamp_t end   = 0;
 };
 
-// ─── tool_counter_info_t<Backend> ────────────────────────────────────────────
+// ─── tool_counter_info_t<Wrapper> ────────────────────────────────────────────
 
-template <typename Backend>
-struct tool_counter_info_t : Backend::counter_info_v0_t
+template <typename Wrapper>
+struct tool_counter_info_t : Wrapper::counter_info_v0_t
 {
-    using this_type            = tool_counter_info_t<Backend>;
-    using parent_type          = typename Backend::counter_info_v0_t;
-    using dimension_info_vec_t = std::vector<typename Backend::dimension_info_t>;
+    using this_type            = tool_counter_info_t<Wrapper>;
+    using parent_type          = typename Wrapper::counter_info_v0_t;
+    using dimension_info_vec_t = std::vector<typename Wrapper::dimension_info_t>;
 
-    tool_counter_info_t(typename Backend::agent_id _agent_id, parent_type _info,
+    tool_counter_info_t(typename Wrapper::agent_id _agent_id, parent_type _info,
                         dimension_info_vec_t&& _dim_info)
     : parent_type{ _info }
     , agent_id{ _agent_id }
@@ -115,8 +115,8 @@ struct tool_counter_info_t : Backend::counter_info_v0_t
     tool_counter_info_t& operator=(const tool_counter_info_t&)     = default;
     tool_counter_info_t& operator=(tool_counter_info_t&&) noexcept = default;
 
-    typename Backend::agent_id                      agent_id       = {};
-    std::vector<typename Backend::dimension_info_t> dimension_info = {};
+    typename Wrapper::agent_id                      agent_id       = {};
+    std::vector<typename Wrapper::dimension_info_t> dimension_info = {};
 };
 
 struct tool_agent
@@ -127,31 +127,31 @@ struct tool_agent
 
 // ─── Aggregated map aliases ───────────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 using agent_counter_info_map_t =
-    std::unordered_map<typename Backend::agent_id,
-                       std::vector<tool_counter_info_t<Backend>>>;
+    std::unordered_map<typename Wrapper::agent_id,
+                       std::vector<tool_counter_info_t<Wrapper>>>;
 
-template <typename Backend>
+template <typename Wrapper>
 using agent_counter_profile_map_t =
-    std::unordered_map<typename Backend::agent_id,
-                       std::optional<typename Backend::counter_config_id>>;
+    std::unordered_map<typename Wrapper::agent_id,
+                       std::optional<typename Wrapper::counter_config_id>>;
 
-template <typename Backend>
-using counter_id_vec_t = std::vector<typename Backend::counter_id>;
+template <typename Wrapper>
+using counter_id_vec_t = std::vector<typename Wrapper::counter_id>;
 
-template <typename Backend>
+template <typename Wrapper>
 using agent_counter_id_map_t =
-    std::unordered_map<typename Backend::agent_id, counter_id_vec_t<Backend>>;
+    std::unordered_map<typename Wrapper::agent_id, counter_id_vec_t<Wrapper>>;
 
-template <typename Backend>
+template <typename Wrapper>
 using backtrace_operation_map_t =
-    std::unordered_map<typename Backend::callback_tracing_kind,
-                       std::unordered_set<typename Backend::tracing_operation>>;
+    std::unordered_map<typename Wrapper::callback_tracing_kind,
+                       std::unordered_set<typename Wrapper::tracing_operation>>;
 
-// ─── client_data<Backend> ────────────────────────────────────────────────────
+// ─── client_data<Wrapper> ────────────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 struct client_data
 {
     static constexpr size_t num_buffers  = 11;
@@ -159,40 +159,40 @@ struct client_data
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
     using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
-    using kernel_symbol_vec_t  = std::vector<kernel_symbol_callback_record_t<Backend>>;
-    using code_object_vec_t    = std::vector<code_object_callback_record_t<Backend>>;
-    using buffer_id_vec_t      = std::array<typename Backend::buffer_id, num_buffers>;
-    using context_id_vec_t     = std::array<typename Backend::context_id, num_contexts>;
-    using agent_vec_t          = std::vector<typename Backend::agent_t>;
+    using kernel_symbol_vec_t  = std::vector<kernel_symbol_callback_record_t<Wrapper>>;
+    using code_object_vec_t    = std::vector<code_object_callback_record_t<Wrapper>>;
+    using buffer_id_vec_t      = std::array<typename Wrapper::buffer_id, num_buffers>;
+    using context_id_vec_t     = std::array<typename Wrapper::context_id, num_contexts>;
+    using agent_vec_t          = std::vector<typename Wrapper::agent_t>;
 
-    typename Backend::client_id_t*            client_id                 = nullptr;
-    typename Backend::client_finalize_t       client_fini               = nullptr;
-    typename Backend::context_id              primary_ctx               = { 0 };
-    typename Backend::context_id              counter_ctx               = { 0 };
-    typename Backend::context_id              code_object_ctx           = { 0 };
-    typename Backend::context_id              control_ctx               = { 0 };
-    typename Backend::buffer_id               kernel_dispatch_buffer    = { 0 };
-    typename Backend::buffer_id               scratch_memory_buffer     = { 0 };
-    typename Backend::buffer_id               memory_copy_buffer        = { 0 };
-    typename Backend::buffer_id               memory_alloc_buffer       = { 0 };
-    typename Backend::buffer_id               counter_collection_buffer = { 0 };
-    typename Backend::buffer_id               kfd_page_fault_buffer     = { 0 };
-    typename Backend::buffer_id               kfd_page_migrate_buffer   = { 0 };
-    typename Backend::buffer_id               kfd_queue_buffer          = { 0 };
-    typename Backend::buffer_id               kfd_event_queue_buffer    = { 0 };
-    typename Backend::buffer_id               kfd_event_unmap_buffer    = { 0 };
-    typename Backend::buffer_id               kfd_event_dropped_buffer  = { 0 };
+    typename Wrapper::client_id_t*            client_id                 = nullptr;
+    typename Wrapper::client_finalize_t       client_fini               = nullptr;
+    typename Wrapper::context_id              primary_ctx               = { 0 };
+    typename Wrapper::context_id              counter_ctx               = { 0 };
+    typename Wrapper::context_id              code_object_ctx           = { 0 };
+    typename Wrapper::context_id              control_ctx               = { 0 };
+    typename Wrapper::buffer_id               kernel_dispatch_buffer    = { 0 };
+    typename Wrapper::buffer_id               scratch_memory_buffer     = { 0 };
+    typename Wrapper::buffer_id               memory_copy_buffer        = { 0 };
+    typename Wrapper::buffer_id               memory_alloc_buffer       = { 0 };
+    typename Wrapper::buffer_id               counter_collection_buffer = { 0 };
+    typename Wrapper::buffer_id               kfd_page_fault_buffer     = { 0 };
+    typename Wrapper::buffer_id               kfd_page_migrate_buffer   = { 0 };
+    typename Wrapper::buffer_id               kfd_queue_buffer          = { 0 };
+    typename Wrapper::buffer_id               kfd_event_queue_buffer    = { 0 };
+    typename Wrapper::buffer_id               kfd_event_unmap_buffer    = { 0 };
+    typename Wrapper::buffer_id               kfd_event_dropped_buffer  = { 0 };
     std::vector<tool_agent>                   cpu_agents                = {};
     std::vector<tool_agent>                   gpu_agents                = {};
     std::vector<hardware_counter_info>        events_info               = {};
-    agent_counter_id_map_t<Backend>           agent_events              = {};
-    agent_counter_info_map_t<Backend>         agent_counter_info        = {};
-    agent_counter_profile_map_t<Backend>      agent_counter_profiles    = {};
+    agent_counter_id_map_t<Wrapper>           agent_events              = {};
+    agent_counter_info_map_t<Wrapper>         agent_counter_info        = {};
+    agent_counter_profile_map_t<Wrapper>      agent_counter_profiles    = {};
     common::synchronized<code_object_vec_t>   code_object_records       = {};
     common::synchronized<kernel_symbol_vec_t> kernel_symbol_records     = {};
     buffer_name_info_t                        buffered_tracing_info     = {};
     callback_name_info_t                      callback_tracing_info     = {};
-    backtrace_operation_map_t<Backend>        backtrace_operations      = {};
+    backtrace_operation_map_t<Wrapper>        backtrace_operations      = {};
 
     void initialize();
     void initialize_event_info();
@@ -200,75 +200,75 @@ struct client_data
 
     context_id_vec_t             get_all_contexts() const;
     context_id_vec_t             get_main_contexts() const;
-    typename Backend::context_id get_control_context() const;
-    typename Backend::context_id get_code_obj_context() const;
+    typename Wrapper::context_id get_control_context() const;
+    typename Wrapper::context_id get_code_obj_context() const;
     buffer_id_vec_t              get_buffers() const;
 
-    const rocprofsys_agent_t* get_agent(typename Backend::agent_id _id) const;
-    const tool_agent*         get_gpu_tool_agent(typename Backend::agent_id id) const;
+    const rocprofsys_agent_t* get_agent(typename Wrapper::agent_id _id) const;
+    const tool_agent*         get_gpu_tool_agent(typename Wrapper::agent_id id) const;
 
-    const kernel_symbol_data_t<Backend>* get_kernel_symbol_info(
+    const kernel_symbol_data_t<Wrapper>* get_kernel_symbol_info(
         std::uint64_t _kernel_id) const;
 
-    const tool_counter_info_t<Backend>* get_tool_counter_info(
-        typename Backend::agent_id   _agent_id,
-        typename Backend::counter_id _counter_id) const;
+    const tool_counter_info_t<Wrapper>* get_tool_counter_info(
+        typename Wrapper::agent_id   _agent_id,
+        typename Wrapper::counter_id _counter_id) const;
 
-    const typename Backend::code_object_load_data* get_code_object_info(
+    const typename Wrapper::code_object_load_data* get_code_object_info(
         std::uint64_t code_object_id) const;
 
 private:
     // ─── Counter query callbacks ──────────────────────────────────────────────
 
-    static typename Backend::status_t dimensions_info_callback(
-        typename Backend::counter_id /*id*/,
-        const typename Backend::dimension_info_t* dim_info, long unsigned int num_dims,
+    static typename Wrapper::status_t dimensions_info_callback(
+        typename Wrapper::counter_id /*id*/,
+        const typename Wrapper::dimension_info_t* dim_info, long unsigned int num_dims,
         void* user_data)
     {
         auto* dimensions_info =
-            static_cast<std::vector<typename Backend::dimension_info_t>*>(user_data);
+            static_cast<std::vector<typename Wrapper::dimension_info_t>*>(user_data);
         dimensions_info->reserve(num_dims);
         for(size_t j = 0; j < num_dims; j++)
             dimensions_info->emplace_back(dim_info[j]);
-        return Backend::STATUS_SUCCESS;
+        return Wrapper::STATUS_SUCCESS;
     }
 
-    static typename Backend::status_t counters_supported_callback(
-        typename Backend::agent_id agent_id, typename Backend::counter_id* counters,
+    static typename Wrapper::status_t counters_supported_callback(
+        typename Wrapper::agent_id agent_id, typename Wrapper::counter_id* counters,
         size_t num_counters, void* user_data)
     {
-        using value_type = typename agent_counter_info_map_t<Backend>::mapped_type;
+        using value_type = typename agent_counter_info_map_t<Wrapper>::mapped_type;
 
-        auto* data_v = static_cast<agent_counter_info_map_t<Backend>*>(user_data);
+        auto* data_v = static_cast<agent_counter_info_map_t<Wrapper>*>(user_data);
         data_v->emplace(agent_id, value_type{});
         for(size_t i = 0; i < num_counters; ++i)
         {
-            auto _info     = typename Backend::counter_info_v0_t{};
-            auto _dim_info = std::vector<typename Backend::dimension_info_t>{};
+            auto _info     = typename Wrapper::counter_info_v0_t{};
+            auto _dim_info = std::vector<typename Wrapper::dimension_info_t>{};
 
-            ROCPROFILER_CALL(Backend::query_counter_info(
-                counters[i], Backend::COUNTER_INFO_VERSION_0, &_info));
-            ROCPROFILER_CALL(Backend::iterate_counter_dimensions(
+            ROCPROFILER_CALL(Wrapper::query_counter_info(
+                counters[i], Wrapper::COUNTER_INFO_VERSION_0, &_info));
+            ROCPROFILER_CALL(Wrapper::iterate_counter_dimensions(
                 counters[i], dimensions_info_callback, &_dim_info));
 
             if(!_info.is_constant)
                 data_v->at(agent_id).emplace_back(agent_id, _info, std::move(_dim_info));
         }
-        return Backend::STATUS_SUCCESS;
+        return Wrapper::STATUS_SUCCESS;
     }
 
-    static agent_counter_info_map_t<Backend> get_agent_counter_info(
+    static agent_counter_info_map_t<Wrapper> get_agent_counter_info(
         const std::vector<tool_agent>& _agents)
     {
-        auto _data = agent_counter_info_map_t<Backend>{};
+        auto _data = agent_counter_info_map_t<Wrapper>{};
         for(const auto& itr : _agents)
         {
-            const auto& _agent_id = typename Backend::agent_id{ itr.agent->handle };
+            const auto& _agent_id = typename Wrapper::agent_id{ itr.agent->handle };
 
-            auto status = Backend::iterate_agent_supported_counters(
+            auto status = Wrapper::iterate_agent_supported_counters(
                 _agent_id, counters_supported_callback, &_data);
 
-            if(status != Backend::STATUS_SUCCESS)
+            if(status != Wrapper::STATUS_SUCCESS)
             {
                 LOG_WARNING("iterate_agent_supported_counters failed for agent {} "
                             "with status {} (Agent HW architecture may not be supported)",
@@ -298,37 +298,37 @@ private:
 
 // ─── client_data method implementations ──────────────────────────────────────
 
-template <typename Backend>
-typename client_data<Backend>::context_id_vec_t
-client_data<Backend>::get_all_contexts() const
+template <typename Wrapper>
+typename client_data<Wrapper>::context_id_vec_t
+client_data<Wrapper>::get_all_contexts() const
 {
     return context_id_vec_t{ primary_ctx, counter_ctx, code_object_ctx, control_ctx };
 }
 
-template <typename Backend>
-typename client_data<Backend>::context_id_vec_t
-client_data<Backend>::get_main_contexts() const
+template <typename Wrapper>
+typename client_data<Wrapper>::context_id_vec_t
+client_data<Wrapper>::get_main_contexts() const
 {
     return context_id_vec_t{ primary_ctx, counter_ctx };
 }
 
-template <typename Backend>
-typename Backend::context_id
-client_data<Backend>::get_control_context() const
+template <typename Wrapper>
+typename Wrapper::context_id
+client_data<Wrapper>::get_control_context() const
 {
     return control_ctx;
 }
 
-template <typename Backend>
-typename Backend::context_id
-client_data<Backend>::get_code_obj_context() const
+template <typename Wrapper>
+typename Wrapper::context_id
+client_data<Wrapper>::get_code_obj_context() const
 {
     return code_object_ctx;
 }
 
-template <typename Backend>
-typename client_data<Backend>::buffer_id_vec_t
-client_data<Backend>::get_buffers() const
+template <typename Wrapper>
+typename client_data<Wrapper>::buffer_id_vec_t
+client_data<Wrapper>::get_buffers() const
 {
     return buffer_id_vec_t{ kernel_dispatch_buffer,    scratch_memory_buffer,
                             memory_copy_buffer,        memory_alloc_buffer,
@@ -338,29 +338,29 @@ client_data<Backend>::get_buffers() const
                             kfd_event_dropped_buffer };
 }
 
-template <typename Backend>
+template <typename Wrapper>
 const rocprofsys_agent_t*
-client_data<Backend>::get_agent(typename Backend::agent_id _id) const
+client_data<Wrapper>::get_agent(typename Wrapper::agent_id _id) const
 {
     const auto& agent_ref = get_agent_manager_instance().get_agent_by_handle(_id.handle);
     return &agent_ref;
 }
 
-template <typename Backend>
+template <typename Wrapper>
 const tool_agent*
-client_data<Backend>::get_gpu_tool_agent(typename Backend::agent_id id) const
+client_data<Wrapper>::get_gpu_tool_agent(typename Wrapper::agent_id id) const
 {
     for(const auto& itr : gpu_agents)
         if(id.handle == itr.agent->handle) return &itr;
     return nullptr;
 }
 
-template <typename Backend>
-const kernel_symbol_data_t<Backend>*
-client_data<Backend>::get_kernel_symbol_info(std::uint64_t _kernel_id) const
+template <typename Wrapper>
+const kernel_symbol_data_t<Wrapper>*
+client_data<Wrapper>::get_kernel_symbol_info(std::uint64_t _kernel_id) const
 {
     return kernel_symbol_records.rlock(
-        [_kernel_id](const auto& _data) -> const kernel_symbol_data_t<Backend>* {
+        [_kernel_id](const auto& _data) -> const kernel_symbol_data_t<Wrapper>* {
             for(const auto& itr : _data)
             {
                 if(_kernel_id == itr.payload.kernel_id)
@@ -373,10 +373,10 @@ client_data<Backend>::get_kernel_symbol_info(std::uint64_t _kernel_id) const
         });
 }
 
-template <typename Backend>
-const tool_counter_info_t<Backend>*
-client_data<Backend>::get_tool_counter_info(
-    typename Backend::agent_id _agent_id, typename Backend::counter_id _counter_id) const
+template <typename Wrapper>
+const tool_counter_info_t<Wrapper>*
+client_data<Wrapper>::get_tool_counter_info(
+    typename Wrapper::agent_id _agent_id, typename Wrapper::counter_id _counter_id) const
 {
     for(const auto& itr : agent_counter_info.at(_agent_id))
     {
@@ -385,11 +385,11 @@ client_data<Backend>::get_tool_counter_info(
     return nullptr;
 }
 
-template <typename Backend>
-const typename Backend::code_object_load_data*
-client_data<Backend>::get_code_object_info(std::uint64_t code_object_id) const
+template <typename Wrapper>
+const typename Wrapper::code_object_load_data*
+client_data<Wrapper>::get_code_object_info(std::uint64_t code_object_id) const
 {
-    using load_data_t = typename Backend::code_object_load_data;
+    using load_data_t = typename Wrapper::code_object_load_data;
     return code_object_records.rlock(
         [code_object_id](const auto& _data) -> const load_data_t* {
             for(const auto& itr : _data)
@@ -404,18 +404,18 @@ client_data<Backend>::get_code_object_info(std::uint64_t code_object_id) const
         });
 }
 
-template <typename Backend>
+template <typename Wrapper>
 void
-client_data<Backend>::initialize()
+client_data<Wrapper>::initialize()
 {
-    buffered_tracing_info = Backend::get_buffer_tracing_names();
-    callback_tracing_info = Backend::get_callback_tracing_names();
+    buffered_tracing_info = Wrapper::get_buffer_tracing_names();
+    callback_tracing_info = Wrapper::get_callback_tracing_names();
     set_agents();
 }
 
-template <typename Backend>
+template <typename Wrapper>
 void
-client_data<Backend>::initialize_event_info()
+client_data<Wrapper>::initialize_event_info()
 {
     auto& agent_mngr = get_agent_manager_instance();
 
@@ -435,7 +435,7 @@ client_data<Backend>::initialize_event_info()
         for(const auto& aitr : gpu_agents)
         {
             auto        _dev_index = aitr.device_id;
-            const auto& _agent_id  = typename Backend::agent_id{ aitr.agent->handle };
+            const auto& _agent_id  = typename Wrapper::agent_id{ aitr.agent->handle };
             auto        _device_qualifier_sym = fmt::format(":device={}", _dev_index);
             auto        _device_qualifier =
                 tim::hardware_counters::qualifier{ true, static_cast<int>(_dev_index),
@@ -453,8 +453,8 @@ client_data<Backend>::initialize_event_info()
 
             auto _counter_info = agent_info_it->second;
             std::sort(_counter_info.begin(), _counter_info.end(),
-                      [](const tool_counter_info_t<Backend>& lhs,
-                         const tool_counter_info_t<Backend>& rhs) {
+                      [](const tool_counter_info_t<Wrapper>& lhs,
+                         const tool_counter_info_t<Wrapper>& rhs) {
                           if(lhs.is_constant && rhs.is_constant)
                               return lhs.id < rhs.id;
                           else if(lhs.is_constant)
@@ -517,9 +517,9 @@ client_data<Backend>::initialize_event_info()
     }
 }
 
-template <typename Backend>
+template <typename Wrapper>
 void
-client_data<Backend>::set_agents()
+client_data<Wrapper>::set_agents()
 {
     auto& agent_mngr = get_agent_manager_instance();
 
@@ -537,11 +537,11 @@ client_data<Backend>::set_agents()
 
 // ─── as_client_data helper ────────────────────────────────────────────────────
 
-template <typename Backend>
-constexpr client_data<Backend>*
+template <typename Wrapper>
+constexpr client_data<Wrapper>*
 as_client_data(void* _ptr)
 {
-    return static_cast<client_data<Backend>*>(_ptr);
+    return static_cast<client_data<Wrapper>*>(_ptr);
 }
 
 // ─── Production type aliases (for non-generic subdirectory code) ──────────────

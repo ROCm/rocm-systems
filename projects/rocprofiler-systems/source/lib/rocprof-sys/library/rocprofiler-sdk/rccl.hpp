@@ -32,10 +32,10 @@ namespace rocprofiler_sdk
 void
 rccl_comm_data_initialize();
 
-template <typename Backend>
+template <typename Wrapper>
 void
 tool_tracing_callback_rccl(std::uint32_t                    operation,
-                           typename Backend::rccl_api_data* payload,
+                           typename Wrapper::rccl_api_data* payload,
                            std::uint64_t begin_ts, std::uint64_t end_ts);
 
 }  // namespace rocprofiler_sdk
@@ -101,11 +101,11 @@ write_perfetto_counter_track(std::uint64_t _val, std::uint64_t _begin_ts,
     }
 }
 
-template <typename Backend>
+template <typename Wrapper>
 [[nodiscard]] inline size_t
-rccl_type_size_or_abort(typename Backend::nccl_data_type_t datatype) noexcept
+rccl_type_size_or_abort(typename Wrapper::nccl_data_type_t datatype) noexcept
 {
-    auto sz = rccl_type_size<Backend>(datatype);
+    auto sz = rccl_type_size<Wrapper>(datatype);
     if(sz == 0)
     {
         LOG_WARNING("Unsupported RCCL datatype: {}", static_cast<int>(datatype));
@@ -184,60 +184,60 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
         static_cast<double>(cumulative), std::nullopt });
 }
 
-template <typename Backend>
-rccl_event_info<Backend>
+template <typename Wrapper>
+rccl_event_info<Wrapper>
 rccl_get_event_info_impl(std::uint32_t                          operation,
-                         const typename Backend::rccl_api_data& payload) noexcept
+                         const typename Wrapper::rccl_api_data& payload) noexcept
 {
-    rccl_event_info<Backend> info{};
+    rccl_event_info<Wrapper> info{};
 
-    const auto set_event = [](rccl_event_info<Backend>& out, bool send, size_t count,
-                              typename Backend::nccl_data_type_t _dt,
-                              typename Backend::nccl_comm_t      _comm) {
+    const auto set_event = [](rccl_event_info<Wrapper>& out, bool send, size_t count,
+                              typename Wrapper::nccl_data_type_t _dt,
+                              typename Wrapper::nccl_comm_t      _comm) {
         out.is_send = send;
-        out.size    = count * rccl_type_size_or_abort<Backend>(_dt);
+        out.size    = count * rccl_type_size_or_abort<Wrapper>(_dt);
         out.comm    = _comm;
     };
 
-    switch(static_cast<typename Backend::rccl_api_id_t>(operation))
+    switch(static_cast<typename Wrapper::rccl_api_id_t>(operation))
     {
-        case Backend::RCCL_API_ID_ncclAllGather:
+        case Wrapper::RCCL_API_ID_ncclAllGather:
             set_event(info, false, payload.args.ncclAllGather.sendcount,
                       payload.args.ncclAllGather.datatype,
                       payload.args.ncclAllGather.comm);
             break;
-        case Backend::RCCL_API_ID_ncclAllToAll:
+        case Wrapper::RCCL_API_ID_ncclAllToAll:
             set_event(info, false, payload.args.ncclAllToAll.count,
                       payload.args.ncclAllToAll.datatype, payload.args.ncclAllToAll.comm);
             break;
-        case Backend::RCCL_API_ID_ncclAllReduce:
+        case Wrapper::RCCL_API_ID_ncclAllReduce:
             set_event(info, false, payload.args.ncclAllReduce.count,
                       payload.args.ncclAllReduce.datatype,
                       payload.args.ncclAllReduce.comm);
             break;
-        case Backend::RCCL_API_ID_ncclGather:
+        case Wrapper::RCCL_API_ID_ncclGather:
             set_event(info, false, payload.args.ncclGather.sendcount,
                       payload.args.ncclGather.datatype, payload.args.ncclGather.comm);
             break;
-        case Backend::RCCL_API_ID_ncclRecv:
+        case Wrapper::RCCL_API_ID_ncclRecv:
             set_event(info, false, payload.args.ncclRecv.count,
                       payload.args.ncclRecv.datatype, payload.args.ncclRecv.comm);
             break;
-        case Backend::RCCL_API_ID_ncclReduce:
+        case Wrapper::RCCL_API_ID_ncclReduce:
             set_event(info, false, payload.args.ncclReduce.count,
                       payload.args.ncclReduce.datatype, payload.args.ncclReduce.comm);
             break;
-        case Backend::RCCL_API_ID_ncclBroadcast:
+        case Wrapper::RCCL_API_ID_ncclBroadcast:
             set_event(info, true, payload.args.ncclBroadcast.count,
                       payload.args.ncclBroadcast.datatype,
                       payload.args.ncclBroadcast.comm);
             break;
-        case Backend::RCCL_API_ID_ncclReduceScatter:
+        case Wrapper::RCCL_API_ID_ncclReduceScatter:
             set_event(info, true, payload.args.ncclReduceScatter.recvcount,
                       payload.args.ncclReduceScatter.datatype,
                       payload.args.ncclReduceScatter.comm);
             break;
-        case Backend::RCCL_API_ID_ncclSend:
+        case Wrapper::RCCL_API_ID_ncclSend:
             set_event(info, true, payload.args.ncclSend.count,
                       payload.args.ncclSend.datatype, payload.args.ncclSend.comm);
             break;
@@ -250,15 +250,15 @@ rccl_get_event_info_impl(std::uint32_t                          operation,
 
 // ─── rccl_get_device_id ───────────────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 [[nodiscard]] inline std::uint32_t
-rccl_get_device_id(typename Backend::nccl_comm_t comm) noexcept
+rccl_get_device_id(typename Wrapper::nccl_comm_t comm) noexcept
 {
     constexpr std::uint32_t DEFAULT_DEVICE_ID = 0;
     if(comm == nullptr) return DEFAULT_DEVICE_ID;
 
     using nccl_fn_t =
-        typename Backend::nccl_result_t (*)(typename Backend::nccl_comm_t, int*);
+        typename Wrapper::nccl_result_t (*)(typename Wrapper::nccl_comm_t, int*);
 
     static nccl_fn_t      ncclCommCuDevice_ptr = nullptr;
     static std::once_flag lookup_flag;
@@ -278,8 +278,8 @@ rccl_get_device_id(typename Backend::nccl_comm_t comm) noexcept
     if(ncclCommCuDevice_ptr == nullptr) return DEFAULT_DEVICE_ID;
 
     int                             device_id = DEFAULT_DEVICE_ID;
-    typename Backend::nccl_result_t result    = ncclCommCuDevice_ptr(comm, &device_id);
-    if(result != Backend::NCCL_SUCCESS)
+    typename Wrapper::nccl_result_t result    = ncclCommCuDevice_ptr(comm, &device_id);
+    if(result != Wrapper::NCCL_SUCCESS)
     {
         LOG_DEBUG("ncclCommCuDevice failed with error {}, using default device_id",
                   static_cast<int>(result));
@@ -298,22 +298,22 @@ rccl_comm_data_initialize()
     rccl_detail::rccl_metadata_initialize_track<rccl_detail::rccl_recv>();
 }
 
-// ─── tool_tracing_callback_rccl<Backend> ─────────────────────────────────────
+// ─── tool_tracing_callback_rccl<Wrapper> ─────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
 tool_tracing_callback_rccl(std::uint32_t                    operation,
-                           typename Backend::rccl_api_data* payload,
+                           typename Wrapper::rccl_api_data* payload,
                            std::uint64_t begin_ts, std::uint64_t end_ts)
 {
     using namespace rccl_detail;
 
-    rccl_event_info<Backend> info =
-        rccl_get_event_info_impl<Backend>(operation, *payload);
+    rccl_event_info<Wrapper> info =
+        rccl_get_event_info_impl<Wrapper>(operation, *payload);
 
     if(info.size > 0 && info.comm != nullptr)
     {
-        std::uint32_t device_id = rccl_get_device_id<Backend>(info.comm);
+        std::uint32_t device_id = rccl_get_device_id<Wrapper>(info.comm);
 
         if(info.is_send)
         {

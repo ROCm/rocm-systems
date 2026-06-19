@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// All counter_storage<Backend> and related template implementations are defined
+// All counter_storage<Wrapper> and related template implementations are defined
 // in counters.hpp. This explicit instantiation stamps out the production specialisation.
 
 #include "library/rocprofiler-sdk/counters.hpp"

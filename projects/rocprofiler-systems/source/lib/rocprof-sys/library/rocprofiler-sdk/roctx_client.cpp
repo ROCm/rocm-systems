@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// All roctx_client<MarkerWriterPolicy, Backend> template implementations are
+// All roctx_client<MarkerWriterPolicy, Wrapper> template implementations are
 // defined in roctx_client.hpp. This explicit instantiation stamps out the
 // production specialisation.
 

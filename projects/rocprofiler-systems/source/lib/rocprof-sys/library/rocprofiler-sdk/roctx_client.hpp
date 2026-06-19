@@ -38,14 +38,14 @@ struct roctx_client_config
     std::string selected_trace_regions{};
 };
 
-// ─── roctx_client<MarkerWriterPolicy, Backend> ───────────────────────────────
+// ─── roctx_client<MarkerWriterPolicy, Wrapper> ───────────────────────────────
 //
 // MarkerWriterPolicy first (with default) preserves backward compatibility:
 //   roctx_client<>                               → uses default_marker_policy + backend
 //   roctx_client<MockPolicy>                     → MockPolicy + backend
 //   roctx_client<MockPolicy, MockBackend>         → fully injectable for tests
 
-template <typename MarkerWriterPolicy = default_marker_policy, typename Backend = backend>
+template <typename MarkerWriterPolicy = default_marker_policy, typename Wrapper = backend>
 class roctx_client
 {
 public:
@@ -57,7 +57,7 @@ public:
     roctx_client(roctx_client&&)                 = default;
     roctx_client& operator=(roctx_client&&)      = default;
 
-    void configure_services(typename Backend::context_id ctx);
+    void configure_services(typename Wrapper::context_id ctx);
 
     std::shared_ptr<control::trace_control> get_controller() const
     {
@@ -68,34 +68,34 @@ private:
     struct marker_range_entry
     {
         tim::hash_value_t             hash;
-        typename Backend::timestamp_t begin_ts;
+        typename Wrapper::timestamp_t begin_ts;
         bool                          write_enabled;
         std::uint64_t                 range_id{ 0 };
     };
 
     using marker_range_stack_t = std::vector<marker_range_entry>;
 
-    typename Backend::context_id               m_ctx{};
+    typename Wrapper::context_id               m_ctx{};
     roctx_client_config                        m_config;
-    marker_writer<Backend, MarkerWriterPolicy> m_writer;
+    marker_writer<Wrapper, MarkerWriterPolicy> m_writer;
     std::shared_ptr<control::trace_control>    m_controller{};
 
     static thread_local marker_range_stack_t m_pushed_ranges;
     static thread_local marker_range_stack_t m_started_ranges;
 
-    void handle_marker_core_enter(typename Backend::callback_tracing_record record,
-                                  typename Backend::user_data_t*            user_data,
-                                  typename Backend::timestamp_t             ts);
-    void handle_marker_core_exit(typename Backend::callback_tracing_record record,
-                                 typename Backend::user_data_t*            user_data,
-                                 typename Backend::timestamp_t             ts);
-    void handle_marker_control(typename Backend::callback_tracing_record record);
+    void handle_marker_core_enter(typename Wrapper::callback_tracing_record record,
+                                  typename Wrapper::user_data_t*            user_data,
+                                  typename Wrapper::timestamp_t             ts);
+    void handle_marker_core_exit(typename Wrapper::callback_tracing_record record,
+                                 typename Wrapper::user_data_t*            user_data,
+                                 typename Wrapper::timestamp_t             ts);
+    void handle_marker_control(typename Wrapper::callback_tracing_record record);
 
-    static void marker_core_callback(typename Backend::callback_tracing_record record,
-                                     typename Backend::user_data_t*            user_data,
+    static void marker_core_callback(typename Wrapper::callback_tracing_record record,
+                                     typename Wrapper::user_data_t*            user_data,
                                      void* callback_data);
-    static void marker_control_callback(typename Backend::callback_tracing_record record,
-                                        typename Backend::user_data_t* user_data,
+    static void marker_control_callback(typename Wrapper::callback_tracing_record record,
+                                        typename Wrapper::user_data_t* user_data,
                                         void*                          callback_data);
 };
 
@@ -109,18 +109,18 @@ namespace rocprofsys::rocprofiler_sdk
 
 // ─── Thread-local storage ────────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Backend>
-thread_local typename roctx_client<MarkerWriterPolicy, Backend>::marker_range_stack_t
-    roctx_client<MarkerWriterPolicy, Backend>::m_pushed_ranges{};
+template <typename MarkerWriterPolicy, typename Wrapper>
+thread_local typename roctx_client<MarkerWriterPolicy, Wrapper>::marker_range_stack_t
+    roctx_client<MarkerWriterPolicy, Wrapper>::m_pushed_ranges{};
 
-template <typename MarkerWriterPolicy, typename Backend>
-thread_local typename roctx_client<MarkerWriterPolicy, Backend>::marker_range_stack_t
-    roctx_client<MarkerWriterPolicy, Backend>::m_started_ranges{};
+template <typename MarkerWriterPolicy, typename Wrapper>
+thread_local typename roctx_client<MarkerWriterPolicy, Wrapper>::marker_range_stack_t
+    roctx_client<MarkerWriterPolicy, Wrapper>::m_started_ranges{};
 
 // ─── Constructor ─────────────────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Backend>
-roctx_client<MarkerWriterPolicy, Backend>::roctx_client(
+template <typename MarkerWriterPolicy, typename Wrapper>
+roctx_client<MarkerWriterPolicy, Wrapper>::roctx_client(
     const roctx_client_config& roctx_cfg)
 : m_config{ roctx_cfg }
 , m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
@@ -142,7 +142,7 @@ s_push_range_id()
 }
 
 // iterate_args_callback uses the raw SDK callback signature — the types are
-// identical to Backend:: aliases at the ABI level.
+// identical to Wrapper:: aliases at the ABI level.
 inline int
 iterate_args_callback(rocprofiler_callback_tracing_kind_t, std::int32_t,
                       std::uint32_t arg_number, const void* const, std::int32_t,
@@ -157,30 +157,30 @@ iterate_args_callback(rocprofiler_callback_tracing_kind_t, std::int32_t,
     return 0;
 }
 
-template <typename Backend>
+template <typename Wrapper>
 void
-configure_callback_tracing(typename Backend::context_id            context_id,
-                           typename Backend::callback_tracing_kind kind,
-                           typename Backend::tracing_operation*    operations,
+configure_callback_tracing(typename Wrapper::context_id            context_id,
+                           typename Wrapper::callback_tracing_kind kind,
+                           typename Wrapper::tracing_operation*    operations,
                            size_t                                  operations_count,
-                           typename Backend::callback_tracing_cb_t callback,
+                           typename Wrapper::callback_tracing_cb_t callback,
                            void*                                   callback_args)
 {
-    auto status = Backend::configure_callback_tracing_service(
+    auto status = Wrapper::configure_callback_tracing_service(
         context_id, kind, operations, operations_count, callback, callback_args);
-    if(status != Backend::STATUS_SUCCESS)
+    if(status != Wrapper::STATUS_SUCCESS)
     {
         LOG_WARNING("Failed to configure marker core callback : {}",
-                    Backend::get_status_string(status));
+                    Wrapper::get_status_string(status));
     }
 }
 
-template <typename Backend>
+template <typename Wrapper>
 std::string
-collect_args(typename Backend::callback_tracing_record record)
+collect_args(typename Wrapper::callback_tracing_record record)
 {
     auto args = function_args_t{};
-    Backend::iterate_callback_tracing_kind_operation_args(record, iterate_args_callback,
+    Wrapper::iterate_callback_tracing_kind_operation_args(record, iterate_args_callback,
                                                           2, &args);
     return get_args_string(args);
 }
@@ -189,43 +189,43 @@ collect_args(typename Backend::callback_tracing_record record)
 
 // ─── configure_services ──────────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Backend>
+template <typename MarkerWriterPolicy, typename Wrapper>
 void
-roctx_client<MarkerWriterPolicy, Backend>::configure_services(
-    typename Backend::context_id ctx)
+roctx_client<MarkerWriterPolicy, Wrapper>::configure_services(
+    typename Wrapper::context_id ctx)
 {
     m_ctx = ctx;
 
-    roctx_client_detail::configure_callback_tracing<Backend>(
-        m_ctx, Backend::CALLBACK_TRACING_MARKER_CORE_API, nullptr, 0,
+    roctx_client_detail::configure_callback_tracing<Wrapper>(
+        m_ctx, Wrapper::CALLBACK_TRACING_MARKER_CORE_API, nullptr, 0,
         marker_core_callback, this);
 
     if(m_config.pause_resume_enabled)
     {
-        auto control_ops = std::array<typename Backend::tracing_operation, 2>{
-            Backend::MARKER_CONTROL_API_ID_roctxProfilerPause,
-            Backend::MARKER_CONTROL_API_ID_roctxProfilerResume
+        auto control_ops = std::array<typename Wrapper::tracing_operation, 2>{
+            Wrapper::MARKER_CONTROL_API_ID_roctxProfilerPause,
+            Wrapper::MARKER_CONTROL_API_ID_roctxProfilerResume
         };
-        roctx_client_detail::configure_callback_tracing<Backend>(
-            m_ctx, Backend::CALLBACK_TRACING_MARKER_CONTROL_API, control_ops.data(),
+        roctx_client_detail::configure_callback_tracing<Wrapper>(
+            m_ctx, Wrapper::CALLBACK_TRACING_MARKER_CONTROL_API, control_ops.data(),
             control_ops.size(), marker_control_callback, this);
     }
 }
 
 // ─── handle_marker_core_enter ─────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Backend>
+template <typename MarkerWriterPolicy, typename Wrapper>
 void
-roctx_client<MarkerWriterPolicy, Backend>::handle_marker_core_enter(
-    typename Backend::callback_tracing_record record,
-    typename Backend::user_data_t* user_data, typename Backend::timestamp_t ts)
+roctx_client<MarkerWriterPolicy, Wrapper>::handle_marker_core_enter(
+    typename Wrapper::callback_tracing_record record,
+    typename Wrapper::user_data_t* user_data, typename Wrapper::timestamp_t ts)
 {
-    auto*      data = static_cast<typename Backend::marker_payload_t*>(record.payload);
+    auto*      data = static_cast<typename Wrapper::marker_payload_t*>(record.payload);
     const bool write_enabled = m_controller->should_write_markers();
 
     switch(record.operation)
     {
-        case Backend::MARKER_CORE_API_ID_roctxRangePushA:
+        case Wrapper::MARKER_CORE_API_ID_roctxRangePushA:
         {
             const char*         name = data->args.roctxRangePushA.message;
             const std::uint64_t range_id =
@@ -238,12 +238,12 @@ roctx_client<MarkerWriterPolicy, Backend>::handle_marker_core_enter(
             if(pushed_write_enabled) m_writer.write_begin(name);
             break;
         }
-        case Backend::MARKER_CORE_API_ID_roctxRangeStartA:
+        case Wrapper::MARKER_CORE_API_ID_roctxRangeStartA:
         {
             tim::add_hash_id(data->args.roctxRangeStartA.message);
             break;
         }
-        case Backend::MARKER_CORE_API_ID_roctxMarkA:
+        case Wrapper::MARKER_CORE_API_ID_roctxMarkA:
         {
             const char* name = data->args.roctxMarkA.message;
             tim::add_hash_id(name);
@@ -268,15 +268,15 @@ roctx_client<MarkerWriterPolicy, Backend>::handle_marker_core_enter(
 
 // ─── handle_marker_core_exit ──────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Backend>
+template <typename MarkerWriterPolicy, typename Wrapper>
 void
-roctx_client<MarkerWriterPolicy, Backend>::handle_marker_core_exit(
-    typename Backend::callback_tracing_record record,
-    typename Backend::user_data_t* user_data, typename Backend::timestamp_t ts)
+roctx_client<MarkerWriterPolicy, Wrapper>::handle_marker_core_exit(
+    typename Wrapper::callback_tracing_record record,
+    typename Wrapper::user_data_t* user_data, typename Wrapper::timestamp_t ts)
 {
-    auto* data = static_cast<typename Backend::marker_payload_t*>(record.payload);
+    auto* data = static_cast<typename Wrapper::marker_payload_t*>(record.payload);
     const std::uint64_t begin_ts = user_data->value;
-    const auto          args_str = roctx_client_detail::collect_args<Backend>(record);
+    const auto          args_str = roctx_client_detail::collect_args<Wrapper>(record);
 
     auto pop_and_write = [&](marker_range_stack_t& stack) {
         auto        range = stack.back();
@@ -289,7 +289,7 @@ roctx_client<MarkerWriterPolicy, Backend>::handle_marker_core_exit(
 
     switch(record.operation)
     {
-        case Backend::MARKER_CORE_API_ID_roctxRangePop:
+        case Wrapper::MARKER_CORE_API_ID_roctxRangePop:
         {
             if(m_pushed_ranges.empty())
             {
@@ -302,7 +302,7 @@ roctx_client<MarkerWriterPolicy, Backend>::handle_marker_core_exit(
             m_controller->handle_range_stop(range_id);
             break;
         }
-        case Backend::MARKER_CORE_API_ID_roctxRangeStop:
+        case Wrapper::MARKER_CORE_API_ID_roctxRangeStop:
         {
             if(m_started_ranges.empty())
             {
@@ -314,18 +314,18 @@ roctx_client<MarkerWriterPolicy, Backend>::handle_marker_core_exit(
             m_controller->handle_range_stop(data->args.roctxRangeStop.id);
             break;
         }
-        case Backend::MARKER_CORE_API_ID_roctxMarkA:
+        case Wrapper::MARKER_CORE_API_ID_roctxMarkA:
         {
             if(m_controller->should_write_markers())
                 m_writer.write_end(data->args.roctxMarkA.message, begin_ts, ts, args_str,
                                    record);
             break;
         }
-        case Backend::MARKER_CORE_API_ID_roctxRangePushA:
+        case Wrapper::MARKER_CORE_API_ID_roctxRangePushA:
         {
             return;
         }
-        case Backend::MARKER_CORE_API_ID_roctxRangeStartA:
+        case Wrapper::MARKER_CORE_API_ID_roctxRangeStartA:
         {
             const char* name     = data->args.roctxRangeStartA.message;
             auto        range_id = data->retval.roctx_range_id_t_retval;
@@ -352,18 +352,18 @@ roctx_client<MarkerWriterPolicy, Backend>::handle_marker_core_exit(
 
 // ─── handle_marker_control ────────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Backend>
+template <typename MarkerWriterPolicy, typename Wrapper>
 void
-roctx_client<MarkerWriterPolicy, Backend>::handle_marker_control(
-    typename Backend::callback_tracing_record record)
+roctx_client<MarkerWriterPolicy, Wrapper>::handle_marker_control(
+    typename Wrapper::callback_tracing_record record)
 {
-    if(record.operation == Backend::MARKER_CONTROL_API_ID_roctxProfilerPause &&
-       record.phase == Backend::CALLBACK_PHASE_ENTER)
+    if(record.operation == Wrapper::MARKER_CONTROL_API_ID_roctxProfilerPause &&
+       record.phase == Wrapper::CALLBACK_PHASE_ENTER)
     {
         m_controller->handle_pause(record.thread_id);
     }
-    else if(record.operation == Backend::MARKER_CONTROL_API_ID_roctxProfilerResume &&
-            record.phase == Backend::CALLBACK_PHASE_EXIT)
+    else if(record.operation == Wrapper::MARKER_CONTROL_API_ID_roctxProfilerResume &&
+            record.phase == Wrapper::CALLBACK_PHASE_EXIT)
     {
         m_controller->handle_resume(record.thread_id);
     }
@@ -371,28 +371,28 @@ roctx_client<MarkerWriterPolicy, Backend>::handle_marker_control(
 
 // ─── Static callbacks ─────────────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Backend>
+template <typename MarkerWriterPolicy, typename Wrapper>
 void
-roctx_client<MarkerWriterPolicy, Backend>::marker_core_callback(
-    typename Backend::callback_tracing_record record,
-    typename Backend::user_data_t* user_data, void* callback_data)
+roctx_client<MarkerWriterPolicy, Wrapper>::marker_core_callback(
+    typename Wrapper::callback_tracing_record record,
+    typename Wrapper::user_data_t* user_data, void* callback_data)
 {
     if(!callback_data) return;
     auto* client = static_cast<roctx_client*>(callback_data);
 
-    typename Backend::timestamp_t ts{};
-    Backend::get_timestamp(&ts);
+    typename Wrapper::timestamp_t ts{};
+    Wrapper::get_timestamp(&ts);
 
-    if(record.phase == Backend::CALLBACK_PHASE_ENTER)
+    if(record.phase == Wrapper::CALLBACK_PHASE_ENTER)
         client->handle_marker_core_enter(record, user_data, ts);
-    else if(record.phase == Backend::CALLBACK_PHASE_EXIT)
+    else if(record.phase == Wrapper::CALLBACK_PHASE_EXIT)
         client->handle_marker_core_exit(record, user_data, ts);
 }
 
-template <typename MarkerWriterPolicy, typename Backend>
+template <typename MarkerWriterPolicy, typename Wrapper>
 void
-roctx_client<MarkerWriterPolicy, Backend>::marker_control_callback(
-    typename Backend::callback_tracing_record record, typename Backend::user_data_t*,
+roctx_client<MarkerWriterPolicy, Wrapper>::marker_control_callback(
+    typename Wrapper::callback_tracing_record record, typename Wrapper::user_data_t*,
     void*                                     callback_data)
 {
     if(!callback_data) return;

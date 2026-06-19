@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "backends/rocprofiler_sdk/rocprofiler_sdk_backend.hpp"
 #include "backends/rocprofiler_sdk/types.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 
 #include <gmock/gmock.h>
 

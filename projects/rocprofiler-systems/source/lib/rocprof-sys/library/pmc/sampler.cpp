@@ -26,7 +26,7 @@
 #include "library/pmc/device_providers/procfs/provider.hpp"
 
 #include "backends/amd_smi/backend.hpp"
-#include "backends/rocprofiler_sdk/rocprofiler_sdk_backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "core/agent.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"

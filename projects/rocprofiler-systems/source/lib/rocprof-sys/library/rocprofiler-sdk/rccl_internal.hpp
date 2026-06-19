@@ -21,29 +21,29 @@ namespace rocprofiler_sdk
 /**
  * @brief Get the size in bytes for an NCCL data type.
  *
- * @tparam Backend Backend policy providing nccl_data_type_t.
+ * @tparam Wrapper Wrapper policy providing nccl_data_type_t.
  * @param datatype The NCCL data type enum value.
  * @return The size in bytes for the given data type, or 0 if unsupported.
  */
-template <typename Backend>
+template <typename Wrapper>
 [[nodiscard]] constexpr size_t
-rccl_type_size(typename Backend::nccl_data_type_t datatype) noexcept
+rccl_type_size(typename Wrapper::nccl_data_type_t datatype) noexcept
 {
     switch(datatype)
     {
-        case Backend::NCCL_INT8:
-        case Backend::NCCL_UINT8: return 1;
-        case Backend::NCCL_FLOAT16:
-        case Backend::NCCL_BFLOAT16: return 2;
-        case Backend::NCCL_INT32:
-        case Backend::NCCL_UINT32:
-        case Backend::NCCL_FLOAT32: return 4;
-        case Backend::NCCL_INT64:
-        case Backend::NCCL_UINT64:
-        case Backend::NCCL_FLOAT64: return 8;
+        case Wrapper::NCCL_INT8:
+        case Wrapper::NCCL_UINT8: return 1;
+        case Wrapper::NCCL_FLOAT16:
+        case Wrapper::NCCL_BFLOAT16: return 2;
+        case Wrapper::NCCL_INT32:
+        case Wrapper::NCCL_UINT32:
+        case Wrapper::NCCL_FLOAT32: return 4;
+        case Wrapper::NCCL_INT64:
+        case Wrapper::NCCL_UINT64:
+        case Wrapper::NCCL_FLOAT64: return 8;
 #if defined(ncclFp8E4M3) && defined(ncclFp8E5M2)
-        case Backend::NCCL_FP8_E4M3:
-        case Backend::NCCL_FP8_E5M2: return 1;
+        case Wrapper::NCCL_FP8_E4M3:
+        case Wrapper::NCCL_FP8_E5M2: return 1;
 #endif
         default: return 0;
     }
@@ -52,23 +52,23 @@ rccl_type_size(typename Backend::nccl_data_type_t datatype) noexcept
 /**
  * @brief Get device ID from RCCL communicator.
  *
- * @tparam Backend Backend policy providing nccl_comm_t.
+ * @tparam Wrapper Wrapper policy providing nccl_comm_t.
  */
-template <typename Backend>
+template <typename Wrapper>
 [[nodiscard]] std::uint32_t
-rccl_get_device_id(typename Backend::nccl_comm_t comm) noexcept;
+rccl_get_device_id(typename Wrapper::nccl_comm_t comm) noexcept;
 
 /**
  * @brief Information extracted from an RCCL API event.
  *
- * @tparam Backend Backend policy providing nccl_comm_t.
+ * @tparam Wrapper Wrapper policy providing nccl_comm_t.
  */
-template <typename Backend>
+template <typename Wrapper>
 struct rccl_event_info
 {
     size_t                        size    = 0;
     bool                          is_send = false;
-    typename Backend::nccl_comm_t comm    = nullptr;
+    typename Wrapper::nccl_comm_t comm    = nullptr;
 };
 
 /**

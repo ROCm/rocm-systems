@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "backends/rocprofiler_sdk/rocprofiler_sdk_backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include <cstdint>
 // All rocprofiler-sdk headers come transitively through fwd.hpp -> backend shim.
 #include "common/synchronized.hpp"
@@ -29,15 +29,15 @@ namespace rocprofsys
 namespace rocprofiler_sdk
 {
 
-// ─── counter_dispatch_record<Backend> ────────────────────────────────────────
+// ─── counter_dispatch_record<Wrapper> ────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 struct counter_dispatch_record
 {
-    const typename Backend::dispatch_counting_data* dispatch_data  = nullptr;
-    typename Backend::dispatch_id_t                 dispatch_id    = 0;
-    typename Backend::counter_id                    counter_id     = {};
-    typename Backend::counter_record                record_counter = {};
+    const typename Wrapper::dispatch_counting_data* dispatch_data  = nullptr;
+    typename Wrapper::dispatch_id_t                 dispatch_id    = 0;
+    typename Wrapper::counter_id                    counter_id     = {};
+    typename Wrapper::counter_record                record_counter = {};
 };
 
 struct counter_data_tag
@@ -48,28 +48,28 @@ using counter_storage_type = typename counter_data_tracker::storage_type;
 using counter_bundle_t     = tim::lightweight_tuple<counter_data_tracker>;
 using counter_track_type   = ::perfetto::CounterTrack;
 
-// ─── counter_event<Backend> ──────────────────────────────────────────────────
+// ─── counter_event<Wrapper> ──────────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 struct counter_event
 {
-    explicit counter_event(counter_dispatch_record<Backend>&& _v)
+    explicit counter_event(counter_dispatch_record<Wrapper>&& _v)
     : record{ std::move(_v) }
     {}
 
-    void operator()(const client_data<Backend>* tool_data, counter_track_type*,
-                    const std::string& track_name, timing_interval<Backend> _timing,
+    void operator()(const client_data<Wrapper>* tool_data, counter_track_type*,
+                    const std::string& track_name, timing_interval<Wrapper> _timing,
                     scope::config _scope) const;
 
-    counter_dispatch_record<Backend> record = {};
+    counter_dispatch_record<Wrapper> record = {};
 };
 
-// ─── counter_storage<Backend> ────────────────────────────────────────────────
+// ─── counter_storage<Wrapper> ────────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 struct counter_storage
 {
-    const client_data<Backend>*           tool_data          = nullptr;
+    const client_data<Wrapper>*           tool_data          = nullptr;
     std::uint64_t                         device_id          = 0;
     std::int64_t                          index              = 0;
     std::string                           metric_name        = {};
@@ -80,7 +80,7 @@ struct counter_storage
     std::unique_ptr<counter_storage_type> storage            = {};
     std::unique_ptr<counter_track_type>   track              = {};
 
-    counter_storage(const client_data<Backend>* _tool_data, std::uint64_t _devid,
+    counter_storage(const client_data<Wrapper>* _tool_data, std::uint64_t _devid,
                     size_t _idx, std::string_view _name);
 
     ~counter_storage()                                 = default;
@@ -95,17 +95,17 @@ struct counter_storage
                std::tie(rhs.storage_name, rhs.device_id, rhs.index);
     }
 
-    void operator()(const counter_event<Backend>& _event,
-                    timing_interval<Backend>      _timing,
+    void operator()(const counter_event<Wrapper>& _event,
+                    timing_interval<Wrapper>      _timing,
                     scope::config                 _scope = scope::get_default()) const;
 
-    void write_zero(typename Backend::timestamp_t timestamp) const;
+    void write_zero(typename Wrapper::timestamp_t timestamp) const;
 
     static void write(counter_storage_type* storage, const std::string& metric_name,
                       const std::string& metric_description);
 
 private:
-    static std::string get_counter_description(const client_data<Backend>* tool_data,
+    static std::string get_counter_description(const client_data<Wrapper>* tool_data,
                                                std::string_view            _v);
     static void        metadata_initialize_counter_category();
     static void        metadata_initialize_counter_track(const char* name);
@@ -189,9 +189,9 @@ namespace rocprofsys::rocprofiler_sdk
 
 // ─── counter_storage private helpers ─────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 std::string
-counter_storage<Backend>::get_counter_description(const client_data<Backend>* tool_data,
+counter_storage<Wrapper>::get_counter_description(const client_data<Wrapper>* tool_data,
                                                   std::string_view            _v)
 {
     const auto& _info = tool_data->events_info;
@@ -203,24 +203,24 @@ counter_storage<Backend>::get_counter_description(const client_data<Backend>* to
     return std::string{};
 }
 
-template <typename Backend>
+template <typename Wrapper>
 void
-counter_storage<Backend>::metadata_initialize_counter_category()
+counter_storage<Wrapper>::metadata_initialize_counter_category()
 {
     trace_cache::get_metadata_registry().add_string(
         trait::name<category::rocm_counter_collection>::value);
 }
 
-template <typename Backend>
+template <typename Wrapper>
 void
-counter_storage<Backend>::metadata_initialize_counter_track(const char* name)
+counter_storage<Wrapper>::metadata_initialize_counter_track(const char* name)
 {
     trace_cache::get_metadata_registry().add_track({ name, std::nullopt, "{}" });
 }
 
-template <typename Backend>
+template <typename Wrapper>
 void
-counter_storage<Backend>::metadata_initialize_counters_pmc(
+counter_storage<Wrapper>::metadata_initialize_counters_pmc(
     size_t dev_id, const std::string& name, const std::string& metric_description)
 {
     const size_t EVENT_CODE       = 0;
@@ -240,12 +240,12 @@ counter_storage<Backend>::metadata_initialize_counters_pmc(
 
 // ─── counter_event::operator() ───────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-counter_event<Backend>::operator()(const client_data<Backend>* tool_data,
+counter_event<Wrapper>::operator()(const client_data<Wrapper>* tool_data,
                                    ::perfetto::CounterTrack*   _track,
                                    const std::string&          track_name,
-                                   timing_interval<Backend>    _timing,
+                                   timing_interval<Wrapper>    _timing,
                                    scope::config               _scope) const
 {
     if(!record.dispatch_data) return;
@@ -304,8 +304,8 @@ counter_event<Backend>::operator()(const client_data<Backend>* tool_data,
 
 // ─── counter_storage constructor ─────────────────────────────────────────────
 
-template <typename Backend>
-counter_storage<Backend>::counter_storage(const client_data<Backend>* _tool_data,
+template <typename Wrapper>
+counter_storage<Wrapper>::counter_storage(const client_data<Wrapper>* _tool_data,
                                           std::uint64_t _devid, size_t _idx,
                                           std::string_view _name)
 : tool_data{ _tool_data }
@@ -355,10 +355,10 @@ counter_storage<Backend>::counter_storage(const client_data<Backend>* _tool_data
 
 // ─── counter_storage::operator() ─────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-counter_storage<Backend>::operator()(const counter_event<Backend>& _event,
-                                     timing_interval<Backend>      _timing,
+counter_storage<Wrapper>::operator()(const counter_event<Wrapper>& _event,
+                                     timing_interval<Wrapper>      _timing,
                                      scope::config                 _scope) const
 {
     operation::set_storage<counter_data_tracker>{}(storage.get());
@@ -367,9 +367,9 @@ counter_storage<Backend>::operator()(const counter_event<Backend>& _event,
 
 // ─── counter_storage::write_zero ─────────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-counter_storage<Backend>::write_zero(typename Backend::timestamp_t timestamp) const
+counter_storage<Wrapper>::write_zero(typename Wrapper::timestamp_t timestamp) const
 {
     if(!track || timestamp == 0) return;
 
@@ -385,9 +385,9 @@ counter_storage<Backend>::write_zero(typename Backend::timestamp_t timestamp) co
 
 // ─── counter_storage::write (static) ─────────────────────────────────────────
 
-template <typename Backend>
+template <typename Wrapper>
 void
-counter_storage<Backend>::write(counter_storage_type* storage,
+counter_storage<Wrapper>::write(counter_storage_type* storage,
                                 const std::string&    metric_name,
                                 const std::string&    metric_description)
 {
