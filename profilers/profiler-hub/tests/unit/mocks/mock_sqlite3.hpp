@@ -136,7 +136,9 @@ struct mock_sqlite3
     static std::string errmsg(database_t db) { return active().errmsg(db); }
     static std::string errstr(int result_code) { return active().errstr(result_code); }
 
-    static int backup_to_file(database_t src, const char* dst_path, std::string& out_errmsg)
+    static int backup_to_file(database_t   src,
+                              const char*  dst_path,
+                              std::string& out_errmsg)
     {
         return active().backup_to_file(src, dst_path, out_errmsg);
     }

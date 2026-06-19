@@ -63,7 +63,9 @@ struct sqlite_api_policy
      * @param dst_path Destination file path to create/overwrite.
      * @return result_ok on full success, otherwise a non-ok sqlite3 result code.
      */
-    static int backup_to_file(database_t src, const char* dst_path, std::string& out_errmsg)
+    static int backup_to_file(database_t   src,
+                              const char*  dst_path,
+                              std::string& out_errmsg)
     {
         database_t out_db = nullptr;
         const int  rc     = sqlite3_open(dst_path, &out_db);
