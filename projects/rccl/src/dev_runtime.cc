@@ -299,6 +299,7 @@ static ncclResult_t symMemoryExportSegmentHandle(
   if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
     msg->memHandle = memHandle;
   } else {
+    INFO(NCCL_INIT, "symMemoryExportSegmentHandle: memHandle=%p, Handle Type: %d", memHandle, ncclCuMemHandleType);
     CUCHECKGOTO(cuMemExportToShareableHandle(&msg->fabricHandle, memHandle, ncclCuMemHandleType, 0), ret, fail);
   }
 fail:
@@ -1069,6 +1070,7 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
   // Get underlying cumem base address and number of mapped physical segments that userPtr spans
   NCCLCHECKGOTO(ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize, &numSegments, &hasSysmemSegment), ret, fail_locReg);
   NCCLCHECKGOTO(ncclCalloc(&memHandles, numSegments), ret, fail_locReg);
+  INFO(NCCL_INIT, "ncclDevrWindowRegisterInGroup: memHandles=%p numSegments=%d hasSysmemSegment=%d", memHandles, numSegments, hasSysmemSegment);
 
   if (hasSysmemSegment) {
     if (!ncclParamElasticBufferRegister()) {
@@ -1101,6 +1103,7 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
     size_t baseSendSize;
     CUCHECK(cuMemGetAddressRange(nullptr, &baseSendSize, reinterpret_cast<CUdeviceptr>(reinterpret_cast<char*>(memAddr) + offset)));
     CUCHECKGOTO(cuMemRetainAllocationHandle(&memHandles[segment], (void *) (reinterpret_cast<char*>(memAddr) + offset)), ret, fail_locReg);
+    INFO(NCCL_INIT, "ncclDevrWindowRegisterInGroup: memHandles[%d]=%p, address: %p", segment, memHandles[segment], reinterpret_cast<char*>(memAddr) + offset);
     CUmemAllocationProp prop;
     CUCHECKGOTO(cuMemGetAllocationPropertiesFromHandle(&prop, memHandles[segment]), ret, fail_locReg);
     if (prop.location.type != CU_MEM_LOCATION_TYPE_HOST_NUMA && prop.location.type != CU_MEM_LOCATION_TYPE_DEVICE) {

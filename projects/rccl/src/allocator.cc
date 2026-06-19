@@ -36,13 +36,7 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
 
   if (ncclCuMemEnable()) {
     size_t handleSize = size;
-    int requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-#if CUDART_VERSION >= 12030
-    // Query device to see if FABRIC handle support is available
-    flag = 0;
-    (void) CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
-    if (flag) requestedHandleTypes |= CU_MEM_HANDLE_TYPE_FABRIC;
-#endif
+    int requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
 #if defined(HIP_VMM_UNCACHED_MEMORY)
     memprop.type = hipMemAllocationTypeUncached;
 #else
@@ -89,6 +83,7 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
     CUCHECK(cuMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0));
     /* Map the virtual address range to the physical allocation */
     CUCHECK(cuMemMap((CUdeviceptr)*ptr, handleSize, 0, handle, 0));
+    INFO(NCCL_INIT, "ncclMemAlloc: ptr=%p, handle=%p", *ptr, handle);
     /* Now allow RW access to the newly mapped memory */
     for (int i = 0; i < dcnt; ++i) {
       int p2p = 0;
