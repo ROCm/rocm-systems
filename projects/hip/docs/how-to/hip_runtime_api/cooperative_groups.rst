@@ -476,7 +476,8 @@ With each group type, the synchronization requires using the correct cooperative
       multi_grid_group multi_grid = this_multi_grid();
       multi_grid.sync();
 
-.. _cg_operations
+.. _cg_operations:
+
 Operations
 ==========
 
