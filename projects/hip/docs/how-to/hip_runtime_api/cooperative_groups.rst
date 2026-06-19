@@ -514,7 +514,7 @@ Performs a group-wide reduce. Participation of all the threads belonging to the 
   auto reduce(const TyGroup& group, T&& val, Operation&& op)
 
 Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation ``op`` on the specified group, contributing the value ``val``
-The parameters are described here: :ref:`scan_operations`
+The parameters are described here: :ref:`cg_operations`
 
 **Performance**
 
