@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <limits>
+#include <stop_token>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -33,7 +34,7 @@ namespace rocprofsys::control::triggers
 /// Templated on Clock so production wires `clocks::steady` and tests wire
 /// `clocks::manual`. Methods on the Clock parameter are duck-typed against
 /// the concept in core/control/clock.hpp.
-template <typename Clock>
+template <ClockPolicy Clock>
 class time_window : public trigger
 {
 public:
@@ -58,17 +59,14 @@ public:
     , m_scope{ event_scope }
     {}
 
-    ~time_window() override { stop(); }
+    ~time_window() override = default;
 
     time_window(const time_window&)            = delete;
     time_window& operator=(const time_window&) = delete;
     time_window(time_window&&)                 = delete;
     time_window& operator=(time_window&&)      = delete;
 
-    [[nodiscard]] std::string_view name() const noexcept override
-    {
-        return "time_window";
-    }
+    [[nodiscard]] std::string_view name() const noexcept override { return "time_window"; }
 
     [[nodiscard]] vote initial_vote() const noexcept override
     {
@@ -82,22 +80,17 @@ public:
 
     [[nodiscard]] scope event_scope() const noexcept override { return m_scope; }
 
-    /// Spawn the worker thread that advances the schedule through delay and
-    /// duration phases. Idempotent: a second call is a no-op.
     void start()
     {
-        if(!has_window()) return;
-        if(m_thread.joinable()) return;
+        if(!has_window() || m_thread.joinable()) return;
         m_clock.reset();
-        m_thread = std::thread{ [this]() { worker(); } };
+        m_thread = std::jthread{ [this](std::stop_token st) { worker(st); } };
     }
 
-    /// Interrupt the clock and join the worker thread. Idempotent.
     void stop() noexcept
     {
-        if(!m_thread.joinable()) return;
-        m_clock.interrupt();
-        m_thread.join();
+        m_thread.request_stop();
+        if(m_thread.joinable()) m_thread.join();
     }
 
 private:
@@ -105,7 +98,7 @@ private:
     Clock&        m_clock;
     schedule_type m_schedule;
     scope         m_scope;
-    std::thread   m_thread;
+    std::jthread  m_thread;
 
     [[nodiscard]] static bool has_window(const config& cfg) noexcept
     {
@@ -122,13 +115,14 @@ private:
         return nullptr;
     }
 
-    [[nodiscard]] bool has_window() const noexcept
-    {
-        return first_window_config() != nullptr;
-    }
+    [[nodiscard]] bool has_window() const noexcept { return first_window_config() != nullptr; }
 
-    void worker()
+    void worker(std::stop_token st)
     {
+        // When stop is requested (e.g. from the jthread destructor or stop()),
+        // this callback interrupts any in-progress sleep_until so the worker exits.
+        std::stop_callback const stop_cb{ st, [this] { m_clock.interrupt(); } };
+
         auto current = m_clock.now();
 
         for(const auto& cfg : m_schedule)
@@ -144,18 +138,15 @@ private:
                 if(cfg.delay > clock_duration::zero())
                 {
                     current += cfg.delay;
-                    if(!m_clock.sleep_until(current)) return;  // interrupted
+                    if(!m_clock.sleep_until(current)) return;
                 }
 
                 m_session.publish(*this, vote::active);
 
-                if(cfg.duration == clock_duration::zero())
-                {
-                    return;  // open-ended collection window
-                }
+                if(cfg.duration == clock_duration::zero()) return;
 
                 current += cfg.duration;
-                if(!m_clock.sleep_until(current)) return;  // interrupted
+                if(!m_clock.sleep_until(current)) return;
                 m_session.publish(*this, vote::paused);
             }
         }

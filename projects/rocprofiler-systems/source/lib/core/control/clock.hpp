@@ -4,24 +4,23 @@
 #pragma once
 
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 
 namespace rocprofsys::control
 {
-/// Shared type aliases for all clock implementations. The clock concept
-/// itself is duck-typed (no virtual base): triggers that need a clock are
-/// templated on it. A type C satisfies the clock concept when it provides:
-///
-///   clock_time_point now() const noexcept;
-///   bool             sleep_until(clock_time_point deadline);
-///   void             interrupt();
-///
-/// Where sleep_until returns true if the deadline was reached and false if
-/// interrupt() woke it early. interrupt() is idempotent and thread-safe.
-///
-/// See clocks::steady (production) and clocks::manual (test-only) for
-/// concrete impls.
-using clock_duration = std::chrono::nanoseconds;
-using clock_time_point =
-    std::chrono::time_point<std::chrono::steady_clock, clock_duration>;
+using clock_duration   = std::chrono::nanoseconds;
+using clock_time_point = std::chrono::time_point<std::chrono::steady_clock, clock_duration>;
+
+/// Satisfied by any type that can drive a time_window trigger.
+/// sleep_until returns true when the deadline was reached, false when
+/// interrupt() woke it early. interrupt() and reset() are idempotent
+/// and thread-safe.
+template <typename C>
+concept ClockPolicy = requires(C c, clock_time_point tp) {
+    { c.now() } noexcept -> std::convertible_to<clock_time_point>;
+    { c.sleep_until(tp) } -> std::same_as<bool>;
+    { c.interrupt() } noexcept;
+    { c.reset() } noexcept;
+};
 }  // namespace rocprofsys::control

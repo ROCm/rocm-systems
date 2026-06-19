@@ -63,5 +63,11 @@ get_valid_clock_ids();
 
 std::vector<spec>
 get_trace_specs();
+
+/// True iff the first configured trace window starts with a delay > 0.
+/// Used by tool_init to decide whether SDK contexts must be deferred until
+/// the delay elapses (the time_window trigger will hold things paused initially).
+[[nodiscard]] bool
+trace_has_initial_delay();
 }  // namespace constraint
 }  // namespace rocprofsys

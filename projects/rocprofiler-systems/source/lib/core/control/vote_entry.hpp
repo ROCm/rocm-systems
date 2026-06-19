@@ -5,7 +5,7 @@
 
 #include "trigger.hpp"
 
-#include <string_view>
+#include <string>
 
 namespace rocprofsys::control
 {
@@ -14,8 +14,8 @@ namespace rocprofsys::control
 /// trigger itself; only the data needed for resolution.
 struct vote_entry
 {
-    std::string_view name;
-    scope            event_scope;
-    vote             current_vote;
+    std::string name;
+    scope       event_scope;
+    vote        current_vote;
 };
 }  // namespace rocprofsys::control

@@ -24,6 +24,7 @@ SAMPLING_DURATION_TOLERANCE_SEC = 0.35
 
 def _assert_sampling_duration_window(result) -> None:
     """Validate sampled Perfetto rows stay inside the configured active window."""
+    from perfetto.common.exceptions import PerfettoException
     from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
 
     trace_processor_path = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
@@ -31,11 +32,14 @@ def _assert_sampling_duration_window(result) -> None:
     if trace_processor_path and Path(trace_processor_path).is_file():
         config = TraceProcessorConfig(bin_path=trace_processor_path)
 
-    trace_processor = (
-        TraceProcessor(trace=str(result.perfetto_file), config=config)
-        if config is not None
-        else TraceProcessor(trace=str(result.perfetto_file))
-    )
+    try:
+        trace_processor = (
+            TraceProcessor(trace=str(result.perfetto_file), config=config)
+            if config is not None
+            else TraceProcessor(trace=str(result.perfetto_file))
+        )
+    except PerfettoException as exc:
+        pytest.skip(f"Perfetto trace processor unavailable on this system: {exc}")
     try:
         query = """
             SELECT COUNT(*) AS track_count,

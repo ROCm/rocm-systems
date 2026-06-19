@@ -437,9 +437,7 @@ std::unique_ptr<trace_window_t>     g_sampling_dur_window;
 void
 stop_time_windows()
 {
-    if(g_sampling_dur_window) g_sampling_dur_window->stop();
     g_sampling_dur_window.reset();
-    if(g_trace_window) g_trace_window->stop();
     g_trace_window.reset();
 }
 

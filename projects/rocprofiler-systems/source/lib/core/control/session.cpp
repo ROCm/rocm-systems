@@ -23,8 +23,6 @@ session::shutdown()
 {
     {
         std::scoped_lock const lk{ m_subscribers_mutex };
-        for(const auto& sub : m_subscribers)
-            sub.paused = false;
         m_subscribers.clear();
     }
     {
@@ -56,7 +54,7 @@ session::attach(trigger& trig)
     const auto event_scope = trig.event_scope();
 
     std::scoped_lock const lk{ m_votes_mutex };
-    m_votes.push_back({ trig.name(), event_scope, trig.initial_vote() });
+    m_votes.push_back(vote_entry{ std::string{ trig.name() }, event_scope, trig.initial_vote() });
     m_active[static_cast<std::size_t>(event_scope)].store(resolve_locked(event_scope),
                                                           std::memory_order_release);
 }
@@ -99,12 +97,11 @@ session::publish(const trigger& trig, vote new_vote)
     {
         std::scoped_lock const lk{ m_votes_mutex };
 
-        auto it = std::find_if(m_votes.begin(), m_votes.end(),
-                               [name, event_scope](const vote_entry& e) {
-                                   return e.name == name && e.event_scope == event_scope;
-                               });
+        auto it = std::ranges::find_if(m_votes, [name, event_scope](const vote_entry& e) {
+            return e.name == name && e.event_scope == event_scope;
+        });
         if(it == m_votes.end())
-            m_votes.push_back({ name, event_scope, new_vote });
+            m_votes.push_back(vote_entry{ std::string{ name }, event_scope, new_vote });
         else
             it->current_vote = new_vote;
 
@@ -117,47 +114,37 @@ session::publish(const trigger& trig, vote new_vote)
     dispatch_for_scope(event_scope);
 }
 
-// Any paused vote (within the given scope) pauses the scope. Abstain is
-// ignored. With no votes for the scope, the scope is active by default.
 bool
 session::resolve_locked(scope event_scope) const noexcept
 {
-    for(const auto& entry : m_votes)
-    {
-        if(entry.event_scope != event_scope) continue;
-        if(entry.current_vote == vote::paused) return false;
-    }
-    return true;
+    return std::ranges::none_of(m_votes, [event_scope](const vote_entry& e) {
+        return e.event_scope == event_scope && e.current_vote == vote::paused;
+    });
 }
 
 bool
 session::is_active_excluding(std::string_view name, scope event_scope) const noexcept
 {
     std::scoped_lock const lk{ m_votes_mutex };
-    for(const auto& entry : m_votes)
-    {
-        if(entry.event_scope != event_scope) continue;
-        if(entry.name == name) continue;
-        if(entry.current_vote == vote::paused) return false;
-    }
-    return true;
+    return std::ranges::none_of(m_votes, [name, event_scope](const vote_entry& e) {
+        return e.event_scope == event_scope && e.name != name &&
+               e.current_vote == vote::paused;
+    });
 }
 
 bool
 session::has_trigger(std::string_view name, scope event_scope) const noexcept
 {
     std::scoped_lock const lk{ m_votes_mutex };
-    return std::any_of(m_votes.begin(), m_votes.end(),
-                       [name, event_scope](const vote_entry& entry) {
-                           return entry.event_scope == event_scope && entry.name == name;
-                       });
+    return std::ranges::any_of(m_votes, [name, event_scope](const vote_entry& e) {
+        return e.event_scope == event_scope && e.name == name;
+    });
 }
 
 bool
 session::subscriber_should_be_paused(const subscriber& sub) const noexcept
 {
-    return std::any_of(sub.scopes.begin(), sub.scopes.end(),
-                       [this](scope s) { return !is_active(s); });
+    return std::ranges::any_of(sub.scopes, [this](scope s) { return !is_active(s); });
 }
 
 void
@@ -175,8 +162,8 @@ session::dispatch_for_scope(scope event_scope)
         to_fire.reserve(m_subscribers.size());
         for(const auto& sub : m_subscribers)
         {
-            const bool listens = std::find(sub.scopes.begin(), sub.scopes.end(),
-                                           event_scope) != sub.scopes.end();
+            const bool listens =
+                std::ranges::find(sub.scopes, event_scope) != sub.scopes.end();
             if(!listens) continue;
 
             const bool should_be_paused = subscriber_should_be_paused(sub);

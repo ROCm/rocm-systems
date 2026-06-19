@@ -196,5 +196,12 @@ get_trace_specs()
 
     return _v;
 }
+
+bool
+trace_has_initial_delay()
+{
+    const auto specs = get_trace_specs();
+    return !specs.empty() && specs.front().delay > 0.0;
+}
 }  // namespace constraint
 }  // namespace rocprofsys

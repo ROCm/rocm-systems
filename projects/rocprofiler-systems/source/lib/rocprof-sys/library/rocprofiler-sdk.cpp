@@ -2423,35 +2423,14 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
 }
 #endif
 
-// True when tool_init must skip starting primary_ctx / counter_ctx and leave
-// them for the rocm subscriber's on_resume to start later. Reasons (any):
-//   1. roctx region filter is gating tracing
-//   2. an initial-delay trace window is configured but its trigger has not
-//      been attached yet (tool_init can run before library.cpp builds windows)
-//   3. control session is otherwise paused (backstop for non-time-window
-//      pausing paths such as ROCPROFSYS_INIT_PAUSED)
-bool
-trace_window_needs_initial_pause()
-{
-    const auto specs = constraint::get_trace_specs();
-    auto       itr   = std::find_if(specs.begin(), specs.end(), [](const auto& spec) {
-        return spec.delay > 0.0 || spec.duration > 0.0;
-    });
-    return itr != specs.end() && itr->delay > 0.0;
-}
-
 bool
 should_defer_main_contexts(roctx_client<>* client)
 {
     const auto session = get_session();
-
-    const auto filtering_active = client && client->get_trigger().filter_active();
-    const auto window_not_attached =
-        trace_window_needs_initial_pause() &&
-        !session->has_trigger("time_window", control::scope::global);
-    const auto session_active = session->is_active(control::scope::global);
-
-    return filtering_active || window_not_attached || !session_active;
+    return (client && client->get_trigger().filter_active()) ||
+           (constraint::trace_has_initial_delay() &&
+            !session->has_trigger("time_window", control::scope::global)) ||
+           !session->is_active(control::scope::global);
 }
 
 int
