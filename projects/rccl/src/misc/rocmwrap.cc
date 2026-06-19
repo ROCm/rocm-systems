@@ -233,8 +233,15 @@ static void initOnceFunc() {
     INFO(NCCL_INIT, "Current version of ROCm does not support dmabuf feature.");
     goto error;
   }
+  else if (hsa_amd_portable_export_dmabuf == nullptr) {
+    // The capability query advertised DMA-BUF, but the weakly-linked entry point
+    // did not resolve (ROCr runtime too old to export it). Disable the feature
+    // cleanly rather than leaving an inconsistent gate.
+    INFO(NCCL_INIT, "ROCr runtime does not export hsa_amd_portable_export_dmabuf; disabling DMA-BUF.");
+    goto error;
+  }
   else {
-    // Arm the DMA-BUF feature gate with the directly-linked symbol.
+    // Arm the DMA-BUF feature gate with the resolved HSA symbol.
     pfn_hsa_amd_portable_export_dmabuf = hsa_amd_portable_export_dmabuf;
   }
 
