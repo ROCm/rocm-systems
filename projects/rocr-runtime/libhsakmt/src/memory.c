@@ -1105,6 +1105,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
     					HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
 						HsaMemoryMapFlags flags)
 {
+	pr_debug("[%s] handle %p offset %lu size %lu addr %lu\n",
+		__func__, Handle, offset, size, addr);
 	CHECK_KFD_OPEN();
 	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
     if (!drmhandle) return HSAKMT_STATUS_ERROR;
@@ -1120,6 +1122,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
     					HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
 {
+	pr_debug("[%s] handle %p offset %lu size %lu addr %lu\n",
+		__func__, Handle, offset, size, addr);
 	CHECK_KFD_OPEN();
 	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
 

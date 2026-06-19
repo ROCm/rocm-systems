@@ -1559,6 +1559,8 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   uint32_t fragOffset = 0;
 
   auto fixFragment = [&](HsaMemoryObjectHandle thunk_bo) {
+    std::cout << "fixFragment: importAddress=" << importAddress << ", importSize=" << importSize
+              << ", fragOffset=" << fragOffset << std::endl;
     if (isFragment) {
       importAddress = reinterpret_cast<uint8_t*>(importAddress) + fragOffset;
       len = Min(len, importSize - fragOffset);

@@ -2830,6 +2830,7 @@ static bool init_mem_handle_aperture(struct hsa_kfd_fmm_context *fmm_ctx, HSAuin
 HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 				unsigned int NumNodes)
 {
+	pr_debug("hsakmt_fmm_init_process_apertures: NumNodes %d\n", NumNodes);
 	uint32_t i;
 	uint32_t gpu_mem_count = 0;
 	int32_t gpu_mem_id = 0;

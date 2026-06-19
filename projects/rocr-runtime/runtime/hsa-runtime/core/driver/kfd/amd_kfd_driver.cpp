@@ -594,6 +594,8 @@ hsa_status_t KfdDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* ha
 
 hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
                             hsa_access_permission_t perms) {
+  std::cout << "KfdDriver::Map: handle=" << handle.handle << ", mem=" << mem << ", offset=" << offset
+            << ", size=" << size << ", perms=" << perms << std::endl;
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, static_cast<HSAuint64>(offset),
                                      static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
@@ -605,6 +607,8 @@ hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, s
 
 hsa_status_t KfdDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
                               size_t offset, size_t size) {
+  std::cout << "KfdDriver::Unmap: handle=" << handle.handle << ", mem=" << mem << ", offset=" << offset
+            << ", size=" << size << std::endl;
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle, static_cast<HSAuint64>(offset),
                                      static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem)));
