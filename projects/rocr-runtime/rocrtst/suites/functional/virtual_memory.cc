@@ -882,9 +882,9 @@ void VirtMemoryTestBasic::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
     EXPECT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
   }
 
-  if (host_data) hsa_memory_free(host_data);
+  if (host_data) hsa_amd_memory_pool_free(host_data);
   if (kernArgsVirt) {
-    hsa_memory_free(kernArgsVirt);
+    hsa_amd_memory_pool_free(kernArgsVirt);
   }
   if (signal.handle) {
     hsa_signal_destroy(signal);
@@ -1137,9 +1137,9 @@ void VirtMemoryTestBasic::GPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
     EXPECT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
   }
 
-  if (host_data) hsa_memory_free(host_data);
+  if (host_data) hsa_amd_memory_pool_free(host_data);
   if (kernArgsVirt) {
-    hsa_memory_free(kernArgsVirt);
+    hsa_amd_memory_pool_free(kernArgsVirt);
   }
   if (signal.handle) {
     hsa_signal_destroy(signal);
@@ -1505,9 +1505,9 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t cpuAgent, hsa_agent_t
   ASSERT_SUCCESS(hsa_amd_vmem_address_free(addr1, alloc_size));
   ASSERT_SUCCESS(hsa_amd_vmem_address_free(addr2, alloc_size));
 
-  if (host_data) hsa_memory_free(host_data);
-  if (dummy_data) hsa_memory_free(dummy_data);
-  if (kernArgs) hsa_memory_free(kernArgs);
+  if (host_data) hsa_amd_memory_pool_free(host_data);
+  if (dummy_data) hsa_amd_memory_pool_free(dummy_data);
+  if (kernArgs) hsa_amd_memory_pool_free(kernArgs);
   if (signal.handle) hsa_signal_destroy(signal);
   if (queue) hsa_queue_destroy(queue);
 }
