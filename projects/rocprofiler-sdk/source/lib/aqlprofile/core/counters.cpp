@@ -100,7 +100,7 @@ GetCounter(Pm4Factory*                                    pm4_factory,
 
     if(event.flags.raw != 0u)
     {
-        if(event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ && reg_index < num_sp_events)
+        if(event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ)
         {
             visible_id = HandleSQFlagsBlock(pm4_factory, event);
         }
