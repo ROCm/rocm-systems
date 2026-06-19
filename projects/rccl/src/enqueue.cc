@@ -1081,6 +1081,10 @@ NCCL_PARAM(P2pLLThreshold, "P2P_LL_THRESHOLD", 8192);
 RCCL_PARAM(P2pNetThreshold, "P2P_NET_THRESHOLD", 131072);
 NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 
+// Upper bound on the number of channels used by the PAT algorithm.
+// Set to <= 0 to disable the cap.
+RCCL_PARAM(MaxPatNchannels, "MAX_PAT_NCHANNELS", 4);
+
 
 // Need this temporary parameter to disable p2p batching to avoid some dips at 4MB - 32 MB message size at large scale
 // This parameter must be removed after further investigation,
@@ -2444,6 +2448,11 @@ static ncclResult_t topoGetAlgoInfo(
     }
   } else if (info->algorithm == NCCL_ALGO_PAT) {
     nc = (nBytes <= (32 << 10)) ? 1 : (nBytes <= (64 << 10)) ? 2 : (nBytes <= (1 << 20)) ? 4 : comm->nChannels;
+
+    int maxPatNChannels = rcclParamMaxPatNchannels();
+    if (maxPatNChannels > 0) {
+      nc = std::min(maxPatNChannels, nc);
+    }
 
     int minNChannels = ncclParamMinNchannels();
     int maxNChannels = ncclParamMaxNchannels();
