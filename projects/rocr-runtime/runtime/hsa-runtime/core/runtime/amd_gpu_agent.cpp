@@ -197,7 +197,10 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
                              node_props.EngineId.ui32.Stepping), sramecc, xnack);
   }
 
-  assert(isa_ != nullptr && "ISA registry inconsistency.");
+  if (!isa_) {
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ISA,
+                             "Agent creation failed.\nNo ISA variant matched requested feature state.\n");
+  }
 
   supported_isas_.push_back(isa_);
   if (!isa_->GetIsaGeneric().empty()) {
