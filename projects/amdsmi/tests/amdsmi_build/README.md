@@ -51,6 +51,7 @@ sudo python3 projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py \
 | `--skip-setuptools-upgrade` | Skip pip/setuptools/wheel upgrade |
 | `--install-more-itertools` | Install `more_itertools` (AzureLinux 3) |
 | `summarize <results-dir>` | (subcommand) Render the CI step summary |
+| `python-matrix` | (subcommand) Run the installed Python test suite under several interpreters |
 
 ## Supported distros
 

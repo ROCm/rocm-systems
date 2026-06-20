@@ -194,9 +194,9 @@ import shutil
 import subprocess
 import sys
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 DEFAULT_LOG_DIR = Path("logs") / "amdsmi"
 
@@ -1238,10 +1238,392 @@ def _summarize_cli(argv: List[str]) -> int:
     return summarize_results(args.results_dir, args.os_label, args.summary_file)
 
 
+# ---------------------------------------------------------------------------
+# Multi-Python sanity sweep (the "python-matrix" subcommand)
+#
+# Builds/installs once, then runs the *installed* Python test suite under a
+# range of interpreters so CI produces per-version PASS/FAIL sanity data on a
+# real GPU.  The amdsmi package is a pure-ctypes wrapper around libamd_smi.so
+# (py-interface/setup.py.in: python_requires>=3.6, no ext_modules) and the
+# tests import it from $AMDSMI_PATH (tests/python_unittest/common.py), so one
+# install is exercised by every interpreter -- no per-version venvs or wheel
+# installs are required.
+#
+# Interpreters are resolved per requested minor version by (1) a system
+# pythonX.Y already on PATH -- which covers distro pythons uv cannot supply,
+# e.g. 3.6 on AlmaLinux8 -- then (2) a uv-managed download.  Versions that
+# neither source can provide are recorded as SKIP rather than failing.
+# ---------------------------------------------------------------------------
+
+DEFAULT_PY_MATRIX_VERSIONS = "3.6 3.7 3.8 3.9 3.10 3.11 3.12 3.13 3.14"
+DEFAULT_AMDSMI_PATH = Path("/opt/rocm/share/amd_smi")
+DEFAULT_UV_VERSION = "0.11.23"
+PY_MATRIX_TEST_FILES = ("integration_test.py", "unit_tests.py", "cli_unit_test.py")
+
+
+@dataclass
+class PyVersionResult:
+    requested: str
+    status: str = "SKIP"  # "PASS" | "FAIL" | "SKIP"
+    interpreter: str = ""
+    resolved: str = ""
+    note: str = ""
+    failed_tests: List[str] = field(default_factory=list)
+
+
+def parse_python_versions(spec: str) -> List[str]:
+    """Parse a whitespace/comma separated version spec into a deduped list.
+
+    Accepts ``X.Y`` or ``X.Y.Z`` tokens; raises ValueError on anything else.
+    """
+    import re
+
+    out: List[str] = []
+    for tok in re.split(r"[,\s]+", spec.strip()):
+        if not tok:
+            continue
+        if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", tok):
+            raise ValueError(f"Invalid Python version token: {tok!r}")
+        if tok not in out:
+            out.append(tok)
+    return out
+
+
+def minor_of(version: str) -> str:
+    """Return the ``X.Y`` minor prefix of a version string."""
+    import re
+
+    m = re.match(r"^\s*(\d+\.\d+)", version)
+    if not m:
+        raise ValueError(f"Cannot parse minor version from {version!r}")
+    return m.group(1)
+
+
+def _py_status_icon(status: str) -> str:
+    return {
+        "PASS": ":white_check_mark:",
+        "FAIL": ":x:",
+        "SKIP": ":fast_forward:",
+    }.get(status, ":grey_question:")
+
+
+def render_python_matrix_summary(os_label: str, results: List[PyVersionResult]) -> str:
+    """Render a markdown table of per-interpreter results."""
+    n_pass = sum(1 for r in results if r.status == "PASS")
+    n_fail = sum(1 for r in results if r.status == "FAIL")
+    n_skip = sum(1 for r in results if r.status == "SKIP")
+
+    lines = [
+        f"## Python Version Matrix \u2014 {os_label}",
+        "",
+        "| Requested | Status | Interpreter | Detail |",
+        "| --- | --- | --- | --- |",
+    ]
+    for r in results:
+        interp = f"{r.resolved} ({r.interpreter})" if r.resolved else "\u2014"
+        detail = ("failed: " + ", ".join(r.failed_tests)) if r.failed_tests else r.note
+        lines.append(
+            f"| {r.requested} | {_py_status_icon(r.status)} {r.status} | {interp} | {detail} |"
+        )
+    lines += [
+        "",
+        f"**{n_pass} passed, {n_fail} failed, {n_skip} skipped** "
+        f"(of {len(results)} requested)",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _query_interpreter_version(python_bin: str) -> Optional[str]:
+    """Return ``X.Y.Z`` reported by *python_bin*, or None if it cannot run."""
+    try:
+        proc = subprocess.run(
+            [python_bin, "-c", "import sys;print('%d.%d.%d' % sys.version_info[:3])"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def ensure_uv(log_dir: Path, uv_version: str, install_dir: Path) -> Optional[Path]:
+    """Return a path to a uv binary, fetching a pinned release if not on PATH."""
+    on_path = shutil.which("uv")
+    if on_path:
+        print(f"python-matrix: using uv on PATH: {on_path}")
+        return Path(on_path)
+
+    import platform
+    import tarfile
+    import urllib.request
+
+    machine = platform.machine().lower()
+    arch = {
+        "x86_64": "x86_64",
+        "amd64": "x86_64",
+        "aarch64": "aarch64",
+        "arm64": "aarch64",
+    }.get(machine)
+    if arch is None:
+        print(f"python-matrix: unsupported arch {machine!r}; cannot fetch uv")
+        return None
+
+    triple = f"uv-{arch}-unknown-linux-gnu"
+    url = (
+        f"https://github.com/astral-sh/uv/releases/download/"
+        f"{uv_version}/{triple}.tar.gz"
+    )
+    install_dir.mkdir(parents=True, exist_ok=True)
+    tarball = install_dir / f"{triple}.tar.gz"
+    uv_dest = install_dir / "uv"
+    print(f"python-matrix: downloading uv {uv_version} from {url}")
+    try:
+        with urllib.request.urlopen(url, timeout=180) as resp, tarball.open("wb") as fh:
+            shutil.copyfileobj(resp, fh)
+        # Extract only the uv binary (by basename) to avoid tar path traversal.
+        with tarfile.open(tarball) as tf:
+            member = next(
+                (
+                    m
+                    for m in tf.getmembers()
+                    if m.isfile() and os.path.basename(m.name) == "uv"
+                ),
+                None,
+            )
+            if member is None:
+                print("python-matrix: uv binary not present in archive")
+                return None
+            src = tf.extractfile(member)
+            if src is None:
+                return None
+            with src, uv_dest.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+    except Exception as exc:  # best-effort: network/extract failure -> skip uv
+        print(f"python-matrix: failed to fetch uv: {exc}")
+        return None
+
+    uv_dest.chmod(0o755)
+    print(f"python-matrix: uv ready at {uv_dest}")
+    return uv_dest
+
+
+def resolve_interpreter(
+    version: str, uv_bin: Optional[Path], log_dir: Path
+) -> Tuple[Optional[str], str, str]:
+    """Resolve *version* to an interpreter path.
+
+    Returns ``(path_or_None, resolved_version, note)``.
+    """
+    minor = minor_of(version)
+
+    # 1. System interpreter on PATH (pythonX.Y) -- covers distro pythons that
+    #    uv cannot provide (e.g. 3.6) and skips an unnecessary download.
+    cand = shutil.which(f"python{minor}")
+    if cand:
+        got = _query_interpreter_version(cand)
+        if got and minor_of(got) == minor:
+            return cand, got, "system"
+
+    # 2. uv-managed download (python-build-standalone) -- covers 3.8-3.14.
+    if uv_bin is not None:
+        try:
+            run_command(
+                [str(uv_bin), "python", "install", version],
+                name=f"uv-install-{version}",
+                retries=2,
+                log_dir=log_dir,
+            )
+        except CommandError:
+            return None, "", f"uv could not install {version}"
+        try:
+            found = subprocess.run(
+                [str(uv_bin), "python", "find", version],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return None, "", f"uv find failed for {version}: {exc}"
+        out = found.stdout.strip()
+        path = out.splitlines()[0].strip() if out else ""
+        if found.returncode == 0 and path:
+            got = _query_interpreter_version(path)
+            if got and minor_of(got) == minor:
+                return path, got, "uv"
+
+    return None, "", "not available via system PATH or uv"
+
+
+def _run_suite_for_interpreter(
+    python_bin: str,
+    tests_dir: Path,
+    amdsmi_path: Path,
+    results_dir: Path,
+    version_tag: str,
+    log_dir: Path,
+) -> List[str]:
+    """Run the installed Python test suite under *python_bin*.
+
+    Returns the list of failing test files (empty == all passed/absent).
+    """
+    env = dict(os.environ)
+    env["AMDSMI_PATH"] = str(amdsmi_path)
+    # Prepend the install to PYTHONPATH so `import amdsmi` resolves to it
+    # under every interpreter (TheRock tarball layout keeps it off sys.path).
+    pp_parts = [str(amdsmi_path)]
+    if env.get("PYTHONPATH"):
+        pp_parts.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(pp_parts)
+
+    # PATH shim so the `amd-smi` CLI subprocess (shebang: /usr/bin/env python3)
+    # spawned by cli_unit_test.py also runs under *python_bin*.
+    # Absolute so the shim resolves regardless of each test's working dir.
+    shim_dir = Path(os.path.abspath(str(log_dir))) / f"py-shim-{version_tag}"
+    shim_dir.mkdir(parents=True, exist_ok=True)
+    shim = shim_dir / "python3"
+    try:
+        if shim.exists() or shim.is_symlink():
+            shim.unlink()
+        shim.symlink_to(python_bin)
+        env["PATH"] = str(shim_dir) + os.pathsep + env.get("PATH", "")
+    except OSError:
+        pass  # shim is best-effort; tests still run under python_bin directly
+
+    failed: List[str] = []
+    for test_file in PY_MATRIX_TEST_FILES:
+        script = tests_dir / test_file
+        if not script.exists():
+            continue
+        stem = test_file[:-3] if test_file.endswith(".py") else test_file
+        result_path = results_dir / f"python_{version_tag}_{stem}.log"
+        try:
+            run_command(
+                [python_bin, str(script), "-v"],
+                name=f"py{version_tag}-{stem}",
+                cwd=tests_dir,
+                env=env,
+                retries=1,
+                log_dir=log_dir,
+                result_file=result_path,
+            )
+        except CommandError:
+            failed.append(stem)
+    return failed
+
+
+def run_python_matrix(
+    versions: List[str],
+    tests_dir: Path,
+    amdsmi_path: Path,
+    results_dir: Path,
+    os_label: str,
+    uv_version: str,
+    log_dir: Path,
+    summary_file: Optional[Path],
+) -> int:
+    """Resolve interpreters, run the suite per version, emit a summary table.
+
+    Returns the number of versions that FAILED (skips do not count).
+    """
+    results_dir.mkdir(parents=True, exist_ok=True)
+    rows: List[PyVersionResult] = []
+
+    if not tests_dir.exists():
+        print(f"python-matrix: tests dir {tests_dir} does not exist; nothing to run")
+    else:
+        uv_bin = ensure_uv(log_dir, uv_version, log_dir / "uv")
+        if uv_bin is None:
+            print("python-matrix: proceeding with system interpreters only (no uv)")
+        for ver in versions:
+            path, resolved, note = resolve_interpreter(ver, uv_bin, log_dir)
+            if path is None:
+                print(f"python-matrix: {ver} -> SKIP ({note})")
+                rows.append(PyVersionResult(requested=ver, status="SKIP", note=note))
+                continue
+            print(f"python-matrix: {ver} -> {resolved} at {path} (via {note})")
+            failed = _run_suite_for_interpreter(
+                path, tests_dir, amdsmi_path, results_dir, ver, log_dir
+            )
+            rows.append(
+                PyVersionResult(
+                    requested=ver,
+                    status="FAIL" if failed else "PASS",
+                    interpreter=path,
+                    resolved=resolved,
+                    failed_tests=failed,
+                    note=note,
+                )
+            )
+
+    summary = render_python_matrix_summary(os_label, rows)
+    (results_dir / "python_matrix_summary.md").write_text(summary, encoding="utf-8")
+    if summary_file is not None:
+        with summary_file.open("a", encoding="utf-8") as fh:
+            fh.write(summary)
+
+    print("=" * 42)
+    print(summary)
+
+    n_fail = sum(1 for r in rows if r.status == "FAIL")
+    if n_fail:
+        failed_versions = ", ".join(r.requested for r in rows if r.status == "FAIL")
+        print(f"::error::Python matrix failures for {os_label}: {failed_versions}")
+    else:
+        print(f"python-matrix: all resolved interpreters PASSED for {os_label}")
+    return n_fail
+
+
+def _python_matrix_cli(argv: List[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="run_amdsmi_build.py python-matrix",
+        description="Run the installed Python test suite under several interpreters.",
+    )
+    parser.add_argument("--results-dir", type=Path, required=True)
+    parser.add_argument("--os-label", default="local")
+    parser.add_argument("--amdsmi-path", type=Path, default=DEFAULT_AMDSMI_PATH)
+    parser.add_argument(
+        "--tests-dir",
+        type=Path,
+        default=None,
+        help="Default: <amdsmi-path>/tests/python_unittest",
+    )
+    parser.add_argument("--python-versions", default=DEFAULT_PY_MATRIX_VERSIONS)
+    parser.add_argument("--uv-version", default=DEFAULT_UV_VERSION)
+    parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
+    parser.add_argument(
+        "--summary-file",
+        type=Path,
+        default=None,
+        help="Append the markdown matrix to this file (e.g. $GITHUB_STEP_SUMMARY).",
+    )
+    args = parser.parse_args(argv)
+
+    versions = parse_python_versions(args.python_versions)
+    tests_dir = args.tests_dir or (args.amdsmi_path / "tests" / "python_unittest")
+    return run_python_matrix(
+        versions=versions,
+        tests_dir=tests_dir,
+        amdsmi_path=args.amdsmi_path,
+        results_dir=args.results_dir,
+        os_label=args.os_label,
+        uv_version=args.uv_version,
+        log_dir=args.log_dir,
+        summary_file=args.summary_file,
+    )
+
+
 def main() -> None:
     # `summarize` subcommand short-circuits before parse_args/sudo logic.
     if len(sys.argv) > 1 and sys.argv[1] == "summarize":
         sys.exit(0 if _summarize_cli(sys.argv[2:]) == 0 else 1)
+    if len(sys.argv) > 1 and sys.argv[1] == "python-matrix":
+        sys.exit(0 if _python_matrix_cli(sys.argv[2:]) == 0 else 1)
     cfg = parse_args()
 
     print(f"Using project directory: {cfg.project_dir}")

@@ -192,5 +192,80 @@ class SummarizeTests(unittest.TestCase):
             self.assertIn(":x: CI Failed", summary.read_text())
 
 
+class ParsePythonVersionsTests(unittest.TestCase):
+    def test_space_separated(self):
+        self.assertEqual(
+            rab.parse_python_versions("3.8 3.9 3.10"), ["3.8", "3.9", "3.10"]
+        )
+
+    def test_comma_and_mixed_whitespace(self):
+        self.assertEqual(
+            rab.parse_python_versions(" 3.8 ,3.9\t3.10 "), ["3.8", "3.9", "3.10"]
+        )
+
+    def test_dedupes_preserving_order(self):
+        self.assertEqual(rab.parse_python_versions("3.10 3.10 3.9"), ["3.10", "3.9"])
+
+    def test_accepts_patch_level(self):
+        self.assertEqual(rab.parse_python_versions("3.10.2"), ["3.10.2"])
+
+    def test_empty_is_empty_list(self):
+        self.assertEqual(rab.parse_python_versions("   "), [])
+
+    def test_invalid_token_raises(self):
+        with self.assertRaises(ValueError):
+            rab.parse_python_versions("3 3.8")
+
+
+class MinorOfTests(unittest.TestCase):
+    def test_patch(self):
+        self.assertEqual(rab.minor_of("3.10.14"), "3.10")
+
+    def test_minor_only(self):
+        self.assertEqual(rab.minor_of("3.6"), "3.6")
+
+    def test_invalid_raises(self):
+        with self.assertRaises(ValueError):
+            rab.minor_of("garbage")
+
+
+class RenderPythonMatrixTests(unittest.TestCase):
+    def _rows(self):
+        return [
+            rab.PyVersionResult(
+                requested="3.6",
+                status="PASS",
+                interpreter="/usr/bin/python3.6",
+                resolved="3.6.8",
+            ),
+            rab.PyVersionResult(
+                requested="3.7",
+                status="SKIP",
+                note="not available via system PATH or uv",
+            ),
+            rab.PyVersionResult(
+                requested="3.10",
+                status="FAIL",
+                interpreter="/root/.local/bin/python3.10",
+                resolved="3.10.14",
+                failed_tests=["unit_tests"],
+            ),
+        ]
+
+    def test_contains_header_and_label(self):
+        out = rab.render_python_matrix_summary("AlmaLinux8", self._rows())
+        self.assertIn("Python Version Matrix", out)
+        self.assertIn("AlmaLinux8", out)
+
+    def test_counts_line(self):
+        out = rab.render_python_matrix_summary("AlmaLinux8", self._rows())
+        self.assertIn("1 passed, 1 failed, 1 skipped", out)
+
+    def test_failed_test_name_and_resolved_shown(self):
+        out = rab.render_python_matrix_summary("AlmaLinux8", self._rows())
+        self.assertIn("unit_tests", out)
+        self.assertIn("3.6.8", out)
+
+
 if __name__ == "__main__":
     unittest.main()
