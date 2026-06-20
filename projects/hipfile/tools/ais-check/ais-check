@@ -89,19 +89,20 @@ def find_hip_runtimes():
     # absolute) to keep CodeQL happy about env-derived paths. The directory
     # component is escaped so that glob metacharacters (*, ?, []) embedded in
     # an env var are matched literally rather than interpreted, and only the
-    # trailing lib_glob acts as a pattern.
+    # trailing lib_glob acts as a pattern. glob.glob does not guarantee an
+    # order, so each match set is sorted for deterministic probing/printing.
     for d in search_dirs:
         safe_d = os.path.abspath(os.path.normpath(d))
         if not os.path.isdir(safe_d):
             continue
-        candidates += glob.glob(os.path.join(glob.escape(safe_d), lib_glob))
+        candidates += sorted(glob.glob(os.path.join(glob.escape(safe_d), lib_glob)))
 
     # 4. Versioned installs (/opt/rocm-5.x, etc.)
-    candidates += glob.glob(f"/opt/rocm*/lib*/{lib_glob}")
+    candidates += sorted(glob.glob(f"/opt/rocm*/lib*/{lib_glob}"))
 
     # 5. ROCm >= 7.11 versioned core installs (/opt/rocm/core-X.Y/lib),
     #    where /opt/rocm is a real directory rather than a symlink.
-    candidates += glob.glob(f"/opt/rocm*/core-*/lib*/{lib_glob}")
+    candidates += sorted(glob.glob(f"/opt/rocm*/core-*/lib*/{lib_glob}"))
 
     # 6. Fall back to the ldconfig cache, which catches installs in
     #    non-standard prefixes registered via /etc/ld.so.conf.d
