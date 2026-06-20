@@ -2622,7 +2622,7 @@
           "description": "Combined NCCL_P2P_DIRECT_DISABLE + NCCL_P2P_USE_CUDA_MEMCPY + NCCL_P2P_LEVEL",
           "env_variables": {
             "NCCL_P2P_DIRECT_DISABLE": "1",
-            "NCCL_P2P_USE_CUDA_MEMCPY": "1",
+            "NCCL_P2P_USE_CUDA_MEMCPY": "0",
             "NCCL_P2P_LEVEL": "SYS"
           }
         }
