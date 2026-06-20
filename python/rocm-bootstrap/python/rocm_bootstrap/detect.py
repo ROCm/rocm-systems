@@ -1,14 +1,15 @@
 """GPU detection orchestration.
 
-Detects AMD GPUs on the current system by reading kernel sysfs interfaces.
+Detects AMD GPUs on the current system using platform-appropriate methods.
 All I/O is delegated to the :mod:`rocm_bootstrap._platform` module so that
-tests can monkeypatch it with fake sysfs content.
+tests can monkeypatch it with fake sysfs content and clinfo output.
 
 Detection chain:
     1. ``ROCM_BOOTSTRAP_DISABLE_DETECTION`` → return ``[]``
     2. ``ROCM_BOOTSTRAP_FORCE_GFX_ARCH`` → parse forced targets
     3. KFD topology (``/sys/class/kfd/kfd/topology/nodes/*/properties``)
-    4. Return empty list if KFD is not available
+    4. ``clinfo`` subprocess (Windows fallback)
+    5. Return empty list if no method succeeds
 """
 
 from __future__ import annotations
@@ -66,8 +67,13 @@ def detect_gpus() -> list[DetectedGpu]:
     if forced:
         return _parse_forced_targets(forced)
 
-    # 3. KFD topology (only supported detection method)
-    return _detect_via_kfd_topology()
+    # 3. KFD topology (Linux)
+    gpus = _detect_via_kfd_topology()
+    if gpus:
+        return gpus
+
+    # 4. clinfo subprocess (Windows fallback)
+    return _detect_via_clinfo()
 
 
 def detect_gfx_targets() -> list[GfxTarget]:
@@ -159,6 +165,43 @@ def _detect_via_kfd_topology() -> list[DetectedGpu]:
         )
 
     return gpus
+
+
+def _parse_clinfo_output(text: str) -> list[DetectedGpu]:
+    """Parse ``clinfo`` text output into DetectedGpu list.
+
+    Looks for ``Device Type: CL_DEVICE_TYPE_GPU`` blocks and extracts
+    the ``Name:`` field (which is the gfx target name, e.g. ``gfx1100``).
+    Devices with unrecognized target names are skipped.
+    """
+    gpus: list[DetectedGpu] = []
+    current_is_gpu = False
+    device_index = 0
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Device Type:"):
+            current_is_gpu = "CL_DEVICE_TYPE_GPU" in stripped
+        elif stripped.startswith("Name:") and current_is_gpu:
+            name = stripped.split(":", 1)[1].strip()
+            try:
+                target = lookup_target(name)
+            except ValueError:
+                current_is_gpu = False
+                continue
+            gpus.append(DetectedGpu(target=target, node_id=device_index))
+            device_index += 1
+            current_is_gpu = False
+
+    return gpus
+
+
+def _detect_via_clinfo() -> list[DetectedGpu]:
+    """Detect GPUs via ``clinfo`` subprocess output."""
+    text = _platform.run_clinfo()
+    if not text:
+        return []
+    return _parse_clinfo_output(text)
 
 
 # ---------------------------------------------------------------------------
