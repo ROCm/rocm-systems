@@ -1,0 +1,92 @@
+# RCCL paired A/B perf-regression gate.
+#
+# DEPLOYMENT: RCCL now lives in the ROCm/rocm-systems monorepo at projects/rccl.
+# This file belongs in that repo at
+#   .github/workflows/rccl_perf_regression.yml
+# It runs on the self-hosted org runner "tw-gfx950-ainic-ROCm-scale-runner"
+# (org: ROCm). Adjust `runs-on` labels to match how that runner was registered.
+# The `paths` filter keeps the gate scoped to RCCL-only changes in the monorepo;
+# build_rccl.sh auto-detects the projects/rccl cmake subdir in the checkout.
+#
+# Flow per PR:
+#   1. Check out PR head with full history (merge-base resolution needs it).
+#   2. build_rccl.sh: build librccl.so for reference (merge-base) and candidate
+#      (PR head) from projects/rccl, then template their lib dirs into ci_detect.json.
+#   3. submit_and_poll.sh: run the A/B detector sbatch on the pinned nodes.
+#   4. format_report.py: render verdict to the job summary + PR comment.
+#   5. Job exit code (from the detector) is the merge gate.
+name: RCCL Perf Regression Gate
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'projects/rccl/**'
+
+# Serialise: the pinned calibration nodes can host only one A/B job at a time,
+# and thresholds are only valid there. Do NOT cancel in-progress (a running
+# allocation must finish cleanly to release the nodes).
+concurrency:
+  group: rccl-perf-gate-pinned-nodes
+  cancel-in-progress: false
+
+env:
+  RCCL_CI_ROOT: /it-share/rccl-ci
+
+jobs:
+  perf-gate:
+    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    timeout-minutes: 600
+    steps:
+      - name: Checkout PR (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build + run A/B detector (one sbatch allocation on pinned nodes)
+        id: detect
+        # Build of reference+candidate librccl and the detector run happen inside
+        # the SAME allocation (build_node=same_alloc). Don't fail here; we still
+        # want to post the report below — the final "Gate" step enforces it.
+        continue-on-error: true
+        env:
+          BUILD_RCCL: "1"
+          CANDIDATE_SRC: ${{ github.workspace }}
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          bash "${RCCL_CI_ROOT}/ci/submit_and_poll.sh" \
+            "${RCCL_CI_ROOT}/configs/ci_detect.json"
+
+      - name: Render report
+        if: always()
+        run: |
+          python3 "${RCCL_CI_ROOT}/ci/format_report.py" \
+            "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
+            --no-exit-code \
+            --output "${RUNNER_TEMP}/rccl_report.md"
+          cat "${RUNNER_TEMP}/rccl_report.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Post / update PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: rccl-perf-gate
+          path: ${{ runner.temp }}/rccl_report.md
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rccl-ab-report
+          path: |
+            /it-share/rccl-ci/ab_artifacts/ab_regression_report.json
+            /it-share/rccl-ci/ab_artifacts/ab_derived_thresholds.json
+            /it-share/rccl-ci/ab_artifacts/rccl_runs.log
+
+      - name: Gate on detector verdict
+        if: always()
+        run: |
+          # Re-derive pass/fail from the report so the job status reflects the gate.
+          python3 "${RCCL_CI_ROOT}/ci/format_report.py" \
+            "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
+            --output /dev/null
