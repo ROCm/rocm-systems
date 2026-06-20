@@ -297,11 +297,11 @@ else()
       ## Fall back to pre-built wkmi.lib
       set(WKMI_SRC_BUILD OFF CACHE INTERNAL "wkmi is built from source")
       message(STATUS "Using pre-built wkmi.lib (set WKMI_SRC_DIR to build from source)")
-      set(WKMI_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi)
+      set(WKMI_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
       if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(WKMI_LIB_PATH ${WKMI_INCLUDE_DIR}/win/dbg/wkmi.lib)
+        set(WKMI_LIB_PATH ${WKMI_INCLUDE_DIR}/win/lib/wkmi.lib)
       else()
-        set(WKMI_LIB_PATH ${WKMI_INCLUDE_DIR}/win/rel/wkmi.lib)
+        set(WKMI_LIB_PATH ${WKMI_INCLUDE_DIR}/win/lib/wkmi.lib)
       endif()
       target_include_directories(${HSAKMT_TARGET} PUBLIC
         $<BUILD_INTERFACE:${WKMI_INCLUDE_DIR}>
@@ -439,8 +439,12 @@ else()
         target_link_libraries(${HSAKMT_STATIC_DRM_TARGET} PUBLIC wkmi)
         target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${WKMI_SRC_DIR}/lib/inc)
       else()
-        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi)
-        set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
+        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC
+          $<BUILD_INTERFACE:${WKMI_INCLUDE_DIR}>
+          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hsakmt/wkmi>)
+        set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+          $<BUILD_INTERFACE:${WKMI_LIB_PATH}>
+          $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/wkmi.lib>)
       endif()
     endif()
     target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})

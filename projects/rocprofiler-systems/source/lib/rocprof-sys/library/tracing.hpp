@@ -89,17 +89,19 @@ auto&
 get_category_stack();
 
 template <typename T>
+    requires std::is_const_v<T>
 auto
 get_perfetto_string(T& name)
 {
-    if constexpr(std::is_const_v<T>)
-    {
-        return ::perfetto::StaticString{ name };
-    }
-    else
-    {
-        return ::perfetto::DynamicString{ name };
-    }
+    return ::perfetto::StaticString{ name };
+}
+
+template <typename T>
+    requires(!std::is_const_v<T>)
+auto
+get_perfetto_string(T& name)
+{
+    return ::perfetto::DynamicString{ name };
 }
 
 template <typename CategoryT, typename... Args>

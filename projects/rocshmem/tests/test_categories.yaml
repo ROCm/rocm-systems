@@ -145,6 +145,7 @@ test_categories:
       - "teamwgbarrier_.*"
       - "teamwavesync_.*"
       - "teamwgsync_.*"
+      - "teamsplit2d_.*"
 
       # Extended signal operations
       - "wgputsignal_.*"
@@ -196,6 +197,10 @@ test_categories:
       - "host_int_amo_fcswap_.*"
       - "host_amo_all_pes_.*"
       - "host_amo_self_.*"
+
+      # Tile collective tests (IPC-only)
+      - "tile_broadcast_.*"
+      - "tile_allgather_.*"
 
     labels:
       - "nightly"

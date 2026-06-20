@@ -203,30 +203,21 @@ void TeamBroadcastTester<T1>::verifyResults(size_t size) {
   int idx = 0;
   T1 expected;
 
-  /**
-   * The verification routine here requires that the
-   * PE_root value is 0 which denotes that the
-   * sending processing element is rank 0.
-   *
-   * The difference in expected values arises from
-   * the specification for broadcast where the
-   * PE_root processing element does not copy the
-   * contents from its own source to dest during
-   * the broadcast.
-   */
+  // Verify correctness: all PEs (including root) receive source 
+  // buffer data in dest buffer
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for (int i = 0; i < num_elems; i++) {
       idx = wg_id * num_elems + i;
       if constexpr (std::is_same<T1, char>::value ||
                     std::is_same<T1, signed char>::value ||
                     std::is_same<T1, unsigned char>::value) {
-        expected = static_cast<T1>('a' + wg_id + (my_pe ? n_pes : 0));
+        expected = static_cast<T1>('a' + wg_id + n_pes);
       }
       else if constexpr (std::is_floating_point<T1>::value) {
-        expected = static_cast<T1>(3.14 + wg_id + (my_pe ? n_pes : 0));
+        expected = static_cast<T1>(3.14 + wg_id + n_pes);
       }
       else if constexpr (std::is_integral<T1>::value) {
-        expected = static_cast<T1>(wg_id + (my_pe ? n_pes : 0));
+        expected = static_cast<T1>(wg_id + n_pes);
       }
       if (dest_buf[idx] != expected) {
         std::cerr << "Data validation error at idx " << idx << std::endl;
