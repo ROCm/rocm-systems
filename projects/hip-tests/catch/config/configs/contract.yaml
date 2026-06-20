@@ -174,3 +174,12 @@ contract:
   Contract_Graph_InstantiateLaunchSynchronize_Succeeds:
     <<: *level_0
     tags: [graph]
+  Contract_Occupancy_MaxActiveBlocksPerMultiprocessor_ReturnsNonNegativeValue:
+    <<: *level_0
+    tags: [occupancy]
+  Contract_Occupancy_MaxPotentialBlockSize_ReturnsUsableValues:
+    <<: *level_0
+    tags: [occupancy]
+  Contract_Occupancy_AvailableDynamicSmem_IsWithinDeviceLimit:
+    <<: *level_0
+    tags: [occupancy]
