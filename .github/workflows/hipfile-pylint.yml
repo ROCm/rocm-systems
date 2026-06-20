@@ -41,6 +41,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pylint
           python -m pip install black
+          python -m pip install pytest
           pip install -r projects/hipfile/docs/sphinx/requirements.in
 
       - name: Lint all Python files
