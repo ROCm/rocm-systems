@@ -807,7 +807,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
   *xaxis_team = ROCSHMEM_TEAM_INVALID;
 
   if (parent_team == ROCSHMEM_TEAM_INVALID) {
-    LOG_ERROR("Parent team is invaid");
+    LOG_ERROR("Parent team is invalid");
     return ROCSHMEM_ERROR;
   }
   if (xrange < 1) {

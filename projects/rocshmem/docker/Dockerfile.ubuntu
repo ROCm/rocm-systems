@@ -24,7 +24,7 @@ RUN apt-get update \
       build-essential autoconf libtool flex bison pkg-config cmake git wget curl ca-certificates \
       libibverbs-dev ibverbs-utils libibumad-dev libpci-dev librdmacm-dev rdma-core infiniband-diags \
       python3-venv \
-# OPTIONAL: reqired to use mpirun launcher
+# OPTIONAL: required to use mpirun launcher
       openssh-server \
 # OPTIONAL: required to build VLLM/DeepEP
 #      libsqlite3-dev libfmt-dev libmsgpack-dev libsuitesparse-dev \
