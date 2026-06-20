@@ -1274,7 +1274,15 @@ class TestExecutor:
             suite_args = self._normalize_mpi_args(suite_config.get("mpi_args"))
             test_args = self._normalize_mpi_args(test_config.get("mpi_args"))
 
-            mca_params = " ".join(p for p in (base_args, suite_args, test_args) if p)
+            # User-supplied extra mpi args, appended last so they override/extend
+            # whatever the config provides. Both the --mpi-args CLI flag and the
+            # RCCL_TEST_MPI_ARGS env var are honored (CLI first, then env).
+            cli_extra_args = self._normalize_mpi_args(getattr(self.args, 'mpi_args', ''))
+            env_extra_args = self._normalize_mpi_args(os.environ.get('RCCL_TEST_MPI_ARGS', ''))
+
+            mca_params = " ".join(
+                p for p in (base_args, suite_args, test_args, cli_extra_args, env_extra_args) if p
+            )
 
             mpi_args = (
                 f"-np {num_ranks} "

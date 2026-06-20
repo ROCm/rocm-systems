@@ -7,6 +7,7 @@ Test Parser Module
 Handles command-line argument parsing and test output parsing
 """
 
+import os
 import re
 import argparse
 
@@ -128,6 +129,14 @@ Examples:
             help="Select system-specific MPI args profile from config (e.g. 'ainic', 'thor2')"
         )
         self.parser.add_argument(
+            '--mpi-args',
+            type=str,
+            default='',
+            help="Extra mpirun arguments appended after the config's base/suite/test mpi_args "
+                 "(MPI tests only). Also accepts the RCCL_TEST_MPI_ARGS environment variable; "
+                 "the CLI flag and env var are both appended (CLI first)."
+        )
+        self.parser.add_argument(
             '--mpich',
             action='store_true',
             default=False,
@@ -165,6 +174,10 @@ Examples:
             print(f"Skip MPI check:    {args.skip_mpi_check}")
             print(f"Stop on rerun fail: {args.stop_on_rerun_failure}")
             print(f"System profile:    {args.system if args.system else 'none (use default MPI args)'}")
+            _cli_mpi = getattr(args, 'mpi_args', '') or ''
+            _env_mpi = os.environ.get('RCCL_TEST_MPI_ARGS', '')
+            _extra_mpi = ' '.join(p for p in (_cli_mpi, _env_mpi) if p)
+            print(f"Extra MPI args:    {_extra_mpi if _extra_mpi else 'none'}")
             print(f"MPI implementation: {'mpich' if args.mpich else 'openmpi (default)'}")
             print("="*80)
             print()
