@@ -20,6 +20,8 @@ import ctypes.util
 import glob
 import gzip
 import os
+import re
+import stat
 import sys
 
 
@@ -212,6 +214,184 @@ def hip_runtime_supports_ais():
     return hip_libraries
 
 
+SUPPORTED_FSTYPES = ("ext4", "xfs")
+
+# sysfs directory keyed by "<major>:<minor>" device numbers; overridable in tests.
+_SYS_DEV_BLOCK = "/sys/dev/block"
+
+# A whole-disk NVMe namespace block device, e.g. nvme0n1. Partitions
+# (nvme0n1p3) are resolved to their parent disk before matching.
+_NVME_NAMESPACE_RE = re.compile(r"^nvme\d+n\d+$")
+
+
+def _read_sysfs(path):
+    """
+    Read and strip a sysfs attribute, returning None if it can't be read.
+    """
+    try:
+        with open(path, "rt", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _parse_proc_mounts():
+    """
+    Yield (source, mountpoint, fstype) for each entry in /proc/mounts,
+    decoding the octal escapes (e.g. \\040 for space) used in the fields.
+    """
+    try:
+        with open("/proc/mounts", "rt", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError as exc:
+        print(f"Unable to read /proc/mounts: {exc}", file=sys.stderr)
+        return
+
+    def unescape(field):
+        return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
+
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        yield unescape(parts[0]), unescape(parts[1]), parts[2]
+
+
+def _whole_disk_sysfs(sysfs_dir):
+    """
+    Given the sysfs directory of a block device, return the sysfs directory
+    of the whole disk: if the device is a partition, step up to its parent.
+    """
+    if os.path.exists(os.path.join(sysfs_dir, "partition")):
+        return os.path.dirname(sysfs_dir)
+    return sysfs_dir
+
+
+def _collect_leaf_disks(sysfs_dir, visited, flags):
+    """
+    Walk the device stack rooted at the sysfs directory of a block device,
+    descending through device-mapper/MD "slaves", and return the sysfs
+    directories of the underlying physical whole disks.
+
+    flags is mutated as the stack is traversed: flags["lvm"] is set True if
+    any layer is an LVM device-mapper volume.
+    """
+    sysfs_dir = os.path.realpath(sysfs_dir)
+    if sysfs_dir in visited:
+        return []
+    visited.add(sysfs_dir)
+
+    # A device-mapper layer carries a dm/uuid; LVM volumes are prefixed "LVM-".
+    dm_uuid = _read_sysfs(os.path.join(sysfs_dir, "dm", "uuid"))
+    if dm_uuid is not None and dm_uuid.startswith("LVM-"):
+        flags["lvm"] = True
+
+    # Stacked devices (dm, md) expose lower devices via "slaves". Recurse.
+    slaves_dir = os.path.join(sysfs_dir, "slaves")
+    try:
+        slaves = os.listdir(slaves_dir)
+    except OSError:
+        slaves = []
+
+    if slaves:
+        leaves = []
+        for name in slaves:
+            real = os.path.realpath(os.path.join(slaves_dir, name))
+            leaves += _collect_leaf_disks(real, visited, flags)
+        return leaves
+
+    # No lower devices: this is a physical device (possibly a partition).
+    return [_whole_disk_sysfs(sysfs_dir)]
+
+
+def _inspect_filesystem(source, mountpoint, fstype):
+    """
+    Evaluate a single mounted filesystem against the AIS requirements.
+
+    Returns a dict with the mountpoint, source, fstype, a supported flag,
+    and a list of human-readable reasons it is not supported (empty when
+    supported).
+    """
+    result = {
+        "mountpoint": mountpoint,
+        "source": source,
+        "fstype": fstype,
+        "supported": False,
+        "reasons": [],
+    }
+    reasons = result["reasons"]
+
+    if fstype not in SUPPORTED_FSTYPES:
+        reasons.append(f"filesystem type {fstype} is not ext4 or xfs")
+
+    # Resolve the backing device to its sysfs node via its device number.
+    try:
+        st = os.stat(source)
+    except OSError:
+        reasons.append("unable to stat backing device")
+        return result
+
+    if not stat.S_ISBLK(st.st_mode):
+        reasons.append("not backed by a block device")
+        return result
+
+    base = os.path.join(
+        _SYS_DEV_BLOCK, f"{os.major(st.st_rdev)}:{os.minor(st.st_rdev)}"
+    )
+    if not os.path.exists(base):
+        reasons.append("backing device not found in sysfs")
+        return result
+
+    flags = {"lvm": False}
+    leaves = _collect_leaf_disks(base, set(), flags)
+
+    if flags["lvm"]:
+        reasons.append("uses LVM")
+
+    leaf_names = [os.path.basename(d) for d in leaves]
+    on_nvme = bool(leaves) and all(_NVME_NAMESPACE_RE.match(n) for n in leaf_names)
+    if not on_nvme:
+        if leaf_names:
+            reasons.append(
+                "not on an NVMe drive (backing device(s): "
+                f"{', '.join(sorted(leaf_names))})"
+            )
+        else:
+            reasons.append("not on an NVMe drive")
+
+    result["supported"] = not reasons
+    return result
+
+
+def inspect_filesystems():
+    """
+    Inspect all mounted, block-backed filesystems and return a list of
+    per-filesystem result dicts (see _inspect_filesystem). Non-block
+    pseudo-filesystems (tmpfs, proc, overlay, network mounts, etc.) are
+    skipped.
+    """
+    results = []
+    seen = set()
+    for source, mountpoint, fstype in _parse_proc_mounts():
+        # Only real block-backed filesystems have an absolute device path.
+        if not source.startswith("/"):
+            continue
+        key = (source, mountpoint)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        try:
+            if not stat.S_ISBLK(os.stat(source).st_mode):
+                continue
+        except OSError:
+            continue
+
+        results.append(_inspect_filesystem(source, mountpoint, fstype))
+
+    return results
+
+
 def amdgpu_supports_ais():
     """
     Check if kfd_ais_rw_file is in the kernel's symbol table
@@ -232,6 +412,34 @@ def amdgpu_supports_ais():
             file=sys.stderr,
         )
     return False
+
+
+def print_filesystems(filesystems, verbose):
+    """
+    Print the filesystem report. In verbose mode every filesystem is listed
+    along with the reasons any unsupported one fails; otherwise only the
+    supported filesystems are listed.
+    """
+    if not verbose:
+        print("Supported filesystems:")
+        supported_fs = [fs for fs in filesystems if fs["supported"]]
+        if not supported_fs:
+            print("\tNone")
+        for fs in supported_fs:
+            print(f"\t{fs['mountpoint']} ({fs['source']}, {fs['fstype']})")
+        return
+
+    print("Filesystems:")
+    if not filesystems:
+        print("\tNo block-backed filesystems found")
+        return
+    for fs in filesystems:
+        if fs["supported"]:
+            print(f"\t{fs['mountpoint']} ({fs['source']}, {fs['fstype']}): supported")
+            continue
+        print(f"\t{fs['mountpoint']} ({fs['source']}, {fs['fstype']}): NOT supported")
+        for reason in fs["reasons"]:
+            print(f"\t\t- {reason}")
 
 
 def main():
@@ -255,6 +463,7 @@ def main():
     args = parser.parse_args()
 
     hip_libraries = hip_runtime_supports_ais()
+    filesystems = inspect_filesystems()
 
     component_support = [
         ("Kernel P2PDMA support", kernel_supports_p2pdma()),
@@ -281,6 +490,9 @@ def main():
         print("AIS support in:")
         for name, supported in component_support:
             print(f"\t{name:<24}: {supported}")
+
+        print()
+        print_filesystems(filesystems, args.verbose)
 
     return int(not all(supported for (_, supported) in component_support))
 

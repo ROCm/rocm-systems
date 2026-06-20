@@ -22,14 +22,17 @@ def stub_checks(monkeypatch, ais_check):
     Returns a setter that fixes each component's support and the HIP library map.
     """
 
-    def configure(*, p2pdma=True, amdgpu=True, hip_libraries=None):
+    def configure(*, p2pdma=True, amdgpu=True, hip_libraries=None, filesystems=None):
         if hip_libraries is None:
             hip_libraries = {"/opt/rocm/lib/libamdhip64.so": True}
+        if filesystems is None:
+            filesystems = []
         monkeypatch.setattr(ais_check, "kernel_supports_p2pdma", lambda: p2pdma)
         monkeypatch.setattr(ais_check, "amdgpu_supports_ais", lambda: amdgpu)
         monkeypatch.setattr(
             ais_check, "hip_runtime_supports_ais", lambda: dict(hip_libraries)
         )
+        monkeypatch.setattr(ais_check, "inspect_filesystems", lambda: list(filesystems))
         monkeypatch.setattr(
             ais_check.os,
             "uname",
@@ -122,3 +125,41 @@ def test_verbose_lists_libraries(monkeypatch, capsys, stub_checks, ais_check):
 def test_quiet_and_verbose_mutually_exclusive(monkeypatch, ais_check):
     with pytest.raises(SystemExit):
         _run(monkeypatch, ais_check, ["-q", "-v"])
+
+
+def test_default_lists_supported_filesystems(
+    monkeypatch, capsys, stub_checks, ais_check, make_fs_result
+):
+    stub_checks(
+        filesystems=[
+            make_fs_result("/data", "/dev/nvme0n1p1", True),
+            make_fs_result("/", "/dev/sda2", False, ["not on an NVMe drive"]),
+        ]
+    )
+    _run(monkeypatch, ais_check, [])
+
+    out = capsys.readouterr().out
+    assert "Supported filesystems:" in out
+    assert "/data (/dev/nvme0n1p1, ext4)" in out
+    assert "/dev/sda2" not in out
+
+
+def test_verbose_lists_all_filesystems_with_reasons(
+    monkeypatch, capsys, stub_checks, ais_check, make_fs_result
+):
+    stub_checks(filesystems=[make_fs_result("/", "/dev/sda2", False, ["uses LVM"])])
+    _run(monkeypatch, ais_check, ["-v"])
+
+    out = capsys.readouterr().out
+    assert "Filesystems:" in out
+    assert "/ (/dev/sda2, ext4): NOT supported" in out
+    assert "- uses LVM" in out
+
+
+def test_unsupported_filesystem_does_not_affect_exit_code(
+    monkeypatch, stub_checks, ais_check, make_fs_result
+):
+    # All three components fine, but every filesystem unsupported -> still 0.
+    stub_checks(filesystems=[make_fs_result("/", "/dev/sda2", False, ["uses LVM"])])
+
+    assert _run(monkeypatch, ais_check, []) == 0
