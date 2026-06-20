@@ -199,7 +199,7 @@ try {
         }
     }
 
-    return backend->io(type, file, buffer, size, file_offset, buffer_offset);
+    return backend->io(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset);
 }
 catch (const DriverNotInitialized &) {
     return -hipFileDriverNotInitialized;
