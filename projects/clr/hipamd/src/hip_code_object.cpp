@@ -120,6 +120,7 @@ hipError_t DynCO::GetGlobal(const std::string& name, void** dptr, size_t* bytes)
 
 hipError_t DynCO::GetManaged(const std::string& name, void** dptr, size_t* bytes) {
   std::scoped_lock lock(dclock_);
+  IHIP_RETURN_ONFAIL(populateDynGlobalVars());
   auto it = vars_.find(name);
   if (it == vars_.end() || it->second->GetVarKind() != Var::DVK_Managed) {
     return hipErrorNotFound;
