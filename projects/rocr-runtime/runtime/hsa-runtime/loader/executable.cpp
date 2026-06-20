@@ -790,14 +790,31 @@ bool Segment::IsAddressInSegment(uint64_t addr)
   return vaddr <= addr && addr < vaddr + size;
 }
 
-void Segment::Copy(uint64_t addr, const void* src, size_t size)
+bool Segment::IsAddressInSegment(uint64_t addr, size_t copy_size)
+{
+  if (addr < vaddr) { return false; }
+  const uint64_t offset = addr - vaddr;
+  // Overflow-safe check of offset + copy_size <= size.
+  return offset <= size && copy_size <= size - offset;
+}
+
+bool Segment::Copy(uint64_t addr, const void* src, size_t size)
 {
   // loader must do copies before freezing.
   assert(!frozen);
 
   if (size > 0) {
+    // addr/size can be derived from attacker-controlled code-object fields
+    // (e.g. a relocation's section sh_addr + r_offset). Offset() only asserts
+    // the start address via IsAddressInSegment() and that assert compiles out
+    // under NDEBUG, so validate the entire destination range here to prevent a
+    // heap out-of-bounds write when loading a crafted code object.
+    if (!IsAddressInSegment(addr, size)) {
+      return false;
+    }
     owner->context()->SegmentCopy(segment, agent, ptr, Offset(addr), src, size);
   }
+  return true;
 }
 
 void Segment::Print(std::ostream& out)
@@ -1880,6 +1897,9 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
   code::RelocationSection* rsec = rel->section();
   code::Section* sec = rsec->targetSection();
   Segment* rseg = SectionSegment(agent, sec);
+  // SectionSegment() returns nullptr when no loaded segment covers the target
+  // section (crafted sh_info/sh_addr); reject rather than dereferencing it.
+  if (!rseg) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
   size_t reladdr = sec->addr() + rel->offset();
   switch (rel->type()) {
     case R_AMDGPU_V1_32_LOW:
@@ -1917,14 +1937,14 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
       switch (rel->type()) {
         case R_AMDGPU_V1_32_HIGH:
           addr32 = uint32_t((addr >> 32) & 0xFFFFFFFF);
-          rseg->Copy(reladdr, &addr32, sizeof(addr32));
+          if (!rseg->Copy(reladdr, &addr32, sizeof(addr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
           break;
         case R_AMDGPU_V1_32_LOW:
           addr32 = uint32_t(addr & 0xFFFFFFFF);
-          rseg->Copy(reladdr, &addr32, sizeof(addr32));
+          if (!rseg->Copy(reladdr, &addr32, sizeof(addr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
           break;
         case R_AMDGPU_V1_64:
-          rseg->Copy(reladdr, &addr, sizeof(addr));
+          if (!rseg->Copy(reladdr, &addr, sizeof(addr))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
           break;
         default:
           return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
@@ -1959,7 +1979,7 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
       status = context_->SamplerCreate(agent, &hsa_sampler_descriptor, &hsa_sampler);
       if (status != HSA_STATUS_SUCCESS) { return status; }
       assert(hsa_sampler.handle);
-      rseg->Copy(reladdr, &hsa_sampler, sizeof(hsa_sampler));
+      if (!rseg->Copy(reladdr, &hsa_sampler, sizeof(hsa_sampler))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2022,7 +2042,7 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
                                   NULL, // TODO: image_data?
                                   &hsa_image);
       if (status != HSA_STATUS_SUCCESS) { return status; }
-      rseg->Copy(reladdr, &hsa_image, sizeof(hsa_image));
+      if (!rseg->Copy(reladdr, &hsa_image, sizeof(hsa_image))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2046,6 +2066,9 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocationSection(hsa_agent_t agent, am
 hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa::code::Relocation *rel)
 {
   Segment* relSeg = VirtualAddressSegment(rel->offset());
+  // VirtualAddressSegment() returns nullptr when no loaded segment covers the
+  // attacker-controlled r_offset; reject rather than dereferencing it.
+  if (!relSeg) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
   uint64_t symAddr = 0;
   switch (rel->symbol()->type()) {
     case STT_OBJECT:
@@ -2053,6 +2076,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
     case STT_FUNC:
     {
       Segment* symSeg = VirtualAddressSegment(rel->symbol()->value());
+      if (!symSeg) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       symAddr = reinterpret_cast<uint64_t>(symSeg->Address(rel->symbol()->value()));
       break;
     }
@@ -2084,7 +2108,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
       }
 
       uint32_t symAddr32 = uint32_t((symAddr >> 32) & 0xFFFFFFFF);
-      relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32));
+      if (!relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2096,7 +2120,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
       }
 
       uint32_t symAddr32 = uint32_t(symAddr & 0xFFFFFFFF);
-      relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32));
+      if (!relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2108,7 +2132,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
       }
 
       uint32_t symAddr32 = uint32_t(symAddr);
-      relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32));
+      if (!relSeg->Copy(rel->offset(), &symAddr32, sizeof(symAddr32))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2119,7 +2143,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
         return HSA_STATUS_ERROR_VARIABLE_UNDEFINED;
       }
 
-      relSeg->Copy(rel->offset(), &symAddr, sizeof(symAddr));
+      if (!relSeg->Copy(rel->offset(), &symAddr, sizeof(symAddr))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
@@ -2127,7 +2151,7 @@ hsa_status_t ExecutableImpl::ApplyDynamicRelocation(hsa_agent_t agent, amd::hsa:
     {
       int64_t baseDelta = reinterpret_cast<uint64_t>(relSeg->Address(0)) - relSeg->VAddr();
       uint64_t relocatedAddr = baseDelta + rel->addend();
-      relSeg->Copy(rel->offset(), &relocatedAddr, sizeof(relocatedAddr));
+      if (!relSeg->Copy(rel->offset(), &relocatedAddr, sizeof(relocatedAddr))) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
       break;
     }
 
