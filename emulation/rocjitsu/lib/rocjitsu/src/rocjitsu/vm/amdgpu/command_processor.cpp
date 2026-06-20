@@ -660,10 +660,13 @@ CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint
     return targets;
 
   const auto &src = src_it->second;
-  if (src.cluster_size <= 1 || mcast_mask == 0) {
+  const uint32_t self_mask = cluster_multicast_rank_mask(src.cluster_rank);
+  if (mcast_mask == 0 || (src.cluster_size <= 1 && (mcast_mask & self_mask) != 0)) {
     targets.push_back({src.cu, wg_id, src.lds_base, src.cluster_rank});
     return targets;
   }
+  if (src.cluster_size <= 1)
+    return targets;
 
   for (uint32_t rank = 0; rank < src.cluster_size && rank < kClusterMulticastMaskBits; ++rank) {
     if ((mcast_mask & (1u << rank)) == 0)
@@ -679,7 +682,7 @@ CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint
     targets.push_back({peer.cu, peer_wg_id, peer.lds_base, peer.cluster_rank});
   }
 
-  if (targets.empty())
+  if (targets.empty() && (mcast_mask & self_mask) != 0)
     targets.push_back({src.cu, wg_id, src.lds_base, src.cluster_rank});
   return targets;
 }

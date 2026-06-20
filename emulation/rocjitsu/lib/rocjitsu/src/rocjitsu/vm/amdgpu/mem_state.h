@@ -24,8 +24,15 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+/// gfx1250 cluster async-to-LDS uses the low M0 bits as a destination
+/// workgroup-rank mask. Dispatch validation keeps cluster size within this
+/// architectural mask width.
 constexpr uint32_t kClusterMulticastMaskBits = 16;
 constexpr uint32_t kClusterMulticastMask = (1u << kClusterMulticastMaskBits) - 1u;
+
+constexpr uint32_t cluster_multicast_rank_mask(uint32_t cluster_rank) {
+  return cluster_rank < kClusterMulticastMaskBits ? (1u << cluster_rank) : 0u;
+}
 
 /// @brief Pipeline routing tags for AMDGPU memory instructions.
 enum MemPipelineTag : uint8_t {

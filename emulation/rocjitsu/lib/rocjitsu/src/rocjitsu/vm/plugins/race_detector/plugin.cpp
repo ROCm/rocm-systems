@@ -293,8 +293,7 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
     if (d.lds_dst) {
       uint32_t perLaneBytes = d.num_elems * d.elem_size;
       if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
-        uint32_t selfMask =
-            wf.cluster_rank() < amdgpu::kClusterMulticastMaskBits ? (1u << wf.cluster_rank()) : 0;
+        uint32_t selfMask = amdgpu::cluster_multicast_rank_mask(wf.cluster_rank());
         uint32_t peerMask = d.cluster_mcast_mask & ~selfMask;
         if (peerMask != 0)
           warn_cluster_peer_writes_ignored_once();

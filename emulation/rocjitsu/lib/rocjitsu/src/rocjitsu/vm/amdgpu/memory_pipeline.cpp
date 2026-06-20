@@ -46,7 +46,11 @@ std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavef
     if (auto *cp = cu.command_processor())
       targets = cp->cluster_lds_targets(wf.dispatch_id(), wf.wg_id(), d.cluster_mcast_mask);
   }
-  if (targets.empty())
+
+  const bool writes_self =
+      !d.cluster_multicast || d.cluster_mcast_mask == 0 ||
+      (d.cluster_mcast_mask & cluster_multicast_rank_mask(wf.cluster_rank())) != 0;
+  if (targets.empty() && writes_self)
     targets.push_back({&cu, wf.wg_id(), d.lds_base, wf.cluster_rank()});
   return targets;
 }

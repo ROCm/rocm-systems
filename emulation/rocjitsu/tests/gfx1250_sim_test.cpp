@@ -1536,6 +1536,52 @@ TEST(Gfx1250ExecutionTest, DeferredClusterLdsMulticastHoldsAsyncCounterUntilCall
   cu->set_cluster_lds_multicast_engine(nullptr);
 }
 
+TEST(Gfx1250ExecutionTest, ClusterLdsFallbackSkipsSelfWhenMaskExcludesSource) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/3, /*pc=*/0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_dispatch_id(17);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_cluster_info(/*rank=*/1, /*size=*/2);
+
+  constexpr uint64_t kGlobalAddr = 0x9100;
+  constexpr uint32_t kLoadedValue = 0xabcdef01;
+  for (uint32_t byte = 0; byte < sizeof(kLoadedValue); ++byte) {
+    sim.memory->write8(kGlobalAddr + byte,
+                       static_cast<uint8_t>((kLoadedValue >> (byte * 8)) & 0xffu));
+  }
+
+  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  state->lds_dst = true;
+  state->lds_per_lane_addr = true;
+  state->lds_base = wf->lds_base();
+  state->wf_size = 32;
+  state->lane_mask = 0x1;
+  state->exec_mask = 0x1;
+  state->cluster_multicast = true;
+  state->cluster_mcast_mask = 0x1; // Selects rank 0, not the source rank 1.
+  state->per_lane_addr[0] = kGlobalAddr;
+  state->per_lane_lds_addr[0] = wf->lds_base() + 0x20;
+
+  DeferredClusterLdsMulticastEngine deferred_engine;
+  cu->set_cluster_lds_multicast_engine(&deferred_engine);
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+
+  EXPECT_EQ(wf->wait_counters().asynccnt, 1u);
+  ASSERT_TRUE(static_cast<bool>(deferred_engine.completion));
+  EXPECT_TRUE(deferred_engine.txn.targets.empty());
+
+  deferred_engine.completion();
+  EXPECT_EQ(wf->wait_counters().asynccnt, 0u);
+  cu->set_cluster_lds_multicast_engine(nullptr);
+}
+
 TEST(Gfx1250SimulationTest, ClusterLdsTargetsCoversMasksAndLifetime) {
   constexpr uint64_t kernel_addr = 0x10000;
   constexpr uint32_t lds_bytes_per_wg = 256;
@@ -1573,8 +1619,7 @@ TEST(Gfx1250SimulationTest, ClusterLdsTargetsCoversMasksAndLifetime) {
 
   auto out_of_range =
       sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0, /*mcast_mask=*/0x4);
-  ASSERT_EQ(out_of_range.size(), 1u);
-  EXPECT_EQ(out_of_range[0].wg_id, 0u);
+  EXPECT_TRUE(out_of_range.empty());
 
   auto mixed_range =
       sim.cp()->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0, /*mcast_mask=*/0x5);
