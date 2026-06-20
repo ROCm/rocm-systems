@@ -67,6 +67,8 @@ extern "C" {
  * @defgroup batch Batch API
  *
  * @defgroup async Async API
+ *
+ * @defgroup sync Synchronous I/O API
  */
 
 // ***********************************************************************
@@ -95,7 +97,7 @@ extern "C" {
 
 /*!
  * @brief Platform-independent offset type
- * @ingroup core
+ * @ingroup sync
  */
 #ifdef _WIN32
 typedef __int64 hoff_t;
@@ -503,7 +505,7 @@ hipFileError_t hipFileBufDeregister(const void *buffer_base);
 
 /*!
  * @brief Synchronously read data from a file into a GPU buffer
- * @ingroup file
+ * @ingroup sync
  *
  * @param [in] fh            \hipfile_handle_param
  * @param [in] buffer_base   \buffer_base_param
@@ -523,7 +525,7 @@ ssize_t hipFileRead(hipFileHandle_t fh, void *buffer_base, size_t size, hoff_t f
 
 /*!
  * @brief Synchronously write data from a GPU buffer to a file
- * @ingroup file
+ * @ingroup sync
  *
  * @param [in] fh            \hipfile_handle_param
  * @param [in] buffer_base   \buffer_base_param

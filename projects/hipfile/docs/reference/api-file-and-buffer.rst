@@ -11,31 +11,12 @@ This page documents the hipFile functions and types for registering and deregist
 For a walkthrough of synchronous reads and writes using registered handles and buffers, see :doc:`/tutorials/copy-a-file`. For the synchronous read and write function signatures, see :doc:`/reference/api-synchronous-io`.
 
 
-File handle types
-*****************
+File handle and buffer types and functions
+*****************************************
 
-.. doxygenenum:: hipFileFileHandleType_t
+File handle types, the filesystem operations structure, and the functions for
+registering and deregistering file handles and GPU memory buffers with the
+hipFile driver.
 
-.. doxygenstruct:: hipFileDescr_t
-   :members:
-
-.. doxygentypedef:: hipFileHandle_t
-
-
-Filesystem operations
-*********************
-
-.. doxygenstruct:: hipFileFSOps_t
-   :members:
-
-File handle registration
-************************
-
-.. doxygenfunction:: hipFileHandleRegister
-.. doxygenfunction:: hipFileHandleDeregister
-
-Buffer registration
-*******************
-
-.. doxygenfunction:: hipFileBufRegister
-.. doxygenfunction:: hipFileBufDeregister
+.. doxygengroup:: file
+   :content-only:

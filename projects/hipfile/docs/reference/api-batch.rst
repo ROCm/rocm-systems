@@ -21,27 +21,12 @@ tear down batch handles. All batch types and functions belong to the
 For related API surfaces, see :doc:`/reference/api-synchronous-io`,
 :doc:`/reference/api-async`, and :doc:`/reference/api-errors`.
 
-Data types
-**********
+Batch I/O types and functions
+*****************************
 
-Enumerations, structures, and handles used by batch I/O operations.
+Enumerations, structures, and handles used by batch I/O operations, together
+with the functions to create, submit, poll, cancel, and destroy batch I/O
+contexts.
 
-.. doxygenenum:: hipFileOpcode_t
-.. doxygenenum:: hipFileStatus_t
-.. doxygenenum:: hipFileBatchMode_t
-.. doxygenstruct:: hipFileIOParams_t
-   :members:
-.. doxygenstruct:: hipFileIOEvents_t
-   :members:
-.. doxygentypedef:: hipFileBatchHandle_t
-
-Batch lifecycle functions
-*************************
-
-Create, submit, poll, cancel, and destroy batch I/O contexts.
-
-.. doxygenfunction:: hipFileBatchIOSetUp
-.. doxygenfunction:: hipFileBatchIOSubmit
-.. doxygenfunction:: hipFileBatchIOGetStatus
-.. doxygenfunction:: hipFileBatchIOCancel
-.. doxygenfunction:: hipFileBatchIODestroy
+.. doxygengroup:: batch
+   :content-only:

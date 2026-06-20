@@ -10,69 +10,22 @@ Functions and types for initializing and shutting down the GPU IO driver, queryi
 
 For a walkthrough of performing I/O after the driver is open, see :doc:`/tutorials/copy-a-file`.
 
-Version macros
-**************
+Driver lifecycle and properties
+*****************************
 
-.. doxygendefine:: HIPFILE_VERSION_MAJOR
-.. doxygendefine:: HIPFILE_VERSION_MINOR
-.. doxygendefine:: HIPFILE_VERSION_PATCH
+Driver property and flag types and the functions to open and close the GPU IO
+driver, query the library reference count, and query or modify driver
+properties. See the Doxygen descriptions for current implementation status.
 
-Data types
-**********
+.. doxygengroup:: driver
+   :content-only:
 
-Driver property and flag types used by the lifecycle and configuration functions.
-
-.. doxygenstruct:: hipFileDriverProps_t
-   :members:
-
-.. doxygenenum:: hipFileDriverStatusFlags_t
-.. doxygenenum:: hipFileDriverControlFlags_t
-.. doxygenenum:: hipFileFeatureFlags_t
-
-Configuration parameter enumerations
-************************************
-
-Selectors passed to the parameter getter and setter functions.
-
-.. doxygenenum:: hipFileSizeTConfigParameter_t
-.. doxygenenum:: hipFileBoolConfigParameter_t
-.. doxygenenum:: hipFileStringConfigParameter_t
-
-Driver lifecycle
-****************
-
-Open and close the GPU IO driver and query the reference count.
-
-.. doxygenfunction:: hipFileDriverOpen
-.. doxygenfunction:: hipFileDriverClose
-.. doxygenfunction:: hipFileUseCount
-
-Driver properties
-*****************
-
-Query and modify driver properties. See the Doxygen descriptions for current implementation status.
-
-.. doxygenfunction:: hipFileDriverGetProperties
-.. doxygenfunction:: hipFileDriverSetPollMode
-.. doxygenfunction:: hipFileDriverSetMaxDirectIOSize
-.. doxygenfunction:: hipFileDriverSetMaxCacheSize
-.. doxygenfunction:: hipFileDriverSetMaxPinnedMemSize
-
-Version query
-*************
-
-.. doxygenfunction:: hipFileGetVersion
-
-Configuration parameter getters
+Core versioning and configuration
 *******************************
 
-.. doxygenfunction:: hipFileGetParameterSizeT
-.. doxygenfunction:: hipFileGetParameterBool
-.. doxygenfunction:: hipFileGetParameterString
+Version macros, the offset type, configuration parameter selectors, and the
+functions to query the library version and read or write configuration
+parameters.
 
-Configuration parameter setters
-*******************************
-
-.. doxygenfunction:: hipFileSetParameterSizeT
-.. doxygenfunction:: hipFileSetParameterBool
-.. doxygenfunction:: hipFileSetParameterString
+.. doxygengroup:: core
+   :content-only:
