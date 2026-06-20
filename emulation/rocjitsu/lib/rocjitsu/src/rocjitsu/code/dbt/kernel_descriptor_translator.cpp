@@ -260,6 +260,8 @@ template <typename T>
   // so a redirected kernel descriptor entry can still be parsed.
   for (int i = 0; i < ehdr.e_shnum; ++i) {
     constexpr uint64_t executable_load_flags = SHF_ALLOC | SHF_EXECINSTR;
+    if (shdr[i].sh_type != SHT_PROGBITS)
+      continue;
     if ((shdr[i].sh_flags & executable_load_flags) != executable_load_flags)
       continue;
     if (shdr[i].sh_addr < text_vaddr)
