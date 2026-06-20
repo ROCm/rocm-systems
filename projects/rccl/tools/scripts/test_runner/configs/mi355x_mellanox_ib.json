@@ -2336,7 +2336,7 @@
           "command_args": "-o all",
           "env_variables": {
             "NCCL_OOB_NET_ENABLE": "1",
-            "NCCL_OOB_NET_IFNAME": "eth0",
+            "NCCL_OOB_NET_IFNAME": "fenic0,enp49s0f0np0",
             "NCCL_UID_STAGGER_RATE": "5000",
             "NCCL_UID_STAGGER_THRESHOLD": "128"
           }
