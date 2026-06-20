@@ -12,6 +12,7 @@ Core C++ library (`libamd_smi.so`) with Python bindings, CLI, Go shim, and Rust 
 3. **Pre-commit must pass** before review: `pip install pre-commit && pre-commit install`
 4. **Version** is defined in `include/amd_smi/amdsmi.h` (`AMDSMI_LIB_VERSION_MAJOR/MINOR/RELEASE`). CMake extracts it from there.
 5. **Excluded from formatting/linting**: `docs/`, `build/`, `esmi_ib_library/`, `third_party/`, `*.md`, `*.rst`
+6. **Agent working files are ephemeral** — write specs, plans, handoff docs, and scratch notes to `${TMPDIR:-/tmp}/amdsmi-agent-*`, never into the workspace. The only curated agent docs that belong in git are `.claude/context/CONTEXT.md` and `.claude/context/agent-flow.md`.
 
 ## Behavioral Guidelines
 
@@ -25,6 +26,11 @@ Bias toward caution over speed. For trivial tasks, use judgment.
 - If multiple interpretations exist, present them — don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask.
+
+**When asking the user to decide:**
+
+- Before surfacing a question, resolve what you can yourself (read the code, the docs, or dispatch a subagent). Only ask about things that genuinely need the user's judgment.
+- Present choices as a lettered multiple-choice list (A / B / C) with a one-line tradeoff for each, and recommend one. Default to asking in chat; only write a `/tmp` doc if the user asks for one.
 
 ### 2. Simplicity First
 

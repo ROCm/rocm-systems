@@ -148,6 +148,7 @@ TEST_F(json_config_test, resolves_output_section)
     auto j = nlohmann::json::parse(R"({
         "output": {
             "path": {"value": "/tmp/my-traces"},
+            "unified_memory_output_path": {"value": "/tmp/my-ump"},
             "time_output": {"enabled": false},
             "file_output": {"enabled": true}
         }
@@ -156,6 +157,7 @@ TEST_F(json_config_test, resolves_output_section)
     auto result = resolve_config(j);
 
     EXPECT_EQ(result.at(env_vars::OUTPUT_PATH), "/tmp/my-traces");
+    EXPECT_EQ(result.at(env_vars::UNIFIED_MEMORY_OUTPUT_PATH), "/tmp/my-ump");
     // time_output and file_output are resolved when the enabled field is present
     EXPECT_EQ(result.count(env_vars::TIME_OUTPUT), 1u);
     EXPECT_EQ(result.count(env_vars::FILE_OUTPUT), 1u);
@@ -384,6 +386,7 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
 {
     std::map<std::string, std::string> env_vars = {
         { "ROCPROFSYS_USE_ROCPD", "true" },
+        { "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH", "/tmp/my-ump" },
         { "ROCPROFSYS_NETWORK_INTERFACE", "ib0" },
         { "ROCPROFSYS_TRACE_PERIODS", "1:5,10:20" },
         { "ROCPROFSYS_PAPI_MULTIPLEXING", "true" },
@@ -392,6 +395,7 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
     auto j = env_vars_to_json_schema(env_vars);
 
     EXPECT_EQ(j["output"]["rocpd_output"]["enabled"], true);
+    EXPECT_EQ(j["output"]["unified_memory_output_path"]["value"], "/tmp/my-ump");
     EXPECT_EQ(j["advanced"]["network_interface"]["value"], "ib0");
     EXPECT_EQ(j["advanced"]["trace_periods"]["value"], "1:5,10:20");
     EXPECT_EQ(j["hardware_counters"]["papi_multiplexing"]["enabled"], true);

@@ -3856,10 +3856,17 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       // kernel dispatches (not synthetic barriers).
       ps->flags_.done_ = false;
       uint16_t hdr;
-      memcpy(&hdr, raw, sizeof(hdr));
+      memcpy(&hdr, patch.packet, sizeof(hdr));
       uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
+      // A kernel dispatch could be a vendor-specific ext-kernel-dispatch
+      // packet, identified by amd_format (byte 2).  Classify it as a dispatch so
+      // the patched last-node completion signal contributes its GPU timing like
+      // every other graph kernel node.
+      const uint8_t amdFormat = patch.packet[2];
       ps->flags_.isPacketDispatch_ =
-          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH);
+          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) ||
+          (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+           amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);

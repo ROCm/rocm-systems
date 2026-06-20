@@ -7,6 +7,7 @@
 
 #include "param.h"
 #include "checks.h"
+#include "debug.h"
 #include "comm.h"
 #include "enqueue.h"
 #include "utils.h"
@@ -19,6 +20,11 @@
 #include "os.h"
 
 #include <dlfcn.h>
+#include <limits.h>
+#include <cstring>
+#if defined(__linux__)
+#include <libgen.h>
+#endif
 
 extern ncclProfiler_t* getNcclProfiler_v1(void* lib);
 extern ncclProfiler_t* getNcclProfiler_v2(void* lib);
@@ -45,6 +51,31 @@ enum {
 static int profilerPluginStatus = profilerPluginLoadReady;
 static pid_t pid;
 
+RCCL_PARAM_DECLARE(EnableProxyTrace);
+
+typedef void (*NcclProfilerProxyTraceDumpFn)(void* profilerContext, ncclDebugLogger_t logfn);
+static NcclProfilerProxyTraceDumpFn ncclProfilerProxyTraceDumpFn = nullptr;
+
+static ncclResult_t ncclProfilerPluginLoad(void);
+
+static ncclResult_t ncclProfilerProxyTraceSiblingPath(char* out, size_t outSz) {
+#if defined(__linux__)
+  Dl_info info;
+  memset(&info, 0, sizeof(info));
+  if (dladdr((void*)&ncclProfilerPluginLoad, &info) == 0 || info.dli_fname == nullptr)
+    return ncclInvalidUsage;
+  char dirbuf[PATH_MAX];
+  snprintf(dirbuf, sizeof(dirbuf), "%s", info.dli_fname);
+  char* dir = dirname(dirbuf);
+  snprintf(out, outSz, "%s/librccl-profiler-proxytrace.so", dir);
+  return ncclSuccess;
+#else
+  (void)out;
+  (void)outSz;
+  return ncclInvalidUsage;
+#endif
+}
+
 static ncclResult_t ncclProfilerPluginLoad(void) {
   const char* profilerName;
   if (profilerPluginLoadFailed == profilerPluginStatus) {
@@ -63,6 +94,17 @@ static ncclResult_t ncclProfilerPluginLoad(void) {
       goto fail;
   }
   profilerPluginLib = ncclOpenProfilerPluginLib(profilerName);
+  if (profilerPluginLib == nullptr && rcclParamEnableProxyTrace()) {
+    char soPath[PATH_MAX];
+    if (ncclProfilerProxyTraceSiblingPath(soPath, sizeof(soPath)) == ncclSuccess) {
+      void* h = ncclOpenProfilerPluginLib(soPath);
+      if (h) {
+        profilerPluginLib = h;
+        profilerName = soPath;
+        INFO(NCCL_INIT, "PROFILER/Plugin: Loaded proxy-trace plugin from %s (RCCL_ENABLE_PROXY_TRACE=1)", soPath);
+      }
+    }
+  }
   if (profilerPluginLib == nullptr) {
     profilerPluginLib = ncclGetNetPluginLib(ncclPluginTypeProfiler);
     if (nullptr == profilerPluginLib) {
@@ -95,6 +137,8 @@ static ncclResult_t ncclProfilerPluginLoad(void) {
   }
   if (profilerName) INFO(NCCL_INIT, "Successfully loaded external profiler plugin %s", profilerName);
 
+  ncclProfilerProxyTraceDumpFn = (NcclProfilerProxyTraceDumpFn)dlsym(profilerPluginLib, "ncclProfilerProxyTraceDump");
+
   ++profilerPluginRefCount;
   profilerPluginStatus = profilerPluginLoadSuccess;
 
@@ -107,6 +151,7 @@ static ncclResult_t ncclProfilerPluginLoad(void) {
 exit:
   return ncclSuccess;
 fail:
+  ncclProfilerProxyTraceDumpFn = nullptr;
   if (profilerPluginLib) NCCLCHECK(ncclClosePluginLib(profilerPluginLib, ncclPluginTypeProfiler));
   profilerPluginLib = nullptr;
   profilerPluginStatus = profilerPluginLoadFailed;
@@ -122,6 +167,7 @@ static ncclResult_t ncclProfilerPluginUnload(void) {
     NCCLCHECK(ncclClosePluginLib(profilerPluginLib, ncclPluginTypeProfiler));
     profilerPluginLib = nullptr;
     ncclProfiler = nullptr;
+    ncclProfilerProxyTraceDumpFn = nullptr;
     profilerPluginStatus = profilerPluginLoadReady;
   }
   return ncclSuccess;
@@ -214,6 +260,7 @@ static void printProfilerEventMask(int mask) {
   if (mask & ncclProfileCeColl)       pos += sprintf(enabled + pos, "CeColl ");
   if (mask & ncclProfileCeSync)       pos += sprintf(enabled + pos, "CeSync ");
   if (mask & ncclProfileCeBatch)      pos += sprintf(enabled + pos, "CeBatch ");
+  if (mask & ncclProfileProxyDiag)    pos += sprintf(enabled + pos, "ProxyDiag ");
   INFO(NCCL_INIT, "Profiler event mask: 0x%x (%d) - Enabled: %s", mask, mask, enabled);
 }
 
@@ -522,7 +569,7 @@ ncclResult_t ncclProfilerStartProxyOpEvent(int s, struct ncclProxyArgs* args) {
   TIME_START_EVENT(proxyOpStart);
   struct ncclProxySubArgs* sub = &args->subs[s];
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0)) {
-    if (sub->eActivationMask & (ncclProfileProxyOp | ncclProfileProxyStep | ncclProfileNetPlugin)) {
+    if (sub->eActivationMask & (ncclProfileProxyOp | ncclProfileProxyStep | ncclProfileNetPlugin | ncclProfileProxyDiag)) {
       ncclProfilerEventDescr_t eDescr = { 0 };
       eDescr.type = ncclProfileProxyOp;
       eDescr.parentObj = sub->taskEventHandle;
@@ -533,6 +580,25 @@ ncclResult_t ncclProfilerStartProxyOpEvent(int s, struct ncclProxyArgs* args) {
       eDescr.proxyOp.nSteps = DIVUP(sub->nsteps, args->sliceSteps);
       eDescr.proxyOp.chunkSize = args->chunkSize * args->sliceSteps;
       eDescr.proxyOp.isSend = args->progress == ncclTransports[TRANSPORT_NET]->send.proxyProgress ? 1 : 0;
+      if (sub->eActivationMask & ncclProfileProxyDiag) {
+        eDescr.proxyOp.commHash = sub->commHash;
+        eDescr.proxyOp.opCount = (int64_t)args->opCount;
+        eDescr.proxyOp.traceFuncIdx = sub->profExtras.funcIdx;
+        eDescr.proxyOp.traceProtocol = sub->profExtras.protocol;
+        eDescr.proxyOp.tracePattern = sub->profExtras.pattern;
+        eDescr.proxyOp.traceTotalBytes = sub->profExtras.totalBytes;
+        eDescr.proxyOp.proxyNbytes = (uint32_t)sub->nbytes;
+        eDescr.proxyOp.rawProxyNsteps = sub->nsteps;
+      } else {
+        eDescr.proxyOp.commHash = 0;
+        eDescr.proxyOp.opCount = 0;
+        eDescr.proxyOp.traceFuncIdx = 0;
+        eDescr.proxyOp.traceProtocol = 0;
+        eDescr.proxyOp.tracePattern = 0;
+        eDescr.proxyOp.traceTotalBytes = 0;
+        eDescr.proxyOp.proxyNbytes = 0;
+        eDescr.proxyOp.rawProxyNsteps = 0;
+      }
       ncclProfiler->startEvent(sub->profilerContext, &sub->opEventHandle, &eDescr);
     }
   }
@@ -556,7 +622,7 @@ ncclResult_t ncclProfilerStartSendProxyStepEvent(int s, struct ncclProxyArgs* ar
   struct ncclProxySubArgs* sub = &args->subs[s];
   int step_ = DIVUP(stepId, args->sliceSteps);
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0)) {
-    if (sub->eActivationMask & (ncclProfileProxyStep | ncclProfileNetPlugin)) {
+    if (sub->eActivationMask & (ncclProfileProxyStep | ncclProfileNetPlugin | ncclProfileProxyDiag)) {
       ncclProfilerEventDescr_t eDescr = { 0 };
       eDescr.type = ncclProfileProxyStep;
       eDescr.parentObj = sub->opEventHandle;
@@ -575,7 +641,7 @@ ncclResult_t ncclProfilerStartRecvProxyStepEvent(int s, struct ncclProxyArgs* ar
   struct ncclProxySubArgs* sub = &args->subs[s];
   int step_ = DIVUP(stepId, args->sliceSteps);
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0)) {
-    if (sub->eActivationMask & (ncclProfileProxyStep | ncclProfileNetPlugin)) {
+    if (sub->eActivationMask & (ncclProfileProxyStep | ncclProfileNetPlugin | ncclProfileProxyDiag)) {
       ncclProfilerEventDescr_t eDescr = { 0 };
       eDescr.type = ncclProfileProxyStep;
       eDescr.parentObj = sub->opEventHandle;
@@ -693,6 +759,32 @@ ncclResult_t ncclProfilerRecordProxyCtrlEventState(void* eHandle, int appended, 
   }
   TIME_STOP_EVENT(proxyCtrlRecord);
   return ncclSuccess;
+}
+
+bool ncclProfilerProxyDiagEnabled(void) {
+  return COMPILER_EXPECT(ncclProfiler != NULL, 0) &&
+         (COMPILER_ATOMIC_LOAD(&ncclProfilerEventMask, std::memory_order_relaxed) & ncclProfileProxyDiag);
+}
+
+ncclResult_t ncclProfilerRecordProxyDiagState(int s, struct ncclProxyArgs* args, uint8_t counterKind, int64_t value,
+                                              int64_t value2, uint16_t flags) {
+  struct ncclProxySubArgs* sub = &args->subs[s];
+  if (!COMPILER_EXPECT(ncclProfiler != NULL, 0)) return ncclSuccess;
+  if (!(sub->eActivationMask & ncclProfileProxyDiag)) return ncclSuccess;
+  if (!sub->opEventHandle) return ncclSuccess;
+  ncclProfilerEventStateArgs_t a = { };
+  a.proxyDiag.counterKind = counterKind;
+  a.proxyDiag.value = value;
+  a.proxyDiag.value2 = value2;
+  a.proxyDiag.flags = flags;
+  ncclProfiler->recordEventState(sub->opEventHandle, ncclProfilerProxyDiagUpdate, &a);
+  return ncclSuccess;
+}
+
+void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) {
+  if (ncclProfilerProxyTraceDumpFn && profilerContext) {
+    ncclProfilerProxyTraceDumpFn(profilerContext, ncclDebugLog);
+  }
 }
 
 ncclResult_t ncclProfilerAddPidToProxyOp(struct ncclProxyOp* op) {

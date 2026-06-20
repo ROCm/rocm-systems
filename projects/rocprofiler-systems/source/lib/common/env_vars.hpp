@@ -141,7 +141,9 @@ inline constexpr const char* SHMEM_PERMIT_LIST = "ROCPROFSYS_SHMEM_PERMIT_LIST";
 inline constexpr const char* SHMEM_REJECT_LIST = "ROCPROFSYS_SHMEM_REJECT_LIST";
 
 // --- Output ---
-inline constexpr const char* OUTPUT_PATH   = "ROCPROFSYS_OUTPUT_PATH";
+inline constexpr const char* OUTPUT_PATH = "ROCPROFSYS_OUTPUT_PATH";
+inline constexpr const char* UNIFIED_MEMORY_OUTPUT_PATH =
+    "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH";
 inline constexpr const char* OUTPUT_PREFIX = "ROCPROFSYS_OUTPUT_PREFIX";
 inline constexpr const char* OUTPUT        = "ROCPROFSYS_OUTPUT";
 inline constexpr const char* OUTPUT_FILE   = "ROCPROFSYS_OUTPUT_FILE";

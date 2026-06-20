@@ -902,6 +902,19 @@ def amdsmi_get_socket_info(socket_handle):
 
 
 def amdsmi_get_processor_info(processor_handle):
+    """
+    Get a string identifier for the given processor. Wraps the same named function call.
+
+    The returned string is the processor's index as a string (for example
+    "0", "1", "2"): its zero-based position in the library's processor list, the
+    same order used by ``amdsmi_get_processor_handles``.
+
+    Parameters:
+        `processor_handle`: Handle of the processor to query.
+
+    Returns:
+        `str`: The processor index as a string.
+    """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
     processor_info = ctypes.create_string_buffer(128)

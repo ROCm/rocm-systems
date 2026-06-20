@@ -12,6 +12,7 @@ If components are missing the program exits with a non-zero exit code.
 import argparse
 import ctypes
 import ctypes.util
+import glob
 import gzip
 import os
 import sys
@@ -34,9 +35,7 @@ def kernel_supports_p2pdma():
             with opener(path, "rt") as f:
                 configs_found = True
                 for line in f:
-                    if line.startswith("CONFIG_PCI_P2PDMA=y") or line.startswith(
-                        "CONFIG_PCI_P2PDMA=m"
-                    ):
+                    if line.startswith("CONFIG_PCI_P2PDMA=y"):
                         return True
         except OSError:
             continue
@@ -46,67 +45,166 @@ def kernel_supports_p2pdma():
     return False
 
 
+def find_hip_runtimes():
+    """
+    Return a mapping of HIP runtime library paths to AIS support flags
+    (all initially False) by looking in the usual places.
+    """
+
+    # NOTE: CodeQL will be unhappy if you are not careful about paths
+    #       in this function
+
+    # Match both the unversioned symlink (shipped in the -dev package)
+    # and the versioned runtime libraries (e.g. libamdhip64.so.6), which
+    # are all that exist on runtime-only installs.
+    lib_glob = "libamdhip64.so*"
+
+    # Directories to search for HIP runtime libraries
+    search_dirs = []
+
+    # 1. Respect runtime linker paths
+    for p in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
+        if p:
+            search_dirs.append(p)
+
+    # 2. Environment variables commonly set by ROCm or modules
+    for var in ("ROCM_HOME", "ROCM_PATH", "HIP_PATH"):
+        base = os.environ.get(var)
+        if base:
+            search_dirs += [
+                os.path.join(base, "lib"),
+                os.path.join(base, "lib64"),
+            ]
+
+    # 3. Standard ROCm install paths
+    search_dirs += [
+        "/opt/rocm/lib",
+        "/opt/rocm/lib64",
+    ]
+
+    candidates = []
+
+    # Glob each search directory for versioned and unversioned libs.
+    # Clean up each directory first (removing `..`, etc. and making it
+    # absolute) to keep CodeQL happy about env-derived paths. The directory
+    # component is escaped so that glob metacharacters (*, ?, []) embedded in
+    # an env var are matched literally rather than interpreted, and only the
+    # trailing lib_glob acts as a pattern. glob.glob does not guarantee an
+    # order, so each match set is sorted for deterministic probing/printing.
+    for d in search_dirs:
+        safe_d = os.path.abspath(os.path.normpath(d))
+        if not os.path.isdir(safe_d):
+            continue
+        candidates += sorted(glob.glob(os.path.join(glob.escape(safe_d), lib_glob)))
+
+    # 4. Versioned installs (/opt/rocm-5.x, etc.)
+    candidates += sorted(glob.glob(f"/opt/rocm*/lib*/{lib_glob}"))
+
+    # 5. ROCm >= 7.11 versioned core installs (/opt/rocm/core-X.Y/lib),
+    #    where /opt/rocm is a real directory rather than a symlink.
+    candidates += sorted(glob.glob(f"/opt/rocm*/core-*/lib*/{lib_glob}"))
+
+    # 6. Fall back to the ldconfig cache, which catches installs in
+    #    non-standard prefixes registered via /etc/ld.so.conf.d
+    cached = ctypes.util.find_library("amdhip64")
+    if cached:
+        candidates.append(cached)
+
+    # Resolve, dedup, and drop paths that don't exist.
+    #
+    # Absolute paths are canonicalized with realpath so that symlinks
+    # (the unversioned .so pointing at a versioned one, or several rocm
+    # directories pointing at a single install) collapse to one entry.
+    # find_library may return a bare soname with no path to check, but
+    # CDLL can still load it by name, so it is kept as-is.
+    resolved = []
+    for path in candidates:
+        if os.path.isabs(path):
+            real = os.path.realpath(path)
+            if os.path.exists(real):
+                resolved.append(real)
+        else:
+            resolved.append(path)
+
+    # dict.fromkeys dedups while preserving insertion order.
+    return dict.fromkeys(resolved, False)
+
+
 def hip_runtime_supports_ais():
     """
-    Check if hipAmdFileRead and hipAmdFileWrite are available in HIP
-    """
-    hip_path = ctypes.util.find_library("amdhip64")
-    if hip_path is None:
-        return False
+    Check if hipAmdFileRead and hipAmdFileWrite are available in HIP.
 
-    hip = ctypes.CDLL(hip_path)
+    Returns the mapping of discovered HIP library paths to a bool
+    indicating whether that library supports AIS.
+    """
+    hip_libraries = find_hip_runtimes()
 
     hipError_t = ctypes.c_int
     hipDriverProcAddressQueryResult = ctypes.c_int
 
-    hip.hipRuntimeGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
-    hip.hipRuntimeGetVersion.restype = hipError_t
+    # Check for AIS functions in the list of found HIP libraries
+    for hip_path in hip_libraries:
 
-    hip.hipGetProcAddress.argtypes = [
-        ctypes.c_char_p,
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.c_int,
-        ctypes.c_uint64,
-        ctypes.POINTER(hipDriverProcAddressQueryResult),
-    ]
-    hip.hipGetProcAddress.restype = hipError_t
+        try:
+            hip = ctypes.CDLL(hip_path)
 
-    hip.hipGetErrorString.argtypes = [hipError_t]
-    hip.hipGetErrorString.restype = ctypes.c_char_p
+            # Resolving these symbols can raise AttributeError on a HIP runtime
+            # too old to export them (e.g. hipGetProcAddress). Treat such a
+            # library as simply not AIS-capable rather than crashing.
+            hip.hipRuntimeGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
+            hip.hipRuntimeGetVersion.restype = hipError_t
 
-    version = ctypes.c_int()
-    err = hip.hipRuntimeGetVersion(ctypes.byref(version))
-    if err != 0:
-        err_str = hip.hipGetErrorString(err).decode("utf-8")
-        print(
-            f"hipRuntimeGetVersion failed with err code {err} ({err_str})",
-            file=sys.stderr,
-        )
-        return False
+            hip.hipGetProcAddress.argtypes = [
+                ctypes.c_char_p,
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.c_int,
+                ctypes.c_uint64,
+                ctypes.POINTER(hipDriverProcAddressQueryResult),
+            ]
+            hip.hipGetProcAddress.restype = hipError_t
 
-    for symbol in [b"hipAmdFileWrite", b"hipAmdFileRead"]:
-        func_ptr = ctypes.c_void_p()
-        symbol_status = hipDriverProcAddressQueryResult()
-        err = hip.hipGetProcAddress(
-            symbol,
-            ctypes.byref(func_ptr),
-            version.value,
-            0,
-            ctypes.byref(symbol_status),
-        )
+            hip.hipGetErrorString.argtypes = [hipError_t]
+            hip.hipGetErrorString.restype = ctypes.c_char_p
+        except (OSError, AttributeError):
+            continue
+
+        version = ctypes.c_int()
+        err = hip.hipRuntimeGetVersion(ctypes.byref(version))
         if err != 0:
-            if symbol_status.value != 1:
-                symbol = symbol.decode("utf-8")
-                err_str = hip.hipGetErrorString(err).decode("utf-8")
-                print(
-                    f"hipGetProcAddress({symbol}) failed with err code"
-                    f" {err} ({err_str}) and symbolStatus"
-                    f" {symbol_status.value}",
-                    file=sys.stderr,
-                )
-            return False
+            err_bytes = hip.hipGetErrorString(err)
+            err_str = err_bytes.decode("utf-8") if err_bytes else "unknown error"
+            print(
+                f"hipRuntimeGetVersion failed for {hip_path} "
+                f"with err code {err} ({err_str})",
+                file=sys.stderr,
+            )
+            continue
 
-    return True
+        # Track whether all required AIS symbols are available in this library
+        supported = True
+
+        for symbol in [b"hipAmdFileWrite", b"hipAmdFileRead"]:
+            func_ptr = ctypes.c_void_p()
+            symbol_status = hipDriverProcAddressQueryResult()
+            err = hip.hipGetProcAddress(
+                symbol,
+                ctypes.byref(func_ptr),
+                version.value,
+                0,
+                ctypes.byref(symbol_status),
+            )
+            # A symbol is only present if the call succeeded, the query result
+            # is HIP_GET_PROC_ADDRESS_SUCCESS (0), and a non-null pointer came
+            # back. Checking all three avoids false positives across HIP
+            # implementations.
+            if err != 0 or symbol_status.value != 0 or not func_ptr.value:
+                supported = False
+                break
+
+        if supported:
+            hip_libraries[hip_path] = True
+
+    return hip_libraries
 
 
 def amdgpu_supports_ais():
@@ -139,14 +237,23 @@ def main():
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument(
         "-q", "--quiet", action="store_true", help="Silence regular output"
+    )
+    output_group.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Also list the discovered HIP libraries",
     )
     args = parser.parse_args()
 
+    hip_libraries = hip_runtime_supports_ais()
+
     component_support = [
         ("Kernel P2PDMA support", kernel_supports_p2pdma()),
-        ("HIP runtime", hip_runtime_supports_ais()),
+        ("HIP runtime", any(hip_libraries.values())),
         ("amdgpu", amdgpu_supports_ais()),
     ]
 
@@ -154,8 +261,18 @@ def main():
         u = os.uname()
         print()
         print(u.sysname, u.nodename, u.release, u.version, u.machine)
-        print()
 
+        if args.verbose:
+            print()
+            print("Found these HIP libraries (some may refer to the same library):")
+            for lib, support in hip_libraries.items():
+                if support:
+                    pretty_supported = "supported"
+                else:
+                    pretty_supported = "NOT supported"
+                print(f"\t{lib} (AIS {pretty_supported})")
+
+        print()
         print("AIS support in:")
         for name, supported in component_support:
             print(f"\t{name:<24}: {supported}")

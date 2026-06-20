@@ -14,6 +14,16 @@
 namespace rocjitsu {
 namespace rdna3 {
 
+namespace {
+
+bool has_saddr(uint32_t saddr) {
+  // LLVM prints saddr=0x7c as "off" for RDNA3 global/flat memory ops.
+  // Keep 0x7f as a no-base sentinel for older generated configs/tests.
+  return saddr != 0x7C && saddr != 0x7F;
+}
+
+} // namespace
+
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
@@ -32,7 +42,7 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
   d.exec_mask = exec;
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 20) >> 20);
   uint64_t saddr_val = 0;
-  if (inst.saddr != 0x7F) {
+  if (has_saddr(inst.saddr)) {
     uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
     saddr_val = (static_cast<uint64_t>(cu.read_sgpr(sb + 1)) << 32) | cu.read_sgpr(sb);
   }
@@ -41,7 +51,7 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
       continue;
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     uint64_t vaddr;
-    if (inst.saddr != 0x7F) {
+    if (has_saddr(inst.saddr)) {
       vaddr = cu.read_vgpr(vbase, lane);
     } else {
       vaddr =
