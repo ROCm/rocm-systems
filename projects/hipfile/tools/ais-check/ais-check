@@ -94,7 +94,11 @@ def find_hip_runtimes():
     # 4. Versioned installs (/opt/rocm-5.x, etc.)
     candidates += glob.glob(f"/opt/rocm*/lib*/{lib_glob}")
 
-    # 5. Fall back to the ldconfig cache, which catches installs in
+    # 5. ROCm >= 7.11 versioned core installs (/opt/rocm/core-X.Y/lib),
+    #    where /opt/rocm is a real directory rather than a symlink.
+    candidates += glob.glob(f"/opt/rocm*/core-*/lib*/{lib_glob}")
+
+    # 6. Fall back to the ldconfig cache, which catches installs in
     #    non-standard prefixes registered via /etc/ld.so.conf.d
     cached = ctypes.util.find_library("amdhip64")
     if cached:
@@ -158,9 +162,11 @@ def hip_runtime_supports_ais():
         version = ctypes.c_int()
         err = hip.hipRuntimeGetVersion(ctypes.byref(version))
         if err != 0:
-            err_str = hip.hipGetErrorString(err).decode("utf-8")
+            err_bytes = hip.hipGetErrorString(err)
+            err_str = err_bytes.decode("utf-8") if err_bytes else "unknown error"
             print(
-                f"hipRuntimeGetVersion failed with err code {err} ({err_str})",
+                f"hipRuntimeGetVersion failed for {hip_path} "
+                f"with err code {err} ({err_str})",
                 file=sys.stderr,
             )
             continue
@@ -221,6 +227,12 @@ def main():
     parser.add_argument(
         "-q", "--quiet", action="store_true", help="Silence regular output"
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Also list the discovered HIP libraries",
+    )
     args = parser.parse_args()
 
     hip_libraries = hip_runtime_supports_ais()
@@ -236,14 +248,15 @@ def main():
         print()
         print(u.sysname, u.nodename, u.release, u.version, u.machine)
 
-        print()
-        print("Found these HIP libraries (some may be redundant symlinks):")
-        for lib, support in hip_libraries.items():
-            if support:
-                pretty_supported = "supported"
-            else:
-                pretty_supported = "NOT supported"
-            print(f"\t{lib} (AIS {pretty_supported})")
+        if args.verbose:
+            print()
+            print("Found these HIP libraries (some may be redundant symlinks):")
+            for lib, support in hip_libraries.items():
+                if support:
+                    pretty_supported = "supported"
+                else:
+                    pretty_supported = "NOT supported"
+                print(f"\t{lib} (AIS {pretty_supported})")
 
         print()
         print("AIS support in:")
