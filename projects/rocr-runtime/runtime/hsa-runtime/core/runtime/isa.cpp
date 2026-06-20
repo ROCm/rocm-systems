@@ -250,14 +250,17 @@ const Isa *IsaRegistry::GetIsa(const std::string &full_name) {
 }
 
 const Isa *IsaRegistry::GetIsa(const Isa::Version &version, IsaFeature sramecc, IsaFeature xnack) {
+  auto feature_matches = [](IsaFeature registered, IsaFeature requested) {
+    return registered == IsaFeature::Unsupported ||
+           registered == IsaFeature::Any ||
+           registered == requested;
+  };
   auto isareg_iter = std::find_if(GetSupportedIsas().begin(),
                                   GetSupportedIsas().end(),
                                   [&](const IsaMap::value_type& isareg) {
                                     return isareg.second.GetVersion() == version &&
-                                        (isareg.second.GetSramecc() == IsaFeature::Unsupported ||
-                                         isareg.second.GetSramecc() == sramecc) &&
-                                        (isareg.second.GetXnack() == IsaFeature::Unsupported ||
-                                         isareg.second.GetXnack() == xnack);
+                                        feature_matches(isareg.second.GetSramecc(), sramecc) &&
+                                        feature_matches(isareg.second.GetXnack(), xnack);
                                   });
   return isareg_iter == GetSupportedIsas().end() ?
                                               nullptr : &isareg_iter->second;
