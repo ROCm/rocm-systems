@@ -86,10 +86,15 @@ def find_hip_runtimes():
 
     # Glob each search directory for versioned and unversioned libs.
     # Clean up each directory first (removing `..`, etc. and making it
-    # absolute) to keep CodeQL happy about env-derived paths.
+    # absolute) to keep CodeQL happy about env-derived paths. The directory
+    # component is escaped so that glob metacharacters (*, ?, []) embedded in
+    # an env var are matched literally rather than interpreted, and only the
+    # trailing lib_glob acts as a pattern.
     for d in search_dirs:
         safe_d = os.path.abspath(os.path.normpath(d))
-        candidates += glob.glob(os.path.join(safe_d, lib_glob))
+        if not os.path.isdir(safe_d):
+            continue
+        candidates += glob.glob(os.path.join(glob.escape(safe_d), lib_glob))
 
     # 4. Versioned installs (/opt/rocm-5.x, etc.)
     candidates += glob.glob(f"/opt/rocm*/lib*/{lib_glob}")
@@ -133,31 +138,34 @@ def hip_runtime_supports_ais():
     """
     hip_libraries = find_hip_runtimes()
 
+    hipError_t = ctypes.c_int
+    hipDriverProcAddressQueryResult = ctypes.c_int
+
     # Check for AIS functions in the list of found HIP libraries
     for hip_path in hip_libraries:
 
         try:
             hip = ctypes.CDLL(hip_path)
-        except OSError:
+
+            # Resolving these symbols can raise AttributeError on a HIP runtime
+            # too old to export them (e.g. hipGetProcAddress). Treat such a
+            # library as simply not AIS-capable rather than crashing.
+            hip.hipRuntimeGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
+            hip.hipRuntimeGetVersion.restype = hipError_t
+
+            hip.hipGetProcAddress.argtypes = [
+                ctypes.c_char_p,
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.c_int,
+                ctypes.c_uint64,
+                ctypes.POINTER(hipDriverProcAddressQueryResult),
+            ]
+            hip.hipGetProcAddress.restype = hipError_t
+
+            hip.hipGetErrorString.argtypes = [hipError_t]
+            hip.hipGetErrorString.restype = ctypes.c_char_p
+        except (OSError, AttributeError):
             continue
-
-        hipError_t = ctypes.c_int
-        hipDriverProcAddressQueryResult = ctypes.c_int
-
-        hip.hipRuntimeGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
-        hip.hipRuntimeGetVersion.restype = hipError_t
-
-        hip.hipGetProcAddress.argtypes = [
-            ctypes.c_char_p,
-            ctypes.POINTER(ctypes.c_void_p),
-            ctypes.c_int,
-            ctypes.c_uint64,
-            ctypes.POINTER(hipDriverProcAddressQueryResult),
-        ]
-        hip.hipGetProcAddress.restype = hipError_t
-
-        hip.hipGetErrorString.argtypes = [hipError_t]
-        hip.hipGetErrorString.restype = ctypes.c_char_p
 
         version = ctypes.c_int()
         err = hip.hipRuntimeGetVersion(ctypes.byref(version))
@@ -184,7 +192,11 @@ def hip_runtime_supports_ais():
                 0,
                 ctypes.byref(symbol_status),
             )
-            if err != 0:
+            # A symbol is only present if the call succeeded, the query result
+            # is HIP_GET_PROC_ADDRESS_SUCCESS (0), and a non-null pointer came
+            # back. Checking all three avoids false positives across HIP
+            # implementations.
+            if err != 0 or symbol_status.value != 0 or not func_ptr.value:
                 supported = False
                 break
 
@@ -224,10 +236,11 @@ def main():
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument(
         "-q", "--quiet", action="store_true", help="Silence regular output"
     )
-    parser.add_argument(
+    output_group.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -250,7 +263,7 @@ def main():
 
         if args.verbose:
             print()
-            print("Found these HIP libraries (some may be redundant symlinks):")
+            print("Found these HIP libraries (some may refer to the same library):")
             for lib, support in hip_libraries.items():
                 if support:
                     pretty_supported = "supported"
