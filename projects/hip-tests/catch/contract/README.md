@@ -14,6 +14,7 @@ The first domains are:
 - `async_transfer`: async copy visibility and invalid-kind consistency contracts
 - `memset`: byte, word, dword, and async memset contracts
 - `error_api`: error name and string API contracts without backend-specific text assumptions
+- `kernel`: tiny in-source kernel launch contracts
 
 Run the layer with:
 

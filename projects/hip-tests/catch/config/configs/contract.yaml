@@ -147,3 +147,15 @@ contract:
   Contract_ErrorApi_GetErrorStringUnknownError_ReturnsNonNullString:
     <<: *level_0
     tags: [error_api]
+  Contract_Kernel_LaunchGGL_WritesExpectedValue:
+    <<: *level_0
+    tags: [kernel]
+  Contract_Kernel_LaunchKernel_WritesExpectedValue:
+    <<: *level_0
+    tags: [kernel]
+  Contract_Kernel_GetLastErrorAfterValidLaunch_ReturnsSuccess:
+    <<: *level_0
+    tags: [kernel]
+  Contract_Kernel_InvalidConfiguration_RecordsReturnedError:
+    <<: *level_0
+    tags: [kernel]
