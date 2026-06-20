@@ -169,6 +169,9 @@ class TestRdna3Profile:
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
+    def test_has_vopd3_false(self):
+        assert self.p.has_vopd3 is False
+
 
 class TestRdna4Profile:
     def setup_method(self):
@@ -189,6 +192,9 @@ class TestRdna4Profile:
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
+    def test_has_vopd3_false(self):
+        assert self.p.has_vopd3 is False
+
 
 class TestGfx1250Profile:
     def setup_method(self):
@@ -199,6 +205,9 @@ class TestGfx1250Profile:
 
     def test_wave_size_max(self):
         assert self.p.wave_size_max == 32
+
+    def test_has_vopd3(self):
+        assert self.p.has_vopd3 is True
 
     def test_generated_arch_name(self):
         assert self.p.generated_arch_name == 'gfx1250'
