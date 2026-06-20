@@ -15,6 +15,7 @@ The first domains are:
 - `memset`: byte, word, dword, and async memset contracts
 - `error_api`: error name and string API contracts without backend-specific text assumptions
 - `kernel`: tiny in-source kernel launch contracts
+- `graph`: graph lifecycle plus simple memcpy and memset node contracts
 
 Run the layer with:
 

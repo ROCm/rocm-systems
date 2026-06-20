@@ -159,3 +159,18 @@ contract:
   Contract_Kernel_InvalidConfiguration_RecordsReturnedError:
     <<: *level_0
     tags: [kernel]
+  Contract_Graph_CreateDestroy_Succeeds:
+    <<: *level_0
+    tags: [graph]
+  Contract_Graph_AddEmptyNode_Succeeds:
+    <<: *level_0
+    tags: [graph]
+  Contract_Graph_AddMemcpyNode1D_RoundTripsBytes:
+    <<: *level_0
+    tags: [graph]
+  Contract_Graph_AddMemsetNode_FillsDeviceBuffer:
+    <<: *level_0
+    tags: [graph]
+  Contract_Graph_InstantiateLaunchSynchronize_Succeeds:
+    <<: *level_0
+    tags: [graph]
