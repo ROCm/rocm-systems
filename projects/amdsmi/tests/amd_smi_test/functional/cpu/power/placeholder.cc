@@ -20,5 +20,5 @@
  * THE SOFTWARE.
  */
 
-// Placeholder for CPU functional tests.
-// Add CPU-specific test files (e.g., power_read.{h,cc}) to this directory.
+// Placeholder for CPU power functional tests.
+// Add CPU power test files (e.g., power_read.{h,cc}) to this directory.

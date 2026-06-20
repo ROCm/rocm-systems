@@ -20,5 +20,5 @@
  * THE SOFTWARE.
  */
 
-// Placeholder for NIC and switch functional tests.
-// Add NIC/switch-specific test files (e.g., discovery_read.{h,cc}) to this directory.
+// Placeholder for CPU clock functional tests.
+// Add CPU clock test files (e.g., clk_read.{h,cc}) to this directory.
