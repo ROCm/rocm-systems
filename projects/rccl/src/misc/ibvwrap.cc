@@ -23,6 +23,11 @@ static std::once_flag initOnceFlag;
 static ncclResult_t initResult;
 struct ncclIbvSymbols ibvSymbols;
 
+#ifdef ENABLE_FAULT_INJECTION
+// Fault shims installed on the context's ops table at open/close time.
+#include "net_ib_ops_fault.h"
+#endif
+
 #ifdef ENABLE_QP_TRACKING
 #include <unordered_map>
 #include <algorithm>
@@ -151,11 +156,32 @@ const char *wrap_ibv_get_device_name(struct ibv_device *device) {
   return ibvSymbols.ibv_internal_get_device_name(device);
 }
 
-ncclResult_t wrap_ibv_open_device(struct ibv_context **ret, struct ibv_device *device) { /*returns 0 on success, -1 on failure*/
+ncclResult_t wrap_ibv_open_device(struct ibv_context **ret, struct ibv_device *device) { /*returns ncclResult_t (ncclSuccess on success)*/
+#ifdef ENABLE_FAULT_INJECTION
+  // Expand IBV_PTR_CHECK inline to install fault shims before returning.
+  CHECK_NOT_NULL(ibvSymbols, ibv_internal_open_device);
+  *ret = ibvSymbols.ibv_internal_open_device(device);
+  if (*ret == NULL) {
+    WARN("Call to ibv_open_device failed");
+    return ncclSystemError;
+  }
+  ncclResult_t installRes = ncclIbOpsFaultInstall(*ret);
+  if (installRes != ncclSuccess) {
+    ibvSymbols.ibv_internal_close_device(*ret);  // don't leak the opened device
+    *ret = NULL;
+    return installRes;
+  }
+  return ncclSuccess;
+#else
   IBV_PTR_CHECK(ibvSymbols, ibv_internal_open_device, ibv_internal_open_device(device), *ret, NULL, "ibv_open_device");
+#endif
 }
 
-ncclResult_t wrap_ibv_close_device(struct ibv_context *context) { /*returns 0 on success, -1 on failure*/
+ncclResult_t wrap_ibv_close_device(struct ibv_context *context) { /*returns ncclResult_t (ncclSuccess on success)*/
+#ifdef ENABLE_FAULT_INJECTION
+  // Restore original ops before closing so the real close sees a clean context.
+  if (context) NCCLCHECK(ncclIbOpsFaultRemove(context));
+#endif
   IBV_INT_CHECK(ibvSymbols, ibv_internal_close_device, ibv_internal_close_device(context), -1, "ibv_close_device");
 }
 

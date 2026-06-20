@@ -44,16 +44,23 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace rocprofiler
 {
@@ -419,6 +426,119 @@ get_hip_register_data()
     return _v;
 }
 
+std::vector<char>
+read_code_object_file(int fd)
+{
+    struct stat info = {};
+    if(fd < 0)
+    {
+        ROCP_CI_LOG(WARNING) << "loaded code object file descriptor is invalid: " << fd;
+        return {};
+    }
+
+    if(::fstat(fd, &info) != 0)
+    {
+        auto err = errno;
+        ROCP_CI_LOG(WARNING) << "failed to stat loaded code object file descriptor " << fd << ": "
+                             << std::strerror(err);
+        return {};
+    }
+
+    if(info.st_size <= 0)
+    {
+        ROCP_CI_LOG(WARNING) << "loaded code object file descriptor " << fd
+                             << " did not report a positive size";
+        return {};
+    }
+
+    if(static_cast<uintmax_t>(info.st_size) > std::numeric_limits<size_t>::max())
+    {
+        ROCP_CI_LOG(WARNING) << "loaded code object file descriptor " << fd
+                             << " is too large to read: " << info.st_size;
+        return {};
+    }
+
+    auto buffer = std::vector<char>(static_cast<size_t>(info.st_size));
+    auto offset = size_t{0};
+    while(offset < buffer.size())
+    {
+        const auto remaining = buffer.size() - offset;
+        const auto read_count =
+            std::min<size_t>(remaining, static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
+        const auto nread =
+            ::pread(fd, buffer.data() + offset, read_count, static_cast<off_t>(offset));
+        if(nread < 0)
+        {
+            if(errno == EINTR) continue;
+            auto err = errno;
+            ROCP_CI_LOG(WARNING) << "failed to read loaded code object file descriptor " << fd
+                                 << ": " << std::strerror(err);
+            return {};
+        }
+        if(nread == 0) break;
+        offset += static_cast<size_t>(nread);
+    }
+
+    if(offset != buffer.size())
+    {
+        ROCP_CI_LOG(WARNING) << "short read on loaded code object file descriptor " << fd
+                             << ": expected " << buffer.size() << " bytes, read " << offset;
+    }
+
+    buffer.resize(offset);
+    return buffer;
+}
+
+hip::kernel_symbol_hip_device_map_t
+get_loaded_code_object_symbol_map(const rocprofiler_callback_tracing_code_object_load_data_t& data)
+{
+    if(data.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
+    {
+        if(data.memory_base == 0 || data.memory_size == 0)
+        {
+            ROCP_CI_LOG(WARNING) << "loaded memory code object has invalid storage: memory_base="
+                                 << data.memory_base << ", memory_size=" << data.memory_size;
+            return {};
+        }
+
+        // The loader reports memory_size as uint64_t while COMGR takes a size_t byte count.
+        if(data.memory_size > std::numeric_limits<size_t>::max())
+        {
+            ROCP_CI_LOG(WARNING) << "loaded memory code object is too large to parse: "
+                                 << data.memory_size;
+            return {};
+        }
+
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        const auto* executable = reinterpret_cast<const void*>(data.memory_base);
+        return hip::get_kernel_symbol_device_name_map_from_executable(
+            executable, static_cast<size_t>(data.memory_size));
+    }
+
+    if(data.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
+    {
+        auto file_data = read_code_object_file(data.storage_file);
+        if(file_data.empty()) return {};
+        return hip::get_kernel_symbol_device_name_map_from_executable(file_data.data(),
+                                                                      file_data.size());
+    }
+
+    return {};
+}
+
+void
+populate_hip_symbol_map_from_loaded_code_object(
+    const rocprofiler_callback_tracing_code_object_load_data_t& data)
+{
+    auto symbol_map = get_loaded_code_object_symbol_map(data);
+    if(symbol_map.empty()) return;
+
+    CHECK_NOTNULL(get_hip_register_data())
+        ->wlock([&symbol_map](hip::hip_register_data& register_data) {
+            register_data.kernel_symbol_device_map.insert(symbol_map.begin(), symbol_map.end());
+        });
+}
+
 hsa_status_t
 executable_iterate_agent_symbols_load_callback(hsa_executable_t        executable,
                                                hsa_agent_t             agent,
@@ -675,6 +795,8 @@ code_object_load_callback(hsa_executable_t         executable,
     // generate a unique code object id
     data.code_object_id = ++get_code_object_id();
 
+    populate_hip_symbol_map_from_loaded_code_object(data);
+
     auto _status = ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
         executable, data.hsa_agent, executable_iterate_agent_symbols_load_callback, &code_obj_v);
 
@@ -782,30 +904,37 @@ get_hip_register_function_function()
 bool
 initialize_hip_binary_data()
 {
-    static bool is_initialized =
-        CHECK_NOTNULL(get_hip_register_data())->wlock([](hip::hip_register_data& data) {
-            ROCP_INFO_IF(!data.fat_binary) << "No binary registered for HIP";
-            if(!data.fat_binary) return false;
-            std::vector<const rocprofiler_agent_t*> rocp_agents = rocprofiler::agent::get_agents();
-            for(const auto* rocp_agent : rocp_agents)
+    static auto parsed_fat_binaries = std::unordered_set<const void*>{};
+
+    return CHECK_NOTNULL(get_hip_register_data())->wlock([](hip::hip_register_data& data) {
+        if(!data.fat_binary) return false;
+        if(parsed_fat_binaries.count(data.fat_binary) > 0) return true;
+
+        auto                                    found_mapping = false;
+        std::vector<const rocprofiler_agent_t*> rocp_agents   = rocprofiler::agent::get_agents();
+        for(const auto* rocp_agent : rocp_agents)
+        {
+            if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+            auto hsa_agent = agent::get_hsa_agent(rocp_agent);
+            if(!hsa_agent.has_value()) continue;
+            for(auto& isa : hip::get_isa_offsets(hsa_agent.value(), data.fat_binary))
             {
-                if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
-                auto hsa_agent = agent::get_hsa_agent(rocp_agent);
-                if(!hsa_agent.has_value()) continue;
-                for(auto& isa : hip::get_isa_offsets(hsa_agent.value(), data.fat_binary))
+                auto kernel_symbols_name_map =
+                    hip::get_kernel_symbol_device_name_map(isa, data.fat_binary);
+                // many to one mapping as the same kernel symbols can be found in multiple code
+                // objects
+                if(!kernel_symbols_name_map.empty())
                 {
-                    auto kernel_symbols_name_map =
-                        hip::get_kernel_symbol_device_name_map(isa, data.fat_binary);
-                    // many to one mapping as the same kernel symbols can be found in multiple code
-                    // objects
-                    if(!kernel_symbols_name_map.empty())
-                        data.kernel_symbol_device_map.insert(kernel_symbols_name_map.begin(),
-                                                             kernel_symbols_name_map.end());
+                    found_mapping = true;
+                    data.kernel_symbol_device_map.insert(kernel_symbols_name_map.begin(),
+                                                         kernel_symbols_name_map.end());
                 }
             }
-            return true;
-        });
-    return is_initialized;
+        }
+
+        if(found_mapping) parsed_fat_binaries.emplace(data.fat_binary);
+        return found_mapping;
+    });
 }
 
 // Contains all operations for tracing we do after a successful executable_freeze
@@ -814,11 +943,9 @@ initialize_hip_binary_data()
 hsa_status_t
 executable_freeze_internal(hsa_executable_t executable)
 {
-    // before iterating code-object populate the host function map from registered binary
-    bool is_initialized = initialize_hip_binary_data();
-    ROCP_INFO_IF(!is_initialized) << "hip mapping data not initialized";
-
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
+    (void) initialize_hip_binary_data();
+
     CHECK_NOTNULL(get_executables())->wlock([executable](executable_array_t& data) {
         data.emplace_back(executable);
     });
@@ -1051,11 +1178,16 @@ hip_register_fat_binary(const void* data)
 {
     const hip::hip_fat_binary_wrapper* fbwrapper =
         reinterpret_cast<const hip::hip_fat_binary_wrapper*>(data);
-    ROCP_ERROR_IF((fbwrapper->magic != hip::HIP_FAT_MAGIC || fbwrapper->version != 1))
-        << "register fat binary failed";
-    CHECK_NOTNULL(get_hip_register_data())->wlock([fbwrapper](hip::hip_register_data& reg_data) {
-        reg_data.fat_binary = fbwrapper->binary;
-    });
+    ROCP_ERROR_IF(!hip::is_valid_fat_binary_wrapper(*fbwrapper)) << "register fat binary failed";
+    // HIPK wrappers carry kpack metadata here, not a HIP fatbin. Kernel metadata is populated from
+    // the HSA loader's actual loaded code object bytes instead.
+    if(hip::has_hip_fat_binary_payload(*fbwrapper))
+    {
+        CHECK_NOTNULL(get_hip_register_data())
+            ->wlock([fbwrapper](hip::hip_register_data& reg_data) {
+                reg_data.fat_binary = fbwrapper->binary;
+            });
+    }
     return CHECK_NOTNULL(get_hip_register_fatbinary_function())(data);
 }
 

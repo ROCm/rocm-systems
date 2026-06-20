@@ -17,7 +17,12 @@ from amdisa.codegen.execute.vector_cmp import (
 )
 from amdisa.codegen.execute.simd_codegen import simd_probe_line
 from amdisa.gpuisa import Instruction, Operand
-from amdisa.isa_profile import Gfx1250Profile, Rdna4Profile
+from amdisa.isa_profile import (
+    Gfx1250Profile,
+    Rdna3_5Profile,
+    Rdna3Profile,
+    Rdna4Profile,
+)
 from amdisa.semantics import InstructionSemantics
 
 
@@ -433,19 +438,120 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     codegen.isa_spec = SimpleNamespace(
         arch_name='gfx1250',
         profile=Gfx1250Profile(),
+        operand_types={'OPR_SRC_SIMPLE'},
     )
     codegen.out_path = str(tmp_path)
 
     codegen.gen_vopd()
     cpp = (tmp_path / 'gfx1250' / 'vopd.cpp').read_text()
 
+    assert '(word0 >> 24) == 0xCF' in cpp
+    assert '[[maybe_unused]] bool vopd3' not in cpp
+    assert 'vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' in cpp
-    fma_start = cpp.index('case kVopdFmaF32: {')
+    execute_start = cpp.index('uint32_t Vopd::execute_slot')
+    fma_start = cpp.index('case kVopdFmaF32', execute_start)
     fma_case = cpp[fma_start : cpp.index('case kVopdSubNcU32:', fma_start)]
     assert 'std::fma(std::bit_cast<float>(src0),' in fma_case
     assert 'std::bit_cast<float>(src1),' in fma_case
     assert 'std::bit_cast<float>(src2))' in fma_case
+    assert 'constexpr uint16_t kVopdFmaF64 = 32;' in cpp
+    assert 'constexpr uint16_t kVopdAddF64 = 33;' in cpp
+    assert 'constexpr uint16_t kVopdMulF64 = 34;' in cpp
+    assert 'constexpr uint16_t kVopdMaxNumF64 = 35;' in cpp
+    assert 'constexpr uint16_t kVopdMinNumF64 = 36;' in cpp
+    assert 'kVopdFmacF64' not in cpp
+
+
+def test_rdna4_profile_enables_generated_vopd():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        operand_types={'OPR_SRC'},
+    )
+
+    assert codegen._supports_generated_vopd()
+
+
+def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        operand_types={'OPR_SRC'},
+    )
+    codegen.out_path = str(tmp_path)
+
+    codegen.gen_vopd()
+    cpp = (tmp_path / 'rdna4' / 'vopd.cpp').read_text()
+
+    assert 'OperandType::OPR_SRC_SIMPLE' not in cpp
+    assert 'vopd3 ? OperandType::OPR_SRC : OperandType::OPR_SRC' not in cpp
+    assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
+    assert '(word0 >> 24) == 0xCF' not in cpp
+    assert 'Format::Vopd3' not in cpp
+    assert 'kVopdAddF64' not in cpp
+    assert 'execute_slot64' not in cpp
+    assert 'constexpr uint16_t kVopdDot2AccF32F16 = 12;' in cpp
+    assert 'constexpr uint16_t kVopdDot2AccF32Bf16 = 13;' in cpp
+    assert 'constexpr uint16_t kVopdAndB32 = 18;' in cpp
+    assert 'constexpr uint16_t kVopdBitop2B32' not in cpp
+    assert 'constexpr uint16_t kVopdFmaF32' not in cpp
+    assert 'v_dual_dot2acc_f32_f16' in cpp
+    assert 'v_dual_max_num_f32' in cpp
+    assert 'v_dual_max_f32' not in cpp
+
+
+def test_rdna3_and_rdna35_vopd_generation_matches_common_profile(tmp_path):
+    generated = {}
+    for arch_name, profile in (
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+    ):
+        codegen = object.__new__(CodeGenerator)
+        codegen.isa_spec = SimpleNamespace(
+            arch_name=arch_name,
+            profile=profile,
+            operand_types={'OPR_SRC'},
+        )
+        codegen.out_path = str(tmp_path)
+
+        codegen.gen_vopd()
+        generated[arch_name] = (tmp_path / arch_name / 'vopd.cpp').read_text()
+
+    rdna3_cpp = generated['rdna3']
+    assert 'constexpr uint16_t kVopdDot2AccF32F16 = 12;' in rdna3_cpp
+    assert 'constexpr uint16_t kVopdDot2AccF32Bf16 = 13;' in rdna3_cpp
+    assert 'constexpr uint16_t kVopdAndB32 = 18;' in rdna3_cpp
+    assert 'constexpr uint16_t kVopdBitop2B32' not in rdna3_cpp
+    assert 'constexpr uint16_t kVopdFmaF32' not in rdna3_cpp
+    assert 'v_dual_max_f32' in rdna3_cpp
+    assert 'v_dual_max_num_f32' not in rdna3_cpp
+
+    normalized = {
+        arch: cpp.replace('rdna3_5', 'rdnaX').replace('rdna3', 'rdnaX')
+        for arch, cpp in generated.items()
+    }
+    assert normalized['rdna3'] == normalized['rdna3_5']
+
+
+def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1250',
+        profile=Gfx1250Profile(),
+        operand_types={'OPR_SRC'},
+    )
+    codegen.out_path = str(tmp_path)
+
+    codegen.gen_vopd()
+    cpp = (tmp_path / 'gfx1250' / 'vopd.cpp').read_text()
+
+    assert '[[maybe_unused]] bool vopd3' in cpp
+    assert 'OperandType::OPR_SRC_SIMPLE' not in cpp
+    assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
 
 
 def test_bf16_mad_mix_half_updates_read_destination_operand():

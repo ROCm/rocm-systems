@@ -145,6 +145,12 @@ declare -A TEST_NUMBERS=(
   ["host_int_amo_fcswap"]="128"
   ["host_amo_all_pes"]="129"
   ["host_amo_self"]="130"
+  ["tile_broadcast"]="131"
+  ["tile_broadcast_wave"]="132"
+  ["tile_broadcast_wg"]="133"
+  ["tile_allgather"]="134"
+  ["tile_allgather_wave"]="135"
+  ["tile_allgather_wg"]="136"
 )
 
 # Detect which runtime to use
@@ -878,6 +884,18 @@ TestTiles() {
   ExecTest  "tile_put_1d"               2       1            1
   ExecTest  "tile_get_1d"               2       1            1
   ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE
+  ExecTest  "tile_broadcast"            2       1            1
+  ExecTest  "tile_broadcast"            4       1            1
+  ExecTest  "tile_broadcast_wave"       2       1            $WAVE_SIZE
+  ExecTest  "tile_broadcast_wave"       4       1            $WAVE_SIZE
+  ExecTest  "tile_broadcast_wg"         2       4            $WAVE_SIZE
+  ExecTest  "tile_broadcast_wg"         4       4            $WAVE_SIZE
+  ExecTest  "tile_allgather"            2       1            1
+  ExecTest  "tile_allgather"            4       1            1
+  ExecTest  "tile_allgather_wave"       2       1            $WAVE_SIZE
+  ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE
+  ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE
+  ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE
 }
 
 TestHeatMapRMA() {

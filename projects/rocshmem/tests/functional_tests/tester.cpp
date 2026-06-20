@@ -72,6 +72,8 @@
 #include "library_info_tester.hpp"
 #include "fence_ordering_tester.hpp"
 #include "tile_rma_tester.hpp"
+#include "tile_broadcast_tester.hpp"
+#include "tile_allgather_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
@@ -774,6 +776,30 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Team Split 2D";
       testers.push_back(new TeamSplit2DTester(args));
       break;
+    case TileBroadcastTestType:
+      test_name = "Tile Broadcast";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
+    case TileBroadcastWaveTestType:
+      test_name = "Tile Broadcast Wave-Collective";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
+    case TileBroadcastWGTestType:
+      test_name = "Tile Broadcast Workgroup-Collective";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
+    case TileAllgatherTestType:
+      test_name = "Tile Allgather";
+      testers.push_back(new TileAllgatherTester(args));
+      break;
+    case TileAllgatherWaveTestType:
+      test_name = "Tile Allgather Wave-Collective";
+      testers.push_back(new TileAllgatherTester(args));
+      break;
+    case TileAllgatherWGTestType:
+      test_name = "Tile Allgather Workgroup-Collective";
+      testers.push_back(new TileAllgatherTester(args));
+      break;
     default:
       test_name = "Empty";
       break;
@@ -929,6 +955,12 @@ bool Tester::peLaunchesKernel() {
     case FenceOrderPutLargeSmallTestType:
     case FenceOrderFanoutTestType:
     case FenceOrderPutWaveNbiChunksTestType:
+    case TileBroadcastTestType:
+    case TileBroadcastWaveTestType:
+    case TileBroadcastWGTestType:
+    case TileAllgatherTestType:
+    case TileAllgatherWaveTestType:
+    case TileAllgatherWGTestType:
       is_launcher = true;
       break;
     case HostPutmemTestType:
