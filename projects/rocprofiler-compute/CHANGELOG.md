@@ -77,7 +77,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * PC sampling collection now runs when requested via the `pc_sampling` block alias (`--block pc_sampling`), instead of being silently skipped
 
-* Re-enabled `SQ_INSTS_DUAL_VALU_WAVE32` counter collection for gfx115x, restoring the `Instructions - Dual VALU (VOPD)` row in the WGP panel (reverts #6176).
+* The Dual VALU (VOPD) instruction mix metric is now reported for gfx115x in the WGP panel.
 
 ### Upcoming changes
 
