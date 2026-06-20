@@ -2327,13 +2327,13 @@
       "num_ranks": 8,
       "num_nodes": 1,
       "num_gpus": 8,
-      "timeout": 1500,
+      "timeout": 300,
       "command_args": "-b 8 -e 1G -f 2 -g 1 -n 3 -w 2 -c 1 -d all -o all",
       "env_variables": {}
     },
     "perf_bf16_base": {
       "extends": "perf_base",
-      "timeout": 1500,
+      "timeout": 300,
       "command_args": "-b 1K -e 1G -f 1024 -g 1 -n 5 -w 2 -c 1 -d bfloat16"
     },
     "default_collectives": {
