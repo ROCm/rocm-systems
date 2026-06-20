@@ -63,7 +63,7 @@ if(
     # rocm-systems monorepo) where .git is not under PROJECT_SOURCE_DIR
     execute_process(
         COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
         OUTPUT_VARIABLE ROCPROFSYS_GIT_REVISION
         OUTPUT_STRIP_TRAILING_WHITESPACE
         RESULT_VARIABLE _GIT_REVISION_RESULT
@@ -75,7 +75,7 @@ if(
         # reporting a stale/nearest tag name that does not identify the source
         execute_process(
             COMMAND ${GIT_EXECUTABLE} describe --tags --exact-match
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
             OUTPUT_VARIABLE ROCPROFSYS_GIT_DESCRIBE
             OUTPUT_STRIP_TRAILING_WHITESPACE
             RESULT_VARIABLE _GIT_DESCRIBE_RESULT
