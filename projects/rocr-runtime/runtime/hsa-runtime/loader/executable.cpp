@@ -186,11 +186,17 @@ static const char *LOADER_DUMP_PREFIX = "amdcode";
 // rewritten so dispatch lands in the stub first.
 //
 // The jump is absolute (the pool is not within S_BRANCH range of the code), so
-// the stub does a global cache writeback (SCOPE_CU) and a v_nop, then loads the
-// 64-bit entry address into a scratch SGPR pair and sets PC.
+// the stub loads the 64-bit entry address into a scratch SGPR pair and sets PC.
 // s[100:101] is a safe fixed scratch: RDNA gives every wave 128 physical SGPRs and
 // these indices are well above the preloaded user+system SGPRs (<= ~20), so they
 // are never a live kernel input -- the kernel writes them before it reads them.
+//
+// Dual entry points: a kernel exposes two entries, at E and E+256, where E is
+// kd + kernel_code_entry_byte_offset. Consumers of the second entry compute it as
+// (descriptor entry) + 256, so after we point the descriptor at the stub the two
+// stub entries must keep the same 256-byte spacing. We therefore reserve a
+// 512-byte slot per kernel: stub[0] (at slot+0) jumps to E, stub[1] (at slot+256)
+// jumps to E+256. The descriptor is rewritten to land on stub[0].
 //
 // gfx1250 encodings verified with: llvm-mc --arch=amdgcn --mcpu=gfx1250 --show-encoding
 //   global_wb   <scope:SCOPE_CU>       ->   0xEE0B007C, 0x00000000, 0x00000000
@@ -200,6 +206,10 @@ static const char *LOADER_DUMP_PREFIX = "amdcode";
 //   s_set_pc_i64 s[100:101]             ->  0xBE804864
 //   s_code_end   (padding)              ->  0xBF9F0000
 static constexpr size_t kTrampolineStubStride = AMD_ISA_ALIGN_BYTES;        // 256: one stub, entry-aligned
+static constexpr size_t kTrampolineEntriesPerKernel = 2;                    // entries at E and E+256
+static constexpr size_t kTrampolineEntrySpacing = AMD_ISA_ALIGN_BYTES;      // 256: matches kernel's E..E+256
+static constexpr size_t kTrampolineSlotStride =
+    kTrampolineStubStride * kTrampolineEntriesPerKernel;                    // 512 per kernel
 
 static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
   auto* w = reinterpret_cast<uint32_t*>(buf);
@@ -1482,7 +1492,7 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
 
 hsa_status_t ExecutableImpl::InstallTrampolinesGfx1250(hsa_agent_t agent) {
   const size_t n = kd_fixups_.size();
-  const size_t pool = n * kTrampolineStubStride;
+  const size_t pool = n * kTrampolineSlotStride;
 
   // AMDGPU_HSA_SEGMENT_CODE_AGENT yields *executable* device memory: the loader
   // context backs it with RegionMemory(..., is_code=true), which sets
@@ -1499,18 +1509,24 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx1250(hsa_agent_t agent) {
 
   for (size_t i = 0; i < n; ++i) {
     const KdFixup& f = kd_fixups_[i];
-    const uint64_t stub_off = i * kTrampolineStubStride;
+    const uint64_t slot_off = i * kTrampolineSlotStride;
     // Device addresses are valid pre-Freeze (RegionMemory::ptr_ is set at alloc).
     const uint64_t kd_dev    = reinterpret_cast<uint64_t>(f.code_seg->Address(f.kd_vaddr));
     const uint64_t entry_dev = reinterpret_cast<uint64_t>(f.code_seg->Address(f.kd_vaddr + f.entry_off));
-    const uint64_t stub_dev  = reinterpret_cast<uint64_t>(tramp->Address(stub_off));
 
-    uint8_t blob[kTrampolineStubStride];
-    BuildTrampolineGfx1250(blob, entry_dev);    // stub jumps to the real entry
-    tramp->Copy(stub_off, blob, sizeof(blob));  // -> trampoline host shadow
+    // Emit one stub per kernel entry, preserving the E..E+256 spacing: stub[e] is
+    // at slot+e*256 and jumps to entry_dev + e*256.
+    for (size_t e = 0; e < kTrampolineEntriesPerKernel; ++e) {
+      const uint64_t stub_off = slot_off + e * kTrampolineEntrySpacing;
+      uint8_t blob[kTrampolineStubStride];
+      BuildTrampolineGfx1250(blob, entry_dev + e * kTrampolineEntrySpacing);
+      tramp->Copy(stub_off, blob, sizeof(blob));  // -> trampoline host shadow
+    }
 
-    // Redirect dispatch onto the stub: kernel_object(kd_dev) + new_off == stub.
-    int64_t new_off = static_cast<int64_t>(stub_dev) - static_cast<int64_t>(kd_dev);
+    // Redirect dispatch onto stub[0]: kernel_object(kd_dev) + new_off == stub[0],
+    // so the second-entry consumer's (stub[0] + 256) lands on stub[1].
+    const uint64_t stub0_dev = reinterpret_cast<uint64_t>(tramp->Address(slot_off));
+    int64_t new_off = static_cast<int64_t>(stub0_dev) - static_cast<int64_t>(kd_dev);
     f.code_seg->Copy(f.kd_vaddr + llvm::amdhsa::KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET,
                      &new_off, sizeof(new_off)); // -> code host shadow
   }
