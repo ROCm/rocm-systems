@@ -1123,6 +1123,66 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   EXPECT_EQ(rodata_word, 0xA5A55A5Au);
 }
 
+TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
+  using namespace rocr::llvm::amdhsa;
+
+  const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+  const Section *rodata = find_section(co, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  ASSERT_GE(rodata->size(), sizeof(kernel_descriptor_t));
+
+  auto patched_rsrc1 = [&](rj_code_arch_t arch) -> std::optional<uint32_t> {
+    AmdGpuCodeObject local_co(image.data(), image.size());
+    if (!local_co.is_valid())
+      return std::nullopt;
+
+    KdTranslation translation{};
+    translation.descriptor_file_offset = rodata->sectionOffset();
+    translation.target_wave_size = 32;
+
+    CodeObjectPatcher patcher(local_co);
+    if (!patcher.apply_kernel_descriptor_translation(translation, arch))
+      return std::nullopt;
+
+    const auto patched_image = patcher.emit();
+    const auto *kd = reinterpret_cast<const kernel_descriptor_t *>(
+        patched_image.data() + translation.descriptor_file_offset);
+    return kd->compute_pgm_rsrc1;
+  };
+
+  const auto cdna3_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(cdna3_rsrc1.has_value());
+  EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 0u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 0u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*cdna3_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 0u);
+
+  const auto rdna3_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_TRUE(rdna3_rsrc1.has_value());
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+
+  const auto rdna3_5_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_TRUE(rdna3_5_rsrc1.has_value());
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna3_5_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+
+  const auto rdna4_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(rdna4_rsrc1.has_value());
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+
+  const auto gfx1250_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(gfx1250_rsrc1.has_value());
+  EXPECT_EQ(AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 0u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
+}
+
 TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
   constexpr uint64_t load_align = 0x1000;
   constexpr uint64_t padded_file_delta = 2 * load_align;

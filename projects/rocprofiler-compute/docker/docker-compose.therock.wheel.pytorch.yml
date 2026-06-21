@@ -1,9 +1,9 @@
 services:
-  rocprofiler-compute-<username>: # service name
+  rocprofiler-compute-therock-wheel-pytorch-<username>: # service name
     build:
       context: ../../../
-      dockerfile: projects/rocprofiler-compute/docker/Dockerfile.customrocmtest
-    image: rocprofiler-compute-<username>
+      dockerfile: projects/rocprofiler-compute/docker/Dockerfile.therock.wheel.pytorch
+    image: rocprofiler-compute-therock-wheel-pytorch-<username>
     # Uncomment for environments using ROCR_VISIBLE_DEVICES env. var. to forward it to container
     # environment:
     #   ROCR_VISIBLE_DEVICES: ${ROCR_VISIBLE_DEVICES}

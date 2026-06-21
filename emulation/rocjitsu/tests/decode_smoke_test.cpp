@@ -23,11 +23,22 @@
 ///                                     (GFX11/12: op=1 is s_setkill; s_endpgm moved to op=48)
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/vopd.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/except.h"
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <bit>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -107,6 +118,230 @@ INSTANTIATE_TEST_SUITE_P(
       name += "_";
       name += info.param.expected_mnemonic;
       return name;
+    });
+
+struct VopdDecodeCase {
+  rj_code_arch_t arch;
+  const char *arch_name;
+  const char *case_name;
+  std::array<uint32_t, 3> words;
+  int expected_size_bytes;
+  const char *expected_mnemonic;
+  const char *expected_disasm_substring;
+};
+
+constexpr uint16_t vopd_src0_vgpr(uint16_t reg) { return 256 + reg; }
+
+constexpr std::array<uint32_t, 3>
+make_vopdxy_pair(uint8_t opx, uint8_t opy, uint16_t srcx0 = vopd_src0_vgpr(1), uint8_t vsrcx1 = 2,
+                 uint16_t srcy0 = vopd_src0_vgpr(3), uint8_t vsrcy1 = 4, uint8_t vdstx = 0,
+                 uint8_t vdsty = 1, uint32_t literal = 0) {
+  return {
+      (0x32u << 26) | ((static_cast<uint32_t>(opx) & 0xFu) << 22) |
+          ((static_cast<uint32_t>(opy) & 0x1Fu) << 17) | (static_cast<uint32_t>(vsrcx1) << 9) |
+          (srcx0 & 0x1FFu),
+      (static_cast<uint32_t>(vdstx) << 24) | (static_cast<uint32_t>(vdsty >> 1) << 17) |
+          (static_cast<uint32_t>(vsrcy1) << 9) | (srcy0 & 0x1FFu),
+      literal,
+  };
+}
+
+class RdnaVopdDecodeSmokeTest : public ::testing::TestWithParam<VopdDecodeCase> {};
+
+TEST_P(RdnaVopdDecodeSmokeTest, DecodesDualSlotForms) {
+  const auto &tc = GetParam();
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr) << tc.arch_name;
+
+  std::unique_ptr<Instruction> inst(decoder->decode(tc.words.data()));
+  ASSERT_NE(inst, nullptr) << tc.arch_name << " " << tc.case_name;
+  EXPECT_EQ(inst->mnemonic(), tc.expected_mnemonic);
+  EXPECT_EQ(inst->size(), tc.expected_size_bytes);
+
+  std::string disasm = inst->disassemble();
+  EXPECT_NE(disasm.find(tc.expected_disasm_substring), std::string::npos) << disasm;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RdnaVopd, RdnaVopdDecodeSmokeTest,
+    ::testing::Values(
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", "vopdxy", make_vopdxy_pair(9, 8), 8,
+                       "v_dual_cndmask_b32 :: v_dual_mov_b32", "v_dual_cndmask_b32"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA3,
+                       "rdna3",
+                       "literal",
+                       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+                       12,
+                       "v_dual_mul_f32 :: v_dual_mov_b32",
+                       "0x4f7ffffe"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", "max_min", make_vopdxy_pair(10, 11), 8,
+                       "v_dual_max_f32 :: v_dual_min_f32", "v_dual_min_f32"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", "dot_and", make_vopdxy_pair(12, 18), 8,
+                       "v_dual_dot2acc_f32_f16 :: v_dual_and_b32", "v_dual_and_b32"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", "dot_bf16_add", make_vopdxy_pair(13, 16),
+                       8, "v_dual_dot2acc_f32_bf16 :: v_dual_add_nc_u32",
+                       "v_dual_dot2acc_f32_bf16"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", "vopdxy", make_vopdxy_pair(9, 8), 8,
+                       "v_dual_cndmask_b32 :: v_dual_mov_b32", "v_dual_cndmask_b32"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA3_5,
+                       "rdna3_5",
+                       "literal",
+                       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+                       12,
+                       "v_dual_mul_f32 :: v_dual_mov_b32",
+                       "0x4f7ffffe"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", "max_min", make_vopdxy_pair(10, 11),
+                       8, "v_dual_max_f32 :: v_dual_min_f32", "v_dual_min_f32"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", "dot_and", make_vopdxy_pair(12, 18),
+                       8, "v_dual_dot2acc_f32_f16 :: v_dual_and_b32", "v_dual_and_b32"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", "dot_bf16_add",
+                       make_vopdxy_pair(13, 16), 8, "v_dual_dot2acc_f32_bf16 :: v_dual_add_nc_u32",
+                       "v_dual_dot2acc_f32_bf16"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", "vopdxy", make_vopdxy_pair(9, 8), 8,
+                       "v_dual_cndmask_b32 :: v_dual_mov_b32", "v_dual_cndmask_b32"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA4,
+                       "rdna4",
+                       "literal",
+                       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+                       12,
+                       "v_dual_mul_f32 :: v_dual_mov_b32",
+                       "0x4f7ffffe"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", "max_min", make_vopdxy_pair(10, 11), 8,
+                       "v_dual_max_num_f32 :: v_dual_min_num_f32", "v_dual_min_num_f32"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", "dot_and", make_vopdxy_pair(12, 18), 8,
+                       "v_dual_dot2acc_f32_f16 :: v_dual_and_b32", "v_dual_and_b32"},
+        VopdDecodeCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", "dot_bf16_add", make_vopdxy_pair(13, 16),
+                       8, "v_dual_dot2acc_f32_bf16 :: v_dual_add_nc_u32",
+                       "v_dual_dot2acc_f32_bf16"}),
+    [](const ::testing::TestParamInfo<VopdDecodeCase> &info) {
+      std::string name = info.param.arch_name;
+      name += "_";
+      name += info.param.case_name;
+      return name;
+    });
+
+struct InvalidVopdDecodeCase {
+  rj_code_arch_t arch;
+  const char *arch_name;
+  std::array<uint32_t, 3> words;
+};
+
+class RdnaInvalidVopdDecodeSmokeTest : public ::testing::TestWithParam<InvalidVopdDecodeCase> {};
+
+TEST_P(RdnaInvalidVopdDecodeSmokeTest, DoesNotClaimVopd3Encoding) {
+  const auto &tc = GetParam();
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr) << tc.arch_name;
+
+  switch (tc.arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    EXPECT_FALSE(
+        rdna3::Vopd::is_vopd(reinterpret_cast<const rdna3::MachineInst *>(tc.words.data())));
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    EXPECT_FALSE(
+        rdna3_5::Vopd::is_vopd(reinterpret_cast<const rdna3_5::MachineInst *>(tc.words.data())));
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    EXPECT_FALSE(
+        rdna4::Vopd::is_vopd(reinterpret_cast<const rdna4::MachineInst *>(tc.words.data())));
+    break;
+  default:
+    FAIL() << "unexpected test arch";
+  }
+
+  EXPECT_THROW(static_cast<void>(decoder->decode(tc.words.data())), util::InvalidInst)
+      << tc.arch_name << " should reserve the 0xCF VOPD3 prefix";
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RdnaVopd, RdnaInvalidVopdDecodeSmokeTest,
+    ::testing::Values(
+        InvalidVopdDecodeCase{
+            ROCJITSU_CODE_ARCH_RDNA3, "rdna3", {0xCF455083u, 0x00000086u, 0x0A000001u}},
+        InvalidVopdDecodeCase{
+            ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", {0xCF455083u, 0x00000086u, 0x0A000001u}},
+        InvalidVopdDecodeCase{
+            ROCJITSU_CODE_ARCH_RDNA4, "rdna4", {0xCF455083u, 0x00000086u, 0x0A000001u}}),
+    [](const ::testing::TestParamInfo<InvalidVopdDecodeCase> &info) {
+      return std::string(info.param.arch_name);
+    });
+
+struct RdnaVopdExecutionCase {
+  rj_code_arch_t arch;
+  const char *arch_name;
+};
+
+class RdnaVopdExecutionSmokeTest : public ::testing::TestWithParam<RdnaVopdExecutionCase> {};
+
+TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
+  const auto &tc = GetParam();
+  constexpr uint32_t kSrc0 = 0x3F800001u;
+  constexpr uint32_t kSrc1 = 0x3F7FFFFFu;
+  constexpr uint32_t kLiteralAddend = 0xBF800000u;
+  constexpr uint32_t kQuietNan = 0x7FC00000u;
+  constexpr uint32_t kPositiveZero = 0x00000000u;
+  constexpr uint32_t kNegativeZero = 0x80000000u;
+  constexpr uint32_t kFmaakOp = 1;
+  constexpr uint32_t kMulDx9ZeroOp = 7;
+  constexpr uint32_t kFmaDst = 4;
+  constexpr uint32_t kDx9Dst = 5;
+  constexpr uint64_t kExecMask = 0xFFFF'FFFFULL;
+
+  const auto words = make_vopdxy_pair(kFmaakOp, kMulDx9ZeroOp, vopd_src0_vgpr(0), 1,
+                                      vopd_src0_vgpr(2), 3, kFmaDst, kDx9Dst, kLiteralAddend);
+  const uint32_t expected_fma =
+      std::bit_cast<uint32_t>(std::fma(std::bit_cast<float>(kSrc0), std::bit_cast<float>(kSrc1),
+                                       std::bit_cast<float>(kLiteralAddend)));
+  ASSERT_EQ(expected_fma, 0x337FFFFEu);
+
+  amdgpu::GpuMemory gpu_mem(std::string(tc.arch_name) + "_vopd_exec_mem");
+  amdgpu::L2Cache l2(std::string(tc.arch_name) + "_vopd_exec_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = tc.arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu =
+      amdgpu::ComputeUnitCore::create(std::string(tc.arch_name) + "_vopd_exec", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(kExecMask);
+
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vb + 0, lane, kSrc0);
+    cu->write_vgpr(vb + 1, lane, kSrc1);
+    cu->write_vgpr(vb + 2, lane, kQuietNan);
+    cu->write_vgpr(vb + 3, lane, (lane & 1u) ? kNegativeZero : kPositiveZero);
+    cu->write_vgpr(vb + kFmaDst, lane, 0xDEADBEEFu);
+    cu->write_vgpr(vb + kDx9Dst, lane, 0xDEADBEEFu);
+  }
+
+  cu->execute_instruction(inst.get(), *wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    EXPECT_EQ(cu->read_vgpr(vb + kFmaDst, lane), expected_fma) << tc.arch_name << " lane " << lane;
+    EXPECT_EQ(cu->read_vgpr(vb + kDx9Dst, lane), kPositiveZero) << tc.arch_name << " lane " << lane;
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RdnaVopd, RdnaVopdExecutionSmokeTest,
+    ::testing::Values(RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"}),
+    [](const ::testing::TestParamInfo<RdnaVopdExecutionCase> &info) {
+      return std::string(info.param.arch_name);
     });
 
 // ---------------------------------------------------------------------------
