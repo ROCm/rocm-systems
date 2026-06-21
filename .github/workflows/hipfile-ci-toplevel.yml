@@ -254,3 +254,20 @@ jobs:
     uses: ./.github/workflows/hipfile-codeql.yml
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
+
+  # Sanitizer-instrumented unit tests are clang-only and platform/standard
+  # independent, so run them exactly once against a single fixed image rather
+  # than fanning out across the build matrix. Change the image key below to
+  # retarget the ROCm version (the combo must exist in Precheck's matrix).
+  sanitizers:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    uses: ./.github/workflows/hipfile-sanitizers.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
