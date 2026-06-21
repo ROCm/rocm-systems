@@ -1310,9 +1310,17 @@ hsaKmtModelEnabled(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtHandleImport(
-    const HsaExternalHandleDesc* ImportDesc,
+    const HsaHandleImportDesc* ImportDesc,
     HsaHandleImportResult* ImportResult,
     HsaHandleImportFlags* Flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtHandleExport(
+    const HsaHandleExportDesc* ExportDesc,
+    HsaMemoryExportResult* ExportResult,
+    HsaHandleExportFlags* Flags
 );
 
 HSAKMT_STATUS
@@ -1352,8 +1360,15 @@ HSAKMTAPI
 hsaKmtMemoryGetCpuAddr(
   HsaAMDGPUDeviceHandle DeviceHandle,
   HsaMemoryObjectHandle MemoryHandle,
-  HSAint32* fd, // OUT
-  HSAuint64* cpu_addr // OUT
+  HSAuint64* cpu_addr, // OUT for newer ROCr; legacy ROCr passes HSAint32* fd here
+  ...
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetAmdGPUDeviceFd(
+  HsaAMDGPUDeviceHandle DeviceHandle, // IN
+  int *fd // OUT
 );
 
 /**

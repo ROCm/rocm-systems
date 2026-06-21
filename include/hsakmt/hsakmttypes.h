@@ -356,6 +356,7 @@ typedef struct _HsaNodeProperties
     HSAuint32       LuidLowPart;       // Windows Locally Unique Identifier Low 4 bytes
     HSAuint32       LuidHighPart;      // Windows Locally Unique Identifier High 4 bytes
     HSAuint64       WallClockKHz;      // Wall Clock Frequency in KHz
+    HSAuint32       FabricHandleSupported; // 0 - not supported, 1 - supported
 } HsaNodeProperties;
 
 
@@ -1541,26 +1542,52 @@ typedef enum _HsaMemoryMapFlags {
 typedef enum _HsaExternalHandleType{
     HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME = 0,
     HSA_EXTERNAL_HANDLE_KMS     = 1,
-    HSA_EXTERNAL_HANDLE_DMA_BUF = 2
+    HSA_EXTERNAL_HANDLE_DMA_BUF = 2,
+    HSA_EXTERNAL_HANDLE_FABRIC  = 3
 } HsaExternalHandleType;
 
-typedef struct _HsaExternalHandleDesc {
+typedef struct _HsaFabricHandle {
+    HSAuint64   handle[2];
+} HsaFabricHandle;
+
+typedef struct _HsaHandleImportDesc {
     HsaAMDGPUDeviceHandle device_handle; // GPU device handle (used for import only)
-    HSAint64 fd; // dmabuf fd
     HsaExternalHandleType type; // handle type
+    union {
+        HSAint64 dmabuf_fd; // dmabuf fd
+        HsaMemoryObjectHandle buf_handle; // Driver handle
+        HsaFabricHandle fabric; // fabric handle
+    };
     void *mem; // existing buffer address (for windows and WSL only)
     HSAuint32 metadata; // Used for IPC handles
-} HsaExternalHandleDesc;
+} HsaHandleImportDesc;
 
 typedef struct _HsaHandleImportResult {
-    HsaMemoryObjectHandle buf_handle; // Thunk buffer object handle
+    HsaMemoryObjectHandle buf_handle; // Buffer Object handle
+    HSAint32 dmabuf_fd; // dmabuf fd created while importing a fabric handle
     HSAuint64 alloc_size; // allocation size for import
     HSAuint32 metadata; // Used for IPC handles
 } HsaHandleImportResult;
 
+typedef struct _HsaHandleExportDesc {
+    HsaAMDGPUDeviceHandle device_handle; // GPU device handle
+    HsaExternalHandleType type; // handle type
+    HsaMemoryObjectHandle buf_handle; // Thunk buffer object handle
+    HSAuint64 size; // allocation size
+} HsaHandleExportDesc;
+
 typedef struct _HsaMemoryExportResult {
-    HSAint32 fd; // dmabuf fd
+    union {
+        HSAint32 dmabuf_fd; // dmabuf fd
+        HsaFabricHandle fabric; // fabric handle
+    };
 } HsaMemoryExportResult;
+
+typedef struct _HsaHandleExportFlags {
+    struct {
+        unsigned int Reserved : 32;
+    } ui32;
+} HsaHandleExportFlags;
 
 typedef struct _HsaHandleImportFlags {
     struct {
@@ -1574,7 +1601,7 @@ typedef struct _HsaHandleImportFlags {
 typedef struct _HsaStructureSizes {
   HSAuint16 StructureSizes;           // sizeof(HsaStructureSizes) used for check overflow
   HSAuint16 SizeOfHsaNodeProperties;  // sizeof(HsaNodeProperties)
-  HSAuint16 SizeOfHsaExternalHandleDesc; // sizeof(HsaExternalHandleDesc)
+  HSAuint16 SizeOfHsaExternalHandleDesc; // Historical name; sizeof(HsaHandleImportDesc)
   HSAuint16 Reserved[5];
 } HsaStructureSizes;
 

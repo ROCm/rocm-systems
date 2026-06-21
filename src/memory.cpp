@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <cstdarg>
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
@@ -37,6 +38,10 @@
 #include "memory_allocation_registry.h"
 
 using rocdxg::Allocation;
+
+static bool rocr_uses_fabric_handle_import_abi(HSAuint16 desc_size) {
+  return desc_size >= sizeof(HsaHandleImportDesc);
+}
 
 static rocdxg::AllocationRegistry &allocation_registry() {
   return dxg_runtime().Allocations();
@@ -515,7 +520,7 @@ hsaKmtGetMemoryHandle(void *MemoryAddress, HSAuint64 SizeInBytes,
 	return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_desc,
+HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_desc,
     HsaHandleImportResult* import_res, HsaHandleImportFlags* flags)
 {
     CHECK_DXG_OPEN();
@@ -524,11 +529,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
     HsaExternalHandleType etype;
     amdgpu_device_handle devhandle;
     HSAuint16 desc_size = detected_abi_.SizeOfHsaExternalHandleDesc;
-    if (desc_size == sizeof(HsaExternalHandleDesc)) {
-        // Current layout: int64 fd + mem field
-        devhandle = (amdgpu_device_handle)import_desc->device_handle;
-        fd = (HSAint32)import_desc->fd;
-        etype = import_desc->type;
+    if (rocr_uses_fabric_handle_import_abi(desc_size)) {
+        // Newer layout (PR #6471): type precedes a union{dmabuf_fd/buf_handle/fabric}
+        auto *newer = reinterpret_cast<const HsaHandleImportDesc*>(import_desc);
+        devhandle = (amdgpu_device_handle)newer->device_handle;
+        etype = newer->type;
+        fd = (HSAint32)newer->dmabuf_fd;
+    } else if (desc_size >= sizeof(HsaExternalHandleDesc_714)) {
+        // ROCm 7.14 layout: int64 fd + mem field
+        auto *desc_714 = reinterpret_cast<const HsaExternalHandleDesc_714*>(import_desc);
+        devhandle = (amdgpu_device_handle)desc_714->device_handle;
+        fd = (HSAint32)desc_714->fd;
+        etype = desc_714->type;
     } else {
         // Old layout or unknown (desc_size == 0): int32 fd, no mem
         auto *legacy = reinterpret_cast<const HsaExternalHandleDesc_712*>(import_desc);
@@ -545,6 +557,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
     case HSA_EXTERNAL_HANDLE_KMS:
         type = amdgpu_bo_handle_type_kms;
         break;
+    case HSA_EXTERNAL_HANDLE_FABRIC:
+        // UALink fabric handles are not supported on WSL/DXG.
+        return HSAKMT_STATUS_NOT_SUPPORTED;
     case HSA_EXTERNAL_HANDLE_DMA_BUF:
     default:
         type = amdgpu_bo_handle_type_dma_buf_fd;
@@ -556,8 +571,46 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
         return HSAKMT_STATUS_ERROR;
     }
 
-    import_res->buf_handle = (HsaMemoryObjectHandle)res.buf_handle;
-    import_res->alloc_size = (HSAuint64)res.alloc_size;
+    if (rocr_uses_fabric_handle_import_abi(desc_size)) {
+        import_res->buf_handle = (HsaMemoryObjectHandle)res.buf_handle;
+        import_res->dmabuf_fd = fd;
+        import_res->alloc_size = (HSAuint64)res.alloc_size;
+    } else {
+        auto *res_714 = reinterpret_cast<HsaHandleImportResult_714*>(import_res);
+        res_714->buf_handle = (HsaMemoryObjectHandle)res.buf_handle;
+        res_714->alloc_size = (HSAuint64)res.alloc_size;
+    }
+    return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
+    HsaMemoryExportResult* res, HsaHandleExportFlags* flags)
+{
+    (void)flags;
+    CHECK_DXG_OPEN();
+    if (!desc || !res || desc->device_handle == NULL)
+        return HSAKMT_STATUS_INVALID_HANDLE;
+
+    if (desc->type != HSA_EXTERNAL_HANDLE_DMA_BUF)
+        return HSAKMT_STATUS_NOT_SUPPORTED;
+
+    wsl::thunk::GpuMemory* gpu_mem = wsl::thunk::GpuMemory::Convert(
+        reinterpret_cast<wsl::thunk::GpuMemoryHandle>(desc->buf_handle));
+    if (!gpu_mem)
+        return HSAKMT_STATUS_INVALID_HANDLE;
+
+    if (!gpu_mem->IsPhysicalCreated()) {
+        auto code = gpu_mem->CreatePhysicalMemory();
+        if (code != ErrorCode::Success)
+            return HSAKMT_STATUS_OUT_OF_RESOURCES;
+    }
+
+    int dmabuf_fd = -1;
+    auto code = gpu_mem->ExportPhysicalHandle(&dmabuf_fd);
+    if (code != ErrorCode::Success)
+        return HSAKMT_STATUS_ERROR;
+
+    res->dmabuf_fd = dmabuf_fd;
     return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -637,18 +690,34 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryCpuMap(HsaMemoryObjectHandle Handle,
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandle,
-                        HsaMemoryObjectHandle MemoryHandle, HSAint32* fd, HSAuint64* cpu_addr)
+                        HsaMemoryObjectHandle MemoryHandle, HSAuint64* cpu_addr, ...)
 {
   CHECK_DXG_OPEN();
 
-  amdgpu_device_handle devhandle = (amdgpu_device_handle)DeviceHandle;
-  *fd = amdgpu_device_get_fd_impl(devhandle);
   void *cpu_ptr = nullptr;
   int ret = amdgpu_bo_cpu_map_impl((amdgpu_bo_handle)MemoryHandle, &cpu_ptr);
   if (ret) {
       return HSAKMT_STATUS_ERROR;
   }
-  *cpu_addr = (HSAuint64)(uintptr_t)cpu_ptr;
+
+  if (rocr_uses_fabric_handle_import_abi(detected_abi_.SizeOfHsaExternalHandleDesc)) {
+    if (!cpu_addr)
+      return HSAKMT_STATUS_INVALID_PARAMETER;
+    *cpu_addr = (HSAuint64)(uintptr_t)cpu_ptr;
+  } else {
+    HSAint32 *fd = reinterpret_cast<HSAint32*>(cpu_addr);
+    va_list args;
+    va_start(args, cpu_addr);
+    HSAuint64 *legacy_cpu_addr = va_arg(args, HSAuint64*);
+    va_end(args);
+
+    if (!fd || !legacy_cpu_addr)
+      return HSAKMT_STATUS_INVALID_PARAMETER;
+
+    amdgpu_device_handle devhandle = (amdgpu_device_handle)DeviceHandle;
+    *fd = amdgpu_device_get_fd_impl(devhandle);
+    *legacy_cpu_addr = (HSAuint64)(uintptr_t)cpu_ptr;
+  }
 
     return HSAKMT_STATUS_SUCCESS;
 }

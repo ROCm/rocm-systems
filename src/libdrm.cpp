@@ -56,6 +56,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(
   return HSAKMT_STATUS_ERROR;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(
+    HsaAMDGPUDeviceHandle DeviceHandle, int *fd) {
+  CHECK_DXG_OPEN();
+
+  if (!DeviceHandle || !fd)
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  *fd = amdgpu_device_get_fd_impl(
+      reinterpret_cast<amdgpu_device_handle>(DeviceHandle));
+  return *fd >= 0 ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_ERROR;
+}
+
 HSAKMTAPI int amdgpu_device_initialize(int fd,
                                        uint32_t *major_version,
                                        uint32_t *minor_version,

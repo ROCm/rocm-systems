@@ -16,6 +16,23 @@ typedef struct _HsaExternalHandleDesc_712 {
     HSAuint32 metadata;
 } HsaExternalHandleDesc_712;
 
+// ROCm 7.14 HsaExternalHandleDesc layout used before ROCm PR #6471.
+// It widened fd to HSAint64 and added mem, but still kept fd before type.
+typedef struct _HsaExternalHandleDesc_714 {
+    HsaAMDGPUDeviceHandle device_handle;
+    HSAint64 fd;
+    HsaExternalHandleType type;
+    void *mem;
+    HSAuint32 metadata;
+} HsaExternalHandleDesc_714;
+
+// ROCm 7.14 HsaHandleImportResult layout before PR #6471 inserted dmabuf_fd.
+typedef struct _HsaHandleImportResult_714 {
+    HsaMemoryObjectHandle buf_handle;
+    HSAuint64 alloc_size;
+    HSAuint32 metadata;
+} HsaHandleImportResult_714;
+
 #pragma pack(pop)
 
 #endif // _HSAKMTTYPES_LEGACY_H_

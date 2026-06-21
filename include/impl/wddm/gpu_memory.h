@@ -222,11 +222,16 @@ public:
 
   ErrorCode ExportPhysicalHandle(int* dmabuf_fd, uint32_t flags = SHARED_ALLOCATION_ALL_ACCESS);
   ErrorCode ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info, gpusize *gpu_addr = nullptr);
+
+  ErrorCode CreatePhysicalMemory();
+  bool IsPhysicalCreated() const {
+    return (alloc_handles_ptr_ != nullptr && alloc_handles_ptr_[0] != 0) ||
+           resource_ != 0 || mem_fd_ > -1;
+  }
   ~GpuMemory();
 protected:
   explicit GpuMemory(WDDMDevice *device);
 private:
-  ErrorCode CreatePhysicalMemory();
   ErrorCode FreePhysicalMemory();
 
   uint64_t AdjustSize(gpusize size) const;
