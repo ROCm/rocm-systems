@@ -46,7 +46,6 @@
   "test_configurations": {
     "default": {
       "env_variables": {
-        "NCCL_LAUNCH_MODE": "GROUP"
       },
       "rerun_env_variables": {
         "NCCL_DEBUG": "INFO"
