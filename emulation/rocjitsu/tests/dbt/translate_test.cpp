@@ -2261,6 +2261,39 @@ TEST(BinaryTranslatorE2E, RelocatedKernelPreservesEntryWindowAndPatchesBranches)
   }
 }
 
+TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableGapAfterEntryWindow) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  std::vector<uint32_t> words(74, rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  words[0] = rocjitsu::build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA4); // 0x00 -> 0x100.
+  words[64] = rocjitsu::build_s_branch(7, ROCJITSU_CODE_ARCH_CDNA4); // 0x100 -> 0x120.
+  words[72] = kCdna4SEndpgm;                                         // Reachable target.
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *text = translated.text_sections()[0];
+  ASSERT_GE(text->size(), words.size() * sizeof(uint32_t));
+
+  const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
+  // The final ELF section is tail-padded back to the original size, but the
+  // relocated body still compacts reachable blocks after the protected 256-byte
+  // entry window. The source 0x120 target therefore lands immediately after the
+  // branch at word 64 instead of remaining at the original word 72.
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[64], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[65], kCdna4SEndpgm);
+  EXPECT_EQ(target_words[72], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
 TEST(BinaryTranslatorE2E, RejectsIndirectBranchAndCallInstructions) {
   struct Case {
     const char *name;

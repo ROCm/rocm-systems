@@ -89,10 +89,7 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     # are exact, so no widening is needed.
     'v_mul_i32_i24_vop2': (
         'uint32_t',
-        '[](auto a, auto b) {'
-        ' auto sa = ::rocjitsu::amdgpu::simd_sign_extend_u32(a, 24);'
-        ' auto sb = ::rocjitsu::amdgpu::simd_sign_extend_u32(b, 24);'
-        ' return sa * sb; }',
+        '[](auto a, auto b) { return ::rocjitsu::amdgpu::simd_mul_i24_u32(a, b); }',
     ),
     # High 32 bits of the 24-bit multiply (48-bit product). The 32x32->high32
     # step uses util::mul_hi_{u,i}32_simd, a 16x16 partial-product decomposition
@@ -2257,10 +2254,7 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     # 48-bit product, identical signed/unsigned for the low half) + int32(c).
     'v_mad_i32_i24_vop3': (
         'uint32_t',
-        '[](auto a, auto b, auto c) {'
-        ' auto sa = ::rocjitsu::amdgpu::simd_sign_extend_u32(a, 24);'
-        ' auto sb = ::rocjitsu::amdgpu::simd_sign_extend_u32(b, 24);'
-        ' return sa * sb + c; }',
+        '[](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_mad_i24_u32(a, b, c); }',
     ),
     # v_mad_u32_u24: low-24 mask a, b, multiply, add c.
     'v_mad_u32_u24_vop3': (

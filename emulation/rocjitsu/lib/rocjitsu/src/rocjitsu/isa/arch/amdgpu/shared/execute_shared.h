@@ -822,7 +822,7 @@ inline void execute_s_bfe_u64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_s_bfm_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint32_t result =
-      (((1u << (inst.ssrc0.read_scalar(wf) & 31u)) - 1u) << (inst.ssrc1.read_scalar(wf) & 31u));
+      ::rocjitsu::amdgpu::bfm_b32(inst.ssrc0.read_scalar(wf), inst.ssrc1.read_scalar(wf));
   inst.sdst.write_scalar(wf, result);
 }
 
@@ -1967,8 +1967,8 @@ inline void execute_s_mul_hi_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_s_mul_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t result = (static_cast<uint32_t>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf))) *
-                    static_cast<uint32_t>(static_cast<int32_t>(inst.ssrc1.read_scalar(wf))));
+  uint32_t result = (static_cast<uint32_t>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf))) *
+                     static_cast<uint32_t>(static_cast<int32_t>(inst.ssrc1.read_scalar(wf))));
   inst.sdst.write_scalar(wf, result);
 }
 
@@ -1981,9 +1981,10 @@ inline void execute_s_mul_u64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_s_mulk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(inst.simm16.encoding_value_);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(s0 * imm));
+  uint32_t s0 = inst.sdst.read_scalar(wf);
+  uint32_t imm = static_cast<uint32_t>(
+      static_cast<int32_t>(static_cast<int16_t>(inst.simm16.encoding_value_)));
+  inst.sdst.write_scalar(wf, s0 * imm);
 }
 
 template <typename Inst>
@@ -3010,8 +3011,9 @@ inline void execute_v_add_lshl_u32_vop3([[maybe_unused]] Inst &inst,
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         ((inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane))
-                          << inst.src2.read_lane(wf, lane)));
+                         ::rocjitsu::amdgpu::lshl_masked(
+                             (inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane)),
+                             inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -3460,9 +3462,9 @@ inline void execute_v_bfm_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         (((1u << (inst.src0.read_lane(wf, lane) & 31u)) - 1u)
-                          << (inst.src1.read_lane(wf, lane) & 31u)));
+    inst.vdst.write_lane(
+        wf, lane,
+        ::rocjitsu::amdgpu::bfm_b32(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -12651,8 +12653,9 @@ inline void execute_v_lshl_add_u32_vop3([[maybe_unused]] Inst &inst,
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         ((inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)) +
-                          inst.src2.read_lane(wf, lane)));
+                         ::rocjitsu::amdgpu::lshl_masked(inst.src0.read_lane(wf, lane),
+                                                         inst.src1.read_lane(wf, lane)) +
+                             inst.src2.read_lane(wf, lane));
   }
 }
 
@@ -12664,10 +12667,11 @@ inline void execute_v_lshl_add_u64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane64(wf, lane,
-                           ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane))
-                             << static_cast<uint64_t>(inst.src1.read_lane(wf, lane))) +
-                            static_cast<uint64_t>(inst.src2.read_lane64(wf, lane))));
+    inst.vdst.write_lane64(
+        wf, lane,
+        ::rocjitsu::amdgpu::lshl_masked(static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)),
+                                        static_cast<uint64_t>(inst.src1.read_lane(wf, lane))) +
+            static_cast<uint64_t>(inst.src2.read_lane64(wf, lane)));
   }
 }
 
@@ -12681,8 +12685,9 @@ inline void execute_v_lshl_or_b32_vop3([[maybe_unused]] Inst &inst,
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         ((inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)) |
-                          inst.src2.read_lane(wf, lane)));
+                         ::rocjitsu::amdgpu::lshl_masked(inst.src0.read_lane(wf, lane),
+                                                         inst.src1.read_lane(wf, lane)) |
+                             inst.src2.read_lane(wf, lane));
   }
 }
 
@@ -13146,19 +13151,16 @@ template <typename Inst>
 inline void execute_v_mad_i32_i24_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    auto sa = ::rocjitsu::amdgpu::simd_sign_extend_u32(a, 24);
-    auto sb = ::rocjitsu::amdgpu::simd_sign_extend_u32(b, 24);
-    return sa * sb + c;
+    return ::rocjitsu::amdgpu::simd_mad_i24_u32(a, b, c);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane, [&]() {
-      auto a = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
-      auto b = static_cast<int32_t>(inst.src1.read_lane(wf, lane) << 8) >> 8;
-      return static_cast<uint32_t>(a * b + static_cast<int32_t>(inst.src2.read_lane(wf, lane)));
-    }());
+    inst.vdst.write_lane(wf, lane,
+                         ::rocjitsu::amdgpu::mad_i24_u32(inst.src0.read_lane(wf, lane),
+                                                         inst.src1.read_lane(wf, lane),
+                                                         inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -17067,40 +17069,30 @@ inline void execute_v_mul_hi_u32_u24_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_mul_i32_i24_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-    auto sa = ::rocjitsu::amdgpu::simd_sign_extend_u32(a, 24);
-    auto sb = ::rocjitsu::amdgpu::simd_sign_extend_u32(b, 24);
-    return sa * sb;
-  });
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(
+      uint32_t, [](auto a, auto b) { return ::rocjitsu::amdgpu::simd_mul_i24_u32(a, b); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane, [&]() {
-      auto a = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
-      auto b = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane) << 8) >> 8;
-      return static_cast<uint32_t>(a * b);
-    }());
+    inst.vdst.write_lane(wf, lane,
+                         ::rocjitsu::amdgpu::mul_i24_u32(inst.src0.read_lane(wf, lane),
+                                                         inst.vsrc1.read_lane(wf, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_mul_i32_i24_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
-    auto sa = ::rocjitsu::amdgpu::simd_sign_extend_u32(a, 24);
-    auto sb = ::rocjitsu::amdgpu::simd_sign_extend_u32(b, 24);
-    return sa * sb;
-  });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(
+      uint32_t, [](auto a, auto b) { return ::rocjitsu::amdgpu::simd_mul_i24_u32(a, b); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane, [&]() {
-      auto a = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
-      auto b = static_cast<int32_t>(inst.src1.read_lane(wf, lane) << 8) >> 8;
-      return static_cast<uint32_t>(a * b);
-    }());
+    inst.vdst.write_lane(wf, lane,
+                         ::rocjitsu::amdgpu::mul_i24_u32(inst.src0.read_lane(wf, lane),
+                                                         inst.src1.read_lane(wf, lane)));
   }
 }
 

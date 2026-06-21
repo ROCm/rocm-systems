@@ -18,10 +18,16 @@
 #include <experimental/simd>
 #endif
 
+// clang + libstdc++ <experimental/simd> on AVX-512 has produced incorrect
+// native 64-bit mask behavior on sanitizer CI hosts. Keep the default
+// workaround local to that stack, but leave it overrideable so fixed toolchains
+// can force vector coverage with -DUTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS=0.
+#ifndef UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #if defined(__clang__) && defined(__GLIBCXX__) && defined(__AVX512F__)
 #define UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS 1
 #else
 #define UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS 0
+#endif
 #endif
 
 namespace util {

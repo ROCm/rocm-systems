@@ -2608,15 +2608,11 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_mulk':
+            L.append(f'  uint32_t s0 = {dst_ops[0]}.read_scalar(wf);')
             L.append(
-                f'  int32_t s0 = static_cast<int32_t>({dst_ops[0]}.read_scalar(wf));'
+                f'  uint32_t imm = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_)));'
             )
-            L.append(
-                f'  int32_t imm = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
-            )
-            L.append(
-                f'  {dst_ops[0]}.write_scalar(wf, static_cast<uint32_t>(s0 * imm));'
-            )
+            L.append(f'  {dst_ops[0]}.write_scalar(wf, s0 * imm);')
             return '\n'.join(L)
 
         if cls == 'scalar_wrexec':

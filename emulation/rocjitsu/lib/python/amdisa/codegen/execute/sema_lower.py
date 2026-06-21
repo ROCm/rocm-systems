@@ -1331,7 +1331,7 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' return static_cast<uint32_t>(v >> ({1} & 31u)); }}()',
     'util::arithmetic_shr_i16': '[&]() {{ auto v = static_cast<int16_t>({0});'
     ' return static_cast<uint32_t>(static_cast<uint16_t>(v >> ({1} & 15u))); }}()',
-    'bfm': '(((1u << ({0} & 31u)) - 1u) << ({1} & 31u))',
+    'bfm': '::rocjitsu::amdgpu::bfm_b32({0}, {1})',
     'bfm64': '[&]() {{ uint64_t cnt = {0} & 63u; uint64_t off = {1} & 63u;'
     ' return cnt == 0 ? 0ULL : ((1ULL << cnt) - 1ULL) << off; }}()',
     'ashr': '[&]() {{ auto v = static_cast<int32_t>({0});'
@@ -1347,9 +1347,7 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' auto b = static_cast<int64_t>(static_cast<int32_t>({1} << 8) >> 8);'
     ' return static_cast<uint32_t>(static_cast<uint64_t>((a * b) >> 32)); }}()',
     'mul_u24': '(({0} & 0x00FFFFFFu) * ({1} & 0x00FFFFFFu))',
-    'mul_i24': '[&]() {{ auto a = static_cast<int32_t>({0} << 8) >> 8;'
-    ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
-    ' return static_cast<uint32_t>(a * b); }}()',
+    'mul_i24': '::rocjitsu::amdgpu::mul_i24_u32({0}, {1})',
     'mul_lo_u16': 'static_cast<uint32_t>(static_cast<uint16_t>('
     'static_cast<uint32_t>(static_cast<uint16_t>({0})) * '
     'static_cast<uint32_t>(static_cast<uint16_t>({1}))))',
@@ -1507,9 +1505,9 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'or3': '({0} | {1} | {2})',
     'xor3': '({0} ^ {1} ^ {2})',
     'xad': '(({0} ^ {1}) + {2})',
-    'lshl_add': '(({0} << {1}) + {2})',
-    'lshl_or': '(({0} << {1}) | {2})',
-    'add_lshl': '(({0} + {1}) << {2})',
+    'lshl_add': '(::rocjitsu::amdgpu::lshl_masked({0}, {1}) + {2})',
+    'lshl_or': '(::rocjitsu::amdgpu::lshl_masked({0}, {1}) | {2})',
+    'add_lshl': '::rocjitsu::amdgpu::lshl_masked(({0} + {1}), {2})',
     'ashr_pk_i8_i32': '[&]() -> uint32_t {{'
     ' uint32_t shift = static_cast<uint32_t>({2}) & 31u;'
     ' auto pack = [&](uint32_t src) -> uint32_t {{'
@@ -1531,7 +1529,7 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'and_or': '(({0} & {1}) | {2})',
     'bfi': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' return (a & b) | (~a & c); }}()',
-    'bfm': '(((1u << ({0} & 31u)) - 1u) << ({1} & 31u))',
+    'bfm': '::rocjitsu::amdgpu::bfm_b32({0}, {1})',
     'alignbit': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' uint64_t val = (static_cast<uint64_t>(a) << 32) | b;'
     ' return static_cast<uint32_t>(val >> (c & 31u)); }}()',
@@ -1651,9 +1649,7 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' else vcc &= ~(1ULL << lane);'
     ' return static_cast<uint32_t>(a - b - c); }}()',
     'mad_u24': '(({0} & 0x00FFFFFFu) * ({1} & 0x00FFFFFFu) + {2})',
-    'mad_i24': '[&]() {{ auto a = static_cast<int32_t>({0} << 8) >> 8;'
-    ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
-    ' return static_cast<uint32_t>(a * b + static_cast<int32_t>({2})); }}()',
+    'mad_i24': '::rocjitsu::amdgpu::mad_i24_u32({0}, {1}, {2})',
     'bfe_u': '[&]() {{ uint32_t src={0}; uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
     ' if (w == 0) return 0u;'
     ' uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);'

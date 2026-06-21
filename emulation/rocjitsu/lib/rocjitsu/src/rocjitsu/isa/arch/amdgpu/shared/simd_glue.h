@@ -45,6 +45,31 @@ using float32_t = float;
 /// flip at runtime.
 inline bool simd_force_scalar() { return util::force_scalar(); }
 
+inline uint32_t sign_extend_u32(uint32_t value, unsigned bits) {
+  assert(bits >= 1 && bits <= 32 && "sign_extend_u32 requires a 1..32 bit width");
+  const uint32_t sign = uint32_t{1} << (bits - 1);
+  const uint32_t mask = bits == 32 ? ~uint32_t{0} : ((uint32_t{1} << bits) - uint32_t{1});
+  return ((value & mask) ^ sign) - sign;
+}
+
+inline uint32_t lshl_masked(uint32_t value, uint32_t count) { return value << (count & 31u); }
+
+inline uint64_t lshl_masked(uint64_t value, uint64_t count) { return value << (count & 63u); }
+
+inline uint32_t bfm_b32(uint32_t width, uint32_t offset) {
+  const uint32_t w = width & 31u;
+  const uint32_t off = offset & 31u;
+  return w == 0 ? uint32_t{0} : ((uint32_t{1} << w) - uint32_t{1}) << off;
+}
+
+inline uint32_t mul_i24_u32(uint32_t lhs, uint32_t rhs) {
+  return sign_extend_u32(lhs, 24) * sign_extend_u32(rhs, 24);
+}
+
+inline uint32_t mad_i24_u32(uint32_t lhs, uint32_t rhs, uint32_t addend) {
+  return mul_i24_u32(lhs, rhs) + addend;
+}
+
 /// Write an explicit SGPR lane-mask destination. Wave32 targets use the low
 /// dword only; writing a pair would clobber the next SGPR, which codegen may
 /// legally use for unrelated scalar state.
@@ -58,9 +83,20 @@ inline void write_explicit_lane_mask(const Operand &dst, Wavefront &wf, uint64_t
 
 inline util::native<uint32_t> simd_sign_extend_u32(util::native<uint32_t> v, unsigned bits) {
   assert(bits >= 1 && bits <= 32 && "simd_sign_extend_u32 requires a 1..32 bit width");
-  const uint32_t sign = 1u << (bits - 1);
-  const uint32_t mask = bits == 32 ? ~0u : ((1u << bits) - 1u);
+  const uint32_t sign = uint32_t{1} << (bits - 1);
+  const uint32_t mask = bits == 32 ? ~uint32_t{0} : ((uint32_t{1} << bits) - uint32_t{1});
   return ((v & mask) ^ sign) - sign;
+}
+
+inline util::native<uint32_t> simd_mul_i24_u32(util::native<uint32_t> lhs,
+                                               util::native<uint32_t> rhs) {
+  return simd_sign_extend_u32(lhs, 24) * simd_sign_extend_u32(rhs, 24);
+}
+
+inline util::native<uint32_t> simd_mad_i24_u32(util::native<uint32_t> lhs,
+                                               util::native<uint32_t> rhs,
+                                               util::native<uint32_t> addend) {
+  return simd_mul_i24_u32(lhs, rhs) + addend;
 }
 
 inline util::native<uint32_t> simd_lshl_u32(util::native<uint32_t> v, util::native<uint32_t> sh) {
@@ -123,9 +159,7 @@ inline util::native<uint32_t> simd_bfm_b32(util::native<uint32_t> width,
                                            util::native<uint32_t> offset) {
   return util::map_native_scalar<uint32_t>(width, offset,
                                            [](uint32_t width_value, uint32_t offset_value) {
-                                             const uint32_t w = width_value & 31u;
-                                             const uint32_t off = offset_value & 31u;
-                                             return ((uint32_t{1} << w) - 1u) << off;
+                                             return bfm_b32(width_value, offset_value);
                                            });
 }
 

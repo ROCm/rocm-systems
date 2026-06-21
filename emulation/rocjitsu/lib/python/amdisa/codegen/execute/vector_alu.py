@@ -543,18 +543,22 @@ def gen_vector_binop(
         else:
             L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16({expr}));')
     elif dtype == 'i24':
-        L.append(
-            f'    int32_t sv0 = static_cast<int32_t>({s0}.read_lane(wf, lane) << 8) >> 8;'
-        )
-        L.append(
-            f'    int32_t sv1 = static_cast<int32_t>({s1}.read_lane(wf, lane) << 8) >> 8;'
-        )
         if op == 'mulhi':
+            L.append(
+                f'    int32_t sv0 = static_cast<int32_t>({s0}.read_lane(wf, lane) << 8) >> 8;'
+            )
+            L.append(
+                f'    int32_t sv1 = static_cast<int32_t>({s1}.read_lane(wf, lane) << 8) >> 8;'
+            )
             L.append(
                 f'    {d}.write_lane(wf, lane, static_cast<uint32_t>((static_cast<int64_t>(sv0) * sv1) >> 32));'
             )
         else:
-            L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(sv0 * sv1));')
+            L.append(f'    uint32_t sv0 = {s0}.read_lane(wf, lane);')
+            L.append(f'    uint32_t sv1 = {s1}.read_lane(wf, lane);')
+            L.append(
+                f'    {d}.write_lane(wf, lane, ::rocjitsu::amdgpu::mul_i24_u32(sv0, sv1));'
+            )
     elif dtype == 'u24':
         L.append(f'    uint32_t sv0 = {s0}.read_lane(wf, lane) & 0x00FFFFFFu;')
         L.append(f'    uint32_t sv1 = {s1}.read_lane(wf, lane) & 0x00FFFFFFu;')
@@ -683,7 +687,7 @@ def gen_vector_binop(
             'shr': 'sv1 >> (sv0 & 31u)',
             'min': 'sv0 < sv1 ? sv0 : sv1',
             'max': 'sv0 > sv1 ? sv0 : sv1',
-            'bfm': '(sv0 & 31u) == 0 ? 0u : ((1u << (sv0 & 31u)) - 1u) << (sv1 & 31u)',
+            'bfm': '::rocjitsu::amdgpu::bfm_b32(sv0, sv1)',
         }
         expr = u_op_map.get(op, f'sv0 /* TODO: {op} */')
         L.append(f'    {d}.write_lane(wf, lane, {expr});')
@@ -953,21 +957,17 @@ def gen_vector_ternary(
         L.append(f'    uint64_t b = {s1}.read_lane64(wf, lane);')
         L.append(f'    uint64_t c = {s2}.read_lane64(wf, lane);')
         u_map = {
-            'lshl_add': '(a << (b & 63u)) + c',
+            'lshl_add': '::rocjitsu::amdgpu::lshl_masked(a, b) + c',
             'add3': 'a + b + c',
         }
         expr = u_map.get(op, f'a /* unhandled: {op} */')
         L.append(f'    {d}.write_lane64(wf, lane, {expr});')
     elif dtype in ('i24',):
+        L.append(f'    uint32_t a = {s0}.read_lane(wf, lane);')
+        L.append(f'    uint32_t b = {s1}.read_lane(wf, lane);')
+        L.append(f'    uint32_t c = {s2}.read_lane(wf, lane);')
         L.append(
-            f'    int32_t a = static_cast<int32_t>({s0}.read_lane(wf, lane) << 8) >> 8;'
-        )
-        L.append(
-            f'    int32_t b = static_cast<int32_t>({s1}.read_lane(wf, lane) << 8) >> 8;'
-        )
-        L.append(f'    int32_t c = static_cast<int32_t>({s2}.read_lane(wf, lane));')
-        L.append(
-            f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(static_cast<int64_t>(a) * b + c));'
+            f'    {d}.write_lane(wf, lane, ::rocjitsu::amdgpu::mad_i24_u32(a, b, c));'
         )
     elif dtype in ('u24',):
         L.append(f'    uint32_t a = {s0}.read_lane(wf, lane) & 0x00FFFFFFu;')
@@ -986,8 +986,8 @@ def gen_vector_ternary(
             'maxmin': 'std::max(a, std::min(b, c))',
             'minmax_num': 'std::min(a, std::max(b, c))',
             'maxmin_num': 'std::max(a, std::min(b, c))',
-            'add_lshl': '(static_cast<uint32_t>(a) + static_cast<uint32_t>(b)) << (static_cast<uint32_t>(c) & 31u)',
-            'lshl_add': '(static_cast<uint32_t>(a) << (static_cast<uint32_t>(b) & 31u)) + static_cast<uint32_t>(c)',
+            'add_lshl': '::rocjitsu::amdgpu::lshl_masked(static_cast<uint32_t>(a) + static_cast<uint32_t>(b), static_cast<uint32_t>(c))',
+            'lshl_add': '::rocjitsu::amdgpu::lshl_masked(static_cast<uint32_t>(a), static_cast<uint32_t>(b)) + static_cast<uint32_t>(c)',
         }
         expr = i_map.get(op, f'a /* TODO: {op} */')
         L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>({expr}));')
@@ -1045,11 +1045,11 @@ def gen_vector_ternary(
         else:
             u_map = {
                 'add3': 'a + b + c',
-                'lshl_or': '(a << (b & 31)) | c',
+                'lshl_or': '::rocjitsu::amdgpu::lshl_masked(a, b) | c',
                 'and_or': '(a & b) | c',
                 'or3': 'a | b | c',
-                'lshl_add': '(a << (b & 31)) + c',
-                'add_lshl': '(a + b) << (c & 31)',
+                'lshl_add': '::rocjitsu::amdgpu::lshl_masked(a, b) + c',
+                'add_lshl': '::rocjitsu::amdgpu::lshl_masked(a + b, c)',
                 'xad': '(a ^ b) + c',
                 'xor3': 'a ^ b ^ c',
                 'min3': 'std::min(std::min(a, b), c)',
