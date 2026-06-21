@@ -1249,13 +1249,14 @@ def _summarize_cli(argv: List[str]) -> int:
 # install is exercised by every interpreter -- no per-version venvs or wheel
 # installs are required.
 #
-# Interpreters are resolved per requested minor version by (1) a system
-# pythonX.Y already on PATH -- which covers distro pythons uv cannot supply,
-# e.g. 3.6 on AlmaLinux8 -- then (2) a uv-managed download.  Versions that
-# neither source can provide are recorded as SKIP rather than failing.
+# Interpreters are resolved per requested version in three tiers: (1) a
+# system pythonX.Y on PATH (covers the native 3.6.8 on AlmaLinux8), then
+# (2) a uv-managed download (3.8-3.14), then (3) a pyenv source build for
+# versions uv cannot supply (3.6.8, 3.7.x).  A version is only recorded as
+# SKIP if all three tiers fail.
 # ---------------------------------------------------------------------------
 
-DEFAULT_PY_MATRIX_VERSIONS = "3.6 3.7 3.8 3.9 3.10 3.11 3.12 3.13 3.14"
+DEFAULT_PY_MATRIX_VERSIONS = "3.6.8 3.7 3.8 3.9 3.10 3.11 3.12 3.13 3.14"
 DEFAULT_AMDSMI_PATH = Path("/opt/rocm/share/amd_smi")
 DEFAULT_UV_VERSION = "0.11.23"
 PY_MATRIX_TEST_FILES = ("integration_test.py", "unit_tests.py", "cli_unit_test.py")
@@ -1297,6 +1298,17 @@ def minor_of(version: str) -> str:
     if not m:
         raise ValueError(f"Cannot parse minor version from {version!r}")
     return m.group(1)
+
+
+def _version_matches(got: str, requested: str) -> bool:
+    """True if interpreter version *got* satisfies the *requested* spec.
+
+    A patch-level request (``X.Y.Z``) requires an exact match; a minor
+    request (``X.Y``) matches any patch release of that minor.
+    """
+    if requested.count(".") >= 2:
+        return got == requested
+    return minor_of(got) == minor_of(requested)
 
 
 def _py_status_icon(status: str) -> str:
@@ -1412,25 +1424,164 @@ def ensure_uv(log_dir: Path, uv_version: str, install_dir: Path) -> Optional[Pat
     return uv_dest
 
 
+def _pyenv_build_dep_packages(pkg_manager: str) -> List[str]:
+    """Return the system packages pyenv needs to build CPython from source."""
+    if pkg_manager == "apt":
+        return [
+            "build-essential", "libssl-dev", "zlib1g-dev", "libbz2-dev",
+            "libreadline-dev", "libsqlite3-dev", "libffi-dev", "liblzma-dev",
+            "tk-dev", "uuid-dev", "xz-utils", "curl", "git",
+        ]
+    if pkg_manager == "dnf":
+        return [
+            "gcc", "make", "patch", "zlib-devel", "bzip2", "bzip2-devel",
+            "readline-devel", "sqlite", "sqlite-devel", "openssl-devel",
+            "tk-devel", "libffi-devel", "xz-devel", "findutils", "git", "curl",
+        ]
+    if pkg_manager == "zypper":
+        return [
+            "gcc", "make", "patch", "zlib-devel", "libbz2-devel",
+            "readline-devel", "sqlite3-devel", "libopenssl-devel",
+            "tk-devel", "libffi-devel", "xz-devel", "git", "curl",
+        ]
+    raise ValueError(f"Unsupported package manager for pyenv deps: {pkg_manager}")
+
+
+def _pkg_install_cmd(pkg_manager: str, packages: List[str]) -> List[str]:
+    """Build the install command for *packages* under *pkg_manager*."""
+    if pkg_manager == "apt":
+        return ["apt-get", "install", "-y", "--no-install-recommends"] + packages
+    if pkg_manager == "dnf":
+        return ["dnf", "install", "-y"] + packages
+    if pkg_manager == "zypper":
+        return ["zypper", "--non-interactive", "install"] + packages
+    raise ValueError(f"Unsupported package manager: {pkg_manager}")
+
+
+def ensure_pyenv(
+    log_dir: Path, pyenv_root: Path, pkg_manager: Optional[str]
+) -> Optional[Path]:
+    """Return a pyenv binary, cloning it (and its build deps) if needed.
+
+    pyenv builds CPython from source, covering versions uv cannot supply
+    (e.g. 3.6.8 and 3.7.x).  Build-dependency installation is best-effort.
+    """
+    on_path = shutil.which("pyenv")
+    if on_path:
+        print(f"python-matrix: using pyenv on PATH: {on_path}")
+        return Path(on_path)
+
+    pyenv_bin = pyenv_root / "bin" / "pyenv"
+    if not pyenv_bin.exists():
+        if pkg_manager:
+            try:
+                run_command(
+                    _pkg_install_cmd(
+                        pkg_manager, _pyenv_build_dep_packages(pkg_manager)
+                    ),
+                    name="pyenv-build-deps",
+                    retries=2,
+                    log_dir=log_dir,
+                )
+            except (CommandError, ValueError) as exc:
+                print(
+                    f"python-matrix: pyenv build-dep install failed "
+                    f"(continuing): {exc}"
+                )
+        pyenv_root.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            run_command(
+                [
+                    "git", "clone", "--depth", "1",
+                    "https://github.com/pyenv/pyenv.git", str(pyenv_root),
+                ],
+                name="pyenv-clone",
+                retries=2,
+                log_dir=log_dir,
+            )
+        except CommandError as exc:
+            print(f"python-matrix: failed to clone pyenv: {exc}")
+            return None
+
+    if pyenv_bin.exists():
+        print(f"python-matrix: pyenv ready at {pyenv_bin}")
+        return pyenv_bin
+    return None
+
+
+def resolve_via_pyenv(
+    version: str, pyenv_bin: Path, pyenv_root: Path, log_dir: Path
+) -> Tuple[Optional[str], str, str]:
+    """Build/locate *version* with pyenv. Returns ``(path, resolved, note)``."""
+    env = dict(os.environ)
+    env["PYENV_ROOT"] = str(pyenv_root)
+    env["PATH"] = str(pyenv_root / "bin") + os.pathsep + env.get("PATH", "")
+
+    # A bare minor (e.g. "3.7") must be resolved to a concrete patch release
+    # before pyenv can build it; an explicit "X.Y.Z" is used as-is.
+    if version.count(".") >= 2:
+        full = version
+    else:
+        try:
+            proc = subprocess.run(
+                [str(pyenv_bin), "latest", "-k", version],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return None, "", f"pyenv latest failed for {version}: {exc}"
+        full = proc.stdout.strip()
+        if proc.returncode != 0 or not full:
+            return None, "", f"pyenv has no buildable release for {version}"
+
+    try:
+        run_command(
+            [str(pyenv_bin), "install", "-s", full],
+            name=f"pyenv-install-{full}",
+            env=env,
+            retries=1,
+            log_dir=log_dir,
+        )
+    except CommandError:
+        return None, "", f"pyenv could not build {full}"
+
+    interp = pyenv_root / "versions" / full / "bin" / "python3"
+    if interp.exists():
+        got = _query_interpreter_version(str(interp))
+        if got:
+            return str(interp), got, "pyenv"
+    return None, "", f"pyenv interpreter missing for {full}"
+
+
 def resolve_interpreter(
-    version: str, uv_bin: Optional[Path], log_dir: Path
+    version: str,
+    uv_bin: Optional[Path],
+    pyenv_bin: Optional[Path],
+    pyenv_root: Path,
+    log_dir: Path,
 ) -> Tuple[Optional[str], str, str]:
     """Resolve *version* to an interpreter path.
 
-    Returns ``(path_or_None, resolved_version, note)``.
+    Tries, in order: a system ``pythonX.Y`` on PATH, a uv-managed download,
+    then a pyenv source build.  Returns ``(path_or_None, resolved, note)``.
     """
     minor = minor_of(version)
 
-    # 1. System interpreter on PATH (pythonX.Y) -- covers distro pythons that
-    #    uv cannot provide (e.g. 3.6) and skips an unnecessary download.
+    # 1. System interpreter on PATH (pythonX.Y) -- covers distro pythons such
+    #    as the native 3.6.8 on AlmaLinux8 and skips an unnecessary download.
     cand = shutil.which(f"python{minor}")
     if cand:
         got = _query_interpreter_version(cand)
-        if got and minor_of(got) == minor:
+        if got and _version_matches(got, version):
             return cand, got, "system"
 
     # 2. uv-managed download (python-build-standalone) -- covers 3.8-3.14.
+    #    A uv miss is not fatal: fall through to the pyenv source build.
     if uv_bin is not None:
+        installed = True
         try:
             run_command(
                 [str(uv_bin), "python", "install", version],
@@ -1439,25 +1590,35 @@ def resolve_interpreter(
                 log_dir=log_dir,
             )
         except CommandError:
-            return None, "", f"uv could not install {version}"
-        try:
-            found = subprocess.run(
-                [str(uv_bin), "python", "find", version],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                timeout=60,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            return None, "", f"uv find failed for {version}: {exc}"
-        out = found.stdout.strip()
-        path = out.splitlines()[0].strip() if out else ""
-        if found.returncode == 0 and path:
-            got = _query_interpreter_version(path)
-            if got and minor_of(got) == minor:
-                return path, got, "uv"
+            installed = False
+        if installed:
+            try:
+                found = subprocess.run(
+                    [str(uv_bin), "python", "find", version],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=60,
+                )
+            except (OSError, subprocess.SubprocessError):
+                found = None
+            if found is not None and found.returncode == 0:
+                out = found.stdout.strip()
+                path = out.splitlines()[0].strip() if out else ""
+                if path:
+                    got = _query_interpreter_version(path)
+                    if got and _version_matches(got, version):
+                        return path, got, "uv"
 
-    return None, "", "not available via system PATH or uv"
+    # 3. pyenv source build -- covers versions uv lacks (e.g. 3.6.8, 3.7.x).
+    if pyenv_bin is not None:
+        path, resolved, note = resolve_via_pyenv(
+            version, pyenv_bin, pyenv_root, log_dir
+        )
+        if path is not None:
+            return path, resolved, note
+
+    return None, "", "not available via system PATH, uv, or pyenv"
 
 
 def _run_suite_for_interpreter(
@@ -1526,6 +1687,8 @@ def run_python_matrix(
     uv_version: str,
     log_dir: Path,
     summary_file: Optional[Path],
+    use_pyenv: bool = True,
+    pyenv_root: Optional[Path] = None,
 ) -> int:
     """Resolve interpreters, run the suite per version, emit a summary table.
 
@@ -1539,9 +1702,24 @@ def run_python_matrix(
     else:
         uv_bin = ensure_uv(log_dir, uv_version, log_dir / "uv")
         if uv_bin is None:
-            print("python-matrix: proceeding with system interpreters only (no uv)")
+            print("python-matrix: proceeding without uv (system/pyenv only)")
+        resolved_pyenv_root = pyenv_root or (Path.home() / ".pyenv")
+        pyenv_bin = None
+        if use_pyenv:
+            try:
+                pkg_manager: Optional[str] = detect_package_manager(None)
+            except RuntimeError:
+                pkg_manager = None
+            pyenv_bin = ensure_pyenv(log_dir, resolved_pyenv_root, pkg_manager)
+            if pyenv_bin is None:
+                print(
+                    "python-matrix: pyenv unavailable; versions uv/system "
+                    "cannot supply will be skipped"
+                )
         for ver in versions:
-            path, resolved, note = resolve_interpreter(ver, uv_bin, log_dir)
+            path, resolved, note = resolve_interpreter(
+                ver, uv_bin, pyenv_bin, resolved_pyenv_root, log_dir
+            )
             if path is None:
                 print(f"python-matrix: {ver} -> SKIP ({note})")
                 rows.append(PyVersionResult(requested=ver, status="SKIP", note=note))
@@ -1595,6 +1773,17 @@ def _python_matrix_cli(argv: List[str]) -> int:
     )
     parser.add_argument("--python-versions", default=DEFAULT_PY_MATRIX_VERSIONS)
     parser.add_argument("--uv-version", default=DEFAULT_UV_VERSION)
+    parser.add_argument(
+        "--pyenv-root",
+        type=Path,
+        default=None,
+        help="pyenv root for source builds (default: ~/.pyenv)",
+    )
+    parser.add_argument(
+        "--no-pyenv",
+        action="store_true",
+        help="Disable the pyenv source-build fallback (uv/system only)",
+    )
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
     parser.add_argument(
         "--summary-file",
@@ -1615,6 +1804,8 @@ def _python_matrix_cli(argv: List[str]) -> int:
         uv_version=args.uv_version,
         log_dir=args.log_dir,
         summary_file=args.summary_file,
+        use_pyenv=not args.no_pyenv,
+        pyenv_root=args.pyenv_root,
     )
 
 

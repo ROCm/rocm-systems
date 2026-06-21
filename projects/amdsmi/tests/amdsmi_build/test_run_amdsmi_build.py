@@ -267,5 +267,68 @@ class RenderPythonMatrixTests(unittest.TestCase):
         self.assertIn("3.6.8", out)
 
 
+class VersionMatchesTests(unittest.TestCase):
+    def test_exact_patch_match(self):
+        self.assertTrue(rab._version_matches("3.6.8", "3.6.8"))
+
+    def test_exact_patch_mismatch(self):
+        self.assertFalse(rab._version_matches("3.6.15", "3.6.8"))
+
+    def test_minor_request_matches_any_patch(self):
+        self.assertTrue(rab._version_matches("3.10.14", "3.10"))
+
+    def test_minor_request_mismatch(self):
+        self.assertFalse(rab._version_matches("3.9.18", "3.10"))
+
+
+class PyenvBuildDepsTests(unittest.TestCase):
+    def test_dnf_has_openssl_and_git(self):
+        pkgs = rab._pyenv_build_dep_packages("dnf")
+        self.assertIn("openssl-devel", pkgs)
+        self.assertIn("git", pkgs)
+
+    def test_apt_has_ssl_and_ffi(self):
+        pkgs = rab._pyenv_build_dep_packages("apt")
+        self.assertIn("libssl-dev", pkgs)
+        self.assertIn("libffi-dev", pkgs)
+
+    def test_zypper_supported(self):
+        self.assertIn("git", rab._pyenv_build_dep_packages("zypper"))
+
+    def test_unsupported_raises(self):
+        with self.assertRaises(ValueError):
+            rab._pyenv_build_dep_packages("brew")
+
+
+class PkgInstallCmdTests(unittest.TestCase):
+    def test_apt(self):
+        cmd = rab._pkg_install_cmd("apt", ["git"])
+        self.assertEqual(cmd[:3], ["apt-get", "install", "-y"])
+        self.assertIn("git", cmd)
+
+    def test_dnf(self):
+        self.assertEqual(rab._pkg_install_cmd("dnf", ["git"]), ["dnf", "install", "-y", "git"])
+
+    def test_zypper(self):
+        cmd = rab._pkg_install_cmd("zypper", ["git"])
+        self.assertEqual(cmd[:3], ["zypper", "--non-interactive", "install"])
+
+    def test_unsupported_raises(self):
+        with self.assertRaises(ValueError):
+            rab._pkg_install_cmd("brew", ["git"])
+
+
+class DefaultMatrixVersionsTests(unittest.TestCase):
+    def test_includes_368_and_314(self):
+        vers = rab.parse_python_versions(rab.DEFAULT_PY_MATRIX_VERSIONS)
+        self.assertIn("3.6.8", vers)
+        self.assertIn("3.14", vers)
+
+    def test_no_duplicate_minors(self):
+        vers = rab.parse_python_versions(rab.DEFAULT_PY_MATRIX_VERSIONS)
+        minors = [rab.minor_of(v) for v in vers]
+        self.assertEqual(len(minors), len(set(minors)))
+
+
 if __name__ == "__main__":
     unittest.main()
