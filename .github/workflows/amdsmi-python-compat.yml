@@ -1,0 +1,122 @@
+# ---------------------------------------------------------------------------
+# AMD-SMI Python compatibility check.
+#
+# Builds and installs AMD-SMI on AlmaLinux8, then runs the installed Python
+# test suite (integration, unit, CLI) under every supported interpreter --
+# 3.6.8 (native) plus the latest patch of 3.7 through 3.14 -- and publishes a
+# per-version PASS/FAIL/SKIP table to the job summary. Runs as its own CI
+# check so a Python-version regression is visible independently of the
+# per-distro build matrix in amdsmi-build.yml.
+#
+# Interpreters are resolved by the `python-matrix` subcommand of
+# tests/amdsmi_build/run_amdsmi_build.py: a system pythonX.Y first, then a
+# uv-managed download, then a pyenv source build for versions uv cannot
+# supply (3.6.8, 3.7.x). AlmaLinux8 is used because it ships Python 3.6.8
+# natively.
+# ---------------------------------------------------------------------------
+
+name: AMDSMI Python Compatibility
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '.github/workflows/amdsmi-python-compat.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '.github/workflows/amdsmi-python-compat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  BUILD_TYPE: Release
+  ROCM_DIR: /opt/rocm
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  python-compat:
+    name: Python Compatibility (AlmaLinux8)
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    container:
+      image: ${{ vars.AlmaLinux8_DOCKER_IMAGE }}
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set Project Directory
+        run: |
+          set -euo pipefail
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
+          if [ -z "$TARGET_DIR" ]; then
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
+          fi
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+
+      - name: Locate Runner Script
+        run: |
+          set -euo pipefail
+          SCRIPT=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py" | head -1)
+          if [ -z "$SCRIPT" ]; then
+            echo "ERROR: run_amdsmi_build.py not found"
+            exit 1
+          fi
+          echo "RUNNER_SCRIPT=$SCRIPT" >> $GITHUB_ENV
+
+      # Build + install + wheel-verify. The python-matrix step below runs the
+      # *installed* test suite from /opt/rocm/share/amd_smi, so an install is
+      # a prerequisite. Distro quirks are autodetected from /etc/os-release.
+      - name: Build and Install AMD-SMI
+        run: |
+          set -euo pipefail
+          python3 "${{ env.RUNNER_SCRIPT }}" \
+            --project-dir "${{ env.PROJECT_DIR }}" \
+            --os-label AlmaLinux8 \
+            --test-results-dir /tmp/test-results-python-compat
+
+      # Runs the installed suite under 3.6.8 + latest 3.7..3.14 and writes the
+      # per-version table to the step summary. Exits non-zero (failing this
+      # check) only if a resolved interpreter's tests FAIL; versions that
+      # cannot be provided are reported as SKIP and do not fail the check.
+      - name: Python Version Matrix
+        run: |
+          set -euo pipefail
+          python3 "${{ env.RUNNER_SCRIPT }}" python-matrix \
+            --results-dir /tmp/test-results-python-compat \
+            --amdsmi-path /opt/rocm/share/amd_smi \
+            --os-label AlmaLinux8 \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Python Compatibility Results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: amdsmi-python-compat-AlmaLinux8
+          path: /tmp/test-results-python-compat
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Uninstall
+        if: always()
+        run: |
+          set -euo pipefail
+          dnf remove -y amd-smi-lib || true
+          rm -f /usr/local/bin/amd-smi
+          if [ -d /opt/rocm/share/amd_smi ]; then
+            rm -rf /opt/rocm/share/amd_smi
+          fi

@@ -227,18 +227,6 @@ jobs:
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example results"
 
-      - name: AMDSMI Python Version Matrix
-        if: ${{ always() && matrix.os == 'AlmaLinux8' }}
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          SCRIPT=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py" | head -1)
-          python3 "$SCRIPT" python-matrix \
-            --results-dir "/tmp/test-results-${{ matrix.os }}" \
-            --amdsmi-path /opt/rocm/share/amd_smi \
-            --os-label "${{ matrix.os }}" \
-            --summary-file "$GITHUB_STEP_SUMMARY"
-
       - name: AMDSMI CI Summary
         if: always()
         run: |
