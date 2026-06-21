@@ -256,6 +256,16 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Get HSA queue ID for core dump filtering
   HSA_QUEUEID aql_queue_id() const { return queue_id_; }
 
+  /// @brief EXPERIMENTAL: Re-ring ("poke") the hardware doorbell of this queue
+  /// using the most recently written doorbell value, without enqueuing any new
+  /// work. This is a no-op (returns false) if the queue is inactive, no
+  /// doorbell value has been written yet, or the queue has no outstanding work
+  /// (read index has caught up to the write index). Intended to be driven by
+  /// the background doorbell-poke thread while the GPU is draining queued work.
+  ///
+  /// @return true if the doorbell was rung, false otherwise.
+  bool PokeDoorbell();
+
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
@@ -330,6 +340,13 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   // Indicates if queue is active
   std::atomic<bool> active_;
+
+  // EXPERIMENTAL doorbell-poke support. last_doorbell_value_ caches the most
+  // recent value written to the hardware doorbell (updated by StoreRelaxed) so
+  // the background poke thread can re-ring the doorbell with the same value.
+  // doorbell_value_valid_ guards against poking before the first real ring.
+  std::atomic<uint64_t> last_doorbell_value_{0};
+  std::atomic<bool> doorbell_value_valid_{false};
 
   // Handle of agent, which queue is attached to
   GpuAgent* agent_;

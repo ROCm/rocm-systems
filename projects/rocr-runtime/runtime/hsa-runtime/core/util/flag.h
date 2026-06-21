@@ -349,6 +349,26 @@ class Flag {
     var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
     sdma_linear_b2b_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
+    // EXPERIMENTAL: Periodically re-ring ("poke") the hardware doorbell of
+    // active compute (CP) queues from the host while the GPU is draining
+    // queued work (e.g. while the application is blocked in
+    // hipDeviceSynchronize). This is a hardware-behavior investigation knob
+    // intended to be used together with rocprofv3. Disabled by default.
+    var = os::GetEnvVar("HSA_DOORBELL_POKE");
+    doorbell_poke_ = (var == "1") ? true : false;
+
+    // EXPERIMENTAL: Interval, in microseconds, between successive doorbell
+    // pokes. Defaults to 10 us. Ignored unless HSA_DOORBELL_POKE=1.
+    var = os::GetEnvVar("HSA_DOORBELL_POKE_INTERVAL_US");
+    doorbell_poke_interval_us_ =
+        var.empty() ? 10 : static_cast<uint32_t>(strtoul(var.c_str(), nullptr, 0));
+    if (doorbell_poke_interval_us_ == 0) doorbell_poke_interval_us_ = 10;
+
+    // EXPERIMENTAL: When set, log every individual doorbell poke (very
+    // verbose). Otherwise a throttled summary is emitted while poking is
+    // active. Ignored unless HSA_DOORBELL_POKE=1.
+    var = os::GetEnvVar("HSA_DOORBELL_POKE_VERBOSE");
+    doorbell_poke_verbose_ = (var == "1") ? true : false;
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -493,6 +513,12 @@ class Flag {
 
   SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
 
+  bool doorbell_poke() const { return doorbell_poke_; }
+
+  uint32_t doorbell_poke_interval_us() const { return doorbell_poke_interval_us_; }
+
+  bool doorbell_poke_verbose() const { return doorbell_poke_verbose_; }
+
   [[nodiscard]]
   bool core_dump_disable() const { return core_dump_disable_; }
 
@@ -573,6 +599,11 @@ class Flag {
   bool enable_dtif_;
   bool enable_dxg_detection_;
   SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
+
+  // EXPERIMENTAL doorbell-poke controls (see Refresh()).
+  bool doorbell_poke_ = false;
+  uint32_t doorbell_poke_interval_us_ = 10;
+  bool doorbell_poke_verbose_ = false;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;

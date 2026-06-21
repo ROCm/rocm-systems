@@ -60,6 +60,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <atomic>
+#include <chrono>
+#include <mutex>
+#include <thread>
+#include <unordered_set>
+
 #include "core/inc/runtime.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/signal.h"
@@ -77,6 +83,160 @@ namespace rocr {
 namespace AMD {
 
 #define SCRATCH_ALT_RATIO 4
+
+// ----------------------------------------------------------------------------
+// EXPERIMENTAL doorbell-poke support.
+//
+// When HSA_DOORBELL_POKE=1, a single background thread periodically re-rings
+// ("pokes") the hardware doorbell of every active compute queue that still has
+// outstanding work. This is used to study command-processor behavior while the
+// host is blocked waiting for the GPU to drain a long backlog of dispatches
+// (for example, while an application is blocked in hipDeviceSynchronize). It is
+// intended to be exercised together with rocprofv3.
+//
+// The poke replays the last value that the runtime legitimately wrote to the
+// doorbell, so it never advances or rewinds the queue; it merely nudges the CP.
+// ----------------------------------------------------------------------------
+namespace {
+
+class DoorbellPokeManager {
+ public:
+  static DoorbellPokeManager& instance() {
+    // Intentionally leaked: lives for the duration of the process.
+    static DoorbellPokeManager* mgr = new DoorbellPokeManager();
+    return *mgr;
+  }
+
+  bool enabled() const { return enabled_; }
+
+  void Register(AqlQueue* queue) {
+    if (!enabled_) return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    queues_.insert(queue);
+    EnsureThreadStarted();
+  }
+
+  void Unregister(AqlQueue* queue) {
+    if (!enabled_) return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    queues_.erase(queue);
+  }
+
+ private:
+  DoorbellPokeManager() {
+    const Flag& flag = core::Runtime::runtime_singleton_->flag();
+    enabled_ = flag.doorbell_poke();
+    interval_us_ = flag.doorbell_poke_interval_us();
+    verbose_ = flag.doorbell_poke_verbose();
+    if (enabled_) {
+      fprintf(stderr,
+              "[doorbell-poke] ENABLED: target interval = %u us%s\n",
+              interval_us_, verbose_ ? " (verbose)" : "");
+    }
+  }
+
+  // Caller must hold mutex_.
+  void EnsureThreadStarted() {
+    if (thread_started_) return;
+    thread_started_ = true;
+    run_.store(true, std::memory_order_release);
+    thread_ = std::thread(&DoorbellPokeManager::ThreadMain, this);
+  }
+
+  static void PreciseWaitUntil(std::chrono::steady_clock::time_point deadline) {
+    // Hybrid wait: sleep for the bulk of the interval (if it is long enough to
+    // make sleeping worthwhile) then busy-spin for the remainder so that small
+    // intervals such as the 10 us default are honored reasonably accurately.
+    constexpr auto kSpinSlack = std::chrono::microseconds(80);
+    auto now = std::chrono::steady_clock::now();
+    if (deadline - now > kSpinSlack) {
+      std::this_thread::sleep_for((deadline - now) - kSpinSlack);
+    }
+    while (std::chrono::steady_clock::now() < deadline) {
+      _mm_pause();
+    }
+  }
+
+  void ThreadMain();
+
+  std::mutex mutex_;
+  std::unordered_set<AqlQueue*> queues_;
+  std::thread thread_;
+  std::atomic<bool> run_{false};
+  bool thread_started_ = false;
+  bool enabled_ = false;
+  bool verbose_ = false;
+  uint32_t interval_us_ = 10;
+};
+
+void DoorbellPokeManager::ThreadMain() {
+  using clock = std::chrono::steady_clock;
+  const auto interval = std::chrono::microseconds(interval_us_);
+
+  uint64_t total_pokes = 0;
+  uint64_t window_pokes = 0;
+  bool draining = false;
+  clock::time_point window_start = clock::now();
+
+  while (run_.load(std::memory_order_acquire)) {
+    const clock::time_point loop_start = clock::now();
+    size_t poked = 0;
+
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      for (AqlQueue* queue : queues_) {
+        if (queue->PokeDoorbell()) ++poked;
+      }
+    }
+
+    total_pokes += poked;
+    window_pokes += poked;
+
+    if (poked > 0) {
+      if (!draining) {
+        draining = true;
+        window_start = loop_start;
+        window_pokes = poked;
+        fprintf(stderr,
+                "[doorbell-poke] started poking: outstanding GPU work detected "
+                "(total pokes so far = %lu)\n",
+                static_cast<unsigned long>(total_pokes));
+      }
+      if (verbose_) {
+        fprintf(stderr, "[doorbell-poke] poked %zu queue(s) (total = %lu)\n",
+                poked, static_cast<unsigned long>(total_pokes));
+      } else {
+        const auto elapsed = loop_start - window_start;
+        if (elapsed >= std::chrono::milliseconds(100)) {
+          const double elapsed_us =
+              std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+          const double avg_us =
+              window_pokes ? (elapsed_us / static_cast<double>(window_pokes)) : 0.0;
+          fprintf(stderr,
+                  "[doorbell-poke] poking active: %lu pokes in last %.1f ms "
+                  "(~%.2f us/poke), cumulative = %lu\n",
+                  static_cast<unsigned long>(window_pokes), elapsed_us / 1000.0,
+                  avg_us, static_cast<unsigned long>(total_pokes));
+          window_start = loop_start;
+          window_pokes = 0;
+        }
+      }
+      PreciseWaitUntil(loop_start + interval);
+    } else {
+      if (draining) {
+        draining = false;
+        fprintf(stderr,
+                "[doorbell-poke] idle: no outstanding GPU work "
+                "(cumulative pokes = %lu)\n",
+                static_cast<unsigned long>(total_pokes));
+      }
+      // Nothing to poke; back off so we do not burn a core while idle.
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+}
+
+}  // namespace
 
 AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
                    HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback,
@@ -344,6 +504,10 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
   active_ = true;
 
+  // EXPERIMENTAL: register with the background doorbell-poke thread (no-op
+  // unless HSA_DOORBELL_POKE=1).
+  DoorbellPokeManager::instance().Register(this);
+
   PM4IBGuard.Dismiss();
   RingGuard.Dismiss();
   QueueGuard.Dismiss();
@@ -352,6 +516,10 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 }
 
 AqlQueue::~AqlQueue() {
+  // EXPERIMENTAL: stop the background doorbell-poke thread from touching this
+  // queue before any of its resources (doorbell, ring buffer) are torn down.
+  DoorbellPokeManager::instance().Unregister(this);
+
   agent_->UnregisterAqlQueue(this);
 
   // Remove error handler synchronously.
@@ -480,6 +648,11 @@ uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
 }
 
 void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
+  // EXPERIMENTAL: remember the last value written to the doorbell so the
+  // background doorbell-poke thread can replay it without advancing the queue.
+  last_doorbell_value_.store(uint64_t(value), std::memory_order_relaxed);
+  doorbell_value_valid_.store(true, std::memory_order_relaxed);
+
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
         core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
     HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));
@@ -490,6 +663,31 @@ void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
     /* signal_ is allocated as uncached so we do not need read-back to flush WC */
   }
   return;
+}
+
+bool AqlQueue::PokeDoorbell() {
+  // Only poke active queues that have already had a real doorbell ring.
+  if (!active_.load(std::memory_order_acquire)) return false;
+  if (!doorbell_value_valid_.load(std::memory_order_relaxed)) return false;
+
+  // Only poke while the GPU still has outstanding work on this queue: if the
+  // read index has caught up to the write index there is nothing in flight and
+  // re-ringing the doorbell would serve no purpose.
+  const uint64_t read = LoadReadIndexRelaxed();
+  const uint64_t write = LoadWriteIndexRelaxed();
+  if (read >= write) return false;
+
+  const hsa_signal_value_t value =
+      static_cast<hsa_signal_value_t>(last_doorbell_value_.load(std::memory_order_relaxed));
+
+  if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
+      core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+    HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));
+  } else {
+    _mm_sfence();
+    *(signal_.hardware_doorbell_ptr) = uint64_t(value);
+  }
+  return true;
 }
 
 void AqlQueue::StoreRelease(hsa_signal_value_t value) {
