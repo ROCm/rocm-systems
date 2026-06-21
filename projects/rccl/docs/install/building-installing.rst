@@ -164,10 +164,8 @@ required. Then build the library from the ``projects/rccl`` directory:
 
 .. note::
 
-    Optional rocSHMEM builds are configured separately and do not use RCCL git
-    submodules. Use ``./install.sh --rocshmem`` or pass ``-DENABLE_ROCSHMEM=ON``
-    together with ``-DROCSHMEM_INSTALL_DIR=<prefix>`` or
-    ``-DROCSHMEM_SOURCE_DIR=<path>``.
+    To build RCCL with optional rocSHMEM support, see the
+    `rocSHMEM documentation <https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/>`_.
 
 You can substitute a different installation path by providing the path as a parameter
 to ``CMAKE_INSTALL_PREFIX``, for example:
