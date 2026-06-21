@@ -44,7 +44,30 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PY_INTERFACE = REPO_ROOT / "py-interface"
+
+
+def _find_py_interface():
+    """Directory holding amdsmi_wrapper.py, across source and installed layouts.
+
+    Source tree: ``py-interface/`` under ``projects/amdsmi``. Installed
+    package: the ``amdsmi`` package in site-packages -- in CI this test runs
+    from the installed tests directory, where ``py-interface/`` is absent and
+    the wrapper instead ships inside the importable ``amdsmi`` package.
+    """
+    candidates = [REPO_ROOT / "py-interface"]
+    try:
+        import amdsmi
+
+        candidates.append(Path(amdsmi.__file__).resolve().parent)
+    except Exception:
+        pass
+    for cand in candidates:
+        if (cand / "amdsmi_wrapper.py").is_file():
+            return cand
+    return candidates[0]
+
+
+PY_INTERFACE = _find_py_interface()
 
 
 class FakeCDLL(object):
@@ -130,7 +153,7 @@ def _scan_unguarded_bindings():
 
 
 def _import_fresh_wrapper():
-    """(Re)import amdsmi_wrapper.py from py-interface/, returning the module."""
+    """(Re)import amdsmi_wrapper.py from PY_INTERFACE, returning the module."""
     if str(PY_INTERFACE) not in sys.path:
         sys.path.insert(0, str(PY_INTERFACE))
     sys.modules.pop("amdsmi_wrapper", None)

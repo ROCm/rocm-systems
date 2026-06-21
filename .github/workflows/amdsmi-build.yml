@@ -252,6 +252,7 @@ jobs:
           echo "AMDSMI_PATH=${AMDSMI_PATH}"
           ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1 || echo 'integration_test.py failed'
           ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1 || echo 'unit_tests.py failed'
+          python3 test_abi_compat.py -v > "$RESULTS_DIR/abi_compat_output.txt" 2>&1 || echo 'test_abi_compat.py failed'
           if [ -f ./perf_tests.py ]; then
             ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
           else

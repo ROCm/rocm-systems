@@ -85,7 +85,9 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOF
-      systemctl reenable --now logrotate.timer
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl reenable --now logrotate.timer >/dev/null 2>&1 || true
+      fi
     else
       echo "[WARNING] Could not configure systemd timer for $packageName's logrotate."\
       "$packageName logs (when turned on) will not rotate properly."
@@ -109,9 +111,25 @@ do_ldconfig() {
   fi
 }
 
+do_activate_argcomplete() {
+  # python3-argcomplete is recommended but optional; activate global bash
+  # completion when its helper is present, otherwise continue gracefully.
+  if command -v activate-global-python-argcomplete &>/dev/null; then
+    activate-global-python-argcomplete 2>/dev/null || \
+      echo "[INFO] Bash completion activation skipped. Enable it manually with: activate-global-python-argcomplete"
+  elif command -v activate-global-python-argcomplete3 &>/dev/null; then
+    activate-global-python-argcomplete3 2>/dev/null || \
+      echo "[INFO] Bash completion activation skipped. Enable it manually with: activate-global-python-argcomplete3"
+  else
+    echo "[WARNING] Could not find argcomplete activation command."\
+    "Argument completion will not work. Install python3-argcomplete to enable it."
+  fi
+}
+
 case "$1" in
   ( configure )
     do_ldconfig
+    do_activate_argcomplete
     do_configureLogrotate || exit 0
   ;;
   ( abort-upgrade | abort-remove | abort-deconfigure )

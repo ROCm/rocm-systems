@@ -53,11 +53,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Changed
 
 - **Reworked Python package install layout for system packages and pip wheels**.
-  - System `.deb` / `.rpm` postinst no longer runs `pip install`; it now drops a single `amdsmi.pth` file into the system Python's `site.getsitepackages()`, pointing at `/opt/rocm/share/amd_smi`. The system package targets only the system Python interpreter (`/usr/bin/python3`); users who want `amdsmi` inside a virtualenv should install the wheel via `pip install amdsmi`. Removal cleans up the `.pth` file. `pip list` will no longer show `amdsmi` for the system package.
+  - System `.deb` / `.rpm` packages no longer run `pip install` during postinst; the `amdsmi` Python package is installed directly into the system Python's `site-packages` (queried from `/usr/bin/python3`) as part of the package payload, so plain `import amdsmi` works after `apt install` / `dnf install`. Removing the package removes those files. `pip list` will no longer show `amdsmi` for the system package.
   - Added new CMake option `-DBUILD_PYTHON_WHEEL=ON` (default `OFF`) which builds the standalone Python wheel and an isolated `libamd_smi_python.so` (distinct SONAME) bundled inside it, so the wheel-shipped library can coexist in-process with the system `libamd_smi.so` without symbol collisions. With `-DBUILD_PYTHON_WHEEL=OFF` (the default used by ROCm CI) only the system-package layout is built; no wheel artifact is produced.
-  - `py-interface/amdsmi_wrapper.py` now auto-detects pip vs system install context and resolves the shared library accordingly (`lib64` first, then `lib`); a `_MissingLibrary` sentinel defers `OSError` to the first API call when no candidate is loadable.
-  - New `AMDSMI_DEBUG_LOAD=1` env var prints the resolved `libamd_smi*.so` path (or every candidate the loader tried) to stderr at import time. `AMDSMI_LIB_OVERRIDE` (existing) now takes precedence over both pip and system context detection so an in-tree `.so` can be loaded without uninstalling either packaged variant.
-  - Added `tools/build_wheel_debian.py` and `tools/build_wheel_rpm.py` plus a manylinux_2_28 CI workflow for producing PyPI-ready wheels.
+  - `py-interface/amdsmi_wrapper.py` now loads the shared library in this order: the `AMDSMI_LIB_OVERRIDE` env var (development / ABI-test escape hatch), a `libamd_smi_python.so` bundled next to the wrapper (pip wheel), then the system `libamd_smi.so` via the dynamic linker. A `_MissingLibrary` sentinel defers `OSError` to the first API call when no candidate is loadable, so import-time tooling (docs, lint) still works without a runtime library.
+  - Added a manylinux_2_28 CI workflow that builds PyPI-ready wheels via `-DBUILD_PYTHON_WHEEL=ON`.
 - **Fixed `amd-smi static --clock` csv and human_readable formatting to output frequency 
 levels as strings instead of dictionary objects**.  
 
