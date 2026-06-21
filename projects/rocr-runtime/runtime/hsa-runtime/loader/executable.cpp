@@ -175,7 +175,7 @@ void LoaderOptions::PrintHelp(std::ostream& out) const
 
 static const char *LOADER_DUMP_PREFIX = "amdcode";
 
-// Kernel-entry trampoline (gfx125x / RDNA4).
+// Kernel-entry trampoline (gfx1250 / RDNA4).
 //
 // We cannot reserve space immediately in front of each kernel entry: that would
 // require a non-uniform relayout of the loaded code segment, which breaks every
@@ -215,13 +215,6 @@ static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
   w[8] = 0xBE804864;                          // s_set_pc_i64 s[100:101]
   for (size_t i = 9; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
     w[i] = 0xBF9F0000;                        // s_code_end (prefetch-safe padding)
-}
-
-// gfx12.5 family: CO v3+ reports either a generic mach name (gfx12-5-generic) or
-// discrete targets (gfx1250, gfx1251, …) in the amdgcn-amd-amdhsa--<target> ISA string.
-static bool CodeObjectIsaIsGfx125Family(const std::string& codeIsa) {
-  if (codeIsa.find("gfx12-5-generic") != std::string::npos) return true;
-  return codeIsa.find("gfx125") != std::string::npos;
 }
 
 Loader* Loader::Create(Context* context)
@@ -1304,9 +1297,9 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
-  // Kernel-entry trampolines (gfx125x). Gate on this code object's ISA and reset
+  // Kernel-entry trampolines (gfx1250). Gate on this code object's ISA and reset
   // the per-object fixup list collected by LoadDefinitionSymbol.
-  trampoline_enabled_gfx125x_ = CodeObjectIsaIsGfx125Family(codeIsa);
+  trampoline_enabled_gfx1250_ = codeIsa.find("gfx1250") != std::string::npos;
   kd_fixups_.clear();
 
   uint32_t majorVersion, minorVersion;
@@ -1372,8 +1365,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   // Emit kernel-entry trampolines into the host shadow now that the image is
   // final (post-relocation) and still unfrozen. The single Freeze DMA carries
   // them to device along with the rewritten descriptors.
-  if (trampoline_enabled_gfx125x_ && !kd_fixups_.empty()) {
-    status = InstallTrampolinesGfx125x(agent);
+  if (trampoline_enabled_gfx1250_ && !kd_fixups_.empty()) {
+    status = InstallTrampolinesGfx1250(agent);
     if (status != HSA_STATUS_SUCCESS) { return status; }
   }
 
@@ -1487,7 +1480,7 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
+hsa_status_t ExecutableImpl::InstallTrampolinesGfx1250(hsa_agent_t agent) {
   const size_t n = kd_fixups_.size();
   const size_t pool = n * kTrampolineStubStride;
 
@@ -1572,7 +1565,7 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
     llvm::amdhsa::kernel_descriptor_t kd;
     sym->GetSection()->getData(sym->SectionOffset(), &kd, sizeof(kd));
 
-    if (trampoline_enabled_gfx125x_) {
+    if (trampoline_enabled_gfx1250_) {
       // Record this descriptor; the trampoline is installed after relocations.
       // sym->VAddr() is the descriptor's ELF vaddr (matches SymbolAddress below).
       kd_fixups_.push_back({ SymbolSegment(agent, sym), sym->VAddr(),
