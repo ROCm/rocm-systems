@@ -13,13 +13,12 @@
 #include "io.h"
 #include "stats.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <fcntl.h>
 #include <hip/hip_runtime_api.h>
-#include <linux/stat.h>
 #include <memory>
 #include <stdexcept>
 #include <system_error>

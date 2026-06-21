@@ -6,7 +6,7 @@
 #include "context.h"
 #include "hip.h"
 #include "state.h"
-#include "stats.h"
+#include "stats.h" // IWYU pragma: keep
 #include "sys.h"
 
 namespace hipFile {

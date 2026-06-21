@@ -11,9 +11,11 @@
 #include "hip.h"
 #include "sys.h"
 
+#include <algorithm>
 #include <memory>
 #include <new>
 #include <syslog.h>
+#include <utility>
 
 namespace hipFile {
 class IFile;

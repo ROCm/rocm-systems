@@ -5,19 +5,27 @@
 
 #include "configuration.h"
 #include "context.h"
+#include "file-descriptor.h"
 #include "hip.h"
+#include "io.h"
 #include "stats.h"
 #include "sys.h"
 
 #include <cerrno>
+#include <cstdio>
+#include <cstring>
 #include <fcntl.h>
+#include <functional>
 #include <iomanip>
+#include <new>
 #include <poll.h>
 #include <sstream>
+#include <string>
+#include <system_error>
 #include <unistd.h>
-#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 
 static int

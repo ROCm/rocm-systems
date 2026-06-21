@@ -6,7 +6,10 @@
 #include "include_internal/hipfile-stats.h"
 #include "stats.h"
 
+#include <cerrno>
 #include <sstream>
+#include <string>
+#include <system_error>
 #include <unistd.h>
 
 using namespace hipFile;

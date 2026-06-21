@@ -6,7 +6,7 @@
 #pragma once
 
 #include "hipfile-warnings.h"
-#include "stats.h"
+#include "stats.h" // IWYU pragma: keep
 
 #include <stdexcept>
 #ifdef AIS_TESTING

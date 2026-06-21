@@ -4,9 +4,6 @@
  */
 
 #include "backend.h"
-#include "buffer.h"
-#include "file.h"
-#include "io.h"
 
 #include <cstddef>
 #include <exception>
@@ -14,8 +11,13 @@
 #include <stdexcept>
 #include <sys/types.h>
 #include <system_error>
-#include <unistd.h>
 #include <utility>
+
+namespace hipFile {
+class IBuffer;
+class IFile;
+enum class IoType;
+}
 
 using namespace hipFile;
 

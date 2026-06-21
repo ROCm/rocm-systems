@@ -10,13 +10,14 @@
 #include "passkey.h"
 #include "sys.h"
 
+#include <cerrno>
 #include <fcntl.h>
 #include <utility>
 #include <string>
+#include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <syslog.h>
 #include <system_error>
-#include <unistd.h>
 
 using namespace std;
 

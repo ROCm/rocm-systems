@@ -4,6 +4,12 @@
  */
 
 #include "api_trace/api-trace-internal.h"
+#include "hipfile-api-trace.h"
+#include "hipfile.h"
+
+#include <cstdint>
+#include <hip/hip_runtime_api.h>
+#include <sys/types.h>
 
 const char *
 hipFileGetOpErrorString(hipFileOpError_t status)

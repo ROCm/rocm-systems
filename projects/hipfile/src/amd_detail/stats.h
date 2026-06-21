@@ -7,16 +7,18 @@
 #include "buffer.h"
 #include "file.h"
 #include "file-descriptor.h"
+#include "hipfile.h"
 #include "io.h"
 
 #include <array>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <functional>
+#include <cstdint>
 #include <memory>
 #include <numeric>
 #include <ostream>
+#include <sys/types.h>
 #include <thread>
 #include <tuple>
 #include <type_traits>

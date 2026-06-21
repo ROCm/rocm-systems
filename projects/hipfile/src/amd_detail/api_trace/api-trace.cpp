@@ -4,8 +4,9 @@
  */
 
 #include "api_trace/api-trace-internal.h"
+#include "hipfile-api-trace.h"
 
-#include <array>
+#include <array> // IWYU pragma: keep
 #include <cstddef>
 
 #if defined(HIPFILE_ROCPROFILER_REGISTER) && HIPFILE_ROCPROFILER_REGISTER > 0

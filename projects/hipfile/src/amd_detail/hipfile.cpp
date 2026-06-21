@@ -21,7 +21,9 @@
 #include <cerrno>
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
+#include <initializer_list>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <utility>
 #include <vector>

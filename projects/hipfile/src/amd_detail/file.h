@@ -9,6 +9,7 @@
 #include "hipfile.h"
 #include "mountinfo.h"
 
+#include <cstdint>
 #include <linux/stat.h>
 #include <memory>
 #include <optional>

@@ -7,8 +7,6 @@
 #include "backend/fastpath.h"
 #include "batch/batch.h"
 #include "buffer.h"
-#include "configuration.h"
-#include "context.h"
 #include "file.h"
 #include "state.h"
 #include "stream.h"
