@@ -6,6 +6,7 @@
 #include "include_internal/hipfile-stats.h"
 #include <iostream>
 #include <unistd.h>
+#include <cstdlib>
 #include <cstring>
 
 static void
