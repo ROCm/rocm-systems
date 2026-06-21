@@ -95,6 +95,7 @@ RUN apt update && \
         doxygen \
         gdb \
         git \
+        iwyu \
         libmount-dev \
         llvm-dev \
         python3.12-dev \

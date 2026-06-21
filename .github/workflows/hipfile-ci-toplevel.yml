@@ -229,3 +229,22 @@ jobs:
       cxx_standard: ${{ matrix.cxx_standard }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}
+
+  # include-what-you-use findings are compiler- and standard-independent, so run
+  # the analysis exactly once against a single fixed image rather than fanning
+  # out across the build matrix. This job is advisory: IWYU runs in launcher
+  # mode and never fails the build, so it only surfaces suggestions. Change the
+  # image key below to retarget the ROCm version (the combo must exist in
+  # Precheck's matrix).
+  iwyu:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    uses: ./.github/workflows/hipfile-iwyu.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}

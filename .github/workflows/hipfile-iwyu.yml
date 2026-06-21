@@ -1,0 +1,134 @@
+name: hipfile-iwyu
+run-name: Run include-what-you-use analysis on hipFile
+
+env:
+  AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
+  AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
+
+on:
+  workflow_call:
+    inputs:
+      ci_image:
+        description: "Full CI image name & tag"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  iwyu:
+    name: iwyu
+    runs-on: [ubuntu-24.04]
+    steps:
+      - name: Set AIS CI container name
+        # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
+        run: |
+          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
+      - name: Compute container name
+        run: |
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_iwyu" >> "${GITHUB_ENV}"
+      - name: Fetching code repository...
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          path: rocm-systems
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+      - name: Authenticating to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Starting Docker Container
+        run: |
+          docker run \
+            -dt \
+            --rm \
+            --pull always \
+            -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \
+            --name "${AIS_CONTAINER_NAME}" \
+            "${AIS_INPUT_CI_IMAGE}"
+      - name: Make copy of the code repository and create build directories
+        # Single quotes necessary to ensure string/command substitutions happen
+        # in the container and not on the host.
+        run: |
+          docker exec \
+            -t \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cp -R /mnt/ais /ais
+              mkdir -p /ais/build/hipfile
+            '
+      - name: Generate build files for hipFile with IWYU enabled
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake \
+                -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_CXX_COMPILER=amdclang++ \
+                -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
+                -DCMAKE_HIP_PLATFORM=amd \
+                -DAIS_USE_IWYU=ON \
+                ../../rocm-systems/projects/hipfile
+            '
+      - name: Compile hipFile with IWYU (advisory)
+        # IWYU runs as part of compilation via CMAKE_CXX_INCLUDE_WHAT_YOU_USE.
+        # It emits suggestions on stderr but, in launcher mode, never changes the
+        # compiler's exit status -- so a normal build both compiles the code and
+        # collects IWYU findings. This job is advisory: it must never fail the CI
+        # run, so the build is tee'd to a log and the step always succeeds.
+        # `set -o pipefail` is intentionally NOT used for that reason.
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake --build . --parallel 2>&1 | tee /ais/build/hipfile/iwyu.log
+            ' || echo "Build returned non-zero; IWYU findings (if any) are reported below."
+      - name: Summarize IWYU findings
+        # Extract just the IWYU advisory blocks from the build log and post them
+        # to the job summary. Always runs and always exits 0.
+        run: |
+          docker exec \
+            -t \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              awk "/should add these lines:/,/^---\$/" /ais/build/hipfile/iwyu.log > /ais/build/hipfile/iwyu-findings.txt || true
+            '
+          docker cp "${AIS_CONTAINER_NAME}:/ais/build/hipfile/iwyu-findings.txt" ./iwyu-findings.txt || true
+          {
+            echo "## include-what-you-use findings (advisory)"
+            echo ""
+            if [ -s ./iwyu-findings.txt ]; then
+              echo "IWYU suggested include changes. These are advisory only and do not fail CI."
+              echo ""
+              echo '```'
+              cat ./iwyu-findings.txt
+              echo '```'
+            else
+              echo "No IWYU findings. :tada:"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Upload IWYU findings artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: iwyu-findings
+          path: ./iwyu-findings.txt
+          if-no-files-found: ignore
+      - name: Cleanup & Stop the Docker container
+        if: ${{ always() }}
+        run: |
+          if docker inspect "${AIS_CONTAINER_NAME}" >/dev/null 2>&1; then
+            docker stop "${AIS_CONTAINER_NAME}"
+          else
+            echo "Container ${AIS_CONTAINER_NAME} does not exist; skipping stop"
+          fi
