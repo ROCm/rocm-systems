@@ -201,6 +201,18 @@ static const char *LOADER_DUMP_PREFIX = "amdcode";
 //   s_code_end   (padding)              ->  0xBF9F0000
 static constexpr size_t kTrampolineStubStride = AMD_ISA_ALIGN_BYTES;        // 256: one stub, entry-aligned
 
+// The CP (CPC) instruction-prefetches forward from a kernel's entry PC when it
+// dispatches. Because dispatch now lands on a stub inside our pool, that prefetch
+// reads ahead from the stub and would run off the end of the pool into the next,
+// unmapped page -- a CPC read page/permission fault (observed on gfx1250). The
+// prefetch length is per-kernel: COMPUTE_PGM_RSRC3.INST_PREF_SIZE (6 bits, GFX11+)
+// counts 128-byte instruction-cache lines to prefetch ahead of the entry. We size
+// a trailing guard from the largest INST_PREF_SIZE in the pool so the prefetch from
+// any stub always lands in mapped, readable memory inside this same allocation. The
+// guard is never executed (the stub sets PC away first); it only needs to be present
+// and readable, which the allocation's zero-fill already guarantees.
+static constexpr size_t kInstPrefUnitBytes = 128;                          // GFX11+ CP I$ prefetch line size
+
 static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
   auto* w = reinterpret_cast<uint32_t*>(buf);
 
@@ -1489,7 +1501,18 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
 
 hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
   const size_t n = kd_fixups_.size();
-  const size_t pool = n * kTrampolineStubStride;
+
+  // Size the trailing prefetch guard from the largest CP instruction-prefetch
+  // window among this pool's kernels (INST_PREF_SIZE lines * 128 B), plus one
+  // stub stride of slack for end-of-window line rounding. Because the stubs are
+  // packed and the last one sits at the end of the pool, a guard >= the max
+  // per-kernel reach covers the forward prefetch from every stub.
+  uint32_t max_pref_lines = 0;
+  for (const auto& f : kd_fixups_)
+    max_pref_lines = std::max(max_pref_lines, f.inst_pref);
+  const size_t guard =
+      static_cast<size_t>(max_pref_lines) * kInstPrefUnitBytes + kTrampolineStubStride;
+  const size_t pool = n * kTrampolineStubStride + guard;
 
   // AMDGPU_HSA_SEGMENT_CODE_AGENT yields *executable* device memory: the loader
   // context backs it with RegionMemory(..., is_code=true), which sets
@@ -1521,6 +1544,9 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
     f.code_seg->Copy(f.kd_vaddr + llvm::amdhsa::KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET,
                      &new_off, sizeof(new_off)); // -> code host shadow
   }
+
+  // The prefetch guard is left as the allocation's zero-fill (zero=true): it is
+  // committed and readable -- all the CP prefetch needs -- and is never executed.
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1575,8 +1601,12 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
     if (trampoline_enabled_gfx125x_) {
       // Record this descriptor; the trampoline is installed after relocations.
       // sym->VAddr() is the descriptor's ELF vaddr (matches SymbolAddress below).
+      // INST_PREF_SIZE (GFX11+) = number of 128B I$ lines the CP prefetches ahead
+      // of the entry; captured here to size the trampoline's prefetch guard.
+      uint32_t inst_pref = AMDHSA_BITS_GET(kd.compute_pgm_rsrc3,
+          rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE);
       kd_fixups_.push_back({ SymbolSegment(agent, sym), sym->VAddr(),
-                             kd.kernel_code_entry_byte_offset });
+                             kd.kernel_code_entry_byte_offset, inst_pref });
     }
 
     uint32_t kernarg_segment_size = kd.kernarg_size; // FIXME: If 0 then the compiler is not specifying the size.
