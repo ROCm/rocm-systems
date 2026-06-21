@@ -390,8 +390,8 @@ class TestLLVMGenericAssignments:
     def test_gfx12_0_has_gfx12_generic(self):
         assert lookup_bundle("gfx12_0").llvm_generic == "gfx12-generic"
 
-    def test_gfx12_5_has_gfx12_5_generic(self):
-        assert lookup_bundle("gfx12_5").llvm_generic == "gfx12-5-generic"
+    def test_gfx12_5_no_generic(self):
+        assert lookup_bundle("gfx12_5").llvm_generic is None
 
     def test_gfx9_family_no_generic(self):
         """No gfx9-generic at the family level (it's at sub-family gfx9_0)."""
