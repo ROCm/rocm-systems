@@ -79,6 +79,7 @@ from amdisa.codegen.execute.packed import (
     gen_mad_mix_f32,
     gen_mad_mix_lo_hi,
     gen_dot2,
+    gen_dot2_true16,
     gen_dot4,
     gen_dot8,
 )
@@ -163,6 +164,21 @@ class CodeGenerator:
     def _supports_simm64_literal_operands(self) -> bool:
         return 'OPR_SIMM64' in self.isa_spec.operand_types
 
+    def _constructor_operand_type(
+        self, inst_sem: InstructionSemantics | None, opnd: Operand
+    ) -> str:
+        if (
+            inst_sem
+            and inst_sem.semantic_class in ('vector_readfirstlane', 'vector_readlane')
+            and opnd.name == 'src0'
+            and opnd.is_input
+            and 'OPR_SRC_VGPR' in self.isa_spec.operand_types
+        ):
+            return 'OPR_SRC_VGPR'
+        if inst_sem and inst_sem.accvgpr_srcs and opnd.is_input:
+            return 'OPR_SRC_VGPR_OR_ACCVGPR'
+        return opnd.operand_type
+
     @staticmethod
     def _literal_encoding_info(
         enc: InstEncoding, inst_enc_obj: InstEncoding | None, inst: Instruction
@@ -219,10 +235,35 @@ class CodeGenerator:
             inst.is_implied_literal_enc,
         )
 
+    @staticmethod
+    def _semantic_source_operands(
+        inst: Instruction, src_operands: list[Operand]
+    ) -> list[Operand]:
+        if inst.name != 'S_FMAMK_F32':
+            return src_operands
+
+        by_name = {op.name: op for op in src_operands}
+        mul_literal = by_name.get('literal') or by_name.get('src2')
+        ssrc0 = by_name.get('ssrc0')
+        ssrc1 = by_name.get('ssrc1')
+        if ssrc0 is None or ssrc1 is None or mul_literal is None:
+            return src_operands
+
+        ordered = [ssrc0, mul_literal, ssrc1]
+        ordered_names = {op.name for op in ordered}
+        ordered.extend(op for op in src_operands if op.name not in ordered_names)
+        return ordered
+
     def _has_machine_inst_struct(self, struct_name: str) -> bool:
         return struct_name in {
             f'{enc.fmt_enc_name}MachineInst' for enc in self.isa_spec.inst_encodings
         }
+
+    def _supports_vop_dpp8(self) -> bool:
+        return any(
+            self._has_machine_inst_struct(f'{base}VopDpp8MachineInst')
+            for base in ('Vop1', 'Vop2', 'Vopc')
+        )
 
     def gen_all(self) -> None:
         """Generate all C++ objects.
@@ -1439,7 +1480,7 @@ class CodeGenerator:
             # VOP1/VOP2 encoding bases store DPP control fields.
             # apply_dpp() is a free function in dpp_sdwa_ops.h.
             if inst_enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
-                has_dpp8 = self.isa_spec.arch_name.lower() == 'gfx1250'
+                has_dpp8 = self._supports_vop_dpp8()
                 class_members.append(cgen.Statement('uint32_t dpp_ctrl_ = 0'))
                 class_members.append(cgen.Statement('uint32_t dpp_row_mask_ = 0xF'))
                 class_members.append(cgen.Statement('uint32_t dpp_bank_mask_ = 0xF'))
@@ -1642,7 +1683,7 @@ class CodeGenerator:
     def _operand_uses_packed_16bit_source(
         self, enc_name: str, opnd: Operand, *, reads_dst: bool = False
     ) -> bool:
-        """Return True for gfx1250 E32 16-bit sources with packed-half selectors."""
+        """Return True for E32 16-bit sources with packed-half selectors."""
         profile = self.isa_spec.profile
         if not profile.uses_packed_16bit_e32_source_selectors:
             return False
@@ -2224,6 +2265,7 @@ class CodeGenerator:
         ):
             src_operands = dst_operands[1:]
             dst_operands = dst_operands[:1]
+        src_operands = self._semantic_source_operands(inst, src_operands)
         dst_ops = [op.name for op in dst_operands]
         src_ops = [op.name for op in src_operands]
         cls = sem.semantic_class
@@ -2293,14 +2335,21 @@ class CodeGenerator:
         if cls in _SEMA_CLASSES:
             sema_block = derive_sema_block(sem)
             if sema_block is not None and not sema_block.is_empty:
-                is_gfx1250_true16_mov = (
-                    self.isa_spec.arch_name.lower() == 'gfx1250'
+                profile = self.isa_spec.profile
+                uses_true16_e32 = bool(
+                    getattr(profile, 'uses_packed_16bit_e32_source_selectors', False)
+                )
+                uses_true16_vop3_opsel = bool(
+                    getattr(profile, 'uses_true16_vop3_opsel', False)
+                )
+                is_true16_mov = (
+                    uses_true16_e32
                     and inst.name == 'V_MOV_B16'
                     and cls == 'vector_mov'
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
-                if is_vop3 and is_float_op and not is_gfx1250_true16_mov:
+                if is_vop3 and is_float_op and not is_true16_mov:
                     from amdisa.sema_enrich import enrich_block
 
                     ef = {'neg'}
@@ -2336,7 +2385,6 @@ class CodeGenerator:
                     dst_reg_classes,
                 )
                 lctx = LoweringContext(exec_model=sema_block.pragma, operand_map=omap)
-                is_gfx1250 = self.isa_spec.arch_name.lower() == 'gfx1250'
                 if cls == 'vector_cmp':
                     # V_CMP writes a fresh wave mask initialized to zero, so false
                     # lanes can remain clear without emitting redundant bit clears.
@@ -2397,21 +2445,22 @@ class CodeGenerator:
                     for opnd in dst_operands
                 )
                 is_true16_vop3 = (
-                    is_gfx1250
+                    uses_true16_vop3_opsel
                     and is_vop3
                     and dst_operands
                     and (has_true16_vop3_src or has_true16_vop3_dst)
                 )
                 if is_true16_vop3:
+                    vop3_opsel = 'amdgpu::vop3_opsel(inst_)'
                     for src_idx, opnd in enumerate(src_operands):
                         if opnd.is_input and (opnd.size == 16 or force_true16_vop3_src):
                             lctx.true16_src_selects[src_idx] = (
-                                f'inst_.opsel & 0x{1 << src_idx:x}u'
+                                f'{vop3_opsel} & 0x{1 << src_idx:x}u'
                             )
                     if has_true16_vop3_dst:
-                        lctx.true16_dst_select = 'inst_.opsel & 0x8u'
+                        lctx.true16_dst_select = f'{vop3_opsel} & 0x8u'
                 elif (
-                    is_gfx1250
+                    uses_true16_e32
                     and inst.name == 'V_MOV_B16'
                     and cls == 'vector_mov'
                     and dtype in ('b16', 'u16')
@@ -2431,7 +2480,7 @@ class CodeGenerator:
                             ': src0.read_lane(wf, lane))'
                         )
                 elif (
-                    is_gfx1250
+                    uses_true16_e32
                     and enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
                     and has_true16_dst
                     and cls != 'vector_swap'
@@ -2514,8 +2563,10 @@ class CodeGenerator:
                 f'  uint16_t imm = static_cast<uint16_t>({src_ops[0]}.encoding_value_);'
             )
             wf = self.isa_spec.profile.waitcnt_family
-            if wf == 'gfx11':
-                # GFX11 (RDNA3/3.5) SIMM16 layout:
+            if wf in ('gfx11', 'gfx12'):
+                # GFX11 (RDNA3/3.5) SIMM16 layout. GFX12 uses split S_WAIT_*
+                # instructions in the XML, but LLVM still accepts the
+                # monolithic S_WAITCNT compatibility opcode with this layout.
                 #   expcnt[2:0] = bits [2:0]
                 #   lgkmcnt[5:0] = bits [9:4]
                 #   vmcnt[5:0] = bits [15:10]
@@ -2539,7 +2590,19 @@ class CodeGenerator:
             L.append(
                 f'  uint16_t cnt = static_cast<uint16_t>({src_ops[0]}.encoding_value_);'
             )
-            L.append(f'  wf.set_wait_counter("{op}", cnt);')
+            if op == 'waitcnt_vscnt':
+                L.append('  wf.set_wait_target_vscnt(static_cast<uint8_t>(cnt));')
+            elif op == 'waitcnt_vmcnt':
+                L.append('  wf.set_wait_target_loadcnt(static_cast<uint8_t>(cnt));')
+            elif op == 'waitcnt_expcnt':
+                L.append('  wf.set_wait_counter("wait_expcnt", cnt);')
+            elif op == 'waitcnt_lgkmcnt':
+                L.append('  const auto current_wait = wf.wait_target();')
+                L.append(
+                    '  wf.set_wait_target(current_wait.vmcnt, static_cast<uint8_t>(cnt), current_wait.expcnt);'
+                )
+            else:
+                L.append(f'  wf.set_wait_counter("{op}", cnt);')
             return '\n'.join(L)
 
         if cls == 'tensor_load_to_lds':
@@ -2563,11 +2626,16 @@ class CodeGenerator:
             cond_map = {
                 'scc0': '!wf.read_scc()',
                 'scc1': 'wf.read_scc()',
-                'vccz': 'wf.vcc() == 0',
-                'vccnz': 'wf.vcc() != 0',
+                'vccz': 'live_vcc == 0',
+                'vccnz': 'live_vcc != 0',
                 'execz': 'wf.exec() == 0',
                 'execnz': 'wf.exec() != 0',
             }
+            if cond in ('vccz', 'vccnz'):
+                L.append(
+                    '  const uint64_t live_vcc = wf.vcc() & '
+                    '(wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));'
+                )
             L.append(f'  if ({cond_map[cond]}) {{')
             L.append(
                 f'    int16_t offset = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
@@ -3057,6 +3125,9 @@ class CodeGenerator:
             )
 
         # ----- VOP3P: packed / dot / mix / MFMA -----
+        if cls in ('dot2_f16_f16', 'dot2_bf16_bf16'):
+            return gen_dot2_true16(dst_ops, src_ops, cls)
+
         if cls.startswith('dot2_'):
             return gen_dot2(
                 dst_ops, src_ops, cls, opsel_exprs=self._vop3p_opsel_exprs()
@@ -3197,6 +3268,12 @@ class CodeGenerator:
             L.append(f'  uint64_t exec = wf.exec();')
             L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
             L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
+            L.append(f'  uint32_t lane_group_width = wf.wf_size();')
+            L.append(
+                f'  if (wf.wf_size() == 64 && (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 ||'
+                f' cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))'
+            )
+            L.append(f'    lane_group_width = 32;')
             L.append(f'  // Pre-read all data0 values from every lane.')
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
@@ -3213,7 +3290,10 @@ class CodeGenerator:
                 L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
                 L.append(f'    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);')
                 L.append(
-                    f'    uint32_t src_lane = ((addr_val + offset) / 4) % wf.wf_size();'
+                    f'    uint32_t group_base = (i / lane_group_width) * lane_group_width;'
+                )
+                L.append(
+                    f'    uint32_t src_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);'
                 )
                 if fetch_invalid:
                     L.append(f'    tmp[i] = src_data[src_lane];')
@@ -3239,7 +3319,10 @@ class CodeGenerator:
                 L.append(f'    if (!(exec & (1ULL << i))) continue;')
                 L.append(f'    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);')
                 L.append(
-                    f'    uint32_t dst_lane = ((addr_val + offset) / 4) % wf.wf_size();'
+                    f'    uint32_t group_base = (i / lane_group_width) * lane_group_width;'
+                )
+                L.append(
+                    f'    uint32_t dst_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);'
                 )
                 L.append(f'    tmp[dst_lane] = src_data[i];')
                 L.append(f'  }}')
@@ -3253,8 +3336,8 @@ class CodeGenerator:
             # DS_SWIZZLE_B32: lane swizzle controlled by offset field.
             # The offset encodes the swizzle pattern. For QDMode (bit 15=1):
             #   for each lane in quad: dst = src[packed_2bit_selector]
-            # For BitMode (bit 15=0): full-wave swizzle via and/or/xor.
-            src_field = 'addr' if enc_name.upper() == 'ENC_VDS' else 'data0'
+            # For BitMode (bit 15=0): swizzle within 32-lane rows via and/or/xor.
+            src_field = 'addr'
             L.append(f'  auto &cu = wf.cu();')
             L.append(f'  uint64_t exec = wf.exec();')
             L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
@@ -3271,11 +3354,15 @@ class CodeGenerator:
                 f'      src_lane = (lane & ~0x3u) | ((offset >> (2u * (lane & 0x3u))) & 0x3u);'
             )
             L.append(f'    }} else {{')
-            L.append(f'      // BitMode: full-wave swizzle.')
+            L.append(f'      // BitMode: swizzle within 32-lane rows.')
             L.append(f'      uint32_t and_mask = offset & 0x1F;')
             L.append(f'      uint32_t or_mask = (offset >> 5) & 0x1F;')
             L.append(f'      uint32_t xor_mask = (offset >> 10) & 0x1F;')
-            L.append(f'      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;')
+            L.append(f'      uint32_t row_base = lane & ~0x1Fu;')
+            L.append(f'      uint32_t row_lane = lane & 0x1Fu;')
+            L.append(
+                f'      src_lane = row_base + (((row_lane & and_mask) | or_mask) ^ xor_mask);'
+            )
             L.append(f'    }}')
             L.append(f'    if (src_lane < wf.wf_size())')
             L.append(f'      cu.write_vgpr(vb + inst_.vdst, lane, src_data[src_lane]);')
@@ -4705,21 +4792,33 @@ class CodeGenerator:
     def _requires_arch_local_execute(
         self, inst: Instruction | None, enc_name: str | None = None
     ) -> bool:
-        if inst is None or self.isa_spec.arch_name.lower() != 'gfx1250':
+        if inst is None:
             return False
+        profile = getattr(self.isa_spec, 'profile', None)
+        uses_true16_e32 = bool(
+            getattr(profile, 'uses_packed_16bit_e32_source_selectors', False)
+        )
+        uses_true16_vop3_opsel = bool(getattr(profile, 'uses_true16_vop3_opsel', False))
         enc_upper = (enc_name or inst.enc_name).upper()
         if (
-            enc_upper == 'ENC_VOP1'
+            uses_true16_e32
+            and enc_upper == 'ENC_VOP1'
             and inst.name == 'V_MOV_B16'
             and any(op.size == 16 for op in inst.operands)
         ):
             return True
-        if enc_upper in ('ENC_VOP1', 'ENC_VOP2') and any(
-            op.is_output and op.size == 16 for op in inst.operands
+        if (
+            uses_true16_e32
+            and enc_upper in ('ENC_VOP1', 'ENC_VOP2')
+            and any(op.is_output and op.size == 16 for op in inst.operands)
         ):
             return True
-        if enc_upper == 'ENC_VOP3' and any(
-            (op.is_input or op.is_output) and op.size == 16 for op in inst.operands
+        if (
+            uses_true16_vop3_opsel
+            and enc_upper == 'ENC_VOP3'
+            and any(
+                (op.is_input or op.is_output) and op.size == 16 for op in inst.operands
+            )
         ):
             return True
         return False
@@ -4727,7 +4826,10 @@ class CodeGenerator:
     def _e32_true16_dst_reg_expr(
         self, inst: Instruction | None, enc_name: str | None = None
     ) -> str:
-        if inst is None or self.isa_spec.arch_name.lower() != 'gfx1250':
+        if inst is None:
+            return 'inst_.vdst'
+        profile = getattr(self.isa_spec, 'profile', None)
+        if not bool(getattr(profile, 'uses_packed_16bit_e32_source_selectors', False)):
             return 'inst_.vdst'
         enc_upper = (enc_name or inst.enc_name).upper()
         if enc_upper not in ('ENC_VOP1', 'ENC_VOP2'):
@@ -4942,9 +5044,7 @@ class CodeGenerator:
                                 f'reinterpret_cast<const OpEncoding*>(inst)))'
                             )
                         elif opnd.name in inst_field_names:
-                            opr_type = opnd.operand_type
-                            if inst_sem and inst_sem.accvgpr_srcs and opnd.is_input:
-                                opr_type = 'OPR_SRC_VGPR_OR_ACCVGPR'
+                            opr_type = self._constructor_operand_type(inst_sem, opnd)
                             packed_16bit_source_arg = (
                                 ', true'
                                 if self._operand_uses_packed_16bit_source(
@@ -5149,7 +5249,7 @@ class CodeGenerator:
                         'ENC_VOP2': 'Vop2',
                         'ENC_VOPC': 'Vopc',
                     }
-                    _enable_dpp8 = self.isa_spec.arch_name.lower() == 'gfx1250'
+                    _enable_dpp8 = self._supports_vop_dpp8()
                     _enc_base = _DPP_ENC_BASES.get(enc.enc_name.upper())
                     _enc_base_dpp8 = (
                         _DPP8_ENC_BASES.get(enc.enc_name.upper())
@@ -6910,6 +7010,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
         arch = self.isa_spec.arch_name
+        scalar_null_precedes_m0 = self.isa_spec.profile.scalar_null_precedes_m0
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
         )
@@ -7289,6 +7390,14 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         _vgpr_index_lines.append('}')
         _vgpr_index_body = '\n'.join(_vgpr_index_lines)
 
+        _read_immediate64_body = (
+            'uint64_t read_immediate64(OperandType opr_type, int ev) {\n'
+            '  if (opr_type == OperandType::OPR_SIMM32)\n'
+            '    return static_cast<uint64_t>(static_cast<uint32_t>(ev));\n'
+            '  return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));\n'
+            '}'
+        )
+
         # Single source of truth for "does this operand resolve to per-lane VGPR
         # storage, and if so what's the offset within the wavefront's VGPR
         # allocation?". Used by read_lane/read_lane64/write_lane/write_lane64
@@ -7383,7 +7492,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (has_literal64_)\n'
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
-            '    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));\n'
+            '    return read_immediate64(opr_type_, ev);\n'
             '  return resolve_src_scalar64(wf, ev);\n'
             '}'
         )
@@ -7468,7 +7577,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    return 0u; // NULL\n'
                 '  if (ev == 125)\n'
                 '    return wf.m0();\n'
-                if arch in ('rdna4', 'gfx1250')
+                if scalar_null_precedes_m0
                 else '  if (ev == 124)\n' '    return wf.m0();\n'
             )
             + '  if (ev == 126)\n'
@@ -7514,7 +7623,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (ev == 250)\n'
             '    return 0u; // NULL\n'
             '  if (ev == 251)\n'
-            '    return wf.vcc() == 0 ? 1u : 0u; // VCCZ\n'
+            '    return (wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL))) == 0 ? 1u : 0u; // VCCZ\n'
             '  if (ev == 252)\n'
             '    return wf.exec() == 0 ? 1u : 0u; // EXECZ\n'
             '  if (ev == 253)\n'
@@ -7532,7 +7641,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '         ev == 124 || ev == 125 || ev == 126 || ev == 127 ||\n'
                 '         (ev >= 128 && ev <= 208) || ev == 230 || ev == 231 ||\n'
                 '         (ev >= 235 && ev <= 238) || (ev >= 240 && ev <= 253);\n'
-                if arch in ('rdna4', 'gfx1250')
+                if scalar_null_precedes_m0
                 else '  return (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) ||\n'
                 '         ev == 124 || ev == 126 || ev == 127 ||\n'
                 '         (ev >= 128 && ev <= 208) || (ev >= 235 && ev <= 238) ||\n'
@@ -7560,7 +7669,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    return 0u; // NULL\n'
                 '  if (ev == 125)\n'
                 '    return wf.m0();\n'
-                if arch in ('rdna4', 'gfx1250')
+                if scalar_null_precedes_m0
                 else '  if (ev == 124)\n' '    return wf.m0();\n'
             )
             + '  if (ev == 126)\n'
@@ -7634,7 +7743,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    wf.set_m0(val);\n'
                 '    return;\n'
                 '  }\n'
-                if arch in ('rdna4', 'gfx1250')
+                if scalar_null_precedes_m0
                 else '  if (ev == 124) {\n'
                 '    wf.set_m0(val);\n'
                 '    return;\n'
@@ -7684,6 +7793,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + _is_immediate_body
             + '\n\n'
             + _vgpr_index_body
+            + '\n\n'
+            + _read_immediate64_body
             + '\n\n'
             + '\n'
             '} // namespace\n'
@@ -7743,7 +7854,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  if (has_literal64_)\n'
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
-            '    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(encoding_value_)));\n'
+            '    return read_immediate64(opr_type_, encoding_value_);\n'
             '  return resolve_src_scalar64(wf, encoding_value_);\n'
             '}\n'
             '\n'

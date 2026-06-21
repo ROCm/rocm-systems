@@ -2548,9 +2548,9 @@ template <typename Inst> [[nodiscard]] bool try_execute_lshl_add_u64_simd(Inst &
 
 /// VOP3 wide 32x32->64 multiply-add fast path (v_mad_u64_u32 / v_mad_i64_i32).
 /// src0/src1 are 32-bit multiplicands (read as narrow lanes), src2 is the 64-bit
-/// addend, dst is 64-bit. `mad_op(s0, s1, c)` receives the two narrow operands
-/// and the 64-bit addend and does the (signedness-aware) widen, 64-bit multiply
-/// (low 64), and add — matching the scalar `(wide)s0 * (wide)s1 + s2`.
+/// addend, dst is 64-bit, and sdst is the per-lane overflow/carryout mask.
+/// `mad_op(s0, s1, c)` receives the two narrow operands and the 64-bit addend
+/// and returns both the low 64-bit result and carry/overflow mask.
 template <typename Inst, typename MadOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_mad_wide64_vop3_simd(Inst &inst, Wavefront &wf,
@@ -2561,6 +2561,7 @@ template <typename Inst, typename MadOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
+  uint64_t carry_out = 0;
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
   const ConstVgprStoragePair64 rs2 = simd_src_reg64(inst.src2, wf);
@@ -2578,8 +2579,15 @@ template <typename Inst, typename MadOp>
     const auto a = simd_load_narrow_or<uint32_t>(r0, base, a_bcast);
     const auto b = simd_load_narrow_or<uint32_t>(r1, base, b_bcast);
     const auto c = simd_load64_or<uint64_t>(rs2, base, c_bcast);
-    write_simd64_at<uint64_t>(rd64, inst.vdst, wf, base, mad_op(a, b, c), chunk);
+    const auto r = mad_op(a, b, c);
+    write_simd64_at<uint64_t>(rd64, inst.vdst, wf, base, r.value, chunk);
+    uint64_t carry_bits = 0;
+    for (std::size_t i = 0; i < W; ++i)
+      if (r.carry[i])
+        carry_bits |= (1ULL << i);
+    carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
+  write_wave_mask_scalar(inst.sdst, wf, carry_out);
   return true;
 }
 template <typename Inst, typename MadOp>
@@ -3713,7 +3721,8 @@ template <bool Vop3, typename Inst>
 
 /// VOP3 wide 32x32->64 multiply-add counterpart (v_mad_u64_u32 / v_mad_i64_i32).
 /// The functor takes `(narrow32<uint32_t> s0, narrow32<uint32_t> s1,
-/// native<uint64_t> c)`; variadic so its commas pass through.
+/// native<uint64_t> c)` and returns `SimdCarry<native<uint64_t>, mask>`;
+/// variadic so its commas pass through.
 #define ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3(...)                                                     \
   if (::rocjitsu::amdgpu::try_execute_mad_wide64_vop3_simd(inst, wf, __VA_ARGS__))                 \
   return

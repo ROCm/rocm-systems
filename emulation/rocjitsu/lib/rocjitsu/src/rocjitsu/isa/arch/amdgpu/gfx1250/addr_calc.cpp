@@ -104,7 +104,13 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
       vaddr =
           (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
     }
-    d.per_lane_addr[lane] = saddr_val + vaddr + offset;
+    uint64_t addr = saddr_val + vaddr + offset;
+    uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
+    if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi) {
+      uint64_t lane_base = wf.scratch_base() + static_cast<uint64_t>(lane) * wf.scratch_lane_size();
+      addr = lane_base + (addr & 0xFFFFFFFFULL);
+    }
+    d.per_lane_addr[lane] = addr;
   }
 }
 

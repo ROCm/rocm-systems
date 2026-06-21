@@ -804,6 +804,49 @@ def gen_dot2(
     return '\n'.join(L)
 
 
+def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
+    """Generate VOP3 true16 V_DOT2_{F16,BF16}_{F16,BF16}.
+
+    These are VOP3 dot instructions, not VOP3P packed instructions. LLVM rejects
+    op_sel[0:1] for this family, so src0/src1 are consumed as their packed v2
+    half values. op_sel[2] selects the half accumulator and op_sel[3] selects
+    the destination half.
+    """
+    d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
+    if cls == 'dot2_f16_f16':
+        widen = 'util::f16_to_f32'
+        narrow = 'util::f32_to_f16'
+    elif cls == 'dot2_bf16_bf16':
+        widen = 'util::bf16_to_f32'
+        narrow = 'util::f32_to_bf16'
+    else:
+        raise ValueError(f'unhandled true16 dot2 class: {cls}')
+
+    L = []
+    L.append('  uint64_t exec = wf.exec();')
+    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+    L.append('    if (!(exec & (1ULL << lane)))')
+    L.append('      continue;')
+    L.append('    uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);')
+    L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
+    L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
+    L.append(
+        f'    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src({s2}, wf, lane, opsel, 2);'
+    )
+    L.append(f'    float a0 = {widen}(static_cast<uint16_t>(raw0 & 0xffffu));')
+    L.append(f'    float a1 = {widen}(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));')
+    L.append(f'    float b0 = {widen}(static_cast<uint16_t>(raw1 & 0xffffu));')
+    L.append(f'    float b1 = {widen}(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));')
+    L.append(f'    float acc = {widen}(static_cast<uint16_t>(acc_bits));')
+    L.append('    float result = a0 * b0 + a1 * b1 + acc;')
+    L.append(f'    uint32_t result_bits = {narrow}(result);')
+    L.append(
+        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, opsel, result_bits);'
+    )
+    L.append('  }')
+    return '\n'.join(L)
+
+
 def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
     """Generate V_DOT4_I32_I8 / V_DOT4_I32_IU8 / V_DOT4_U32_U8."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]

@@ -398,6 +398,27 @@ class TestGfx1250Profile:
             '  if (is_immediate_type(opr_type_))'
         ) in read_lane64
 
+    def test_operand_read64_zero_extends_simm32_literal(self, tmp_path):
+        generator = CodeGenerator(
+            SimpleNamespace(
+                arch_name='rdna3',
+                opnd_selectors=[],
+                operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+                profile=Rdna3Profile(),
+            ),
+            str(tmp_path),
+        )
+
+        generator.gen_operand()
+        operand_cpp = (tmp_path / 'rdna3' / 'operand.cpp').read_text()
+
+        assert (
+            'if (opr_type == OperandType::OPR_SIMM32)\n'
+            '    return static_cast<uint64_t>(static_cast<uint32_t>(ev));'
+        ) in operand_cpp
+        assert 'return read_immediate64(opr_type_, ev);' in operand_cpp
+        assert 'return read_immediate64(opr_type_, encoding_value_);' in operand_cpp
+
 
 class TestMemoryCoherencyModelEnum:
     def test_all_five_values_exist(self):

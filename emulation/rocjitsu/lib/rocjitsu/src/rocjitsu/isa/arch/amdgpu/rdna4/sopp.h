@@ -301,6 +301,13 @@ public:
   Operand simm16;
 };
 
+class SWaitcntSopp : public Sopp {
+public:
+  SWaitcntSopp(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand simm16;
+};
+
 } // namespace rdna4
 } // namespace rocjitsu
 
