@@ -318,6 +318,57 @@ TEST(CuFactoryTest, CdnaAccVgprsAreClearedOnRedispatch) {
   }
 }
 
+TEST(CuFactoryTest, SplitBarrierWaitsForSignalsFromLiveWorkgroupWaves) {
+  class SplitBarrierTestCu
+      : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna4::Isa> {
+  public:
+    using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna4::Isa>;
+    using Base::Base;
+    using Base::update_wf_states;
+  };
+
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 64;
+  cfg.lds_size_kb = 64;
+
+  SplitBarrierTestCu cu("split_barrier_cu", cfg, &mem, &l2);
+
+  auto *wf0 = cu.dispatch_wf(7, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  auto *wf1 = cu.dispatch_wf(7, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  wf0->set_dispatch_id(3);
+  wf1->set_dispatch_id(3);
+
+  wf0->signal_split_barrier();
+  wf0->wait_split_barrier();
+  cu.update_wf_states();
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::BARRIER);
+
+  wf1->signal_split_barrier();
+  cu.update_wf_states();
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+
+  wf1->wait_split_barrier();
+  cu.update_wf_states();
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
+
+  wf0->signal_split_barrier();
+  wf0->wait_split_barrier();
+  cu.update_wf_states();
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::BARRIER);
+
+  wf1->signal_split_barrier();
+  cu.update_wf_states();
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+}
+
 INSTANTIATE_TEST_SUITE_P(AllIsas, CuFactoryTest,
                          ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
                                            ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,

@@ -16,8 +16,10 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <mutex>
 #include <shared_mutex>
+#include <sys/mman.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -58,6 +60,7 @@ public:
     uint64_t gpu_va = 0;
     uint64_t size = 0;
     void *host_ptr = nullptr;
+    bool host_ptr_owned = false;
     uint32_t flags = 0;
     uint64_t handle = 0;
     int memfd = -1;
@@ -106,6 +109,8 @@ public:
   struct PageTableEntry {
     uint8_t *host_ptr = nullptr;
     amdgpu::Mtype mtype = amdgpu::Mtype::RW;
+    bool host_readable = false;
+    bool host_writable = false;
   };
 
   /// @brief Per-process GPU page table (GPU VA page number → PTE).
@@ -117,21 +122,64 @@ public:
   static constexpr uint64_t kPageShift = 12;
   static constexpr uint64_t kPageSize = 1ULL << kPageShift;
 
+  struct HostPageAccess {
+    bool readable = false;
+    bool writable = false;
+  };
+
+  static HostPageAccess host_page_access(const void *ptr) {
+    const auto page = reinterpret_cast<uintptr_t>(ptr) & ~(kPageSize - 1);
+    FILE *maps = std::fopen("/proc/self/maps", "re");
+    if (!maps)
+      return {};
+
+    char line[512];
+    while (std::fgets(line, sizeof(line), maps)) {
+      unsigned long long start = 0;
+      unsigned long long end = 0;
+      char perms[5] = {};
+      if (std::sscanf(line, "%llx-%llx %4s", &start, &end, perms) != 3)
+        continue;
+      if (page >= start && page + kPageSize <= end) {
+        std::fclose(maps);
+        return {.readable = perms[0] == 'r', .writable = perms[1] == 'w'};
+      }
+    }
+    std::fclose(maps);
+    return {};
+  }
+
+  static bool host_page_mapped(const void *ptr) { return host_page_access(ptr).readable; }
+
   /// @brief Map host pages into this process's GPU page table.
   /// @param mtype PTE MTYPE for these pages (derived from allocation flags).
   void map_pages(uint64_t gpu_va, void *host_ptr, size_t size,
                  amdgpu::Mtype mtype = amdgpu::Mtype::RW) {
+    if (size == 0)
+      return;
     std::unique_lock lock(page_table_mutex_);
     auto *base = static_cast<uint8_t *>(host_ptr);
-    for (size_t off = 0; off < size; off += kPageSize)
-      page_table_[(gpu_va + off) >> kPageShift] = {base + off, mtype};
+    const uint64_t first_page = gpu_va & ~(kPageSize - 1);
+    const uint64_t end_va = gpu_va + size;
+    for (uint64_t page_va = first_page; page_va < end_va; page_va += kPageSize) {
+      auto *translation_base =
+          reinterpret_cast<uint8_t *>(reinterpret_cast<uintptr_t>(base) + page_va - gpu_va);
+      const uint64_t access_va = page_va < gpu_va ? gpu_va : page_va;
+      const HostPageAccess access = host_page_access(base + (access_va - gpu_va));
+      page_table_[page_va >> kPageShift] = {translation_base, mtype, access.readable,
+                                            access.writable};
+    }
   }
 
   /// @brief Unmap pages from this process's GPU page table.
   void unmap_pages(uint64_t gpu_va, size_t size) {
+    if (size == 0)
+      return;
     std::unique_lock lock(page_table_mutex_);
-    for (size_t off = 0; off < size; off += kPageSize)
-      page_table_.erase((gpu_va + off) >> kPageShift);
+    const uint64_t first_page = gpu_va & ~(kPageSize - 1);
+    const uint64_t end_va = gpu_va + size;
+    for (uint64_t page_va = first_page; page_va < end_va; page_va += kPageSize)
+      page_table_.erase(page_va >> kPageShift);
   }
 
   mutable std::shared_mutex page_table_mutex_;

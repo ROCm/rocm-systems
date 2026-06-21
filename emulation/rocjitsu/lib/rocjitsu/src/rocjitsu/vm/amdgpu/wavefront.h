@@ -59,9 +59,9 @@ struct RegAllocation {
 /// A slot is considered dispatched (active) when it has a nonzero register
 /// allocation (sgpr_alloc_.count > 0). After clear(), the slot is idle.
 ///
-/// wf_size and max register counts come from the ISA struct and are fixed
-/// at construction. num_sgprs and num_vgprs are the per-dispatch allocation
-/// sizes set from code object metadata.
+/// max register counts come from the ISA struct and are fixed at construction.
+/// wf_size, num_sgprs, and num_vgprs are per-dispatch values set from code
+/// object metadata.
 ///
 /// Derives from ThreadContext so that instruction execute() methods can
 /// static_cast the ThreadContext& parameter to Wavefront&.
@@ -70,7 +70,7 @@ public:
   ~Wavefront() override = default;
 
   /// @brief Return the number of lanes per wavefront.
-  /// @returns Lanes per wavefront (ISA-fixed).
+  /// @returns Lanes per wavefront for the active dispatch.
   uint32_t wf_size() const { return wf_size_; }
 
   /// @brief Return the ISA maximum SGPRs per wavefront.
@@ -194,6 +194,10 @@ public:
   /// @returns Raw VCC register value.
   uint64_t vcc() const { return vcc_; }
 
+  /// @brief Return VCC masked to lanes present in this wavefront.
+  /// @returns VCC bits for active architectural lanes only.
+  uint64_t vcc_live_lanes() const { return vcc_ & lane_mask(); }
+
   /// @brief Set the VCC scalar register pair.
   /// @param val New VCC value.
   void set_vcc(uint64_t val) { vcc_ = val; }
@@ -279,6 +283,13 @@ public:
       state_ = WfState::WAITCNT;
   }
 
+  /// @brief Set the LGKMCNT target (S_WAITCNT_LGKMCNT).
+  void set_wait_target_lgkmcnt(uint8_t threshold) {
+    wait_target_.lgkmcnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
   /// @brief Set the STORECNT target (GFX11+ S_WAITCNT_VSCNT / S_WAIT_STORECNT).
   void set_wait_target_storecnt(uint8_t threshold) {
     wait_target_.vscnt = threshold;
@@ -338,10 +349,12 @@ public:
     using namespace std::string_view_literals;
     std::string_view name{counter_name};
     auto t = static_cast<uint8_t>(threshold);
-    if (name == "wait_loadcnt")
+    if (name == "wait_loadcnt" || name == "waitcnt_vmcnt")
       set_wait_target_loadcnt(t);
-    else if (name == "wait_storecnt")
+    else if (name == "wait_storecnt" || name == "waitcnt_vscnt")
       set_wait_target_storecnt(t);
+    else if (name == "wait_lgkmcnt" || name == "waitcnt_lgkmcnt")
+      set_wait_target_lgkmcnt(t);
     else if (name == "wait_dscnt")
       set_wait_target_dscnt(t);
     else if (name == "wait_kmcnt")
@@ -350,7 +363,7 @@ public:
       set_wait_target_tensorcnt(t);
     else if (name == "wait_asynccnt")
       set_wait_target_asynccnt(t);
-    else if (name == "wait_expcnt") {
+    else if (name == "wait_expcnt" || name == "waitcnt_expcnt") {
       wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
       if (!wait_satisfied())
         state_ = WfState::WAITCNT;
@@ -391,6 +404,36 @@ public:
   /// @brief Set the execution state.
   /// @param s New execution state.
   void set_state(WfState s) { state_ = s; }
+
+  /// @brief Enter a whole-workgroup barrier.
+  void enter_barrier() {
+    waiting_on_split_barrier_ = false;
+    state_ = WfState::BARRIER;
+  }
+
+  /// @brief Mark this wavefront as arrived at the current split barrier.
+  void signal_split_barrier() { split_barrier_signal_generation_ = split_barrier_generation_ + 1; }
+
+  /// @brief Wait for all live wavefronts in the workgroup to signal.
+  void wait_split_barrier() {
+    if (split_barrier_signal_generation_ <= split_barrier_generation_)
+      signal_split_barrier();
+    split_barrier_wait_generation_ = split_barrier_signal_generation_;
+    waiting_on_split_barrier_ = true;
+    state_ = WfState::BARRIER;
+  }
+
+  bool waiting_on_split_barrier() const { return waiting_on_split_barrier_; }
+  uint64_t split_barrier_wait_generation() const { return split_barrier_wait_generation_; }
+  bool has_signaled_split_barrier(uint64_t generation) const {
+    return split_barrier_signal_generation_ >= generation;
+  }
+  void complete_split_barrier_wait(uint64_t generation) {
+    if (split_barrier_generation_ < generation)
+      split_barrier_generation_ = generation;
+    split_barrier_wait_generation_ = 0;
+    waiting_on_split_barrier_ = false;
+  }
 
   /// @brief Check whether this wavefront slot is halted.
   /// @retval true Slot is halted and available for dispatch.
@@ -445,6 +488,10 @@ public:
     wait_counters_ = {};
     wait_target_ = {};
     ready_cycle_ = 0;
+    split_barrier_generation_ = 0;
+    split_barrier_signal_generation_ = 0;
+    split_barrier_wait_generation_ = 0;
+    waiting_on_split_barrier_ = false;
     state_ = WfState::HALTED;
   }
 
@@ -452,7 +499,7 @@ protected:
   /// @brief Construct a wavefront bound to a CU slot.
   /// @param cu Parent compute unit (permanent binding).
   /// @param wf_id Slot index within the CU (permanent binding).
-  /// @param wf_size Lanes per wavefront (ISA-fixed).
+  /// @param wf_size Default lanes per wavefront.
   /// @param max_sgprs Maximum SGPRs per wavefront (ISA-fixed).
   /// @param max_vgprs Maximum VGPRs per wavefront (ISA-fixed).
   Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t wf_size, uint32_t max_sgprs,
@@ -466,7 +513,7 @@ protected:
   uint32_t process_id_ = 0;  ///< Owning process ID (PASID analog, set per dispatch).
   uint32_t lds_base_ = 0;    ///< Per-WG LDS base offset (set per dispatch).
 
-  uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
+  uint32_t wf_size_ = 0;   ///< Lanes per wavefront for the active dispatch.
   uint32_t num_sgprs_ = 0; ///< Allocated scalar registers (set at dispatch).
   uint32_t num_vgprs_ = 0; ///< Allocated vector registers (set at dispatch).
   uint32_t max_sgprs_ = 0; ///< ISA maximum SGPRs per wavefront.
@@ -490,6 +537,10 @@ private:
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
   uint64_t private_aperture_limit_ = 0;
+  uint64_t split_barrier_generation_ = 0;
+  uint64_t split_barrier_signal_generation_ = 0;
+  uint64_t split_barrier_wait_generation_ = 0;
+  bool waiting_on_split_barrier_ = false;
   WfState state_ = WfState::HALTED; ///< Current execution state.
   WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
 

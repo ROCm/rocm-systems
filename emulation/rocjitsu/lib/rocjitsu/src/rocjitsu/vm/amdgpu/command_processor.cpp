@@ -12,6 +12,7 @@ RJ_DIAGNOSTIC_POP
 
 #include "simdojo/sim/message.h"
 #include "simdojo/sim/simulation.h"
+#include "util/bit.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -62,11 +63,10 @@ static_assert(sizeof(AmdExtKernelDispatchPacket) == 64);
 
 uint32_t nonzero_or_one(uint32_t v) { return v == 0 ? 1 : v; }
 
-uint32_t read_memory_u32(GpuMemory *memory, uint64_t addr) {
-  uint32_t value = 0;
-  for (uint32_t i = 0; i < sizeof(value); ++i)
-    value |= static_cast<uint32_t>(memory->read8(addr + i)) << (i * 8);
-  return value;
+uint32_t dispatch_grid_workgroups(uint32_t grid_size, uint32_t workgroup_size) {
+  if (workgroup_size == 0)
+    return 1;
+  return util::ceil_div(grid_size, workgroup_size);
 }
 
 bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
@@ -83,6 +83,25 @@ bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
     return false;
   default:
     return true;
+  }
+}
+
+uint32_t kernel_dispatch_wave_size(rj_code_arch_t arch, uint32_t kernel_code_properties) {
+  using namespace rocr::llvm::amdhsa;
+
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return AMDHSA_BITS_GET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32)
+               ? 32
+               : 64;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 32;
+  default:
+    return 64;
   }
 }
 
@@ -165,7 +184,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
 
       uint64_t preload_addr = pkt.kernarg_addr + static_cast<uint64_t>(preload_offset) * 4;
       for (uint32_t i = 0; i < preload_length; ++i)
-        cu->write_sgpr(sbase + idx + i, read_memory_u32(memory_, preload_addr + i * 4));
+        cu->write_sgpr(sbase + idx + i, read_gpu_u32(preload_addr + i * 4, pkt.process_id));
       util::Logger::vm("CP: init_wf kernarg preload s[", idx, ":", idx + preload_length - 1,
                        "] length=", preload_length, " offset=", preload_offset, " sbase=", sbase);
       idx += preload_length;
@@ -223,11 +242,12 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   // v0[19:10]=Y, v0[29:20]=Z. v1/v2 are not written. Kernel extracts
   // components via bit masks.
   uint32_t vbase = wf->vgpr_alloc().base;
-  uint32_t workitem_base = wf_index_in_wg * cu->wf_size();
+  uint32_t wave_size = wf->wf_size();
+  uint32_t workitem_base = wf_index_in_wg * wave_size;
   uint32_t wg_x = pkt.workgroup_size_x > 0 ? pkt.workgroup_size_x : 1;
   uint32_t wg_y = pkt.workgroup_size_y > 0 ? pkt.workgroup_size_y : 1;
   uint32_t wg_xy = wg_x * wg_y;
-  for (uint32_t lane = 0; lane < cu->wf_size(); ++lane) {
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
     uint32_t flat_id = workitem_base + lane;
     uint32_t id_x = flat_id % wg_x;
     uint32_t id_y = (flat_id / wg_x) % wg_y;
@@ -254,11 +274,11 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     uint64_t scratch_pool = pkt.scratch_backing_addr;
     if (scratch_pool == 0)
       scratch_pool = 0x1'0000'0000ULL;
-    uint64_t per_wave_size = static_cast<uint64_t>(pkt.private_segment_fixed_size) * cu->wf_size();
+    uint64_t per_wave_size = static_cast<uint64_t>(pkt.private_segment_fixed_size) * wave_size;
     uint32_t wg_total_size = static_cast<uint32_t>(pkt.workgroup_size_x) *
                              std::max<uint16_t>(1, pkt.workgroup_size_y) *
                              std::max<uint16_t>(1, pkt.workgroup_size_z);
-    uint32_t waves_per_wg = (wg_total_size + cu->wf_size() - 1) / cu->wf_size();
+    uint32_t waves_per_wg = util::ceil_div(wg_total_size, wave_size);
     uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
     uint64_t wave_scratch = scratch_pool + global_wave_idx * per_wave_size;
 
@@ -557,12 +577,12 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     wg_wavefronts.reserve(entry.wfs_per_workgroup);
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
-                                      entry.vgprs_per_wf);
+                                      entry.vgprs_per_wf, entry.wave_size);
       assert(wf && "dispatch_wf failed after can_accept_workgroup returned true");
       wf->set_lds_base(lds_base);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_process_id(entry.process_id);
-      wf->set_exec(initial_exec_mask_for_wave(entry, w, cu->wf_size()));
+      wf->set_exec(initial_exec_mask_for_wave(entry, w, entry.wave_size));
       init_wavefront_regs(cu, wf, entry, global_wg_id, w);
       wg_wavefronts.push_back(wf);
     }
@@ -710,13 +730,15 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 
   uint32_t wg_size =
       static_cast<uint32_t>(pkt.workgroup_size_x) * pkt.workgroup_size_y * pkt.workgroup_size_z;
-  uint32_t wave_size = cus_.empty() ? 64 : cus_[0]->wf_size();
-  uint32_t wfs_per_wg = (wg_size + wave_size - 1) / wave_size;
+  uint32_t wave_size = kernel_dispatch_wave_size(arch, kd.kernel_code_properties);
+  uint32_t wfs_per_wg = util::ceil_div(wg_size, wave_size);
 
   uint32_t num_dims = pkt.setup & 0x3;
-  uint32_t grid_wgs_x = pkt.workgroup_size_x > 0 ? pkt.grid_size_x / pkt.workgroup_size_x : 1;
-  uint32_t grid_wgs_y = pkt.workgroup_size_y > 0 ? pkt.grid_size_y / pkt.workgroup_size_y : 1;
-  uint32_t grid_wgs_z = pkt.workgroup_size_z > 0 ? pkt.grid_size_z / pkt.workgroup_size_z : 1;
+  uint32_t grid_wgs_x = dispatch_grid_workgroups(pkt.grid_size_x, pkt.workgroup_size_x);
+  uint32_t grid_wgs_y =
+      num_dims >= 2 ? dispatch_grid_workgroups(pkt.grid_size_y, pkt.workgroup_size_y) : 1;
+  uint32_t grid_wgs_z =
+      num_dims >= 3 ? dispatch_grid_workgroups(pkt.grid_size_z, pkt.workgroup_size_z) : 1;
   uint32_t total_wgs = grid_wgs_x * grid_wgs_y * grid_wgs_z;
 
   DispatchEntry dp{};
@@ -724,6 +746,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.queue_id = queue.queue_id;
   dp.process_id = queue.process_id;
   dp.kernel_entry_pc = entry_pc;
+  dp.wave_size = wave_size;
   dp.total_wgs = total_wgs;
   dp.dispatched_wgs = 0;
   dp.completed_wgs = 0;
@@ -1274,8 +1297,10 @@ constexpr uint32_t POLL_REGMEM_SIZE = 6;
 constexpr uint32_t ATOMIC_SIZE = 8;
 constexpr uint32_t CONST_FILL_SIZE = 5;
 constexpr uint32_t TIMESTAMP_SIZE = 3;
+// Source of truth: ROCR's sdma_registers.h defines SDMA_PKT_GCR as
+// 5 dwords and SDMA_PKT_GCR_GFX1250 as 6 dwords.
 constexpr uint32_t GCR_SIZE = 5;
-constexpr uint32_t GCR_GFX11_PLUS_SIZE = 6;
+constexpr uint32_t GCR_GFX1250_SIZE = 6;
 constexpr uint32_t COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE = 19;
 constexpr uint32_t FENCE_64B_GFX11_PLUS_SIZE = 5;
 constexpr uint32_t POLL_MEM_64B_GFX11_PLUS_SIZE = 8;
@@ -1672,7 +1697,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         else
           l2->invalidate_all();
       }
-      pkt_dwords = uses_gfx11_plus_sdma_packets() ? sdma::GCR_GFX11_PLUS_SIZE : sdma::GCR_SIZE;
+      pkt_dwords = uses_gfx1250_sdma_packets() ? sdma::GCR_GFX1250_SIZE : sdma::GCR_SIZE;
       break;
     }
     case sdma::OP_HDP_FLUSH:

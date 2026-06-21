@@ -12,6 +12,7 @@
 #include "simdojo/sim/component.h"
 #include "util/log.h"
 
+#include <algorithm>
 #include <cstring>
 #include <format>
 #include <memory>
@@ -40,11 +41,9 @@ public:
       auto &hdr = msg->header();
       auto *data = reinterpret_cast<uint8_t *>(msg->payload());
       if (hdr.op == simdojo::MessageOp::READ) {
-        for (uint32_t i = 0; i < hdr.size_bytes; ++i)
-          data[i] = read8(hdr.addr + i);
+        read_bytes(hdr.addr, data, hdr.size_bytes);
       } else if (hdr.op == simdojo::MessageOp::WRITE) {
-        for (uint32_t i = 0; i < hdr.size_bytes; ++i)
-          write8(hdr.addr + i, data[i]);
+        write_bytes(hdr.addr, data, hdr.size_bytes);
       }
       hdr.op = simdojo::MessageOp::RESPONSE;
     });
@@ -76,7 +75,7 @@ public:
 
   /// @brief Resolve a GPU VA to a host pointer via the given VMID's page table.
   uint8_t *resolve_host_ptr(uint64_t addr, uint32_t vmid = 0) const {
-    return translate(addr, vmid);
+    return translate_read(addr, vmid);
   }
 
   /// @brief Look up PTE MTYPE for a GPU VA in the given VMID's page table.
@@ -99,7 +98,9 @@ public:
 
   uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
 
-  uint8_t *translate_debug(uint64_t addr, uint32_t vmid) const { return translate(addr, vmid); }
+  uint8_t *translate_debug(uint64_t addr, uint32_t vmid) const {
+    return translate_read(addr, vmid);
+  }
 
   std::string debug_page_table_info(uint32_t vmid, uint64_t page_key) const {
     std::shared_lock lk(vmid_mutex_);
@@ -124,13 +125,30 @@ public:
   }
 
   uint8_t read8(uint64_t addr, uint32_t vmid = 0) const {
-    if (auto *p = translate(addr, vmid))
+    if (auto *p = translate_read(addr, vmid))
       return p[addr & PAGE_MASK];
     return SparseMemory::read8(addr);
   }
 
+  void read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid = 0) const {
+    uint32_t copied = 0;
+    while (copied < size) {
+      const uint64_t ea = addr + copied;
+      const uint32_t page_offset = ea & PAGE_MASK;
+      const uint32_t page_remaining = static_cast<uint32_t>(PAGE_SIZE - page_offset);
+      const uint32_t chunk = std::min(size - copied, page_remaining);
+      if (auto *p = translate_read(ea, vmid)) {
+        std::memcpy(dst + copied, p + page_offset, chunk);
+      } else {
+        for (uint32_t i = 0; i < chunk; ++i)
+          dst[copied + i] = SparseMemory::read8(ea + i);
+      }
+      copied += chunk;
+    }
+  }
+
   uint16_t read16(uint64_t addr, uint32_t vmid = 0) const {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 2 <= PAGE_SIZE) {
+    if (auto *p = translate_read(addr, vmid); p && (addr & PAGE_MASK) + 2 <= PAGE_SIZE) {
       uint16_t val;
       std::memcpy(&val, p + (addr & PAGE_MASK), 2);
       return val;
@@ -139,7 +157,7 @@ public:
   }
 
   uint32_t read32(uint64_t addr, uint32_t vmid = 0) const {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 4 <= PAGE_SIZE) {
+    if (auto *p = translate_read(addr, vmid); p && (addr & PAGE_MASK) + 4 <= PAGE_SIZE) {
       uint32_t val;
       std::memcpy(&val, p + (addr & PAGE_MASK), 4);
       return val;
@@ -148,7 +166,7 @@ public:
   }
 
   uint64_t read64(uint64_t addr, uint32_t vmid = 0) const {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 8 <= PAGE_SIZE) {
+    if (auto *p = translate_read(addr, vmid); p && (addr & PAGE_MASK) + 8 <= PAGE_SIZE) {
       uint64_t val;
       std::memcpy(&val, p + (addr & PAGE_MASK), 8);
       return val;
@@ -157,15 +175,32 @@ public:
   }
 
   void write8(uint64_t addr, uint8_t val, uint32_t vmid = 0) {
-    if (auto *p = translate(addr, vmid)) {
+    if (auto *p = translate_write(addr, vmid)) {
       p[addr & PAGE_MASK] = val;
       return;
     }
     SparseMemory::write8(addr, val);
   }
 
+  void write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid = 0) {
+    uint32_t copied = 0;
+    while (copied < size) {
+      const uint64_t ea = addr + copied;
+      const uint32_t page_offset = ea & PAGE_MASK;
+      const uint32_t page_remaining = static_cast<uint32_t>(PAGE_SIZE - page_offset);
+      const uint32_t chunk = std::min(size - copied, page_remaining);
+      if (auto *p = translate_write(ea, vmid)) {
+        std::memcpy(p + page_offset, src + copied, chunk);
+      } else {
+        for (uint32_t i = 0; i < chunk; ++i)
+          SparseMemory::write8(ea + i, src[copied + i]);
+      }
+      copied += chunk;
+    }
+  }
+
   void write16(uint64_t addr, uint16_t val, uint32_t vmid = 0) {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 2 <= PAGE_SIZE) {
+    if (auto *p = translate_write(addr, vmid); p && (addr & PAGE_MASK) + 2 <= PAGE_SIZE) {
       std::memcpy(p + (addr & PAGE_MASK), &val, 2);
       return;
     }
@@ -173,7 +208,7 @@ public:
   }
 
   void write32(uint64_t addr, uint32_t val, uint32_t vmid = 0) {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 4 <= PAGE_SIZE) {
+    if (auto *p = translate_write(addr, vmid); p && (addr & PAGE_MASK) + 4 <= PAGE_SIZE) {
       std::memcpy(p + (addr & PAGE_MASK), &val, 4);
       return;
     }
@@ -181,7 +216,7 @@ public:
   }
 
   void write64(uint64_t addr, uint64_t val, uint32_t vmid = 0) {
-    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 8 <= PAGE_SIZE) {
+    if (auto *p = translate_write(addr, vmid); p && (addr & PAGE_MASK) + 8 <= PAGE_SIZE) {
       std::memcpy(p + (addr & PAGE_MASK), &val, 8);
       return;
     }
@@ -194,9 +229,19 @@ private:
     std::shared_mutex *mutex = nullptr;
   };
 
-  uint8_t *translate(uint64_t addr, uint32_t vmid) const {
+  enum class HostAccess { Read, Write };
+
+  uint8_t *translate_read(uint64_t addr, uint32_t vmid) const {
+    return translate(addr, vmid, HostAccess::Read);
+  }
+
+  uint8_t *translate_write(uint64_t addr, uint32_t vmid) const {
+    return translate(addr, vmid, HostAccess::Write);
+  }
+
+  uint8_t *translate(uint64_t addr, uint32_t vmid, HostAccess access) const {
     if (vmid == 0)
-      return passthrough_ ? reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK) : nullptr;
+      return passthrough_host_ptr(addr, access);
     {
       std::shared_lock lk(vmid_mutex_);
       auto it = vmid_table_.find(vmid);
@@ -204,20 +249,30 @@ private:
         auto &entry = it->second;
         std::shared_lock pt_lk(*entry.mutex);
         auto pt_it = entry.page_table->find(addr >> PAGE_SHIFT);
-        if (pt_it != entry.page_table->end())
-          return pt_it->second.host_ptr;
+        if (pt_it != entry.page_table->end()) {
+          const auto &pte = pt_it->second;
+          const bool allowed = access == HostAccess::Read ? pte.host_readable : pte.host_writable;
+          return allowed ? pte.host_ptr : nullptr;
+        }
       }
     }
-    static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
-    if (passthrough_ && addr < kUserSpaceLimit)
-      return reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
-    return nullptr;
+    return passthrough_host_ptr(addr, access);
+  }
+
+  uint8_t *passthrough_host_ptr(uint64_t addr, HostAccess access) const {
+    if (!passthrough_ || addr >= kUserSpaceLimit)
+      return nullptr;
+    auto *page = reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
+    const auto host_access = KfdProcess::host_page_access(page);
+    const bool allowed = access == HostAccess::Read ? host_access.readable : host_access.writable;
+    return allowed ? page : nullptr;
   }
 
   simdojo::Port *cpl_ = nullptr;
   mutable std::shared_mutex vmid_mutex_;
   std::unordered_map<uint32_t, VmidEntry> vmid_table_;
   bool passthrough_ = false;
+  static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
 };
 
 } // namespace amdgpu
