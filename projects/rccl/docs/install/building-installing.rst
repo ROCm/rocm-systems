@@ -151,21 +151,23 @@ monorepo:
     git sparse-checkout set projects/rccl
     git checkout develop
 
-After the checkout completes, initialize the RCCL build submodules:
-
-.. code-block:: shell
-
-    git submodule update --init --recursive --depth=1
-
-Then build the library from the ``projects/rccl`` directory:
+For the default RCCL build on the ``develop`` branch, no ``git submodule`` step is
+required. Then build the library from the ``projects/rccl`` directory:
 
 .. code-block:: shell
 
     cd projects/rccl
     mkdir build
     cd build
-    cmake ../..
+    cmake ..
     make -j 16      # Or some other suitable number of parallel jobs
+
+.. note::
+
+    Optional rocSHMEM builds are configured separately and do not use RCCL git
+    submodules. Use ``./install.sh --rocshmem`` or pass ``-DENABLE_ROCSHMEM=ON``
+    together with ``-DROCSHMEM_INSTALL_DIR=<prefix>`` or
+    ``-DROCSHMEM_SOURCE_DIR=<path>``.
 
 You can substitute a different installation path by providing the path as a parameter
 to ``CMAKE_INSTALL_PREFIX``, for example:
