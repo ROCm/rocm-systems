@@ -169,6 +169,13 @@ required. Then build the library from the ``projects/rccl`` directory:
     together with ``-DROCSHMEM_INSTALL_DIR=<prefix>`` or
     ``-DROCSHMEM_SOURCE_DIR=<path>``.
 
+    rocSHMEM support drives RCCL's GPU Direct Async (GDA) AllToAll path, which is
+    validated only on supported GDA platforms (gfx942-class systems with a
+    supported multi-node NIC and driver setup). Building with ``--rocshmem`` on
+    other GPU architectures is not a supported configuration and may fail. For
+    the GDA NIC and driver requirements, see the
+    `rocSHMEM documentation <https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies>`_.
+
 You can substitute a different installation path by providing the path as a parameter
 to ``CMAKE_INSTALL_PREFIX``, for example:
 
