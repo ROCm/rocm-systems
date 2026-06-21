@@ -1306,7 +1306,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
   // Kernel-entry trampolines (gfx125x). Gate on this code object's ISA and reset
   // the per-object fixup list collected by LoadDefinitionSymbol.
-  trampoline_enabled_gfx125x_ = CodeObjectIsaIsGfx125Family(codeIsa);
+  //trampoline_enabled_gfx125x_ = CodeObjectIsaIsGfx125Family(codeIsa);
+  trampoline_enabled_gfx125x_ = false;
   kd_fixups_.clear();
 
   uint32_t majorVersion, minorVersion;
