@@ -35,12 +35,10 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <cinttypes>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 /// @brief Hard cap on bytes consumed from INPUT. Override at compile time.

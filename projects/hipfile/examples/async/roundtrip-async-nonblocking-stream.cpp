@@ -41,12 +41,10 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <cinttypes>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 /// @brief Size of the test payload in bytes. Override at compile time.

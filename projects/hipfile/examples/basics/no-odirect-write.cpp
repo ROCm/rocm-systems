@@ -36,17 +36,16 @@
 #include "examples_common.h"
 
 #include <hipfile.h>
+#include <hip/driver_types.h>
 #include <hip/hip_runtime_api.h>
 
 #include <cerrno>
 #include <fcntl.h>
 #include <cinttypes>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 /// @brief Size of the test payload in bytes. Override at compile time.
