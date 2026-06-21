@@ -18,11 +18,13 @@
 #include "state.h"
 #include "stats.h"
 
+#include <bit>
 #include <cerrno>
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 #include <sys/types.h>
@@ -77,7 +79,11 @@ try {
         return {hipFileInvalidValue, hipSuccess};
     }
 
-    switch (descr->type) {
+    // A C caller may pass a type outside the enum's valid range, and an
+    // lvalue-to-rvalue load of such a value as the enum type is undefined
+    // behavior. Reinterpret the bits as the underlying integer type instead.
+    auto type = std::bit_cast<std::underlying_type_t<hipFileFileHandleType_t>>(descr->type);
+    switch (type) {
         case hipFileHandleTypeOpaqueFD: {
             UnregisteredFile uf{descr->handle.fd};
             *fh = Context<DriverState>::get()->registerFile(std::move(uf));
