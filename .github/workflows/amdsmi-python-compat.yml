@@ -1,18 +1,22 @@
 # ---------------------------------------------------------------------------
 # AMD-SMI Python compatibility check.
 #
-# Builds and installs AMD-SMI on AlmaLinux8, then runs the installed Python
-# test suite (integration, unit, CLI) under every supported interpreter --
-# 3.6.8 (native) plus the latest patch of 3.7 through 3.14 -- and publishes a
-# per-version PASS/FAIL/SKIP table to the job summary. Runs as its own CI
-# check so a Python-version regression is visible independently of the
-# per-distro build matrix in amdsmi-build.yml.
+# Builds and installs AMD-SMI on each OS, then runs the installed Python test
+# suite (integration, unit, CLI) under every supported interpreter -- 3.6.8
+# plus the latest patch of 3.7 through 3.14 -- and publishes a per-version
+# PASS/FAIL/SKIP table to the job summary. Runs as its own CI check so a
+# Python-version regression is visible independently of the per-distro build
+# matrix in amdsmi-build.yml.
+#
+# Coverage spans two OS families so both glibc/toolchain worlds are exercised:
+#   - AlmaLinux8 ships Python 3.6.8 natively (el8).
+#   - Ubuntu22 has no system 3.6/3.7, so those are built from source.
 #
 # Interpreters are resolved by the `python-matrix` subcommand of
-# tests/amdsmi_build/run_amdsmi_build.py: a system pythonX.Y first, then a
-# uv-managed download, then a pyenv source build for versions uv cannot
-# supply (3.6.8, 3.7.x). AlmaLinux8 is used because it ships Python 3.6.8
-# natively.
+# tests/amdsmi_build/run_amdsmi_build.py in three tiers: a system pythonX.Y
+# first, then a uv-managed download (3.8-3.14), then a pyenv source build for
+# versions uv cannot supply (3.6.8, 3.7.x). A version that no tier can provide
+# is reported as SKIP rather than failing the run.
 # ---------------------------------------------------------------------------
 
 name: AMDSMI Python Compatibility
@@ -45,12 +49,17 @@ defaults:
 
 jobs:
   python-compat:
-    name: Python Compatibility (AlmaLinux8)
+    name: Python Compatibility on ${{ matrix.os }}
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [Ubuntu22, AlmaLinux8]
     container:
-      image: ${{ vars.AlmaLinux8_DOCKER_IMAGE }}
+      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
@@ -79,43 +88,49 @@ jobs:
           echo "RUNNER_SCRIPT=$SCRIPT" >> $GITHUB_ENV
 
       # Build + install + wheel-verify. The python-matrix step below runs the
-      # *installed* test suite from /opt/rocm/share/amd_smi, so an install is
-      # a prerequisite. Distro quirks are autodetected from /etc/os-release.
+      # *installed* test suite from /opt/rocm/share/amd_smi, so an install is a
+      # prerequisite. The runner script autodetects the package manager and
+      # distro quirks (and installs the toolchain/headers pyenv needs to build
+      # CPython) from /etc/os-release.
       - name: Build and Install AMD-SMI
         run: |
           set -euo pipefail
           python3 "${{ env.RUNNER_SCRIPT }}" \
             --project-dir "${{ env.PROJECT_DIR }}" \
-            --os-label AlmaLinux8 \
-            --test-results-dir /tmp/test-results-python-compat
+            --os-label "${{ matrix.os }}" \
+            --test-results-dir "/tmp/test-results-python-compat-${{ matrix.os }}"
 
       # Runs the installed suite under 3.6.8 + latest 3.7..3.14 and writes the
-      # per-version table to the step summary. Exits non-zero (failing this
-      # check) only if a resolved interpreter's tests FAIL; versions that
-      # cannot be provided are reported as SKIP and do not fail the check.
+      # per-version table to the step summary. Exits non-zero only if a
+      # resolved interpreter's tests FAIL; versions that cannot be provided on
+      # this OS are reported as SKIP and do not fail the step.
       - name: Python Version Matrix
         run: |
           set -euo pipefail
           python3 "${{ env.RUNNER_SCRIPT }}" python-matrix \
-            --results-dir /tmp/test-results-python-compat \
+            --results-dir "/tmp/test-results-python-compat-${{ matrix.os }}" \
             --amdsmi-path /opt/rocm/share/amd_smi \
-            --os-label AlmaLinux8 \
+            --os-label "${{ matrix.os }}" \
             --summary-file "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Python Compatibility Results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: amdsmi-python-compat-AlmaLinux8
-          path: /tmp/test-results-python-compat
+          name: amdsmi-python-compat-${{ matrix.os }}
+          path: /tmp/test-results-python-compat-${{ matrix.os }}
           if-no-files-found: warn
           retention-days: 7
 
       - name: Uninstall
         if: always()
         run: |
-          set -euo pipefail
-          dnf remove -y amd-smi-lib || true
+          set -uo pipefail
+          if command -v apt >/dev/null 2>&1; then
+            apt remove -y amd-smi-lib || true
+          elif command -v dnf >/dev/null 2>&1; then
+            dnf remove -y amd-smi-lib || true
+          fi
           rm -f /usr/local/bin/amd-smi
           if [ -d /opt/rocm/share/amd_smi ]; then
             rm -rf /opt/rocm/share/amd_smi
