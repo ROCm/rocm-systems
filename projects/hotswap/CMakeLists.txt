@@ -83,6 +83,21 @@ target_include_directories(hotswap_tool_test PRIVATE
   ${HSA_RUNTIME_INC}/..
 )
 
+# Loader-path tests for libhsa-hotswap.so. The test includes hotswap_tool.cpp
+# directly and supplies stub HSA/COMGR entry points, so it does not link the
+# real HSA runtime or COMGR.
+add_executable(hotswap_loader_test
+  tests/hotswap_loader_test.cpp
+  hotswap_gfx_query.cpp
+  ${HOTSWAP_PLATFORM_IO_SRC}
+)
+target_include_directories(hotswap_loader_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${HSA_RUNTIME_INC}
+  ${HSA_RUNTIME_INC}/..
+)
+
 enable_testing()
 add_test(NAME hotswap_test COMMAND hotswap_test)
 add_test(NAME hotswap_tool_test COMMAND hotswap_tool_test)
+add_test(NAME hotswap_loader_test COMMAND hotswap_loader_test)

@@ -1,0 +1,519 @@
+//===- hotswap_loader_test.cpp - Tests for HSA tools loader path ----------===//
+//
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This test includes hotswap_tool.cpp directly so it can drive the wrapped HSA
+// API-table entry points without a GPU or a real HSA runtime. The original HSA
+// functions and COMGR retarget call are replaced with stubs below.
+//
+//===----------------------------------------------------------------------===//
+
+#include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <vector>
+
+#include <hsa.h>
+
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
+namespace {
+
+struct FakeEnv {
+  std::string agent_isa = "amdgcn-amd-amdhsa--gfx1250";
+  bool asic_rev_ok = true;
+  uint32_t asic_revision = 0;
+
+  int retarget_calls = 0;
+  int load_calls = 0;
+  int memory_reader_create_calls = 0;
+  int file_reader_create_calls = 0;
+  int reader_destroy_calls = 0;
+  int isa_query_calls = 0;
+  int asic_rev_calls = 0;
+
+  int retarget_status = 0;
+  hsa_status_t load_status = HSA_STATUS_SUCCESS;
+  hsa_status_t reader_create_status = HSA_STATUS_SUCCESS;
+
+  uint64_t next_reader_handle = 100;
+  uint64_t last_loaded_reader = 0;
+  uint64_t last_created_reader = 0;
+  uint64_t retarget_reader_handle = 0;
+
+  std::string retarget_source_isa;
+  std::string retarget_target_isa;
+  void *retarget_output_ptr = nullptr;
+};
+
+FakeEnv g_env;
+
+} // namespace
+
+#include "../hotswap_tool.cpp"
+
+namespace rocr::hotswap {
+
+int RetargetCodeObject(const void *elf_data, size_t elf_size,
+                       const char *source_isa, const char *target_isa,
+                       void **out_data, size_t *out_size) {
+  ++g_env.retarget_calls;
+  g_env.retarget_source_isa = source_isa ? source_isa : "";
+  g_env.retarget_target_isa = target_isa ? target_isa : "";
+
+  if (!out_data || !out_size) {
+    return -1;
+  }
+  *out_data = const_cast<void *>(elf_data);
+  *out_size = elf_size;
+
+  if (g_env.retarget_status != 0) {
+    return g_env.retarget_status;
+  }
+
+  void *copy = std::malloc(elf_size);
+  if (!copy) {
+    return -1;
+  }
+  std::memcpy(copy, elf_data, elf_size);
+  g_env.retarget_output_ptr = copy;
+  *out_data = copy;
+  *out_size = elf_size;
+  return 0;
+}
+
+} // namespace rocr::hotswap
+
+extern "C" {
+
+hsa_status_t hsa_agent_iterate_isas(hsa_agent_t /*agent*/,
+                                    hsa_status_t (*callback)(hsa_isa_t isa,
+                                                             void *data),
+                                    void *data) {
+  ++g_env.isa_query_calls;
+  hsa_isa_t isa{};
+  isa.handle = 1;
+  const hsa_status_t status = callback(isa, data);
+  return status == HSA_STATUS_INFO_BREAK ? HSA_STATUS_SUCCESS : status;
+}
+
+hsa_status_t hsa_isa_get_info_alt(hsa_isa_t /*isa*/, hsa_isa_info_t attribute,
+                                  void *value) {
+  if (attribute == HSA_ISA_INFO_NAME_LENGTH) {
+    *static_cast<uint32_t *>(value) =
+        static_cast<uint32_t>(g_env.agent_isa.size() + 1);
+    return HSA_STATUS_SUCCESS;
+  }
+  if (attribute == HSA_ISA_INFO_NAME) {
+    std::memcpy(value, g_env.agent_isa.c_str(), g_env.agent_isa.size() + 1);
+    return HSA_STATUS_SUCCESS;
+  }
+  return HSA_STATUS_ERROR;
+}
+
+hsa_status_t hsa_agent_get_info(hsa_agent_t /*agent*/,
+                                hsa_agent_info_t attribute, void *value) {
+  if (attribute ==
+      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION)) {
+    ++g_env.asic_rev_calls;
+    if (!g_env.asic_rev_ok) {
+      return HSA_STATUS_ERROR;
+    }
+    *static_cast<uint32_t *>(value) = g_env.asic_revision;
+    return HSA_STATUS_SUCCESS;
+  }
+  return HSA_STATUS_ERROR;
+}
+
+} // extern "C"
+
+namespace {
+
+constexpr const char *kGfx1250Isa = "amdgcn-amd-amdhsa--gfx1250";
+constexpr const char *kGfx942Isa = "amdgcn-amd-amdhsa--gfx942";
+constexpr const char *kGfx1250B0Isa =
+    "amdgcn-amd-amdhsa--gfx1250:gfx1250-b0-specific+";
+constexpr const char *kGfx1250A0Isa =
+    "amdgcn-amd-amdhsa--gfx1250:gfx1250-b0-specific-";
+
+int tests_passed = 0;
+int tests_failed = 0;
+
+void check(bool cond, const char *name) {
+  if (cond) {
+    ++tests_passed;
+    std::printf("  PASS: %s\n", name);
+  } else {
+    ++tests_failed;
+    std::fprintf(stderr, "  FAIL: %s\n", name);
+  }
+}
+
+void set_entry_trampoline_env(const char *value) {
+#ifdef _WIN32
+  _putenv_s("AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES", value ? value : "");
+#else
+  if (value) {
+    setenv("AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES", value, 1);
+  } else {
+    unsetenv("AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES");
+  }
+#endif
+}
+
+void reset_state() {
+  {
+    std::scoped_lock lock(g_reader_map_mutex);
+    g_reader_map.clear();
+  }
+  {
+    std::scoped_lock lock(g_rewritten_elfs_mutex);
+    g_rewritten_elfs.clear();
+  }
+  g_core_table = nullptr;
+  g_orig_reader_create_from_memory = nullptr;
+  g_orig_reader_create_from_file = nullptr;
+  g_orig_reader_destroy = nullptr;
+  g_orig_load_agent_code_object = nullptr;
+  rocr::hotswap::reset_gfx_revision_cache();
+  set_entry_trampoline_env(nullptr);
+  g_env = FakeEnv{};
+}
+
+size_t align4(size_t value) { return (value + 3) & ~size_t{3}; }
+
+std::vector<uint8_t> make_code_object(const std::string &isa) {
+  constexpr size_t EhdrOff = 0;
+  constexpr size_t PhdrOff = sizeof(Elf64_Ehdr);
+  constexpr size_t NoteOff = 0x100;
+  const std::string metadata = "---\namdhsa.target: '" + isa + "'\n";
+  constexpr char Name[] = "AMD";
+  const size_t NameSize = sizeof(Name);
+  const size_t DescSize = metadata.size();
+  const size_t NoteSize = sizeof(Elf64_Nhdr) + align4(NameSize) + align4(DescSize);
+  std::vector<uint8_t> elf(NoteOff + NoteSize, 0);
+
+  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(elf.data() + EhdrOff);
+  std::memcpy(ehdr->e_ident, ELFMAG, SELFMAG);
+  ehdr->e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr->e_ident[EI_DATA] = ELFDATA2LSB;
+  ehdr->e_ident[EI_VERSION] = EV_CURRENT;
+  ehdr->e_type = ET_DYN;
+  ehdr->e_machine = EM_AMDGPU;
+  ehdr->e_version = EV_CURRENT;
+  ehdr->e_phoff = PhdrOff;
+  ehdr->e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr->e_phentsize = sizeof(Elf64_Phdr);
+  ehdr->e_phnum = 1;
+
+  auto *phdr = reinterpret_cast<Elf64_Phdr *>(elf.data() + PhdrOff);
+  phdr->p_type = PT_NOTE;
+  phdr->p_offset = NoteOff;
+  phdr->p_filesz = NoteSize;
+
+  auto *nhdr = reinterpret_cast<Elf64_Nhdr *>(elf.data() + NoteOff);
+  nhdr->n_namesz = NameSize;
+  nhdr->n_descsz = DescSize;
+  nhdr->n_type = 32; // NT_AMDGPU_METADATA
+
+  size_t cursor = NoteOff + sizeof(Elf64_Nhdr);
+  std::memcpy(elf.data() + cursor, Name, NameSize);
+  cursor += align4(NameSize);
+  std::memcpy(elf.data() + cursor, metadata.data(), metadata.size());
+  return elf;
+}
+
+hsa_status_t HSA_API fake_reader_create_from_memory(
+    const void * /*code_object*/, size_t /*size*/,
+    hsa_code_object_reader_t *code_object_reader) {
+  ++g_env.memory_reader_create_calls;
+  if (g_env.reader_create_status != HSA_STATUS_SUCCESS) {
+    return g_env.reader_create_status;
+  }
+  code_object_reader->handle = g_env.next_reader_handle++;
+  g_env.last_created_reader = code_object_reader->handle;
+  if (g_env.retarget_output_ptr) {
+    g_env.retarget_reader_handle = code_object_reader->handle;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_reader_create_from_file(
+    hsa_file_t /*file*/, hsa_code_object_reader_t *code_object_reader) {
+  ++g_env.file_reader_create_calls;
+  code_object_reader->handle = g_env.next_reader_handle++;
+  g_env.last_created_reader = code_object_reader->handle;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API
+fake_reader_destroy(hsa_code_object_reader_t code_object_reader) {
+  ++g_env.reader_destroy_calls;
+  if (code_object_reader.handle == g_env.retarget_reader_handle) {
+    g_env.retarget_reader_handle = 0;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_load_agent_code_object(
+    hsa_executable_t /*executable*/, hsa_agent_t /*agent*/,
+    hsa_code_object_reader_t code_object_reader, const char * /*options*/,
+    hsa_loaded_code_object_t *loaded_code_object) {
+  ++g_env.load_calls;
+  g_env.last_loaded_reader = code_object_reader.handle;
+  if (loaded_code_object) {
+    loaded_code_object->handle = 0xC0DE;
+  }
+  return g_env.load_status;
+}
+
+CoreApiTable install_tool() {
+  CoreApiTable core{};
+  core.hsa_code_object_reader_create_from_memory_fn =
+      fake_reader_create_from_memory;
+  core.hsa_code_object_reader_create_from_file_fn = fake_reader_create_from_file;
+  core.hsa_code_object_reader_destroy_fn = fake_reader_destroy;
+  core.hsa_executable_load_agent_code_object_fn = fake_load_agent_code_object;
+
+  HsaApiTable table{};
+  table.core_ = &core;
+  check(OnLoad(&table, 0, 0, nullptr), "OnLoad installs with complete table");
+  return core;
+}
+
+hsa_agent_t fake_agent() {
+  hsa_agent_t agent{};
+  agent.handle = 42;
+  return agent;
+}
+
+hsa_code_object_reader_t create_memory_reader(CoreApiTable &core,
+                                              const std::vector<uint8_t> &elf) {
+  hsa_code_object_reader_t reader{};
+  const hsa_status_t status = core.hsa_code_object_reader_create_from_memory_fn(
+      elf.data(), elf.size(), &reader);
+  check(status == HSA_STATUS_SUCCESS, "memory reader creation succeeds");
+  return reader;
+}
+
+hsa_status_t load_reader(CoreApiTable &core, hsa_code_object_reader_t reader) {
+  hsa_loaded_code_object_t loaded{};
+  return core.hsa_executable_load_agent_code_object_fn(
+      hsa_executable_t{}, fake_agent(), reader, nullptr, &loaded);
+}
+
+void test_OnLoadInstallsWrappers() {
+  std::printf("TEST OnLoadInstallsWrappers...\n");
+  reset_state();
+  CoreApiTable core = install_tool();
+  check(core.hsa_code_object_reader_create_from_memory_fn !=
+            fake_reader_create_from_memory,
+        "memory reader entry point is wrapped");
+  check(core.hsa_code_object_reader_create_from_file_fn !=
+            fake_reader_create_from_file,
+        "file reader entry point is wrapped");
+  check(core.hsa_executable_load_agent_code_object_fn !=
+            fake_load_agent_code_object,
+        "load entry point is wrapped");
+}
+
+void test_ReadElfIsaNoteFindsMetadata() {
+  std::printf("TEST ReadElfIsaNoteFindsMetadata...\n");
+  reset_state();
+  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
+  check(read_elf_isa_note(elf.data(), elf.size()) == kGfx1250Isa,
+        "valid AMDGPU metadata note yields ISA");
+  const uint8_t not_elf[] = {0x7f, 'E', 'L', 'F'};
+  check(read_elf_isa_note(not_elf, sizeof(not_elf)).empty(),
+        "malformed ELF yields empty ISA");
+}
+
+void test_FlagUnsetLoadsOriginalForNonA0Gfx1250() {
+  std::printf("TEST FlagUnsetLoadsOriginalForNonA0Gfx1250...\n");
+  reset_state();
+  g_env.agent_isa = kGfx1250Isa;
+  g_env.asic_revision = 1;
+  CoreApiTable core = install_tool();
+  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
+  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
+  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
+  check(g_env.retarget_calls == 0, "flag unset skips non-A0 gfx1250 rewrite");
+  check(g_env.last_loaded_reader == reader.handle,
+        "original reader is loaded when flag is unset");
+}
+
+void test_FlagZeroLoadsOriginalForNonA0Gfx1250() {
+  std::printf("TEST FlagZeroLoadsOriginalForNonA0Gfx1250...\n");
+  reset_state();
+  set_entry_trampoline_env("0");
+  g_env.agent_isa = kGfx1250Isa;
+  g_env.asic_revision = 1;
+  CoreApiTable core = install_tool();
+  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
+  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
+  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
+  check(g_env.retarget_calls == 0, "flag value 0 disables entry trampolines");
+  check(g_env.last_loaded_reader == reader.handle,
+        "original reader is loaded when flag is 0");
+}
+
+void test_FlagOneRetargetsB0ToB0() {
+  std::printf("TEST FlagOneRetargetsB0ToB0...\n");
+  reset_state();
+  set_entry_trampoline_env("1");
+  g_env.agent_isa = kGfx1250Isa;
+  g_env.asic_revision = 1;
+  CoreApiTable core = install_tool();
+  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
+  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
+  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
+  check(g_env.retarget_calls == 1, "flag 1 routes B0 gfx1250 through COMGR");
+  check(g_env.retarget_source_isa == kGfx1250B0Isa,
+        "source ISA is tagged as B0");
+  check(g_env.retarget_target_isa == kGfx1250B0Isa,
+        "non-A0 target ISA is tagged as B0");
+  check(g_env.last_loaded_reader != reader.handle,
+        "rewritten reader is loaded instead of original reader");
+  check(g_rewritten_elfs.size() == 1,
+        "rewritten ELF is retained after successful load");
+}
+
+void test_A0RetargetsWithoutFlag() {
+  std::printf("TEST A0RetargetsWithoutFlag...\n");
+  reset_state();
+  g_env.agent_isa = kGfx1250Isa;
+  g_env.asic_revision = 0;
+  CoreApiTable core = install_tool();
+  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
+  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
+  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
+  check(g_env.retarget_calls == 1, "A0 gfx1250 keeps default rewrite path");
+  check(g_env.retarget_source_isa == kGfx1250B0Isa,
+        "source code object ISA is tagged as B0");
+  check(g_env.retarget_target_isa == kGfx1250A0Isa,
+        "A0 agent ISA is tagged as A0");
+}
+
+void test_FlagOneRetargetsUnknownRevisionAsB0Target() {
+  std::printf("TEST FlagOneRetargetsUnknownRevisionAsB0Target...\n");
+  reset_state();
+  set_entry_trampoline_env("1");
+  g_env.agent_isa = kGfx1250Isa;
+  g_env.asic_rev_ok = false;
+  CoreApiTable core = install_tool();
+  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
+  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
+  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
+  check(g_env.retarget_calls == 1,
+        "flag 1 routes unknown-revision gfx1250 through COMGR");
+  check(g_env.retarget_target_isa == kGfx1250B0Isa,
+        "unknown revision is treated as non-A0 for target suffix");
+}
+
+void test_FlagOneBlocksNonGfx1250() {
+  std::printf("TEST FlagOneBlocksNonGfx1250...\n");
+  reset_state();
+  set_entry_trampoline_env("1");
+  g_env.agent_isa = kGfx942Isa;
+  g_env.asic_revision = 0;
+  CoreApiTable core = install_tool();
+  std::vector<uint8_t> elf = make_code_object(kGfx942Isa);
+  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
+  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
+  check(g_env.retarget_calls == 0,
+        "entry trampoline flag does not enable non-gfx1250 rewrite");
+  check(g_env.last_loaded_reader == reader.handle,
+        "non-gfx1250 uses original reader");
+}
+
+void test_RetargetFailureFallsBackToOriginalReader() {
+  std::printf("TEST RetargetFailureFallsBackToOriginalReader...\n");
+  reset_state();
+  set_entry_trampoline_env("1");
+  g_env.agent_isa = kGfx1250Isa;
+  g_env.asic_revision = 1;
+  g_env.retarget_status = -1;
+  CoreApiTable core = install_tool();
+  std::vector<uint8_t> elf = make_code_object(kGfx1250Isa);
+  const hsa_code_object_reader_t reader = create_memory_reader(core, elf);
+  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "fallback load succeeds");
+  check(g_env.retarget_calls == 1, "COMGR retarget was attempted");
+  check(g_env.last_loaded_reader == reader.handle,
+        "retarget failure falls back to original reader");
+}
+
+#ifndef _WIN32
+void test_FileReaderPathKeepsFileBackedReaderAlive() {
+  std::printf("TEST FileReaderPathKeepsFileBackedReaderAlive...\n");
+  reset_state();
+  set_entry_trampoline_env("1");
+  g_env.agent_isa = kGfx942Isa;
+  g_env.asic_revision = 0;
+  CoreApiTable core = install_tool();
+
+  std::vector<uint8_t> elf = make_code_object(kGfx942Isa);
+  char path[] = "/tmp/hotswap-loader-test-XXXXXX";
+  const int fd = mkstemp(path);
+  check(fd >= 0, "temporary code object file is created");
+  if (fd < 0) {
+    return;
+  }
+  unlink(path);
+  const ssize_t written = write(fd, elf.data(), elf.size());
+  check(written == static_cast<ssize_t>(elf.size()),
+        "temporary code object file is written");
+  lseek(fd, 0, SEEK_SET);
+
+  hsa_code_object_reader_t reader{};
+  const hsa_status_t create_status =
+      core.hsa_code_object_reader_create_from_file_fn(fd, &reader);
+  close(fd);
+  check(create_status == HSA_STATUS_SUCCESS, "file reader creation succeeds");
+  check(g_env.memory_reader_create_calls == 1,
+        "file reader path converts file contents to a memory reader");
+
+  check(load_reader(core, reader) == HSA_STATUS_SUCCESS, "load succeeds");
+  check(g_env.retarget_calls == 0, "non-gfx1250 file reader is not rewritten");
+  check(g_env.last_loaded_reader == reader.handle,
+        "file-backed original reader is loaded");
+  check(core.hsa_code_object_reader_destroy_fn(reader) == HSA_STATUS_SUCCESS,
+        "file-backed reader destroy succeeds");
+
+  bool retained = false;
+  {
+    std::scoped_lock lock(g_reader_map_mutex);
+    const auto it = g_reader_map.find(reader.handle);
+    retained = it != g_reader_map.end() && it->second.from_file;
+  }
+  check(retained, "file-backed reader bytes stay alive after successful load");
+}
+#endif
+
+} // namespace
+
+int main() {
+  test_OnLoadInstallsWrappers();
+  test_ReadElfIsaNoteFindsMetadata();
+  test_FlagUnsetLoadsOriginalForNonA0Gfx1250();
+  test_FlagZeroLoadsOriginalForNonA0Gfx1250();
+  test_FlagOneRetargetsB0ToB0();
+  test_A0RetargetsWithoutFlag();
+  test_FlagOneRetargetsUnknownRevisionAsB0Target();
+  test_FlagOneBlocksNonGfx1250();
+  test_RetargetFailureFallsBackToOriginalReader();
+#ifndef _WIN32
+  test_FileReaderPathKeepsFileBackedReaderAlive();
+#endif
+  reset_state();
+
+  std::printf("\n%d passed, %d failed\n", tests_passed, tests_failed);
+  return tests_failed ? EXIT_FAILURE : EXIT_SUCCESS;
+}
