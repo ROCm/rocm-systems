@@ -37,10 +37,12 @@ jobs:
           "clang++",
           "g++"
         ]
+      # C++20 is the production standard, built across the full matrix. C++23 is
+      # validated separately as a single forward-compat smoke test (see the
+      # cxx23_smoke_test job) rather than fanned out across every combo.
       CXX_STANDARD: >-
         [
-          20,
-          23
+          20
         ]
       # Note: If adding distros or ROCm versions, ensure they have been properly excluded.
       SUPPORTED_PLATFORMS: >-
@@ -67,7 +69,6 @@ jobs:
       # combination of CI parameters in include as the matrix axes grow.
       MATRIX_EXCLUDE: >-
         [
-          {"supported_platforms": "rocky8", "cxx_standard": 23},
           {"supported_platforms": "rocky", "rocm_versions": "7.13.0"},
           {"supported_platforms": "rocky", "rocm_versions": "nightly"},
           {"supported_platforms": "rocky8", "rocm_versions": "7.13.0"},
@@ -229,3 +230,27 @@ jobs:
       cxx_standard: ${{ matrix.cxx_standard }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}
+
+  # C++23 is a forward-compat smoke test, not a production target, so it runs
+  # exactly once (ubuntu + amdclang++ + 7.2.2) rather than fanning out across the
+  # build matrix. It reuses hipfile-build.yml with cxx_standard=23 and disables
+  # coverage and artifact upload; packaging and the install test still run (they
+  # are cheap and hipfile-build.yml has no toggle to skip them).
+  cxx23_smoke_test:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    uses: ./.github/workflows/hipfile-build.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
+      cxx_compiler: amdclang++
+      cxx_standard: 23
+      generate_coverage: false
+      platform: ubuntu
+      rocm_version: "7.2.2"
+      upload_artifacts: false
