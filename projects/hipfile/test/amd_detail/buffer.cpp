@@ -13,14 +13,12 @@
 #include "state.h"
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 #include <limits>
 #include <memory>
-#include <stdexcept>
 
 using namespace hipFile;
 

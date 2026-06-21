@@ -13,10 +13,8 @@
 
 #include "hipfile.h"
 #include "hipfile-api-trace.h"
-#include "hipfile-test.h"
 #include "hipfile-warnings.h"
 
-#include <cstddef>
 #include <gtest/gtest.h>
 
 // The accessor lives in `namespace hipFile` and is normally consumed via

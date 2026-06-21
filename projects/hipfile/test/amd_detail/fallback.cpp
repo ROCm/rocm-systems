@@ -35,10 +35,10 @@
 #include <hip/driver_types.h>
 #include <memory>
 #include <stdexcept>
-#include <string>
 #include <sys/mman.h>
 #include <system_error>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 using namespace hipFile;

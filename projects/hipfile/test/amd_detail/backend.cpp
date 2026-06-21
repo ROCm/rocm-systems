@@ -13,6 +13,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <memory>
+#include <stdexcept>
+#include <sys/types.h>
 
 using namespace hipFile;
 

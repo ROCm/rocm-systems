@@ -3,16 +3,24 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "context.h"
 #include "hipfile-test.h"
+#include "hipfile-warnings.h"
+#include "io.h"
 #include "mconfiguration.h"
 #include "mhip.h"
 #include "mstats.h"
 #include "stats.h"
 #include "msys.h"
 
+#include <cerrno>
+#include <cstddef>
+#include <cstdint>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <sstream>
+#include <string>
+#include <system_error>
 
 using namespace hipFile;
 

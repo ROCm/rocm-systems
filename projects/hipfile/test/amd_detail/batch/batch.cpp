@@ -18,7 +18,6 @@
 #include <cstdio>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <utility>

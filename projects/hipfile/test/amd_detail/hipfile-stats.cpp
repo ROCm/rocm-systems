@@ -3,12 +3,16 @@
  * SPDX-License-Identifier: MIT
  */
 #include "hipfile-test.h"
+#include "hipfile-warnings.h"
 #include "include_internal/hipfile-stats.h"
 #include "msys.h"
 #include "stats.h"
 
+#include <cerrno>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <ostream>
+#include <system_error>
 
 using namespace hipFile;
 using ::testing::StrictMock;

@@ -14,7 +14,6 @@
 #include "state.h"
 
 #include <cerrno>
-#include <cstring>
 #include <fcntl.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
