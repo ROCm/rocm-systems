@@ -179,6 +179,7 @@ if(BUILD_TESTS)
     ScatterTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
+    TeardownStressTests.cpp
     _RecorderTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
@@ -251,18 +252,26 @@ if(BUILD_TESTS)
       DdaIpcEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
+      NetDevsPolicyTests.cpp
       NetSocketTests.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
+      TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
+      graph/TopoTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
+
+    # NetDevsPolicyTests loads a topology XML fixture from the source tree
+    # (tools/topo_expl/models). Expose the test source dir so it can build the path.
+    target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
+      RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
@@ -312,6 +321,7 @@ if(BUILD_TESTS)
       transport/GinMPI/GinMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp
+      WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       RegistrationMPITests.cpp
@@ -321,6 +331,7 @@ if(BUILD_TESTS)
       ce/CeMPITests.cpp
       ce/CeInternalMPITests.cpp
       GrowMPITests.cpp
+      GinNcclTimeoutMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})

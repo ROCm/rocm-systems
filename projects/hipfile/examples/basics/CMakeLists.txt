@@ -124,8 +124,14 @@ if(BUILD_TESTING)
             LABELS "system;hipfile;basics"
         )
         if(mode_name STREQUAL "managed" OR mode_name STREQUAL "pinned")
+            # Disabled modes never run, but ctest still chdir's into a test's
+            # WORKING_DIRECTORY to report it — and the fixture scratch dir is
+            # already cleaned up by then (disabled tests don't keep the fixture
+            # alive). Point them at the always-present build dir so reporting
+            # them doesn't emit a spurious "Failed to change working directory".
             set_tests_properties(basics_various-mem-rw_${mode_name} PROPERTIES
                 DISABLED TRUE
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
         endif()
     endforeach()

@@ -133,6 +133,16 @@ echo "Test: $TEST_NAME (Launcher: $LAUNCHER_MODE, Backend: $BACKEND, Executable:
 # These match the skip logic from driver.sh
 # Note: Skip logic only applies when backend is known (not "multi" or "unknown")
 
+# Host non-MPI IPC tests require IPC backend
+if [[ "$BACKEND" == "ro" || "$BACKEND" == "gda" ]]; then
+    case "$TEST_NAME" in
+        host_putmem_*|host_getmem_*|host_amo_*|host_ctx_*|host_int_*)
+            echo "Skip: $TEST_NAME (host non-MPI IPC tests require IPC backend)"
+            exit $SKIP_CODE
+            ;;
+    esac
+fi
+
 # AIROCSHMEM-120: RO get tests abort
 if [[ "$BACKEND" == "ro" ]]; then
     case "$TEST_NAME" in

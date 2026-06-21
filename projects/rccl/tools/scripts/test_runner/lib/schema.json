@@ -40,9 +40,14 @@
     },
 
     "mpi_args": {
-      "description": "Per-system-profile extra mpirun arguments (keyed by profile name, e.g. 'mellanox', 'ainic', 'thor2')",
-      "type": "object",
-      "additionalProperties": { "type": "string" }
+      "description": "Base mpirun arguments that replace the built-in defaults. May be a string or list of strings applied to all tests, OR an object keyed by --system profile name (e.g. 'mellanox', 'ainic', 'thor2') whose values are strings or lists of strings.",
+      "oneOf": [
+        { "$ref": "#/$defs/mpi_args_value" },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/mpi_args_value" }
+        }
+      ]
     },
 
     "system_env_variables": {
@@ -87,6 +92,46 @@
       }
     },
 
+    "rccl_tests_build_configuration": {
+      "description": "Controls how the rccl-tests perf binaries (all_reduce_perf, etc.) are built. Absent section => step skipped.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Set to false to skip building rccl-tests. Default: true when the section is present."
+        },
+        "source_dir": {
+          "type": "string",
+          "description": "Path to the rccl-tests checkout. Supports ~ and $VAR expansion. Default: $workdir/rccl-tests."
+        },
+        "install_script": {
+          "type": "string",
+          "description": "Name of the build script inside source_dir. Default: 'install.sh'."
+        },
+        "build_command": {
+          "description": "Explicit build command (string run via shell, or argv array). Overrides install_script + install_flags.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "install_flags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Flags passed to install_script, e.g. ['--mpi']. Supports ~ and $VAR expansion."
+        },
+        "rccl_home": {
+          "type": "string",
+          "description": "RCCL install/build prefix to link rccl-tests against. Default: the RCCL build_dir."
+        },
+        "env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Environment variables set only during the rccl-tests build step"
+        }
+      }
+    },
+
     "test_configurations": {
       "description": "Named test configuration blocks. Each key is a configuration name referenced by test_suites or via 'extends'.",
       "type": "object",
@@ -108,6 +153,14 @@
       "additionalProperties": { "type": "string" }
     },
 
+    "mpi_args_value": {
+      "description": "Extra mpirun arguments expressed as either a single string ('--bind-to none --oversubscribe') or a list of strings (['--bind-to none', '--oversubscribe']).",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+
     "test_defaults": {
       "description": "Fields that can appear at the test_configuration level as defaults and be overridden per-test",
       "type": "object",
@@ -121,9 +174,11 @@
           "description": "Test binary name or path. Relative names are resolved under build_dir/test/ (or test_binary_dir if set). Supports ~ and $VAR expansion."
         },
         "num_ranks": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Total MPI ranks. 1 → no mpirun wrapper."
+          "description": "Total MPI ranks. 1 → no mpirun wrapper. The string \"auto\" resolves to (detected GPUs per node × num_nodes), i.e. use all GPUs.",
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "enum": ["auto"] }
+          ]
         },
         "num_nodes": {
           "type": "integer",
@@ -131,9 +186,11 @@
           "description": "Number of nodes across which ranks are distributed"
         },
         "num_gpus": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "GPUs per node; controls --map-by ppr:{num_gpus}:node for multi-node runs. Default: 8."
+          "description": "GPUs per node; controls --map-by ppr:{num_gpus}:node for multi-node runs. The string \"auto\" (also the default when omitted) resolves to the detected GPUs per node.",
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "enum": ["auto"] }
+          ]
         },
         "timeout": {
           "type": "integer",
@@ -205,9 +262,12 @@
           "description": "Extra command-line arguments appended to the test binary invocation. Lists are de-duplicated and appended when configs are merged via 'extends'."
         },
         "mpi_args": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Extra mpirun arguments for tests in this configuration. Lists are de-duplicated and appended when configs are merged via 'extends'."
+          "$ref": "#/$defs/mpi_args_value",
+          "description": "Extra mpirun arguments for tests in this configuration, appended after the base mpi_args. Accepts a string or list of strings; lists are de-duplicated and appended when configs are merged via 'extends'."
+        },
+        "command_args": {
+          "type": "string",
+          "description": "Shared base command-line arguments for this configuration. A test's own 'command_args' is appended to this base at execution time (see test_executor.run_test). Inherited via 'extends': a child that omits command_args takes the parent's value."
         },
         "_comment": {
           "type": "string",
@@ -266,6 +326,10 @@
         "rerun_env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Per-test additional environment variables used only on rerun"
+        },
+        "mpi_args": {
+          "$ref": "#/$defs/mpi_args_value",
+          "description": "Per-test extra mpirun arguments (MPI tests only), appended after the base and suite/configuration mpi_args. Accepts a string or list of strings."
         }
       }
     },
@@ -307,6 +371,10 @@
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Suite-level environment variable overrides (between configuration-level and test-level in priority)"
+        },
+        "mpi_args": {
+          "$ref": "#/$defs/mpi_args_value",
+          "description": "Suite-level extra mpirun arguments, appended after the base and configuration mpi_args (and before per-test mpi_args). Accepts a string or list of strings."
         }
       }
     }
