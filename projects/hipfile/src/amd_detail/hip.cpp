@@ -130,7 +130,9 @@ Hip::hipAmdFileRead(hipAmdFileHandle_t handle, void *devicePtr, uint64_t size, i
     auto hip_error{(*hipAmdFileReadPtr)(handle, devicePtr, size, file_offset, &bytes_read, &status)};
 
     if (status) {
-        throw std::system_error(abs(status), std::generic_category());
+        // Widen before abs(): abs(INT_MIN) overflows int (UB). int64_t holds the magnitude safely.
+        throw std::system_error(static_cast<int>(std::abs(static_cast<int64_t>(status))),
+                                std::generic_category());
     }
     else if (hip_error) {
         throw Hip::RuntimeError(hip_error);
@@ -153,7 +155,9 @@ Hip::hipAmdFileWrite(hipAmdFileHandle_t handle, void *devicePtr, uint64_t size, 
     auto hip_error{(*hipAmdFileWritePtr)(handle, devicePtr, size, file_offset, &bytes_written, &status)};
 
     if (status) {
-        throw std::system_error(abs(status), std::generic_category());
+        // Widen before abs(): abs(INT_MIN) overflows int (UB). int64_t holds the magnitude safely.
+        throw std::system_error(static_cast<int>(std::abs(static_cast<int64_t>(status))),
+                                std::generic_category());
     }
     else if (hip_error) {
         throw Hip::RuntimeError(hip_error);
