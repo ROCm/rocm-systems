@@ -11,7 +11,7 @@ Inductor kernel launches appear in ROCTX markers.
 import importlib.util
 import inspect
 import threading
-from functools import wraps
+from functools import partial, partialmethod
 from pathlib import Path
 from typing import Any, Callable
 
@@ -123,43 +123,64 @@ def _run_with_marker(
         _thread_local.in_launch = False
 
 
+def _roctx_method_call(
+    instance: object,
+    marker_prefix: str,
+    original: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> object:
+    """Run a wrapped method ``original`` inside a ROCTX range."""
+    return _run_with_marker(
+        instance, marker_prefix, partial(original, instance, *args, **kwargs)
+    )
+
+
 def _wrap_method(
     owner: type, method_name: str, marker_prefix: str, original: Callable[..., Any]
 ) -> bool:
-    @wraps(original)
-    def launch_with_roctx(self: object, *args: Any, **kwargs: Any) -> object:
-        return _run_with_marker(
-            self, marker_prefix, lambda: original(self, *args, **kwargs)
-        )
-
-    launch_with_roctx._roctx_wrapped = True
-    setattr(owner, method_name, launch_with_roctx)
+    wrapper = partialmethod(_roctx_method_call, marker_prefix, original)
+    wrapper._roctx_wrapped = True
+    setattr(owner, method_name, wrapper)
     return True
 
 
+def _roctx_launch(
+    instance: object,
+    marker_prefix: str,
+    launcher: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> object:
+    """Run a property-returned ``launcher`` inside a ROCTX range."""
+    return _run_with_marker(instance, marker_prefix, partial(launcher, *args, **kwargs))
+
+
+def _roctx_property_get(
+    marker_prefix: str, original_getter: Callable[..., Any], instance: object
+) -> object:
+    """Property getter that wraps the launcher it returns with a ROCTX range."""
+    launcher = original_getter(instance)
+    if launcher is None or getattr(launcher, "_roctx_launcher", False):
+        return launcher
+    wrapped = partial(_roctx_launch, instance, marker_prefix, launcher)
+    wrapped._roctx_launcher = True
+    return wrapped
+
+
 def _wrap_property(
-    owner: type, method_name: str, marker_prefix: str, prop: property
+    owner: type, method_name: str, marker_prefix: str, wrapped_property: property
 ) -> bool:
-    orig_get = prop.fget
-    if orig_get is None:
+    original_getter = wrapped_property.fget
+    if original_getter is None:
         return False
-
-    def roctx_get(self: object) -> object:
-        launcher = orig_get(self)
-        if launcher is None or getattr(launcher, "_roctx_launcher", False):
-            return launcher
-
-        @wraps(launcher)
-        def launch(*args: Any, **kwargs: Any) -> object:
-            return _run_with_marker(
-                self, marker_prefix, lambda: launcher(*args, **kwargs)
-            )
-
-        launch._roctx_launcher = True
-        return launch
-
-    roctx_get._roctx_wrapped = True
-    setattr(owner, method_name, property(roctx_get, prop.fset, prop.fdel))
+    getter = partial(_roctx_property_get, marker_prefix, original_getter)
+    getter._roctx_wrapped = True
+    setattr(
+        owner,
+        method_name,
+        property(getter, wrapped_property.fset, wrapped_property.fdel),
+    )
     return True
 
 

@@ -5,12 +5,42 @@
 ``core.install_global_wraps``, ``registry.install_many``, ``TritonBackend``,
 and ``core._push_scope`` / ``_pop_scope``."""
 
+import functools
 import importlib
 import sys
 import types
 
 import common  # noqa: F401
 import pytest
+
+# ---------------------------------------------------------------------------
+# Test helpers
+# ---------------------------------------------------------------------------
+
+
+def record_call(calls, names):
+    """Append a snapshot of ``names`` to ``calls`` (an ``install_many`` spy)."""
+    calls.append(list(names))
+
+
+def find_spec_without(absent_name, real_find_spec, name, *args, **kwargs):
+    """Behave like ``find_spec`` but report ``absent_name`` as missing."""
+    if name == absent_name:
+        return None
+    return real_find_spec(name, *args, **kwargs)
+
+
+def raise_import_skipped(*args, **kwargs):
+    """Raise to assert that an import path is never reached."""
+    raise AssertionError("roctx import should be skipped")
+
+
+def make_backend(name, install_fn=None):
+    backend = types.SimpleNamespace()
+    backend.name = name
+    backend.install = install_fn or (lambda: None)
+    return backend
+
 
 # ---------------------------------------------------------------------------
 # install_global_wraps
@@ -23,11 +53,9 @@ def captured_install(monkeypatch):
     from utils.inject_roctx import registry as registry_pkg
 
     calls: list[list[str]] = []
-
-    def _record(names):
-        calls.append(list(names))
-
-    monkeypatch.setattr(registry_pkg, "install_many", _record)
+    monkeypatch.setattr(
+        registry_pkg, "install_many", functools.partial(record_call, calls)
+    )
     return calls
 
 
@@ -88,17 +116,10 @@ def fresh_registry(monkeypatch):
     return registry_pkg
 
 
-def _make_backend(name, install_fn=None):
-    backend = types.SimpleNamespace()
-    backend.name = name
-    backend.install = install_fn or (lambda: None)
-    return backend
-
-
 def test_install_many_invokes_registered_backends(fresh_registry):
     calls: list[str] = []
-    fresh_registry.register(_make_backend("alpha", lambda: calls.append("alpha")))
-    fresh_registry.register(_make_backend("beta", lambda: calls.append("beta")))
+    fresh_registry.register(make_backend("alpha", lambda: calls.append("alpha")))
+    fresh_registry.register(make_backend("beta", lambda: calls.append("beta")))
 
     fresh_registry.install_many(["alpha", "beta"])
     assert calls == ["alpha", "beta"]
@@ -106,7 +127,7 @@ def test_install_many_invokes_registered_backends(fresh_registry):
 
 def test_install_many_dedupes_duplicate_names(fresh_registry):
     calls: list[str] = []
-    fresh_registry.register(_make_backend("alpha", lambda: calls.append("alpha")))
+    fresh_registry.register(make_backend("alpha", lambda: calls.append("alpha")))
 
     fresh_registry.install_many(["alpha", "alpha", "alpha"])
     assert calls == ["alpha"]
@@ -118,9 +139,9 @@ def test_install_many_continues_after_backend_failure(fresh_registry, monkeypatc
 
     other_calls: list[str] = []
     fresh_registry.register(
-        _make_backend("bad", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        make_backend("bad", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     )
-    fresh_registry.register(_make_backend("good", lambda: other_calls.append("good")))
+    fresh_registry.register(make_backend("good", lambda: other_calls.append("good")))
 
     fresh_registry.install_many(["bad", "good"])
     assert other_calls == ["good"]
@@ -160,13 +181,11 @@ def test_triton_backend_skips_when_triton_missing(monkeypatch):
     from utils.inject_roctx._backends import triton as triton_backend
 
     real_find_spec = importlib.util.find_spec
-
-    def _no_triton(name, *args, **kwargs):
-        if name == "triton":
-            return None
-        return real_find_spec(name, *args, **kwargs)
-
-    monkeypatch.setattr(importlib.util, "find_spec", _no_triton)
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        functools.partial(find_spec_without, "triton", real_find_spec),
+    )
 
     warnings: list[tuple] = []
     monkeypatch.setattr(
@@ -320,10 +339,7 @@ def test_ensure_python_tier_short_circuits_when_already_configured(monkeypatch):
     try:
         core.set_python_tier_io(lambda _s: None, lambda: None)
 
-        def _boom(*_a, **_k):
-            raise AssertionError("roctx import should be skipped")
-
-        monkeypatch.setattr(core.importlib, "import_module", _boom)
+        monkeypatch.setattr(core.importlib, "import_module", raise_import_skipped)
         assert core.ensure_python_tier() is True
     finally:
         core._STATE.range_push, core._STATE.range_pop = saved_push, saved_pop
