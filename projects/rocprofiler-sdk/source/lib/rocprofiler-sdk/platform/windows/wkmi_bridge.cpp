@@ -89,8 +89,9 @@ wkmi_parse_adapter(uint32_t d3dkmt_handle, wkmi_device_info& out)
     out.minor    = info.minor;
     out.stepping = info.stepping;
     out.is_dgpu  = info.is_dgpu;
-    // product_name is a fixed-size char buffer; copy as a NUL-terminated string.
-    out.product_name = std::string{info.product_name};
+    // product_name is a fixed-size char[MAX_PATH] buffer; bound the copy to
+    // MAX_PATH to guard against a missing NUL terminator.
+    out.product_name = std::string{info.product_name, ::strnlen(info.product_name, MAX_PATH)};
     out.uuid         = info.uuid;
     out.family       = info.family;
     out.device_id    = info.device_id;
@@ -149,8 +150,9 @@ namespace platform
 namespace windows
 {
 bool
-wkmi_parse_adapter(uint32_t /*d3dkmt_handle*/, wkmi_device_info& /*out*/)
+wkmi_parse_adapter(uint32_t /*d3dkmt_handle*/, wkmi_device_info& out)
 {
+    out = wkmi_device_info{};
     ROCP_INFO << "wkmi_bridge: built without wkmi; wkmi_parse_adapter is a no-op";
     return false;
 }

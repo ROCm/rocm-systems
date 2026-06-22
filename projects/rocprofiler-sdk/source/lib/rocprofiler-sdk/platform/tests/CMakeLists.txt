@@ -15,14 +15,6 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library GTest::gtest
             GTest::gtest_main)
 
-# hsa-runtime and drm are the Linux KFD/amdgpu backends; they are not part of the
-# native-Windows build, where topology comes from the D3DKMT + wkmi enumerator.
-if(NOT WIN32)
-    target_link_libraries(
-        platform-dispatch-tests PRIVATE rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
-                                        rocprofiler-sdk::rocprofiler-sdk-drm)
-endif()
-
 if(WIN32)
     # Windows resolves dependent DLLs via PATH (no LD_LIBRARY_PATH). The sysfs/KFD
     # topology fixture is Linux-only, so the Windows tests run without it - they exercise

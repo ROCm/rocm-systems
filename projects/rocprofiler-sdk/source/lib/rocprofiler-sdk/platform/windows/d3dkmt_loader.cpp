@@ -94,9 +94,9 @@ utf8_to_wide(const std::string& src)
 // Concrete dispatch table. The PFND3DKMT_* typedefs come from the vendored WDK
 // header and carry the APIENTRY (__stdcall) calling convention - using a plain
 // (*)() here would be an ABI bug on x86 and a type-safety hole on x64.
-struct d3dkmt_loader::impl
+struct d3dkmt_loader::impl_t
 {
-    ::HMODULE                    module        = nullptr;
+    ::HMODULE                    hmodule       = nullptr;
     bool                         owns_module   = false;
     ::PFND3DKMT_ENUMADAPTERS3    enum_adapters = nullptr;
     ::PFND3DKMT_QUERYADAPTERINFO query_adapter = nullptr;
@@ -104,7 +104,7 @@ struct d3dkmt_loader::impl
 
     bool ready() const
     {
-        return module != nullptr && enum_adapters != nullptr && query_adapter != nullptr &&
+        return hmodule != nullptr && enum_adapters != nullptr && query_adapter != nullptr &&
                close_adapter != nullptr;
     }
 };
@@ -116,34 +116,34 @@ namespace
 // (refcounted; recorded so the destructor FreeLibrary()s it). Returns true and
 // fills out on success; false and leaves out unchanged on any failure.
 bool
-open_d3dkmt_module(const std::wstring& name, d3dkmt_loader::impl& out)
+open_d3dkmt_module(const std::wstring& name, d3dkmt_loader::impl_t& out)
 {
     if(name.empty()) return false;
 
-    bool      owns   = false;
-    ::HMODULE module = ::GetModuleHandleW(name.c_str());
-    if(module == nullptr)
+    bool      owns    = false;
+    ::HMODULE hmodule = ::GetModuleHandleW(name.c_str());
+    if(hmodule == nullptr)
     {
-        module = ::LoadLibraryW(name.c_str());
-        owns   = (module != nullptr);
+        hmodule = ::LoadLibraryW(name.c_str());
+        owns    = (hmodule != nullptr);
     }
-    if(module == nullptr)
+    if(hmodule == nullptr)
     {
         ROCP_INFO << "d3dkmt_loader: could not obtain a handle for module";
         return false;
     }
 
-    auto enum_fn  = resolve<::PFND3DKMT_ENUMADAPTERS3>(module, "D3DKMTEnumAdapters3");
-    auto query_fn = resolve<::PFND3DKMT_QUERYADAPTERINFO>(module, "D3DKMTQueryAdapterInfo");
-    auto close_fn = resolve<::PFND3DKMT_CLOSEADAPTER>(module, "D3DKMTCloseAdapter");
+    auto enum_fn  = resolve<::PFND3DKMT_ENUMADAPTERS3>(hmodule, "D3DKMTEnumAdapters3");
+    auto query_fn = resolve<::PFND3DKMT_QUERYADAPTERINFO>(hmodule, "D3DKMTQueryAdapterInfo");
+    auto close_fn = resolve<::PFND3DKMT_CLOSEADAPTER>(hmodule, "D3DKMTCloseAdapter");
 
     if(enum_fn == nullptr || query_fn == nullptr || close_fn == nullptr)
     {
-        if(owns) ::FreeLibrary(module);
+        if(owns) ::FreeLibrary(hmodule);
         return false;
     }
 
-    out.module        = module;
+    out.hmodule       = hmodule;
     out.owns_module   = owns;
     out.enum_adapters = enum_fn;
     out.query_adapter = query_fn;
@@ -152,22 +152,22 @@ open_d3dkmt_module(const std::wstring& name, d3dkmt_loader::impl& out)
 }
 
 // Resolve D3DKMT entry points. When ROCPROFILER_D3DKMT_MODULE is set the
-// override is tried exclusively — no fallback to gdi32.dll — so a test that
-// forces a bogus module name reliably produces a failed load. Without the
-// override, gdi32.dll is the only candidate (the real implementation on native
-// Windows).
+// env_override is tried exclusively — no fallback to gdi32.dll — so a test
+// that forces a bogus module name reliably produces a failed load. Without the
+// env_override, gdi32.dll is the only candidate (the real implementation on
+// native Windows).
 void
-open_d3dkmt(d3dkmt_loader::impl& out)
+open_d3dkmt(d3dkmt_loader::impl_t& out)
 {
-    auto override = common::get_env(kEnvModuleOverride, std::string{});
-    if(!override.empty())
+    auto env_override = common::get_env(kEnvModuleOverride, std::string{});
+    if(!env_override.empty())
     {
-        if(!open_d3dkmt_module(utf8_to_wide(override), out))
+        if(!open_d3dkmt_module(utf8_to_wide(env_override), out))
             ROCP_INFO << fmt::format(
                 "d3dkmt_loader: {} override '{}' failed to load or missing D3DKMT symbols; "
                 "not falling back to gdi32.dll",
                 kEnvModuleOverride,
-                override);
+                env_override);
         return;
     }
     open_d3dkmt_module(std::wstring{kDefaultModule}, out);
@@ -175,11 +175,11 @@ open_d3dkmt(d3dkmt_loader::impl& out)
 
 // Single KMTQAITYPE query into a caller-provided buffer.
 bool
-query_one(const d3dkmt_loader::impl& impl,
-          uint32_t                   hadapter,
-          ::KMTQUERYADAPTERINFOTYPE  type,
-          void*                      out,
-          uint32_t                   out_size)
+query_one(const d3dkmt_loader::impl_t& impl,
+          uint32_t                     hadapter,
+          ::KMTQUERYADAPTERINFOTYPE    type,
+          void*                        out,
+          uint32_t                     out_size)
 {
     auto q                  = ::D3DKMT_QUERYADAPTERINFO{};
     q.hAdapter              = static_cast<::D3DKMT_HANDLE>(hadapter);
@@ -201,7 +201,7 @@ query_one(const d3dkmt_loader::impl& impl,
 }  // namespace
 
 d3dkmt_loader::d3dkmt_loader()
-: m_impl{new impl{}}
+: m_impl{new impl_t{}}
 {
     open_d3dkmt(*m_impl);
 }
@@ -210,7 +210,7 @@ d3dkmt_loader::~d3dkmt_loader()
 {
     if(m_impl != nullptr)
     {
-        if(m_impl->owns_module && m_impl->module != nullptr) ::FreeLibrary(m_impl->module);
+        if(m_impl->owns_module && m_impl->hmodule != nullptr) ::FreeLibrary(m_impl->hmodule);
         delete m_impl;
         m_impl = nullptr;
     }

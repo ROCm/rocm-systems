@@ -116,8 +116,8 @@ public:
     void close_adapter(uint32_t hadapter) const;
 
 private:
-    struct impl;
-    impl* m_impl = nullptr;
+    struct impl_t;
+    impl_t* m_impl = nullptr;
 };
 }  // namespace windows
 }  // namespace platform
