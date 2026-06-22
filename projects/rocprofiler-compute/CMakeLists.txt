@@ -564,8 +564,8 @@ add_test(
     NAME test_roofline_main
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_roofline_main.xml ${COV_OPTION}
-        tests/test_roofline_main.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_roofline_main.xml ${COV_OPTION} tests/test_roofline_main.py
+        ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
