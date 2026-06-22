@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <shared_mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -112,9 +113,9 @@ struct agent_state
     void*                                             backend             = nullptr;
     uint64_t                                          consecutive_kernels = 0;
 
-    std::mutex mutex     = {};
-    bool       started   = false;
-    bool       finalized = false;
+    std::shared_mutex mutex     = {};
+    bool              started   = false;
+    bool              finalized = false;
 
     std::vector<kernel_symbol_record>                                      kernel_symbols   = {};
     std::unordered_map<entry_key, rocprofiler_kernel_id_t, entry_key_hash> kernels_by_entry = {};

@@ -34,6 +34,12 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <iostream>
+
+//#define LOG_TRACE ROCP_TRACE
+//#define LOG_INFO ROCP_INFO
+#define LOG_TRACE std::cout << std::endl
+#define LOG_INFO std::cout << std::endl
 
 namespace rocprofiler
 {
@@ -218,7 +224,7 @@ start_agent_context(agent_state& state)
 {
     auto start_context = false;
     {
-        auto lock = std::lock_guard<std::mutex>{state.mutex};
+        auto lock = std::unique_lock{state.mutex};
         if(!state.started && !state.finalized)
         {
             state.started = true;
@@ -228,7 +234,7 @@ start_agent_context(agent_state& state)
 
     if(start_context)
     {
-        ROCP_INFO << fmt::format(
+        LOG_INFO << fmt::format(
             "starting ATT no-intercept context for agent {} ({})", state.id.handle, state.name);
         check_status(rocprofiler_start_context(state.context), "ATT no-intercept context start");
     }
@@ -239,7 +245,7 @@ stop_agent_context(agent_state& state)
 {
     auto stop_context = false;
     {
-        auto lock       = std::lock_guard<std::mutex>{state.mutex};
+        auto lock       = std::unique_lock{state.mutex};
         stop_context    = state.started;
         state.started   = false;
         state.finalized = true;
@@ -274,7 +280,7 @@ configure(std::vector<agent_config> agents,
     ROCP_FATAL_IF(forwarder == nullptr)
         << "ATT no-intercept setup requires a shader-data forwarding callback";
 
-    auto lock               = std::lock_guard<std::mutex>{manager_mutex()};
+    auto lock               = std::unique_lock{manager_mutex()};
     shader_data_forwarder() = forwarder;
     kernel_target_filter()  = filter;
 
@@ -307,7 +313,7 @@ configure(std::vector<agent_config> agents,
 
         auto* state_ptr = state.get();
         agent_states().emplace(agent.id.handle, std::move(state));
-        ROCP_INFO << fmt::format("configured ATT no-intercept context for agent {} ({})",
+        LOG_INFO << fmt::format("configured ATT no-intercept context for agent {} ({})",
                                  state_ptr->id.handle,
                                  state_ptr->name);
     }
@@ -319,7 +325,7 @@ code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& dat
     std::vector<kernel_symbol_record> symbols = {};
     agent_state*                      state   = nullptr;
     {
-        auto lock = std::lock_guard<std::mutex>{manager_mutex()};
+        auto lock = std::unique_lock{manager_mutex()};
         auto itr  = agent_states().find(data.agent_id.handle);
         if(itr == agent_states().end()) return;
 
@@ -335,7 +341,7 @@ code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& dat
     }
 
     {
-        auto lock                                = std::lock_guard<std::mutex>{state->mutex};
+        auto lock                                = std::unique_lock{state->mutex};
         state->code_objects[data.code_object_id] = code_object_record{
             data.code_object_id, data.load_delta, data.load_base, data.load_size};
     }
@@ -343,7 +349,7 @@ code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& dat
     backend_code_object_load(*state, data);
 
     {
-        auto lock = std::lock_guard<std::mutex>{state->mutex};
+        auto lock = std::unique_lock{state->mutex};
         for(const auto& symbol : symbols)
             state->kernel_symbols.emplace_back(symbol);
         rebuild_kernel_ranges_locked(*state);
@@ -359,7 +365,7 @@ kernel_symbol_load(
     auto         symbol = make_symbol_record(data);
     agent_state* state  = nullptr;
     {
-        auto lock = std::lock_guard<std::mutex>{manager_mutex()};
+        auto lock = std::unique_lock{manager_mutex()};
         if(auto itr = code_object_agents().find(data.code_object_id);
            itr != code_object_agents().end())
         {
@@ -372,7 +378,7 @@ kernel_symbol_load(
         }
     }
 
-    auto lock = std::lock_guard<std::mutex>{state->mutex};
+    auto lock = std::unique_lock{state->mutex};
     register_kernel_symbol_locked(*state, symbol);
 }
 
@@ -381,7 +387,7 @@ finalize()
 {
     std::vector<agent_state*> states = {};
     {
-        auto lock = std::lock_guard<std::mutex>{manager_mutex()};
+        auto lock = std::unique_lock{manager_mutex()};
         states.reserve(agent_states().size());
         for(auto& itr : agent_states())
             states.emplace_back(itr.second.get());
@@ -394,7 +400,7 @@ finalize()
 
         stop_agent_context(*state);
 
-        ROCP_INFO << fmt::format(
+        LOG_INFO << fmt::format(
             "ATT no-intercept agent {} ({}) stats: chunks={}, bytes={}, dispatches={}, "
             "targets={}, cuts={}, cross_chunk_skips={}, unknown_dispatches={}, scan_failures={}, "
             "cut_failures={}, buffer_full={}",
