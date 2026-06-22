@@ -364,6 +364,7 @@ def test_pc_sampling_profile_sdk_live_attach(tmp_path, monkeypatch):
     options = {
         "ROCPROF_ATTACH_PID": "1234",
         "ROCPROF_ATTACH_LIBRARY": "lib.so",
+        "ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC": "1",
     }
 
     mock_capture = Mock()

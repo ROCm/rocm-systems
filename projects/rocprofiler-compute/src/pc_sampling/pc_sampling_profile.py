@@ -135,8 +135,6 @@ class PCSamplingProfile:
             "ROCPROF_PC_SAMPLING_INTERVAL": str(interval),
             "ROCPROF_PC_SAMPLING_METHOD": method,
         })
-        if is_live_attach(profiler_options):
-            options["ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC"] = "1"
         app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
         new_env = os.environ.copy()
         for key, value in options.items():
