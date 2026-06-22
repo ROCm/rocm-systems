@@ -978,6 +978,15 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
 }
 
 template <typename T>
+__device__ int GDAContext::alltoall_wave([[maybe_unused]] rocshmem_team_t team, 
+                                            [[maybe_unused]] T* dest, 
+                                            [[maybe_unused]] const T* source, 
+                                            [[maybe_unused]] int nelems) {
+  LOGD_WARN("Alltoall not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+template <typename T>
 __device__ void GDAContext::fcollect(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
   fcollect_linear(team, dst, src, nelems);

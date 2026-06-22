@@ -585,7 +585,7 @@ __device__ void IPCContext::alltoall_wg(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
-__device__ int Context::alltoall_wave(rocshmem_team_t team, T *dest,
+__device__ int IPCContext::alltoall_wave(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems) {
 
   return alltoallmem_wave(team, dest, source, nelems * sizeof(T));

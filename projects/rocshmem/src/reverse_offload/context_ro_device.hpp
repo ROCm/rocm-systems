@@ -179,6 +179,10 @@ class ROContext : public Context {
                             T *source, const size_t source_nelems[],
                             const size_t source_displs[]);
 
+  template <typename T>
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, 
+                                  const T* source, int nelems);
+
   __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, 
                                   const void* source, int nelems);
 

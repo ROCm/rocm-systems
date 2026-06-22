@@ -2219,16 +2219,6 @@ INT_REDUCTION_ON_STREAM_KERNEL_GEN(short, short)
 
 FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(float, float)
 FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(double, double)
-
-ALLTOALLWAVE_GEN(T, TNAME)
-ALLTOALLWAVE_GEN(int, int)
-ALLTOALLWAVE_GEN(long, long)
-ALLTOALLWAVE_GEN(long long, longlong)
-ALLTOALLWAVE_GEN(short, short)
-
-ALLTOALLWAVE_GEN(float, float)
-ALLTOALLWAVE_GEN(double, double)
-
 // clang-format on
 
 }  // namespace rocshmem
