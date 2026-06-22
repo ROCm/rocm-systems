@@ -772,7 +772,6 @@ class db_analysis(OmniAnalyze_Base):
             new_rows.append(base)
         return new_rows
 
-
     def calc_metrics_data(
         self,
     ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
