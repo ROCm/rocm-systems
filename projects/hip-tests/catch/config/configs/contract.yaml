@@ -228,3 +228,12 @@ contract:
   Contract_GraphTopology_NodeDependents_ReturnsConfiguredDependent:
     <<: *level_0
     tags: [graph_topology]
+  Contract_GraphClone_ClonedEmptyGraph_InstantiatesAndLaunches:
+    <<: *level_0
+    tags: [graph_clone]
+  Contract_GraphClone_ClonedMemcpyGraph_RoundTripsBytes:
+    <<: *level_0
+    tags: [graph_clone]
+  Contract_GraphClone_OriginalAndClone_AreDistinctHandles:
+    <<: *level_0
+    tags: [graph_clone]
