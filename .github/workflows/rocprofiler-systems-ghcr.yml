@@ -2,17 +2,6 @@ name: rocprofiler-systems GHCR Packages for CI Images
 
 on:
   workflow_dispatch:
-    inputs:
-      gpu:
-        description: 'GPU target(s) to publish'
-        required: true
-        default: 'all'
-        type: choice
-        options:
-          - all
-          - gfx94X
-          - gfx950
-          - gfx1151
   schedule:
     - cron: 0 5 * * *
   push:
@@ -51,30 +40,19 @@ jobs:
     if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
-      containers_list: ${{ steps.generate_containers_list.outputs.containers_list }}
-      gpu_list: ${{ steps.generate_gpu_list.outputs.gpu_list }}
+      matrix_data: ${{ steps.generate_matrix_ci_base.outputs.matrix_data }}
 
     steps:
       - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems/docker
 
-      - name: Generate containers list
+      - name: Output data for containers matrix
         working-directory: projects/rocprofiler-systems/docker
-        id: generate_containers_list
+        id: generate_matrix_ci_base
         run: |
           DISTROS=$(cat containers-ci.yml | yq '.distros' -I=0 -o=json)
           echo "containers_list=$DISTROS" >> $GITHUB_OUTPUT
-
-      - name: Generate GPU list
-        id: generate_gpu_list
-        run: |
-          INPUT="${{ github.event.inputs.gpu }}"
-          if [ -z "$INPUT" ] || [ "$INPUT" = "all" ]; then
-            echo 'gpu_list=["gfx94X","gfx950","gfx1151"]' >> $GITHUB_OUTPUT
-          else
-            echo "gpu_list=[\"$INPUT\"]" >> $GITHUB_OUTPUT
-          fi
 
   rocprofiler-systems-ci-gfx:
     needs: prepare_matrix_ci
