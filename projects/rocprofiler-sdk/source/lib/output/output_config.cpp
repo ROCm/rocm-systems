@@ -67,9 +67,10 @@ output_config::parse_env()
     annotate_kfd   = common::get_env("ROCPROF_ANNOTATE_KFD", false);
     annotate_pmc   = common::get_env("ROCPROF_ANNOTATE_PMC", false);
 
-    // Record the root process's PID. It is inherited across fork and fork+exec
-    // (spawn), so descendants detect they aren't the root by comparing PIDs.
-    // override=0 keeps descendants from overwriting the root's value.
+    // Record the root process's PID (inherited across fork/fork+exec, override=0 so
+    // descendants don't clobber it). get_output_filename() uses it to PID-suffix a
+    // descendant's output so it doesn't overwrite the root's. Relies on the final
+    // filename being built lazily, after any fork.
     common::set_env("ROCPROF_OUTPUT_ROOT_PID", std::to_string(getpid()), 0);
 
     auto to_upper = [](std::string val) {

@@ -59,18 +59,18 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
     auto output_path   = fs::path{cfg_output_path};
     auto output_prefix = tool::format_path(cfg.output_file);
 
-    // Descendants of the root process append their PID so they don't overwrite
-    // each other's output; the root keeps the user-specified name. Recomputed
-    // per call (not a static) so a process that forks later still gets its PID.
-    // Token check uses raw cfg.output_file since format_path() already expanded
-    // any %pid%/%p/{pid} in output_prefix.
+    // Descendants of the root append their PID so they don't overwrite the root's
+    // output; recomputed per call so a process that forks later still gets its PID.
+    // We check the already-expanded prefix for this PID rather than scanning raw
+    // tokens: that skips the suffix only when the name truly embeds THIS process's
+    // pid (%pid%/%p/%nid%), not a fork-shared token like %ppid%/%pgid% that would
+    // collide across siblings.
+    auto _pid           = std::to_string(getpid());
     auto _root_pid      = common::get_env_optional("ROCPROF_OUTPUT_ROOT_PID");
-    bool _is_descendant = _root_pid.has_value() && *_root_pid != std::to_string(getpid());
-    if(_is_descendant && cfg.output_file.find("%pid%") == std::string::npos &&
-       cfg.output_file.find("{pid}") == std::string::npos &&
-       cfg.output_file.find("%p") == std::string::npos)
+    bool _is_descendant = _root_pid.has_value() && *_root_pid != _pid;
+    if(_is_descendant && output_prefix.find(_pid) == std::string::npos)
     {
-        output_prefix += fmt::format("_{}", getpid());
+        output_prefix += fmt::format("_{}", _pid);
     }
 
     if(fs::exists(output_path) && !fs::is_directory(fs::status(output_path)))

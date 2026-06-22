@@ -60,4 +60,5 @@ target_sources(fork-test PRIVATE fork-test.cpp)
 target_compile_options(fork-test PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
 
 find_package(Threads REQUIRED)
-target_link_libraries(fork-test PRIVATE Threads::Threads)
+target_link_libraries(fork-test PRIVATE Threads::Threads
+                                        rocprofiler-sdk::tests-build-flags)
