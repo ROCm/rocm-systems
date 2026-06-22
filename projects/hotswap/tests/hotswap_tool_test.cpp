@@ -18,7 +18,7 @@
 //   * ISA name        <- hsa_agent_iterate_isas / hsa_isa_get_info_alt
 //   * ASIC revision   <- hsa_agent_get_info(HSA_AMD_AGENT_INFO_ASIC_REVISION)
 //
-// This path is portable: it depends only on HSA so the same query/gate logic is 
+// This path is portable: it depends only on HSA so the same query/gate logic is
 // exercised for both Linux and Windows builds.
 //
 //===----------------------------------------------------------------------===//
@@ -34,22 +34,24 @@
 // ---------------------------------------------------------------------------
 namespace {
 struct FakeEnv {
-  std::string isa_name;          // ISA reported for the agent
-  bool asic_rev_ok = true;       // hsa_agent_get_info(ASIC_REVISION) success
-  uint32_t asic_revision = 0;    // reported ASIC revision (0 == A0)
+  std::string isa_name;       // ISA reported for the agent
+  bool asic_rev_ok = true;    // hsa_agent_get_info(ASIC_REVISION) success
+  uint32_t asic_revision = 0; // reported ASIC revision (0 == A0)
 
   // Counters used to assert short-circuiting and caching behavior.
-  int isa_query_calls = 0;       // get_agent_isa_name -> iterate_isas
-  int asic_rev_calls = 0;        // ASIC revision queries
+  int isa_query_calls = 0; // get_agent_isa_name -> iterate_isas
+  int asic_rev_calls = 0;  // ASIC revision queries
 };
 FakeEnv g_env;
-}  // namespace
+} // namespace
 
 // The unit under test (brings in hsa.h and the query helper declarations).
 #include "hotswap_gfx_query.hpp"
 
+using rocr::hotswap::add_gfx1250_stepping_feature;
 using rocr::hotswap::AgentGfxRevision;
 using rocr::hotswap::gate_allows_hotswap;
+using rocr::hotswap::gate_allows_hotswap_rewrite;
 using rocr::hotswap::query_agent_gfx_revision;
 using rocr::hotswap::reset_gfx_revision_cache;
 
@@ -97,7 +99,7 @@ hsa_status_t hsa_agent_get_info(hsa_agent_t /*agent*/,
   return HSA_STATUS_ERROR;
 }
 
-}  // extern "C"
+} // extern "C"
 
 // ---------------------------------------------------------------------------
 // Minimal test harness.
@@ -194,10 +196,67 @@ void test_Gfx1250NonA0Blocks() {
   printf("TEST Gfx1250NonA0Blocks...\n");
   reset_env();
   g_env.isa_name = kGfx1250Isa;
-  g_env.asic_revision = 1;  // A1
+  g_env.asic_revision = 1; // A1
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
   run("ASIC revision is A1 (1)", g.revision_valid && g.asic_revision == 1);
   run("gate blocks gfx1250 A1", gate_allows_hotswap(g) == false);
+}
+
+// The entry-trampoline flag opens an explicit gfx1250 path independent of the
+// B0/A0 retargeting gate.
+void test_EntryTrampolineFlagAllowsGfx1250NonA0() {
+  printf("TEST EntryTrampolineFlagAllowsGfx1250NonA0...\n");
+  reset_env();
+  g_env.isa_name = kGfx1250Isa;
+  g_env.asic_revision = 1; // A1/B0-side path, not A0.
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  run("default gate blocks non-A0",
+      gate_allows_hotswap_rewrite(g, false) == false);
+  run("trampoline gate allows gfx1250 non-A0",
+      gate_allows_hotswap_rewrite(g, true) == true);
+}
+
+// If ASIC revision cannot be queried, the explicit trampoline flag can still
+// route gfx1250 through COMGR. The target is treated as non-A0 for B0/A0 patch
+// selection so the trampoline pass does not imply A0-specific fixes.
+void test_EntryTrampolineFlagAllowsGfx1250UnknownRevision() {
+  printf("TEST EntryTrampolineFlagAllowsGfx1250UnknownRevision...\n");
+  reset_env();
+  g_env.isa_name = kGfx1250Isa;
+  g_env.asic_rev_ok = false;
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  run("default gate blocks unknown revision",
+      gate_allows_hotswap_rewrite(g, false) == false);
+  run("trampoline gate allows gfx1250 unknown revision",
+      gate_allows_hotswap_rewrite(g, true) == true);
+}
+
+// The trampoline flag is not a global rewrite enable; non-gfx1250 targets still
+// load unchanged.
+void test_EntryTrampolineFlagBlocksOtherTargets() {
+  printf("TEST EntryTrampolineFlagBlocksOtherTargets...\n");
+  reset_env();
+  g_env.isa_name = kGfx942Isa;
+  g_env.asic_revision = 0;
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  run("trampoline gate blocks gfx942",
+      gate_allows_hotswap_rewrite(g, true) == false);
+}
+
+void test_AddGfx1250SteppingFeature() {
+  printf("TEST AddGfx1250SteppingFeature...\n");
+  run("B0 feature appended to bare gfx1250",
+      add_gfx1250_stepping_feature(kGfx1250Isa, true) ==
+          std::string(kGfx1250Isa) + ":gfx1250-b0-specific+");
+  run("A0 feature appended after existing ISA features",
+      add_gfx1250_stepping_feature(kGfx1250IsaWithFeatures, false) ==
+          std::string(kGfx1250IsaWithFeatures) + ":gfx1250-b0-specific-");
+  run("existing B0 feature is preserved",
+      add_gfx1250_stepping_feature(
+          "amdgcn-amd-amdhsa--gfx1250:gfx1250-b0-specific+", false) ==
+          "amdgcn-amd-amdhsa--gfx1250:gfx1250-b0-specific+");
+  run("non-gfx1250 ISA is unchanged",
+      add_gfx1250_stepping_feature(kGfx942Isa, true) == kGfx942Isa);
 }
 
 // ASIC revision query failure -> revision_valid false and gate blocks, even for
@@ -250,7 +309,7 @@ void test_DistinctHandlesIndependent() {
       a2.gfx_target == "gfx942" && gate_allows_hotswap(a2) == false);
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   test_Gfx1250A0Passes();
@@ -258,6 +317,10 @@ int main() {
   test_NonGfx1250Blocks();
   test_NearMissTargetBlocks();
   test_Gfx1250NonA0Blocks();
+  test_EntryTrampolineFlagAllowsGfx1250NonA0();
+  test_EntryTrampolineFlagAllowsGfx1250UnknownRevision();
+  test_EntryTrampolineFlagBlocksOtherTargets();
+  test_AddGfx1250SteppingFeature();
   test_AsicRevisionQueryFailure();
   test_ResultIsCachedPerHandle();
   test_DistinctHandlesIndependent();
