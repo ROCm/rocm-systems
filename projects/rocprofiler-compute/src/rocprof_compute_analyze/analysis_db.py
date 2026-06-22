@@ -4,9 +4,8 @@
 import ast
 import re
 import warnings
-from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 import astunparse
 import numpy as np
@@ -60,6 +59,22 @@ from utils.utils_analysis import (
 )
 from utils.utils_common import get_uuid, get_version
 from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
+
+
+class MetricInfoRow(NamedTuple):
+    name: str
+    metric_id: str
+    description: Optional[str]
+    unit: Optional[str]
+    pct_of_peak: bool
+    table_name: str
+    sub_table_name: str
+
+
+class ExpressionRow(NamedTuple):
+    metric_id: str
+    value_name: str
+    value: str
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -560,10 +575,6 @@ class db_analysis(OmniAnalyze_Base):
         expression_df: pd.DataFrame,
         emit_variance_warnings: bool = False,
     ) -> pd.Series:
-        # apply(axis=1) on an empty frame returns a DataFrame, not a Series,
-        # which breaks the single-column assignment at the call site.
-        if expression_df.empty:
-            return pd.Series(index=expression_df.index, dtype=object)
         db_analysis.calc_builtin_vars(
             pmc_df,
             sys_info,
@@ -573,15 +584,18 @@ class db_analysis(OmniAnalyze_Base):
                 if isinstance(v, str) and v and v != "None"
             ],
         )
-        return expression_df.apply(
-            lambda row: db_analysis.evaluate(
-                f"{row['metric_id']} - {row['value_name']}",
-                row["value"],
-                pmc_df,
-                sys_info,
-                emit_variance_warnings=emit_variance_warnings,
-            ),
-            axis=1,
+        return pd.Series(
+            [
+                db_analysis.evaluate(
+                    f"{row.metric_id} - {row.value_name}",
+                    row.value,
+                    pmc_df,
+                    sys_info,
+                    emit_variance_warnings=emit_variance_warnings,
+                )
+                for row in expression_df.itertuples(index=False)
+            ],
+            index=expression_df.index,
         )
 
     @staticmethod
@@ -758,19 +772,6 @@ class db_analysis(OmniAnalyze_Base):
             new_rows.append(base)
         return new_rows
 
-    @staticmethod
-    def _iter_metric_table_rows(
-        arch_config: schema.ArchConfig,
-    ) -> Iterator[tuple[str, pd.DataFrame, pd.Series]]:
-        """Yield (metric_id, metric_df, row) for each metric-table row (any df
-        with a Metric/Channel column), skipping roofline points (table 402)."""
-        for metric_df_id, metric_df in arch_config.dfs.items():
-            if metric_df_id == 402:
-                continue
-            if not set(metric_df.columns).intersection({"Metric", "Channel"}):
-                continue
-            for metric_id, row in metric_df.iterrows():
-                yield metric_id, metric_df, row
 
     def calc_metrics_data(
         self,
@@ -800,59 +801,45 @@ class db_analysis(OmniAnalyze_Base):
                 "Transaction",
                 "Percent of Peak",
             ]
-            # Pass explicit columns so an empty result (e.g. a --block filter
-            # matching nothing) still carries the schema downstream relies on.
-            metric_table_rows = list(
-                self._iter_metric_table_rows(self._arch_configs[gfx_arch])
-            )
+            metric_table_rows = [
+                (metric_id, metric_df, row)
+                for df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
+                if df_id != 402  # roofline points handled in calc_roofline_data
+                if set(metric_df.columns).intersection({"Metric", "Channel"})
+                for metric_id, row in metric_df.iterrows()
+            ]
             metrics_info_df = pd.DataFrame(
-                data=[
-                    {
-                        "name": row.get("Metric") or row["Channel"].strip(),
-                        "metric_id": metric_id,
-                        "description": row.get("Description"),
-                        "unit": row.get("Unit"),
-                        "pct_of_peak": row.get("Percent of Peak") is True,
-                        "table_name": table_names_map[
-                            int(metric_id.split(".")[0]) * 100
-                        ],
-                        "sub_table_name": table_names_map[
+                [
+                    MetricInfoRow(
+                        name=row.get("Metric") or row["Channel"].strip(),
+                        metric_id=metric_id,
+                        description=row.get("Description"),
+                        unit=row.get("Unit"),
+                        pct_of_peak=row.get("Percent of Peak") is True,
+                        table_name=table_names_map[int(metric_id.split(".")[0]) * 100],
+                        sub_table_name=table_names_map[
                             int(metric_id.split(".")[0]) * 100
                             + int(metric_id.split(".")[1])
                         ],
-                    }
-                    for metric_id, _metric_df, row in metric_table_rows
+                    )
+                    for metric_id, _, row in metric_table_rows
                 ],
-                columns=[
-                    "name",
-                    "metric_id",
-                    "description",
-                    "unit",
-                    "pct_of_peak",
-                    "table_name",
-                    "sub_table_name",
-                ],
+                columns=MetricInfoRow._fields,
             )
             expression_df = pd.DataFrame(
-                data=[
-                    {
-                        "metric_id": metric_id,
-                        "value_name": value_name,
-                        "value": row[value_name].strip(),
-                    }
+                [
+                    ExpressionRow(
+                        metric_id=metric_id,
+                        value_name=value_name,
+                        value=row[value_name].strip(),
+                    )
                     for metric_id, metric_df, row in metric_table_rows
                     for value_name in metric_df.drop(
                         columns=non_expression_columns, errors="ignore"
                     ).columns
                 ],
-                columns=["metric_id", "value_name", "value"],
+                columns=ExpressionRow._fields,
             )
-
-            if metrics_info_df.empty:
-                console_warning(
-                    f"No metrics matched the active filter for {workload_path}; "
-                    "the database will contain no metric values for this workload."
-                )
 
             metrics_info_data_per_workload[workload_path] = metrics_info_df
             metric_expression_data_per_workload[workload_path] = expression_df

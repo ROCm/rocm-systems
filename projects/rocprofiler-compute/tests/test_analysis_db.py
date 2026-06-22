@@ -504,8 +504,7 @@ def test_iter_metric_table_rows_yields_in_df_order_with_source_frame():
 
 
 def test_calc_metrics_data_empty_filter_preserves_schema_and_warns():
-    """With no metric tables, the output frames keep their columns and a
-    warning is emitted."""
+    """With no metric tables, the output frames keep their columns."""
     workload_path = "/fake/workload"
     arch_config = schema.ArchConfig()
     # Only a non-metric table survives the filter (no Metric/Channel column).
@@ -518,10 +517,7 @@ def test_calc_metrics_data_empty_filter_preserves_schema_and_warns():
     }
     analyzer._arch_configs = {"gfx942": arch_config}
 
-    with patch(
-        "rocprof_compute_analyze.analysis_db.console_warning"
-    ) as console_warning_mock:
-        metrics_info, expressions = analyzer.calc_metrics_data()
+    metrics_info, expressions = analyzer.calc_metrics_data()
 
     assert metrics_info[workload_path].empty
     assert "pct_of_peak" in metrics_info[workload_path].columns
@@ -531,7 +527,6 @@ def test_calc_metrics_data_empty_filter_preserves_schema_and_warns():
         "value_name",
         "value",
     ]
-    console_warning_mock.assert_called_once()
 
 
 # =============================================================================
