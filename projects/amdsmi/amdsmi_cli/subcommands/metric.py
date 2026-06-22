@@ -702,7 +702,7 @@ class MetricCommands:
                 #   - partition metrics when --partition is set
                 #   - socket-level gpu_metrics otherwise
                 # Both expose the same field names, so one population path serves both.
-                clock_source = (
+                clock_metrics = (
                     gpu_partition_metrics
                     if (args.partition and gpu_partition_metrics is not None)
                     else gpu_metric
@@ -743,8 +743,8 @@ class MetricCommands:
 
                 # Populate GFX clock values
                 try:
-                    current_gfx_clocks = clock_source.get("current_gfxclks", "N/A")
-                    gfxclk_lock_status = clock_source.get("gfxclk_lock_status", "N/A")
+                    current_gfx_clocks = clock_metrics.get("current_gfxclks", "N/A")
+                    gfxclk_lock_status = clock_metrics.get("gfxclk_lock_status", "N/A")
                     if current_gfx_clocks != "N/A":
                         for clock_index, current_gfx_clock in enumerate(current_gfx_clocks):
                             # If the current clock is N/A then nothing else applies
@@ -770,7 +770,7 @@ class MetricCommands:
 
                 # Populate MEM clock value
                 try:
-                    current_mem_clock = clock_source.get("current_uclk", "N/A")  # single value
+                    current_mem_clock = clock_metrics.get("current_uclk", "N/A")  # single value
                     if current_mem_clock != "N/A":
                         clocks["mem_0"]["clk"] = self.helpers.unit_format(
                             self.logger, current_mem_clock, clock_unit
@@ -780,7 +780,7 @@ class MetricCommands:
 
                 # Populate VCLK clock values
                 try:
-                    current_vclk_clocks = clock_source.get("current_vclk0s", "N/A")
+                    current_vclk_clocks = clock_metrics.get("current_vclk0s", "N/A")
                     if current_vclk_clocks != "N/A":
                         for clock_index, current_vclk_clock in enumerate(current_vclk_clocks):
                             # If the current clock is N/A then nothing else applies
@@ -797,7 +797,7 @@ class MetricCommands:
 
                 # Populate DCLK clock values
                 try:
-                    current_dclk_clocks = clock_source.get("current_dclk0s", "N/A")
+                    current_dclk_clocks = clock_metrics.get("current_dclk0s", "N/A")
                     if current_dclk_clocks != "N/A":
                         for clock_index, current_dclk_clock in enumerate(current_dclk_clocks):
                             # If the current clock is N/A then nothing else applies
@@ -839,7 +839,7 @@ class MetricCommands:
 
                 # Populate SOCCLK clock value
                 try:
-                    current_socclk_clock = clock_source.get("current_socclk", "N/A")
+                    current_socclk_clock = clock_metrics.get("current_socclk", "N/A")
                     if current_socclk_clock != "N/A":
                         clocks["socclk_0"]["clk"] = self.helpers.unit_format(
                             self.logger, current_socclk_clock, clock_unit
@@ -849,7 +849,7 @@ class MetricCommands:
 
                 # Populate per-AID memory clocks
                 try:
-                    current_uclk_aid = clock_source.get("current_uclk_aid", "N/A")
+                    current_uclk_aid = clock_metrics.get("current_uclk_aid", "N/A")
                     if current_uclk_aid != "N/A":
                         clocks["uclk_aid"] = {
                             f"AID_{index}": self.helpers.unit_format(self.logger, clk, clock_unit)
@@ -862,7 +862,7 @@ class MetricCommands:
 
                 # Populate per-MID SOC clocks
                 try:
-                    current_socclks_mid = clock_source.get("current_socclks_mid", "N/A")
+                    current_socclks_mid = clock_metrics.get("current_socclks_mid", "N/A")
                     if current_socclks_mid != "N/A":
                         clocks["socclks_mid"] = {
                             f"MID_{index}": self.helpers.unit_format(self.logger, clk, clock_unit)
@@ -1202,7 +1202,7 @@ class MetricCommands:
                 #   - partition metrics when --partition is set
                 #   - socket-level gpu_metrics otherwise
                 # Both expose the same field names, so one population path serves both.
-                temp_source = (
+                temp_metrics = (
                     gpu_partition_metrics
                     if (args.partition and gpu_partition_metrics is not None)
                     else gpu_metric
@@ -1211,9 +1211,9 @@ class MetricCommands:
                     "edge": temperature_edge_current,
                     "hotspot": temperature_hotspot_current,
                     "mem": temperature_vram_current,
-                    "hbm_stacks": temp_source.get("temperature_hbm_stacks", "N/A"),
-                    "mid": temp_source.get("temperature_mid", "N/A"),
-                    "aid": temp_source.get("temperature_aid", "N/A"),
+                    "hbm_stacks": temp_metrics.get("temperature_hbm_stacks", "N/A"),
+                    "mid": temp_metrics.get("temperature_mid", "N/A"),
+                    "aid": temp_metrics.get("temperature_aid", "N/A"),
                     "xcd": "N/A",
                 }
 
@@ -1225,7 +1225,7 @@ class MetricCommands:
                     temperatures["aid"] = list(temperatures["aid"])
 
                 # XCP/XCD temperatures
-                xcp_temp_xcd = temp_source.get("xcp_stats.temperature_xcd", "N/A")
+                xcp_temp_xcd = temp_metrics.get("xcp_stats.temperature_xcd", "N/A")
                 if xcp_temp_xcd != "N/A" and isinstance(xcp_temp_xcd, list):
                     if args.partition and gpu_partition_metrics is not None:
                         available_partition = len(xcp_temp_xcd)
