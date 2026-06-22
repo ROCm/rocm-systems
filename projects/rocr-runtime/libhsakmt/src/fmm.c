@@ -717,11 +717,8 @@ static void reserved_aperture_release(manageable_aperture_t *app,
 		mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
 			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
 			-1, 0);
-		if (mmap_ret == MAP_FAILED && errno == ENOMEM) {
-			mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
-					MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
-					-1, 0);
-		}
+		if (mmap_ret == MAP_FAILED)
+			pr_warn("Failed to reserve VA range %p: %s\n", address, strerror(errno));
 	}
 }
 
