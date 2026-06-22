@@ -753,6 +753,23 @@ class VirtualGPU : public device::VirtualDevice {
   //! one and retaining the new one. No-op if cmd or hw_event is null.
   static void AttachHwEvent(amd::Command* cmd, void* hw_event);
 
+  //! Spin-wait until queue has space for a packet at \p write_index.
+  //! Uses cached_read_dispatch_id_ to avoid DRAM traffic on the fast path;
+  //! only re-reads the hardware read_dispatch_id when the cached value
+  //! indicates the queue might be full.
+  void WaitForQueueSlot(uint64_t write_index, uint32_t capacity) {
+    if ((write_index - cached_read_dispatch_id_) < capacity) {
+      return;
+    }
+    do {
+      cached_read_dispatch_id_ = Hsa::queue_load_read_index_scacquire(gpu_queue_);
+      if ((write_index - cached_read_dispatch_id_) < capacity) {
+        return;
+      }
+      amd::Os::yield();
+    } while (true);
+  }
+
   //! Queue state flags
   union {
     struct {
@@ -780,6 +797,10 @@ class VirtualGPU : public device::VirtualDevice {
   hsa_barrier_and_packet_t barrier_packet_ {};
   hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 
+  uint64_t cached_read_dispatch_id_ = 0;  //!< Cached read_dispatch_id to avoid DRAM reads
+                                          //!< when queue is not full. GPU updates to
+                                          //!< amd_queue_t.read_dispatch_id probe-invalidate
+                                          //!< CPU caches; this local copy stays in L1/L2.
   uint32_t skippedDispatches_;  //!< Count of consecutive dispatches that skipped the doorbell flush.
   uint32_t dispatch_id_;  //!< This variable must be updated atomically.
   Device& roc_device_;    //!< roc device object
