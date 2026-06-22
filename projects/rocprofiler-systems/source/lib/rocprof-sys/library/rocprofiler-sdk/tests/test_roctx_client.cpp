@@ -102,7 +102,7 @@ TEST_F(roctx_client_test, constructor_creates_controller)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config config{ true, true, true, false, "TestRegion" };
-    roctx_client<mock_marker_policy, rocprofsys::rocprofiler_sdk::backend> client(config);
+    roctx_client<rocprofsys::rocprofiler_sdk::backend, mock_marker_policy> client(config);
     EXPECT_NE(client.get_controller(), nullptr);
 }
 
@@ -111,7 +111,7 @@ TEST_F(roctx_client_test, constructor_without_region_filter)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config config{ true, true, true, false, "" };
-    roctx_client<mock_marker_policy, rocprofsys::rocprofiler_sdk::backend> client(config);
+    roctx_client<rocprofsys::rocprofiler_sdk::backend, mock_marker_policy> client(config);
     EXPECT_NE(client.get_controller(), nullptr);
     EXPECT_FALSE(client.get_controller()->region_filter_active());
 }
@@ -121,7 +121,7 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config config{ true, true, true, false, "Region 1" };
-    roctx_client<mock_marker_policy, rocprofsys::rocprofiler_sdk::backend> client(config);
+    roctx_client<rocprofsys::rocprofiler_sdk::backend, mock_marker_policy> client(config);
     EXPECT_TRUE(client.get_controller()->region_filter_active());
 }
 
@@ -130,7 +130,7 @@ TEST_F(roctx_client_test, should_write_no_filter)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config config{ true, true, true, false, "" };
-    const roctx_client<mock_marker_policy, rocprofsys::rocprofiler_sdk::backend> client(
+    const roctx_client<rocprofsys::rocprofiler_sdk::backend, mock_marker_policy> client(
         config);
     EXPECT_TRUE(client.get_controller()->should_write_markers());
 }
@@ -140,7 +140,7 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config config{ true, true, true, false, "Region 1" };
-    const roctx_client<mock_marker_policy, rocprofsys::rocprofiler_sdk::backend> client(
+    const roctx_client<rocprofsys::rocprofiler_sdk::backend, mock_marker_policy> client(
         config);
     EXPECT_FALSE(client.get_controller()->should_write_markers());
 }
@@ -159,8 +159,8 @@ class roctx_client_control_test : public mock_cleanup_base
 {
 protected:
     using roctx_client_t =
-        rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy,
-                                                  rocprofsys::rocprofiler_sdk::backend>;
+        rocprofsys::rocprofiler_sdk::roctx_client<rocprofsys::rocprofiler_sdk::backend,
+                                                  mock_marker_policy>;
     using roctx_config_t = rocprofsys::rocprofiler_sdk::roctx_client_config;
 
     int start_count = 0;
@@ -713,8 +713,8 @@ class roctx_push_pop_region_test : public mock_cleanup_base
 {
 protected:
     using roctx_client_t =
-        rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy,
-                                                  rocprofsys::rocprofiler_sdk::backend>;
+        rocprofsys::rocprofiler_sdk::roctx_client<rocprofsys::rocprofiler_sdk::backend,
+                                                  mock_marker_policy>;
     using roctx_config_t = rocprofsys::rocprofiler_sdk::roctx_client_config;
 
     int start_count = 0;

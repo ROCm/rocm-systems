@@ -113,7 +113,7 @@ public:
     // ─── Static data members (formerly anon-namespace globals) ───────────────
 
     static client_data<Wrapper>*                                         tool_data;
-    static std::shared_ptr<roctx_client<default_marker_policy, Wrapper>> g_roctx_client;
+    static std::shared_ptr<roctx_client<Wrapper, default_marker_policy>> g_roctx_client;
     static std::atomic<bool>                                             tool_fini_done;
     static std::atomic<bool>                                             tool_init_done;
     static std::atomic<bool>                                             sdk_configured;
@@ -193,7 +193,7 @@ private:
 
     // ─── roctx / counter / finalization helpers ───────────────────────────────
 
-    static std::shared_ptr<roctx_client<default_marker_policy, Wrapper>>
+    static std::shared_ptr<roctx_client<Wrapper, default_marker_policy>>
                 get_roctx_client();
     static void flush_counter_storage_outputs();
     static void flush_counter_tracks_to_zero(typename Wrapper::timestamp_t ts);
@@ -471,7 +471,7 @@ template <typename Wrapper>
 client_data<Wrapper>* library_sdk<Wrapper>::tool_data = new client_data<Wrapper>{};
 
 template <typename Wrapper>
-std::shared_ptr<roctx_client<default_marker_policy, Wrapper>>
+std::shared_ptr<roctx_client<Wrapper, default_marker_policy>>
     library_sdk<Wrapper>::g_roctx_client = {};
 
 template <typename Wrapper>
@@ -636,7 +636,8 @@ template <typename Wrapper>
 bool
 library_sdk<Wrapper>::is_initialized(typename Wrapper::context_id ctx)
 {
-    return (ctx.handle > 0);
+    typename Wrapper::context_id ctx_default;
+    return ctx != ctx_default;
 }
 
 template <typename Wrapper>
@@ -715,7 +716,7 @@ library_sdk<Wrapper>::flush()
 // ─── roctx helper ────────────────────────────────────────────────────────────
 
 template <typename Wrapper>
-std::shared_ptr<roctx_client<default_marker_policy, Wrapper>>
+std::shared_ptr<roctx_client<Wrapper, default_marker_policy>>
 library_sdk<Wrapper>::get_roctx_client()
 {
     if(!g_roctx_client)
@@ -739,7 +740,7 @@ library_sdk<Wrapper>::get_roctx_client()
             roctx_traced_regions,
         };
         g_roctx_client =
-            std::make_shared<roctx_client<default_marker_policy, Wrapper>>(roctx_config);
+            std::make_shared<roctx_client<Wrapper, default_marker_policy>>(roctx_config);
     }
     return g_roctx_client;
 }

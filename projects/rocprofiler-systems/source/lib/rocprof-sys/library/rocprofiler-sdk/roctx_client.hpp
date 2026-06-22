@@ -38,14 +38,14 @@ struct roctx_client_config
     std::string selected_trace_regions{};
 };
 
-// ─── roctx_client<MarkerWriterPolicy, Wrapper> ───────────────────────────────
+// ─── roctx_client<Wrapper, MarkerWriterPolicy> ───────────────────────────────
 //
-// MarkerWriterPolicy first (with default) preserves backward compatibility:
-//   roctx_client<>                               → uses default_marker_policy + backend
-//   roctx_client<MockPolicy>                     → MockPolicy + backend
-//   roctx_client<MockPolicy, MockBackend>         → fully injectable for tests
+// Wrapper first matches marker_writer<Wrapper, Policy> convention:
+//   roctx_client<>                               → uses backend + default_marker_policy
+//   roctx_client<MockBackend>                    → MockBackend + default_marker_policy
+//   roctx_client<MockBackend, MockPolicy>        → fully injectable for tests
 
-template <typename MarkerWriterPolicy = default_marker_policy, typename Wrapper = backend>
+template <typename Wrapper, typename MarkerWriterPolicy = default_marker_policy>
 class roctx_client
 {
 public:
@@ -109,18 +109,18 @@ namespace rocprofsys::rocprofiler_sdk
 
 // ─── Thread-local storage ────────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Wrapper>
-thread_local typename roctx_client<MarkerWriterPolicy, Wrapper>::marker_range_stack_t
-    roctx_client<MarkerWriterPolicy, Wrapper>::m_pushed_ranges{};
+template <typename Wrapper, typename MarkerWriterPolicy>
+thread_local typename roctx_client<Wrapper, MarkerWriterPolicy>::marker_range_stack_t
+    roctx_client<Wrapper, MarkerWriterPolicy>::m_pushed_ranges{};
 
-template <typename MarkerWriterPolicy, typename Wrapper>
-thread_local typename roctx_client<MarkerWriterPolicy, Wrapper>::marker_range_stack_t
-    roctx_client<MarkerWriterPolicy, Wrapper>::m_started_ranges{};
+template <typename Wrapper, typename MarkerWriterPolicy>
+thread_local typename roctx_client<Wrapper, MarkerWriterPolicy>::marker_range_stack_t
+    roctx_client<Wrapper, MarkerWriterPolicy>::m_started_ranges{};
 
 // ─── Constructor ─────────────────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Wrapper>
-roctx_client<MarkerWriterPolicy, Wrapper>::roctx_client(
+template <typename Wrapper, typename MarkerWriterPolicy>
+roctx_client<Wrapper, MarkerWriterPolicy>::roctx_client(
     const roctx_client_config& roctx_cfg)
 : m_config{ roctx_cfg }
 , m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
@@ -190,9 +190,9 @@ collect_args(typename Wrapper::callback_tracing_record record)
 
 // ─── configure_services ──────────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Wrapper>
+template <typename Wrapper, typename MarkerWriterPolicy>
 void
-roctx_client<MarkerWriterPolicy, Wrapper>::configure_services(
+roctx_client<Wrapper, MarkerWriterPolicy>::configure_services(
     typename Wrapper::context_id ctx)
 {
     m_ctx = ctx;
@@ -215,9 +215,9 @@ roctx_client<MarkerWriterPolicy, Wrapper>::configure_services(
 
 // ─── handle_marker_core_enter ─────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Wrapper>
+template <typename Wrapper, typename MarkerWriterPolicy>
 void
-roctx_client<MarkerWriterPolicy, Wrapper>::handle_marker_core_enter(
+roctx_client<Wrapper, MarkerWriterPolicy>::handle_marker_core_enter(
     typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t* user_data, typename Wrapper::timestamp_t ts)
 {
@@ -269,9 +269,9 @@ roctx_client<MarkerWriterPolicy, Wrapper>::handle_marker_core_enter(
 
 // ─── handle_marker_core_exit ──────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Wrapper>
+template <typename Wrapper, typename MarkerWriterPolicy>
 void
-roctx_client<MarkerWriterPolicy, Wrapper>::handle_marker_core_exit(
+roctx_client<Wrapper, MarkerWriterPolicy>::handle_marker_core_exit(
     typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t* user_data, typename Wrapper::timestamp_t ts)
 {
@@ -353,9 +353,9 @@ roctx_client<MarkerWriterPolicy, Wrapper>::handle_marker_core_exit(
 
 // ─── handle_marker_control ────────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Wrapper>
+template <typename Wrapper, typename MarkerWriterPolicy>
 void
-roctx_client<MarkerWriterPolicy, Wrapper>::handle_marker_control(
+roctx_client<Wrapper, MarkerWriterPolicy>::handle_marker_control(
     typename Wrapper::callback_tracing_record record)
 {
     if(record.operation == Wrapper::MARKER_CONTROL_API_ID_roctxProfilerPause &&
@@ -372,9 +372,9 @@ roctx_client<MarkerWriterPolicy, Wrapper>::handle_marker_control(
 
 // ─── Static callbacks ─────────────────────────────────────────────────────────
 
-template <typename MarkerWriterPolicy, typename Wrapper>
+template <typename Wrapper, typename MarkerWriterPolicy>
 void
-roctx_client<MarkerWriterPolicy, Wrapper>::marker_core_callback(
+roctx_client<Wrapper, MarkerWriterPolicy>::marker_core_callback(
     typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t* user_data, void* callback_data)
 {
@@ -390,9 +390,9 @@ roctx_client<MarkerWriterPolicy, Wrapper>::marker_core_callback(
         client->handle_marker_core_exit(record, user_data, ts);
 }
 
-template <typename MarkerWriterPolicy, typename Wrapper>
+template <typename Wrapper, typename MarkerWriterPolicy>
 void
-roctx_client<MarkerWriterPolicy, Wrapper>::marker_control_callback(
+roctx_client<Wrapper, MarkerWriterPolicy>::marker_control_callback(
     typename Wrapper::callback_tracing_record record, typename Wrapper::user_data_t*,
     void*                                     callback_data)
 {
