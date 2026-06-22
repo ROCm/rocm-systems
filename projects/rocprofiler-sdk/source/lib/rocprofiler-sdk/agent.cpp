@@ -321,17 +321,26 @@ using unique_agent_t = ::rocprofiler::platform::unique_agent_t;
 // (it cannot read the real per-device topology before HSA is up);
 // construct_agent_cache() reads this to refine those fields from the HSA runtime
 // at runtime without touching the KFD path. File-local to this translation unit.
-bool&
-wsl_platform_selected()
+// Internal-linkage storage for the file-local flag above; accessed only through
+// the named getter/setter below (no mutable-reference-to-static handed out).
+static bool s_wsl_platform_selected = false;
+
+bool
+is_wsl_platform_selected()
 {
-    static bool _v = false;
-    return _v;
+    return s_wsl_platform_selected;
+}
+
+void
+set_wsl_platform_selected(bool value)
+{
+    s_wsl_platform_selected = value;
 }
 
 std::vector<unique_agent_t>
 enumerate_platform_agents()
 {
-    wsl_platform_selected() = false;
+    set_wsl_platform_selected(false);
 
     const auto forced = common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
     if(!forced.empty())
@@ -345,7 +354,7 @@ enumerate_platform_agents()
         if(forced == "wsl")
         {
             ROCP_INFO << "agent topology: forced wsl via ROCPROFILER_FORCE_PLATFORM";
-            wsl_platform_selected() = true;
+            set_wsl_platform_selected(true);
             return platform::wsl::enumerate();
         }
 #endif
@@ -372,7 +381,7 @@ enumerate_platform_agents()
     {
         ROCP_INFO << "agent topology: selected " << platform::wsl::name
                   << " (libdxcore.so present)";
-        wsl_platform_selected() = true;
+        set_wsl_platform_selected(true);
         return platform::wsl::enumerate();
     }
     ROCP_WARNING << "agent topology: no platform matched; falling back to "
@@ -771,11 +780,11 @@ construct_agent_cache(::HsaApiTable* table)
     // source aqlprofile also reads — overrides those placeholders so non-default
     // GPUs report correct topology at runtime.
     //
-    // Gated on wsl_platform_selected() so the KFD (bare-metal Linux) path is never
+    // Gated on is_wsl_platform_selected() so the KFD (bare-metal Linux) path is never
     // touched: its agents already carry authoritative KFD-sysfs values. Each HSA
     // query overrides only on success with a non-zero value, so a query failure
     // keeps the enumerator's safe defaults rather than zeroing a field.
-    if(wsl_platform_selected())
+    if(is_wsl_platform_selected())
     {
         // An explicit, valid ROCPROFILER_FORCE_GFX (applied in wsl::enumerate) is a
         // user override of the gfx target and must win over the HSA-reported name.

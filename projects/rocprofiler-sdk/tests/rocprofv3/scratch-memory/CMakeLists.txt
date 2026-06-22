@@ -15,12 +15,12 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-# WSL/DXG does not expose /dev/kfd; the GPU is scheduled through the dxg path,
-# which does not surface scratch-memory allocations. With no scratch reported,
-# the rocprofv3 --scratch-memory-trace run produces no out_results.json, so the
-# validate step errors on a missing input file. Gate the whole scratch-memory
-# execute+validate flow off on WSL/no-KFD (same CMake-level pattern used for the
-# multi-counter integration tests); real-KFD CI still runs it normally.
+# WSL/DXG does not expose /dev/kfd; the GPU is scheduled through the dxg path, which does
+# not surface scratch-memory allocations. With no scratch reported, the rocprofv3
+# --scratch-memory-trace run produces no out_results.json, so the validate step errors on
+# a missing input file. Gate the whole scratch-memory execute+validate flow off on
+# WSL/no-KFD (same CMake-level pattern used for the multi-counter integration tests);
+# real-KFD CI still runs it normally.
 set(IS_WSL_DXG_NO_KFD OFF)
 if(NOT EXISTS "/dev/kfd")
     set(IS_WSL_DXG_NO_KFD ON)

@@ -551,7 +551,9 @@ is_available()
     // initializes its dxg runtime (which reads the variable once per process);
     // is_available() is called during agent discovery at rocprofiler init, well
     // before any profiling queue is created. The function-local static ensures
-    // the setenv happens at most once.
+    // the setenv happens at most once. NOTE: setenv mutates the global environ
+    // and is not itself thread-safe; this is safe here only because it runs on
+    // the single-threaded rocprofiler init path before any worker threads exist.
     if(avail)
     {
         static const bool _vendor_packet_enabled = []() {

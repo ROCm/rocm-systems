@@ -34,8 +34,6 @@
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include <unistd.h>
-
 #include <mutex>
 
 namespace rocprofiler

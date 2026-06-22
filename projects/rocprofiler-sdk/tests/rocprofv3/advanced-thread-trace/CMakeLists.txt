@@ -322,6 +322,34 @@ rocprofiler_add_integration_validate_test(
          ${TARGET_CU}
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
+if(attdecoder_FOUND
+   AND NOT ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS
+   AND DEFINED rocm_version_NUMERIC_VERSION
+   AND rocm_version_NUMERIC_VERSION GREATER_EQUAL 71400)
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-att-event-tracing
+        COMMAND
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/event_tracing -o
+            out --kernel-include-regex matrixTranspose -- $<TARGET_FILE:simple-transpose>
+        DEPENDS simple-transpose
+        TIMEOUT 45
+        LABELS "integration-tests"
+        FIXTURES_SETUP rocprofv3-test-att-event-tracing)
+
+    rocprofiler_add_integration_validate_test(
+        rocprofv3-test-att-event-tracing-validate
+        TEST_PATHS validate.py
+        COPY conftest.py
+        CONFIG pytest.ini
+        DISCOVERY_ARGS -k test_occupancy_event_tracing_fields
+        TIMEOUT 45
+        LABELS "integration-tests"
+        FIXTURES_REQUIRED rocprofv3-test-att-event-tracing
+        ARGS --att-occupancy-event-trace-out-dir
+             ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/event_tracing
+        FAIL_REGULAR_EXPRESSION "AssertionError")
+endif()
+
 # Other SIMD file tests. Requires both a supported arch (gfx11/12) AND the
 # rocprof-trace-decoder library: the test sets ROCPROF_ATT_LIBRARY_PATH and aborts with
 # "rocprof-trace-decoder library path not found" when the decoder is absent (e.g. WSL, or
