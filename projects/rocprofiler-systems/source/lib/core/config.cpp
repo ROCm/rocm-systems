@@ -453,7 +453,25 @@ inline namespace config
 namespace
 {
 auto cfg_fini_callbacks = std::vector<std::function<void()>>{};
+
+bool
+json_has_project_name_root(const std::string& json_path)
+{
+    std::ifstream ifs{ json_path };
+    if(!ifs.is_open())
+    {
+        return false;
+    }
+    try
+    {
+        const auto json = nlohmann::json::parse(ifs);
+        return json.is_object() && json.contains(TIMEMORY_PROJECT_NAME);
+    } catch(const nlohmann::json::exception&)
+    {
+        return false;
+    }
 }
+}  // namespace
 
 void
 finalize()
@@ -608,6 +626,13 @@ configure_settings(bool _init)
         "events (requires HSA_XNACK=1 on a supported GPU; required KFD tracing is "
         "enabled automatically)",
         false, "backend", "unified_memory", "kfd");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::UNIFIED_MEMORY_OUTPUT_PATH,
+        "Explicitly specify the output folder for unified memory profiling reports. "
+        "When empty, unified memory reports are written next to the active trace "
+        "backend output.",
+        std::string{}, "output", "unified_memory", "backend", "kfd");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_AMD_SMI,
                               "Enable sampling GPU power, temp, utilization, "
@@ -1281,6 +1306,16 @@ configure_settings(bool _init)
     _add_advanced_category(env_vars::COLLAPSE_THREADS);
     _add_advanced_category(env_vars::COLLAPSE_PROCESSES);
 
+    // Setting is registered above with "ROCPROFSYS_CONFIG_SETTING"; safe to read them
+    // here.
+    if(!output_filtering::is_log_output_enabled_for_current_mpi_rank())
+    {
+        logger_t::instance().set_level(spdlog::level::err);
+        setenv(env_vars::LOG_LEVEL, "error", 1);
+        setenv(env_vars::DL_VERBOSE, "-1", 1);
+        setenv(env_vars::VERBOSE, "-1", 1);
+    }
+
 #if defined(TIMEMORY_USE_PAPI)
     int _paranoid = 2;
     {
@@ -1363,6 +1398,21 @@ configure_settings(bool _init)
     {
         if(_config->get_suppress_config()) continue;
 
+        const auto expanded_filename = settings::format(itr, _config->get_tag());
+
+        // Prevent Timemory's read() silently dropping JSON config files without proper
+        // root. Non-existing JSONs should not throw: default ROCPROFSYS_CONFIG_FILE
+        // includes '~/.rocprofiler-systems.json' that can be missing
+        if(expanded_filename.ends_with(".json") && filepath::exists(expanded_filename) &&
+           !json_has_project_name_root(expanded_filename))
+        {
+            throw std::runtime_error(
+                fmt::format("Config file '{}' is missing the expected '{}' root object "
+                            "and cannot be loaded. If this is a hierarchical preset "
+                            "configuration, pass it via --preset instead.",
+                            expanded_filename, TIMEMORY_PROJECT_NAME));
+        }
+
         LOG_DEBUG("Reading config file {}", itr);
         validate_config_file_values(itr, _config->get_tag(), _config);
         if(_config->read(itr) && _main_proc &&
@@ -1370,8 +1420,7 @@ configure_settings(bool _init)
              settings::verbose() >= 0) ||
             settings::verbose() >= 1 || settings::debug()))
         {
-            auto              fitr = settings::format(itr, _config->get_tag());
-            std::ifstream     _in{ fitr };
+            std::ifstream     _in{ expanded_filename };
             std::stringstream _iss{};
             while(_in)
             {
@@ -1381,7 +1430,7 @@ configure_settings(bool _init)
             }
             if(!_iss.str().empty())
             {
-                LOG_DEBUG("config file '{}': {}", fitr, _iss.str());
+                LOG_DEBUG("config file '{}': {}", expanded_filename, _iss.str());
             }
         }
     }
@@ -1417,6 +1466,15 @@ configure_settings(bool _init)
        _combine_perfetto_traces->second->get_config_updated())
     {
         _combine_perfetto_traces->second->set(_config->get<bool>("collapse_processes"));
+    }
+
+    auto _merge_perfetto_files =
+        _config->find(std::string{ env_vars::MERGE_PERFETTO_FILES });
+    if(!_merge_perfetto_files->second->get_environ_updated() &&
+       !_merge_perfetto_files->second->get_config_updated())
+    {
+        _merge_perfetto_files->second->set(
+            static_cast<tim::tsettings<bool>&>(*_combine_perfetto_traces->second).get());
     }
 
     handle_deprecated_setting(std::string{ env_vars::AMD_SMI_DEVICES },
@@ -1557,7 +1615,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 
     if(!_config->get_enabled())
     {
-        _set(env_vars::USE_TRACE, false);
+        _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
         _set(env_vars::USE_CAUSAL, false);
         _set(env_vars::USE_AMD_SMI, false);
@@ -1805,7 +1863,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     {
         auto _v = itr.second->get_env_name();
         if(_hidden_exact.count(_v) > 0 ||
-           std ::regex_match(_v, std::regex{ _hidden_exact_re }) ||
+           std::regex_match(_v, std::regex{ _hidden_exact_re }) ||
            std::regex_match(_v, std::regex{ _hidden_begin_re }))
         {
             itr.second->set_enabled(false);
@@ -1870,6 +1928,8 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new,
 void
 print_banner(std::ostream& _os)
 {
+    if(!output_filtering::is_log_output_enabled_for_current_mpi_rank()) return;
+
     static const char* _banner = R"banner(
 
      ____   ___   ____ __  __   ______   ______ _____ _____ __  __ ____    ____  ____   ___  _____ ___ _     _____ ____
