@@ -217,8 +217,8 @@ static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
   auto* w = reinterpret_cast<uint32_t*>(buf);
 
   w[0] = 0xEE0B007C;                          // global_wb <scope:SCOPE_CU>
-  w[1] = 0x00000000;                          // padding
-  w[2] = 0x00000000;                          // padding
+  w[1] = 0x00000000;                          // :
+  w[2] = 0x00000000;                          // :
   w[3] = 0x7E000000;                          // v_nop (padding)
   w[4] = 0xBEE400FF;                          // s_mov_b32 s100, target_lo
   w[5] = static_cast<uint32_t>(target);
@@ -1503,15 +1503,17 @@ hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
   const size_t n = kd_fixups_.size();
 
   // Size the trailing prefetch guard from the largest CP instruction-prefetch
-  // window among this pool's kernels (INST_PREF_SIZE lines * 128 B), plus one
-  // stub stride of slack for end-of-window line rounding. Because the stubs are
-  // packed and the last one sits at the end of the pool, a guard >= the max
-  // per-kernel reach covers the forward prefetch from every stub.
+  // window among this pool's kernels (INST_PREF_SIZE lines * 128 B). The forward
+  // prefetch from the last stub reaches its_entry + INST_PREF_SIZE*128; since that
+  // stub's own slot (one stub stride) already lies inside the pool, only the
+  // remainder, (INST_PREF_SIZE*128 - stub_size), can spill past the pool and needs
+  // a guard. (Clamp to 0 when the window fits within a stub slot.)
   uint32_t max_pref_lines = 0;
   for (const auto& f : kd_fixups_)
     max_pref_lines = std::max(max_pref_lines, f.inst_pref);
+  const size_t pref_bytes = static_cast<size_t>(max_pref_lines) * kInstPrefUnitBytes;
   const size_t guard =
-      static_cast<size_t>(max_pref_lines) * kInstPrefUnitBytes + kTrampolineStubStride;
+      pref_bytes > kTrampolineStubStride ? pref_bytes - kTrampolineStubStride : 0;
   const size_t pool = n * kTrampolineStubStride + guard;
 
   // AMDGPU_HSA_SEGMENT_CODE_AGENT yields *executable* device memory: the loader
