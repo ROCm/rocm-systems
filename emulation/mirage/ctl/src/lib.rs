@@ -152,9 +152,9 @@ fn emulators_cmd(long: bool, json: bool) {
 }
 
 /// Best-effort: materialise all builtin state on disk — agents,
-/// topologies, profiles, and the rocjitsu runtime assets — writing only
-/// what's missing. Errors are logged, never fatal; the user can always
-/// force a full rewrite with `mirage state builtins`.
+/// topologies, and profiles — writing only what's missing. Errors are
+/// logged, never fatal; the user can always force a full rewrite with
+/// `mirage state builtins`.
 ///
 /// Shared by the CLI ([`dispatch`]) and the daemon so both surfaces
 /// auto-unpack the builtins the first time they run, instead of
@@ -168,9 +168,6 @@ pub fn ensure_builtins_present() {
     }
     if let Err(e) = mirage_builtin::ensure_profiles(false) {
         tracing::warn!("failed to preload builtin profiles: {e:#}");
-    }
-    if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
-        tracing::warn!("failed to extract rocjitsu assets: {e:#}");
     }
 }
 
@@ -1656,14 +1653,6 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
 
 // ----- state dispatch --------------------------------------------------------
 
-fn rocjitsu_asset_path(name: &str) -> std::path::PathBuf {
-    match name {
-        n if n == mirage_rocjitsu::KMD_LIB_NAME => mirage_rocjitsu::kmd_lib_path(),
-        n if n == mirage_rocjitsu::LIB_NAME => mirage_rocjitsu::lib_path(),
-        _ => mirage_rocjitsu::schema_fbs_path(),
-    }
-}
-
 async fn state_cmd<C: MirageCtl + 'static>(
     ctl: Arc<C>,
     cmd: StateCmd,
@@ -1674,7 +1663,6 @@ async fn state_cmd<C: MirageCtl + 'static>(
             let agents = mirage_builtin::ensure_agents(true)?;
             let topologies = mirage_builtin::ensure_topologies(true)?;
             let profiles = mirage_builtin::ensure_profiles(true)?;
-            let assets = mirage_rocjitsu::ensure_assets(true)?;
             if json {
                 let entries: Vec<_> = agents
                     .iter()
@@ -1702,15 +1690,6 @@ async fn state_cmd<C: MirageCtl + 'static>(
                             "written": w,
                         })
                     }))
-                    .chain(assets.iter().map(|(n, w)| {
-                        let p = rocjitsu_asset_path(n);
-                        serde_json::json!({
-                            "kind": "asset",
-                            "name": n,
-                            "path": p,
-                            "written": w,
-                        })
-                    }))
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&entries)?);
             } else {
@@ -1728,11 +1707,6 @@ async fn state_cmd<C: MirageCtl + 'static>(
                     let p = mirage_core::paths::profile_path(name);
                     let tag = if *w { "wrote" } else { "kept" };
                     println!("{tag} profile   {} -> {}", name, p.display());
-                }
-                for (name, w) in &assets {
-                    let p = rocjitsu_asset_path(name);
-                    let tag = if *w { "wrote" } else { "kept" };
-                    println!("{tag} asset     {} -> {}", name, p.display());
                 }
             }
         }

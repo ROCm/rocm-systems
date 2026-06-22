@@ -4948,16 +4948,7 @@ void VMacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane,
-                    util::f32_to_f16(std::fma(
-                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))),
-                        util::f16_to_f32(static_cast<uint16_t>(vsrc1.read_lane(wf, lane))),
-                        util::f16_to_f32(static_cast<uint16_t>(vdst.read_lane(wf, lane))))));
-  }
+  amdgpu::execute_v_mac_f16_vop2(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
@@ -7710,22 +7701,7 @@ void VDot2cF32F16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = vsrc1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));
-    float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));
-    facc += a0 * b0 + a1 * b1;
-    acc = static_cast<int32_t>(std::bit_cast<uint32_t>(facc));
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot2c_f32_f16_vop2(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
@@ -7871,20 +7847,7 @@ void VDot2cI32I16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = vsrc1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    int16_t a0 = static_cast<int16_t>(a & 0xFFFF);
-    int16_t a1 = static_cast<int16_t>((a >> 16) & 0xFFFF);
-    int16_t b0 = static_cast<int16_t>(b & 0xFFFF);
-    int16_t b1 = static_cast<int16_t>((b >> 16) & 0xFFFF);
-    acc += static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1;
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot2c_i32_i16_vop2(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
@@ -8018,20 +7981,7 @@ void VDot4cI32I8Vop2::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = vsrc1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    for (int i = 0; i < 4; ++i) {
-      int8_t ea = static_cast<int8_t>((a >> (i * 8)) & 0xFF);
-      int8_t eb = static_cast<int8_t>((b >> (i * 8)) & 0xFF);
-      acc += static_cast<int32_t>(ea) * static_cast<int32_t>(eb);
-    }
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot4c_i32_i8_vop2(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
@@ -8165,24 +8115,7 @@ void VDot8cI32I4Vop2::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = vsrc1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    for (int i = 0; i < 8; ++i) {
-      int32_t ea = static_cast<int32_t>((a >> (i * 4)) & 0xF);
-      if (ea & 8)
-        ea |= ~0xF;
-      int32_t eb = static_cast<int32_t>((b >> (i * 4)) & 0xF);
-      if (eb & 8)
-        eb |= ~0xF;
-      acc += ea * eb;
-    }
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot8c_i32_i4_vop2(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {

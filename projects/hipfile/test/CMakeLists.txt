@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 include(AISAddExecutable)
-include(AISUseGTest)
 
 set(SHARED_SOURCE_FILES
     common/magic-word.cpp
@@ -48,6 +47,8 @@ ais_add_test_executable(
 )
 target_link_libraries(hipfile_tests PRIVATE GTest::gtest)
 target_link_libraries(hipfile_tests PRIVATE GTest::gtest_main)
+target_compile_options(hipfile_tests PRIVATE -pthread)
+target_link_options(hipfile_tests PRIVATE -pthread)
 
 ais_gtest_discover_tests(
     hipfile_tests
@@ -62,6 +63,8 @@ ais_add_test_executable(
     SYSINCLS ${TEST_SYSINCLS}
 )
 target_link_libraries(hipfile_system_tests PRIVATE GTest::gtest)
+target_compile_options(hipfile_system_tests PRIVATE -pthread)
+target_link_options(hipfile_system_tests PRIVATE -pthread)
 
 ais_gtest_discover_tests(
     hipfile_system_tests

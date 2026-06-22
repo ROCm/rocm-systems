@@ -24,7 +24,6 @@ def lulesh_base_env() -> dict[str, str]:
         "ROCPROFSYS_COUT_OUTPUT": "ON",
         "ROCPROFSYS_SAMPLING_FREQ": "50",
         "ROCPROFSYS_KOKKOSP_PREFIX": "[kokkos]",
-        "ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK": "ON",
     }
     return env
 
@@ -96,7 +95,7 @@ class TestLulesh(RocprofsysTest):
         "mode", ["sampling", "binary_rewrite", "runtime_instrument", "sys_run"]
     )
     def test_kokkosp(self, mode):
-        env = {"ROCPROFSYS_USE_KOKKOSP": "ON", "ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK": "ON"}
+        env = {"ROCPROFSYS_USE_KOKKOSP": "ON"}
         result = self.run_test(
             mode,
             "lulesh",
@@ -124,7 +123,6 @@ class TestLulesh(RocprofsysTest):
     def test_perfetto(self, mode, perfetto_env):
         env = perfetto_env.copy()
         env["ROCPROFSYS_USE_KOKKOSP"] = "OFF"
-        env["ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK"] = "ON"
         result = self.run_test(
             mode,
             "lulesh",
@@ -152,7 +150,6 @@ class TestLulesh(RocprofsysTest):
     def test_timemory(self, mode, timemory_env):
         env = timemory_env.copy()
         env["ROCPROFSYS_USE_KOKKOSP"] = "OFF"
-        env["ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK"] = "ON"
         result = self.run_test(
             mode,
             "lulesh",

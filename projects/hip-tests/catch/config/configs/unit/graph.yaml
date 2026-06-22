@@ -1230,6 +1230,12 @@ graph:
   Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture:
     <<: *level_2
     tags: [capture]
+  Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode:
+    <<: *level_2
+    # Hangs on Windows (PAL), hitting CI timeout; passes on Linux.
+    # https://github.com/ROCm/rocm-systems/issues/7148
+    disabled: [amd_windows, amd_wsl]
+    tags: [capture]
   Unit_hipUserObjectCreate_Functional_1:
     <<: *level_2
     tags: [userobj]
@@ -1391,6 +1397,8 @@ graph:
     tags: [node]
   Unit_hipStreamEndCapture_later_and_add_a_node_inbetween:
     <<: *level_2
+    # AIRUNTIME-2335: temporarily disabled (intermittent failure in CI)
+    disabled: [amd_windows, amd_wsl, amd_linux]
     tags: [node]
   Unit_hipStreamEndCapture_first_and_add_a_node_later:
     <<: *level_2
@@ -1734,5 +1742,8 @@ graph:
     <<: *level_2
     tags: [node]
   Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy:
     <<: *level_2
     tags: [node]

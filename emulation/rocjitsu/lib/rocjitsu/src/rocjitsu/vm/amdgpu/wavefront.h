@@ -190,13 +190,13 @@ public:
   /// @param val New EXEC mask value.
   void set_exec(uint64_t val) { exec_ = val & lane_mask(); }
 
-  /// @brief Return the vector condition code.
-  /// @returns VCC register value.
+  /// @brief Return the VCC scalar register pair.
+  /// @returns Raw VCC register value.
   uint64_t vcc() const { return vcc_; }
 
-  /// @brief Set the vector condition code.
+  /// @brief Set the VCC scalar register pair.
   /// @param val New VCC value.
-  void set_vcc(uint64_t val) { vcc_ = val & lane_mask(); }
+  void set_vcc(uint64_t val) { vcc_ = val; }
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.
@@ -205,6 +205,11 @@ public:
   /// @brief Set the M0 special register.
   /// @param val New M0 value.
   void set_m0(uint32_t val) { m0_ = val; }
+
+  static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
+  bool gpr_idx_en() const { return mode_raw_ & GPR_IDX_EN_BIT; }
+  uint32_t gpr_idx_offset() const { return m0_ & 0xFF; }
+  uint32_t gpr_idx_mode() const { return (m0_ >> 8) & 0xF; }
 
   /// @brief Return the per-wavefront scratch (private segment) base address.
   /// @returns Byte address in GPU memory where this wavefront's scratch starts.
@@ -237,6 +242,9 @@ public:
 
   /// @returns Const reference to the wait counters.
   const WaitCounters &wait_counters() const { return wait_counters_; }
+
+  /// @brief Retire one outstanding wait-counter operation and wake the wave if ready.
+  void release_wait_counter(WaitCounterType type);
 
   /// @brief Set the s_waitcnt target thresholds and stall if not yet satisfied.
   ///
@@ -513,6 +521,13 @@ private:
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
 };
+
+inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, bool is_dst) {
+  uint32_t mode = wf.gpr_idx_mode();
+  if ((!is_dst && (mode & 0x7)) || (is_dst && (mode & 0x8)))
+    return vgpr_off + wf.gpr_idx_offset();
+  return vgpr_off;
+}
 
 /// @brief ISA-parameterized concrete wavefront with ISA-specific status register.
 ///

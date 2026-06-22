@@ -566,6 +566,30 @@ class Graph {
   std::unordered_set<void*> memAllocNodePtrs_;
   static std::unordered_set<Graph*> graphSet_;
   static amd::Monitor graphSetLock_;
+
+  //! Records a graph allocation that has no matching free node yet. Shared by the
+  //! explicit and stream-capture paths so their bookkeeping cannot diverge.
+  static void TrackMemAllocPtr(Graph* graph, void* dptr) {
+    if (graph == nullptr || dptr == nullptr) return;
+    amd::ScopedLock lock(graphSetLock_);
+    graph->memAllocNodePtrs_.insert(dptr);
+  }
+
+  //! Finds and erases a tracked dptr across all graphs (an alloc may be freed in a
+  //! different graph). Returns false if it is not a live unmatched allocation; both
+  //! free paths reject that as hipErrorInvalidValue.
+  static bool UntrackMemAllocPtr(void* dptr) {
+    if (dptr == nullptr) return false;
+    amd::ScopedLock lock(graphSetLock_);
+    for (auto* g : graphSet_) {
+      auto it = g->memAllocNodePtrs_.find(dptr);
+      if (it != g->memAllocNodePtrs_.end()) {
+        g->memAllocNodePtrs_.erase(it);
+        return true;
+      }
+    }
+    return false;
+  }
   Graph(hip::Device* device, const Graph* original = nullptr)
       : pOriginalGraph_(original),
         id_(nextID.fetch_add(1, std::memory_order_relaxed)),
@@ -880,13 +904,11 @@ class Graph {
   //! returns device object
   hip::Device* Device() { return device_; }
   bool IsLeafNodeSyncRequired() const {
-    // Single-segment graphs run entirely on the launch stream — no sync needed.
-    if (segments_.size() <= 1) return false;
-    size_t leafCount = 0;
-    for (const auto& seg : segments_) {
-      if (seg.segment_ids_edges.empty() && ++leafCount > 1) return true;
-    }
-    return false;
+    // A single-segment graph runs entirely on the launch stream; no explicit sync needed.
+    // For all multi-segment graphs we always require leaf sync: a single leaf segment
+    // can still be on a different HW queue (e.g. child-graph segments dispatch on their
+    // own stream pool).  EnqueueSegmentedGraph skips same-stream leaves cheaply.
+    return segments_.size() > 1;
   }
 
  protected:
@@ -2867,6 +2889,16 @@ class GraphEmptyNode : public GraphNode {
   GraphEmptyNode& operator=(const GraphEmptyNode&) = delete;
 
   GraphNode* clone() const override { return new GraphEmptyNode(*this); }
+
+  // Empty nodes participate in AQL capture as zero-packet dependency points.
+  // The capture loop registers them as zero-packet nodeRanges so dependency
+  // tracking works without emitting any GPU commands.
+  bool GraphCaptureEnabled() override {
+    if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
+      return true;
+    }
+    return false;
+  }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);

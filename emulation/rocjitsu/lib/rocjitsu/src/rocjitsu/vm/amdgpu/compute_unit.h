@@ -8,6 +8,7 @@
 #define ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -29,6 +30,7 @@
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/simulation.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -370,6 +372,27 @@ public:
   /// @returns Mutable pointer to the raw VGPR data.
   virtual uint8_t *vgpr_data(uint32_t base) = 0;
 
+  /// @brief Number of physical VGPR registers in one allocation block.
+  virtual uint32_t vgpr_allocation_block_size() const = 0;
+
+  /// @brief Typed view of a single VGPR as the file's @c simdojo::VectorReg.
+  /// @details The abstract CU exposes the VGPR file only as a byte pointer
+  /// (@c vgpr_data), which erases the wavefront-size template parameter. The
+  /// file actually stores @c simdojo::VectorReg<N,uint32_t>, so this recovers
+  /// the typed register with the design's single localized @c reinterpret_cast.
+  /// The @c static_assert pins @c VectorReg<N> to @c N contiguous @c uint32_t
+  /// (no padding / vtable) so the byte view and the typed view coincide.
+  template <size_t N> simdojo::VectorReg<N, uint32_t> &vgpr_reg(uint32_t base) {
+    static_assert(sizeof(simdojo::VectorReg<N, uint32_t>) == N * sizeof(uint32_t),
+                  "VectorReg must be layout-compatible with raw lane storage");
+    return *reinterpret_cast<simdojo::VectorReg<N, uint32_t> *>(vgpr_data(base));
+  }
+  template <size_t N> const simdojo::VectorReg<N, uint32_t> &vgpr_reg(uint32_t base) const {
+    static_assert(sizeof(simdojo::VectorReg<N, uint32_t>) == N * sizeof(uint32_t),
+                  "VectorReg must be layout-compatible with raw lane storage");
+    return *reinterpret_cast<const simdojo::VectorReg<N, uint32_t> *>(vgpr_data(base));
+  }
+
   /// @brief Return the SGPR register file (for serialization).
   /// @returns Const reference to the SGPR register file.
   const simdojo::RegisterFile<uint32_t> &sgpr_file() const { return sgpr_file_; }
@@ -544,8 +567,16 @@ public:
   IsaExecComputeUnit(std::string name, const ComputeUnitCore::Config &config, GpuMemory *memory,
                      L2Cache *l2)
       : ExecComputeUnit<Mode>(std::move(name), config, memory, l2, Isa::WF_SIZE) {
-    vgpr_file_.init(config.num_wf_slots * config.vgprs_per_wf, config.vgprs_per_wf);
-    vgpr_to_wave_.resize(config.num_wf_slots * config.vgprs_per_wf, nullptr);
+    static_assert(!HasAccVgpr<Isa> || Isa::MAX_VGPRS_PER_WF == ACC_VGPR_OFFSET,
+                  "AccVGPR allocation base must match execution-side addressing");
+    // AccVGPR operands are addressed after the normal VGPR bank in the same
+    // physical file, so acc0 lives at base + ACC_VGPR_OFFSET.
+    constexpr uint32_t accvgpr_physical_base = ACC_VGPR_OFFSET;
+    constexpr uint32_t accvgpr_physical_limit =
+        Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : accvgpr_physical_base + Isa::MAX_ACC_VGPRS_PER_WF;
+    vgprs_per_block_ = std::max(config.vgprs_per_wf, accvgpr_physical_limit);
+    vgpr_file_.init(config.num_wf_slots * vgprs_per_block_, vgprs_per_block_);
+    vgpr_to_wave_.resize(config.num_wf_slots * vgprs_per_block_, nullptr);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
     this->sram_ecc_ = Isa::SRAM_ECC;
@@ -595,6 +626,10 @@ protected:
 
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
 
+public:
+  uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
+
+protected:
   /// @brief Execute one instruction on the given wavefront.
   ///
   /// @brief Execute one instruction on the given wavefront via direct dispatch.
@@ -603,6 +638,7 @@ protected:
 private:
   simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};
   std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
+  uint32_t vgprs_per_block_ = 0;
 };
 
 } // namespace amdgpu

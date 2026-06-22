@@ -81,7 +81,7 @@
   X(TeamCtxPut,                36)  \
   X(TeamCtxPutNBI,             37)  \
   X(TeamCtxInfra,              38)  \
-  X(PutNBIMR,                  39)  \
+  /* 39: PutNBIMR removed, use PutNBI with -b instead */ \
   X(AMO_Set,                   40)  \
   X(AMO_Swap,                  41)  \
   X(AMO_FetchAnd,              42)  \
@@ -160,7 +160,25 @@
   X(TileGetColumnMajor,        115)  \
   X(TileGetArbitrary,          116)  \
   X(ReduceOnStream,            117)  \
-  X(HostCtxCreate,             118) 
+  X(HostCtxCreate,             118)  \
+  X(TeamSplit2D,               119)  \
+  X(HostTeamSyncBarrier,       120)  \
+  X(HostPutmem,                121)  \
+  X(HostGetmem,                122)  \
+  X(HostAmoFAdd,               123)  \
+  X(HostAmoFCswap,             124)  \
+  X(HostCtxPutmem,             125)  \
+  X(HostCtxGetmem,             126)  \
+  X(HostIntAmoFAdd,            127)  \
+  X(HostIntAmoFCswap,          128)  \
+  X(HostAmoAllPes,             129)  \
+  X(HostAmoSelf,               130)  \
+  X(TileBroadcast,             131)  \
+  X(TileBroadcastWave,         132)  \
+  X(TileBroadcastWG,           133)  \
+  X(TileAllgather,             134)  \
+  X(TileAllgatherWave,         135)  \
+  X(TileAllgatherWG,           136)
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
   ROCSHMEM_FOREACH_TEST_TYPE(_ROCSHMEM_ENUM_ENTRY)
@@ -202,6 +220,7 @@ class Tester {
   size_t num_msgs = 0;
   size_t num_timed_msgs = 0;
   int num_loops = 0;
+  int batch_size = 0;
   int size_factor = 1;
   int bw_factor = 1;
   int rtt_factor = 1;

@@ -9,17 +9,24 @@
 /// All mutable state is consolidated in InterposerContext.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/plugin_sink.h"
+#include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 
 #include "util/dynamic_loader.h"
 #include "util/log.h"
 
+#include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <charconv>
 #include <csignal>
 #include <cstdarg>
 #include <cstdio>
@@ -30,20 +37,27 @@
 #include <linux/memfd.h>
 #include <mutex>
 #include <signal.h>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/sysmacros.h>
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
 
+extern "C" rocjitsu::ExecutionPlugin *createKernelLoggingPlugin();
+extern "C" rocjitsu::ExecutionPlugin *createRaceDetectorPlugin();
+
 using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedDriver;
+using rocjitsu::Sysfs;
 
 static int connect_to_daemon() {
   auto path = rocjitsu::rpc_default_socket_path();
@@ -96,6 +110,8 @@ public:
   int (*stat)(const char *, struct stat *) = nullptr;
   int (*lstat)(const char *, struct stat *) = nullptr;
   int (*access)(const char *, int) = nullptr;
+  int (*fstat_fn)(int, struct stat *) = nullptr;
+  ssize_t (*readlink_fn)(const char *, char *, size_t) = nullptr;
   pid_t (*fork)() = nullptr;
 
   bool ready() const { return initialized_; }
@@ -119,10 +135,12 @@ public:
     stat = util::lookup_symbol<decltype(stat)>(handle, "stat");
     lstat = util::lookup_symbol<decltype(lstat)>(handle, "lstat");
     access = util::lookup_symbol<decltype(access)>(handle, "access");
+    fstat_fn = util::lookup_symbol<decltype(fstat_fn)>(handle, "fstat");
+    readlink_fn = util::lookup_symbol<decltype(readlink_fn)>(handle, "readlink");
     fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
     assert(openat && close && ioctl && mmap && munmap && mprotect && madvise);
     assert(dup && dup2 && fcntl && fopen && freopen && opendir && fork);
-    assert(stat && lstat && access);
+    assert(stat && lstat && access && fstat_fn && readlink_fn);
     initialized_ = true;
   }
 
@@ -329,6 +347,46 @@ public:
         in_construction = false;
         return nullptr;
       }
+
+      // Set up execution plugins based on environment variables.
+      if (rj_vm_->soc) {
+        std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
+        if (std::getenv("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP"))
+          pg = std::make_shared<rocjitsu::ProfiledExecutionPluginGroup>();
+        else
+          pg = std::make_shared<rocjitsu::ExecutionPluginGroup>();
+
+        std::string sinks_str = "stderr";
+        if (const char *s = std::getenv("RJ_SINKS"))
+          sinks_str = s;
+        {
+          std::istringstream ss(sinks_str);
+          std::string token;
+          while (std::getline(ss, token, ',')) {
+            if (token == "stderr")
+              pg->add_sink(&rocjitsu::StderrSink::instance());
+            else if (token == "stdout")
+              pg->add_sink(&rocjitsu::StdoutSink::instance());
+            else if (token == "file") {
+              const char *dir = std::getenv("RJ_SINK_DIR");
+              if (dir)
+                pg->set_sink_dir(dir);
+            }
+          }
+        }
+
+        if (const char *rj_log = std::getenv("RJ_LOG"); rj_log && std::string(rj_log) == "1") {
+          pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createKernelLoggingPlugin()));
+          fprintf(stderr, "[rocjitsu] Logging enabled (RJ_LOG)\n");
+        }
+
+        if (const char *race = std::getenv("RJ_RACE"); race && std::string(race) == "1") {
+          pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createRaceDetectorPlugin()));
+          fprintf(stderr, "[rocjitsu] Race detection enabled (RJ_RACE)\n");
+        }
+        rj_vm_->soc->set_plugin_group(pg);
+      }
+
       std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
       in_construction = false;
     }
@@ -369,11 +427,221 @@ alignas(16) uint8_t InterposerContext::storage_[sizeof(InterposerContext)];
 InterposerContext &InterposerContext::ctx =
     *reinterpret_cast<InterposerContext *>(InterposerContext::storage_);
 
+static void *(*real_dlsym_fn)(void *, const char *) = nullptr;
+
+__attribute__((constructor(101))) static void resolve_real_dlsym() {
+  real_dlsym_fn =
+      reinterpret_cast<decltype(real_dlsym_fn)>(dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.34"));
+  if (!real_dlsym_fn)
+    real_dlsym_fn =
+        reinterpret_cast<decltype(real_dlsym_fn)>(dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.2.5"));
+  if (!real_dlsym_fn) {
+    fprintf(stderr, "rocjitsu: failed to resolve real dlsym\n");
+    abort();
+  }
+}
+
 __attribute__((constructor)) static void init_interposer() { InterposerContext::init(); }
+
+constexpr int DRM_NODE_PRIMARY = 0;
+constexpr int DRM_NODE_RENDER = 2;
+constexpr int DRM_BUS_PCI = 0;
+constexpr unsigned kDrmCommandBase = 0x40;
+constexpr unsigned kDrmAmdgpuInfo = 0x05;
+constexpr unsigned kAmdgpuInfoDevInfo = 0x16;
+
+// Local ABI mirrors for the libdrm calls we interpose. The source of truth is
+// the Linux UAPI DRM headers for drm_version, drm_amdgpu_info, and
+// drm_amdgpu_info_device, plus libdrm's amdgpu.h for amdgpu_device_handle and
+// amdgpu_gpu_info. Keep this target independent of libdrm headers; the layout
+// test covers the drm_amdgpu_info_device prefix where that dependency already
+// existed.
+struct RjAmdgpuDevice;
+using RjAmdgpuDeviceHandle = RjAmdgpuDevice *;
+
+struct RjDrmVersion {
+  int version_major;
+  int version_minor;
+  int version_patchlevel;
+  size_t name_len;
+  char *name;
+  size_t date_len;
+  char *date;
+  size_t desc_len;
+  char *desc;
+};
+
+struct RjDrmAmdgpuInfo {
+  uint64_t return_pointer;
+  uint32_t return_size;
+  uint32_t query;
+  uint64_t pad;
+};
+
+struct RjAmdgpuGpuInfo {
+  uint32_t asic_id;
+  uint32_t chip_rev;
+  uint32_t chip_external_rev;
+  uint32_t family_id;
+  uint64_t ids_flags;
+  uint64_t max_engine_clk;
+  uint64_t max_memory_clk;
+  uint32_t num_shader_engines;
+  uint32_t num_shader_arrays_per_engine;
+  uint32_t avail_quad_shader_pipes;
+  uint32_t max_quad_shader_pipes;
+  uint32_t cache_entries_per_quad_pipe;
+  uint32_t num_hw_gfx_contexts;
+  uint32_t rb_pipes;
+  uint32_t enabled_rb_pipes_mask;
+  uint32_t gpu_counter_freq;
+  uint32_t backend_disable[4];
+  uint32_t mc_arb_ramcfg;
+  uint32_t gb_addr_cfg;
+  uint32_t gb_tile_mode[32];
+  uint32_t gb_macro_tile_mode[16];
+  uint32_t pa_sc_raster_cfg[4];
+  uint32_t pa_sc_raster_cfg1[4];
+  uint32_t cu_active_number;
+  uint32_t cu_ao_mask;
+  uint32_t cu_bitmap[4][4];
+  uint32_t vram_type;
+  uint32_t vram_bit_width;
+  uint32_t ce_ram_size;
+  uint32_t vce_harvest_config;
+  uint32_t pci_rev_id;
+};
+
+struct RjDrmAmdgpuInfoDevice {
+  uint32_t device_id;
+  uint32_t chip_rev;
+  uint32_t external_rev;
+  uint32_t pci_rev;
+  uint32_t family;
+  uint32_t num_shader_engines;
+  uint32_t num_shader_arrays_per_engine;
+  uint32_t gpu_counter_freq;
+  uint64_t max_engine_clock;
+  uint64_t max_memory_clock;
+  uint32_t cu_active_number;
+  uint32_t cu_ao_mask;
+  uint32_t cu_bitmap[4][4];
+  uint32_t enabled_rb_pipes_mask;
+  uint32_t num_rb_pipes;
+  uint32_t num_hw_gfx_contexts;
+  uint32_t pcie_gen;
+  uint64_t ids_flags;
+  uint64_t virtual_address_offset;
+  uint64_t virtual_address_max;
+  uint32_t virtual_address_alignment;
+  uint32_t pte_fragment_size;
+  uint32_t gart_page_size;
+  uint32_t ce_ram_size;
+  uint32_t vram_type;
+  uint32_t vram_bit_width;
+  uint32_t vce_harvest_config;
+  uint32_t gc_double_offchip_lds_buf;
+  uint64_t prim_buf_gpu_addr;
+  uint64_t pos_buf_gpu_addr;
+  uint64_t cntl_sb_buf_gpu_addr;
+  uint64_t param_buf_gpu_addr;
+  uint32_t prim_buf_size;
+  uint32_t pos_buf_size;
+  uint32_t cntl_sb_buf_size;
+  uint32_t param_buf_size;
+  uint32_t wave_front_size;
+  uint32_t num_shader_visible_vgprs;
+  uint32_t num_cu_per_sh;
+  uint32_t num_tcc_blocks;
+  uint32_t gs_vgt_table_depth;
+  uint32_t gs_prim_buffer_depth;
+  uint32_t max_gs_waves_per_vgt;
+  uint32_t pcie_num_lanes;
+  uint32_t cu_ao_bitmap[4][4];
+  uint64_t high_va_offset;
+  uint64_t high_va_max;
+  uint32_t pa_sc_tile_steering_override;
+  uint64_t tcc_disabled_mask;
+};
+
+struct drmPciBusInfo {
+  uint16_t domain;
+  uint8_t bus;
+  uint8_t dev;
+  uint8_t func;
+};
+
+struct drmPciDeviceInfo {
+  uint16_t vendor_id;
+  uint16_t device_id;
+  uint16_t subvendor_id;
+  uint16_t subdevice_id;
+  uint8_t revision_id;
+};
+
+struct drmDevice {
+  char **nodes;
+  int available_nodes;
+  int bustype;
+  union {
+    drmPciBusInfo *pci;
+  } businfo;
+  union {
+    drmPciDeviceInfo *pci;
+  } deviceinfo;
+};
 
 } // namespace
 
 extern "C" {
+
+static std::string redirect_sysfs_path(const char *path);
+static std::string redirect_sys_dev_char(const char *path);
+static const Sysfs::GpuInfo *interposer_gpu_info();
+
+struct SyntheticDrmOpenResult {
+  bool handled = false;
+  int fd = -1;
+};
+
+static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
+  static constexpr std::string_view kRenderPrefix = "/dev/dri/renderD";
+  if (!path || !std::string_view(path).starts_with(kRenderPrefix))
+    return {};
+
+  if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
+      !InterposerContext::ctx.initialized())
+    InterposerContext::ctx.get_or_create();
+
+  if (InterposerContext::ctx.driver_fd() < 0 && InterposerContext::ctx.remote_kfd_fd() < 0)
+    return {};
+
+  uint32_t render_minor = 128;
+  auto minor_str = std::string_view(path).substr(kRenderPrefix.size());
+  if (!minor_str.empty()) {
+    uint32_t parsed_minor = 0;
+    auto *first = minor_str.data();
+    auto *last = first + minor_str.size();
+    if (auto result = std::from_chars(first, last, parsed_minor);
+        result.ec == std::errc{} && result.ptr == last)
+      render_minor = parsed_minor;
+  }
+
+  auto raw_drm_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", MFD_CLOEXEC));
+  if (raw_drm_fd < 0)
+    return {true, -1};
+
+  int high_fd = fcntl(raw_drm_fd, F_DUPFD_CLOEXEC, 512);
+  int saved_errno = errno;
+  InterposerContext::real.close(raw_drm_fd);
+  if (high_fd < 0) {
+    errno = saved_errno;
+    return {true, -1};
+  }
+
+  InterposerContext::ctx.track_drm(high_fd, render_minor);
+  return {true, high_fd};
+}
 
 int open(const char *path, int flags, ...) {
   mode_t mode = 0;
@@ -389,29 +657,8 @@ int open(const char *path, int flags, ...) {
   if (!p || InterposerContext::in_construction)
     return static_cast<int>(syscall(SYS_openat, AT_FDCWD, path, flags, mode));
 
-  if (std::string_view(path).starts_with("/dev/dri/renderD")) {
-    if (!InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) &&
-        !InterposerContext::ctx.initialized())
-      InterposerContext::ctx.get_or_create();
-  }
-  if (std::string_view(path).starts_with("/dev/dri/renderD") &&
-      (InterposerContext::ctx.driver_fd() >= 0 || InterposerContext::ctx.remote_kfd_fd() >= 0)) {
-    uint32_t render_minor = 128;
-    auto minor_str = std::string_view(path).substr(16);
-    if (!minor_str.empty())
-      render_minor = static_cast<uint32_t>(std::atoi(minor_str.data()));
-    auto raw_drm_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", MFD_CLOEXEC));
-    if (raw_drm_fd >= 0) {
-      int high_fd = fcntl(raw_drm_fd, F_DUPFD_CLOEXEC, 512);
-      InterposerContext::real.close(raw_drm_fd);
-      if (high_fd >= 0) {
-        InterposerContext::ctx.track_drm(high_fd, render_minor);
-        return high_fd;
-      }
-    }
-    errno = EMFILE;
-    return -1;
-  }
+  if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
+    return drm_fd.fd;
 
   if (std::strcmp(path, "/dev/kfd") == 0) {
     if (InterposerContext::ctx.get_or_create_remote())
@@ -453,6 +700,8 @@ int open(const char *path, int flags, ...) {
   }
   if (redirected.empty())
     redirected = InterposerContext::ctx.redirect(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
   if (!redirected.empty()) {
     int fd = InterposerContext::real.openat(AT_FDCWD, redirected.c_str(), flags, mode);
     if (fd >= 0)
@@ -494,8 +743,13 @@ int openat(int dirfd, const char *path, int flags, ...) {
   auto *volatile p_at = path;
   if (!p_at)
     return InterposerContext::real.openat(dirfd, path, flags, mode);
+  if (InterposerContext::in_construction)
+    return InterposerContext::real.openat(dirfd, path, flags, mode);
 
   if (path[0] == '/') {
+    if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
+      return drm_fd.fd;
+
     if (std::string_view(path).starts_with("/sys/class/drm") ||
         std::string_view(path).starts_with("/sys/devices/virtual/kfd") ||
         std::string_view(path).starts_with("/sys/class/kfd")) {
@@ -522,6 +776,8 @@ int openat(int dirfd, const char *path, int flags, ...) {
     }
     if (redirected.empty())
       redirected = InterposerContext::ctx.redirect(path);
+    if (redirected.empty())
+      redirected = redirect_sys_dev_char(path);
     if (!redirected.empty()) {
       int fd = InterposerContext::real.openat(AT_FDCWD, redirected.c_str(), flags, mode);
       if (fd >= 0)
@@ -583,21 +839,15 @@ int ioctl(int fd, unsigned long request, ...) {
   void *arg = va_arg(ap, void *);
   va_end(ap);
 
-  constexpr unsigned long kDrmIoctlVersion = 0xc0406400;
-  constexpr unsigned long kDrmIoctlAmdgpuInfo = 0x40186445;
+  constexpr unsigned kDrmIoctlType = 'd';
+  constexpr unsigned kDrmIoctlNrVersion = 0x00;
+  constexpr unsigned kDrmIoctlNrAmdgpuInfo = kDrmCommandBase + kDrmAmdgpuInfo;
 
   if (InterposerContext::ctx.is_drm(fd)) {
-    if (request == kDrmIoctlVersion && arg) {
-      struct drm_version {
-        int version_major, version_minor, version_patchlevel;
-        size_t name_len;
-        char *name;
-        size_t date_len;
-        char *date;
-        size_t desc_len;
-        char *desc;
-      };
-      auto *ver = static_cast<drm_version *>(arg);
+    unsigned nr = _IOC_NR(request);
+    unsigned type = _IOC_TYPE(request);
+    if (type == kDrmIoctlType && nr == kDrmIoctlNrVersion && arg) {
+      auto *ver = static_cast<RjDrmVersion *>(arg);
       ver->version_major = 3;
       ver->version_minor = 57;
       ver->version_patchlevel = 0;
@@ -613,16 +863,44 @@ int ioctl(int fd, unsigned long request, ...) {
       ver->desc_len = 1;
       return 0;
     }
-    if (request == kDrmIoctlAmdgpuInfo && arg) {
-      struct drm_amdgpu_info {
-        uint64_t return_pointer;
-        uint32_t return_size;
-        uint32_t query;
-        uint64_t pad;
-      };
-      auto *info = static_cast<drm_amdgpu_info *>(arg);
-      if (info->return_pointer && info->return_size > 0)
-        std::memset(reinterpret_cast<void *>(info->return_pointer), 0, info->return_size);
+    if (type == kDrmIoctlType && nr == kDrmIoctlNrAmdgpuInfo && arg) {
+      auto *info = static_cast<RjDrmAmdgpuInfo *>(arg);
+      if (info->query == kAmdgpuInfoDevInfo && !interposer_gpu_info()) {
+        errno = ENODEV;
+        return -1;
+      }
+      if (info->return_pointer && info->return_size > 0) {
+        auto *out = reinterpret_cast<void *>(info->return_pointer);
+        std::memset(out, 0, info->return_size);
+        if (info->query == kAmdgpuInfoDevInfo) {
+          if (info->return_size >= sizeof(RjDrmAmdgpuInfoDevice)) {
+            auto *dev = static_cast<RjDrmAmdgpuInfoDevice *>(out);
+            auto *gpu = interposer_gpu_info();
+            if (gpu) {
+              dev->device_id = gpu->device_id;
+              dev->chip_rev = gpu->revision_id;
+              dev->external_rev = rocjitsu::kmd::external_rev_id_for_gfx_target_version(
+                  gpu->gfx_target_version, gpu->revision_id);
+              dev->pci_rev = gpu->pci_revision_id;
+              dev->family = gpu->family_id;
+              dev->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
+                  gpu->num_shader_engines, gpu->num_shader_arrays_per_engine);
+              dev->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
+              dev->gpu_counter_freq = 100000;
+              dev->max_engine_clock = gpu->max_engine_clk_fcompute;
+              dev->max_memory_clock = gpu->mem_clk_max;
+              dev->wave_front_size = gpu->wave_front_size;
+              dev->num_cu_per_sh = gpu->num_cu_per_sh;
+              dev->num_hw_gfx_contexts = rocjitsu::kmd::num_hw_gfx_contexts_for_gfx_target_version(
+                  gpu->gfx_target_version);
+              dev->vram_type = gpu->vram_type;
+              dev->vram_bit_width = gpu->mem_width;
+              dev->cu_active_number =
+                  rocjitsu::kmd::drm_cu_active_number(gpu->num_shader_engines, gpu->num_cu_per_sh);
+            }
+          }
+        }
+      }
       return 0;
     }
     errno = EINVAL;
@@ -853,26 +1131,74 @@ int munmap(void *addr, size_t length) {
 // -- libdrm interposition --
 
 int amdgpu_device_initialize(int /*fd*/, uint32_t *major_version, uint32_t *minor_version,
-                             void **device_handle) {
+                             RjAmdgpuDeviceHandle *device_handle) {
   if (InterposerContext::ctx.driver_fd() < 0 && InterposerContext::ctx.remote_kfd_fd() < 0)
     return -1;
   *major_version = 3;
   *minor_version = 57;
   static int dummy_handle = 1;
-  *device_handle = &dummy_handle;
+  *device_handle = reinterpret_cast<RjAmdgpuDeviceHandle>(&dummy_handle);
   return 0;
 }
 
 int amdgpu_device_initialize2(int fd, bool /*deduplicate_device*/, uint32_t *major_version,
-                              uint32_t *minor_version, void **device_handle) {
+                              uint32_t *minor_version, RjAmdgpuDeviceHandle *device_handle) {
   return amdgpu_device_initialize(fd, major_version, minor_version, device_handle);
 }
 
-int amdgpu_device_deinitialize(void * /*device_handle*/) { return 0; }
+int amdgpu_device_deinitialize(RjAmdgpuDeviceHandle /*device_handle*/) { return 0; }
 
-int amdgpu_device_get_fd(void * /*device_handle*/) {
+int amdgpu_device_get_fd(RjAmdgpuDeviceHandle /*device_handle*/) {
   int fd = InterposerContext::ctx.remote_kfd_fd();
   return fd >= 0 ? fd : InterposerContext::ctx.driver_fd();
+}
+
+const char *amdgpu_get_marketing_name(RjAmdgpuDeviceHandle /*device_handle*/) {
+  auto *gpu = interposer_gpu_info();
+  if (!gpu)
+    return nullptr;
+
+  static thread_local std::string name;
+  if (!gpu->marketing_name.empty()) {
+    name = gpu->marketing_name;
+  } else {
+    name = rocjitsu::kmd::gfx_target_name(gpu->gfx_target_version);
+  }
+  return name.c_str();
+}
+
+int amdgpu_query_gpu_info(RjAmdgpuDeviceHandle /*device_handle*/, RjAmdgpuGpuInfo *info) {
+  if (!info)
+    return -EINVAL;
+
+  auto *gpu = interposer_gpu_info();
+  if (!gpu)
+    return -ENODEV;
+
+  std::memset(info, 0, sizeof(*info));
+  info->asic_id = gpu->device_id;
+  info->chip_rev = gpu->revision_id;
+  info->chip_external_rev = rocjitsu::kmd::external_rev_id_for_gfx_target_version(
+      gpu->gfx_target_version, gpu->revision_id);
+  info->family_id = gpu->family_id;
+  info->max_engine_clk = gpu->max_engine_clk_fcompute;
+  info->max_memory_clk = gpu->mem_clk_max;
+  info->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
+      gpu->num_shader_engines, gpu->num_shader_arrays_per_engine);
+  info->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
+  info->avail_quad_shader_pipes =
+      rocjitsu::kmd::drm_quad_shader_pipe_count(gpu->num_shader_engines);
+  info->max_quad_shader_pipes = info->avail_quad_shader_pipes;
+  info->num_hw_gfx_contexts =
+      rocjitsu::kmd::num_hw_gfx_contexts_for_gfx_target_version(gpu->gfx_target_version);
+  info->gpu_counter_freq = 100000;
+  info->gb_addr_cfg = rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
+  info->cu_active_number =
+      rocjitsu::kmd::drm_cu_active_number(gpu->num_shader_engines, gpu->num_cu_per_sh);
+  info->vram_type = gpu->vram_type;
+  info->vram_bit_width = gpu->mem_width;
+  info->pci_rev_id = gpu->pci_revision_id;
+  return 0;
 }
 
 // -- fopen / freopen interposition (sysfs redirect) --
@@ -913,6 +1239,8 @@ FILE *fopen(const char *path, const char *mode) {
     }
     if (redirected.empty())
       redirected = InterposerContext::ctx.redirect(path);
+    if (redirected.empty())
+      redirected = redirect_sys_dev_char(path);
     if (!redirected.empty())
       actual = redirected.c_str();
   }
@@ -972,12 +1300,85 @@ static std::string redirect_sysfs_path(const char *path) {
   return fallback;
 }
 
+static std::string redirect_sys_dev_char(const char *path) {
+  if (!path || !InterposerContext::real.ready() || InterposerContext::in_construction)
+    return {};
+  std::string_view sv(path);
+  constexpr std::string_view prefix = "/sys/dev/char/";
+  if (!sv.starts_with(prefix))
+    return {};
+
+  auto rest = sv.substr(prefix.size());
+  auto colon = rest.find(':');
+  if (colon == std::string_view::npos)
+    return {};
+
+  uint32_t major_num = 0, minor_num = 0;
+  if (std::from_chars(rest.data(), rest.data() + colon, major_num).ec != std::errc{} ||
+      major_num != 226)
+    return {};
+
+  auto after_colon = rest.substr(colon + 1);
+  auto slash_pos = after_colon.find('/');
+  auto minor_end = (slash_pos != std::string_view::npos) ? after_colon.data() + slash_pos
+                                                         : after_colon.data() + after_colon.size();
+  if (std::from_chars(after_colon.data(), minor_end, minor_num).ec != std::errc{})
+    return {};
+
+  std::string drm_base;
+  auto *drv = InterposerContext::ctx.driver();
+  if (drv)
+    drm_base = drv->topology().drm_path();
+  else
+    drm_base = InterposerContext::ctx.remote_drm_path();
+  if (drm_base.empty())
+    return {};
+
+  std::string entry = (minor_num >= 128) ? "renderD" + std::to_string(minor_num)
+                                         : "card" + std::to_string(minor_num);
+  std::string suffix;
+  if (slash_pos != std::string_view::npos)
+    suffix = std::string(after_colon.substr(slash_pos));
+
+  return drm_base + "/" + entry + suffix;
+}
+
+static const Sysfs::GpuInfo *interposer_gpu_info() {
+  auto *drv = InterposerContext::ctx.driver();
+  if (drv)
+    return &drv->topology().gpu_info();
+  if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
+    return remote->gpu_info();
+  return nullptr;
+}
+
+static std::string redirect_dev_dri(const char *path) {
+  if (!path || !InterposerContext::real.ready() || InterposerContext::in_construction)
+    return {};
+  std::string_view sv(path);
+  if (sv != "/dev/dri" && sv != "/dev/dri/")
+    return {};
+  std::string drm_base;
+  auto *drv = InterposerContext::ctx.driver();
+  if (drv)
+    drm_base = drv->topology().drm_path();
+  else
+    drm_base = InterposerContext::ctx.remote_drm_path();
+  if (drm_base.empty())
+    return {};
+  return drm_base + "/dev_dri";
+}
+
 int stat(const char *path, struct stat *buf) {
   if (!InterposerContext::real.ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "stat");
     return fn ? fn(path, buf) : -1;
   }
   auto redirected = redirect_sysfs_path(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   if (!redirected.empty())
     return InterposerContext::real.stat(redirected.c_str(), buf);
   return InterposerContext::real.stat(path, buf);
@@ -989,6 +1390,10 @@ int lstat(const char *path, struct stat *buf) {
     return fn ? fn(path, buf) : -1;
   }
   auto redirected = redirect_sysfs_path(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   if (!redirected.empty())
     return InterposerContext::real.lstat(redirected.c_str(), buf);
   return InterposerContext::real.lstat(path, buf);
@@ -1000,6 +1405,10 @@ int access(const char *path, int mode) {
     return fn ? fn(path, mode) : -1;
   }
   auto redirected = redirect_sysfs_path(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
   if (!redirected.empty())
     return InterposerContext::real.access(redirected.c_str(), mode);
   return InterposerContext::real.access(path, mode);
@@ -1044,10 +1453,311 @@ DIR *opendir(const char *name) {
     }
     if (redirected.empty())
       redirected = InterposerContext::ctx.redirect(name);
+    if (redirected.empty())
+      redirected = redirect_sys_dev_char(name);
+    if (redirected.empty())
+      redirected = redirect_dev_dri(name);
     if (!redirected.empty())
       return InterposerContext::real.opendir(redirected.c_str());
   }
   return InterposerContext::real.opendir(name);
+}
+
+// -- fstat interposition (DRM memfd → synthetic st_rdev) --
+
+int fstat(int fd, struct stat *buf) {
+  if (!InterposerContext::real.ready()) {
+    auto fn = util::lookup_symbol<int (*)(int, struct stat *)>(RTLD_NEXT, "fstat");
+    return fn ? fn(fd, buf) : -1;
+  }
+  int rc = InterposerContext::real.fstat_fn(fd, buf);
+  if (rc == 0 && InterposerContext::ctx.is_drm(fd)) {
+    uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
+    buf->st_rdev = makedev(226, render_minor);
+    buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
+  }
+  return rc;
+}
+
+int fstat64(int fd, struct stat64 *buf) {
+  using fstat64_fn_t = int (*)(int, struct stat64 *);
+  static fstat64_fn_t real_fstat64 = util::lookup_symbol<fstat64_fn_t>(RTLD_NEXT, "fstat64");
+  if (!real_fstat64)
+    return -1;
+  int rc = real_fstat64(fd, buf);
+  if (rc == 0 && InterposerContext::real.ready() && InterposerContext::ctx.is_drm(fd)) {
+    uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
+    buf->st_rdev = makedev(226, render_minor);
+    buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
+  }
+  return rc;
+}
+
+int __fxstat(int ver, int fd, struct stat *buf) {
+  using fxstat_fn_t = int (*)(int, int, struct stat *);
+  static fxstat_fn_t real_fxstat = util::lookup_symbol<fxstat_fn_t>(RTLD_NEXT, "__fxstat");
+  if (!real_fxstat)
+    return -1;
+  int rc = real_fxstat(ver, fd, buf);
+  if (rc == 0 && InterposerContext::real.ready() && InterposerContext::ctx.is_drm(fd)) {
+    uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
+    buf->st_rdev = makedev(226, render_minor);
+    buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
+  }
+  return rc;
+}
+
+int __fxstat64(int ver, int fd, struct stat64 *buf) {
+  using fxstat64_fn_t = int (*)(int, int, struct stat64 *);
+  static fxstat64_fn_t real_fxstat64 = util::lookup_symbol<fxstat64_fn_t>(RTLD_NEXT, "__fxstat64");
+  if (!real_fxstat64)
+    return -1;
+  int rc = real_fxstat64(ver, fd, buf);
+  if (rc == 0 && InterposerContext::real.ready() && InterposerContext::ctx.is_drm(fd)) {
+    uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
+    buf->st_rdev = makedev(226, render_minor);
+    buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
+  }
+  return rc;
+}
+
+// -- readlink interposition (redirect /sys/dev/char/) --
+
+ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
+  if (!InterposerContext::real.ready()) {
+    auto fn = util::lookup_symbol<ssize_t (*)(const char *, char *, size_t)>(RTLD_NEXT, "readlink");
+    return fn ? fn(path, buf, bufsiz) : -1;
+  }
+  auto redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_sysfs_path(path);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  return InterposerContext::real.readlink_fn(actual, buf, bufsiz);
+}
+
+// -- stat64/lstat64 interposition (distinct from stat on glibc 2.33+) --
+
+int stat64(const char *path, struct stat64 *buf) {
+  using stat64_fn_t = int (*)(const char *, struct stat64 *);
+  static stat64_fn_t real_stat64 = util::lookup_symbol<stat64_fn_t>(RTLD_NEXT, "stat64");
+  if (!real_stat64)
+    return -1;
+  auto redirected = redirect_sysfs_path(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  return real_stat64(actual, buf);
+}
+
+int lstat64(const char *path, struct stat64 *buf) {
+  using lstat64_fn_t = int (*)(const char *, struct stat64 *);
+  static lstat64_fn_t real_lstat64 = util::lookup_symbol<lstat64_fn_t>(RTLD_NEXT, "lstat64");
+  if (!real_lstat64)
+    return -1;
+  auto redirected = redirect_sysfs_path(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  return real_lstat64(actual, buf);
+}
+
+int __xstat(int ver, const char *path, struct stat *buf) {
+  using xstat_fn_t = int (*)(int, const char *, struct stat *);
+  static xstat_fn_t real_xstat = util::lookup_symbol<xstat_fn_t>(RTLD_NEXT, "__xstat");
+  if (!real_xstat)
+    return -1;
+  auto redirected = redirect_sysfs_path(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  return real_xstat(ver, actual, buf);
+}
+
+int __xstat64(int ver, const char *path, struct stat64 *buf) {
+  using xstat64_fn_t = int (*)(int, const char *, struct stat64 *);
+  static xstat64_fn_t real_xstat64 = util::lookup_symbol<xstat64_fn_t>(RTLD_NEXT, "__xstat64");
+  if (!real_xstat64)
+    return -1;
+  auto redirected = redirect_sysfs_path(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  return real_xstat64(ver, actual, buf);
+}
+
+int __lxstat(int ver, const char *path, struct stat *buf) {
+  using lxstat_fn_t = int (*)(int, const char *, struct stat *);
+  static lxstat_fn_t real_lxstat = util::lookup_symbol<lxstat_fn_t>(RTLD_NEXT, "__lxstat");
+  if (!real_lxstat)
+    return -1;
+  auto redirected = redirect_sysfs_path(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  return real_lxstat(ver, actual, buf);
+}
+
+int __lxstat64(int ver, const char *path, struct stat64 *buf) {
+  using lxstat64_fn_t = int (*)(int, const char *, struct stat64 *);
+  static lxstat64_fn_t real_lxstat64 = util::lookup_symbol<lxstat64_fn_t>(RTLD_NEXT, "__lxstat64");
+  if (!real_lxstat64)
+    return -1;
+  auto redirected = redirect_sysfs_path(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  return real_lxstat64(ver, actual, buf);
+}
+
+// -- DRM device enumeration (direct PLT linkage consumers) --
+
+static std::unordered_set<void *> our_drm_allocs;
+static std::mutex drm_alloc_mutex;
+
+static drmDevice *alloc_drm_device(const Sysfs::GpuInfo &gpu, uint32_t card_idx) {
+  uint32_t render_minor = gpu.drm_render_minor;
+  char primary_path[64], render_path[64];
+  snprintf(primary_path, sizeof(primary_path), "/dev/dri/card%u", card_idx);
+  snprintf(render_path, sizeof(render_path), "/dev/dri/renderD%u", render_minor);
+
+  size_t primary_len = strlen(primary_path) + 1;
+  size_t render_len = strlen(render_path) + 1;
+  constexpr int kMaxNodeTypes = 3;
+
+  size_t alloc_size = sizeof(drmDevice) + kMaxNodeTypes * sizeof(char *) + primary_len +
+                      render_len + sizeof(drmPciBusInfo) + sizeof(drmPciDeviceInfo);
+  auto *mem = static_cast<uint8_t *>(calloc(1, alloc_size));
+  if (!mem)
+    return nullptr;
+
+  auto *dev = reinterpret_cast<drmDevice *>(mem);
+  auto *nodes = reinterpret_cast<char **>(mem + sizeof(drmDevice));
+  auto *str_buf = reinterpret_cast<char *>(nodes + kMaxNodeTypes);
+  auto *bus = reinterpret_cast<drmPciBusInfo *>(str_buf + primary_len + render_len);
+  auto *pci_dev = reinterpret_cast<drmPciDeviceInfo *>(bus + 1);
+
+  memcpy(str_buf, primary_path, primary_len);
+  memcpy(str_buf + primary_len, render_path, render_len);
+
+  nodes[DRM_NODE_PRIMARY] = str_buf;
+  nodes[DRM_NODE_RENDER] = str_buf + primary_len;
+  nodes[1] = nullptr;
+
+  uint32_t bus_num = (gpu.location_id >> 8) & 0xFF;
+  uint32_t dev_num = (gpu.location_id >> 3) & 0x1F;
+  uint32_t func_num = gpu.location_id & 0x7;
+
+  bus->domain = static_cast<uint16_t>(gpu.domain);
+  bus->bus = static_cast<uint8_t>(bus_num);
+  bus->dev = static_cast<uint8_t>(dev_num);
+  bus->func = static_cast<uint8_t>(func_num);
+
+  pci_dev->vendor_id = static_cast<uint16_t>(gpu.vendor_id);
+  pci_dev->device_id = static_cast<uint16_t>(gpu.device_id);
+  pci_dev->subvendor_id = static_cast<uint16_t>(gpu.vendor_id);
+  pci_dev->subdevice_id = static_cast<uint16_t>(gpu.device_id);
+  pci_dev->revision_id = static_cast<uint8_t>(gpu.pci_revision_id);
+
+  dev->nodes = nodes;
+  dev->available_nodes = (1 << DRM_NODE_PRIMARY) | (1 << DRM_NODE_RENDER);
+  dev->bustype = DRM_BUS_PCI;
+  dev->businfo.pci = bus;
+  dev->deviceinfo.pci = pci_dev;
+
+  {
+    std::lock_guard lock(drm_alloc_mutex);
+    our_drm_allocs.insert(mem);
+  }
+
+  return dev;
+}
+
+void drmFreeDevice(drmDevice **device) {
+  if (!device || !*device)
+    return;
+  bool ours;
+  {
+    std::lock_guard lock(drm_alloc_mutex);
+    ours = our_drm_allocs.erase(*device) != 0;
+  }
+  if (ours) {
+    free(*device);
+    *device = nullptr;
+    return;
+  }
+  using fn_t = void (*)(drmDevice **);
+  static fn_t real_fn = util::lookup_symbol<fn_t>(RTLD_NEXT, "drmFreeDevice");
+  if (real_fn)
+    real_fn(device);
+}
+
+void drmFreeDevices(drmDevice **devices, int count) {
+  for (int i = 0; i < count; ++i) {
+    if (devices[i])
+      drmFreeDevice(&devices[i]);
+  }
+}
+
+int drmGetDevice(int fd, drmDevice **device) {
+  if (!device)
+    return -EINVAL;
+  *device = nullptr;
+  if (!InterposerContext::real.ready() || !InterposerContext::ctx.is_drm(fd))
+    return -ENODEV;
+  auto *gpu = interposer_gpu_info();
+  if (!gpu)
+    return -ENODEV;
+  *device = alloc_drm_device(*gpu, 0);
+  return *device ? 0 : -ENOMEM;
+}
+
+int drmGetDevice2(int fd, uint32_t /*flags*/, drmDevice **device) {
+  return drmGetDevice(fd, device);
+}
+
+int drmGetDevices(drmDevice **devices, int max_devices) {
+  if (!devices || max_devices <= 0)
+    return 0;
+  auto *gpu = interposer_gpu_info();
+  if (!gpu)
+    return 0;
+  devices[0] = alloc_drm_device(*gpu, 0);
+  return devices[0] ? 1 : 0;
+}
+
+int drmGetDevices2(uint32_t /*flags*/, drmDevice **devices, int max_devices) {
+  return drmGetDevices(devices, max_devices);
+}
+
+// Intercept dlsym so that dlsym-based consumers (amdsmi) get our DRM
+// device query implementations instead of libdrm's.  Without this,
+// libdrm's internal drmGetDeviceFromDevId runs on our synthetic memfds
+// and produces a corrupted drmDevice that crashes in drmFreeDevice.
+// drmFreeDevice/drmFreeDevices are intentionally excluded: our own
+// drmFreeDevice fallback calls dlsym(RTLD_NEXT, "drmFreeDevice") and
+// including it here would cause infinite recursion.
+void *dlsym(void *handle, const char *symbol) {
+  auto symbol_addr = reinterpret_cast<uintptr_t>(symbol);
+  if (symbol_addr != 0 && InterposerContext::real.ready()) {
+    static const std::unordered_map<std::string_view, void *> overrides = {
+        {"drmGetDevice", reinterpret_cast<void *>(&drmGetDevice)},
+        {"drmGetDevice2", reinterpret_cast<void *>(&drmGetDevice2)},
+        {"drmGetDevices", reinterpret_cast<void *>(&drmGetDevices)},
+        {"drmGetDevices2", reinterpret_cast<void *>(&drmGetDevices2)},
+        {"amdgpu_get_marketing_name", reinterpret_cast<void *>(&amdgpu_get_marketing_name)},
+        {"amdgpu_query_gpu_info", reinterpret_cast<void *>(&amdgpu_query_gpu_info)},
+    };
+    auto it = overrides.find(symbol);
+    if (it != overrides.end())
+      return it->second;
+  }
+  if (real_dlsym_fn)
+    return real_dlsym_fn(handle, symbol);
+  // Called before resolve_real_dlsym constructor runs (e.g., during
+  // dynamic linker symbol resolution at library load time).  Resolve
+  // the real dlsym now and forward.
+  resolve_real_dlsym();
+  return real_dlsym_fn(handle, symbol);
 }
 
 pid_t fork() {
