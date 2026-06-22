@@ -16,8 +16,14 @@ both loaded via `LD_PRELOAD` into the target application
    `rocpd_pmc_event` table (`src/utils/rocpd_data.py`, `src/utils/utils_profile.py`).
 
 This replaces the CSV round-trip: the native tool writes its own rocpd directly via
-profiler-hub, and the Python layer merges it into the SDK rocpd with a single set-based
-SQL statement instead of bespoke CSV parsing.
+profiler-hub, and the merge into the SDK rocpd moves to analyze mode as a single set-based
+SQL statement instead of bespoke CSV parsing in profile mode. Each tool keeps its own
+rocpd; they are never co-mingled into one schema.
+
+This builds on separate, in-flight work that consolidates each tool's per-PID rocpds into a
+single rocpd per tool; that work must land first. This design takes the two consolidated
+rocpds (one per tool, per application-replay pass) as input and does not change how they
+are produced.
 
 Scope is counters only. ISA / code-object collection stays as the existing JSON output:
 it backs PC sampling, which rocpd has no schema or profiler-hub writer support for yet, so
@@ -31,13 +37,13 @@ flowchart TD
     App --> SDK["rocprofiler-sdk 'SDK tool'<br/>ROCPROF_COUNTER_COLLECTION=0"]
     App --> NAT["rocprofiler-compute 'native tool'<br/>(HW counters)"]
 
-    SDK -->|writes rocpd| SDKDB[("SDK rocpd (per PID)<br/>kernel_dispatch (dispatch_id, event_id)<br/>info_pmc<br/>pmc_event [EMPTY]")]
-    NAT -->|writes rocpd via profiler-hub| NATDB[("native rocpd (per PID)<br/>info_pmc (symbol, arch)<br/>event (correlation_id = dispatch_id)<br/>pmc_event (value)")]
+    SDK -->|writes rocpd| SDKDB[("consolidated SDK rocpd (per pass)<br/>kernel_dispatch (pid, dispatch_id, event_id)<br/>info_pmc<br/>pmc_event [EMPTY]")]
+    NAT -->|writes rocpd via profiler-hub| NATDB[("consolidated native rocpd (per pass)<br/>info_pmc (symbol, target_arch)<br/>event (pid, correlation_id = dispatch_id)<br/>pmc_event (value)")]
 
-    SDKDB --> MERGE["Python merge per PID<br/>ATTACH + INSERT...SELECT<br/>dispatch_id -> SDK event_id<br/>symbol + arch -> SDK pmc_id"]
+    SDKDB --> MERGE["analyze merge (per pass)<br/>ATTACH + INSERT...SELECT<br/>(pid, dispatch_id) -> SDK event_id<br/>symbol + target_arch -> SDK pmc_id"]
     NATDB --> MERGE
 
-    MERGE --> OUT[("SDK rocpd: pmc_event populated<br/>-> analysis counters view")]
+    MERGE --> OUT[("SDK pmc_event populated<br/>-> counters_collection view -> pmc_perf.csv")]
 ```
 
 ## profiler-hub intro
@@ -76,11 +82,11 @@ The native `register_pmc_info` must write the same `target_arch` the SDK tool us
 merge join matches. In the verified rocflop rocpd that value is the literal string `GPU`
 for hardware counters, not a gfx arch, so the native writer sets `target_arch = "GPU"`.
 
-## Python layer changes
+## Analyze layer changes
 
-Replace the CSV read + row-by-row insert in `update_rocpd_pmc_events`
-(`src/utils/rocpd_data.py`) with a set-based merge that runs entirely inside SQLite. For
-each PID, given the SDK db and the matching native db:
+Replace the profile-mode CSV read + row-by-row insert (`update_rocpd_pmc_events` in
+`src/utils/rocpd_data.py`) with a set-based merge that runs in analyze mode. For each
+application-replay pass, given the consolidated SDK and native rocpds:
 
 ```sql
 ATTACH DATABASE :native_db AS native;
@@ -96,6 +102,7 @@ JOIN native.rocpd_event      AS n_ev
      ON n_ev.id = n_pmc.event_id
 JOIN rocpd_kernel_dispatch   AS sdk_kd
      ON sdk_kd.dispatch_id = n_ev.correlation_id     -- dispatch_id carrier
+     AND sdk_kd.pid = n_ev.pid                        -- pid scopes the dispatch
 JOIN native.rocpd_info_pmc   AS n_info
      ON n_info.id = n_pmc.pmc_id
 JOIN rocpd_info_pmc          AS sdk_pmc
@@ -116,25 +123,20 @@ not used for the merge: its `connect()` unions same-base tables across all input
 would merge the two `rocpd_info_pmc` tables and destroy that cross-tool identity.
 
 These base-name views are plain `SELECT *` views with no INSERT triggers, so they are not
-writable. The INSERT target therefore stays the physical SDK `rocpd_pmc_event_<guid>`
-table, whose name is taken from the SDK db's own metadata
-(`"rocpd_pmc_event" || (SELECT value FROM rocpd_metadata WHERE tag='uuid')`, where the
-stored `uuid` value already carries the leading underscore) rather than reconstructed by
-string-munging a discovered table name.
+writable. The INSERT target therefore stays the physical SDK `rocpd_pmc_event_<guid>` table.
 
 The remap is needed because `event_id` is assigned independently by each tool, while
-`dispatch_id` is shared, so it is the only stable key to recover the SDK `event_id`. The
+`(pid, dispatch_id)` is shared, so it is the stable key to recover the SDK `event_id`. The
 merge relies on two verified SDK-rocpd facts: `rocpd_pmc_event` and `rocpd_kernel_dispatch`
 both reference `rocpd_event` via `event_id` and `rocpd_kernel_dispatch` carries
 `dispatch_id`; and counter identity lives in `rocpd_info_pmc` (referenced by `pmc_id`),
 matched across tools on `symbol` + `target_arch`. The analysis counters view joins pmc to
 dispatch on the shared `event_id`, so the merge must land SDK `event_id` values.
 
-Update the caller (`src/utils/utils_profile.py`) to pass the per-PID native db path and
-pair native to SDK db per PID (both filenames embed the PID), and remove the now-dead CSV
-plumbing (`src/utils/utils_profile_csv.py`). Loop the attach/insert/detach over all PIDs.
-Combining the per-pass rocpds produced by application replay (or multi-rank runs) into
-one rocpd for analysis is a later PR, out of scope here.
+After the merge, read the SDK `counters_collection` view and concatenate the result across
+all passes into `pmc_perf.csv`; the rest of the analyze pipeline is unchanged. Profile mode
+drops its native-counter injection and the now-dead CSV plumbing
+(`src/utils/utils_profile_csv.py`).
 
 The `symbol` + `target_arch` join key is unique: in the verified rocflop rocpd all 15
 `rocpd_info_pmc` rows have distinct `symbol` values.
@@ -202,8 +204,9 @@ endif()
 - Run a small workload (e.g. `tests/vcopy`) with the native tool preloaded; confirm the
   `_native_counter_collection.db` has `rocpd_info_pmc`, `rocpd_event` (with
   `correlation_id`), and `rocpd_pmc_event` populated.
-- Run the merge against a real SDK rocpd; confirm `rocpd_pmc_event` fills and the counters
-  view joins cleanly (counts match expected dispatch x counter rows).
-- Cover the pure logic (merge SQL, native/SDK db pairing) with new unit tests.
+- Run the analyze-mode merge against real consolidated rocpds; confirm `rocpd_pmc_event`
+  fills, the counters view joins cleanly, and `pmc_perf.csv` matches expected dispatch x
+  counter rows.
+- Cover the pure logic (merge SQL, per-pass native/SDK db pairing) with new unit tests.
 - Run the full `ctest` suite and ensure it passes, to catch regressions in the existing
   CSV-era and analysis paths the merge replaces.
