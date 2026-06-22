@@ -24,6 +24,12 @@
 
 #include "att_no_intercept.hpp"
 
+#if !defined(ROCPROFILER_ATT_QUICK_SCAN_ENABLED) || ROCPROFILER_ATT_QUICK_SCAN_ENABLED == 0
+typedef uint64_t rocprof_trace_decoder_handle_t;
+#else
+#include <rocprof_trace_decoder/rocprof_trace_decoder.h>
+#endif
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -88,7 +94,7 @@ struct kernel_symbol_range
     uint64_t                end            = 0;
 };
 
-struct agent_state
+struct agent_state_t
 {
     rocprofiler_agent_id_t                            id                  = {};
     uint64_t                                          gpu_index           = 0;
@@ -96,7 +102,7 @@ struct agent_state
     rocprofiler_context_id_t                          context             = {};
     std::vector<rocprofiler_thread_trace_parameter_t> parameters          = {};
     rocprofiler_user_data_t                           userdata            = {};
-    void*                                             backend             = nullptr;
+    rocprof_trace_decoder_handle_t                    decoder             = {};
     uint64_t                                          consecutive_kernels = 0;
 
     std::shared_mutex mutex     = {};
@@ -113,18 +119,18 @@ struct agent_state
 bool
 backend_supported();
 
-void*
-backend_create(agent_state& state);
+void
+backend_create(agent_state_t& state);
 
 void
-backend_destroy(agent_state& state);
+backend_destroy(agent_state_t& state);
 
 void
-backend_code_object_load(agent_state&                                                state,
+backend_code_object_load(agent_state_t&                                                state,
                          const rocprofiler_callback_tracing_code_object_load_data_t& data);
 
 void
-backend_shader_data(agent_state&                           state,
+backend_shader_data(agent_state_t&                           state,
                     rocprofiler_thread_trace_shader_data_t shader_data,
                     shader_data_forwarder_t                shader_data_forwarder,
                     kernel_target_filter_t                 kernel_target_filter);
