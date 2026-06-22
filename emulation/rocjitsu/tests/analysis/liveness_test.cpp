@@ -222,8 +222,8 @@ public:
       // s_or_b64 exec, exec, -1: OR of a (non-constant) source and an all-ones
       // inline constant -> all-ones regardless of the other operand.
       return new TestInstruction("test_write_exec_or_allones", {{RegClass::EXEC, 0, 2}},
-                                 {{RegClass::SGPR, 0, 1}}, RESULT_OR, std::nullopt, {}, std::nullopt,
-                                 ~0ULL);
+                                 {{RegClass::SGPR, 0, 1}}, RESULT_OR, std::nullopt, {},
+                                 std::nullopt, ~0ULL);
     case TestOpcode::WriteExecAndSaveexec:
       // s_and_saveexec exec, -1: writes EXEC (flag), single all-ones source, but
       // exec = exec & -1 = exec -> NOT all-ones. No RESULT_* -> must stay Unknown.
