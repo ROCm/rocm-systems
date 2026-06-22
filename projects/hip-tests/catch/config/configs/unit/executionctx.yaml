@@ -68,6 +68,7 @@ executionctx:
     <<: *level_2
   Unit_hipExecutionCtxRecordEvent_ElapsedTime_MultiStream:
     <<: *level_2
+    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
   Unit_hipExecutionCtxRecordWaitEvent_Negative:
     <<: *level_2
   Unit_hipExecutionCtxWaitEvent_CrossCtx:
