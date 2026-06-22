@@ -38,7 +38,8 @@ def build_counter_string(obj):
     counter_str = "\n".join(
         ["{:20}:\t{}".format(key, itr) for key, itr in obj.get_as_dict().items()]
     )
-
+    spm_support = "Supported" if obj.spm_support else "Not Supported"
+    counter_str += "\n" + "{:20}:\t{}".format("SPM", spm_support)
     counter_str += "\n" + "{:20}:\t".format("Dimensions")
     counter_str += " ".join(dim.__str__() for dim in obj.dimensions)
     return counter_str
@@ -74,12 +75,14 @@ class counter:
         counter_description,
         counter_dimensions,
         is_hw_constant,
+        spm_support,
     ):
         self.name = counter_name
         self.counter_handle = counter_handle
         self.description = counter_description
         self.dimensions = counter_dimensions
         self.is_hw_constant = is_hw_constant
+        self.spm_support = spm_support
 
     def get_as_dict(self):
         return dict(zip((self.columns), [self.name, self.description]))
@@ -102,6 +105,7 @@ class derived_counter(counter):
         counter_expression,
         counter_dimensions,
         is_hw_constant,
+        spm_support,
     ):
         super().__init__(
             counter_handle,
@@ -109,6 +113,7 @@ class derived_counter(counter):
             counter_description,
             counter_dimensions,
             is_hw_constant,
+            spm_support,
         )
         self.expression = counter_expression
 
@@ -131,6 +136,7 @@ class basic_counter(counter):
         counter_block,
         counter_dimensions,
         is_hw_constant,
+        spm_support,
     ):
         super().__init__(
             counter_handle,
@@ -138,6 +144,7 @@ class basic_counter(counter):
             counter_description,
             counter_dimensions,
             is_hw_constant,
+            spm_support,
         )
         self.block = counter_block
 
@@ -205,6 +212,54 @@ class pc_config:
                     self.min_interval,
                     self.max_interval,
                     self.flags,
+                ],
+            )
+        )
+
+
+class spm_config:
+
+    columns = ["Type", "Minimum_Interval", "Maximum_Interval"]
+
+    def __init__(self, config_type, sample_interval_min, sample_interval_max):
+
+        self.type = self.get_type_string(config_type.value)
+        self.sample_interval_min = sample_interval_min
+        self.sample_interval_max = sample_interval_max
+
+    def __str__(self):
+
+        return "\n".join(
+            [
+                "   {:20}:\t{}".format(
+                    key,
+                    itr if key == "Type" else self.get_value(key, itr),
+                )
+                for key, itr in self.get_as_dict().items()
+            ]
+        )
+
+    @staticmethod
+    def get_value(key, itr):
+        if key == "Minimum_Interval" or key == "Maximum_Interval":
+            return itr.value
+        else:
+            fatal_error("Incorrect key")
+
+    @staticmethod
+    def get_type_string(key):
+        type_map = {0: "None", 1: "SAMPLE_INTERVAL_SCLK_CYCLES"}
+        return type_map[key]
+
+    def get_as_dict(self):
+
+        return dict(
+            zip(
+                (self.columns),
+                [
+                    self.type,
+                    self.sample_interval_min,
+                    self.sample_interval_max,
                 ],
             )
         )
@@ -321,7 +376,7 @@ def get_dimensions(counter_handle):
     return dimensions
 
 
-def get_counters():
+def get_counters_helper(is_spm=False):
     agent_counters = {}
     agents = get_agent_handles()
     agent_counters = {}
@@ -334,8 +389,32 @@ def get_counters():
         if counters:
             for counter_id in list(counters):
                 counter_info = get_counter_info(counter_id)
-                agent_counters[agent].append(counter_info)
+                if is_spm:
+                    if counter_info.spm_support.value:
+                        agent_counters[agent].append(counter_info)
+                else:
+                    agent_counters[agent].append(counter_info)
     return agent_counters
+
+
+def get_counters():
+    return get_counters_helper(False)
+
+
+def get_spm_counters():
+    return get_counters_helper(True)
+
+
+def get_spm_configs():
+    agent_spm_config = {}
+    agents = get_agent_handles()
+
+    for agent in agents:
+        configs = get_spm_config(agent)
+        if len(configs) > 0:
+            agent_spm_config[agent] = configs
+
+    return agent_spm_config
 
 
 def get_pc_sample_configs():
@@ -358,17 +437,20 @@ def get_counter_info(counter_handle):
         ctypes.POINTER(ctypes.c_char_p),
         ctypes.POINTER(ctypes.c_uint),
         ctypes.POINTER(ctypes.c_uint),
+        ctypes.POINTER(ctypes.c_uint),
     ]
     counter_name = ctypes.c_char_p()
     counter_description = ctypes.c_char_p()
     is_derived = ctypes.c_uint()
     is_hw_constant = ctypes.c_uint()
+    spm_support = ctypes.c_uint()
     lib.counter_info(
         counter_handle,
         ctypes.byref(counter_name),
         ctypes.byref(counter_description),
         ctypes.byref(is_derived),
         ctypes.byref(is_hw_constant),
+        ctypes.byref(spm_support),
     )
 
     if is_derived.value == 1:
@@ -386,6 +468,7 @@ def get_counter_info(counter_handle):
             get_string_value(expression),
             dimensions,
             is_hw_constant,
+            spm_support,
         )
 
     elif not is_hw_constant.value:
@@ -400,6 +483,7 @@ def get_counter_info(counter_handle):
             get_string_value(block),
             dimensions,
             is_hw_constant,
+            spm_support,
         )
     else:
         return counter(
@@ -408,6 +492,7 @@ def get_counter_info(counter_handle):
             get_string_value(counter_description),
             [],
             is_hw_constant.value,
+            spm_support,
         )
 
 
@@ -416,6 +501,13 @@ def get_number_of_pc_sample_configs(agent_handle):
     lib.get_number_of_pc_sample_configs.argtypes = [ctypes.c_ulong]
     lib.get_number_of_pc_sample_configs.restype = ctypes.c_ulong
     return lib.get_number_of_pc_sample_configs(agent_handle)
+
+
+def get_number_of_spm_configs(agent_handle):
+    lib = get_library()
+    lib.get_number_of_spm_configs.argtypes = [ctypes.c_ulong]
+    lib.get_number_of_spm_configs.restype = ctypes.c_ulong
+    return lib.get_number_of_spm_configs(agent_handle)
 
 
 def get_pc_sample_config(agent_handle):
@@ -457,6 +549,37 @@ def get_pc_sample_config(agent_handle):
             )
         )
     return pc_configs
+
+
+def get_spm_config(agent_handle):
+    lib = get_library()
+    num_configs = get_number_of_spm_configs(agent_handle)
+    lib.spm_sample_interval_config.argtypes = [
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.POINTER(ctypes.c_ulong),
+    ]
+    spm_configs = []
+
+    for config in range(0, num_configs):
+        type_ = (ctypes.c_ulong)()
+        max_interval = (ctypes.c_ulong)()
+        min_interval = (ctypes.c_ulong)()
+        lib.spm_sample_interval_config(
+            agent_handle,
+            config,
+            ctypes.byref(type_),
+            ctypes.byref(min_interval),
+            ctypes.byref(max_interval),
+        )
+        spm_configs.append(
+            spm_config(
+                type_,
+                min_interval,
+                max_interval,
+            )
+        )
+    return spm_configs
 
 
 def check_pmc(agent_counter):

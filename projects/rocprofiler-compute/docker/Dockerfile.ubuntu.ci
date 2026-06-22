@@ -38,17 +38,17 @@ RUN OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"'
 
 # The Rock Tarball
 ARG GPU_TYPE=""
-ARG GPU_TARBALL=""
-RUN if [ -n "$GPU_TYPE" ] && [ -n "$GPU_TARBALL" ]; then \
-        VERSION=$(echo "$GPU_TARBALL" | sed -nE 's/.*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p'); \
-        if [ -z "$VERSION" ]; then \
-            echo "Error: Could not extract version from GPU_TARBALL ('$GPU_TARBALL')." >&2; \
-            exit 1; \
-        fi; \
-        pip install --upgrade pip; \
-        pip install awscli --break-system-packages; \
-        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${VERSION}-${GPU_TYPE}.tar.gz --no-sign-request; \
-        mv rocm-${VERSION}-${GPU_TYPE}.tar.gz /opt/rocm-${VERSION}-${GPU_TYPE}.tar.gz; \
+RUN if [ -n "${GPU_TYPE}" ]; then \
+        TARBALL=$(curl -fsSL "https://rocm.nightlies.amd.com/tarball-multi-arch/" | \
+            grep -oE "\"name\": \"therock-dist-linux-${GPU_TYPE}-[^\"]+\", \"mtime\": [0-9.]+" | \
+            sort -t' ' -k4 -g | \
+            tail -1 | \
+            sed 's/.*"name": "\([^"]*\)".*/\1/'); \
+        test -n "${TARBALL}" || { echo "Error: no therock-dist-linux-${GPU_TYPE}-* tarball found" >&2; exit 1; }; \
+        VERSION=$(echo "${TARBALL}" | sed -nE 's/.*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p'); \
+        test -n "${VERSION}" || { echo "Error: could not extract version from '${TARBALL}'" >&2; exit 1; }; \
+        curl -fSL "https://rocm.nightlies.amd.com/tarball-multi-arch/${TARBALL}" \
+            -o "/opt/rocm-${VERSION}-${GPU_TYPE}.tar.gz"; \
     fi
 
 ENV LC_ALL=C.UTF-8

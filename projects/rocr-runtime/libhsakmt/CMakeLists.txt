@@ -159,7 +159,8 @@ else()
                      "src/dxg/wddm/gpu_memory.cpp"
                      "src/dxg/wddm/va_mgr.cpp"
                      "src/dxg/wddm/queue.cpp"
-                     "src/dxg/wddm/cmd_util.cpp" )
+                     "src/dxg/wddm/cmd_util.cpp"
+                     "src/dxg/extsem.cpp" )
   else()
     ## Source files
     set ( HSAKMT_SRC "src/debug.c"
@@ -181,7 +182,8 @@ else()
                      "src/svm.c"
                      "src/pc_sampling.c"
                      "src/ais.c"
-                     "src/kfdcontext.c")
+                     "src/kfdcontext.c"
+                     "src/extsem.c")
   endif()
 
   ## Declare the library target name
@@ -296,11 +298,11 @@ else()
       set(WKMI_SRC_BUILD OFF CACHE INTERNAL "wkmi is built from source")
       message(STATUS "Using pre-built wkmi.lib (set WKMI_SRC_DIR to build from source)")
       if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/dbg/wkmi.lib)
+        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/win/lib/wkmi.lib)
       else()
-        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/rel/wkmi.lib)
+        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/win/lib/wkmi.lib)
       endif()
-      target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi)
+      target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
       
       # Link wkmi.lib and ensure it's propagated to downstream targets (hsa-runtime64)
       target_link_libraries(${HSAKMT_TARGET} PUBLIC ${WKMI_LIB_PATH})
@@ -423,7 +425,7 @@ else()
         target_link_libraries(${HSAKMT_STATIC_DRM_TARGET} PUBLIC wkmi)
         target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${WKMI_SRC_DIR}/lib/inc)
       else()
-        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi)
+        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
         set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
       endif()
     endif()

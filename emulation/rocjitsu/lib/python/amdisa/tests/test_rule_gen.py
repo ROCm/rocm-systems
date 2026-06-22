@@ -28,48 +28,80 @@ _HAS_SEMA_XML = os.path.isfile(SEMA_XML_PATH)
 
 
 def _make_add(name: str, pragma: ExecModel = ExecModel.SCALAR) -> SemaBlock:
-    body = SemaNode(SemaNodeKind.ASSIGN, children=(
-        SemaNode(SemaNodeKind.ID, id_name='D'),
-        SemaNode(SemaNodeKind.ADD, ty=SemaType.U32, children=(
-            SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-                SemaNode(SemaNodeKind.ID, id_name='S'),
-                SemaNode(SemaNodeKind.LIT, lit_value='0'),
-            )),
-            SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-                SemaNode(SemaNodeKind.ID, id_name='S'),
-                SemaNode(SemaNodeKind.LIT, lit_value='1'),
-            )),
-        )),
-    ))
+    body = SemaNode(
+        SemaNodeKind.ASSIGN,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='D'),
+            SemaNode(
+                SemaNodeKind.ADD,
+                ty=SemaType.U32,
+                children=(
+                    SemaNode(
+                        SemaNodeKind.INSTOPERAND,
+                        ty=SemaType.B32,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='S'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='0'),
+                        ),
+                    ),
+                    SemaNode(
+                        SemaNodeKind.INSTOPERAND,
+                        ty=SemaType.B32,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='S'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='1'),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
     return SemaBlock(name, pragma, body)
 
 
 def _make_sub(name: str) -> SemaBlock:
-    body = SemaNode(SemaNodeKind.ASSIGN, children=(
-        SemaNode(SemaNodeKind.ID, id_name='D'),
-        SemaNode(SemaNodeKind.SUB, ty=SemaType.U32, children=(
-            SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-                SemaNode(SemaNodeKind.ID, id_name='S'),
-                SemaNode(SemaNodeKind.LIT, lit_value='0'),
-            )),
-            SemaNode(SemaNodeKind.INSTOPERAND, ty=SemaType.B32, children=(
-                SemaNode(SemaNodeKind.ID, id_name='S'),
-                SemaNode(SemaNodeKind.LIT, lit_value='1'),
-            )),
-        )),
-    ))
+    body = SemaNode(
+        SemaNodeKind.ASSIGN,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='D'),
+            SemaNode(
+                SemaNodeKind.SUB,
+                ty=SemaType.U32,
+                children=(
+                    SemaNode(
+                        SemaNodeKind.INSTOPERAND,
+                        ty=SemaType.B32,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='S'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='0'),
+                        ),
+                    ),
+                    SemaNode(
+                        SemaNodeKind.INSTOPERAND,
+                        ty=SemaType.B32,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='S'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='1'),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
     return SemaBlock(name, ExecModel.SCALAR, body)
 
 
 def _make_stub(name: str) -> SemaBlock:
-    return SemaBlock(name, ExecModel.UNKNOWN,
-                     SemaNode(SemaNodeKind.SEQ, children=()))
+    return SemaBlock(name, ExecModel.UNKNOWN, SemaNode(SemaNodeKind.SEQ, children=()))
 
 
 def _make_mfma(name: str) -> SemaBlock:
-    body = SemaNode(SemaNodeKind.CALL, ty=SemaType.F32,
-                    call_name='mfma_compute',
-                    children=(SemaNode(SemaNodeKind.ID, id_name='mfma_compute'),))
+    body = SemaNode(
+        SemaNodeKind.CALL,
+        ty=SemaType.F32,
+        call_name='mfma_compute',
+        children=(SemaNode(SemaNodeKind.ID, id_name='mfma_compute'),),
+    )
     return SemaBlock(name, ExecModel.VECTOR, body)
 
 
@@ -138,6 +170,7 @@ class TestGenerateRulesProperties:
         dst = {'ADD': _make_add('ADD', ExecModel.VECTOR)}
         rules = generate_rules('a', 'b', src, dst)
         from amdisa.sema_properties import InstructionProperty
+
         assert InstructionProperty.EXEC_MASKED in rules[0].src_properties
         assert InstructionProperty.EXEC_MASKED in rules[0].dst_properties
 
@@ -152,7 +185,9 @@ class TestSummarizeRules:
             TranslationRule('A', RuleAction.IDENTITY, 'A'),
             TranslationRule('B', RuleAction.SUBSTITUTE, 'B2'),
             TranslationRule('C', RuleAction.LOWER),
-            TranslationRule('D', RuleAction.EXPAND, expansion=ExpansionStrategy.GENERIC),
+            TranslationRule(
+                'D', RuleAction.EXPAND, expansion=ExpansionStrategy.GENERIC
+            ),
         ]
         s = summarize_rules(rules)
         assert s.total == 4
@@ -167,6 +202,7 @@ class TestSemaXmlRuleGen:
     @pytest.fixture(scope='class')
     def blocks(self):
         from amdisa.sema_parser import parse_semantics_xml
+
         return parse_semantics_xml(SEMA_XML_PATH)
 
     def test_self_rules_all_identity_or_substitute(self, blocks):
@@ -179,17 +215,22 @@ class TestSemaXmlRuleGen:
 
     def test_rules_have_properties(self, blocks):
         rules = generate_rules('cdna4', 'cdna4', blocks, blocks)
-        vector_rules = [r for r in rules
-                        if r.action in (RuleAction.IDENTITY, RuleAction.SUBSTITUTE)
-                        and 'V_ADD_F32' == r.src_mnemonic]
+        vector_rules = [
+            r
+            for r in rules
+            if r.action in (RuleAction.IDENTITY, RuleAction.SUBSTITUTE)
+            and 'V_ADD_F32' == r.src_mnemonic
+        ]
         if vector_rules:
             from amdisa.sema_properties import InstructionProperty
+
             assert InstructionProperty.EXEC_MASKED in vector_rules[0].src_properties
 
 
 class TestMatrixExpandRules:
     def test_mfma_to_wmma_16x16(self):
         from amdisa.codegen.dbt.rule_gen import generate_matrix_expand_rules
+
         rules = generate_matrix_expand_rules(
             ['V_MFMA_F32_16X16X16_F16'],
             ['V_WMMA_F32_16X16X16_F16'],
@@ -203,6 +244,7 @@ class TestMatrixExpandRules:
 
     def test_no_match_returns_empty(self):
         from amdisa.codegen.dbt.rule_gen import generate_matrix_expand_rules
+
         rules = generate_matrix_expand_rules(
             ['V_MFMA_F32_32X32X8_F16'],
             ['V_WMMA_I32_16X16X32_I8'],
@@ -211,8 +253,10 @@ class TestMatrixExpandRules:
 
     def test_emit_header_compiles(self):
         from amdisa.codegen.dbt.rule_gen import (
-            generate_matrix_expand_rules, emit_matrix_conversions_header,
+            generate_matrix_expand_rules,
+            emit_matrix_conversions_header,
         )
+
         rules = generate_matrix_expand_rules(
             ['V_MFMA_F32_16X16X16_F16'],
             ['V_WMMA_F32_16X16X16_F16'],

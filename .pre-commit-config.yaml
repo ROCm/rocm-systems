@@ -11,21 +11,33 @@ exclude: |
     | projects/amdsmi/
     | projects/rdc/
     | projects/rocm-smi-lib/
+    | projects/rocprofiler-compute/
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v3.2.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
 
+  # Two black hooks so that directories with skip-string-normalization
+  # (listed in the first hook) are kept separate from directories where
+  # black enforces double quotes (the second hook). This is necessary
+  # because black picks a single pyproject.toml for an entire invocation
+  # based on the common ancestor of all input files. Running two hooks
+  # ensures each group gets its own config context.
   - repo: https://github.com/psf/black
-    rev: 22.10.0
+    rev: 26.5.1
     hooks:
       - id: black
-        language_version: python3
+        name: black (skip-string-normalization)
+        args: ["--skip-string-normalization"]
+        files: ^emulation/rocjitsu/
+      - id: black
+        name: black
+        exclude: ^emulation/rocjitsu/
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v18.1.4
@@ -35,8 +47,8 @@ repos:
         entry: clang-format -i -style=file
         files: '\.(c|cpp|cc|h|hpp|m|mm)$'
 
+  # gersemi: CMake formatter (replaces cmake-format and cmake-lint)
   - repo: https://github.com/BlankSpruce/gersemi
-    # gersemi replaces cmake-format and cmake-lint
-    rev: 0.22.1
+    rev: 0.25.1
     hooks:
       - id: gersemi

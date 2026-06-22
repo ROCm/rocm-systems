@@ -125,6 +125,12 @@ generate_csv(const output_config&                                               
              const stats_entry_t&                                               stats);
 
 void
+generate_csv(const output_config&                        cfg,
+             const metadata&                             tool_metadata,
+             const generator<tool_spm_counter_record_t>& data,
+             const stats_entry_t&                        stats);
+
+void
 generate_csv(const output_config&      cfg,
              const metadata&           tool_metadata,
              const domain_stats_vec_t& data);

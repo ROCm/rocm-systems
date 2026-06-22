@@ -137,6 +137,7 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   hsa_amd_pointer_info_t ptrInfo = {};
   uint32_t num_agents_accessible = 0;
   std::vector<hsa_agent_t> gpus;
+  std::vector<hsa_agent_t> aies;
   rocrtst::pool_info_t pool_i;
   hsa_device_type_t ag_type;
   char ag_name[64];
@@ -155,6 +156,7 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   const size_t sizeof_addrRange = 20 * granule_size;
 
   ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateAIEAgents, &aies));
   ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addrRange, sizeof_addrRange, 0, 0));
   ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addrRangeUnmapped, sizeof_addrRangeUnmapped, 0, 0));
 
@@ -228,6 +230,14 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
     ASSERT_EQ(perm, HSA_ACCESS_PERMISSION_NONE);
   }
 
+  // Access to each AIE should be None
+  for (auto aieIt = aies.begin(); aieIt != aies.end(); ++aieIt) {
+    hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_RW;
+
+    ASSERT_SUCCESS(hsa_amd_vmem_get_access(addrRange, &perm, *aieIt));
+    ASSERT_EQ(perm, HSA_ACCESS_PERMISSION_NONE);
+  }
+
   /* Set RO Access to all GPUs */
   {
     int descIndex = 0;
@@ -238,20 +248,41 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
     ASSERT_SUCCESS(hsa_amd_vmem_set_access(addrRange, 10 * granule_size, desc, gpus.size()));
   }
 
+  /* Set RO Access to all AIEs */
+  if (!aies.empty()) {
+    int descIndex = 0;
+    hsa_amd_memory_access_desc_t desc[aies.size()];
+    for (auto aieIt = aies.begin(); aieIt != aies.end(); ++aieIt) {
+      desc[descIndex++] = {HSA_ACCESS_PERMISSION_RO, *aieIt};
+    }
+    ASSERT_SUCCESS(hsa_amd_vmem_set_access(addrRange, 10 * granule_size, desc, aies.size()));
+  }
+
   /* Verity pointer info accessible agents on mapped addresses */
   ptrInfo.size = sizeof(ptrInfo);
   ASSERT_SUCCESS(hsa_amd_pointer_info(addrRange, &ptrInfo, &malloc, &num_agents_accessible,
                                       &agents_accessible));
   ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_HSA_VMEM);
   ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_mem_handle);  // size matches memory handle
-  ASSERT_EQ(num_agents_accessible, gpus.size());
+  ASSERT_EQ(num_agents_accessible, gpus.size() + aies.size());
   ASSERT_NE(agents_accessible, nullptr);
 
   /* Verify agents_accessible is valid */
   for (auto gpuIt = gpus.begin(); gpuIt != gpus.end(); ++gpuIt) {
     bool found = false;
-    for (auto i = 0; i < gpus.size(); i++) {
+    for (auto i = 0; i < num_agents_accessible; i++) {
       if (agents_accessible[i].handle == (*gpuIt).handle) {
+        found = true;
+        break;
+      }
+    }
+    ASSERT_EQ(found, true);
+  }
+
+  for (auto aieIt = aies.begin(); aieIt != aies.end(); ++aieIt) {
+    bool found = false;
+    for (auto i = 0; i < num_agents_accessible; i++) {
+      if (agents_accessible[i].handle == (*aieIt).handle) {
         found = true;
         break;
       }
@@ -269,6 +300,17 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
 
     /* addrRangeUnmapped was never mapped, so this is an invalid mapping */
     err = hsa_amd_vmem_get_access(addrRangeUnmapped, &perm, *gpuIt);
+    ASSERT_EQ(err, HSA_STATUS_ERROR_INVALID_ALLOCATION);
+  }
+
+  for (auto aieIt = aies.begin(); aieIt != aies.end(); ++aieIt) {
+    hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_NONE;
+
+    ASSERT_SUCCESS(hsa_amd_vmem_get_access(addrRange, &perm, *aieIt));
+    ASSERT_EQ(perm, HSA_ACCESS_PERMISSION_RO);
+
+    /* addrRangeUnmapped was never mapped, so this is an invalid mapping */
+    err = hsa_amd_vmem_get_access(addrRangeUnmapped, &perm, *aieIt);
     ASSERT_EQ(err, HSA_STATUS_ERROR_INVALID_ALLOCATION);
   }
 
@@ -294,6 +336,7 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
 
   ASSERT_SUCCESS(hsa_amd_vmem_unmap(addrRange, sizeof_mem_handle));
   ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handleTypePinned));
   ASSERT_SUCCESS(hsa_amd_vmem_address_free(addrRange, sizeof_addrRange));
   ASSERT_SUCCESS(hsa_amd_vmem_address_free(addrRangeUnmapped, sizeof_addrRangeUnmapped));
 }
@@ -839,9 +882,9 @@ void VirtMemoryTestBasic::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
     EXPECT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
   }
 
-  if (host_data) hsa_memory_free(host_data);
+  if (host_data) hsa_amd_memory_pool_free(host_data);
   if (kernArgsVirt) {
-    hsa_memory_free(kernArgsVirt);
+    hsa_amd_memory_pool_free(kernArgsVirt);
   }
   if (signal.handle) {
     hsa_signal_destroy(signal);
@@ -1094,9 +1137,9 @@ void VirtMemoryTestBasic::GPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
     EXPECT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
   }
 
-  if (host_data) hsa_memory_free(host_data);
+  if (host_data) hsa_amd_memory_pool_free(host_data);
   if (kernArgsVirt) {
-    hsa_memory_free(kernArgsVirt);
+    hsa_amd_memory_pool_free(kernArgsVirt);
   }
   if (signal.handle) {
     hsa_signal_destroy(signal);
@@ -1187,10 +1230,10 @@ void VirtMemoryTestBasic::MemoryAccountingTest(hsa_agent_t agent, hsa_amd_memory
   ptr_info.size = sizeof(ptr_info);
   ASSERT_SUCCESS(hsa_amd_pointer_info(reserved_addr, &ptr_info, nullptr, nullptr, nullptr));
   ASSERT_SUCCESS(hsa_amd_vmem_handle_create(pool, allocation_size, MEMORY_TYPE_NONE, 0, &mem_handle));
- 
+
   ASSERT_SUCCESS(hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL, &amount_current));
   ASSERT_NEAR(amount_begin - amount_current, allocation_size, 4096);
-  
+
   ASSERT_SUCCESS(hsa_amd_vmem_map(reserved_addr, allocation_size, 0, mem_handle, 0));
 
   hsa_amd_memory_access_desc_t access_desc = {HSA_ACCESS_PERMISSION_RW, agent};
@@ -1376,7 +1419,7 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t cpuAgent, hsa_agent_t
 
   // Setup kernel args to write to addr1
   kernArgs->a = host_data;
-  kernArgs->b = dummy_data;  // dummy buffer kernel writes to 
+  kernArgs->b = dummy_data;  // dummy buffer kernel writes to
   kernArgs->c = reinterpret_cast<int*>(addr1);
 
   // Create and dispatch AQL packet for addr1
@@ -1462,9 +1505,9 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t cpuAgent, hsa_agent_t
   ASSERT_SUCCESS(hsa_amd_vmem_address_free(addr1, alloc_size));
   ASSERT_SUCCESS(hsa_amd_vmem_address_free(addr2, alloc_size));
 
-  if (host_data) hsa_memory_free(host_data);
-  if (dummy_data) hsa_memory_free(dummy_data);
-  if (kernArgs) hsa_memory_free(kernArgs);
+  if (host_data) hsa_amd_memory_pool_free(host_data);
+  if (dummy_data) hsa_amd_memory_pool_free(dummy_data);
+  if (kernArgs) hsa_amd_memory_pool_free(kernArgs);
   if (signal.handle) hsa_signal_destroy(signal);
   if (queue) hsa_queue_destroy(queue);
 }
@@ -1475,6 +1518,17 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(void) {
   if (verbosity() > 0) {
     PrintMemorySubtestHeader("VA Alias Access Test");
   }
+
+#ifdef ROCRTST_ASAN
+  // The ASAN interceptors do not support multiple VA mappings of one handle,
+  // so skip this subtest under ASAN (bug to be filed to compiler-rt).
+  if (verbosity() > 0) {
+    std::cout << "    Skipping VA alias test under ASAN (vmem aliasing unsupported by interceptors)"
+              << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+  return;
+#endif
 
   bool supp = false;
   ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, (void*)&supp));

@@ -1616,6 +1616,40 @@ hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
       dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs, num_prefetch_locs, flags, stream);
   CATCH;
 }
+hipError_t hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                   unsigned long long flags, hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemDiscardBatchAsync_fn(
+      dev_ptrs, sizes, count, flags, stream);
+  CATCH;
+}
+hipError_t hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                      unsigned long long flags, hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDrvMemDiscardBatchAsync_fn(
+      dptrs, sizes, count, flags, stream);
+  CATCH;
+}
+hipError_t hipMemDiscardAndPrefetchBatchAsync(void** dptrs, size_t* sizes, size_t count,
+                                              hipMemLocation* prefetchLocs,
+                                              size_t* prefetchLocIdxs,
+                                              size_t numPrefetchLocs,
+                                              unsigned long long flags, hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemDiscardAndPrefetchBatchAsync_fn(
+      dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
+  CATCH;
+}
+hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                                 hipMemLocation* prefetchLocs,
+                                                 size_t* prefetchLocIdxs,
+                                                 size_t numPrefetchLocs,
+                                                 unsigned long long flags, hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDrvMemDiscardAndPrefetchBatchAsync_fn(
+      dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
+  CATCH;
+}
 hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
   TRY;
   return hip::GetHipDispatchTable()->hipMemPtrGetInfo_fn(ptr, size);
@@ -3137,6 +3171,18 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
   TRY;
   return hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count,
                                                                  library);
+  CATCH;
+}
+hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
+                               const char* name) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipLibraryGetGlobal_fn(dptr, bytes, library, name);
+  CATCH;
+}
+hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library,
+                                const char* name) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipLibraryGetManaged_fn(dptr, bytes, library, name);
   CATCH;
 }
 hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,

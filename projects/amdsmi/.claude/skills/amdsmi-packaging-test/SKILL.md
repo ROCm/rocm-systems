@@ -13,7 +13,7 @@ End-to-end testing of amd-smi package builds, installs, and Python imports acros
 - After changes to Python wrapper/loader (`amdsmi_wrapper.py`, `amdsmi_init.py`)
 - After changes to wheel build tooling (`tools/build_wheel_debian.py`, `tools/build_wheel_rpm.py`)
 - After changes to `tools/generator.py` or `py-interface/setup.py.in` / `py-interface/pyproject.toml.in`
-- When reviewing PRs that touch `BUILD_PYTHON_LIB` cmake paths
+- When reviewing PRs that touch `BUILD_PYTHON_WHEEL` cmake paths
 - Before merging any Python packaging PR
 
 ## Prerequisites
@@ -73,32 +73,51 @@ Test package installation and Python import across multiple OS containers. This 
 
 ### Target Matrix
 
-| OS | Image | Format | Min Python | Min glibc |
-|----|-------|--------|------------|-----------|
-| RHEL 8 / UBI 8 | `registry.access.redhat.com/ubi8/ubi:latest` | RPM | 3.6.8 | 2.28 |
-| RHEL 9 / UBI 9 | `registry.access.redhat.com/ubi9/ubi:latest` | RPM | 3.9 | 2.34 |
-| Ubuntu 20.04 | `ubuntu:20.04` | DEB | 3.8 | 2.31 |
-| Ubuntu 22.04 | `ubuntu:22.04` | DEB | 3.10 | 2.35 |
-| Ubuntu 24.04 | `ubuntu:24.04` | DEB | 3.12 | 2.39 |
-| Debian 10 | `debian:10` | DEB | 3.7 | 2.28 |
-| SLES 15 | `registry.suse.com/bci/bci-base:15.5` | RPM | 3.6 | 2.31 |
-| AzureLinux 3 | `mcr.microsoft.com/azurelinux/base/core:3.0` | RPM | 3.12 | 2.38 |
+This matrix mirrors `.github/workflows/amdsmi-build.yml` (`os:` lists at lines 28, 142, 366, 568). The CI workflow resolves images from GitHub repo variables (`vars.<OS>_DOCKER_IMAGE`) which point at AMD-internal registries. Use `gh variable get <LABEL>_DOCKER_IMAGE` to fetch the CI image (requires `gh auth login` against `github.com/ROCm/rocm-systems`, read access to the repo's variables, and AMD VPN); off-VPN or unauthenticated callers get the public fallback below.
+
+| CI label | Public fallback | Format | Min Python | Min glibc |
+|----------|-----------------|--------|------------|-----------|
+| `Ubuntu20` | `ubuntu:20.04` | DEB | 3.8 | 2.31 |
+| `Ubuntu22` | `ubuntu:22.04` | DEB | 3.10 | 2.35 |
+| `Ubuntu24` | `ubuntu:24.04` | DEB | 3.12 | 2.39 |
+| `Debian10` | `debian:10` (needs `archive.debian.org` sources) | DEB | 3.7 | 2.28 |
+| `SLES` | `registry.suse.com/bci/bci-base:15.6` | RPM | 3.6 | 2.31 |
+| `RHEL8` | `registry.access.redhat.com/ubi8/ubi:latest` | RPM | 3.6.8 | 2.28 |
+| `RHEL9` | `registry.access.redhat.com/ubi9/ubi:latest` | RPM | 3.9 | 2.34 |
+| `RHEL10` | `registry.access.redhat.com/ubi10/ubi:latest` | RPM | 3.12 | 2.39 |
+| `AzureLinux3` | `mcr.microsoft.com/azurelinux/base/core:3.0` | RPM | 3.12 | 2.38 |
+| `AlmaLinux8` | `almalinux:8` | RPM | 3.6 | 2.28 |
 
 ### Multi-OS Test Script
 
-Set `$BUILD_DIR` to the directory containing built `.rpm` and `.deb` files:
+Set `$BUILD_DIR` to the directory containing built `.rpm` and `.deb` files. The `ci_image` helper prefers the CI image (via `gh variable get`) and falls back to the public image if `gh` isn't authenticated or the variable isn't set.
 
 ```bash
 BUILD_DIR="$WORKSPACE/build-manylinux"  # or $WORKSPACE/build
 RPM_NAME=$(ls "$BUILD_DIR"/amd-smi-lib-*[!tests]*.rpm 2>/dev/null | head -1 | xargs basename)
 DEB_NAME=$(ls "$BUILD_DIR"/amd-smi-lib_*.deb 2>/dev/null | grep -v tests | head -1 | xargs basename)
 
-for spec in \
-  "rhel8|registry.access.redhat.com/ubi8/ubi:latest|rpm|$RPM_NAME" \
-  "ubuntu22|ubuntu:22.04|deb|$DEB_NAME" \
-  "ubuntu24|ubuntu:24.04|deb|$DEB_NAME"; do
+# Resolve a CI image: prefer vars.<LABEL>_DOCKER_IMAGE, else public fallback.
+ci_image() {
+  local label=$1 fallback=$2 img
+  img=$(gh variable get "${label}_DOCKER_IMAGE" 2>/dev/null) || img=""
+  echo "${img:-$fallback}"
+}
 
-  IFS='|' read -r name img fmt pkg <<< "$spec"
+for spec in \
+  "ubuntu20|Ubuntu20|ubuntu:20.04|deb|$DEB_NAME" \
+  "ubuntu22|Ubuntu22|ubuntu:22.04|deb|$DEB_NAME" \
+  "ubuntu24|Ubuntu24|ubuntu:24.04|deb|$DEB_NAME" \
+  "debian10|Debian10|debian:10|deb|$DEB_NAME" \
+  "sles|SLES|registry.suse.com/bci/bci-base:15.6|rpm|$RPM_NAME" \
+  "rhel8|RHEL8|registry.access.redhat.com/ubi8/ubi:latest|rpm|$RPM_NAME" \
+  "rhel9|RHEL9|registry.access.redhat.com/ubi9/ubi:latest|rpm|$RPM_NAME" \
+  "rhel10|RHEL10|registry.access.redhat.com/ubi10/ubi:latest|rpm|$RPM_NAME" \
+  "azurelinux3|AzureLinux3|mcr.microsoft.com/azurelinux/base/core:3.0|rpm|$RPM_NAME" \
+  "almalinux8|AlmaLinux8|almalinux:8|rpm|$RPM_NAME"; do
+
+  IFS='|' read -r name label fallback fmt pkg <<< "$spec"
+  img=$(ci_image "$label" "$fallback")
   echo ""
   echo "##### $name ($img / $fmt / $pkg) #####"
   docker run --rm -e PKG="$pkg" -e FMT="$fmt" \
@@ -243,6 +262,30 @@ pip install wheelhouse/amdsmi-*.whl
 python3 -c "import amdsmi; print(amdsmi.__file__)"
 ```
 
+### System Package + Wheel Conflict Matrix
+
+The dual-library design (`BUILD_PYTHON_WHEEL`) ships `libamd_smi.so` in the system package and a SONAME-renamed `libamd_smi_python.so` inside the wheel. The two MUST be safely co-installable in the same Python process. Run [tests/run_amdsmi_pkg_conflict_test.py](tests/run_amdsmi_pkg_conflict_test.py) to validate all four scenarios in one container:
+
+```bash
+python3 tests/run_amdsmi_pkg_conflict_test.py \
+    --build-dir build-manylinux \
+    --wheel-dir build-manylinux/py-interface/python_package \
+    --image ubuntu:22.04
+```
+
+The driver verifies, in order:
+
+| # | Scenario | Pass criterion |
+|---|----------|----------------|
+| 1 | system pkg ALONE | `_loaded_lib_path` is `/opt/rocm/lib64/libamd_smi.so`; `amdsmi_init` runs |
+| 2 | wheel ALONE | `_loaded_lib_path` is `<site>/amdsmi/libamd_smi_python.so`; `amdsmi_init` runs |
+| 3 | system pkg + wheel | both .so files present, SONAMEs differ (`libamd_smi.so.<X>` vs `libamd_smi_python.so`); `amdsmi_init` runs |
+| 4 | forced dual-load via `ctypes.CDLL(..., RTLD_GLOBAL)` | `amdsmi_init` + `amdsmi_shut_down` complete with no SIGSEGV |
+
+**Critical regression to watch for:** if scenario 3's SONAME assertion ever fails, the two-library guarantee is broken and the wheel is one `pip install` away from segfaulting any system that already has the .deb/.rpm installed. This is the failure mode `BUILD_PYTHON_WHEEL` exists to prevent.
+
+> Note: requires a wheel built with `-DBUILD_PYTHON_WHEEL=ON` (the wheel-build scripts already do this; a default `cmake .. && make` does NOT).
+
 ---
 
 ## 5. Python Version Compatibility
@@ -317,17 +360,17 @@ Building inside `quay.io/pypa/manylinux_2_28_x86_64` guarantees glibc 2.28 ceili
 
 ## 7. Build Automation Script Testing
 
-Test `tests/run_amdsmi_build.py` which mirrors the CI workflow locally:
+Test `tests/amdsmi_build/run_amdsmi_build.py` which mirrors the CI workflow locally:
 
 ```bash
 # Ubuntu / Debian
-sudo python3 tests/run_amdsmi_build.py --package-manager apt --os-label Ubuntu22
+sudo python3 tests/amdsmi_build/run_amdsmi_build.py --package-manager apt --os-label Ubuntu22
 
 # RHEL / AlmaLinux
-sudo python3 tests/run_amdsmi_build.py --package-manager dnf --package-format rpm --os-label RHEL9
+sudo python3 tests/amdsmi_build/run_amdsmi_build.py --package-manager dnf --package-format rpm --os-label RHEL9
 
 # SLES (auto-bootstraps Python 3.11 if system Python is 3.6)
-sudo python3 tests/run_amdsmi_build.py --package-manager zypper --package-format rpm --os-label SLES
+sudo python3 tests/amdsmi_build/run_amdsmi_build.py --package-manager zypper --package-format rpm --os-label SLES
 ```
 
 The script should:
@@ -348,10 +391,11 @@ Fastest way to validate packaging changes — run after `amdsmi-build-install` s
 BUILD_DIR="$WORKSPACE/build-manylinux"
 # Expand to all targets as needed; minimum: rhel8 + ubuntu22 + ubuntu24
 for spec in \
-  "rhel8|registry.access.redhat.com/ubi8/ubi:latest|rpm" \
-  "ubuntu22|ubuntu:22.04|deb" \
-  "ubuntu24|ubuntu:24.04|deb"; do
-  IFS='|' read -r name img fmt <<< "$spec"
+  "ubuntu22|Ubuntu22|ubuntu:22.04|deb" \
+  "rhel9|RHEL9|registry.access.redhat.com/ubi9/ubi:latest|rpm" \
+  "azurelinux3|AzureLinux3|mcr.microsoft.com/azurelinux/base/core:3.0|rpm"; do
+  IFS='|' read -r name label fallback fmt <<< "$spec"
+  img=$(gh variable get "${label}_DOCKER_IMAGE" 2>/dev/null) || img="$fallback"
   pkg=$(ls "$BUILD_DIR"/*amd-smi-lib*[!tests]*.$fmt 2>/dev/null | head -1)
   [[ -z "$pkg" ]] && echo "SKIP $name: no .$fmt package" && continue
   echo "=== $name ==="

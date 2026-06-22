@@ -512,6 +512,10 @@ hipGetDriverEntryPoint
 hipGetDriverEntryPoint_spt
 hipMemPrefetchAsync_v2
 hipMemPrefetchBatchAsync
+hipMemDiscardBatchAsync
+hipDrvMemDiscardBatchAsync
+hipMemDiscardAndPrefetchBatchAsync
+hipDrvMemDiscardAndPrefetchBatchAsync
 hipMemAdvise_v2
 hipStreamGetId
 hipLibraryLoadData
@@ -519,6 +523,8 @@ hipLibraryLoadFromFile
 hipLibraryUnload
 hipLibraryGetKernel
 hipLibraryGetKernelCount
+hipLibraryGetGlobal
+hipLibraryGetManaged
 hipStreamCopyAttributes
 hipLibraryEnumerateKernels
 hipKernelGetLibrary

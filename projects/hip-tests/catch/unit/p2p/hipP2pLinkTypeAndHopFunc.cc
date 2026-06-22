@@ -15,6 +15,7 @@
 #include <dlfcn.h>
 #endif
 #include <vector>
+#include <string>
 #define MAX_SIZE 30
 #define VISIBLE_DEVICE 0
 
@@ -50,7 +51,7 @@ void getDeviceCount(int* pdevCnt) {
     write(fd[1], &devCnt, sizeof(devCnt));
     // close the write descriptor:
     close(fd[1]);
-    exit(0);
+    _exit(0);
   } else {  // failure
     *pdevCnt = 1;
     return;
@@ -83,7 +84,7 @@ bool testMaskedDevice(int actualNumGPUs) {
     close(fd[0]);
     write(fd[1], &testResult, sizeof(testResult));
     close(fd[1]);
-    exit(0);
+    _exit(0);
 
   } else if (cPid > 0) {  // parent
     close(fd[1]);
@@ -190,18 +191,22 @@ bool validateLinkType(uint32_t linktype_Hip, RSMI_IO_LINK_TYPE linktype_RocmSmi)
 bool testhipLinkTypeHopcountDevice(int numDevices) {
   bool TestPassed = true;
   // Opening and initializing rocm-smi library
-  void* lib_rocm_smi_hdl;
+  void* lib_rocm_smi_hdl = nullptr;
   rsmi_status_t (*fntopo_get_link_type)(uint32_t, uint32_t, uint64_t*, RSMI_IO_LINK_TYPE*);
   rsmi_status_t (*fntopo_init)(uint64_t);
   rsmi_status_t (*fntopo_shut_down)();
 
-  // Use ROCM_SMI_LIB_DIR from CMake instead of hardcoding to /opt/rocm
-#ifdef ROCM_SMI_LIB_DIR
-  std::string rocm_smi_path = std::string(ROCM_SMI_LIB_DIR) + "/librocm_smi64.so";
-#else
-  std::string rocm_smi_path = "librocm_smi64.so";
-#endif
-  lib_rocm_smi_hdl = dlopen(rocm_smi_path.c_str(), RTLD_LAZY);
+  lib_rocm_smi_hdl = dlopen("librocm_smi64.so", RTLD_LAZY);
+  if (lib_rocm_smi_hdl == nullptr) {
+    // Try to find in the user defined rocm path
+    if (const char *rocm_path = std::getenv("ROCM_PATH")) {
+      std::string rocm_smi_path =
+          std::string(rocm_path) + "/lib/librocm_smi64.so";
+      lib_rocm_smi_hdl = dlopen(rocm_smi_path.c_str(), RTLD_LAZY);
+    } else {
+      lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so", RTLD_LAZY);
+    }
+  }
   REQUIRE(lib_rocm_smi_hdl);
 
   void* fnsym = dlsym(lib_rocm_smi_hdl, "rsmi_topo_get_link_type");

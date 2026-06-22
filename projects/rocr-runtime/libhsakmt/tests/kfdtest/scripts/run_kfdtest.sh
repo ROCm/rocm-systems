@@ -201,6 +201,14 @@ getNodeName() {
     echo "$gpuName"
 }
 
+printGpuNodelist() {
+    local hsaNodes=$(getHsaNodes)
+    for node in $hsaNodes; do
+        local name=$(getNodeName $node)
+        echo "Node $node: $name"
+    done
+}
+
 # Run KfdTest independently. Two global variables set by command-line
 # will influence the tests as indicated below
 #   PLATFORM - If set all tests will run with this platform filter

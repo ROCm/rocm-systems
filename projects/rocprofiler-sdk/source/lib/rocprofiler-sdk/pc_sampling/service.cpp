@@ -174,6 +174,8 @@ configure_pc_sampling_service(context::context*                ctx,
         return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     }
 
+    if(ctx->dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
     // Check if this agent is already configured by another context. If so, report an error.
     // Otherwise, register the session.
     return get_global_pc_sampling_sessions().wlock([&](auto& sessions) -> rocprofiler_status_t {

@@ -43,7 +43,7 @@ struct TopologyBuildResult {
 /// convenience accessors for the SoC and GPU memory. After loading, wire
 /// the topology into a SimulationEngine:
 /// @code
-///   auto loaded = load_config("config.json", "schema.fbs");
+///   auto loaded = load_config("config.json", kEmbeddedSchema);
 ///   SimulationEngine engine(loaded.engine_config);
 ///   engine.topology().set_root(loaded.take_root());
 ///   loaded.wire_links(engine.topology());
@@ -60,15 +60,18 @@ struct KfdDeviceConfig {
   uint64_t unique_id = 0;
   std::string marketing_name;
   uint32_t drm_render_minor = 128;
+  uint32_t revision_id = 0;
+  uint32_t pci_revision_id = 0;
   uint32_t simd_count = 0;
   uint32_t max_waves_per_simd = 10;
-  uint32_t num_shader_engines = 0;
+  uint32_t num_shader_engines = 0; ///< KFD array_count: total shader arrays.
   uint32_t num_shader_arrays_per_engine = 1;
   uint32_t num_cu_per_sh = 0;
   uint32_t simd_per_cu = 4;
   uint32_t wave_front_size = 64;
   uint32_t max_slots_scratch_cu = 32;
   uint64_t local_mem_size = 0;
+  uint32_t vram_type = 6;
   uint32_t lds_size_kb = 64;
   uint32_t mem_width = 4096;
   uint32_t mem_clk_max = 1200;
@@ -82,17 +85,24 @@ struct KfdDeviceConfig {
   uint32_t num_sdma_xgmi_engines = 0;
   uint32_t num_cp_queues = 128;
   uint32_t max_engine_clk_fcompute = 2100;
+  uint32_t location_id = 0x0300;
+  uint64_t hive_id = 0;
+  uint32_t domain = 0;
   bool present = false; ///< True if device section existed in config.
 };
 
 struct LoadedConfig {
   simdojo::SimulationEngine::Config engine_config;
   TopologyBuildResult build_result;
+  std::vector<TopologyBuildResult>
+      extra_gpu_builds; ///< Additional GPU SoC trees (for num_gpus > 1).
   simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL;
-  KfdDeviceConfig device; ///< KFD device identity from vm.gpu.device.
+  KfdDeviceConfig device;               ///< KFD device identity from vm.gpu.device.
+  uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
+  std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
 
-  /// @brief Return the SoC (root component, typed).
-  SoC *soc() { return dynamic_cast<SoC *>(build_result.root.get()); }
+  /// @brief Return the SoC from the topology root.
+  SoC *soc();
 
   /// @brief Return GPU memory.
   amdgpu::GpuMemory *memory() { return build_result.memory; }
@@ -112,17 +122,17 @@ const char *arch_to_string(rj_code_arch_t arch);
 
 /// @brief Load simulation config from a JSON file.
 /// @param json_path Path to the JSON config file.
-/// @param schema_path Path to the simulation_config.fbs schema file.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @returns LoadedConfig with engine parameters and built topology.
 /// @throws std::runtime_error on file I/O, parse errors, or invalid config.
-LoadedConfig load_config(const std::string &json_path, const std::string &schema_path);
+LoadedConfig load_config(const std::string &json_path, const std::string &schema_text);
 
 /// @brief Load simulation config from a JSON string.
 /// @param json JSON configuration string.
-/// @param schema_path Path to the simulation_config.fbs schema file.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @returns LoadedConfig with engine parameters and built topology.
 /// @throws std::runtime_error on parse errors or invalid config.
-LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_path);
+LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text);
 
 } // namespace config
 } // namespace rocjitsu

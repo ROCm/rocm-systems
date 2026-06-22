@@ -23,7 +23,7 @@
  *   6. Hash verify
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>
@@ -43,10 +43,6 @@
 #ifndef NBW_SIZE
 #define NBW_SIZE (1024UL * 1024UL)
 #endif
-
-/// @brief Alignment used for O_DIRECT transfers (must be a power of two).
-#define BLOCK_ALIGN ((size_t)4096)
-static_assert(is_power_of_two(BLOCK_ALIGN), "BLOCK_ALIGN must be a power of two");
 
 int
 main(int argc, char *argv[])

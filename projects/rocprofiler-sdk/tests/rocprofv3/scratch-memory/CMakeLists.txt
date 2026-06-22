@@ -26,8 +26,7 @@ foreach(_OUTPUT_FORMAT csv json)
         TIMEOUT 45
         LABELS "integration-tests"
         PRELOAD "${PRELOAD_ENV}"
-        FIXTURES_SETUP rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT}
-        DISABLED "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+        FIXTURES_SETUP rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT})
 endforeach()
 
 rocprofiler_add_integration_validate_test(
@@ -41,5 +40,4 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-scratch-memory-tracing-csv
-                      rocprofv3-test-scratch-memory-tracing-json
-    DISABLED "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+                      rocprofv3-test-scratch-memory-tracing-json)

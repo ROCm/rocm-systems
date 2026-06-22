@@ -107,6 +107,11 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-binary
 )
 
+target_link_options(
+    rocprofiler-systems-shared-library
+    PRIVATE "LINKER:--exclude-libs=ALL"
+)
+
 set_target_properties(
     rocprofiler-systems-shared-library
     PROPERTIES

@@ -204,49 +204,82 @@ class SemaNodeKind(Enum):
     ID = '_id'
 
 
-_STATEMENT_KINDS: frozenset[SemaNodeKind] = frozenset({
-    SemaNodeKind.SEQ,
-    SemaNodeKind.ASSIGN,
-    SemaNodeKind.IF,
-    SemaNodeKind.FOR,
-    SemaNodeKind.WHILE,
-    SemaNodeKind.BREAK,
-    SemaNodeKind.CONTINUE,
-    SemaNodeKind.COMMENT,
-    SemaNodeKind.DECLARE,
-    SemaNodeKind.PRAGMA,
-    SemaNodeKind.RETURN,
-    SemaNodeKind.ADD_ASSIGN,
-    SemaNodeKind.SUB_ASSIGN,
-})
+_STATEMENT_KINDS: frozenset[SemaNodeKind] = frozenset(
+    {
+        SemaNodeKind.SEQ,
+        SemaNodeKind.ASSIGN,
+        SemaNodeKind.IF,
+        SemaNodeKind.FOR,
+        SemaNodeKind.WHILE,
+        SemaNodeKind.BREAK,
+        SemaNodeKind.CONTINUE,
+        SemaNodeKind.COMMENT,
+        SemaNodeKind.DECLARE,
+        SemaNodeKind.PRAGMA,
+        SemaNodeKind.RETURN,
+        SemaNodeKind.ADD_ASSIGN,
+        SemaNodeKind.SUB_ASSIGN,
+    }
+)
 
-_BINARY_KINDS: frozenset[SemaNodeKind] = frozenset({
-    SemaNodeKind.ADD, SemaNodeKind.SUB, SemaNodeKind.MUL,
-    SemaNodeKind.DIV, SemaNodeKind.MOD, SemaNodeKind.AND,
-    SemaNodeKind.OR, SemaNodeKind.XOR, SemaNodeKind.SHL,
-    SemaNodeKind.SHR, SemaNodeKind.LAND, SemaNodeKind.LOR,
-    SemaNodeKind.EQ, SemaNodeKind.NE, SemaNodeKind.LT,
-    SemaNodeKind.GT, SemaNodeKind.LE, SemaNodeKind.GE,
-    SemaNodeKind.UNORD_NE,
-    SemaNodeKind.POW, SemaNodeKind.FPOW, SemaNodeKind.LDEXP,
-})
+_BINARY_KINDS: frozenset[SemaNodeKind] = frozenset(
+    {
+        SemaNodeKind.ADD,
+        SemaNodeKind.SUB,
+        SemaNodeKind.MUL,
+        SemaNodeKind.DIV,
+        SemaNodeKind.MOD,
+        SemaNodeKind.AND,
+        SemaNodeKind.OR,
+        SemaNodeKind.XOR,
+        SemaNodeKind.SHL,
+        SemaNodeKind.SHR,
+        SemaNodeKind.LAND,
+        SemaNodeKind.LOR,
+        SemaNodeKind.EQ,
+        SemaNodeKind.NE,
+        SemaNodeKind.LT,
+        SemaNodeKind.GT,
+        SemaNodeKind.LE,
+        SemaNodeKind.GE,
+        SemaNodeKind.UNORD_NE,
+        SemaNodeKind.POW,
+        SemaNodeKind.FPOW,
+        SemaNodeKind.LDEXP,
+    }
+)
 
-_UNARY_KINDS: frozenset[SemaNodeKind] = frozenset({
-    SemaNodeKind.BITNEG, SemaNodeKind.BOOLNEG, SemaNodeKind.ABS,
-    SemaNodeKind.UMINUS, SemaNodeKind.UPLUS, SemaNodeKind.SIGN,
-    SemaNodeKind.SIGNEXT,
-    SemaNodeKind.CAST, SemaNodeKind.EVAL,
-    SemaNodeKind.FLOOR, SemaNodeKind.TRUNC,
-    SemaNodeKind.COS, SemaNodeKind.SIN, SemaNodeKind.SQRT,
-    SemaNodeKind.LOG2, SemaNodeKind.FRACT,
-    SemaNodeKind.EXPONENT, SemaNodeKind.MANTISSA,
-})
+_UNARY_KINDS: frozenset[SemaNodeKind] = frozenset(
+    {
+        SemaNodeKind.BITNEG,
+        SemaNodeKind.BOOLNEG,
+        SemaNodeKind.ABS,
+        SemaNodeKind.UMINUS,
+        SemaNodeKind.UPLUS,
+        SemaNodeKind.SIGN,
+        SemaNodeKind.SIGNEXT,
+        SemaNodeKind.CAST,
+        SemaNodeKind.EVAL,
+        SemaNodeKind.FLOOR,
+        SemaNodeKind.TRUNC,
+        SemaNodeKind.COS,
+        SemaNodeKind.SIN,
+        SemaNodeKind.SQRT,
+        SemaNodeKind.LOG2,
+        SemaNodeKind.FRACT,
+        SemaNodeKind.EXPONENT,
+        SemaNodeKind.MANTISSA,
+    }
+)
 
-_TERNARY_KINDS: frozenset[SemaNodeKind] = frozenset({
-    SemaNodeKind.TERNARY,
-    SemaNodeKind.ARRAYSLICE, SemaNodeKind.ARRAYSLICESIZE,
-    SemaNodeKind.FMA,
-})
+_TERNARY_KINDS: frozenset[SemaNodeKind] = frozenset(
+    {
+        SemaNodeKind.TERNARY,
+        SemaNodeKind.ARRAYSLICE,
+        SemaNodeKind.ARRAYSLICESIZE,
+        SemaNodeKind.FMA,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,40 +335,41 @@ class SemaBlock:
     @property
     def is_empty(self) -> bool:
         """True if this is a stub (empty semantics)."""
-        return (self.body.kind == SemaNodeKind.SEQ
-                and len(self.body.children) == 0)
+        return self.body.kind == SemaNodeKind.SEQ and len(self.body.children) == 0
 
 
 def validate_types(node: SemaNode) -> None:
     """Assert that statement nodes carry no result type."""
     for n in node.walk():
         if n.kind in _STATEMENT_KINDS:
-            assert n.ty is None, (
-                f"Statement node {n.kind} must have ty=None, got ty={n.ty}"
-            )
+            assert (
+                n.ty is None
+            ), f"Statement node {n.kind} must have ty=None, got ty={n.ty}"
 
 
 def validate_well_formed(node: SemaNode) -> None:
     """Assert structural well-formedness of the AST."""
     for n in node.walk():
         nc = len(n.children)
-        if n.kind in (SemaNodeKind.ASSIGN, SemaNodeKind.ADD_ASSIGN,
-                      SemaNodeKind.SUB_ASSIGN, SemaNodeKind.ARRAYDEREF):
+        if n.kind in (
+            SemaNodeKind.ASSIGN,
+            SemaNodeKind.ADD_ASSIGN,
+            SemaNodeKind.SUB_ASSIGN,
+            SemaNodeKind.ARRAYDEREF,
+        ):
             assert nc == 2, f"{n.kind} must have 2 children, got {nc}"
         elif n.kind == SemaNodeKind.IF:
             assert nc >= 2, f"IF must have >= 2 children, got {nc}"
         elif n.kind == SemaNodeKind.FOR:
-            assert nc == 4, (
-                f"FOR must have 4 children (init, cond, step, body), got {nc}"
-            )
+            assert (
+                nc == 4
+            ), f"FOR must have 4 children (init, cond, step, body), got {nc}"
         elif n.kind == SemaNodeKind.WHILE:
             assert nc == 2, f"WHILE must have 2 children (cond, body), got {nc}"
         elif n.kind == SemaNodeKind.BITCAT:
             assert nc >= 2, f"BITCAT must have >= 2 children, got {nc}"
         elif n.kind == SemaNodeKind.SIGNEXT_FROM_BIT:
-            assert nc in (1, 2), (
-                f"SIGNEXT_FROM_BIT must have 1 or 2 children, got {nc}"
-            )
+            assert nc in (1, 2), f"SIGNEXT_FROM_BIT must have 1 or 2 children, got {nc}"
         elif n.kind == SemaNodeKind.WITHIN:
             assert nc in (2, 3), f"WITHIN must have 2 or 3 children, got {nc}"
         elif n.kind in _TERNARY_KINDS:
@@ -343,9 +377,7 @@ def validate_well_formed(node: SemaNode) -> None:
         elif n.kind in _BINARY_KINDS:
             assert nc == 2, f"{n.kind} must have 2 children, got {nc}"
         elif n.kind == SemaNodeKind.RETURN:
-            assert nc == 1, (
-                f"RETURN must have 1 child (return value), got {nc}"
-            )
+            assert nc == 1, f"RETURN must have 1 child (return value), got {nc}"
         elif n.kind in _UNARY_KINDS:
             assert nc == 1, f"{n.kind} must have 1 child, got {nc}"
         elif n.kind == SemaNodeKind.LIT:
@@ -355,6 +387,4 @@ def validate_well_formed(node: SemaNode) -> None:
             assert nc == 0, f"ID must have 0 children, got {nc}"
             assert n.id_name is not None, "ID must have id_name set"
         elif n.kind == SemaNodeKind.CALL:
-            assert nc >= 1, (
-                f"CALL must have >= 1 child (callee id), got {nc}"
-            )
+            assert nc >= 1, f"CALL must have >= 1 child (callee id), got {nc}"

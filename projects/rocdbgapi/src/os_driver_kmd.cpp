@@ -2135,6 +2135,8 @@ kmd_driver_t::xfer_global_memory_partial (global_address_t address, void *read,
         return status;
       else if (status == AMD_DBGAPI_STATUS_ERROR_MEMORY_UNAVAILABLE)
         return status;
+      else if (status == AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED)
+        return status;
     }
 
   /* The memory could not be accessed using any of the known agents, this must
@@ -2294,6 +2296,8 @@ kmd_driver_t::xfer_agent_memory_partial (os_agent_id_t agent_id,
     }
   else if (status == STATUS_RETRY)
     return AMD_DBGAPI_STATUS_ERROR_MEMORY_UNAVAILABLE;
+  else if (status == STATUS_DRIVER_PROCESS_TERMINATED)
+    return AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED;
 
   return AMD_DBGAPI_STATUS_ERROR_MEMORY_ACCESS;
 

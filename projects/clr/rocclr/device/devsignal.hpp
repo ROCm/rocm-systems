@@ -51,14 +51,10 @@ class Signal {
   virtual bool IpcExport(void* handle, size_t handle_size) { return false; }
 
   // Initializes this signal from an IPC handle (alternative to Init for imported signals)
-  virtual bool IpcImport(const void* handle, size_t handle_size,
-                         const amd::Device* dev = nullptr) { return false; }
+  virtual bool IpcImport(const void* handle, size_t handle_size) { return false; }
 
   // Return the handle to the underlying amd_signal_t object
   virtual void* getHandle() { return nullptr; }
-
-  // Return a GPU-accessible handle (may differ from getHandle for IPC signals)
-  virtual void* getGpuHandle() { return getHandle(); }
 };
 
 };  // namespace amd::device

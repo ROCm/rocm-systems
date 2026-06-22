@@ -15,10 +15,12 @@
 namespace rocjitsu {
 namespace rdna3_5 {
 
-class Operand : public IsaOperand<Isa> {
+class Operand : public AmdgpuIsaOperand<Isa> {
 public:
   Operand(int size_bits, OperandType opr_type, int encoding_value);
+  Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
   std::string name() const override;
+  std::optional<uint64_t> literal64_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
   uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
   uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
@@ -28,6 +30,10 @@ public:
   void write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const override;
   uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;
   void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;
+
+private:
+  uint64_t literal64_value_ = 0;
+  bool has_literal64_ = false;
 };
 
 } // namespace rdna3_5

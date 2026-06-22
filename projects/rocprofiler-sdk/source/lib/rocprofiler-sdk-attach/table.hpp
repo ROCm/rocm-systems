@@ -26,7 +26,7 @@ namespace rocprofiler
 {
 namespace attach
 {
-constexpr size_t ROCPROFILER_ATTACH_DISPATCH_TABLE_LEGNTH = 6;
+constexpr size_t ROCPROFILER_ATTACH_DISPATCH_TABLE_LENGTH = 8;
 
 RocAttachDispatchTable*
 get_dispatch_table();

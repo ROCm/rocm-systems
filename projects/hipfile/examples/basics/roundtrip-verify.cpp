@@ -26,7 +26,7 @@
  *   6. Hash both files and compare
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>
@@ -46,10 +46,6 @@
 #ifndef RV_SIZE
 #define RV_SIZE (64UL * 1024UL)
 #endif
-
-/// @brief Alignment used for O_DIRECT transfers (must be a power of two).
-#define BLOCK_ALIGN ((size_t)4096)
-static_assert(is_power_of_two(BLOCK_ALIGN), "BLOCK_ALIGN must be a power of two");
 
 int
 main(int argc, char *argv[])
@@ -190,21 +186,11 @@ main(int argc, char *argv[])
 
     /* 6. Hash both files and compare */
     {
-        uint64_t hash_created, hash_copied;
-
-        if (hash_file_range(created_path, 0, payload_size, &hash_created))
+        uint64_t hash;
+        if (verify_files_match(created_path, copied_path, payload_size, &hash))
             goto deregister_buf;
-        if (hash_file_range(copied_path, 0, payload_size, &hash_copied))
-            goto deregister_buf;
-
-        if (hash_created != hash_copied) {
-            fprintf(stderr, "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n", created_path,
-                    hash_created, copied_path, hash_copied);
-            goto deregister_buf;
-        }
-
         printf("OK  %s == %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", created_path, copied_path, payload_size,
-               hash_created);
+               hash);
     }
 
     exit_status = EXIT_SUCCESS;

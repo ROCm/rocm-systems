@@ -7,7 +7,7 @@
 /// Tests important GEMM sizes, non-square dimensions, alpha/beta variants,
 /// and random fuzzing — all validated against a CPU golden reference.
 /// Compiled with hipcc and linked against rocblas. Requires
-/// LD_PRELOAD=librocjitsu_kmd.so and RJ_CONFIG/RJ_SCHEMA env vars.
+/// LD_PRELOAD=librocjitsu_kmd.so.
 ///
 /// Each test case is registered as a separate ctest because running multiple
 /// HIP dispatches sequentially in one process hangs due to comgr state issues.
@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   int rc = RUN_ALL_TESTS();
   (void)hipDeviceReset();
-  _exit(rc);
+  return rc;
 }
 
 // ---------------------------------------------------------------------------

@@ -12,16 +12,13 @@ Panel Config:
         unit: Unit
       metric:
         Bandwidth Utilization:
-          value: AVG(((SQC_ICACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) * (End_Timestamp
-            - Start_Timestamp))))
+          value: SUM(SQC_ICACHE_REQ * 100000) / SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp))
           unit: Percent
         Cache Hit Rate:
-          value: AVG(((SQC_ICACHE_HITS * 100) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
-            + SQC_ICACHE_MISSES_DUPLICATE)))
+          value: SUM(SQC_ICACHE_HITS * 100) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE)
           unit: Percent
         L1I-L2 Bandwidth Utilization:
-          value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu)
-            * (End_Timestamp - Start_Timestamp))))
+          value: SUM(SQC_TC_INST_REQ * 100000) / SUM(2 * $max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp))
           unit: Percent
       comparable: false
       cli_style: simple_bar
@@ -37,39 +34,37 @@ Panel Config:
         unit: Unit
       metric:
         Req:
-          avg: AVG((SQC_ICACHE_REQ / $denom))
+          avg: SUM(SQC_ICACHE_REQ) / SUM($denom)
           min: MIN((SQC_ICACHE_REQ / $denom))
           max: MAX((SQC_ICACHE_REQ / $denom))
           unit: (Requests + $normUnit)
         Hits:
-          avg: AVG((SQC_ICACHE_HITS / $denom))
+          avg: SUM(SQC_ICACHE_HITS) / SUM($denom)
           min: MIN((SQC_ICACHE_HITS / $denom))
           max: MAX((SQC_ICACHE_HITS / $denom))
           unit: (Requests + $normUnit)
         Misses - Non Duplicated:
-          avg: AVG((SQC_ICACHE_MISSES / $denom))
+          avg: SUM(SQC_ICACHE_MISSES) / SUM($denom)
           min: MIN((SQC_ICACHE_MISSES / $denom))
           max: MAX((SQC_ICACHE_MISSES / $denom))
           unit: (Requests + $normUnit)
         Misses - Duplicated:
-          avg: AVG((SQC_ICACHE_MISSES_DUPLICATE / $denom))
+          avg: SUM(SQC_ICACHE_MISSES_DUPLICATE) / SUM($denom)
           min: MIN((SQC_ICACHE_MISSES_DUPLICATE / $denom))
           max: MAX((SQC_ICACHE_MISSES_DUPLICATE / $denom))
           unit: (Requests + $normUnit)
         Cache Hit Rate:
-          avg: AVG(((100 * SQC_ICACHE_HITS) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
-            + SQC_ICACHE_MISSES_DUPLICATE)))
+          avg: SUM(100 * SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE)
           min: MIN(((100 * SQC_ICACHE_HITS) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
             + SQC_ICACHE_MISSES_DUPLICATE)))
           max: MAX(((100 * SQC_ICACHE_HITS) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
             + SQC_ICACHE_MISSES_DUPLICATE)))
           unit: Percent
         Instruction Fetch Latency:
-          avg: AVG((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
-          min: MIN((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
-          max: MAX((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
+          avg: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH)
+          min: MIN((SQ_IFETCH_LEVEL_ACCUM / SQ_IFETCH))
+          max: MAX((SQ_IFETCH_LEVEL_ACCUM / SQ_IFETCH))
           unit: Cycles
-          coll_level: SQ_IFETCH_LEVEL
   - metric_table:
       id: 1303
       title: L1I <-> L2 interface
@@ -81,7 +76,7 @@ Panel Config:
         unit: Unit
       metric:
         L1I-L2 Bandwidth:
-          avg: AVG(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+          avg: SUM(SQC_TC_INST_REQ * 64) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
           max: MAX(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
           unit: Gbps
