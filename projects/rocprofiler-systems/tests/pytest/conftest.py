@@ -23,10 +23,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 import pytest
 from pytest import StashKey
 
+from rocprofsys import environment
 from rocprofsys import (
     RocprofsysConfig,
-    TestEnvironment,
-    fundamental_system_environment,
     discover_build_config,
     GPUInfo,
     get_rocminfo,
@@ -696,7 +695,7 @@ def pytest_runtest_makereport(item, call):
             output_parts.append(f"{'='*70}")
             output_parts.append(f"Command: {cmd}")
         result_env = getattr(result, "environment", None)
-        if isinstance(result_env, TestEnvironment):
+        if isinstance(result_env, environment.TestEnvironment):
             env_lines = result_env.format_layers()
             if env_lines:
                 output_parts.append("Environment:\n\n" + "\n".join(env_lines) + "\n")
@@ -1403,7 +1402,7 @@ def _generate_rocprofsys_config_header() -> list[str]:
         )
     # Use fundamental system env to avoid verbose output
     header.extend(["-" * 70, "System Environment:"])
-    for key, value in fundamental_system_environment().items():
+    for key, value in environment.fundamental_system_environment().items():
         header.append(_row(f"{key}:", value))
     header.extend(["=" * 70, ""])
     return header
@@ -1606,72 +1605,25 @@ def library_path(rocprof_config) -> str:
 @pytest.fixture
 def flat_env() -> dict[str, str]:
     """Environment variables for flat profile tests."""
-    return {
-        "ROCPROFSYS_TRACE": "ON",
-        "ROCPROFSYS_PROFILE": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_COUT_OUTPUT": "ON",
-        "ROCPROFSYS_FLAT_PROFILE": "ON",
-        "ROCPROFSYS_TIMELINE_PROFILE": "OFF",
-        "ROCPROFSYS_COLLAPSE_PROCESSES": "ON",
-        "ROCPROFSYS_COLLAPSE_THREADS": "ON",
-        "ROCPROFSYS_SAMPLING_FREQ": "50",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
-    }
+    return environment.flat_environment()
 
 
 @pytest.fixture
 def lock_env() -> dict[str, str]:
     """Environment variables for thread lock tracing tests."""
-    return {
-        "ROCPROFSYS_USE_SAMPLING": "ON",
-        "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
-        "ROCPROFSYS_SAMPLING_FREQ": "750",
-        "ROCPROFSYS_COLLAPSE_THREADS": "ON",
-        "ROCPROFSYS_TRACE_THREAD_LOCKS": "ON",
-        "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS": "ON",
-        "ROCPROFSYS_TRACE_THREAD_RW_LOCKS": "ON",
-        "ROCPROFSYS_COUT_OUTPUT": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_TIMELINE_PROFILE": "OFF",
-        "ROCPROFSYS_LOG_LEVEL": "info",
-    }
+    return environment.lock_environment()
 
 
 @pytest.fixture
 def perfetto_env() -> dict[str, str]:
     """Environment variables for perfetto-only tests."""
-    return {
-        "ROCPROFSYS_TRACE": "ON",
-        "ROCPROFSYS_PROFILE": "OFF",
-        "ROCPROFSYS_USE_SAMPLING": "ON",
-        "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_PERFETTO_BACKEND": "inprocess",
-        "ROCPROFSYS_PERFETTO_FILL_POLICY": "ring_buffer",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
-    }
+    return environment.perfetto_environment()
 
 
 @pytest.fixture
 def timemory_env() -> dict[str, str]:
     """Environment variables for timemory-only tests."""
-    return {
-        "ROCPROFSYS_TRACE": "OFF",
-        "ROCPROFSYS_PROFILE": "ON",
-        "ROCPROFSYS_USE_SAMPLING": "ON",
-        "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
-    }
+    return environment.timemory_environment()
 
 
 # ----------------------------------------------------------------------------
