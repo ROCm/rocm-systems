@@ -204,3 +204,12 @@ contract:
   Contract_GraphKernel_ExecKernelNodeSetParams_UpdatesLaunchValue:
     <<: *level_0
     tags: [graph_kernel]
+  Contract_GraphEvent_AddEventRecordNode_RecordsEvent:
+    <<: *level_0
+    tags: [graph_event]
+  Contract_GraphEvent_AddEventWaitNode_WaitsForRecordedEvent:
+    <<: *level_0
+    tags: [graph_event]
+  Contract_GraphEvent_RecordThenWait_OrdersMemcpy:
+    <<: *level_0
+    tags: [graph_event]
