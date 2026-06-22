@@ -158,6 +158,8 @@ class TestAmdSmiCli(unittest.TestCase):
         self.openCurlyBrace = "{"
         self.closeCurlyBrace = "}"
 
+        self.monitor_args = "--power-usage --temperature --base-board-temps --gpu-board-temps --gfx --mem --encoder --decoder --ecc --vram-usage --pcie"
+
         self.perf_levels = [
             "AUTO",
             "LOW",
@@ -318,9 +320,18 @@ class TestAmdSmiCli(unittest.TestCase):
                     "gfx": None,
                     "mem": None,
                     "vram_used": None,
+                    "vram_free": None,
                     "vram_total": None,
                 }
             )
+            # Find the larger of the two amounts
+            if metric is not None:
+                total_gtt = int(metric["gpu_data"][i]["mem_usage"]["total_gtt"]["value"])
+                total_vram = int(metric["gpu_data"][i]["mem_usage"]["total_vram"]["value"])
+                if total_gtt > total_vram:
+                    vram_key = "gtt"
+                else:
+                    vram_key = "vram"
             for key in data[i]:
                 if isinstance(monitor1[i][key], str) and monitor1[i][key] == "N/A":
                     unit = "N/A"
@@ -345,9 +356,17 @@ class TestAmdSmiCli(unittest.TestCase):
                         elif key == "mem":
                             data2 = metric["gpu_data"][i]["usage"]["mm_activity"]["value"]
                         elif key == "vram_used":
-                            data2 = int(metric["gpu_data"][i]["mem_usage"]["used_gtt"]["value"])
+                            data2 = int(
+                                metric["gpu_data"][i]["mem_usage"][f"used_{vram_key}"]["value"]
+                            )
+                        elif key == "vram_free":
+                            data2 = int(
+                                metric["gpu_data"][i]["mem_usage"][f"free_{vram_key}"]["value"]
+                            )
                         elif key == "vram_total":
-                            data2 = int(metric["gpu_data"][i]["mem_usage"]["total_gtt"]["value"])
+                            data2 = int(
+                                metric["gpu_data"][i]["mem_usage"][f"total_{vram_key}"]["value"]
+                            )
                 data[i][key] = [data1, data2, abs(data1 - data2), unit]
         return data
 
@@ -379,6 +398,22 @@ class TestAmdSmiCli(unittest.TestCase):
                         successes.append(("*" * len(msg_title), msg_header))
                     successes.append((msg_title, _msg))
         return (failures, successes)
+
+    def _process(self, q, cmd):
+        # Receive timestamp
+        if self.Debug:
+            time_stamp = q.get()
+            print(f"{time_stamp} _process pid={os.getpid()} Receiving rvs")
+            time_stamp2a = time.monotonic()
+
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        time_stamp2b = time.monotonic()
+        if self.Debug:
+            print(f"{time_stamp2a} _process pid={os.getpid()} Before rvs")
+            print(f"{time_stamp2b} _process pid={os.getpid()} After rvs")
+        q.put(data)
+        q.put(time_stamp2b)
+        return
 
     def _find_args(self, cmd, match_str):
         if (
@@ -1532,7 +1567,7 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi monitor serial"
         self.common.print(msg)
 
-        cmd = f"{self.amd_smi_exe} monitor --power-usage --temperature --base-board-temps --gpu-board-temps --gfx --mem --encoder --decoder --ecc --vram-usage --pcie --json"
+        cmd = f"{self.amd_smi_exe} monitor {self.monitor_args} --json"
         (rc, data1, std_err) = self.util.RunCmdSync(cmd)
         (rc, data2, std_err) = self.util.RunCmdSync(cmd)
         cmd = f"{self.amd_smi_exe} metric --json"
@@ -1559,30 +1594,21 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi monitor parallel"
         self.common.print(msg)
 
-        def _Process(q, cmd):
-            # Receive timestamp
-            time_stamp = q.get()
-
-            (rc, data, std_err) = self.util.RunCmdSync(cmd)
-            time_stamp2 = time.monotonic()
-            q.put(data)
-            q.put(time_stamp2)
-            return
-
         # Setup queue between processes
         q = multiprocessing.Queue()
 
         # Monitor to Monitor
-        cmd = f"{self.amd_smi_exe} monitor --power-usage --temperature --base-board-temps --gpu-board-temps --gfx --mem --encoder --decoder --ecc --vram-usage --pcie --json"
-        p1 = multiprocessing.Process(target=_Process, args=(q, cmd))
+        cmd = f"{self.amd_smi_exe} monitor {self.monitor_args} --json"
+        p1 = multiprocessing.Process(target=self._process, args=(q, cmd))
         p1.start()
         # Send time_stamp
         time_stamp = time.monotonic()
-        # print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
+        if self.Debug:
+            print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
         q.put(time_stamp)
 
         # Get monitor data
-        cmd = f"{self.amd_smi_exe} monitor --power-usage --temperature --base-board-temps --gpu-board-temps --gfx --mem --encoder --decoder --ecc --vram-usage --pcie --json"
+        cmd = f"{self.amd_smi_exe} monitor {self.monitor_args} --json"
         (rc, data1, std_err) = self.util.RunCmdSync(cmd)
         time_stamp = time.monotonic()
 
@@ -1598,12 +1624,13 @@ class TestAmdSmiCli(unittest.TestCase):
         monitor_failures, monitor_successes = self._compare_monitor_metric_data("Monitor", data)
 
         # Monitor to Metric
-        cmd = f"{self.amd_smi_exe} monitor --power-usage --temperature --base-board-temps --gpu-board-temps --gfx --mem --encoder --decoder --ecc --vram-usage --pcie --json"
-        p1 = multiprocessing.Process(target=_Process, args=(q, cmd))
+        cmd = f"{self.amd_smi_exe} monitor {self.monitor_args} --json"
+        p1 = multiprocessing.Process(target=self._process, args=(q, cmd))
         p1.start()
         # Send time_stamp
         time_stamp = time.monotonic()
-        # print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
+        if self.Debug:
+            print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
         q.put(time_stamp)
 
         # Get metric data
@@ -1634,57 +1661,60 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common.print(msg)
 
         # TODO allow monitor_with_workload to be executed
-        if not self.PrintCmdsOnly:
-            if self.common.TODO_SKIP_FAIL:
-                msg = f"{self.tab}Needs Testing, Not Yet Implemented"
-                self.common.print(msg)
-                self.skipTest(msg)
-
-        def _Process(q, cmd):
-            # Receive timestamp
-            time_stamp = q.get()
-
-            (rc, data, std_err) = self.util.RunCmdSync(cmd)
-            time_stamp2 = time.monotonic()
-            q.put(data)
-            q.put(time_stamp2)
-            return
+        # if not self.PrintCmdsOnly:
+        if self.common.TODO_SKIP_FAIL:
+            msg = f"{self.tab}Needs Testing, Not Yet Implemented"
+            self.common.print(msg)
+            self.skipTest(msg)
 
         # Setup queue between processes
         q = multiprocessing.Queue()
 
         # Get baseline monitor data
-        cmd = f"{self.amd_smi_exe} monitor --power-usage --temperature --base-board-temps --gpu-board-temps --gfx --mem --encoder --decoder --ecc --vram-usage --pcie --json"
-        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
+        cmd = f"{self.amd_smi_exe} monitor {self.monitor_args} --json"
+        (rc, data_baseline, std_err) = self.util.RunCmdSync(cmd)
 
         # Monitor to Monitor
-        cmd = "stress-ng --vm 2 --vm-bytes 75% --timeout 8s"
         cmd = "rvs --json"
-        p1 = multiprocessing.Process(target=_Process, args=(q, cmd))
+        if self.Debug:
+            cmd = "stress-ng --vm 2 --vm-bytes 75% --timeout 8s"
+        p1 = multiprocessing.Process(target=self._process, args=(q, cmd))
         p1.start()
         # Send time_stamp
         time_stamp = time.monotonic()
-        # print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
         q.put(time_stamp)
+        if self.Debug:
+            print(f"{time_stamp} Producer pid={os.getpid()} Sending rvs")
 
         # Get monitor data under workload
         time.sleep(2)
-        cmd = f"{self.amd_smi_exe} monitor --power-usage --temperature --base-board-temps --gpu-board-temps --gfx --mem --encoder --decoder --ecc --vram-usage --pcie --json"
-        (rc, data2, std_err) = self.util.RunCmdSync(cmd)
-        time_stamp = time.monotonic()
+        cmd = f"{self.amd_smi_exe} monitor {self.monitor_args} --json"
+        time_stamp2a = time.monotonic()
+        (rc, data_workload, std_err) = self.util.RunCmdSync(cmd)
+        if self.Debug:
+            time_stamp2b = time.monotonic()
+            print(f"{time_stamp2a} Producer pid={os.getpid()} Before monitor")
+            print(f"{time_stamp2b} Producer pid={os.getpid()} After monitor ")
 
         # Receive process data and time_stamp
         process_data = q.get()
         if verbose == common.VERBOSITY_VERBOSE:
             print(process_data)
         process_time_stamp = q.get()
+        if self.Debug:
+            print(f"Producer pid={os.getpid()}  _process: {process_time_stamp}")
         p1.join()
 
-        monitor1 = json.loads(data1)
-        monitor2 = json.loads(data2)
-        data = self._get_monitor_metric_data(monitor1, monitor2, None)
+        monitor_baseline = json.loads(data_baseline)
+        monitor_workload = json.loads(data_workload)
+        data = self._get_monitor_metric_data(monitor_baseline, monitor_workload, None)
         monitor_failures, monitor_successes = self._compare_monitor_metric_data("Workload", data)
+        # Update lists to not have and 'total' checks
+        # Skip comparing 'total' checks since they should not be different
+        monitor_failures = [item for item in monitor_failures if "total" not in item[1]]
+        monitor_successes = [item for item in monitor_successes if "total" not in item[1]]
         # Results are opposite, want differences in values
+        # So switch failure and success criterion
         for index, cmd_data in enumerate(monitor_failures):
             if "Failure" in cmd_data[1]:
                 monitor_failures[index] = (
