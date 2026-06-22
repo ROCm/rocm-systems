@@ -24,7 +24,7 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
    .. grid-item-card:: How to
 
       * :doc:`Register a file and GPU buffer for GPU I/O <how-to/register-file-and-buffer>`
-      * :doc:`Exercise hipFile with fio <how-to/use-with-fio>`
+      * :doc:`Benchmark hipFile with fio <how-to/use-with-fio>`
       * :doc:`Use the hipFile Python API <how-to/use-python-api>`
 
    .. grid-item-card:: Tutorials
