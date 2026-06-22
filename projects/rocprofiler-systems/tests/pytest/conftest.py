@@ -143,7 +143,6 @@ def pytest_configure(config: pytest.Config) -> None:
     config.option.verbose = max(config.option.verbose, 1)  # -v
     config.option.tbstyle = "short"  # --tb=short
     config.option.no_header = True
-    config.option.show_test_output = "all"
     config.option.reportchars += "s"  # -rs
 
     if config.getoption("--ctest-mode", default="off") == "cleanup":
@@ -565,7 +564,7 @@ def pytest_collection_finish(session):
 @pytest.hookimpl(hookwrapper=True)  # Allows yield
 def pytest_runtest_makereport(item, call):
     """
-    Appends a header to the report when main/subtest fails of the form:
+    Attaches a "Runner Output" section to the call-phase report of the form:
 
     =========================================
     Command: <command>
@@ -581,7 +580,7 @@ def pytest_runtest_makereport(item, call):
 
     setattr(item, f"rep_{rep.when}", rep)
 
-    if rep.when != "call" or item.stash.get(_output_printed_key, False) or not rep.failed:
+    if rep.when != "call" or item.stash.get(_output_printed_key, False):
         return
 
     item.stash[_output_printed_key] = True
@@ -613,6 +612,31 @@ def pytest_runtest_makereport(item, call):
         return
 
     rep.sections.append(("Runner Output", "\n".join(report_output) + "\n\n"))
+
+
+def pytest_runtest_logreport(report):
+    """Print the runner output inline for passing tests in CTest run mode.
+
+    Failing tests already have their "Runner Output" section printed by pytest's
+    failure summary.
+    """
+    config = getattr(pytest, "_config_ref", None)
+    if config is None:
+        return
+    if config.getoption("--ctest-mode", default="off") != "run":
+        return
+    if report.when != "call" or not report.passed:
+        return
+
+    terminal = config.pluginmanager.get_plugin("terminalreporter")
+    if terminal is None:
+        return
+
+    for section_name, section_content in report.sections:
+        if section_name == "Runner Output":
+            terminal.write_line(f"\n--- {section_name} ---")
+            for line in section_content.splitlines():
+                terminal.write_line(line)
 
 
 # ----------------------------------------------------------------------------
