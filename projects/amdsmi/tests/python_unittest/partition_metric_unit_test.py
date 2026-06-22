@@ -230,6 +230,8 @@ class TestAmdSmiPartitionMetricTransforms(unittest.TestCase):
             "current_dclk0s": [400, 410],
             "current_socclks": [900, 910],
             "current_gfxclks": [1500, 1600],
+            "current_uclk_aid": [1200, 1210],
+            "current_socclks_mid": [1300, 1310],
             "gfxclk_lock_status": 0b10,  # XCP_0 unlocked, XCP_1 locked
         }
         result = self._invoke(
@@ -258,6 +260,13 @@ class TestAmdSmiPartitionMetricTransforms(unittest.TestCase):
         self.assertEqual(clocks["AID_1"]["vclk"]["value"], 810)
         self.assertEqual(clocks["AID_0"]["vclk_min_limit"]["value"], 100)
         self.assertEqual(clocks["AID_0"]["vclk_max_limit"]["value"], 2000)
+        self.assertEqual(clocks["AID_0"]["dclk"]["value"], 400)
+        self.assertEqual(clocks["AID_0"]["dclk_min_limit"]["value"], 100)
+        self.assertEqual(clocks["AID_0"]["socclk"]["value"], 900)
+        self.assertEqual(clocks["AID_0"]["socclk_max_limit"]["value"], 2000)
+        # Main-population per-AID memory clocks and per-MID SOC clocks.
+        self.assertEqual(clocks["uclk_aid"]["AID_0"]["value"], 1200)
+        self.assertEqual(clocks["socclks_mid"]["MID_0"]["value"], 1300)
         self.assertEqual(clocks["XCP_0"]["gfx_clk"]["value"], 1500)
         self.assertEqual(clocks["XCP_0"]["gfx_clk_locked"], "DISABLED")
         self.assertEqual(clocks["XCP_1"]["gfx_clk_locked"], "ENABLED")
@@ -298,6 +307,44 @@ class TestAmdSmiPartitionMetricTransforms(unittest.TestCase):
         self.assertNotIn("gfx_clk", clocks["XCP_1"])
         self.assertNotIn("gfx_min_clk", clocks["XCP_1"])
         self.assertNotIn("gfx_max_clk", clocks["XCP_1"])
+        self.assertEqual(clocks["XCP_1"]["gfx_clk_locked"], "ENABLED")
+
+    def test_clock_partition_gfx_clk_list_of_engines(self):
+        # A per-XCP gfx entry may be a list of per-engine clocks: the first
+        # valid value is taken. An all-N/A entry yields no value and so no
+        # limits, only its lock state.
+        partition_metrics = {
+            "current_gfxclks": [[1500, 1600], ["N/A", "N/A"]],
+            "gfxclk_lock_status": 0b10,  # XCP_0 unlocked, XCP_1 locked
+        }
+        result = self._invoke(
+            "clock",
+            partition=True,
+            gpu_metric={},
+            partition_metrics=partition_metrics,
+            num_partition=2,
+            interface_mocks={
+                "amdsmi_get_clock_info": {
+                    "min_clk": 100,
+                    "max_clk": 2000,
+                    "clk": 1500,
+                    "sleep_clk": 0,
+                    "clk_deep_sleep": 0,
+                },
+                "amdsmi_get_clk_freq": {
+                    "num_supported": 1,
+                    "current": 0,
+                    "frequency": [1000000000],
+                },
+            },
+        )
+        clocks = result["clock"]
+        # XCP_0 takes the first valid engine clock and attaches limits.
+        self.assertEqual(clocks["XCP_0"]["gfx_clk"]["value"], 1500)
+        self.assertEqual(clocks["XCP_0"]["gfx_min_clk"]["value"], 100)
+        # XCP_1's engines are all N/A: no value, no phantom limits, lock kept.
+        self.assertNotIn("gfx_clk", clocks["XCP_1"])
+        self.assertNotIn("gfx_min_clk", clocks["XCP_1"])
         self.assertEqual(clocks["XCP_1"]["gfx_clk_locked"], "ENABLED")
 
     # ----- temperature -----------------------------------------------------
