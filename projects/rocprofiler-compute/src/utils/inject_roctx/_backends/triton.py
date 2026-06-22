@@ -17,9 +17,8 @@ from utils.inject_roctx.core import (
     ensure_python_tier,
     resolve_user_caller_location,
 )
+from utils.inject_roctx.registry import register
 from utils.logger import console_log, console_warning
-
-from ..registry import register
 
 _BACKEND_NAME = "triton"
 

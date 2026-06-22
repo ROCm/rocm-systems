@@ -132,7 +132,7 @@ def resolve_user_caller_location() -> str:
     frame = inspect.currentframe()
     while frame is not None:
         fn_path = frame.f_code.co_filename
-        in_package = fn_path.startswith(_PACKAGE_ROOT) or fn_path == __file__
+        in_package = fn_path.startswith(_PACKAGE_ROOT)
         in_framework = any(fn_path.startswith(root) for root in _STATE.framework_roots)
         if not in_package and not in_framework:
             return f"{Path(fn_path).name}:{frame.f_lineno}"
@@ -162,18 +162,8 @@ def _push_scope(marker: str, context: str, backend: str = "") -> None:
 
     _STATE.range_push(compose_marker(marker, context, backend))
 
-    snapshot_len = len(marker_stack)
-    try:
-        marker_stack.append(marker)
-        context_stack.append(context)
-    except Exception:
-        del marker_stack[snapshot_len:]
-        del context_stack[snapshot_len:]
-        try:
-            _STATE.range_pop()
-        except Exception:
-            pass
-        raise
+    marker_stack.append(marker)
+    context_stack.append(context)
 
 
 def _pop_scope() -> None:

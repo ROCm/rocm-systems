@@ -24,14 +24,8 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from utils.inject_roctx import core
-from utils.inject_roctx.core import (
-    get_context_stack,
-    get_marker_stack,
-    resolve_user_caller_location,
-)
+from utils.inject_roctx.registry import register
 from utils.logger import console_log, console_warning
-
-from ..registry import register
 
 _BACKEND_NAME = "torch"
 
@@ -158,8 +152,8 @@ def _push_scope(marker: str, context: str, backend: str = "") -> None:
     """Push a scope, routing through the native C++ RecordFunction tier when
     active and otherwise emitting on the Python tier.
     """
-    marker_stack = get_marker_stack()
-    context_stack = get_context_stack()
+    marker_stack = core.get_marker_stack()
+    context_stack = core.get_context_stack()
     tier_stack = _get_tier_stack()
 
     used_native = False
@@ -175,30 +169,15 @@ def _push_scope(marker: str, context: str, backend: str = "") -> None:
         range_push, _ = core.get_python_tier_io()
         range_push(full)
 
-    snapshot_len = len(tier_stack)
-    try:
-        tier_stack.append(used_native)
-        marker_stack.append(marker)
-        context_stack.append(context)
-    except Exception:
-        del tier_stack[snapshot_len:]
-        del marker_stack[snapshot_len:]
-        del context_stack[snapshot_len:]
-        try:
-            if used_native and _STATE.native_hook is not None:
-                _STATE.native_hook.pop()
-            else:
-                _, range_pop = core.get_python_tier_io()
-                range_pop()
-        except Exception:
-            pass
-        raise
+    tier_stack.append(used_native)
+    marker_stack.append(marker)
+    context_stack.append(context)
 
 
 def _pop_scope() -> None:
     """Pop a scope, routing to the tier that handled its push."""
-    marker_stack = get_marker_stack()
-    context_stack = get_context_stack()
+    marker_stack = core.get_marker_stack()
+    context_stack = core.get_context_stack()
     tier_stack = _get_tier_stack()
 
     # Unmatched pop: no-op.
@@ -239,7 +218,7 @@ def roctx_wrapper(
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> object:
         call_counter["count"] += 1
-        location = resolve_user_caller_location()
+        location = core.resolve_user_caller_location()
         _push_scope(func_name, f"#{call_counter['count']}@{location}", backend=backend)
         try:
             return func(*args, **kwargs)
@@ -260,7 +239,7 @@ def _marker_only_init_wrapper(name: str, backend: str = "") -> Callable[..., Any
 
     def marker_only_init(self: object, *args: Any, **kwargs: Any) -> None:
         call_counter["count"] += 1
-        location = resolve_user_caller_location()
+        location = core.resolve_user_caller_location()
         _push_scope(name, f"#{call_counter['count']}@{location}", backend=backend)
         try:
             return object.__init__(self)
@@ -558,7 +537,7 @@ def patch_compile_callable() -> None:
         *args: Any,
         **kwargs: Any,
     ) -> object:
-        location = resolve_user_caller_location()
+        location = core.resolve_user_caller_location()
         _push_scope("torch.compile", f"#1@{location}", backend=_BACKEND_NAME)
         try:
             compiled = original_compile(model_or_fn, *args, **kwargs)
@@ -572,7 +551,7 @@ def patch_compile_callable() -> None:
 
         @wraps(compiled)
         def invocation_wrapper(*c_args: Any, **c_kwargs: Any) -> object:
-            loc = resolve_user_caller_location()
+            loc = core.resolve_user_caller_location()
             _push_scope(f"torch.compile.{fn_label}", f"#1@{loc}", backend=_BACKEND_NAME)
             try:
                 return compiled(*c_args, **c_kwargs)
@@ -672,9 +651,9 @@ def install_dispatcher_hook() -> str:
 
     def start_disp(op_name: str) -> None:
         idx = next_dispatcher_index(op_name)
-        location = resolve_user_caller_location()
-        marker_stack = get_marker_stack()
-        context_stack = get_context_stack()
+        location = core.resolve_user_caller_location()
+        marker_stack = core.get_marker_stack()
+        context_stack = core.get_context_stack()
         # Mirror the _push_scope wire format, including the backend suffix.
         full_marker = (
             "/".join([*marker_stack, op_name])
@@ -687,8 +666,8 @@ def install_dispatcher_hook() -> str:
         context_stack.append(f"#{idx}@{location}")
 
     def end_disp() -> None:
-        marker_stack = get_marker_stack()
-        context_stack = get_context_stack()
+        marker_stack = core.get_marker_stack()
+        context_stack = core.get_context_stack()
         try:
             rangePop()
         finally:
@@ -752,7 +731,7 @@ def install_tensor_backward_wrapper() -> None:
         **kwargs: Any,
     ) -> object:
         backward_counter["count"] += 1
-        location = resolve_user_caller_location()
+        location = core.resolve_user_caller_location()
         _push_scope(
             "torch.Tensor.backward",
             f"#{backward_counter['count']}@{location}",
@@ -831,7 +810,7 @@ def inject_roctx_into_optimizer() -> None:
             *args: Any,
             **kwargs: Any,
         ) -> object:
-            location = resolve_user_caller_location()
+            location = core.resolve_user_caller_location()
             if not hasattr(self, "_roctx_step_call_count"):
                 self._roctx_step_call_count = 0
             self._roctx_step_call_count += 1
@@ -976,7 +955,7 @@ def install_function_apply_wrappers() -> bool:
             return
 
         def wrapped_apply(*args: Any, **kwargs: Any) -> object:
-            location = resolve_user_caller_location()
+            location = core.resolve_user_caller_location()
             _push_scope(
                 "torch.autograd.Function.apply",
                 f"#1@{location}",
@@ -1145,7 +1124,7 @@ def inject_roctx_into_model() -> None:
         if not hasattr(self, "_roctx_call_count"):
             self._roctx_call_count = 0
         self._roctx_call_count += 1
-        location = resolve_user_caller_location()
+        location = core.resolve_user_caller_location()
         _push_scope(
             f"nn.Module.{class_name}.forward",
             f"#{self._roctx_call_count}@{location}",
