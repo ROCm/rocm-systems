@@ -579,6 +579,22 @@ class UBR_MultiSegment : public RegistrationTestBase
 protected:
     using T = RegTestConfig::DefaultType;
 
+    // Multi-segment registration currently relies on dmabuf support from the
+    // runtime/HSA layer for the inter-node (NET/GIN) path. Until that lands,
+    // restrict every UBR_MultiSegment test to a single node so the multi-node
+    // tests are not exercised.
+    void SetUp() override
+    {
+        RegistrationTestBase::SetUp();
+        if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) {
+            return;
+        }
+        if (MPITestConstants::detectNodeCount() != 1) {
+            GTEST_SKIP() << "UBR_MultiSegment is limited to single node until "
+                            "dmabuf support is available from the HIP/HSA layer";
+        }
+    }
+
     struct MultiSegmentBuffer
     {
         hipDeviceptr_t                                vaBase      = 0;
@@ -1079,17 +1095,13 @@ TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
  * (symmetric_sched.cc).
  *
  */
- TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
- {
-     const int nodeCount = MPITestConstants::detectNodeCount();
-     if (!validateTestPrerequisites(/*min_processes=*/2)) {
-         GTEST_SKIP() << "Requires 2+ ranks";
-     }
-     if (nodeCount != 1) {
-         GTEST_SKIP() << "LSA-only elastic buffer test targets a single node";
-     }
- 
-     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
+{
+    if (!validateTestPrerequisites(/*min_processes=*/2)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
  
      ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
      ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
@@ -1160,16 +1172,12 @@ TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
   * rejection happens in ncclCommWindowRegister before any collective bootstrap,
   * so all ranks fail symmetrically.
   */
- TEST_F(UBR_MultiSegment, Symmetric_Elastic_Gating)
- {
-     const int nodeCount = MPITestConstants::detectNodeCount();
-     if (!validateTestPrerequisites(/*min_processes=*/2)) {
-         GTEST_SKIP() << "Requires 2+ ranks";
-     }
-     if (nodeCount != 1) {
-         GTEST_SKIP() << "Single-node elastic gating test";
-     }
-     if (isElasticBufferRegisterEnabled()) {
+TEST_F(UBR_MultiSegment, Symmetric_Elastic_Gating)
+{
+    if (!validateTestPrerequisites(/*min_processes=*/2)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    if (isElasticBufferRegisterEnabled()) {
          GTEST_SKIP() << "Run with NCCL_ELASTIC_BUFFER_REGISTER=0 to exercise the rejection path";
      }
  
