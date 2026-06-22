@@ -41,6 +41,8 @@
 #define LOG_TRACE std::cout << std::endl
 #define LOG_INFO std::cout << std::endl
 
+#define CHECK_PTR(_x) ROCP_FATAL_IF(_x == nullptr) << "Called after finalize()";
+
 namespace rocprofiler
 {
 namespace tool
@@ -49,35 +51,19 @@ namespace att_no_intercept
 {
 namespace
 {
-using agent_state_map_t    = std::unordered_map<uint64_t, std::unique_ptr<agent_state>>;
-using pending_symbol_map_t = std::unordered_map<uint64_t, std::vector<kernel_symbol_record>>;
+using agent_state_map_t    = std::unordered_map<uint64_t, std::shared_ptr<agent_state>>;
 
-std::mutex&
-manager_mutex()
-{
-    static auto* _v = new std::mutex{};
-    return *_v;
-}
+std::mutex manager_mutex{};
 
-agent_state_map_t&
+// Never used after global destructor
+std::unordered_map<uint64_t, std::shared_ptr<agent_state>> code_objects{};
+
+agent_state_map_t*&
 agent_states()
 {
     static auto* _v = new agent_state_map_t{};
-    return *_v;
-}
-
-std::unordered_map<uint64_t, agent_state*>&
-code_object_agents()
-{
-    static auto* _v = new std::unordered_map<uint64_t, agent_state*>{};
-    return *_v;
-}
-
-pending_symbol_map_t&
-pending_symbols()
-{
-    static auto* _v = new pending_symbol_map_t{};
-    return *_v;
+    CHECK_PTR(_v);
+    return _v;
 }
 
 shader_data_forwarder_t&
@@ -198,17 +184,6 @@ register_kernel_symbol_locked(agent_state& state, const kernel_symbol_record& sy
     rebuild_kernel_ranges_locked(state);
 }
 
-kernel_symbol_record
-make_symbol_record(
-    const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& data)
-{
-    return kernel_symbol_record{data.kernel_id,
-                                data.code_object_id,
-                                (data.kernel_name != nullptr) ? data.kernel_name : "",
-                                data.kernel_address.handle,
-                                data.kernel_code_entry_byte_offset};
-}
-
 void
 shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                      rocprofiler_user_data_t                userdata)
@@ -222,22 +197,12 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
 void
 start_agent_context(agent_state& state)
 {
-    auto start_context = false;
-    {
-        auto lock = std::unique_lock{state.mutex};
-        if(!state.started && !state.finalized)
-        {
-            state.started = true;
-            start_context = true;
-        }
-    }
-
-    if(start_context)
-    {
-        LOG_INFO << fmt::format(
-            "starting ATT no-intercept context for agent {} ({})", state.id.handle, state.name);
-        check_status(rocprofiler_start_context(state.context), "ATT no-intercept context start");
-    }
+    auto lock = std::unique_lock{state.mutex};
+    if(state.started || state.finalized) return;
+    
+    state.started = true;
+    LOG_INFO << fmt::format("starting ATT no-intercept context for agent {}", state.name);
+    check_status(rocprofiler_start_context(state.context), "ATT no-intercept context start");
 }
 
 void
@@ -280,15 +245,15 @@ configure(std::vector<agent_config> agents,
     ROCP_FATAL_IF(forwarder == nullptr)
         << "ATT no-intercept setup requires a shader-data forwarding callback";
 
-    auto lock               = std::unique_lock{manager_mutex()};
+    auto lock               = std::unique_lock{manager_mutex};
     shader_data_forwarder() = forwarder;
     kernel_target_filter()  = filter;
 
     for(auto& agent : agents)
     {
-        if(agent_states().count(agent.id.handle) != 0) continue;
+        if(agent_states()->count(agent.id.handle) != 0) continue;
 
-        auto state                 = std::make_unique<agent_state>();
+        auto state                 = std::make_shared<agent_state>();
         state->id                  = agent.id;
         state->gpu_index           = agent.gpu_index;
         state->name                = std::move(agent.name);
@@ -312,7 +277,7 @@ configure(std::vector<agent_config> agents,
                      "ATT no-intercept thread-trace service configure");
 
         auto* state_ptr = state.get();
-        agent_states().emplace(agent.id.handle, std::move(state));
+        agent_states()->emplace(agent.id.handle, std::move(state));
         LOG_INFO << fmt::format("configured ATT no-intercept context for agent {} ({})",
                                  state_ptr->id.handle,
                                  state_ptr->name);
@@ -323,22 +288,17 @@ void
 code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& data)
 {
     std::vector<kernel_symbol_record> symbols = {};
-    agent_state*                      state   = nullptr;
+    std::shared_ptr<agent_state>      state   = nullptr;
     {
-        auto lock = std::unique_lock{manager_mutex()};
-        auto itr  = agent_states().find(data.agent_id.handle);
-        if(itr == agent_states().end()) return;
+        auto lock = std::unique_lock{manager_mutex};
+        auto itr  = agent_states()->find(data.agent_id.handle);
+        if(itr == agent_states()->end()) return;
 
-        state                                     = itr->second.get();
-        code_object_agents()[data.code_object_id] = state;
-
-        auto pending_itr = pending_symbols().find(data.code_object_id);
-        if(pending_itr != pending_symbols().end())
-        {
-            symbols = std::move(pending_itr->second);
-            pending_symbols().erase(pending_itr);
-        }
+        state                             = itr->second;
+        code_objects[data.code_object_id] = state;
     }
+
+    if (state == nullptr) return;
 
     {
         auto lock                                = std::unique_lock{state->mutex};
@@ -362,18 +322,23 @@ void
 kernel_symbol_load(
     const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& data)
 {
-    auto         symbol = make_symbol_record(data);
-    agent_state* state  = nullptr;
+    auto symbol = kernel_symbol_record{data.kernel_id,
+                                data.code_object_id,
+                                (data.kernel_name != nullptr) ? data.kernel_name : "",
+                                data.kernel_address.handle,
+                                data.kernel_code_entry_byte_offset};
+
+    std::shared_ptr<agent_state> state  = nullptr;
     {
-        auto lock = std::unique_lock{manager_mutex()};
-        if(auto itr = code_object_agents().find(data.code_object_id);
-           itr != code_object_agents().end())
+        auto lock = std::unique_lock{manager_mutex};
+        if(auto itr = code_objects.find(data.code_object_id);
+           itr != code_objects.end())
         {
             state = itr->second;
         }
         else
         {
-            pending_symbols()[data.code_object_id].emplace_back(symbol);
+            ROCP_WARNING << "Unknown kernel symbol: " << data.kernel_id;
             return;
         }
     }
@@ -385,40 +350,17 @@ kernel_symbol_load(
 void
 finalize()
 {
-    std::vector<agent_state*> states = {};
+    auto lock = std::unique_lock{manager_mutex};
+
+    for(auto& itr : *agent_states())
     {
-        auto lock = std::unique_lock{manager_mutex()};
-        states.reserve(agent_states().size());
-        for(auto& itr : agent_states())
-            states.emplace_back(itr.second.get());
+        auto& state = *itr.second;
+        stop_agent_context(state);
+        backend_destroy(state);
     }
 
-    for(auto* state : states)
-    {
-        if(state == nullptr) continue;
-        if(state->backend == nullptr) continue;
-
-        stop_agent_context(*state);
-
-        LOG_INFO << fmt::format(
-            "ATT no-intercept agent {} ({}) stats: chunks={}, bytes={}, dispatches={}, "
-            "targets={}, cuts={}, cross_chunk_skips={}, unknown_dispatches={}, scan_failures={}, "
-            "cut_failures={}, buffer_full={}",
-            state->id.handle,
-            state->name,
-            state->stats.chunks_scanned.load(),
-            state->stats.bytes_scanned.load(),
-            state->stats.dispatches_seen.load(),
-            state->stats.target_dispatches.load(),
-            state->stats.cuts_built.load(),
-            state->stats.cross_chunk_skips.load(),
-            state->stats.unknown_dispatches.load(),
-            state->stats.quick_scan_failures.load(),
-            state->stats.cut_build_failures.load(),
-            state->stats.buffer_full_events.load());
-
-        backend_destroy(*state);
-    }
+    delete agent_states();
+    agent_states() = nullptr;
 }
 
 #if !defined(ROCPROFILER_ATT_QUICK_SCAN_ENABLED) || ROCPROFILER_ATT_QUICK_SCAN_ENABLED == 0

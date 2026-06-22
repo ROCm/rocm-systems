@@ -244,9 +244,19 @@ producer_loop(
         buffer.cv.notify_one();
     };
 
+    auto submit_wait_timeout = [&] () {
+        if (signal_wait(submit_signal.sig, 1 << 28)) return true;
+
+        worker_flag.store(WORKER_FLAG_ERROR);
+        ROCP_ERROR << "Submit timeout!";
+        return false;
+    };
+
     auto stop_trace = [&]() {
         ROCP_INFO << "Stopping the trace";
-        att_queue_submit_and_wait_last(queue, parameters.control_packet->after_krn_pkt);
+        if (!submit_wait_timeout()) return false;
+        att_queue_submit(queue, &parameters.control_packet->after_krn_pkt.at(0), &submit_signal.sig);
+        return submit_wait_timeout();
     };
 
     // Drain remaining ATT data after a stop; waits for a free slot to land it in.
@@ -285,11 +295,7 @@ producer_loop(
 
         // PHASE 1: Poll SQTT buffer status
         att_queue_submit(queue, &buffer_packet.query_status, &submit_signal.sig);
-        if(!signal_wait(submit_signal.sig, 1 << 30))
-        {
-            worker_flag.store(WORKER_FLAG_ERROR);
-            continue;
-        }
+        if(!submit_wait_timeout()) break;
 
         if(auto status = buffer_packet.query_buffer_status())
         {
@@ -326,14 +332,11 @@ producer_loop(
             // The status_query test verifies we immediately poll again after consuming a
             // buffer, so skip the backoff when a flip just occurred.
             do_sleep = false;
-            signal_wait(submit_signal.sig);
+            submit_wait_timeout();
         }
     }
-    if(worker_flag.load() != WORKER_FLAG_ERROR)
-    {
-        stop_trace();
-        iterate_trace();
-    }
+
+    if(worker_flag.load() != WORKER_FLAG_ERROR && stop_trace()) iterate_trace();
 
     // Signal all consumers to exit. Setting `stopping` under each slot's
     // mutex ensures consumers about to enter cv.wait() observe it; the

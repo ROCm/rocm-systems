@@ -88,20 +88,6 @@ struct kernel_symbol_range
     uint64_t                end            = 0;
 };
 
-struct agent_stats
-{
-    std::atomic<uint64_t> chunks_scanned      = {0};
-    std::atomic<uint64_t> bytes_scanned       = {0};
-    std::atomic<uint64_t> dispatches_seen     = {0};
-    std::atomic<uint64_t> unknown_dispatches  = {0};
-    std::atomic<uint64_t> target_dispatches   = {0};
-    std::atomic<uint64_t> cross_chunk_skips   = {0};
-    std::atomic<uint64_t> cuts_built          = {0};
-    std::atomic<uint64_t> cut_build_failures  = {0};
-    std::atomic<uint64_t> quick_scan_failures = {0};
-    std::atomic<uint64_t> buffer_full_events  = {0};
-};
-
 struct agent_state
 {
     rocprofiler_agent_id_t                            id                  = {};
@@ -122,7 +108,6 @@ struct agent_state
     std::unordered_map<uint64_t, std::vector<kernel_symbol_range>> kernel_ranges_by_code_object =
         {};
     std::unordered_map<uint64_t, code_object_record> code_objects = {};
-    agent_stats                                      stats        = {};
 };
 
 bool
