@@ -161,8 +161,6 @@ TEST(Memory, DMABufExportImportGPUtoAIE) {
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-#if 0
-
 TEST(Memory, DMABufExportImportAIEtoGPU) {
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
@@ -216,8 +214,6 @@ TEST(Memory, DMABufExportImportAIEtoGPU) {
   EXPECT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
-
-#endif
 
 TEST(Memory, MemoryLock) {
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
