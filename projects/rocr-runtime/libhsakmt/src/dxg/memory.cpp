@@ -1202,9 +1202,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HSAuint32 NodeId,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HSAuint32 NodeId,
-              HsaMemoryObjectHandle Handle,
-              HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
+              HSAuint64 offset, HSAuint64 size, HSAuint64 addr, HSAuint32 NodeId)
 {
 	CHECK_DXG_OPEN();
   (void)NodeId;

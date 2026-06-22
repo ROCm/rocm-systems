@@ -886,9 +886,9 @@ hsa_status_t XdnaDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* h
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::Map(uint32_t node_id, const core::DriverMemoryHandle& handle, void *mem,
+hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void *mem,
                              size_t offset, size_t size,
-                             hsa_access_permission_t perms) {
+                             hsa_access_permission_t perms, uint32_t node_id) {
   (void)node_id;
   // Get fd associated with the handle.
   drm_prime_handle params = {};
@@ -910,8 +910,8 @@ hsa_status_t XdnaDriver::Map(uint32_t node_id, const core::DriverMemoryHandle& h
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::Unmap(uint32_t node_id, const core::DriverMemoryHandle& handle, void *mem,
-                               size_t offset, size_t size) {
+hsa_status_t XdnaDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
+                               size_t offset, size_t size, uint32_t node_id) {
   (void)node_id;
   if (munmap(mem, size) != 0) {
     return HSA_STATUS_ERROR;

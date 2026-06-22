@@ -1648,8 +1648,8 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       return errCleanup(bo);
     }
     HSAuint32 gpu_node_id = allocation_map_[importAddress].thunk_node_id;
-    status = HSAKMT_CALL(hsaKmtMemoryVaMap(gpu_node_id, bo, 0, static_cast<HSAuint64>(importSize),
-                                           reinterpret_cast<HSAuint64>(cpuPtr), HSA_MEMORY_ACCESS_RW));
+    status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
+                                           reinterpret_cast<HSAuint64>(cpuPtr), HSA_MEMORY_ACCESS_RW, gpu_node_id));
     if (status != HSAKMT_STATUS_SUCCESS) {
       return errCleanup(bo);
     }
@@ -1696,9 +1696,9 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       if (it->second.thunk_bo) {
         HSAuint32 gpu_node_id = it->second.thunk_node_id;
-        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(gpu_node_id, it->second.thunk_bo, 0,
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(it->second.thunk_bo, 0,
                                                                static_cast<HSAuint64>(it->second.size),
-                                                               reinterpret_cast<HSAuint64>(ptr)));
+                                                               reinterpret_cast<HSAuint64>(ptr), gpu_node_id));
         if (status != HSAKMT_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
@@ -3982,8 +3982,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
       return HSA_STATUS_ERROR;
     }
   } else {
-    hsa_status_t status = targetAgent->driver().Map(targetAgent->node_id(), 
-        driver_handle, va, mappedHandle->offset, size, perms);
+    hsa_status_t status = targetAgent->driver().Map(driver_handle, va, mappedHandle->offset, size, perms, targetAgent->node_id());
     if (status != HSA_STATUS_SUCCESS) return status;
   }
   permissions = perms;
@@ -4003,8 +4002,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
       permissions = perms;
     }
   } else {
-    return targetAgent->driver().Unmap(targetAgent->node_id(),
-        driver_handle, va, mappedHandle->offset, mappedHandle->size);
+    return targetAgent->driver().Unmap(driver_handle, va, mappedHandle->offset, mappedHandle->size, targetAgent->node_id());
   }
   return HSA_STATUS_SUCCESS;
 }

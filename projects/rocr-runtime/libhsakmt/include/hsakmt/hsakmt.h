@@ -1376,22 +1376,22 @@ hsaKmtHandleExport(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtMemoryVaMap(
-    HSAuint32 NodeId,
     HsaMemoryObjectHandle Handle,
     HSAuint64 offset,
     HSAuint64 size,
     HSAuint64 addr,
-    HsaMemoryMapFlags flags
+    HsaMemoryMapFlags flags,
+    HSAuint32 NodeId
 );
 
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtMemoryVaUnmap(
-    HSAuint32 NodeId,
     HsaMemoryObjectHandle Handle,
     HSAuint64 offset,
     HSAuint64 size,
-    HSAuint64 addr
+    HSAuint64 addr,
+    HSAuint32 NodeId
 );
 
 HSAKMT_STATUS

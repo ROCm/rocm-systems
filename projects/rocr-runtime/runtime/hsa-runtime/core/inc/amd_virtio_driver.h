@@ -108,9 +108,9 @@ class KfdVirtioDriver final : public core::Driver {
                                   core::ShareType type, void* import_handle,
                                   void* mem = nullptr) override;
   hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) override;
-  hsa_status_t Map(uint32_t node_id, const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
-                   hsa_access_permission_t perms) override;
-  hsa_status_t Unmap(uint32_t node_id, const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size) override;
+  hsa_status_t Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
+                   hsa_access_permission_t perms, uint32_t node_id) override;
+  hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size, uint32_t node_id) override;
   hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
                                      core::DriverMemoryHandle* handle, uint64_t* offset) override;
   hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) override;

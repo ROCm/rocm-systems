@@ -1101,10 +1101,9 @@ HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags) {
   }
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HSAuint32 NodeId,
-						HsaMemoryObjectHandle Handle,
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 						HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
-						HsaMemoryMapFlags flags)
+						HsaMemoryMapFlags flags, HSAuint32 NodeId)
 {
 	CHECK_KFD_OPEN();
 	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
@@ -1160,9 +1159,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HSAuint32 NodeId,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HSAuint32 NodeId,
-						HsaMemoryObjectHandle Handle,
-						HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
+						HSAuint64 offset, HSAuint64 size, HSAuint64 addr, HSAuint32 NodeId)
 {
 	CHECK_KFD_OPEN();
 	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);

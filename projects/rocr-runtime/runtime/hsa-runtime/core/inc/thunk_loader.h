@@ -363,17 +363,17 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleExport))(const HsaHandleExportDesc* desc, \
                                       HsaMemoryExportResult* res, \
                                       HsaHandleExportFlags* flags);
-    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaMap))(HSAuint32 NodeId, \
-                                      HsaMemoryObjectHandle Handle, \
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaMap))(HsaMemoryObjectHandle Handle, \
                                       HSAuint64 offset, \
                                       HSAuint64 size, \
                                       HSAuint64 addr, \
-                                      HsaMemoryMapFlags flags);
-    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaUnmap))(HSAuint32 NodeId, \
-                                      HsaMemoryObjectHandle Handle, \
+                                      HsaMemoryMapFlags flags, \
+                                      HSAuint32 NodeId);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaUnmap))(HsaMemoryObjectHandle Handle, \
                                       HSAuint64 offset, \
                                       HSAuint64 size, \
-                                      HSAuint64 addr);
+                                      HSAuint64 addr, \
+                                      HSAuint32 NodeId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemHandleFree))(HsaMemoryObjectHandle Handle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr))(HsaAMDGPUDeviceHandle DeviceHandle, \
                                       HsaMemoryObjectHandle MemoryHandle, \

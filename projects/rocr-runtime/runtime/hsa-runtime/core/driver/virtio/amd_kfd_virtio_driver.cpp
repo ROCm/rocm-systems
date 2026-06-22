@@ -532,8 +532,8 @@ hsa_status_t KfdVirtioDriver::DestroyImportedMemoryHandle(core::DriverMemoryHand
   return DestroyMemoryHandle(handle);
 }
 
-hsa_status_t KfdVirtioDriver::Map(uint32_t node_id, const core::DriverMemoryHandle& handle, void* mem, size_t offset,
-                                  size_t size, hsa_access_permission_t perms) {
+hsa_status_t KfdVirtioDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
+                                  size_t size, hsa_access_permission_t perms, uint32_t node_id) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
@@ -545,8 +545,8 @@ hsa_status_t KfdVirtioDriver::Map(uint32_t node_id, const core::DriverMemoryHand
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::Unmap(uint32_t node_id, const core::DriverMemoryHandle& handle, void* mem, size_t offset,
-                                    size_t size) {
+hsa_status_t KfdVirtioDriver::Unmap(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
+                                    size_t size, uint32_t node_id) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
