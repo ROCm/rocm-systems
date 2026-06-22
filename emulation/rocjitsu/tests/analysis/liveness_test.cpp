@@ -546,7 +546,7 @@ TEST(ExecMaskAnalysis, AndSaveexecWithAllOnesStaysUnknown) {
 
 TEST(ExecMaskAnalysis, PartialAllOnesWritePreservesButDoesNotEstablishFull) {
   // s_mov_b32 exec_lo, -1 on Wave64 sets only the low half to all-ones.
-  // It keeps an already-Full mask Full...
+  // Keeps an already-Full mask Full
   {
     auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::WriteExecLoHalf,
                                      TestOpcode::DefVgpr0, TestOpcode::End});
@@ -557,7 +557,7 @@ TEST(ExecMaskAnalysis, PartialAllOnesWritePreservesButDoesNotEstablishFull) {
     EXPECT_EQ(exec.before(*insts[1]), ExecState::Full); // entering the half write
     EXPECT_EQ(exec.before(*insts[2]), ExecState::Full); // half all-ones preserved Full
   }
-  // ...but cannot establish Full from Unknown (exec_hi stays unknown).
+  // ...Cannot establish Full from Unknown (exec_hi stays unknown).
   {
     auto blocks =
         build_test_blocks({TestOpcode::WriteExecLoHalf, TestOpcode::DefVgpr0, TestOpcode::End});
