@@ -36,6 +36,10 @@ on:
       ais_hipfile_pkg_filename:
         required: true
         type: string
+      ais_hipfile_build_dir_artifact_name:
+        description: "Artifact name for the hipFile build directory produced upstream"
+        required: true
+        type: string
       ci_image:
         required: true
         type: string
@@ -64,13 +68,12 @@ jobs:
   run_system_tests:
     runs-on: [AIS]
     steps:
-      - name: Set early AIS CI environment variables
-        run: |
-          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
-          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
+        # job.check_run_id is unique per job, so the container and its
+        # /mnt/ais-fs scratch dir never collide across matrix legs on the
+        # shared AIS runner.
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
+          echo "AIS_CONTAINER_NAME=${{ job.check_run_id }}" >> "${GITHUB_ENV}"
       - name: Fetching hipFile repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -90,7 +93,7 @@ jobs:
       - name: Download hipFile build directory
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: hipfile-build-dir-${{ inputs.platform }}-${{ inputs.rocm_version }}-${{ inputs.cxx_compiler }}-cxx${{ inputs.cxx_standard }}
+          name: ${{ inputs.ais_hipfile_build_dir_artifact_name }}
           path: ${{ github.workspace }}/hipfile-build-dir
       - name: Authenticating to GitHub Container Registry
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0

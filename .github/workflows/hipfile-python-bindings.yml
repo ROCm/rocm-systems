@@ -61,12 +61,12 @@ jobs:
     steps:
       - name: Set early AIS CI environment variables
         run: |
-          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
           echo "AIS_GHA_CMD_FILES_DIR=${GITHUB_ENV%/*}" >> "${GITHUB_ENV}"
-          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
+        # job.check_run_id is unique per job, disambiguating the container across
+        # every matrix leg without encoding the build-arg tuple.
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
+          echo "AIS_CONTAINER_NAME=${{ job.check_run_id }}" >> "${GITHUB_ENV}"
       - name: Fetching code repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -150,10 +150,7 @@ jobs:
         run: |
           docker exec \
             -e "AIS_GITHUB_OUTPUT=${{ env.AIS_GHA_CMD_FILES_DOCKER_DIR }}/${GITHUB_OUTPUT##*/}" \
-            -e "_AIS_INPUT_PLATFORM=${AIS_INPUT_PLATFORM}" \
-            -e "_AIS_INPUT_ROCM_VERSION=${AIS_INPUT_ROCM_VERSION}" \
-            -e "_AIS_SAFE_COMPILER_NAME=${AIS_SAFE_COMPILER_NAME}" \
-            -e "_AIS_INPUT_CXX_STANDARD=${AIS_INPUT_CXX_STANDARD}" \
+            -e "_AIS_CHECK_RUN_ID=${{ job.check_run_id }}" \
             -t \
             -w /ais/rocm-systems/projects/hipfile \
             "${AIS_CONTAINER_NAME}" \
@@ -161,11 +158,10 @@ jobs:
               .venv/bin/python -m build --sdist ./python
               shopt -s nullglob
               OLD_FILENAME="$(basename ./python/dist/hipfile-*.tar.gz)"
-              # python_bindings runs for every (platform, rocm, cxx) leg and the
-              # sdist version does not encode any of them, so disambiguate the
-              # artifact (named after the file) across all of them. Sanitized
-              # compiler avoids a "+" being read as a PEP 440 local version.
-              NEW_FILENAME="${OLD_FILENAME%.tar.gz}-${_AIS_INPUT_PLATFORM}-${_AIS_INPUT_ROCM_VERSION}-${_AIS_SAFE_COMPILER_NAME}-cxx${_AIS_INPUT_CXX_STANDARD}.tar.gz"
+              # python_bindings runs for every matrix leg and the sdist version
+              # encodes none of them, so disambiguate the artifact (named after
+              # the file) with the per-job check_run_id.
+              NEW_FILENAME="${OLD_FILENAME%.tar.gz}-${_AIS_CHECK_RUN_ID}.tar.gz"
               mv ./python/dist/${OLD_FILENAME} ./python/dist/${NEW_FILENAME}
               echo "HIPFILE_PYTHON_SDIST_FILENAME=${NEW_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
             '

@@ -62,6 +62,7 @@ jobs:
     with:
       ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
       ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
+      ais_hipfile_build_dir_artifact_name: ${{ needs.build_and_test.outputs.ais_hipfile_build_dir_artifact_name }}
       ci_image: ${{ needs.build_and_test.outputs.ci_image }}
       cxx_compiler: ${{ inputs.cxx_compiler }}
       cxx_standard: ${{ inputs.cxx_standard }}

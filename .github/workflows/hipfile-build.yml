@@ -3,7 +3,6 @@ run-name: Build, test, and analyze hipFile
 
 env:
   AIS_GHA_CMD_FILES_DOCKER_DIR: /root/github
-  AIS_INPUT_BUILD_ID: ${{ inputs.build_id }}
   AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
   AIS_INPUT_CXX_COMPILER: ${{ inputs.cxx_compiler }}
   AIS_INPUT_CXX_STANDARD: ${{ inputs.cxx_standard }}
@@ -62,6 +61,9 @@ on:
         description: "Upload binaries and the build tree as artifacts to GitHub"
         type: boolean
     outputs:
+      ais_hipfile_build_dir_artifact_name:
+        description: "Artifact name for the hipFile build directory"
+        value: ${{ jobs.compile_on_AMD.outputs.ais_hipfile_build_dir_artifact_name }}
       ais_hipfile_pkg_dev_filename:
         description: "Filename for the hipFile development DEB/RPM package"
         value: ${{ jobs.compile_on_AMD.outputs.ais_hipfile_pkg_dev_filename }}
@@ -86,6 +88,7 @@ jobs:
   compile_on_AMD:
     name: compile_on_AMD (${{ inputs.cxx_compiler }} C++${{ inputs.cxx_standard}})
     outputs:
+      ais_hipfile_build_dir_artifact_name: hipfile-build-dir-${{ job.check_run_id }}
       ais_hipfile_pkg_dev_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
       ais_hipfile_pkg_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
       ais_hipfile_pkg_tests_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_TESTS_FILENAME }}
@@ -101,14 +104,13 @@ jobs:
         # - ROCM_VERSION (set in DOCKERFILE)
         # See: https://github.com/ROCm/ROCm/blob/8aa43d132f0d541eb5303dc532f5931cb80ad87a/tools/rocm-build/envsetup.sh#L25-L42
         run: |
-          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
           echo "AIS_GHA_CMD_FILES_DIR=${GITHUB_ENV%/*}" >> "${GITHUB_ENV}"
-          echo "AIS_SAFE_COMPILER_NAME=$(echo ${AIS_INPUT_CXX_COMPILER} | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
-        # We should expect that there are multiple instances of this job with different cxx_compilers.
-        # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
+        # job.check_run_id is unique per job, so it disambiguates the container
+        # (and the AIS scratch dir) across every matrix leg and re-run without
+        # encoding the build-arg tuple.
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
+          echo "AIS_CONTAINER_NAME=${{ job.check_run_id }}" >> "${GITHUB_ENV}"
       - name: Fetching code repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -153,19 +155,17 @@ jobs:
         run: |
           docker exec \
             -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
-            -e "_AIS_SAFE_COMPILER_NAME=${AIS_SAFE_COMPILER_NAME}" \
-            -e "_AIS_INPUT_CXX_STANDARD=${AIS_INPUT_CXX_STANDARD}" \
-            -e "BUILD_ID=${AIS_INPUT_BUILD_ID}" \
+            -e "BUILD_ID=${{ inputs.build_id == 9999 && job.check_run_id || inputs.build_id }}" \
             -e "JOB_DESIGNATOR=${AIS_INPUT_JOB_DESIGNATOR}" \
             -t \
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              # Embed compiler+standard in the package release so the per-combo
-              # artifacts (named after the package filename) stay unique.
-              _AIS_CXX_TAG="${_AIS_SAFE_COMPILER_NAME}.cxx${_AIS_INPUT_CXX_STANDARD}"
-              export CPACK_DEBIAN_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}.${_AIS_CXX_TAG}~$(source /etc/os-release && echo ${VERSION_ID})"
-              export CPACK_RPM_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}.${_AIS_CXX_TAG}"
+              # job.check_run_id (used as BUILD_ID) is unique per job, so the
+              # package filename stays unique across matrix legs without encoding
+              # the build-arg tuple in the CPACK release.
+              export CPACK_DEBIAN_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}~$(source /etc/os-release && echo ${VERSION_ID})"
+              export CPACK_RPM_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}"
               cmake \
                 -DCMAKE_BUILD_TYPE=Debug \
                 -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
@@ -375,7 +375,7 @@ jobs:
         if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: hipfile-build-dir-${{ inputs.platform }}-${{ inputs.rocm_version }}-${{ inputs.cxx_compiler }}-cxx${{ inputs.cxx_standard }}
+          name: hipfile-build-dir-${{ job.check_run_id }}
           path: ${{ github.workspace }}/hipfile-build-dir
           if-no-files-found: error
           retention-days: 1
