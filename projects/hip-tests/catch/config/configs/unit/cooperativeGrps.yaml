@@ -105,7 +105,7 @@ cooperativeGrps:
     tags: [cooperative, launch]
   Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
     <<: *level_2
-    # Does not play well with ASAN
+    # Kernel uses runtime sized shared memory which is not adjusted to handle ASAN extra memory requirements
     disabled: [asan]
     tags: [cooperative, launch]
   Unit_Multi_Grid_Group_Getters_Positive_Basic:
@@ -119,6 +119,8 @@ cooperativeGrps:
     tags: [cooperative, groups]
   Unit_Multi_Grid_Group_Positive_Sync:
     <<: *level_2
+    # Test launches near the GPU's max concurrent blocks; under ASAN fewer fit, so grid.sync() deadlocks
+    disabled: [asan]
     tags: [cooperative, groups]
   Unit_coalesced_groups_shfl_down:
     <<: *level_2
