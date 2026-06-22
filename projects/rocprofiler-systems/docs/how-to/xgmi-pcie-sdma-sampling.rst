@@ -8,8 +8,7 @@
 XGMI, PCIe, and SDMA metrics sampling and monitoring
 *************************************************************
 
-`ROCm Systems Profiler`__ supports sampling of XGMI and PCIe interconnect metrics and
-SDMA engine utilization via AMD SMI.
+`ROCm Systems Profiler`__ supports sampling of XGMI and PCIe interconnect metrics, as well as SDMA engine utilization, via AMD SMI.
 
 It allows you to gather key performance metrics for GPU-to-GPU communication via XGMI
 links, CPU-to-GPU communication via PCIe links, and asynchronous copy activity handled by
