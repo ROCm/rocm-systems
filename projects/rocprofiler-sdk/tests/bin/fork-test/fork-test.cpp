@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <cstdlib>
 #include <iostream>
 
 #define HIP_API_CALL(CALL)                                                                         \
@@ -134,6 +135,23 @@ main()
     {
         // Child process
         std::cout << "\n=== CHILD PROCESS ===\n";
+
+        // If a fork+exec target is provided, replace the child image with it. This
+        // exercises the supported "spawn" path: the exec'd process initializes the
+        // SDK fresh, so it becomes its own output context and must get a distinct
+        // (PID-suffixed) output filename. Falls back to running the kernel in the
+        // forked child directly when no target is set (standalone use).
+        const char* exec_target = getenv("FORK_TEST_EXEC_TARGET");
+        if(exec_target != nullptr && exec_target[0] != '\0')
+        {
+            std::cout << "[CHILD PID=" << getpid() << "] execv -> " << exec_target << "\n";
+            char* const argv[] = {const_cast<char*>(exec_target), nullptr};
+            execv(exec_target, argv);
+            // execv only returns on failure
+            std::cerr << "[CHILD PID=" << getpid() << "] execv failed for " << exec_target << "\n";
+            return 1;
+        }
+
         runKernel("CHILD");
         std::cout << "=== CHILD PROCESS COMPLETE ===\n\n";
         return 0;

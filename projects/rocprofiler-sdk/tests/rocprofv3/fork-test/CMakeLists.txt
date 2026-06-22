@@ -35,17 +35,21 @@ find_package(rocprofiler-sdk REQUIRED)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-# Test with -o and -d flags to ensure multiple PIDs create separate database files
+# Test with -o and -d flags to ensure multiple PIDs create separate output files.
+# FORK_TEST_EXEC_TARGET makes the forked child exec simple-transpose, exercising the
+# supported fork+exec ("spawn") path: the exec'd child re-initializes the SDK and must get
+# its own PID-suffixed output filename while the parent keeps the clean name.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-fork
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -r -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-output -o fork_out --output-format rocpd csv --
-        $<TARGET_FILE:fork-test>
-    DEPENDS fork-test
+        ${CMAKE_CURRENT_BINARY_DIR}/fork-test-output -o fork_out --output-format rocpd csv
+        -- $<TARGET_FILE:fork-test>
+    DEPENDS fork-test simple-transpose
     TIMEOUT 45
     LABELS "integration-tests;fork-test"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "FORK_TEST_EXEC_TARGET=$<TARGET_FILE:simple-transpose>"
     FIXTURES_SETUP rocprofv3-test-fork
     DISABLED $<NOT:$<TARGET_EXISTS:fork-test>>)
 

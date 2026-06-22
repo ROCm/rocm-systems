@@ -1,5 +1,27 @@
 #!/usr/bin/env python3
 
+# MIT License
+#
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 import os
 import sys
 import glob
@@ -43,12 +65,21 @@ def test_multiple_pid_databases(output_dir):
         assert os.path.getsize(db_file) > 0, f"Database file {db_file} is empty"
 
 
+def _is_parent_csv(path):
+    """The parent keeps the clean name (fork_out_kernel_trace.csv); children are
+    PID-suffixed (fork_out_<pid>_kernel_trace.csv)."""
+    return os.path.basename(path) == "fork_out_kernel_trace.csv"
+
+
 def test_kernel_traces_in_csv(kernel_trace_files, kernel_trace_data):
     """
-    Test that kernel traces exist in CSV files for both parent and child processes.
+    Test that kernel traces are captured for both processes, and that each process'
+    CSV contains its OWN kernel -- proving the parent and the fork+exec'd child wrote
+    to separate files rather than overwriting each other.
 
-    This validates that CSV output is generated correctly for each process
-    and contains the expected vectorAdd kernel.
+    The parent runs the vectorAdd kernel directly; the child execs simple-transpose,
+    whose kernel is matrixTranspose. So the parent CSV must contain vectorAdd and the
+    child CSV must contain matrixTranspose.
     """
     # We expect at least 2 kernel trace CSV files (parent + child)
     assert len(kernel_trace_files) >= 2, (
@@ -56,20 +87,37 @@ def test_kernel_traces_in_csv(kernel_trace_files, kernel_trace_data):
         f"but found {len(kernel_trace_files)}: {kernel_trace_files}"
     )
 
-    # Check each CSV file for kernel traces
-    for csv_file, data in kernel_trace_data.items():
-        print(f"\nValidating kernel traces in: {csv_file}")
+    parent_csvs = [f for f in kernel_trace_files if _is_parent_csv(f)]
+    child_csvs = [f for f in kernel_trace_files if not _is_parent_csv(f)]
 
-        # Verify the CSV file is not empty
+    assert len(parent_csvs) == 1, (
+        f"Expected exactly 1 parent kernel trace CSV (fork_out_kernel_trace.csv), "
+        f"but found {len(parent_csvs)}: {parent_csvs}"
+    )
+    assert len(child_csvs) >= 1, (
+        f"Expected at least 1 PID-suffixed child kernel trace CSV, "
+        f"but found {len(child_csvs)}: {child_csvs}"
+    )
+
+    def _kernel_names(csv_file):
+        data = kernel_trace_data[csv_file]
         assert len(data) > 0, f"Kernel trace CSV file {csv_file} is empty"
+        return [row.get("Kernel_Name", "") for row in data]
 
-        # Look for vectorAdd kernel in the traces
-        kernel_names = [row.get("Kernel_Name", "") for row in data]
-        vectorAdd_found = any("vectorAdd" in name for name in kernel_names)
+    # Parent ran vectorAdd directly.
+    parent_csv = parent_csvs[0]
+    parent_kernels = _kernel_names(parent_csv)
+    assert any("vectorAdd" in name for name in parent_kernels), (
+        f"Expected to find 'vectorAdd' kernel in parent CSV {parent_csv}, "
+        f"but found kernels: {parent_kernels}"
+    )
 
-        assert vectorAdd_found, (
-            f"Expected to find 'vectorAdd' kernel in {csv_file}, "
-            f"but found kernels: {kernel_names}"
+    # Child exec'd simple-transpose, which runs matrixTranspose.
+    for child_csv in child_csvs:
+        child_kernels = _kernel_names(child_csv)
+        assert any("matrixTranspose" in name for name in child_kernels), (
+            f"Expected to find 'matrixTranspose' kernel in child CSV {child_csv}, "
+            f"but found kernels: {child_kernels}"
         )
 
 
