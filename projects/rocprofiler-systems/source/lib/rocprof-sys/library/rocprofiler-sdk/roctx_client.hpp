@@ -236,7 +236,10 @@ roctx_client<Wrapper, MarkerWriterPolicy>::handle_marker_core_enter(
             const bool pushed_write_enabled = m_controller->should_write_markers();
             m_pushed_ranges.push_back(
                 { tim::add_hash_id(name), ts, pushed_write_enabled, range_id });
-            if(pushed_write_enabled) m_writer.write_begin(name);
+            if(pushed_write_enabled)
+            {
+                m_writer.write_begin(name);
+            }
             break;
         }
         case Wrapper::MARKER_CORE_API_ID_roctxRangeStartA:
@@ -248,7 +251,10 @@ roctx_client<Wrapper, MarkerWriterPolicy>::handle_marker_core_enter(
         {
             const char* name = data->args.roctxMarkA.message;
             tim::add_hash_id(name);
-            if(write_enabled) m_writer.write_begin(name);
+            if(write_enabled)
+            {
+                m_writer.write_begin(name);
+            }
             break;
         }
         default:
@@ -318,8 +324,10 @@ roctx_client<Wrapper, MarkerWriterPolicy>::handle_marker_core_exit(
         case Wrapper::MARKER_CORE_API_ID_roctxMarkA:
         {
             if(m_controller->should_write_markers())
+            {
                 m_writer.write_end(data->args.roctxMarkA.message, begin_ts, ts, args_str,
                                    record);
+            }
             break;
         }
         case Wrapper::MARKER_CORE_API_ID_roctxRangePushA:
@@ -334,7 +342,10 @@ roctx_client<Wrapper, MarkerWriterPolicy>::handle_marker_core_exit(
             const bool write_enabled = m_controller->should_write_markers();
             m_started_ranges.push_back(
                 { tim::get_hash_id(name), begin_ts, write_enabled });
-            if(write_enabled) m_writer.write_begin(name);
+            if(write_enabled)
+            {
+                m_writer.write_begin(name);
+            }
             return;
         }
         default:
@@ -378,16 +389,23 @@ roctx_client<Wrapper, MarkerWriterPolicy>::marker_core_callback(
     typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t* user_data, void* callback_data)
 {
-    if(!callback_data) return;
+    if(!callback_data)
+    {
+        return;
+    }
     auto* client = static_cast<roctx_client*>(callback_data);
 
     typename Wrapper::timestamp_t ts{};
     Wrapper::get_timestamp(&ts);
 
     if(record.phase == Wrapper::CALLBACK_PHASE_ENTER)
+    {
         client->handle_marker_core_enter(record, user_data, ts);
+    }
     else if(record.phase == Wrapper::CALLBACK_PHASE_EXIT)
+    {
         client->handle_marker_core_exit(record, user_data, ts);
+    }
 }
 
 template <typename Wrapper, typename MarkerWriterPolicy>
@@ -396,7 +414,10 @@ roctx_client<Wrapper, MarkerWriterPolicy>::marker_control_callback(
     typename Wrapper::callback_tracing_record record, typename Wrapper::user_data_t*,
     void*                                     callback_data)
 {
-    if(!callback_data) return;
+    if(!callback_data)
+    {
+        return;
+    }
     static_cast<roctx_client*>(callback_data)->handle_marker_control(record);
 }
 

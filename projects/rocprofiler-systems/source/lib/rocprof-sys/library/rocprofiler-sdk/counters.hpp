@@ -198,7 +198,9 @@ counter_storage<Wrapper>::get_counter_description(const client_data<Wrapper>* to
     for(const auto& itr : _info)
     {
         if(itr.symbol().find(_v) == 0 || itr.short_description().find(_v) == 0)
+        {
             return itr.long_description();
+        }
     }
     return std::string{};
 }
@@ -373,9 +375,11 @@ counter_storage<Wrapper>::write_zero(typename Wrapper::timestamp_t timestamp) co
 {
     if(!track || timestamp == 0) return;
 
+    // Write zero to Perfetto trace (for legacy Perfetto)
     TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *track,
                   timestamp, 0);
 
+    // Write zero to cache (for rocpd database)
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
         track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}",

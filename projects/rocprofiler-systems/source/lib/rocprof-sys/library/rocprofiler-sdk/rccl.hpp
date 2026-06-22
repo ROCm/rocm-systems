@@ -243,6 +243,7 @@ rccl_get_event_info_impl(std::uint32_t                          operation,
             break;
         default: break;
     }
+
     return info;
 }
 
@@ -255,6 +256,7 @@ template <typename Wrapper>
 rccl_get_device_id(typename Wrapper::nccl_comm_t comm) noexcept
 {
     constexpr std::uint32_t DEFAULT_DEVICE_ID = 0;
+
     if(comm == nullptr) return DEFAULT_DEVICE_ID;
 
     using nccl_fn_t =
@@ -299,7 +301,15 @@ rccl_comm_data_initialize()
 }
 
 // ─── tool_tracing_callback_rccl<Wrapper> ─────────────────────────────────────
-
+/**
+ * It determines the device ID from the communicator and records both cache
+ * events and Perfetto counter tracks for send/recv operations.
+ *
+ * @param operation The RCCL operation ID
+ * @param payload The RCCL API-specific payload data
+ * @param begin_ts Timestamp when the API call began (nanoseconds)
+ * @param end_ts Timestamp when the API call ended (nanoseconds)
+ */
 template <typename Wrapper>
 void
 tool_tracing_callback_rccl(std::uint32_t                    operation,

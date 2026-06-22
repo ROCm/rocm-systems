@@ -119,23 +119,24 @@ namespace rocprofsys::rocprofiler_sdk
 template <typename Wrapper>
 template <typename Tp>
 std::string
-sdk_core<Wrapper>::to_lower(const Tp& val)
+sdk_core<Wrapper>::to_lower(const Tp& _val)
 {
-    auto str = std::string{ val };
-    for(auto& ch : str)
-        ch = static_cast<char>(::tolower(ch));
-    return str;
+    auto _v = std::string{ _val };
+    for(auto& itr : _v)
+        itr = ::tolower(itr);
+    return _v;
 }
 
 template <typename Wrapper>
 std::string
-sdk_core<Wrapper>::get_setting_name(std::string val)
+sdk_core<Wrapper>::get_setting_name(std::string _v)
 {
-    constexpr auto prefix = tim::string_view_t{ "rocprofsys_" };
-    for(auto& ch : val)
-        ch = static_cast<char>(::tolower(ch));
-    auto pos = val.find(prefix);
-    return pos == 0 ? val.substr(prefix.length()) : val;
+    constexpr auto _prefix = tim::string_view_t{ "rocprofsys_" };
+    for(auto& itr : _v)
+        itr = tolower(itr);
+    auto _pos = _v.find(_prefix);
+    if(_pos == 0) return _v.substr(_prefix.length());
+    return _v;
 }
 
 // ─── set_operation_options ────────────────────────────────────────────────────
@@ -318,14 +319,16 @@ template <typename Wrapper>
 version_info&
 sdk_core<Wrapper>::get_version()
 {
-    static auto _version = version_info{};
+    static auto _version = version_info{ 0 };
 
     if(_version.formatted == 0)
     {
         std::uint32_t _major = 0;
         std::uint32_t _minor = 0;
         std::uint32_t _patch = 0;
+
         Wrapper::get_version(&_major, &_minor, &_patch);
+
         _version.major     = _major;
         _version.minor     = _minor;
         _version.patch     = _patch;
@@ -339,6 +342,7 @@ template <typename Wrapper>
 void
 sdk_core<Wrapper>::config_settings(const std::shared_ptr<settings>& _config)
 {
+    // const auto agents                = std::vector<rocprofiler_agent_t>{};
     const auto buffered_tracing_info = Wrapper::get_buffer_tracing_names();
     const auto callback_tracing_info = Wrapper::get_callback_tracing_names();
 
@@ -423,6 +427,7 @@ sdk_core<Wrapper>::config_settings(const std::shared_ptr<settings>& _config)
 
     for(const auto& itr : buffered_tracing_info)
         _add_domain(itr.name);
+
     for(const auto& itr : callback_tracing_info)
         _add_domain(itr.name);
 
@@ -457,11 +462,17 @@ sdk_core<Wrapper>::config_settings(const std::shared_ptr<settings>& _config)
 
     for(const auto& itr : callback_tracing_info)
         _add_operation_settings(itr.name, itr, callback_operation_option_names);
+
     for(const auto& itr : buffered_tracing_info)
         _add_operation_settings(itr.name, itr, buffered_operation_option_names);
 
-    if(std::ranges::find(_domain_choices, std::string{ "hip_stream" }) !=
-       _domain_choices.end())
+    // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is present
+    // in supported ROCProfiler-SDK domains.
+    auto _has_hip_stream =
+        std::ranges::find(_domain_choices, std::string{ "hip_stream" }) !=
+        _domain_choices.end();
+
+    if(_has_hip_stream)
     {
         insert_config_setting<bool>(
             _config, env_vars::ROCM_GROUP_BY_QUEUE,
@@ -491,12 +502,16 @@ sdk_core<Wrapper>::get_callback_domains()
     };
 
     auto _version = get_version();
-    if(_version.formatted == 0) LOG_WARNING("rocprofiler-sdk version not initialized");
+    if(_version.formatted == 0)
+    {
+        LOG_WARNING("rocprofiler-sdk version not initialized");
+    }
 
     if constexpr(Wrapper::compile_time_version >= 600)
     {
         if(_version.formatted >= 600)
         {
+            // Argument tracing is supported in rocprofiler-sdk 0.6.0 and later
             supported.emplace(Wrapper::CALLBACK_TRACING_RCCL_API);
             supported.emplace(Wrapper::CALLBACK_TRACING_OMPT);
             supported.emplace(Wrapper::CALLBACK_TRACING_ROCDECODE_API);
@@ -517,11 +532,18 @@ sdk_core<Wrapper>::get_callback_domains()
     if constexpr(Wrapper::compile_time_version >= 600)
     {
         if(config::get_use_rcclp() && _version.formatted >= 600)
+        {
+            // Translate ROCPROFSYS_USE_RCCLP to entry in ROCPROFSYS_ROCM_DOMAINS
             _data.emplace(Wrapper::CALLBACK_TRACING_RCCL_API);
+        }
         if(config::get_use_ompt() && _version.formatted >= 600)
+        {
+            // Translate some configuration settings to rocprofiler domains
             _data.emplace(Wrapper::CALLBACK_TRACING_OMPT);
+        }
     }
 
+    // Check that the domains are valid
     const auto valid_choices =
         settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS })->get_choices();
     auto invalid_domain = [&valid_choices](const auto& domainv) {
@@ -612,6 +634,7 @@ sdk_core<Wrapper>::get_buffered_domains()
         config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
             .value_or(std::string{}),
         " ,;:\t\n");
+    // Check that the domains are valid
     const auto valid_choices =
         settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS })->get_choices();
     auto invalid_domain = [&valid_choices](const auto& domainv) {
@@ -714,6 +737,7 @@ sdk_core<Wrapper>::get_buffered_domains()
 
     if constexpr(Wrapper::compile_time_version >= 10000)
     {
+        // Automatically enable KFD domains when unified memory profiling is enabled
         if(config::get_use_unified_memory_profiling())
         {
             if(kfd_supported_by_runtime)

@@ -740,8 +740,10 @@ library_sdk<Wrapper>::get_roctx_client()
         }
 
         const auto roctx_config = roctx_client_config{
-            has_marker_domain,          config::get_use_perfetto(),
-            config::get_use_timemory(), config::get_perfetto_annotations(),
+            has_marker_domain,  // pause_resume_enabled
+            config::get_use_perfetto(),
+            config::get_use_timemory(),
+            config::get_perfetto_annotations(),
             roctx_traced_regions,
         };
         g_roctx_client =
@@ -2163,11 +2165,19 @@ library_sdk<Wrapper>::ompt_tracing_callback_start(
     typename Wrapper::user_data_t* /*user_data*/, typename Wrapper::timestamp_t ts)
 {
     std::string_view _name = ompt_get_unified_name(record);
-    if(get_use_timemory()) tracing::push_timemory(category::rocm_ompt_api{}, _name);
+
+    if(get_use_timemory())
+    {
+        tracing::push_timemory(category::rocm_ompt_api{}, _name);
+    }
+
     if(get_use_perfetto())
     {
         auto args = callback_arg_array_t{};
-        if(config::get_perfetto_annotations()) ompt_iterate_operation_args(record, args);
+        if(config::get_perfetto_annotations())
+        {
+            ompt_iterate_operation_args(record, args);
+        }
         std::uint64_t _beg_ts   = ts;
         auto          stream_id = stream_id_top();
         tracing::push_perfetto_ts(
@@ -2197,11 +2207,19 @@ library_sdk<Wrapper>::ompt_tracing_callback_stop(
     std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
 {
     std::string_view _name = ompt_get_unified_name(record);
-    if(get_use_timemory()) tracing::pop_timemory(category::rocm_ompt_api{}, _name);
+
+    if(get_use_timemory())
+    {
+        tracing::pop_timemory(category::rocm_ompt_api{}, _name);
+    }
+
     if(get_use_perfetto())
     {
         auto args = callback_arg_array_t{};
-        if(config::get_perfetto_annotations()) ompt_iterate_operation_args(record, args);
+        if(config::get_perfetto_annotations())
+        {
+            ompt_iterate_operation_args(record, args);
+        }
         std::uint64_t _end_ts = ts;
         tracing::pop_perfetto_ts(
             category::rocm_ompt_api{}, _name.data(), _end_ts,
@@ -2671,11 +2689,15 @@ library_sdk<Wrapper>::counter_record_callback(
             Wrapper::query_record_counter_id(record_data[i].id, &_counter_id),
             "Wrapper::query_record_counter_id");
         if(!_aggregate.emplace(_counter_id, record_data[i]).second)
+        {
             _aggregate[_counter_id].counter_value += record_data[i].counter_value;
+        }
     }
 
     if(_agent_counter_storage->count(_agent_id) == 0)
+    {
         _agent_counter_storage->emplace(_agent_id, counter_storage_map_t{});
+    }
 
     if(get_kernel_dispatch_timestamps().count(_dispatch_id) > 0)
     {

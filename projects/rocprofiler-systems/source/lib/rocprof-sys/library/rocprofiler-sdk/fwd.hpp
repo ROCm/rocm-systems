@@ -407,6 +407,7 @@ client_data<Wrapper>::initialize()
 {
     buffered_tracing_info = Wrapper::get_buffer_tracing_names();
     callback_tracing_info = Wrapper::get_callback_tracing_names();
+
     set_agents();
 }
 
@@ -417,9 +418,13 @@ client_data<Wrapper>::initialize_event_info()
     auto& agent_mngr = get_agent_manager_instance();
 
     if(agent_mngr.get_agents().empty())
+    {
         initialize();
+    }
     else if(gpu_agents.empty() && cpu_agents.empty())
+    {
         set_agents();
+    }
 
     if(agent_counter_info.size() != gpu_agents.size())
         agent_counter_info = get_agent_counter_info(gpu_agents);
@@ -439,6 +444,7 @@ client_data<Wrapper>::initialize_event_info()
                                                    _device_qualifier_sym,
                                                    fmt::format("Device {}", _dev_index) };
 
+            // Check if agent info is available ( i.e., counters are supported)
             auto agent_info_it = agent_counter_info.find(_agent_id);
             if(agent_info_it == agent_counter_info.end())
             {
@@ -458,12 +464,14 @@ client_data<Wrapper>::initialize_event_info()
                               return true;
                           else if(rhs.is_constant)
                               return false;
+
                           if(!lhs.is_derived && !rhs.is_derived)
                               return lhs.id < rhs.id;
                           else if(!lhs.is_derived)
                               return true;
                           else if(!rhs.is_derived)
                               return false;
+
                           return lhs.id < rhs.id;
                       });
 
@@ -473,9 +481,11 @@ client_data<Wrapper>::initialize_event_info()
                 auto _units     = std::string{};
                 auto _pysym     = std::string{};
 
-                if(ditr.is_constant) continue;
-
-                if(ditr.is_derived)
+                if(ditr.is_constant)
+                {
+                    continue;
+                }
+                else if(ditr.is_derived)
                 {
                     auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
                     auto _short_desc =
@@ -488,6 +498,7 @@ client_data<Wrapper>::initialize_event_info()
                 else
                 {
                     auto _dim_info = std::vector<std::string>{};
+
                     for(const auto& itr : ditr.dimension_info)
                     {
                         auto _info =
@@ -496,11 +507,14 @@ client_data<Wrapper>::initialize_event_info()
                                 : std::string{};
                         if(!_info.empty()) _dim_info.emplace_back(_info);
                     }
+
                     auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
                     auto _short_desc =
                         fmt::format("{} on device {}", ditr.name, _dev_index);
                     if(!_dim_info.empty())
+                    {
                         _short_desc += fmt::format("{}", fmt::join(_dim_info, ". "));
+                    }
                     events_info.emplace_back(hardware_counter_info(
                         true, tim::hardware_counters::api::rocm, events_info.size(), 0,
                         _sym, _pysym, _short_desc, _long_desc, _units,
