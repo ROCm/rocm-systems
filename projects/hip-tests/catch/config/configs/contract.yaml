@@ -261,3 +261,15 @@ contract:
   Contract_HostMemory_HostGetFlags_IncludesRequestedFlags:
     <<: *level_0
     tags: [host_memory]
+  Contract_PitchedMemory_MallocPitch_ReturnsPitchAtLeastWidth:
+    <<: *level_0
+    tags: [pitched_memory]
+  Contract_PitchedMemory_Memcpy2D_HostDeviceRoundTripsRows:
+    <<: *level_0
+    tags: [pitched_memory]
+  Contract_PitchedMemory_Memcpy2D_SingleRowRoundTripsBytes:
+    <<: *level_0
+    tags: [pitched_memory]
+  Contract_PitchedMemory_FreePitchedAllocation_Succeeds:
+    <<: *level_0
+    tags: [pitched_memory]

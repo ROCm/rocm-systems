@@ -24,6 +24,7 @@ The first domains are:
 - `graph_clone`: graph clone lifecycle and cloned memcpy graph contracts
 - `graph_update`: graph exec memcpy and memset node parameter update contracts
 - `host_memory`: host allocation, registration, device-pointer, and flag contracts
+- `pitched_memory`: pitched allocation and host/device 2D copy contracts
 
 Run the layer with:
 
