@@ -8,7 +8,7 @@
 hipFile documentation
 *********************
 
-hipFile is AMD's Infinity Storage library that provides direct-to-GPU I/O for the ROCm platform. It bypasses the CPU for data transfers between storage and GPU memory. The library exposes a C API and Python bindings for registering files and GPU buffers, then performing synchronous, asynchronous, and batch read/write operations directly into device memory. hipFile uses a fastpath through HIP runtime extensions, with automatic fallback to POSIX I/O.
+hipFile is AMD's Infinity Storage library that provides direct-to-GPU I/O for the ROCm platform. The library provides C and Python APIs for synchronous, asynchronous, and batch I/O operations. hipFile automatically falls back to POSIX I/O when operations are unable to use the direct-to-GPU path.
 
 The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile>`_.
 
