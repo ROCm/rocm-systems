@@ -52,7 +52,7 @@ jobs:
         id: generate_matrix_ci_base
         run: |
           DISTROS=$(cat containers-ci.yml | yq '.distros' -I=0 -o=json)
-          echo "containers_list=$DISTROS" >> $GITHUB_OUTPUT
+           echo "matrix_data=$DISTROS" >> $GITHUB_OUTPUT
 
   rocprofiler-systems-ci-gfx:
     needs: prepare_matrix_ci
