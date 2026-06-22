@@ -431,6 +431,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         scope.translation->target_vgpr_count, scope.translation->target_agpr_count,
         scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count);
     LivenessAnalysisOptions liveness_options;
+    liveness_options.wave_size = scope.translation->guest_wavefront_size;
     if (options_.debug_min_free_vgpr)
       liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
     LivenessAnalysis liveness(KernelBlockScope(scope.blocks), liveness_options);

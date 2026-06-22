@@ -16,9 +16,12 @@ namespace {
 
 /// @brief How an instruction affects the EXEC mask.
 enum class ExecWrite {
-  None,
-  Narrowing,
-  AllOnes,
+  None,      ///< Does not write EXEC; state unchanged.
+  AllOnes,   ///< Writes the whole EXEC mask to all-ones -> Full.
+  Preserve,  ///< Sets a subset of EXEC to all-ones (e.g. only exec_lo on
+             ///< Wave64); keeps an already-Full mask Full and leaves Unknown
+             ///< as Unknown, but cannot establish Full on its own.
+  Narrowing, ///< Writes EXEC some other way -> Unknown.
 };
 
 [[nodiscard]] bool writes_exec(const Instruction &inst) {
@@ -40,21 +43,37 @@ enum class ExecWrite {
   return false;
 }
 
-/// @brief Bit mask covering the EXEC write width (defaults to 64-bit/Wave64
-/// when no EXEC destination operand exposes its width).
-[[nodiscard]] uint64_t exec_width_mask(const Instruction &inst) {
+/// @brief All-ones mask for an EXEC register of @p wave_size lanes.
+[[nodiscard]] uint64_t full_exec_mask(uint32_t wave_size) {
+  return wave_size >= 64 ? ~0ULL : ((1ULL << wave_size) - 1ULL);
+}
+
+/// @brief The EXEC bits an instruction writes: a mask of the written bits and
+/// whether they cover the whole @p wave_size-lane EXEC register.
+///
+/// @details Semantic EXEC writers (WRITES_EXEC: saveexec/wrexec/v_cmpx) write the
+/// whole mask. A generic write via an EXEC destination operand covers only that
+/// operand's lanes — e.g. `s_mov_b32 exec_lo` writes 32 bits, which is the whole
+/// mask on Wave32 but only half on Wave64.
+struct ExecWriteExtent {
+  uint64_t mask = 0; ///< Bits written into EXEC.
+  bool full = false; ///< True when those bits cover the entire EXEC register.
+};
+
+[[nodiscard]] ExecWriteExtent exec_write_extent(const Instruction &inst, uint32_t wave_size) {
+  if (inst.flags() & WRITES_EXEC)
+    return {full_exec_mask(wave_size), true};
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const Operand *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
     if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::EXEC) {
       const int w = op->size_bits();
-      if (w > 0 && w < 64)
-        return (1ULL << w) - 1ULL;
-      return ~0ULL;
+      const uint64_t mask = (w >= 64) ? ~0ULL : ((1ULL << w) - 1ULL);
+      return {mask, w >= static_cast<int>(wave_size)};
     }
   }
-  return ~0ULL;
+  return {};
 }
 
 /// @brief True when @p op is a compile-time all-ones constant across @p mask.
@@ -76,20 +95,16 @@ enum class Combinator { Other, Copy, Or };
   return Combinator::Other;
 }
 
-/// @brief True when the instruction provably assigns an all-ones EXEC mask.
+/// @brief True when the value written into the EXEC bits is provably all-ones
+/// across @p mask (the written width).
 ///
-/// @details Operation-aware, so it only claims all-ones when it can prove it
-/// from the instruction's result combinator and compile-time-constant sources
-/// (`const_value()` resolves literals and inline constants without a wavefront):
+/// @details Operation-aware via the result combinator and compile-time-constant
+/// sources (`const_value()` resolves literals and inline constants without a
+/// wavefront):
 ///   * `Copy` (`exec = src`):     the single source is all-ones.
-///   * `Or`   (`exec = a | b …`): any source is an all-ones constant — OR with
-///                                an all-ones operand is all-ones regardless of
-///                                the rest (covers `exec = exec | -1`).
+///   * `Or`   (`exec = a | b …`): any source is an all-ones constant.
 ///   * everything else (and/xor/not/cmpx/register restores/...): not provable.
-/// AND-style writes (incl. `s_and_saveexec exec, -1`, where `exec & -1 == exec`)
-/// fall through to `Other` and therefore stay `Unknown` — never a false `Full`.
-[[nodiscard]] bool exec_write_is_all_ones(const Instruction &inst) {
-  const uint64_t mask = exec_width_mask(inst);
+[[nodiscard]] bool writes_all_ones_value(const Instruction &inst, uint64_t mask) {
   switch (combinator(inst)) {
   case Combinator::Copy:
     return inst.num_src_operands() == 1 && src_const_is_all_ones(inst.src_operand(0), mask);
@@ -104,18 +119,28 @@ enum class Combinator { Other, Copy, Or };
   return false;
 }
 
-[[nodiscard]] ExecWrite classify(const Instruction &inst) {
+/// @details A full all-ones write establishes `Full`. A *partial* all-ones write
+/// (e.g. `s_mov_b32 exec_lo, -1` on Wave64) only sets a subset of the mask to
+/// ones, so it keeps an already-`Full` mask `Full` but cannot establish `Full`
+/// from `Unknown` — that is `Preserve`. AND-style writes (incl.
+/// `s_and_saveexec exec, -1`, where `exec & -1 == exec`) and writes of any other
+/// value fall through to `Narrowing`.
+[[nodiscard]] ExecWrite classify(const Instruction &inst, uint32_t wave_size) {
   if (!writes_exec(inst))
     return ExecWrite::None;
-  return exec_write_is_all_ones(inst) ? ExecWrite::AllOnes : ExecWrite::Narrowing;
+  const ExecWriteExtent ext = exec_write_extent(inst, wave_size);
+  if (writes_all_ones_value(inst, ext.mask))
+    return ext.full ? ExecWrite::AllOnes : ExecWrite::Preserve;
+  return ExecWrite::Narrowing;
 }
 
-[[nodiscard]] ExecState transfer(ExecState in, const Instruction &inst) {
-  switch (classify(inst)) {
+[[nodiscard]] ExecState transfer(ExecState in, const Instruction &inst, uint32_t wave_size) {
+  switch (classify(inst, wave_size)) {
   case ExecWrite::AllOnes:
     return ExecState::Full;
   case ExecWrite::Narrowing:
     return ExecState::Unknown;
+  case ExecWrite::Preserve: // partial all-ones: keep Full as Full, Unknown as Unknown
   case ExecWrite::None:
     break;
   }
@@ -127,16 +152,19 @@ enum class Combinator { Other, Copy, Or };
   return (a == ExecState::Full && b == ExecState::Full) ? ExecState::Full : ExecState::Unknown;
 }
 
-[[nodiscard]] ExecState block_transfer(ExecState in, BasicBlock &block) {
+[[nodiscard]] ExecState block_transfer(ExecState in, BasicBlock &block, uint32_t wave_size) {
   ExecState state = in;
   for (const auto &inst : block.instructions())
-    state = transfer(state, inst);
+    state = transfer(state, inst, wave_size);
   return state;
 }
 
 } // namespace
 
-ExecMaskAnalysis::ExecMaskAnalysis(KernelBlockScope blocks) { analyze(blocks); }
+ExecMaskAnalysis::ExecMaskAnalysis(KernelBlockScope blocks, uint32_t wave_size)
+    : wave_size_(wave_size) {
+  analyze(blocks);
+}
 
 void ExecMaskAnalysis::analyze(KernelBlockScope blocks) {
   states_.assign(blocks.size(), BlockExec{});
@@ -202,7 +230,7 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks) {
       in = acc.value_or(ExecState::Unknown);
     }
 
-    const ExecState out = block_transfer(in, *block);
+    const ExecState out = block_transfer(in, *block, wave_size_);
     if (in != states_[idx].in || out != states_[idx].out) {
       states_[idx].in = in;
       states_[idx].out = out;
@@ -222,7 +250,7 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks) {
     ExecState state = states_[i].in;
     for (const auto &inst : block->instructions()) {
       before_.emplace(&inst, state);
-      state = transfer(state, inst);
+      state = transfer(state, inst, wave_size_);
     }
   }
 }

@@ -162,6 +162,7 @@ enum class TestOpcode : uint32_t {
   WriteExecFullInline = 19,
   WriteExecOrAllOnes = 20,
   WriteExecAndSaveexec = 21,
+  WriteExecLoHalf = 22,
 };
 
 class TestDecoder : public Decoder {
@@ -228,6 +229,11 @@ public:
       // exec = exec & -1 = exec -> NOT all-ones. No RESULT_* -> must stay Unknown.
       return new TestInstruction("test_write_exec_and_saveexec", {{RegClass::SGPR, 0, 2}}, {},
                                  WRITES_EXEC, std::nullopt, {}, std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecLoHalf:
+      // s_mov_b32 exec_lo, -1: a 32-bit COPY of all-ones into only the low half
+      // of EXEC. Full on Wave32; a partial write on Wave64.
+      return new TestInstruction("test_write_exec_lo_half", {{RegClass::EXEC, 0, 1}}, {},
+                                 RESULT_COPY, std::nullopt, {}, std::nullopt, ~0ULL);
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
@@ -536,6 +542,42 @@ TEST(ExecMaskAnalysis, AndSaveexecWithAllOnesStaysUnknown) {
   auto insts = insts_of(*blocks[0]);
   ASSERT_GE(insts.size(), 2u);
   EXPECT_EQ(exec.before(*insts[1]), ExecState::Unknown); // after and-saveexec
+}
+
+TEST(ExecMaskAnalysis, PartialAllOnesWritePreservesButDoesNotEstablishFull) {
+  // s_mov_b32 exec_lo, -1 on Wave64 sets only the low half to all-ones.
+  // It keeps an already-Full mask Full...
+  {
+    auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::WriteExecLoHalf,
+                                     TestOpcode::DefVgpr0, TestOpcode::End});
+    auto scope = block_scope(blocks);
+    ExecMaskAnalysis exec{KernelBlockScope(scope)}; // default Wave64
+    auto insts = insts_of(*blocks[0]);
+    ASSERT_GE(insts.size(), 3u);
+    EXPECT_EQ(exec.before(*insts[1]), ExecState::Full); // entering the half write
+    EXPECT_EQ(exec.before(*insts[2]), ExecState::Full); // half all-ones preserved Full
+  }
+  // ...but cannot establish Full from Unknown (exec_hi stays unknown).
+  {
+    auto blocks =
+        build_test_blocks({TestOpcode::WriteExecLoHalf, TestOpcode::DefVgpr0, TestOpcode::End});
+    auto scope = block_scope(blocks);
+    ExecMaskAnalysis exec{KernelBlockScope(scope)}; // default Wave64
+    auto insts = insts_of(*blocks[0]);
+    ASSERT_GE(insts.size(), 2u);
+    EXPECT_EQ(exec.before(*insts[1]), ExecState::Unknown);
+  }
+}
+
+TEST(ExecMaskAnalysis, Wave32ExecLoWriteCoversFullMask) {
+  // On Wave32, exec_lo is the entire EXEC, so an all-ones exec_lo write is Full.
+  auto blocks =
+      build_test_blocks({TestOpcode::WriteExecLoHalf, TestOpcode::DefVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/32};
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 2u);
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full);
 }
 
 TEST(LivenessAnalysis, ExecFullPromotesVgprDefToKill) {

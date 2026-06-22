@@ -101,6 +101,7 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
 
 LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options) {
   min_free_vgpr_ = options.min_free_vgpr;
+  wave_size_ = options.wave_size;
   analyze(blocks);
 }
 
@@ -113,7 +114,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
 
   // Program-point EXEC approximation: lets EXEC-masked vector defs count as
   // kills where EXEC is provably full.
-  const ExecMaskAnalysis exec(blocks);
+  const ExecMaskAnalysis exec(blocks, wave_size_);
 
   // Compute each block's local transfer function before iterating across CFG
   // edges. `gen` keeps only uses that occur before a local definition, because
