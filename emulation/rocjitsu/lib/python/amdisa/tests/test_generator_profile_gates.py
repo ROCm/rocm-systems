@@ -55,6 +55,27 @@ def test_vop_dpp8_support_is_detected_from_machine_inst_structs():
     assert codegen._supports_vop_dpp8()
 
 
+def test_vop3_sdst_dpp_support_is_detected_from_machine_inst_structs():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        inst_encodings=[
+            SimpleNamespace(fmt_enc_name='Vop1VopDpp16', enc_name='VOP1_VOP_DPP16'),
+            SimpleNamespace(
+                fmt_enc_name='Vop3SdstEncVopDpp16', enc_name='VOP3_SDST_ENC_VOP_DPP16'
+            ),
+            SimpleNamespace(
+                fmt_enc_name='Vop3SdstEncVopDpp8', enc_name='VOP3_SDST_ENC_VOP_DPP8'
+            ),
+        ]
+    )
+
+    assert codegen._vop_dpp_struct_names('VOP3_SDST_ENC') == (
+        'Vop3SdstEncVopDpp16MachineInst',
+        'Vop3SdstEncVopDpp8MachineInst',
+    )
+    assert codegen._supports_vop_dpp_encoding('VOP3_SDST_ENC')
+
+
 def test_rdna4_parser_injects_s_waitcnt_compat():
     import pathlib
 
@@ -552,6 +573,45 @@ def test_gfx1250_generated_vop3_lshrrev_b16_uses_true16_helpers():
     assert 'inst.vdst.write_lane' not in body
 
 
+def test_gfx1250_generated_vop3_add_f16_applies_dpp():
+    import pathlib
+
+    arch_root = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+        / 'gfx1250'
+    )
+    encodings_h = (arch_root / 'encodings.h').read_text()
+    vop3_alu = '\n'.join(
+        path.read_text() for path in sorted(arch_root.glob('vop3_alu*.cpp'))
+    )
+
+    vop3_base = encodings_h[
+        encodings_h.index('class Vop3') : encodings_h.index('class Vop3p')
+    ]
+    assert 'uint32_t dpp_ctrl_ = 0;' in vop3_base
+
+    start = vop3_alu.index('VAddF16Vop3::VAddF16Vop3')
+    end = vop3_alu.index('void VAddF16Vop3::execute_impl', start)
+    ctor = vop3_alu[start:end]
+    assert 'Vop3VopDpp16MachineInst' in ctor
+    assert 'dpp_ctrl_ = dp->dpp_ctrl;' in ctor
+
+    start = vop3_alu.index('void VAddF16Vop3::execute_impl')
+    end = vop3_alu.index('VAddNcU16Vop3::VAddNcU16Vop3', start)
+    body = vop3_alu[start:end]
+    assert 'amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_' in body
+    assert 'if (dpp_src0_)' in body
+    assert 'src0.set_delegate(dpp_src0_.get());' in body
+    assert 'src0.clear_delegate();' in body
+
+
 def test_generated_vop3_dot2_true16_uses_true16_helpers():
     import pathlib
 
@@ -580,6 +640,34 @@ def test_generated_vop3_dot2_true16_uses_true16_helpers():
     assert 'util::f32_to_f16' in body
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits)' in body
     assert 'throw util::UnimplementedInst' not in body
+
+
+def test_generated_rdna4_vop3_cvt_f32_f16_applies_true16_source_modifiers():
+    import pathlib
+
+    vop3 = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+        / 'rdna4'
+        / 'vop3.cpp'
+    ).read_text()
+
+    start = vop3.index('void VCvtF32F16Vop3::execute_impl')
+    end = vop3.index('VCvtU16F16Vop3::VCvtU16F16Vop3', start)
+    body = vop3[start:end]
+
+    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
+    assert 'float src = util::f16_to_f32(static_cast<uint16_t>(raw));' in body
+    assert 'if (inst_.abs & (1u << 0))' in body
+    assert 'src = std::fabs(src);' in body
+    assert 'if (inst_.neg & (1u << 0))' in body
+    assert 'vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(src));' in body
 
 
 def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe():
@@ -640,8 +728,9 @@ def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
 def test_gfx1250_generated_fp8_vop3_shared_byte_select_uses_inst_member():
     import pathlib
 
+    source_root = pathlib.Path(__file__).resolve().parents[4]
     execute_shared = (
-        pathlib.Path(__file__).resolve().parents[4]
+        source_root
         / 'lib'
         / 'rocjitsu'
         / 'src'
@@ -663,6 +752,26 @@ def test_gfx1250_generated_fp8_vop3_shared_byte_select_uses_inst_member():
     assert 'util::fp8_e4m3_to_f32' in body
     assert 'amdgpu::vop3_opsel(inst_)' not in body
     assert 'amdgpu::vop3_fp8_decode_e5m3(inst_)' not in body
+
+    gfx1250_vop3_cvt = (
+        source_root
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+        / 'gfx1250'
+        / 'vop3_cvt_1.cpp'
+    ).read_text()
+    start = gfx1250_vop3_cvt.index('void VCvtF16Fp8Vop3::execute_impl')
+    end = gfx1250_vop3_cvt.index('VCvtF16Bf8Vop3::VCvtF16Bf8Vop3', start)
+    body = gfx1250_vop3_cvt[start:end]
+    body_words = ' '.join(body.split())
+
+    assert '>> (((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1) * 8u)' in body_words
+    assert '((amdgpu::vop3_opsel(inst_) & 0x1u) << 1)' not in body
 
 
 def test_gfx1250_helper_blocks_emit_hwreg_and_scaled_wmma_hooks():
@@ -703,6 +812,12 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' in cpp
+    src_neg_start = cpp.index('bool Vopd::uses_src_neg_modifier')
+    src_neg_body = cpp[
+        src_neg_start : cpp.index('uint32_t Vopd::apply_neg', src_neg_start)
+    ]
+    assert 'case kVopdCndmaskB32:' in src_neg_body
+    assert 'if (uses_src_neg_modifier(slot.op))' in cpp
     execute_start = cpp.index('uint32_t Vopd::execute_slot')
     fma_start = cpp.index('case kVopdFmaF32', execute_start)
     fma_case = cpp[fma_start : cpp.index('case kVopdSubNcU32:', fma_start)]

@@ -10,7 +10,10 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -1120,6 +1123,45 @@ TEST(RdnaAddrCalcTest, Rdna3SmemSoffsetHandlesNullM0AndSgprSelectors) {
   EXPECT_EQ(rdna3::smem_calculate_address(inst, *wf), kBase + 0x20 + 0x80);
 }
 
+TEST(RdnaAddrCalcTest, Rdna3MubufWrapsOffsetPartBeforeBoundsCheck) {
+  amdgpu::GpuMemory mem("rdna3_mubuf_wrap_mem");
+  amdgpu::L2Cache l2("rdna3_mubuf_wrap_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna3_mubuf_wrap_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1ULL);
+
+  constexpr uint64_t kBase = 0x2'0000'1000ULL;
+  uint32_t sbase = wf->sgpr_alloc().base;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  cu->write_sgpr(sbase, static_cast<uint32_t>(kBase));
+  cu->write_sgpr(sbase + 1, static_cast<uint32_t>(kBase >> 32));
+  cu->write_sgpr(sbase + 2, 0x1000);
+  cu->write_sgpr(sbase + 3, 0);
+  cu->write_vgpr(vbase + 4, 0, 0xFFFF'FFF0u);
+
+  rdna3::MubufMachineInst inst{};
+  inst.srsrc = 0;
+  inst.soffset = 0x80;
+  inst.offen = 1;
+  inst.idxen = 0;
+  inst.vaddr = 4;
+  inst.offset = 0x10;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  rdna3::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.lane_mask, 1ULL);
+  EXPECT_EQ(d.per_lane_addr[0], kBase);
+}
+
 TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
   amdgpu::GpuMemory mem("rdna4_addr_mem");
   amdgpu::L2Cache l2("rdna4_addr_l2");
@@ -1299,6 +1341,84 @@ TEST(RdnaAddrCalcTest, Rdna4VbufferUsesDecodedRsrcAndOptionalSoffset) {
   inst.soffset = rdna4::OPR_SREG_M0_M0;
   rdna4::mubuf_calculate_addresses(inst, *wf, d);
   EXPECT_EQ(d.per_lane_addr[0], kBase + 0x20 + 0x10 + 0x40);
+}
+
+TEST(RdnaAddrCalcTest, Rdna4VbufferWrapsOffsetPartBeforeBaseAddition) {
+  amdgpu::GpuMemory mem("rdna4_vbuffer_wrap_mem");
+  amdgpu::L2Cache l2("rdna4_vbuffer_wrap_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_vbuffer_wrap_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1ULL);
+
+  constexpr uint64_t kBase = 0x2'0000'1000ULL;
+  uint32_t sbase = wf->sgpr_alloc().base;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  cu->write_sgpr(sbase + 4, static_cast<uint32_t>(kBase));
+  cu->write_sgpr(sbase + 5, static_cast<uint32_t>(kBase >> 32));
+  cu->write_sgpr(sbase + 6, 0x1000);
+  cu->write_sgpr(sbase + 7, 0);
+  cu->write_vgpr(vbase + 4, 0, 0xFFFF'8200u);
+
+  rdna4::VbufferMachineInst inst{};
+  inst.rsrc = 4;
+  inst.soffset = rdna4::OPR_SREG_M0_NULL;
+  inst.offen = 1;
+  inst.idxen = 0;
+  inst.vaddr = 4;
+  inst.ioffset = 0x7E00;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  rdna4::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.lane_mask, 1ULL);
+  EXPECT_EQ(d.per_lane_addr[0], kBase);
+}
+
+TEST(RdnaAddrCalcTest, Gfx1250VbufferWrapsOffsetPartBeforeBoundsCheck) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_wrap_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_wrap_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_wrap_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1ULL);
+
+  constexpr uint64_t kBase = 0x2'0000'1000ULL;
+  uint32_t sbase = wf->sgpr_alloc().base;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  cu->write_sgpr(sbase + 4, static_cast<uint32_t>(kBase));
+  cu->write_sgpr(sbase + 5, static_cast<uint32_t>(kBase >> 32));
+  cu->write_sgpr(sbase + 6, 0x100);
+  cu->write_sgpr(sbase + 7, 0);
+  cu->write_vgpr(vbase + 4, 0, 0xFFFF'8200u);
+
+  gfx1250::VbufferMachineInst inst{};
+  inst.rsrc = 4;
+  inst.soffset = gfx1250::OPR_SREG_NULL;
+  inst.offen = 1;
+  inst.idxen = 0;
+  inst.vaddr = 4;
+  inst.ioffset = 0x7E00;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  gfx1250::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.lane_mask, 1ULL);
+  EXPECT_EQ(d.per_lane_addr[0], kBase);
 }
 
 void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {

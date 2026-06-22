@@ -3803,10 +3803,12 @@ inline void execute_v_cmp_class_f16_vop3([[maybe_unused]] Inst &inst,
   });
   uint64_t exec = wf.exec();
   uint64_t vcc = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst.inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0_raw = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
+    uint16_t s0_raw = static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src0, wf, lane, opsel, 0));
     if (inst.inst_.abs & (1u << 0))
       s0_raw &= 0x7FFFu;
     if (inst.inst_.neg & (1u << 0))
@@ -8144,10 +8146,12 @@ inline void execute_v_cndmask_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
+    const uint32_t src0_value =
+        apply_vop3_b32_src_mod(inst.src0.read_lane(wf, lane), inst.inst_.abs, inst.inst_.neg, 0);
+    const uint32_t src1_value =
+        apply_vop3_b32_src_mod(inst.src1.read_lane(wf, lane), inst.inst_.abs, inst.inst_.neg, 1);
     inst.vdst.write_lane(wf, lane,
-                         ((inst.src2.read_scalar64(wf) >> lane) & 1)
-                             ? inst.src1.read_lane(wf, lane)
-                             : inst.src0.read_lane(wf, lane));
+                         ((inst.src2.read_scalar64(wf) >> lane) & 1) ? src1_value : src0_value);
   }
 }
 
@@ -11462,19 +11466,24 @@ inline void execute_v_fma_mix_f32_vop3p([[maybe_unused]] Inst &inst,
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
     uint32_t raw2 = inst.src2.read_lane(wf, lane);
-    float a, b, c;
-    if (inst.inst_.op_sel_hi & 1)
-      a = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
-    else
-      a = std::bit_cast<float>(raw0);
-    if (inst.inst_.op_sel_hi & 2)
-      b = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
-    else
-      b = std::bit_cast<float>(raw1);
-    if (inst.inst_.op_sel_hi_2)
-      c = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
-    else
-      c = std::bit_cast<float>(raw2);
+    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
+                           bool high_half) -> float {
+      if (!src_is_f16)
+        return std::bit_cast<float>(raw);
+      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+                          ? util::f32_to_f16(std::bit_cast<float>(raw))
+                          : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
+      return util::f16_to_f32(bits);
+    };
+    float a = read_mix_src(raw0, inst.inst_.src0, inst.inst_.op_sel_hi & 1, inst.inst_.op_sel & 1);
+    float b = read_mix_src(raw1, inst.inst_.src1, inst.inst_.op_sel_hi & 2, inst.inst_.op_sel & 2);
+    float c = read_mix_src(raw2, inst.inst_.src2, inst.inst_.op_sel_hi_2, inst.inst_.op_sel & 4);
+    if (inst.inst_.neg_hi & 1)
+      a = std::fabs(a);
+    if (inst.inst_.neg_hi & 2)
+      b = std::fabs(b);
+    if (inst.inst_.neg_hi & 4)
+      c = std::fabs(c);
     if (inst.inst_.neg & 1)
       a = -a;
     if (inst.inst_.neg & 2)
@@ -11499,19 +11508,24 @@ inline void execute_v_fma_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
     uint32_t raw2 = inst.src2.read_lane(wf, lane);
-    float a, b, c;
-    if (inst.inst_.op_sel_hi & 1)
-      a = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
-    else
-      a = std::bit_cast<float>(raw0);
-    if (inst.inst_.op_sel_hi & 2)
-      b = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
-    else
-      b = std::bit_cast<float>(raw1);
-    if (inst.inst_.op_sel_hi_2)
-      c = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
-    else
-      c = std::bit_cast<float>(raw2);
+    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
+                           bool high_half) -> float {
+      if (!src_is_f16)
+        return std::bit_cast<float>(raw);
+      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+                          ? util::f32_to_f16(std::bit_cast<float>(raw))
+                          : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
+      return util::f16_to_f32(bits);
+    };
+    float a = read_mix_src(raw0, inst.inst_.src0, inst.inst_.op_sel_hi & 1, inst.inst_.op_sel & 1);
+    float b = read_mix_src(raw1, inst.inst_.src1, inst.inst_.op_sel_hi & 2, inst.inst_.op_sel & 2);
+    float c = read_mix_src(raw2, inst.inst_.src2, inst.inst_.op_sel_hi_2, inst.inst_.op_sel & 4);
+    if (inst.inst_.neg_hi & 1)
+      a = std::fabs(a);
+    if (inst.inst_.neg_hi & 2)
+      b = std::fabs(b);
+    if (inst.inst_.neg_hi & 4)
+      c = std::fabs(c);
     if (inst.inst_.neg & 1)
       a = -a;
     if (inst.inst_.neg & 2)
@@ -11522,8 +11536,7 @@ inline void execute_v_fma_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
     if (inst.inst_.clamp)
       result = std::clamp(result, 0.0f, 1.0f);
     uint16_t h = util::f32_to_f16(result);
-    uint32_t prev = inst.vdst.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, (prev & 0x0000FFFFu) | (static_cast<uint32_t>(h) << 16));
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0x8u, h);
   }
 }
 
@@ -11538,19 +11551,24 @@ inline void execute_v_fma_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
     uint32_t raw2 = inst.src2.read_lane(wf, lane);
-    float a, b, c;
-    if (inst.inst_.op_sel_hi & 1)
-      a = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
-    else
-      a = std::bit_cast<float>(raw0);
-    if (inst.inst_.op_sel_hi & 2)
-      b = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
-    else
-      b = std::bit_cast<float>(raw1);
-    if (inst.inst_.op_sel_hi_2)
-      c = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
-    else
-      c = std::bit_cast<float>(raw2);
+    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
+                           bool high_half) -> float {
+      if (!src_is_f16)
+        return std::bit_cast<float>(raw);
+      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+                          ? util::f32_to_f16(std::bit_cast<float>(raw))
+                          : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
+      return util::f16_to_f32(bits);
+    };
+    float a = read_mix_src(raw0, inst.inst_.src0, inst.inst_.op_sel_hi & 1, inst.inst_.op_sel & 1);
+    float b = read_mix_src(raw1, inst.inst_.src1, inst.inst_.op_sel_hi & 2, inst.inst_.op_sel & 2);
+    float c = read_mix_src(raw2, inst.inst_.src2, inst.inst_.op_sel_hi_2, inst.inst_.op_sel & 4);
+    if (inst.inst_.neg_hi & 1)
+      a = std::fabs(a);
+    if (inst.inst_.neg_hi & 2)
+      b = std::fabs(b);
+    if (inst.inst_.neg_hi & 4)
+      c = std::fabs(c);
     if (inst.inst_.neg & 1)
       a = -a;
     if (inst.inst_.neg & 2)
@@ -11561,8 +11579,7 @@ inline void execute_v_fma_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
     if (inst.inst_.clamp)
       result = std::clamp(result, 0.0f, 1.0f);
     uint16_t h = util::f32_to_f16(result);
-    uint32_t prev = inst.vdst.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, (prev & 0xFFFF0000u) | h);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0u, h);
   }
 }
 
@@ -13357,19 +13374,24 @@ inline void execute_v_mad_mix_f32_vop3p([[maybe_unused]] Inst &inst,
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
     uint32_t raw2 = inst.src2.read_lane(wf, lane);
-    float a, b, c;
-    if (inst.inst_.op_sel_hi & 1)
-      a = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
-    else
-      a = std::bit_cast<float>(raw0);
-    if (inst.inst_.op_sel_hi & 2)
-      b = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
-    else
-      b = std::bit_cast<float>(raw1);
-    if (inst.inst_.op_sel_hi_2)
-      c = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
-    else
-      c = std::bit_cast<float>(raw2);
+    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
+                           bool high_half) -> float {
+      if (!src_is_f16)
+        return std::bit_cast<float>(raw);
+      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+                          ? util::f32_to_f16(std::bit_cast<float>(raw))
+                          : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
+      return util::f16_to_f32(bits);
+    };
+    float a = read_mix_src(raw0, inst.inst_.src0, inst.inst_.op_sel_hi & 1, inst.inst_.op_sel & 1);
+    float b = read_mix_src(raw1, inst.inst_.src1, inst.inst_.op_sel_hi & 2, inst.inst_.op_sel & 2);
+    float c = read_mix_src(raw2, inst.inst_.src2, inst.inst_.op_sel_hi_2, inst.inst_.op_sel & 4);
+    if (inst.inst_.neg_hi & 1)
+      a = std::fabs(a);
+    if (inst.inst_.neg_hi & 2)
+      b = std::fabs(b);
+    if (inst.inst_.neg_hi & 4)
+      c = std::fabs(c);
     if (inst.inst_.neg & 1)
       a = -a;
     if (inst.inst_.neg & 2)
@@ -13394,19 +13416,24 @@ inline void execute_v_mad_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
     uint32_t raw2 = inst.src2.read_lane(wf, lane);
-    float a, b, c;
-    if (inst.inst_.op_sel_hi & 1)
-      a = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
-    else
-      a = std::bit_cast<float>(raw0);
-    if (inst.inst_.op_sel_hi & 2)
-      b = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
-    else
-      b = std::bit_cast<float>(raw1);
-    if (inst.inst_.op_sel_hi_2)
-      c = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
-    else
-      c = std::bit_cast<float>(raw2);
+    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
+                           bool high_half) -> float {
+      if (!src_is_f16)
+        return std::bit_cast<float>(raw);
+      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+                          ? util::f32_to_f16(std::bit_cast<float>(raw))
+                          : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
+      return util::f16_to_f32(bits);
+    };
+    float a = read_mix_src(raw0, inst.inst_.src0, inst.inst_.op_sel_hi & 1, inst.inst_.op_sel & 1);
+    float b = read_mix_src(raw1, inst.inst_.src1, inst.inst_.op_sel_hi & 2, inst.inst_.op_sel & 2);
+    float c = read_mix_src(raw2, inst.inst_.src2, inst.inst_.op_sel_hi_2, inst.inst_.op_sel & 4);
+    if (inst.inst_.neg_hi & 1)
+      a = std::fabs(a);
+    if (inst.inst_.neg_hi & 2)
+      b = std::fabs(b);
+    if (inst.inst_.neg_hi & 4)
+      c = std::fabs(c);
     if (inst.inst_.neg & 1)
       a = -a;
     if (inst.inst_.neg & 2)
@@ -13417,8 +13444,7 @@ inline void execute_v_mad_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
     if (inst.inst_.clamp)
       result = std::clamp(result, 0.0f, 1.0f);
     uint16_t h = util::f32_to_f16(result);
-    uint32_t prev = inst.vdst.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, (prev & 0x0000FFFFu) | (static_cast<uint32_t>(h) << 16));
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0x8u, h);
   }
 }
 
@@ -13433,19 +13459,24 @@ inline void execute_v_mad_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
     uint32_t raw2 = inst.src2.read_lane(wf, lane);
-    float a, b, c;
-    if (inst.inst_.op_sel_hi & 1)
-      a = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
-    else
-      a = std::bit_cast<float>(raw0);
-    if (inst.inst_.op_sel_hi & 2)
-      b = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
-    else
-      b = std::bit_cast<float>(raw1);
-    if (inst.inst_.op_sel_hi_2)
-      c = util::f16_to_f32(static_cast<uint16_t>((inst.inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
-    else
-      c = std::bit_cast<float>(raw2);
+    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
+                           bool high_half) -> float {
+      if (!src_is_f16)
+        return std::bit_cast<float>(raw);
+      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+                          ? util::f32_to_f16(std::bit_cast<float>(raw))
+                          : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
+      return util::f16_to_f32(bits);
+    };
+    float a = read_mix_src(raw0, inst.inst_.src0, inst.inst_.op_sel_hi & 1, inst.inst_.op_sel & 1);
+    float b = read_mix_src(raw1, inst.inst_.src1, inst.inst_.op_sel_hi & 2, inst.inst_.op_sel & 2);
+    float c = read_mix_src(raw2, inst.inst_.src2, inst.inst_.op_sel_hi_2, inst.inst_.op_sel & 4);
+    if (inst.inst_.neg_hi & 1)
+      a = std::fabs(a);
+    if (inst.inst_.neg_hi & 2)
+      b = std::fabs(b);
+    if (inst.inst_.neg_hi & 4)
+      c = std::fabs(c);
     if (inst.inst_.neg & 1)
       a = -a;
     if (inst.inst_.neg & 2)
@@ -13456,8 +13487,7 @@ inline void execute_v_mad_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
     if (inst.inst_.clamp)
       result = std::clamp(result, 0.0f, 1.0f);
     uint16_t h = util::f32_to_f16(result);
-    uint32_t prev = inst.vdst.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, (prev & 0xFFFF0000u) | h);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0u, h);
   }
 }
 

@@ -759,6 +759,31 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
   throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));
 }
 
+uint32_t resolve_src_scalar16(const amdgpu::Wavefront &wf, int ev) {
+  switch (ev) {
+  case 240:
+    return 0x3800u; // 0.5h
+  case 241:
+    return 0xB800u; // -0.5h
+  case 242:
+    return 0x3C00u; // 1.0h
+  case 243:
+    return 0xBC00u; // -1.0h
+  case 244:
+    return 0x4000u; // 2.0h
+  case 245:
+    return 0xC000u; // -2.0h
+  case 246:
+    return 0x4400u; // 4.0h
+  case 247:
+    return 0xC400u; // -4.0h
+  case 248:
+    return 0x3118u; // f16 1/(2*pi)
+  default:
+    return resolve_src_scalar(wf, ev);
+  }
+}
+
 // Must stay in sync with resolve_src_scalar above — returns true for
 // exactly the encoding values that resolve_src_scalar handles without
 // throwing. Used by Isa::simd_capable_value() to keep the SIMD fast
@@ -1010,6 +1035,8 @@ uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
   }
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(ev);
+  if (size_bits_ == 16)
+    return resolve_src_scalar16(wf, ev);
   return resolve_src_scalar(wf, ev);
 }
 

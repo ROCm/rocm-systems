@@ -3,6 +3,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -167,7 +168,8 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
     if (inst.offen) {
       voffset = cu.read_vgpr(wf.vgpr_alloc().base + inst.vaddr, lane);
     }
-    d.per_lane_addr[lane] = base_addr + voffset + ioff + soffset_val;
+    uint32_t offset_part = amdgpu::addr_calc::buffer_offset_part(voffset, ioff);
+    d.per_lane_addr[lane] = base_addr + offset_part + soffset_val;
   }
 }
 
