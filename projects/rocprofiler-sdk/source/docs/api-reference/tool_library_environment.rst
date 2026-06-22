@@ -94,6 +94,36 @@ that is not being loaded, not being initialized, or not receiving callbacks.
 
         Log messages are emitted to ``stderr``.
 
+Queue interception behavior
+---------------------------
+
+This variable controls how ROCprofiler-SDK intercepts HSA queue operations. It
+is an advanced knob: most tools do not need to set it, and the default is chosen
+automatically based on the services your tool enables.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 30 15 55
+
+    * - Variable
+      - Default
+      - Description
+    * - ``ROCPROFILER_QUEUE_INTERPOSITION``
+      - (auto)
+      - Boolean (``true``/``false``). Selects between *inline* queue interposition
+        (a shadow write-pointer that intercepts queue operations without the
+        legacy intercept queue) and the legacy
+        ``hsa_amd_queue_intercept_create`` path.
+
+        When unset, the SDK chooses automatically: inline interposition is
+        enabled only when **no** registered context requires dispatch counter
+        collection, thread trace (ATT), or PC sampling; otherwise the legacy
+        path is used.
+
+        If you set this to ``true`` while a context that requires the legacy
+        path (counter collection, ATT, or PC sampling) is registered, the SDK
+        logs a warning and falls back to the legacy path anyway.
+
 Beta-feature opt-in
 -------------------
 
