@@ -6613,9 +6613,13 @@ Field | Description
 `vpod_id` | Virtual PoD identifier
 `vpod_size` | Virtual PoD size
 `local_accelerators` | List of local accelerator IDs
-`vpod_active_accelerators` | Active-accelerator bitmap as a list of 32-bit words (bit N set = accelerator ID N is active)
+`local_accelerator_count` | Count of valid entries in `local_accelerators`
+`vpod_active_accelerators` | List of active accelerator IDs; unused slots read `UINT32_MAX` (UNSET), as with `local_accelerators`
 `addr_mode` | NPA address mode: `SOURCE_ALIASING`, `SOURCE_IDENTIFICATION`, or `UNKNOWN`
 `accel_state` | Accelerator vPoD state: `UNCONFIGURED`, `CONFIGURED`, `READY`, `ACTIVE`, `ERROR`, or `UNKNOWN`
+`station_flags` | DF/station flags
+`num_stations` | Number of stations
+`lane_en_bitmap` | Per-lane enable bitmap as a list of bytes
 
 Exceptions that can be thrown by `amdsmi_get_gpu_fabric_info` function:
 

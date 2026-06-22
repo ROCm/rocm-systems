@@ -7139,6 +7139,7 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
     """
     Return fabric info from UALoE sysfs (partial reads).
 
+    The C API may return AMDSMI_STATUS_NOT_INIT when the accelerators are not configured/setup
     The C API may return AMDSMI_STATUS_NO_DATA when no sysfs files produced usable
     lines; the struct is still populated with BDF and sentinel/default fabric fields.
     """
@@ -7151,25 +7152,36 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
         raise AmdSmiRetryException()
     if ret == amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT:
         raise AmdSmiTimeoutException()
-    if ret not in (amdsmi_wrapper.AMDSMI_STATUS_SUCCESS, amdsmi_wrapper.AMDSMI_STATUS_NO_DATA):
+    if ret not in (
+        amdsmi_wrapper.AMDSMI_STATUS_SUCCESS,
+        amdsmi_wrapper.AMDSMI_STATUS_NO_DATA,
+        amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+    ):
         raise AmdSmiLibraryException(ret)
 
     v1 = fabric_info.fabric_info.v1
+    ppod = v1.ppod
+    vpod = v1.vpod
+    station = v1.station
     return {
         "bdf": _format_bdf(fabric_info.bdf),
         "version": fabric_info.fabric_version,
-        "accelerator_id": v1.accelerator_id,
+        "accelerator_id": ppod.accelerator_id,
         "fabric_type": _FABRIC_TYPE_NAMES.get(v1.fabric_type, "UNKNOWN"),
-        "bandwidth": v1.bandwidth,
-        "latency": v1.latency,
-        "ppod_id": list(v1.ppod_id),
-        "ppod_size": v1.ppod_size,
-        "vpod_id": v1.vpod_id,
-        "vpod_size": v1.vpod_size,
-        "local_accelerators": list(v1.local_accelerators),
-        "vpod_active_accelerators": list(v1.vpod_active_accelerators),
-        "addr_mode": _FABRIC_ADDR_MODE_NAMES.get(v1.addr_mode, "UNKNOWN"),
+        "bandwidth": ppod.bandwidth,
+        "latency": ppod.latency,
+        "ppod_id": list(ppod.ppod_id),
+        "ppod_size": ppod.ppod_size,
+        "vpod_id": vpod.vpod_id,
+        "vpod_size": vpod.vpod_size,
+        "local_accelerators": list(ppod.local_accelerators),
+        "local_accelerator_count": ppod.local_accelerator_count,
+        "vpod_active_accelerators": list(vpod.vpod_active_accelerators),
+        "addr_mode": _FABRIC_ADDR_MODE_NAMES.get(vpod.addr_mode, "UNKNOWN"),
         "accel_state": _FABRIC_ACCEL_STATE_NAMES.get(v1.accel_state, "UNKNOWN"),
+        "station_flags": station.station_flags,
+        "num_stations": station.num_stations,
+        "lane_en_bitmap": list(station.lane_en_bitmap),
     }
 
 
