@@ -4,6 +4,7 @@
 import ast
 import re
 import warnings
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Optional
 
@@ -559,6 +560,10 @@ class db_analysis(OmniAnalyze_Base):
         expression_df: pd.DataFrame,
         emit_variance_warnings: bool = False,
     ) -> pd.Series:
+        # apply(axis=1) on an empty frame returns a DataFrame, not a Series,
+        # which breaks the single-column assignment at the call site.
+        if expression_df.empty:
+            return pd.Series(index=expression_df.index, dtype=object)
         db_analysis.calc_builtin_vars(
             pmc_df,
             sys_info,
@@ -753,6 +758,20 @@ class db_analysis(OmniAnalyze_Base):
             new_rows.append(base)
         return new_rows
 
+    @staticmethod
+    def _iter_metric_table_rows(
+        arch_config: schema.ArchConfig,
+    ) -> Iterator[tuple[str, pd.DataFrame, pd.Series]]:
+        """Yield (metric_id, metric_df, row) for each metric-table row (any df
+        with a Metric/Channel column), skipping roofline points (table 402)."""
+        for metric_df_id, metric_df in arch_config.dfs.items():
+            if metric_df_id == 402:
+                continue
+            if not set(metric_df.columns).intersection({"Metric", "Channel"}):
+                continue
+            for metric_id, row in metric_df.iterrows():
+                yield metric_id, metric_df, row
+
     def calc_metrics_data(
         self,
     ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
@@ -781,40 +800,59 @@ class db_analysis(OmniAnalyze_Base):
                 "Transaction",
                 "Percent of Peak",
             ]
-            metrics_info_df = pd.DataFrame([
-                {
-                    "name": row.get("Metric") or row["Channel"].strip(),
-                    "metric_id": metric_id,
-                    "description": row.get("Description"),
-                    "unit": row.get("Unit"),
-                    "pct_of_peak": row.get("Percent of Peak") is True,
-                    "table_name": table_names_map[int(metric_id.split(".")[0]) * 100],
-                    "sub_table_name": table_names_map[
-                        int(metric_id.split(".")[0]) * 100
-                        + int(metric_id.split(".")[1])
-                    ],
-                }
-                for metric_df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
-                if metric_df_id
-                != 402  # Skip roofline data points handled in calc_roofline_data
-                if set(metric_df.columns).intersection({"Metric", "Channel"})
-                for metric_id, row in metric_df.iterrows()
-            ])
-            expression_df = pd.DataFrame([
-                {
-                    "metric_id": metric_id,
-                    "value_name": value_name,
-                    "value": row[value_name].strip(),
-                }
-                for metric_df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
-                if metric_df_id
-                != 402  # Skip roofline data points handled in calc_roofline_data
-                if set(metric_df.columns).intersection({"Metric", "Channel"})
-                for metric_id, row in metric_df.iterrows()
-                for value_name in metric_df.drop(
-                    columns=non_expression_columns, errors="ignore"
-                ).columns
-            ])
+            # Pass explicit columns so an empty result (e.g. a --block filter
+            # matching nothing) still carries the schema downstream relies on.
+            metric_table_rows = list(
+                self._iter_metric_table_rows(self._arch_configs[gfx_arch])
+            )
+            metrics_info_df = pd.DataFrame(
+                data=[
+                    {
+                        "name": row.get("Metric") or row["Channel"].strip(),
+                        "metric_id": metric_id,
+                        "description": row.get("Description"),
+                        "unit": row.get("Unit"),
+                        "pct_of_peak": row.get("Percent of Peak") is True,
+                        "table_name": table_names_map[
+                            int(metric_id.split(".")[0]) * 100
+                        ],
+                        "sub_table_name": table_names_map[
+                            int(metric_id.split(".")[0]) * 100
+                            + int(metric_id.split(".")[1])
+                        ],
+                    }
+                    for metric_id, _metric_df, row in metric_table_rows
+                ],
+                columns=[
+                    "name",
+                    "metric_id",
+                    "description",
+                    "unit",
+                    "pct_of_peak",
+                    "table_name",
+                    "sub_table_name",
+                ],
+            )
+            expression_df = pd.DataFrame(
+                data=[
+                    {
+                        "metric_id": metric_id,
+                        "value_name": value_name,
+                        "value": row[value_name].strip(),
+                    }
+                    for metric_id, metric_df, row in metric_table_rows
+                    for value_name in metric_df.drop(
+                        columns=non_expression_columns, errors="ignore"
+                    ).columns
+                ],
+                columns=["metric_id", "value_name", "value"],
+            )
+
+            if metrics_info_df.empty:
+                console_warning(
+                    f"No metrics matched the active filter for {workload_path}; "
+                    "the database will contain no metric values for this workload."
+                )
 
             metrics_info_data_per_workload[workload_path] = metrics_info_df
             metric_expression_data_per_workload[workload_path] = expression_df
