@@ -128,7 +128,7 @@ class TestMinimal(RocprofsysTest):
             pass_regex=[
                 r"key\s*::\s*debug\.size",
                 r":: 4096",
-                r"key\s*::\s*debug\.status",
+                r"key\s*::\s*debug\.status[\s\S]*?::\s*0",
             ],
         )
 

@@ -12,8 +12,8 @@ worker(void*)
 int
 main()
 {
-    pthread_t tid;
-    pthread_create(&tid, nullptr, &worker, nullptr);
-    pthread_join(tid, nullptr);
+    pthread_t tid{};
+    if(pthread_create(&tid, nullptr, &worker, nullptr) != 0) return 1;
+    if(pthread_join(tid, nullptr) != 0) return 2;
     return 0;
 }
