@@ -1654,11 +1654,11 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' if (w == 0) return 0u;'
     ' uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);'
     ' return (src >> off) & mask; }}()',
-    'bfe_i': '[&]() -> uint32_t {{ int32_t src=static_cast<int32_t>({0});'
-    ' uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
-    ' if (w == 0) return 0u; int32_t val = (src >> off) & ((1 << w) - 1);'
-    ' if (val & (1 << (w-1))) val |= -(1 << w);'
-    ' return static_cast<uint32_t>(val); }}()',
+    'bfe_i': '[&]() -> uint32_t {{ uint32_t src=static_cast<uint32_t>({0});'
+    ' uint32_t off=static_cast<uint32_t>({1}) & 31u; uint32_t w=static_cast<uint32_t>({2}) & 31u;'
+    ' if (w == 0) return 0u; uint32_t mask = (uint32_t{1} << w) - 1u;'
+    ' uint32_t extracted = static_cast<uint32_t>(static_cast<int32_t>(src) >> off) & mask;'
+    ' uint32_t signbit = uint32_t{1} << (w - 1u); return (extracted ^ signbit) - signbit; }}()',
     'cubeid': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
     ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
     ' if (ax >= ay && ax >= az) return x >= 0 ? 0.0f : 1.0f;'

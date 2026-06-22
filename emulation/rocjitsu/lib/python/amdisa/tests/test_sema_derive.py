@@ -1121,7 +1121,9 @@ class TestDeriveVectorTernary:
         cpp = lower_sema_block(block)
 
         assert '::rocjitsu::amdgpu::lshl_masked' in cpp
-        assert 'inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)' not in cpp
+        assert (
+            'inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)' not in cpp
+        )
 
     def test_i24_mad_lowers_through_unsigned_helper(self):
         sem = _FakeSem('V_MAD_I32_I24', 'vector_ternary', 'mad_i24', 'i24')

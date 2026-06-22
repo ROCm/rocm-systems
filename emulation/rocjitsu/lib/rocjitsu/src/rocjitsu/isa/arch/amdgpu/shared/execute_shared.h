@@ -3404,15 +3404,15 @@ inline void execute_v_bfe_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
-      int32_t src = static_cast<int32_t>(static_cast<int32_t>(inst.src0.read_lane(wf, lane)));
-      uint32_t off = static_cast<int32_t>(inst.src1.read_lane(wf, lane)) & 31u;
-      uint32_t w = static_cast<int32_t>(inst.src2.read_lane(wf, lane)) & 31u;
+      uint32_t src = static_cast<uint32_t>(inst.src0.read_lane(wf, lane));
+      uint32_t off = static_cast<uint32_t>(inst.src1.read_lane(wf, lane)) & 31u;
+      uint32_t w = static_cast<uint32_t>(inst.src2.read_lane(wf, lane)) & 31u;
       if (w == 0)
         return 0u;
-      int32_t val = (src >> off) & ((1 << w) - 1);
-      if (val & (1 << (w - 1)))
-        val |= -(1 << w);
-      return static_cast<uint32_t>(val);
+      uint32_t mask = (uint32_t{1} << w) - 1u;
+      uint32_t extracted = static_cast<uint32_t>(static_cast<int32_t>(src) >> off) & mask;
+      uint32_t signbit = uint32_t{1} << (w - 1u);
+      return (extracted ^ signbit) - signbit;
     }());
   }
 }
@@ -10491,11 +10491,15 @@ inline void execute_v_dot2_i32_i16_vop3p([[maybe_unused]] Inst &inst,
     int16_t a1 = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     int16_t b0 = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
     int16_t b1 = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    int32_t acc = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    int32_t result = static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1 + acc;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(result));
+    uint32_t result = inst.src2.read_lane(wf, lane);
+    result += static_cast<uint32_t>(static_cast<int32_t>(a0) * b0);
+    result += static_cast<uint32_t>(static_cast<int32_t>(a1) * b1);
+    if (inst.inst_.clamp) {
+      int32_t signed_result = static_cast<int32_t>(result);
+      if (signed_result < 0)
+        result = 0u;
+    }
+    inst.vdst.write_lane(wf, lane, result);
   }
 }
 
@@ -10619,16 +10623,18 @@ inline void execute_v_dot4_i32_i8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    int32_t sum = acc;
+    uint32_t sum = inst.src2.read_lane(wf, lane);
     for (int i = 0; i < 4; ++i) {
       int8_t a = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);
       int8_t b = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);
-      sum += static_cast<int32_t>(a) * b;
+      sum += static_cast<uint32_t>(static_cast<int32_t>(a) * b);
     }
-    if (inst.inst_.clamp)
-      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
+    if (inst.inst_.clamp) {
+      int32_t signed_sum = static_cast<int32_t>(sum);
+      if (signed_sum < 0)
+        sum = 0u;
+    }
+    inst.vdst.write_lane(wf, lane, sum);
   }
 }
 
@@ -10642,8 +10648,7 @@ inline void execute_v_dot4_i32_iu8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    int32_t sum = acc;
+    uint32_t sum = inst.src2.read_lane(wf, lane);
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 4; ++i) {
@@ -10653,11 +10658,14 @@ inline void execute_v_dot4_i32_iu8_vop3p([[maybe_unused]] Inst &inst,
                               : static_cast<int32_t>(raw_a);
       int32_t b = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_b))
                               : static_cast<int32_t>(raw_b);
-      sum += a * b;
+      sum += static_cast<uint32_t>(a * b);
     }
-    if (inst.inst_.clamp)
-      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
+    if (inst.inst_.clamp) {
+      int32_t signed_sum = static_cast<int32_t>(sum);
+      if (signed_sum < 0)
+        sum = 0u;
+    }
+    inst.vdst.write_lane(wf, lane, sum);
   }
 }
 
@@ -10732,8 +10740,7 @@ inline void execute_v_dot8_i32_i4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    int32_t sum = acc;
+    uint32_t sum = inst.src2.read_lane(wf, lane);
     for (int i = 0; i < 8; ++i) {
       int32_t a = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);
       if (a & 0x8)
@@ -10741,11 +10748,14 @@ inline void execute_v_dot8_i32_i4_vop3p([[maybe_unused]] Inst &inst,
       int32_t b = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);
       if (b & 0x8)
         b |= ~0xF;
-      sum += a * b;
+      sum += static_cast<uint32_t>(a * b);
     }
-    if (inst.inst_.clamp)
-      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
+    if (inst.inst_.clamp) {
+      int32_t signed_sum = static_cast<int32_t>(sum);
+      if (signed_sum < 0)
+        sum = 0u;
+    }
+    inst.vdst.write_lane(wf, lane, sum);
   }
 }
 
@@ -10759,8 +10769,7 @@ inline void execute_v_dot8_i32_iu4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    int32_t sum = acc;
+    uint32_t sum = inst.src2.read_lane(wf, lane);
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 8; ++i) {
@@ -10770,11 +10779,14 @@ inline void execute_v_dot8_i32_iu4_vop3p([[maybe_unused]] Inst &inst,
                               : static_cast<int32_t>(raw_a);
       int32_t b = src1_signed ? static_cast<int32_t>((raw_b & 0x8) ? (raw_b | ~0xF) : raw_b)
                               : static_cast<int32_t>(raw_b);
-      sum += a * b;
+      sum += static_cast<uint32_t>(a * b);
     }
-    if (inst.inst_.clamp)
-      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
+    if (inst.inst_.clamp) {
+      int32_t signed_sum = static_cast<int32_t>(sum);
+      if (signed_sum < 0)
+        sum = 0u;
+    }
+    inst.vdst.write_lane(wf, lane, sum);
   }
 }
 
@@ -13314,11 +13326,13 @@ inline void execute_v_mad_legacy_u16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(
-                             ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *
-                               static_cast<uint16_t>(inst.src1.read_lane(wf, lane))) +
-                              static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
+    uint16_t a = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
+    uint16_t b = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
+    uint16_t c = static_cast<uint16_t>(inst.src2.read_lane(wf, lane));
+    inst.vdst.write_lane(
+        wf, lane,
+        static_cast<uint32_t>(static_cast<uint16_t>(
+            static_cast<uint32_t>(a) * static_cast<uint32_t>(b) + static_cast<uint32_t>(c))));
   }
 }
 
