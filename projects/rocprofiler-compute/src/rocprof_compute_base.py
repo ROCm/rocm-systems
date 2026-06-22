@@ -574,8 +574,7 @@ class RocProfCompute:
                 console_error(
                     f"Workload directory '{output_dir}' is not empty. Re-run "
                     "with --overwrite to wipe it and re-profile, or choose a "
-                    "different --output-directory. Each profiling run should "
-                    "use a fresh output directory."
+                    "different --output-directory."
                 )
             console_warning(
                 f"--overwrite: clearing existing workload directory {output_dir}"
