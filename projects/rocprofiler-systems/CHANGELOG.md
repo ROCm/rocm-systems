@@ -9,7 +9,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Added
 
 - hipFILE (GPU-direct storage) API tracing. Add `hipfile_api` to
-  `ROCPROFSYS_ROCM_DOMAINS` (shorthand: `hipfile`) to capture hipFILE API traces. Requires ROCProfiler-SDK version 1.3.2 or later.
+  `ROCPROFSYS_ROCM_DOMAINS` (shorthand: `hipfile`) to capture hipFILE API traces. Requires ROCProfiler-SDK version 1.3.3 or later.
 
 - `--output-format` flag for `rocprof-sys-run` and `rocprof-sys-sample` to select
   output format(s) in a single, intuitive option: `proto` (Perfetto), `rocpd`

@@ -416,9 +416,10 @@ get_callback_domains()
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
     }
 #endif
-#if(ROCPROFILER_VERSION >= 10302)
-    if(_version.formatted >= 10302)
+#if(ROCPROFILER_VERSION >= 10303)
+    if(_version.formatted >= 10303)
     {
+        // hipFILE API tracing requires rocprofiler-sdk 1.3.3 or later
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API);
     }
 #endif
