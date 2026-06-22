@@ -63,18 +63,7 @@ add_custom_target(amdsmi_rust_source ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/sou
 find_program(CARGO_EXECUTABLE NAMES cargo)
 
 if(NOT CARGO_EXECUTABLE)
-    message(STATUS "Cargo not found. Installing Rust and Cargo...")
-    execute_process(
-        COMMAND /bin/sh -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-        RESULT_VARIABLE result
-    )
-
-    if(result)
-        message(FATAL_ERROR "Failed to install Rust and Cargo.")
-    endif()
-
-    # Add Cargo to the PATH
-    set(CARGO_EXECUTABLE "$ENV{HOME}/.cargo/bin/cargo")
+    message(FATAL_ERROR "Cargo not found. Install Rust from https://rustup.rs before building the Rust interface.")
 endif()
 
 # Determine the Cargo build command
