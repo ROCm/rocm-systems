@@ -49,7 +49,7 @@ class Workload:
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
     path: str = field(default_factory=str)
     filter_top_n: str = field(default_factory=str)
-    matched_torch_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
+    matched_ml_api_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 # The prefix of raw pmc_perf.csv

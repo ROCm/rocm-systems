@@ -235,7 +235,7 @@ TEST_F(RoctxRecordFnTest, PushPopAreBalanced)
     constexpr int n = 100;
     for (int i = 0; i < n; ++i)
     {
-        push_user_scope("m" + std::to_string(i), "c");
+        push_user_scope("m" + std::to_string(i), "c", "gtest");
     }
     EXPECT_EQ(g_stack.size(), static_cast<std::size_t>(n));
     EXPECT_EQ(g_dbg_guards.size(), static_cast<std::size_t>(n));
@@ -264,7 +264,7 @@ TEST_F(RoctxRecordFnTest, DeepNestingPreservesOrder)
     constexpr int depth = 256;
     for (int i = 0; i < depth; ++i)
     {
-        push_user_scope("m" + std::to_string(i), "c" + std::to_string(i));
+        push_user_scope("m" + std::to_string(i), "c" + std::to_string(i), "gtest");
     }
     ASSERT_EQ(g_stack.size(), static_cast<std::size_t>(depth));
 
@@ -361,7 +361,7 @@ TEST_F(RoctxRecordFnRealOpsTest, FwdBwdCounterSanity)
     install();
 
     auto x = at::randn({8, 8}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
-    push_user_scope("test.fwd_bwd", "#1@test:1");
+    push_user_scope("test.fwd_bwd", "#1@test:1", "gtest");
     auto y = (x * 2).sum();
     pop_user_scope();
     y.backward();
@@ -384,7 +384,7 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
         (void)(warmup * 2).sum();
     }
 
-    push_user_scope("test.outer_step", "#1@test:7");
+    push_user_scope("test.outer_step", "#1@test:7", "gtest");
     auto x = at::randn({32, 32}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
     auto y = (x.matmul(x)).sum();
     y.backward();
@@ -393,12 +393,15 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
     const auto captured = stop_capture();
     ASSERT_FALSE(captured.empty());
 
-    bool        saw_aten_top    = false;
-    bool        saw_aten_nested = false;
-    bool        saw_bwd_leaf    = false;
-    bool        saw_legacy      = false;
-    std::size_t bwd_total       = 0;
-    std::size_t bwd_under_scope = 0;
+    bool        saw_aten_top      = false;
+    bool        saw_aten_nested   = false;
+    bool        saw_bwd_leaf      = false;
+    bool        saw_legacy        = false;
+    bool        saw_torch_backend = false;
+    std::size_t bwd_total         = 0;
+    std::size_t bwd_under_scope   = 0;
+
+    const std::string backend_suffix = "|torch";
 
     for (const auto& m : captured)
     {
@@ -410,6 +413,16 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
             saw_bwd_leaf = true;
         if (m.find("dispatcher:0") != std::string::npos)
             saw_legacy = true;
+
+        const bool is_recordfn_op = m.find("aten:0") != std::string::npos ||
+                                    m.find("aten.nested:0") != std::string::npos ||
+                                    m.find("autograd.bwd:0") != std::string::npos ||
+                                    m.find("autograd.engine:0") != std::string::npos;
+        if (is_recordfn_op && m.size() >= backend_suffix.size() &&
+            m.compare(m.size() - backend_suffix.size(), backend_suffix.size(), backend_suffix) == 0)
+        {
+            saw_torch_backend = true;
+        }
 
         if (m.find("autograd.bwd:0") != std::string::npos ||
             m.find("autograd.engine:0") != std::string::npos)
@@ -427,6 +440,7 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
     EXPECT_TRUE(saw_aten_top);
     EXPECT_TRUE(saw_aten_nested);
     EXPECT_TRUE(saw_bwd_leaf);
+    EXPECT_TRUE(saw_torch_backend);
     ASSERT_GT(bwd_total, 0u);
     EXPECT_GT(bwd_under_scope, 0u);
     EXPECT_GT(g_n_userscope_inherits.load(), 0u);
@@ -463,8 +477,7 @@ TEST_F(RoctxRecordFnRealOpsTest, DetachedForwardBounded)
 
     EXPECT_GT(g_n_snapshots_saved.load(), 0u);
     EXPECT_EQ(g_n_callback_errors.load(), 0u);
-    // 50 forward-only iterations should stay well below a single shard's
-    // soft cap; eviction kicking in here would indicate a per-iteration leak.
+    // 50 forward-only iterations stay well below a single shard's soft cap.
     EXPECT_LT(pending_snapshots(), SHARD_SOFT_CAP);
     EXPECT_EQ(g_n_snapshots_dropped.load(), 0u);
 }
@@ -483,7 +496,7 @@ TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
             [wid]()
             {
                 const std::string scope = "test.concurrent.worker" + std::to_string(wid);
-                push_user_scope(scope, "#1@test_thread:" + std::to_string(wid));
+                push_user_scope(scope, "#1@test_thread:" + std::to_string(wid), "gtest");
                 for (int i = 0; i < 4; ++i)
                 {
                     auto x = at::randn({64, 64}, at::TensorOptions().device(at::kCUDA)).requires_grad_(true);
