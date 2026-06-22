@@ -8,10 +8,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added `--partition` flag to `amd-smi metric` for partition-scoped metrics**.  
+- **Added `--partition` flag to `amd-smi metric` for partition-scoped metrics**.
   - The `-X`/`--partition` flag switches the temperature, clock, and usage categories to partition-level data sources. The `--violation` (throttle) category already reports per-XCP data independently and is unaffected by this flag.
   - Reuses the existing temperature/clock/usage section schema and adds partition-only AID/XCP/MID entries within it; socket-only fields with no partition equivalent report `N/A`.
-  - When `--partition` is set with `--temperature`: adds MID and per-XCP/XCD temperatures.
+  - When `--partition` is set with `--temperature`: switches the data source for `aid`, `mid`, and per-XCP/XCD temperatures to partition metrics.
   - When `--partition` is set with `--clock`: sources GFX/VCLK/DCLK/SOCCLK from partition metrics and adds per-AID and per-XCP clock entries with their limits.
   - When `--partition` is set with `--usage`: reports per-XCP GFX/JPEG/VCN activity.
 
@@ -58,6 +58,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added the new types to `amdsmi_link_types` as part of support for NICs
 
 ### Changed
+
+- **Normalized partition key casing in `amd-smi metric --usage` output**.
+  - Per-partition GFX/JPEG/VCN activity keys changed from `xcp_<N>` to `XCP_<N>`, matching the uppercase `XCP_<N>`/`AID_<N>`/`MID_<N>` keys already used by the temperature and clock categories. JSON consumers parsing the previous lowercase keys must update.
 
 - **Fixed `amd-smi static --clock` csv and human_readable formatting to output frequency 
 levels as strings instead of dictionary objects**.  

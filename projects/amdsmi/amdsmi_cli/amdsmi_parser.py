@@ -1778,7 +1778,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         partition_help = (
             "Switch temperature, clock, and usage to partition-scoped\n"
-            "    (XCP/AID/MID) data sources; combine with those flags to scope it;"
+            "    (XCP/AID/MID) data sources; requires -c, -t, or -u to have any effect;"
             "\n    Only available for MI300 or newer ASICs"
         )
 
