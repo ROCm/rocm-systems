@@ -2135,11 +2135,11 @@ TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
   EXPECT_TRUE(sim.cu()->wf(0)->is_halted());
 }
 
-TEST(Gfx1250SimulationTest, MultiWaveDispatchPacksWorkitemIdsInV0) {
+TEST(Gfx1250SimulationTest, MultiWaveDispatchPacksWorkitemIdsInV0WithOneTidVgpr) {
   Gfx1250Sim sim;
   const uint32_t code[] = {S_ENDPGM_GFX12};
-  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false,
-                                            false, false, 0, 0, 0, 0, 1);
+  uint64_t kernel_object =
+      sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false, false, false);
 
   test::AqlQueue queue(sim.memory, sim.cp());
   hsa_kernel_dispatch_packet_t pkt{};

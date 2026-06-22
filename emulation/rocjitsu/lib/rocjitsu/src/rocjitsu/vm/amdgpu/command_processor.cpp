@@ -105,6 +105,24 @@ uint32_t kernel_dispatch_wave_size(rj_code_arch_t arch, uint32_t kernel_code_pro
   }
 }
 
+uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wave_size,
+                                                   uint32_t fallback_granularity) {
+  // This is the AMDHSA kernel descriptor encoding granularity for
+  // COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT, not the physical VGPR
+  // allocation block size. LLVM's AMDGPUBaseInfo::getVGPREncodingGranule
+  // encodes GFX10-GFX12 Wave64 descriptors in blocks of 4 VGPRs.
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return wave_size == 32 ? 8 : 4;
+  default:
+    return std::max(fallback_granularity, 1u);
+  }
+}
+
 } // namespace
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
@@ -238,9 +256,9 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   //   0 = v0 only (workitem_id_x)
   //   1 = v0 + v1 (workitem_id_x, workitem_id_y)
   //   2 = v0 + v1 + v2 (workitem_id_x, workitem_id_y, workitem_id_z)
-  // On packed-TID targets (CDNA3/4 and gfx1250): v0[9:0]=X,
-  // v0[19:10]=Y, v0[29:20]=Z. v1/v2 are not written. Kernel extracts
-  // components via bit masks.
+  // On packed-TID targets (CDNA3/4 and GFX11+): v0[9:0]=X, v0[19:10]=Y,
+  // v0[29:20]=Z. TIDIG_COMP_CNT still controls how many TID VGPRs are
+  // allocated; the one-VGPR case carries the full packed tuple in v0.
   uint32_t vbase = wf->vgpr_alloc().base;
   uint32_t wave_size = wf->wf_size();
   uint32_t workitem_base = wf_index_in_wg * wave_size;
@@ -252,7 +270,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     uint32_t id_x = flat_id % wg_x;
     uint32_t id_y = (flat_id / wg_x) % wg_y;
     uint32_t id_z = flat_id / wg_xy;
-    if (packed_tid_ && pkt.enable_vgpr_workitem_id > 0) {
+    if (packed_tid_) {
       uint32_t packed = (id_x & 0x3FFu) | ((id_y & 0x3FFu) << 10) | ((id_z & 0x3FFu) << 20);
       cu->write_vgpr(vbase, lane, packed);
     } else {
@@ -722,15 +740,16 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   uint32_t sgpr_gran =
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  uint32_t vgprs = (vgpr_gran + 1) * vgpr_granularity_;
   rj_code_arch_t arch = cus_.empty() ? ROCJITSU_CODE_ARCH_CDNA1 : cus_[0]->config().arch;
+  uint32_t wave_size = kernel_dispatch_wave_size(arch, kd.kernel_code_properties);
+  uint32_t vgprs = (vgpr_gran + 1) *
+                   descriptor_vgpr_granularity_for_wavefront(arch, wave_size, vgpr_granularity_);
   uint32_t sgprs = sgpr_count_is_descriptor_encoded(arch, sgpr_gran) ? (sgpr_gran + 1) * 8 : 0;
   uint32_t user_sgprs = AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
   uint64_t entry_pc = pkt.kernel_object + static_cast<uint64_t>(kd.kernel_code_entry_byte_offset);
 
   uint32_t wg_size =
       static_cast<uint32_t>(pkt.workgroup_size_x) * pkt.workgroup_size_y * pkt.workgroup_size_z;
-  uint32_t wave_size = kernel_dispatch_wave_size(arch, kd.kernel_code_properties);
   uint32_t wfs_per_wg = util::ceil_div(wg_size, wave_size);
 
   uint32_t num_dims = pkt.setup & 0x3;
