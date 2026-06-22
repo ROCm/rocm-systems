@@ -5,7 +5,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "hotswap.hpp"
-#include <amd_comgr.h>
+#include "amd_comgr/amd_comgr.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
