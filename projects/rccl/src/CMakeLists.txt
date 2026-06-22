@@ -559,12 +559,12 @@ endif()
 if(RCCL_BUILD_ALL_UNROLLS)
   set(RCCL_BUILD_UNROLLS_ARG "ALL")
 else()
-  set(RCCL_BUILD_UNROLLS_ARG "")
+  set(RCCL_BUILD_UNROLLS_ARG "DEFAULT")
 endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} "${RCCL_BUILD_UNROLLS_ARG}" ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS} "${RCCL_BUILD_UNROLLS_ARG}"
     WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error

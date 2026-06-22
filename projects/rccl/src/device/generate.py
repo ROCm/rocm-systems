@@ -79,10 +79,10 @@ is_ifc             = 1 if sys.argv[2] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[4] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[5] == "ON" else 0
 
-# build all 6 unroll factors when --all-unrolls passed (argv[6] == "ALL"); default is arch-specific
-build_all_unrolls = len(sys.argv) > 6 and sys.argv[6] == "ALL"
+# build all 6 unroll factors when --all-unrolls passed (last argv == "ALL"); default is arch-specific
+build_all_unrolls = sys.argv[-1] == "ALL"
 
-func_pattern = sys.argv[7:8]
+func_pattern = sys.argv[6:-1]
 
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
