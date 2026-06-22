@@ -12,6 +12,7 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/counters.h>
+#include <rocprofiler-sdk/cxx/details/name_info.hpp>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
@@ -21,6 +22,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/marker/api_id.h>
+#include <rocprofiler-sdk/ompt/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/version.h>
 
@@ -768,12 +770,15 @@ struct backend
     // ─── Tracing name tables ──────────────────────────────────────────────────────
     // Wrapped here so sdk_core<Backend> routes all SDK interactions through Backend.
 
-    static auto get_callback_tracing_names()
+    using callback_name_info_t = rocprofiler::sdk::callback_name_info;
+    using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info;
+
+    static callback_name_info_t get_callback_tracing_names()
     {
         return rocprofiler::sdk::get_callback_tracing_names();
     }
 
-    static auto get_buffer_tracing_names()
+    static buffer_name_info_t get_buffer_tracing_names()
     {
         return rocprofiler::sdk::get_buffer_tracing_names();
     }
