@@ -127,3 +127,6 @@
 [submodule "projects/rocprofiler-compute/src/lib/external/fmt"]
 	path = projects/rocprofiler-compute/src/lib/external/fmt
 	url = https://github.com/fmtlib/fmt.git
+[submodule "projects/rocprofiler-compute/src/lib/external/json"]
+	path = projects/rocprofiler-compute/src/lib/external/json
+	url = https://github.com/nlohmann/json.git

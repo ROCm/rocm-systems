@@ -373,7 +373,7 @@ def get_arch_guard(fn):
   elif fn.proto == "LL128":
       cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
   elif fn.acc == "1":
-      cond = "defined(__gfx942__) || defined(__gfx950__)"
+      cond = "defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)"
 
   return cond
 

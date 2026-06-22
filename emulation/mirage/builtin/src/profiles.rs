@@ -12,11 +12,8 @@
 
 use mirage_core::common::{MaybeRef, SimpleMap};
 use mirage_core::emulator::{EmulatorDef, EmulatorKind, ExecMode};
-use mirage_core::profile::{ContainerizedDef, ProfileDef};
+use mirage_core::profile::ProfileDef;
 use mirage_core::topology::TopologyDef;
-
-/// Container image every builtin profile runs its nodes in.
-const DEFAULT_IMAGE: &str = "docker.io/rocm/dev-ubuntu-24.04:7.1.1-complete";
 
 /// All builtin profiles, keyed by the name written to disk.
 ///
@@ -60,13 +57,7 @@ fn profile(name: &str, emulator: EmulatorKind, agent: &str) -> ProfileDef {
                 agent: MaybeRef::Ref(agent.to_string()),
             }),
         },
-        containerize: Some(ContainerizedDef {
-            provider: None,
-            image: DEFAULT_IMAGE.to_string(),
-            mounts: Vec::new(),
-            devices: Vec::new(),
-            groups: Vec::new(),
-        }),
+        containerize: None,
     }
 }
 

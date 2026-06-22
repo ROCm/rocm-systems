@@ -174,6 +174,19 @@ in the following table.
         | Forces merging of network devices.
       - | String specifying forced merge configuration
 
+    * - | ``NCCL_NETDEVS_POLICY``
+        | Controls how many of a GPU's locally reachable NICs are used on the
+        | network path for ``send``, ``recv``, and ``all-to-all``. The policy
+        | governs per-channel NIC selection (``ncclTopoGetLocalNet``); the
+        | per-peer network channel count is still bounded by available NIC
+        | bandwidth.
+        | Any unset, malformed, or out-of-range value falls back to ``AUTO``.
+      - | ``AUTO`` (default): use ``ceil(localNetCount / localGpuCount)`` NICs,
+        | dividing the local NICs across the GPUs that share them.
+        | ``ALL``: use every locally reachable NIC.
+        | ``MAX:N``: use at most ``N`` NICs (clamped to the number reachable);
+        | ``N`` must be a positive integer.
+
     * - | ``RCCL_IB_SPLIT_DATA_THRESHOLD``
         | Minimum message size (in bytes) before the payload is split across
         | multiple NICs/QPs.

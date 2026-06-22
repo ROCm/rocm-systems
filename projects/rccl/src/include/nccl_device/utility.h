@@ -24,6 +24,20 @@
     #define NCCL_CHECK_CUDACC __CUDACC__
 #endif
 
+// NCCL_DEVICE_INLINE / NCCL_HOST_DEVICE_INLINE are provided by hip_compat.h
+// (included above) for the AMD path; do not redefine them here.
+
+// Macro for conditional constexpr support
+#if defined(__cpp_if_constexpr) && __cpp_if_constexpr >= 201606
+  #ifndef NCCL_IF_CONSTEXPR
+    #define NCCL_IF_CONSTEXPR constexpr
+  #endif
+#else
+  #ifndef NCCL_IF_CONSTEXPR
+    #define NCCL_IF_CONSTEXPR
+  #endif
+#endif
+
 #if __cplusplus
 #define NCCL_EXTERN_C extern "C"
 #else
@@ -38,6 +52,10 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+
+#if defined(NCCL_OS_WINDOWS)
+#include <intrin.h>
+#endif
 
 #if NCCL_CHECK_CUDACC
 #if defined(__HIP_PLATFORM_AMD__)
@@ -196,7 +214,7 @@ NCCL_HOST_DEVICE_INLINE uint32_t imulRcp32(uint32_t x, uint32_t xrcp, uint32_t y
   if (xrcp == 0) return yrcp;
   if (yrcp == 0) return xrcp;
   uint32_t rcp = mul32hi(xrcp, yrcp);
-  uint32_t rem = -x*y*rcp;
+  uint32_t rem = 0u - x*y*rcp;
   if (x*y <= rem) rcp += 1;
   return rcp;
 }
@@ -204,7 +222,7 @@ NCCL_HOST_DEVICE_INLINE uint64_t imulRcp64(uint64_t x, uint64_t xrcp, uint64_t y
   if (xrcp == 0) return yrcp;
   if (yrcp == 0) return xrcp;
   uint64_t rcp = mul64hi(xrcp, yrcp);
-  uint64_t rem = -x*y*rcp;
+  uint64_t rem = 0ULL - x*y*rcp;
   if (x*y <= rem) rcp += 1;
   return rcp;
 }
@@ -219,8 +237,8 @@ NCCL_HOST_DEVICE_INLINE void idivmodFast32(uint32_t *quo, uint32_t *rem, uint32_
   *rem = r;
 }
 NCCL_HOST_DEVICE_INLINE void idivmodFast64(uint64_t *quo, uint64_t *rem, uint64_t x, uint64_t y, uint64_t yrcp) {
-  uint32_t q = yrcp == 0 ? x : mul64hi(x, yrcp);
-  uint32_t r = x - y*q;
+  uint64_t q = yrcp == 0 ? x : mul64hi(x, yrcp);
+  uint64_t r = x - y*q;
   if (r >= y) { q += 1; r -= y; }
   *quo = q;
   *rem = r;
@@ -234,7 +252,7 @@ NCCL_HOST_DEVICE_INLINE uint32_t idivFast32(uint32_t x, uint32_t y, uint32_t yrc
 NCCL_HOST_DEVICE_INLINE uint32_t idivFast64(uint64_t x, uint64_t y, uint64_t yrcp) {
   uint64_t q, r;
   idivmodFast64(&q, &r, x, y, yrcp);
-  return q;
+  return (uint32_t)q;
 }
 
 NCCL_HOST_DEVICE_INLINE uint32_t imodFast32(uint32_t x, uint32_t y, uint32_t yrcp) {
@@ -242,7 +260,7 @@ NCCL_HOST_DEVICE_INLINE uint32_t imodFast32(uint32_t x, uint32_t y, uint32_t yrc
   idivmodFast32(&q, &r, x, y, yrcp);
   return r;
 }
-NCCL_HOST_DEVICE_INLINE uint32_t imodFast64(uint64_t x, uint64_t y, uint64_t yrcp) {
+NCCL_HOST_DEVICE_INLINE uint64_t imodFast64(uint64_t x, uint64_t y, uint64_t yrcp) {
   uint64_t q, r;
   idivmodFast64(&q, &r, x, y, yrcp);
   return r;

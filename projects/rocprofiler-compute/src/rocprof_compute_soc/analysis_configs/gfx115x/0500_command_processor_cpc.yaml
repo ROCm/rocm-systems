@@ -1,0 +1,225 @@
+# =============================================================================
+# RDNA3.5 (gfx115x) - RDNA3.5 CPC (Command Processor Compute) Performance Metrics
+# =============================================================================
+# CPC handles compute shader dispatch and command stream processing
+# =============================================================================
+
+Panel Config:
+  id: 500
+  title: Command Processor Compute (CPC)
+  data source:
+  # =========================================================================
+  # CPC Utilization
+  # =========================================================================
+  - metric_table:
+      id: 501
+      title: "CPC Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        CPC Busy:
+          avg: SUM(100 * CPC_STAT_BUSY) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
+          unit: Percent
+        CPC Idle:
+          avg: SUM(100 * CPC_STAT_IDLE) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
+          unit: Percent
+        CPC Stalled:
+          avg: SUM(100 * CPC_STAT_STALL) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_STAT_STALL / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_STAT_STALL / CPC_ALWAYS_COUNT)
+          unit: Percent
+
+  # =========================================================================
+  # CPC Interface Utilization
+  # =========================================================================
+  - metric_table:
+      id: 502
+      title: "CPC Interface Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        TCIU Busy:
+          avg: SUM(100 * CPC_TCIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
+          unit: Percent
+        UTCL2 Busy:
+          avg: SUM(100 * CPC_UTCL2IU_BUSY) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
+          unit: Percent
+        GCRIU Busy:
+          avg: SUM(100 * CPC_GCRIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT)
+          unit: Percent
+
+  # =========================================================================
+  # MEC (Micro Engine Compute) Stalls
+  # =========================================================================
+  - metric_table:
+      id: 503
+      title: "MEC Stall Cycles"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        ME1 Stall on RCIU Ready:
+          avg: SUM(CPC_ME1_STALL_WAIT_ON_RCIU_READY) / SUM($denom)
+          min: MIN(CPC_ME1_STALL_WAIT_ON_RCIU_READY / $denom)
+          max: MAX(CPC_ME1_STALL_WAIT_ON_RCIU_READY / $denom)
+          unit: (Cycles + $normUnit)
+        ME1 Stall on Memory Read:
+          avg: SUM(CPC_ME1_STALL_WAIT_ON_MEM_READ) / SUM($denom)
+          min: MIN(CPC_ME1_STALL_WAIT_ON_MEM_READ / $denom)
+          max: MAX(CPC_ME1_STALL_WAIT_ON_MEM_READ / $denom)
+          unit: (Cycles + $normUnit)
+        ME1 Stall on Memory Write:
+          avg: SUM(CPC_ME1_STALL_WAIT_ON_MEM_WRITE) / SUM($denom)
+          min: MIN(CPC_ME1_STALL_WAIT_ON_MEM_WRITE / $denom)
+          max: MAX(CPC_ME1_STALL_WAIT_ON_MEM_WRITE / $denom)
+          unit: (Cycles + $normUnit)
+        ME1 Stall on ROQ Data:
+          avg: SUM(CPC_ME1_STALL_ON_DATA_FROM_ROQ) / SUM($denom)
+          min: MIN(CPC_ME1_STALL_ON_DATA_FROM_ROQ / $denom)
+          max: MAX(CPC_ME1_STALL_ON_DATA_FROM_ROQ / $denom)
+          unit: (Cycles + $normUnit)
+
+  # =========================================================================
+  # CPC Memory Requests
+  # =========================================================================
+  - metric_table:
+      id: 504
+      title: "CPC Memory Requests"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        TCIU Read Requests:
+          avg: SUM(CPC_TCIU_READ_REQUEST_SENT_sum) / SUM($denom)
+          min: MIN(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
+          max: MAX(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
+          unit: (Count + $normUnit)
+        TCIU Write Requests:
+          avg: SUM(CPC_TCIU_WRITE_REQUEST_SENT_sum) / SUM($denom)
+          min: MIN(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
+          max: MAX(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
+          unit: (Count + $normUnit)
+        GUS Read Requests:
+          avg: SUM(CPC_GUS_READ_REQUEST_SENT_sum) / SUM($denom)
+          min: MIN(CPC_GUS_READ_REQUEST_SENT_sum / $denom)
+          max: MAX(CPC_GUS_READ_REQUEST_SENT_sum / $denom)
+          unit: (Count + $normUnit)
+        GUS Write Requests:
+          avg: SUM(CPC_GUS_WRITE_REQUEST_SENT_sum) / SUM($denom)
+          min: MIN(CPC_GUS_WRITE_REQUEST_SENT_sum / $denom)
+          max: MAX(CPC_GUS_WRITE_REQUEST_SENT_sum / $denom)
+          unit: (Count + $normUnit)
+
+  # =========================================================================
+  # MEC Instruction Cache
+  # =========================================================================
+  - metric_table:
+      id: 505
+      title: "MEC Instruction Cache"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Instruction Cache Hits:
+          avg: SUM(CPC_MEC_INSTR_CACHE_HIT_sum) / SUM($denom)
+          min: MIN(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
+          max: MAX(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
+          unit: (Count + $normUnit)
+        Instruction Cache Misses:
+          avg: SUM(CPC_MEC_INSTR_CACHE_MISS_sum) / SUM($denom)
+          min: MIN(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
+          max: MAX(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
+          unit: (Count + $normUnit)
+        Instruction Cache Hit Rate:
+          avg: SUM(100 * CPC_MEC_INSTR_CACHE_HIT_sum) / SUM(CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)
+          min: MIN(100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum))
+          max: MAX(100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum))
+          unit: Percent
+
+  metrics_description:
+    CPC Busy: >-
+      Percentage of time the Command Processor Compute is actively processing commands.
+      High busy percentage indicates efficient command stream processing. Low values may
+      indicate gaps in workload submission or dispatch bottlenecks.
+    CPC Idle: >-
+      Percentage of time the Command Processor Compute has no work to process. High idle
+      time indicates underutilization, often due to gaps between kernel dispatches or
+      insufficient workload to keep the GPU busy.
+    CPC Stalled: >-
+      Percentage of time the Command Processor Compute is stalled waiting for resources.
+      High stall rates may indicate memory bottlenecks, synchronization issues, or
+      contention for internal command processor resources.
+    TCIU Busy: >-
+      Percentage of time the Texture Cache Interface Unit is busy handling command
+      processor memory requests. High utilization indicates significant memory traffic
+      from command processing activities.
+    UTCL2 Busy: >-
+      Percentage of time the Unified Translation Cache L2 interface is busy handling
+      address translation requests. High utilization may indicate heavy virtual memory
+      activity or TLB pressure.
+    GCRIU Busy: >-
+      Percentage of time the Graphics Cache Rinse Interface Unit is busy. This unit
+      handles cache coherency operations. High utilization may indicate frequent
+      cache flushes or synchronization points.
+    ME1 Stall on RCIU Ready: >-
+      Cycles the Micro Engine is stalled waiting for the Register Cache Interface
+      Unit. High stall counts may indicate register allocation bottlenecks or
+      excessive register pressure during command processing.
+    ME1 Stall on Memory Read: >-
+      Cycles the Micro Engine is stalled waiting for memory read operations to complete.
+      High stall counts indicate memory latency is impacting command processing throughput.
+    ME1 Stall on Memory Write: >-
+      Cycles the Micro Engine is stalled waiting for memory write operations to complete.
+      High stall counts may indicate memory bandwidth saturation or write queue pressure.
+    ME1 Stall on ROQ Data: >-
+      Cycles the Micro Engine is stalled waiting for data from the Ring Output Queue.
+      High stall counts may indicate command stream processing bottlenecks.
+    TCIU Read Requests: >-
+      Number of read requests issued by the command processor through the texture cache
+      interface. These requests fetch command buffer data and kernel arguments.
+    TCIU Write Requests: >-
+      Number of write requests issued by the command processor through the texture cache
+      interface. These handle completion signals and status updates.
+    GUS Read Requests: >-
+      Number of read requests to the Global Unified Shader memory interface. This path
+      handles direct memory access for command processor operations.
+    GUS Write Requests: >-
+      Number of write requests to the Global Unified Shader memory interface. High write
+      counts may indicate frequent state updates or completion notifications.
+    Instruction Cache Hits: >-
+      Number of Micro Engine instruction fetches serviced from the instruction cache.
+      Higher hit counts indicate good instruction locality in command processing code.
+    Instruction Cache Misses: >-
+      Number of Micro Engine instruction fetches that missed in the instruction cache.
+      High miss counts increase command processing latency due to memory fetches.
+    Instruction Cache Hit Rate: >-
+      Percentage of Micro Engine instruction fetches that hit in cache. High hit rates
+      are essential for efficient command processing. Low rates may indicate complex
+      or large command processing routines.
