@@ -8,6 +8,8 @@ add_executable(
     test_rocprofiler_compute_tool.cpp
     test_sdk_callbacks.h
     test_sdk_callbacks.cpp
+    test_environ_cache.h
+    test_environ_cache.cpp
     mocks.h
     mocks.cpp
     main.cpp
@@ -15,7 +17,13 @@ add_executable(
 
 target_link_libraries(
     ${target}
-    PRIVATE rocprofiler-compute-tool gtest_main gmock gsl_assert fmt::fmt
+    PRIVATE
+        rocprofiler-compute-tool
+        gtest_main
+        gmock
+        gsl_assert
+        fmt::fmt
+        asan_build_dependencies
 )
 
 set_target_properties(

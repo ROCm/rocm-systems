@@ -37,6 +37,9 @@ struct ncclRing;
 struct ncclConnector;
 struct ncclComm;
 
+int64_t ncclParamMultiSegmentRegister();
+extern int64_t ncclParamNvlsEnable();
+
 #define CHANNEL_MASK_OFFSET(nranks, connIndex) (nranks * (connIndex == NCCL_CONN_IDX_P2P_NET ? NCCL_CONN_IDX_P2P_NET : 0))
 
 #define CONNECT_SIZE 256
@@ -71,6 +74,8 @@ struct ncclNvlsSharedRes {
   char* ucCredit; // Unicast NVLS credit address
   int nChannels;
   int nHeads;
+  int chunkSize;
+  int treeMaxChunkSize;
   struct ncclShmemCollBuff nvlsShmem;
   void *nvlsShmemHandle;
 };
@@ -91,7 +96,7 @@ struct ncclCollNetSharedRes {
 struct ncclTransportComm {
   ncclResult_t (*setup)(struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo*, struct ncclPeerInfo*, struct ncclConnect*, struct ncclConnector*, int channelId, int connIndex);
   ncclResult_t (*connect)(struct ncclComm* comm, struct ncclConnect*, int nranks, int rank, struct ncclConnector*);
-  ncclResult_t (*free)(struct ncclConnector*);
+  ncclResult_t (*free)(struct ncclComm* comm, struct ncclConnector*);
   ncclResult_t (*proxySharedInit)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, int nChannels);
   ncclResult_t (*proxySetup)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done);
   ncclResult_t (*proxyConnect)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done);
@@ -115,6 +120,7 @@ ncclResult_t ncclTransportIsAllDirectP2p(struct ncclComm* comm, int* isAllDirect
 bool ncclP2pUsesMemcpy();
 
 ncclResult_t ncclNvlsInit(struct ncclComm* comm);
+ncclResult_t ncclNvlsTuning(struct ncclComm* comm);
 ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent);
 ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm);
 ncclResult_t ncclNvlsTreeConnect(struct ncclComm* comm);

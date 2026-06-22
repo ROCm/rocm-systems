@@ -34,6 +34,13 @@ in the following table.
       - | String value for host identification
         | Used for host hash generation
 
+    * - | ``NCCL_BOOTSTRAP_BIDIR_ALLGATHER``
+        | Enables the bidirectional ring AllGather (N/2 steps) on the socket OOB path
+          during bootstrap. The unidirectional ring (N-1 steps) is kept as a fallback.
+          Has no effect when net OOB is in use.
+      - | ``0``: Force unidirectional ring.
+        | ``1``: Force bidirectional ring (default).
+
 Logging and debugging
 =====================
 
@@ -166,6 +173,19 @@ in the following table.
     * - | ``NCCL_NET_FORCE_MERGE``
         | Forces merging of network devices.
       - | String specifying forced merge configuration
+
+    * - | ``NCCL_NETDEVS_POLICY``
+        | Controls how many of a GPU's locally reachable NICs are used on the
+        | network path for ``send``, ``recv``, and ``all-to-all``. The policy
+        | governs per-channel NIC selection (``ncclTopoGetLocalNet``); the
+        | per-peer network channel count is still bounded by available NIC
+        | bandwidth.
+        | Any unset, malformed, or out-of-range value falls back to ``AUTO``.
+      - | ``AUTO`` (default): use ``ceil(localNetCount / localGpuCount)`` NICs,
+        | dividing the local NICs across the GPUs that share them.
+        | ``ALL``: use every locally reachable NIC.
+        | ``MAX:N``: use at most ``N`` NICs (clamped to the number reachable);
+        | ``N`` must be a positive integer.
 
     * - | ``RCCL_IB_SPLIT_DATA_THRESHOLD``
         | Minimum message size (in bytes) before the payload is split across

@@ -83,7 +83,7 @@ trim(std::string s, bool (*f)(int) = not_is_space)
     return s;
 }
 
-// replace unsuported specail chars with space
+// replace unsupported special chars with space
 void
 handle_special_chars(std::string& str)
 {
@@ -189,7 +189,7 @@ parse_att_counters(std::string line)
 }
 
 std::set<std::string>
-parse_counters(std::string line)
+parse_counters(std::string line, const std::string& qualifier)
 {
     auto counters = std::set<std::string>{};
 
@@ -205,14 +205,13 @@ parse_counters(std::string line)
     // check to see if comment stripping + trim resulted in empty line
     if(line.empty()) return counters;
 
-    constexpr auto pmc_qualifier = std::string_view{"pmc:"};
-    auto           pos           = std::string::npos;
+    auto pos = std::string::npos;
 
     // should we handle an "pmc:" not being present? Seems like it should be a fatal error
-    if((pos = line.find(pmc_qualifier)) != std::string::npos)
+    if((pos = line.find(qualifier)) != std::string::npos)
     {
         // strip out pmc qualifier
-        line = line.substr(pos + pmc_qualifier.length());
+        line = line.substr(pos + qualifier.length());
 
         handle_special_chars(line);
 
@@ -223,7 +222,7 @@ parse_counters(std::string line)
             input_ss >> counter;
             if(counter.empty())
                 break;
-            else if(counter != pmc_qualifier && has_counter_format(counter))
+            else if(counter != qualifier && has_counter_format(counter))
                 counters.emplace(counter);
         }
     }
@@ -236,7 +235,7 @@ parse_counter_envs()
 {
     if(auto single_counter = get_env("ROCPROF_COUNTERS", std::string{}); !single_counter.empty())
     {
-        return {parse_counters(single_counter)};
+        return {parse_counters(single_counter, "pmc:")};
     }
 
     if(auto group_counters = get_env("ROCPROF_COUNTER_GROUPS", std::string{});
@@ -245,7 +244,7 @@ parse_counter_envs()
         auto counters = std::vector<std::set<std::string>>{};
         for(const auto& group : rocprofiler::sdk::parse::tokenize(group_counters, "\n"))
         {
-            counters.emplace_back(parse_counters(group));
+            counters.emplace_back(parse_counters(group, "pmc:"));
         }
         return counters;
     }
@@ -258,6 +257,7 @@ config::config()
 , kernel_filter_range{get_kernel_filter_range(
       get_env("ROCPROF_KERNEL_FILTER_RANGE", std::string{}))}
 , counters{parse_counter_envs()}
+, spm_counters({parse_counters(get_env("ROCPROF_SPM_COUNTERS", std::string()), "spm:")})
 , att_param_perfcounters{
       parse_att_counters(get_env("ROCPROF_ATT_PARAM_PERFCOUNTERS", std::string{}))}
 {
@@ -273,6 +273,10 @@ config::config()
         {{"none", ROCPROFILER_PC_SAMPLING_METHOD_NONE},
          {"stochastic", ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC},
          {"host_trap", ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP}};
+
+    std::unordered_map<std::string_view, rocprofiler_spm_parameter_type_t> spm_type_map = {
+        {"none", ROCPROFILER_SPM_PARAMETER_TYPE_NONE},
+        {"sclk_cycles", ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES}};
 
     try
     {
@@ -307,6 +311,16 @@ config::config()
                                                         std::stoull(_config_params.at(1)),
                                                         std::stoull(_config_params.at(2))});
         }
+    }
+
+    try
+    {
+        spm_sample_interval_unit_value = spm_type_map.at(spm_sample_interval_unit);
+    } catch(...)
+    {
+        ROCP_FATAL << "Invalid value for ROCPROF_SPM_SAMPLE_INTERVAL_UNIT: "
+                   << spm_sample_interval_unit << ". "
+                   << "Valid choices are: sclk_cycles\n";
     }
 
     // Benchmarking Enable/Disable

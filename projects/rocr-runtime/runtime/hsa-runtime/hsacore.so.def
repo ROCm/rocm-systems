@@ -221,6 +221,8 @@ global:
 	hsa_amd_ipc_memory_create;
 	hsa_amd_ipc_memory_attach;
 	hsa_amd_ipc_memory_detach;
+	hsa_amd_external_semaphore_handle_open;
+	hsa_amd_external_semaphore_handle_close;
 	hsa_amd_ipc_signal_create;
 	hsa_amd_ipc_signal_attach;
 	hsa_amd_register_system_event_handler;
@@ -272,6 +274,8 @@ global:
 	hsa_amd_counted_queue_release;
 	hsa_amd_svm_discard_batch_async;
 	hsa_amd_signal_get_event_id;
+	hsa_amd_vmem_export_fabric_handle;
+	hsa_amd_vmem_import_fabric_handle;
 local:
     *;
 };

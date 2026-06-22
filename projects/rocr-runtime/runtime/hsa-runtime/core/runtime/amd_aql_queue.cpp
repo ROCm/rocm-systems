@@ -352,6 +352,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 }
 
 AqlQueue::~AqlQueue() {
+  agent_->UnregisterAqlQueue(this);
+
   // Remove error handler synchronously.
   // Sequences error handler callbacks with queue destroy.
   dynamicScratchState |= ERROR_HANDLER_TERMINATE;

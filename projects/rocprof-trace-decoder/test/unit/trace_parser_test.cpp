@@ -23,8 +23,8 @@
 #include "trace_parser.hpp"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "rocprof_trace_decoder/rocprof_trace_decoder.h"
 #include "stitch/stitch.hpp"
-#include "trace_decoder_api.h"
 
 // Forward declarations for internal functions
 std::unique_ptr<SQTTParser> AnalyseBinary_GFX9_internal(
@@ -56,7 +56,9 @@ TEST(CppReturnInfoTest, DefaultConstruction)
 TEST(OccupancyInfoTest, ConstructorWithUint64WaveStart)
 {
     pcinfo_t pc{100, 5};
-    occupancy_info_t occ(pc, 1000, uint64_t(1), uint64_t(2), uint64_t(3), uint64_t(1));
+    occupancy_info_t occ(
+        pc, 1000, uint64_t(1), uint64_t(2), uint64_t(3), uint64_t(1), uint64_t(0), uint64_t(0), uint64_t(0), uint64_t(0)
+    );
 
     EXPECT_EQ(occ.pc.address, 100);
     EXPECT_EQ(occ.pc.code_object_id, 5);
@@ -70,7 +72,9 @@ TEST(OccupancyInfoTest, ConstructorWithUint64WaveStart)
 TEST(OccupancyInfoTest, ConstructorWithUint64WaveEnd)
 {
     pcinfo_t pc{100, 5};
-    occupancy_info_t occ(pc, 1000, uint64_t(1), uint64_t(2), uint64_t(3), uint64_t(0));
+    occupancy_info_t occ(
+        pc, 1000, uint64_t(1), uint64_t(2), uint64_t(3), uint64_t(0), uint64_t(0), uint64_t(0), uint64_t(0), uint64_t(0)
+    );
 
     EXPECT_EQ(occ.start, 0); // wave_end
 }
@@ -78,7 +82,9 @@ TEST(OccupancyInfoTest, ConstructorWithUint64WaveEnd)
 TEST(OccupancyInfoTest, ConstructorWithInt8)
 {
     pcinfo_t pc{200, 10};
-    occupancy_info_t occ(pc, 2000, int8_t(4), int8_t(1), int8_t(7), uint64_t(1));
+    occupancy_info_t occ(
+        pc, 2000, int8_t(4), int8_t(1), int8_t(7), uint64_t(1), uint64_t(0), uint64_t(0), uint64_t(0), uint64_t(0)
+    );
 
     EXPECT_EQ(occ.pc.address, 200);
     EXPECT_EQ(occ.pc.code_object_id, 10);
@@ -90,55 +96,6 @@ TEST(OccupancyInfoTest, ConstructorWithInt8)
 }
 
 // Note: bValid tests are in stitch_utils_test.cpp
-
-// Tests for PipeArray
-TEST(PipeArrayTest, AtRegAccessesCorrectElement)
-{
-    PipeArray<int> arr{};
-
-    struct MockToken
-    {
-        int me;
-        int pipe;
-    };
-
-    MockToken t1{0, 0};
-    MockToken t2{0, 1};
-    MockToken t3{1, 2};
-    MockToken t4{1, 3};
-
-    arr.at_reg(t1) = 10;
-    arr.at_reg(t2) = 20;
-    arr.at_reg(t3) = 30;
-    arr.at_reg(t4) = 40;
-
-    EXPECT_EQ(arr[0][0], 10);
-    EXPECT_EQ(arr[0][1], 20);
-    EXPECT_EQ(arr[1][2], 30);
-    EXPECT_EQ(arr[1][3], 40);
-}
-
-TEST(PipeArrayTest, MeModulo2)
-{
-    PipeArray<int> arr{};
-
-    struct MockToken
-    {
-        int me;
-        int pipe;
-    };
-
-    // me=2 should map to me&1 = 0
-    MockToken t1{2, 0};
-    // me=3 should map to me&1 = 1
-    MockToken t2{3, 1};
-
-    arr.at_reg(t1) = 100;
-    arr.at_reg(t2) = 200;
-
-    EXPECT_EQ(arr[0][0], 100);
-    EXPECT_EQ(arr[1][1], 200);
-}
 
 // Tests for PipeArray64
 TEST(PipeArray64Test, SetLoSetsLowBits)
@@ -244,34 +201,6 @@ TEST(TokenGeneratorEdgeCaseTest, LargeTimeValues)
     EXPECT_EQ(gen.get_base_time(), large_time - 1000);
 }
 
-// Edge case: PipeArray with all pipe values
-TEST(PipeArrayEdgeCaseTest, AllPipeValues)
-{
-    PipeArray<int> arr{};
-
-    struct MockToken
-    {
-        int me;
-        int pipe;
-    };
-
-    // Test all combinations
-    for (int me = 0; me < 2; me++)
-    {
-        for (int pipe = 0; pipe < 4; pipe++)
-        {
-            MockToken t{me, pipe};
-            arr.at_reg(t) = me * 100 + pipe;
-        }
-    }
-
-    // Verify all values
-    for (int me = 0; me < 2; me++)
-    {
-        for (int pipe = 0; pipe < 4; pipe++) { EXPECT_EQ(arr[me][pipe], me * 100 + pipe); }
-    }
-}
-
 // Edge case: PipeArray64 combines hi and lo correctly
 TEST(PipeArray64EdgeCaseTest, HiLoComposition)
 {
@@ -302,9 +231,6 @@ struct FakeRegToken
 TEST(CSRegisterHandlerTest, AddressClassification)
 {
     CSRegisterHandler h;
-    EXPECT_TRUE(h.IsPgmLo(0xC));
-    EXPECT_TRUE(h.IsPgmHi(0xD));
-    EXPECT_FALSE(h.IsPgmLo(0xD));
     EXPECT_TRUE(h.IsUserdata(0xC340));
     EXPECT_TRUE(h.IsUserdata(0xC343));
     EXPECT_FALSE(h.IsUserdata(0xC344));
@@ -318,7 +244,7 @@ TEST(CSRegisterHandlerTest, UpdateRegNoCSNonUserdata2Ignored)
 {
     CSRegisterHandler h;
     FakeRegToken tok{0, 0, 0xC340, 0};
-    EXPECT_FALSE(h.UpdateRegNoCS(tok));
+    EXPECT_EQ(h.UpdateRegNoCS(tok).kind, CSRegisterHandler::RegUpdateEvent::NONE);
 }
 
 TEST(CSRegisterHandlerTest, ROCHeaderAndCodeObjLoadUnload)
@@ -369,7 +295,7 @@ TEST(CSRegisterHandlerTest, ROCHeaderAndCodeObjLoadUnload)
     tail.legacy_id = 42;
     tok.regdata = tail.raw;
     h.UpdateRegNoCS(tok);
-    EXPECT_FALSE(h.active_codeobj_id.empty());
+    EXPECT_FALSE(h.active_codeobjs.read().empty());
 
     // TAIL (unload)
     tok.regdata = pkt.u32All;
@@ -377,7 +303,7 @@ TEST(CSRegisterHandlerTest, ROCHeaderAndCodeObjLoadUnload)
     tail.isUnload = 1;
     tok.regdata = tail.raw;
     h.UpdateRegNoCS(tok);
-    EXPECT_TRUE(h.active_codeobj_id.empty());
+    EXPECT_TRUE(h.active_codeobjs.read().empty());
 }
 
 TEST(CSRegisterHandlerTest, AgentInfoCounterAndRtFrequency)
@@ -394,14 +320,14 @@ TEST(CSRegisterHandlerTest, AgentInfoCounterAndRtFrequency)
     pkt.type = ROCPROF_TRACE_DECODER_AGENT_INFO_TYPE_COUNTER_INTERVAL;
     pkt.data20 = 256;
     tok.regdata = pkt.u32All;
-    EXPECT_TRUE(h.UpdateRegNoCS(tok));
+    EXPECT_EQ(h.UpdateRegNoCS(tok).kind, CSRegisterHandler::RegUpdateEvent::COUNTER_FREQUENCY_CHANGED);
     EXPECT_EQ(h.counter_frequency, 256u);
 
     // RT frequency
     pkt.type = ROCPROF_TRACE_DECODER_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ;
     pkt.data20 = 100;
     tok.regdata = pkt.u32All;
-    EXPECT_FALSE(h.UpdateRegNoCS(tok));
+    EXPECT_EQ(h.UpdateRegNoCS(tok).kind, CSRegisterHandler::RegUpdateEvent::NONE);
     EXPECT_EQ(h.realtime_frequency, 100u * 1000);
 }
 

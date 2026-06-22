@@ -56,6 +56,7 @@
 #include "suites/functional/memory_alignment.h"
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
+#include "suites/functional/memory_fill.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
@@ -81,6 +82,7 @@
 #include "suites/functional/concurrent_shutdown.h"
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
+#include "suites/functional/signal_allocation_validation.h"
 #include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
@@ -200,6 +202,13 @@ TEST(rocrtstFunc, MemoryAllocateContiguousTest) {
   RunCustomTestEpilog(&ma);
 }
 
+TEST(rocrtstFunc, MemoryFillTest) {
+  MemoryFill mf;
+  if (!RunCustomTestProlog(&mf)) return;
+  mf.MemoryFillTest();
+  RunCustomTestEpilog(&mf);
+}
+
 TEST(rocrtstFunc, Concurrent_Init_Test) {
   ConcurrentInitTest ci;
   if (!RunCustomTestProlog(&ci)) return;
@@ -253,6 +262,13 @@ TEST(rocrtstFunc, Signal_Create_Concurrently) {
   if (!RunCustomTestProlog(&sd)) return;
   sd.TestSignalCreateConcurrent();
   RunCustomTestEpilog(&sd);
+}
+
+TEST(rocrtstFunc, Signal_Allocation_Validation) {
+  SignalAllocationValidationTest sav;
+  RunCustomTestProlog(&sav);
+  sav.TestSignalAllocationValidation();
+  RunCustomTestEpilog(&sav);
 }
 
 /* Temporary: Disable CU Masking until it is fixed */

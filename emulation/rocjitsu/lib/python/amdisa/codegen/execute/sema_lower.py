@@ -59,13 +59,47 @@ class OperandMap:
         dst_ops: list[str],
         exec_model: ExecModel,
         dtype: str | None = None,
+        op_widths: dict[str, int] | None = None,
+        src_reg_classes: dict[int, RegClass] | None = None,
+        dst_reg_classes: dict[int, RegClass] | None = None,
+        src_widths: dict[int, int] | None = None,
+        dst_widths: dict[int, int] | None = None,
     ) -> OperandMap:
         is_64 = dtype in ('b64', 'i64', 'u64', 'f64')
         is_scalar = exec_model == ExecModel.SCALAR
         reg = RegClass.SGPR if is_scalar else RegClass.VGPR
         width = 64 if is_64 else 32
-        src_b = {i: OperandBinding(name, reg, width) for i, name in enumerate(src_ops)}
-        dst_b = {i: OperandBinding(name, reg, width) for i, name in enumerate(dst_ops)}
+
+        def _bw(name: str, explicit_width: int | None = None) -> int:
+            # Prefer the operand's own declared bit size so mixed-width
+            # instructions (e.g. the f64<->32-bit conversions, where one side is
+            # 64-bit and the other 32-bit) get the correct per-operand lane
+            # width instead of a single instruction-level dtype width. 64-bit
+            # selects read_lane64/write_lane64; 16-bit is also preserved so
+            # true16 lowering can merge the selected half of a 32-bit lane.
+            if explicit_width is not None:
+                return explicit_width
+            size = op_widths.get(name) if op_widths else None
+            if size is None:
+                return width
+            return size
+
+        src_reg_classes = src_reg_classes or {}
+        dst_reg_classes = dst_reg_classes or {}
+        src_widths = src_widths or {}
+        dst_widths = dst_widths or {}
+        src_b = {
+            i: OperandBinding(
+                name, src_reg_classes.get(i, reg), _bw(name, src_widths.get(i))
+            )
+            for i, name in enumerate(src_ops)
+        }
+        dst_b = {
+            i: OperandBinding(
+                name, dst_reg_classes.get(i, reg), _bw(name, dst_widths.get(i))
+            )
+            for i, name in enumerate(dst_ops)
+        }
         return OperandMap(src_bindings=src_b, dst_bindings=dst_b)
 
 
@@ -81,6 +115,15 @@ class LoweringContext:
     vcc_var: str = 'vcc'
     vcc_read: str | None = None
     vcc_dst: str | None = None
+    true16_dst_select: str | None = None
+    true16_src_select: str | None = None
+    true16_src_selects: dict[int, str] = field(default_factory=dict)
+    true16_dst_reg: str | None = None
+    true16_src_raw: str | None = None
+    fp8_byte_select: str | None = None
+    fp8_decode_e5m3_select: str | None = None
+    vector_sgpr_once: bool = False
+    clear_false_lane_mask_writes: bool = True
 
 
 _INFIX_OPS: dict[SemaNodeKind, str] = {
@@ -124,8 +167,12 @@ _STD_MATH: dict[SemaNodeKind, str] = {
     SemaNodeKind.SIN: 'std::sin',
     SemaNodeKind.COS: 'std::cos',
     SemaNodeKind.LOG2: 'std::log2',
-    SemaNodeKind.FLOOR: 'std::floor',
-    SemaNodeKind.TRUNC: 'std::trunc',
+    # floor/trunc go through util:: wrappers that quiet a signaling NaN so the
+    # generated scalar bodies agree with the SIMD fast paths (and the GPU) under
+    # gcc, whose glibc floorf/truncf pass sNaN through unquieted (clang's
+    # roundss/roundsd quiet it). See util::floor_scalar in util/simd.h.
+    SemaNodeKind.FLOOR: 'util::floor_scalar',
+    SemaNodeKind.TRUNC: 'util::trunc_scalar',
 }
 
 
@@ -155,6 +202,15 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
         if writes_vcc:
             vcc_init = _vcc_init_expr(ctx)
             wrapped.append(f'  uint64_t vcc = {vcc_init};')
+        if ctx.vector_sgpr_once:
+            wrapped.append('  if (exec != 0) {')
+            for line in body_lines:
+                wrapped.append('  ' + line)
+            wrapped.append('  }')
+            if writes_vcc:
+                vcc_write = _vcc_write_stmt(ctx)
+                wrapped.append(f'  {vcc_write}')
+            return '\n'.join(wrapped)
         wrapped.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         wrapped.append('    if (!(exec & (1ULL << lane))) continue;')
         for line in body_lines:
@@ -198,25 +254,30 @@ def _writes_vcc(node: SemaNode) -> bool:
 
 def _vcc_init_expr(ctx: LoweringContext) -> str:
     """Return the C++ expression to initialize the vcc local variable."""
-    if ctx.vcc_dst:
-        return 'wf.vcc()'
-    if ctx.operand_map:
-        dst = ctx.operand_map.dst(0)
-        if dst:
-            return f'{dst.name}.read_scalar64(wf)'
-    return 'wf.vcc()'
+    return '0'
+
+
+def _write_vcc_mask_to_explicit_dst(dst: str) -> str:
+    # Keep this wave32/wave64 mask-width rule in sync with simd_glue.h and
+    # vector_cmp.py.
+    return (
+        f'if (wf.wf_size() <= 32)\n'
+        f'    {dst}.write_scalar(wf, static_cast<uint32_t>(vcc));\n'
+        f'  else\n'
+        f'    {dst}.write_scalar64(wf, vcc);'
+    )
 
 
 def _vcc_write_stmt(ctx: LoweringContext) -> str:
     """Return the C++ statement to write back the vcc local variable."""
     if ctx.vcc_dst and ctx.vcc_dst != '__vcc__':
-        return f'{ctx.vcc_dst}.write_scalar64(wf, vcc);'
+        return _write_vcc_mask_to_explicit_dst(ctx.vcc_dst)
     if ctx.vcc_dst == '__vcc__':
         return 'wf.set_vcc(vcc);'
     if ctx.operand_map:
         dst = ctx.operand_map.dst(0)
         if dst:
-            return f'{dst.name}.write_scalar64(wf, vcc);'
+            return _write_vcc_mask_to_explicit_dst(dst.name)
     return 'wf.set_vcc(vcc);'
 
 
@@ -257,6 +318,15 @@ def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
             operand_map=ctx.operand_map,
             indent=ctx.indent + 1,
             declared=ctx.declared,
+            true16_dst_select=ctx.true16_dst_select,
+            true16_src_select=ctx.true16_src_select,
+            true16_src_selects=ctx.true16_src_selects,
+            true16_dst_reg=ctx.true16_dst_reg,
+            true16_src_raw=ctx.true16_src_raw,
+            fp8_byte_select=ctx.fp8_byte_select,
+            fp8_decode_e5m3_select=ctx.fp8_decode_e5m3_select,
+            vector_sgpr_once=ctx.vector_sgpr_once,
+            clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
         )
         lines.extend(_lower_stmt(node.children[1], inner_ctx))
         lines.append(f'{_indent(ctx)}}}')
@@ -329,12 +399,18 @@ def _lower_assign(node: SemaNode, ctx: LoweringContext) -> list[str]:
             idx = _lower_expr(lhs_node.children[1], ctx)
             rhs = _lower_expr(rhs_node, ctx)
             ind = _indent(ctx)
-            return [
+            lines = [
                 f'{ind}if ({rhs})',
                 f'{ind}  {ctx.vcc_var} |= (1ULL << {idx});',
-                f'{ind}else',
-                f'{ind}  {ctx.vcc_var} &= ~(1ULL << {idx});',
             ]
+            if ctx.clear_false_lane_mask_writes:
+                lines.extend(
+                    [
+                        f'{ind}else',
+                        f'{ind}  {ctx.vcc_var} &= ~(1ULL << {idx});',
+                    ]
+                )
+            return lines
         if arr.kind == SemaNodeKind.ID and arr.id_name in ('MEM', 'LDS'):
             idx = _lower_expr(lhs_node.children[1], ctx)
             rhs = _lower_expr(rhs_node, ctx)
@@ -376,6 +452,15 @@ def _lower_if(node: SemaNode, ctx: LoweringContext) -> list[str]:
         operand_map=ctx.operand_map,
         indent=ctx.indent + 1,
         declared=ctx.declared,
+        true16_dst_select=ctx.true16_dst_select,
+        true16_src_select=ctx.true16_src_select,
+        true16_src_selects=ctx.true16_src_selects,
+        true16_dst_reg=ctx.true16_dst_reg,
+        true16_src_raw=ctx.true16_src_raw,
+        fp8_byte_select=ctx.fp8_byte_select,
+        fp8_decode_e5m3_select=ctx.fp8_decode_e5m3_select,
+        vector_sgpr_once=ctx.vector_sgpr_once,
+        clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
     )
 
     if len(children) == 2:
@@ -420,6 +505,15 @@ def _lower_for(node: SemaNode, ctx: LoweringContext) -> list[str]:
         operand_map=ctx.operand_map,
         indent=ctx.indent + 1,
         declared=ctx.declared,
+        true16_dst_select=ctx.true16_dst_select,
+        true16_src_select=ctx.true16_src_select,
+        true16_src_selects=ctx.true16_src_selects,
+        true16_dst_reg=ctx.true16_dst_reg,
+        true16_src_raw=ctx.true16_src_raw,
+        fp8_byte_select=ctx.fp8_byte_select,
+        fp8_decode_e5m3_select=ctx.fp8_decode_e5m3_select,
+        vector_sgpr_once=ctx.vector_sgpr_once,
+        clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
     )
 
     init_str = (
@@ -446,6 +540,23 @@ def _lower_declare(node: SemaNode, ctx: LoweringContext) -> list[str]:
     return []
 
 
+def _lower_less_greater_once(node: SemaNode, ctx: LoweringContext) -> str | None:
+    if node.kind != SemaNodeKind.LOR or len(node.children) != 2:
+        return None
+
+    left, right = node.children
+    if {left.kind, right.kind} != {SemaNodeKind.LT, SemaNodeKind.GT}:
+        return None
+    if len(left.children) != 2 or len(right.children) != 2:
+        return None
+    if left.children != right.children:
+        return None
+
+    lhs = _lower_expr(left.children[0], ctx)
+    rhs = _lower_expr(left.children[1], ctx)
+    return f'([&]() {{ auto a = {lhs}; auto b = {rhs}; return (a < b) || (a > b); }}())'
+
+
 def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower an expression node to a C++ expression string."""
     kind = node.kind
@@ -457,6 +568,8 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         return _lower_id(node, ctx)
 
     if kind in _INFIX_OPS:
+        if (expr := _lower_less_greater_once(node, ctx)) is not None:
+            return expr
         lhs = _lower_expr(node.children[0], ctx)
         rhs = _lower_expr(node.children[1], ctx)
         op = _INFIX_OPS[kind]
@@ -506,6 +619,13 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
 
     if kind == SemaNodeKind.ABS:
         arg = _lower_expr(node.children[0], ctx)
+        if node.ty and node.ty.base == 'I':
+            return (
+                f'[&]() {{ int{node.ty.size}_t v = {arg};'
+                f' return static_cast<uint{node.ty.size}_t>'
+                f'(v < 0 ? (0u - static_cast<uint{node.ty.size}_t>(v))'
+                f' : static_cast<uint{node.ty.size}_t>(v)); }}()'
+            )
         return f'std::abs({arg})'
 
     if kind == SemaNodeKind.UMINUS:
@@ -779,14 +899,41 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
         if binding.reg_class == RegClass.SGPR or ctx.exec_model == ExecModel.SCALAR:
             if binding.bit_width == 64:
                 return f'{name}.read_scalar64(wf)'
-            return f'{name}.read_scalar(wf)'
+            value = f'{name}.read_scalar(wf)'
+            if tag != 'D' and idx in ctx.true16_src_selects:
+                select = ctx.true16_src_selects[idx]
+                return f'(({select}) != 0 ? ({value} >> 16) : {value})'
+            return value
         if binding.bit_width == 64:
             return f'{name}.read_lane64(wf, lane)'
-        return f'{name}.read_lane(wf, lane)'
+        value = f'{name}.read_lane(wf, lane)'
+        if (
+            tag == 'D'
+            and ctx.true16_dst_select is not None
+            and ((node.ty and node.ty.size == 16) or binding.bit_width == 16)
+        ):
+            if ctx.true16_dst_reg is not None:
+                value = (
+                    'wf.cu().read_vgpr(wf.vgpr_alloc().base + '
+                    f'({ctx.true16_dst_reg}), lane)'
+                )
+            return f'(({ctx.true16_dst_select}) != 0 ? ({value} >> 16) : {value})'
+        if tag != 'D' and idx in ctx.true16_src_selects:
+            select = ctx.true16_src_selects[idx]
+            return f'(({select}) != 0 ? ({value} >> 16) : {value})'
+        return value
 
     if ctx.exec_model == ExecModel.SCALAR:
-        return f'inst.src{idx}.read_scalar(wf)'
-    return f'inst.src{idx}.read_lane(wf, lane)'
+        value = f'inst.src{idx}.read_scalar(wf)'
+        if tag != 'D' and idx in ctx.true16_src_selects:
+            select = ctx.true16_src_selects[idx]
+            return f'(({select}) != 0 ? ({value} >> 16) : {value})'
+        return value
+    value = f'inst.src{idx}.read_lane(wf, lane)'
+    if tag != 'D' and idx in ctx.true16_src_selects:
+        select = ctx.true16_src_selects[idx]
+        return f'(({select}) != 0 ? ({value} >> 16) : {value})'
+    return value
 
 
 def _get_operand_dtype(node: SemaNode) -> SemaType | None:
@@ -807,6 +954,23 @@ def _rhs_is_float_expr(node: SemaNode) -> int:
     Checks if the RHS expression evaluates to a float in C++, meaning the
     dst write needs bit_cast<uint32_t> to store it as a register value.
     """
+    # VOP3 result modifiers (apply_omod/apply_clamp) always emit a float/double
+    # lambda regardless of the declared dst type, so a write to a non-float
+    # register (e.g. v_mov_b32 with omod/clamp) still needs the bit_cast back —
+    # without it the float is truncated float->int at the integer write_lane.
+    # apply_src_mod only produces a float lambda when it actually applies abs/neg
+    # to a float source; otherwise it passes its operand through unchanged.
+    if node.kind == SemaNodeKind.CALL:
+        if node.call_name in ('apply_omod', 'apply_clamp'):
+            return 64 if (node.ty and node.ty.size == 64) else 32
+        if node.call_name == 'apply_src_mod':
+            src = node.children[1] if len(node.children) > 1 else None
+            has_neg = len(node.children) > 3 and node.children[3].lit_value == '1'
+            has_abs = len(node.children) > 4 and node.children[4].lit_value == '1'
+            src_is_int = src is not None and src.ty and src.ty.base in ('I', 'U')
+            if (has_neg or has_abs) and not src_is_int:
+                return 64 if (node.ty and node.ty.size == 64) else 32
+            return _rhs_is_float_expr(src) if src is not None else 0
     if node.ty and node.ty.base in ('F', 'BF') and node.ty.size in (32, 64):
         if node.kind in (
             SemaNodeKind.ADD,
@@ -842,7 +1006,8 @@ def _lower_dst_write(
 ) -> list[str]:
     """Lower a destination operand write."""
     idx = _get_operand_index(lhs_node)
-    rhs = _lower_expr(rhs_node, ctx)
+    raw_rhs = _lower_expr(rhs_node, ctx)
+    rhs = raw_rhs
 
     needs_bitcast = _rhs_is_float_expr(rhs_node)
     lhs_ty = _get_operand_dtype(lhs_node)
@@ -872,6 +1037,49 @@ def _lower_dst_write(
             if binding.bit_width == 64:
                 return [f'{_indent(ctx)}{name}.write_scalar64(wf, {rhs});']
             return [f'{_indent(ctx)}{name}.write_scalar(wf, {rhs});']
+        if ctx.true16_dst_select is not None and (
+            (lhs_ty and lhs_ty.size == 16) or binding.bit_width == 16
+        ):
+            selected_rhs = rhs
+            if ctx.true16_src_raw is not None or ctx.true16_src_select is not None:
+                true16_rhs = ctx.true16_src_raw or raw_rhs
+                if (
+                    ctx.true16_src_raw is None
+                    and rhs_node.kind == SemaNodeKind.CAST
+                    and rhs_node.children
+                    and rhs_node.cast_target
+                    and rhs_node.cast_target.size == 16
+                ):
+                    true16_rhs = _lower_expr(rhs_node.children[0], ctx)
+                selected_rhs = true16_rhs
+                if ctx.true16_src_select is not None:
+                    selected_rhs = f'(({ctx.true16_src_select}) != 0 ? ({true16_rhs} >> 16) : {true16_rhs})'
+            ind = _indent(ctx)
+            if ctx.true16_dst_reg is not None:
+                dst_ref = f'wf.vgpr_alloc().base + ({ctx.true16_dst_reg})'
+                read_dst = f'wf.cu().read_vgpr({dst_ref}, lane)'
+                write_dst = f'wf.cu().write_vgpr({dst_ref}, lane, merged);'
+            elif ctx.true16_dst_select == 'inst_.opsel & 0x8u':
+                return [
+                    f'{ind}{{',
+                    f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',
+                    f'{ind}  ::rocjitsu::amdgpu::write_vop3_true16_dst('
+                    f'{name}, wf, lane, {ctx.true16_dst_select}, src_half);',
+                    f'{ind}}}',
+                ]
+            else:
+                read_dst = f'{name}.read_lane(wf, lane)'
+                write_dst = f'{name}.write_lane(wf, lane, merged);'
+            return [
+                f'{ind}{{',
+                f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',
+                f'{ind}  uint32_t old_dst = {read_dst};',
+                f'{ind}  uint32_t merged = (({ctx.true16_dst_select}) != 0)',
+                f'{ind}      ? ((old_dst & 0x0000ffffu) | (src_half << 16))',
+                f'{ind}      : ((old_dst & 0xffff0000u) | src_half);',
+                f'{ind}  {write_dst}',
+                f'{ind}}}',
+            ]
         if binding.bit_width == 64:
             return [f'{_indent(ctx)}{name}.write_lane64(wf, lane, {rhs});']
         return [f'{_indent(ctx)}{name}.write_lane(wf, lane, {rhs});']
@@ -914,12 +1122,25 @@ def _lower_arrayderef(node: SemaNode, ctx: LoweringContext) -> str:
 
 
 _INLINE_UNARY_OPS: dict[str, str] = {
-    'rcp': '1.0f / {0}',
-    'rcp_iflag': '1.0f / {0}',
-    'rsq': '1.0f / std::sqrt({0})',
+    'rcp': 'amdgpu::transcendental::rcp_f32({0})',
+    'rcp_iflag': 'amdgpu::transcendental::rcp_f32({0})',
+    'rsq': 'amdgpu::transcendental::rsq_f32({0})',
+    'sqrt': 'amdgpu::transcendental::sqrt_f32({0})',
+    'sin': 'amdgpu::transcendental::sin_f32({0})',
+    'cos': 'amdgpu::transcendental::cos_f32({0})',
+    'tanh': 'amdgpu::transcendental::tanh_f32({0})',
+    'log': 'amdgpu::transcendental::log_f32({0})',
+    'exp': 'amdgpu::transcendental::exp_f32({0})',
+    'rcp_f64': 'amdgpu::transcendental::rcp_f64({0})',
+    'rsq_f64': 'amdgpu::transcendental::rsq_f64({0})',
+    'sqrt_f64': 'amdgpu::transcendental::sqrt_f64({0})',
+    'abs': '[&]() {{ int32_t v = static_cast<int32_t>({0});'
+    ' return static_cast<uint32_t>'
+    '(v < 0 ? (0u - static_cast<uint32_t>(v))'
+    ' : static_cast<uint32_t>(v)); }}()',
     'rndne': 'std::nearbyint({0})',
-    'ceil': 'std::ceil({0})',
-    'exp2': 'std::exp2({0})',
+    'ceil': 'util::ceil_scalar({0})',
+    'exp2': 'amdgpu::transcendental::exp_f32({0})',
     'bcnt': 'static_cast<uint32_t>(std::popcount({0}))',
     'bcnt1': 'static_cast<uint32_t>(std::popcount({0}))',
     'bcnt0': 'static_cast<uint32_t>(std::popcount(~{0}))',
@@ -958,7 +1179,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' return s == 0 ? static_cast<uint32_t>(-1)'
     ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
     'cls': '[&]() {{ int32_t sv = static_cast<int32_t>({0});'
-    ' if (sv == 0 || sv == -1) return 32u;'
+    ' if (sv == 0 || sv == -1) return 31u;'
     ' uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);'
     ' return static_cast<uint32_t>(std::countl_zero(u)) - 1u; }}()',
     'wqm': '[&]() {{ uint32_t s = {0}; uint32_t r = 0;'
@@ -999,8 +1220,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' for (int i = 0; i < 8; ++i)'
     ' if (s & (0xFu << (i * 4))) r |= (1u << i);'
     ' return r; }}()',
-    'bitset0': '({0} & ~(1u << ({0} & 31u)))',
-    'bitset1': '({0} | (1u << ({0} & 31u)))',
     'v_readfirstlane': '{0}',
     'ffbh_i32': '[&]() {{ auto s = static_cast<int32_t>({0});'
     ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
@@ -1009,8 +1228,12 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cls_i32': '[&]() {{ auto s = static_cast<int32_t>({0});'
     ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
     ' return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1; }}()',
-    'frexp_exp_f32': 'std::ilogb({0}) + 1',
-    'frexp_exp_f16': 'std::ilogb({0}) + 1',
+    'frexp_exp_f32': '[&]() {{ float s = {0}; int exp = 0;'
+    ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+    ' return static_cast<uint32_t>(exp); }}()',
+    'frexp_exp_f16': '[&]() {{ float s = {0}; int exp = 0;'
+    ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+    ' return static_cast<uint32_t>(exp); }}()',
     'frexp_exp_f64': '[&]() {{ double s = {0};'
     ' int exp = 0;'
     ' if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
@@ -1019,7 +1242,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' int exp = 0;'
     ' return std::frexp(s, &exp); }}()',
     'frexp_mant_f32': '[&]() {{ int e; return std::frexp(static_cast<float>({0}), &e); }}()',
-    'log2': 'std::log2({0})',
+    'log2': 'amdgpu::transcendental::log_f32({0})',
     'cvt_f32_i32': 'std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>({0})))',
     'cvt_f32_u32': 'std::bit_cast<uint32_t>(static_cast<float>({0}))',
     'cvt_i32_f32': '[&]() -> uint32_t {{ float s = std::bit_cast<float>(static_cast<uint32_t>({0}));'
@@ -1036,6 +1259,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f32_bf16': 'std::bit_cast<uint32_t>(util::bf16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_fp8': 'std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0})))',
     'cvt_f32_bf8': 'std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})))',
+    'cvt_f16_fp8': 'static_cast<uint32_t>(util::f32_to_f16(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0}))))',
+    'cvt_f16_bf8': 'static_cast<uint32_t>(util::f32_to_f16(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0}))))',
     'cvt_f64_i32': 'std::bit_cast<uint64_t>(static_cast<double>(static_cast<int32_t>({0})))',
     'cvt_f64_u32': 'std::bit_cast<uint64_t>(static_cast<double>({0}))',
     'cvt_i32_f64': '[&]() -> uint32_t {{ double s = std::bit_cast<double>(static_cast<uint64_t>({0}));'
@@ -1060,6 +1285,17 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' if (s >= 32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MAX));'
     ' if (s < -32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));'
     ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s))); }}()',
+    'cvt_norm_i16_f16': '[&]() -> uint32_t {{ float s = util::f16_to_f32(static_cast<uint16_t>({0}));'
+    ' if (std::isnan(s)) return 0u;'
+    ' float scaled = std::clamp(s * 32767.0f, -32768.0f, 32767.0f);'
+    ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(scaled))); }}()',
+    'cvt_norm_u16_f16': '[&]() -> uint32_t {{ float s = util::f16_to_f32(static_cast<uint16_t>({0}));'
+    ' if (std::isnan(s)) return 0u;'
+    ' float scaled = std::clamp(s * 65535.0f, 0.0f, 65535.0f);'
+    ' return static_cast<uint32_t>(static_cast<uint16_t>(scaled)); }}()',
+    'cvt_off_f32_i4': '[&]() -> float {{ int32_t nibble = static_cast<int32_t>({0} & 0xfu);'
+    ' if (nibble & 0x8) nibble -= 16;'
+    ' return static_cast<float>(nibble) * 0.0625f; }}()',
     'cvt_i32_i16': 'static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({0} & 0xFFFF)))',
     'cvt_u32_u16': '({0} & 0xFFFFu)',
     'cvt_f32_ubyte0': 'std::bit_cast<uint32_t>(static_cast<float>({0} & 0xFFu))',
@@ -1093,7 +1329,11 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' return static_cast<uint32_t>((a * b) >> 32); }}()',
     'util::arithmetic_shr': '[&]() {{ auto v = static_cast<int32_t>({0});'
     ' return static_cast<uint32_t>(v >> ({1} & 31u)); }}()',
+    'util::arithmetic_shr_i16': '[&]() {{ auto v = static_cast<int16_t>({0});'
+    ' return static_cast<uint32_t>(static_cast<uint16_t>(v >> ({1} & 15u))); }}()',
     'bfm': '(((1u << ({0} & 31u)) - 1u) << ({1} & 31u))',
+    'bfm64': '[&]() {{ uint64_t cnt = {0} & 63u; uint64_t off = {1} & 63u;'
+    ' return cnt == 0 ? 0ULL : ((1ULL << cnt) - 1ULL) << off; }}()',
     'ashr': '[&]() {{ auto v = static_cast<int32_t>({0});'
     ' return static_cast<uint32_t>(v >> ({1})); }}()',
     'ashr_i64': '[&]() {{ auto v = static_cast<int64_t>({0});'
@@ -1116,11 +1356,23 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     'std::max': 'std::max({0}, {1})',
     'std::fmin': 'std::fmin({0}, {1})',
     'std::fmax': 'std::fmax({0}, {1})',
+    'min_num': 'std::fmin({0}, {1})',
+    'max_num': 'std::fmax({0}, {1})',
+    'minimum': '[&]() {{ auto a = {0}; auto b = {1};'
+    ' if (std::isnan(a) || std::isnan(b))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' if (a == b) return std::signbit(a) ? a : b;'
+    ' return a < b ? a : b; }}()',
+    'maximum': '[&]() {{ auto a = {0}; auto b = {1};'
+    ' if (std::isnan(a) || std::isnan(b))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' if (a == b) return std::signbit(a) ? b : a;'
+    ' return a > b ? a : b; }}()',
     'is_ordered': '(!std::isnan({0}) && !std::isnan({1}))',
     'is_unordered': '(std::isnan({0}) || std::isnan({1}))',
     'fp_class_test': '[&]() -> bool {{'
-    ' float s0 = std::bit_cast<float>(static_cast<uint32_t>({0}));'
-    ' uint32_t mask = {1}; bool match = false;'
+    ' float s0 = {0};'
+    ' uint32_t mask = static_cast<uint32_t>({1}); bool match = false;'
     ' if ((mask & 0x001u) && std::isnan(s0)'
     ' && (std::bit_cast<uint32_t>(s0) & 0x00400000u) == 0) match = true;'
     ' if ((mask & 0x002u) && std::isnan(s0)'
@@ -1133,6 +1385,24 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' if ((mask & 0x040u) && s0 == 0.0f && !std::signbit(s0)) match = true;'
     ' if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0)'
     ' && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;'
+    ' if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0) match = true;'
+    ' if ((mask & 0x200u) && std::isinf(s0) && s0 > 0) match = true;'
+    ' return match; }}()',
+    'fp_class_test_f64': '[&]() -> bool {{'
+    ' double s0 = {0};'
+    ' uint32_t mask = static_cast<uint32_t>({1}); bool match = false;'
+    ' if ((mask & 0x001u) && std::isnan(s0)'
+    ' && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0) match = true;'
+    ' if ((mask & 0x002u) && std::isnan(s0)'
+    ' && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0) match = true;'
+    ' if ((mask & 0x004u) && std::isinf(s0) && s0 < 0) match = true;'
+    ' if ((mask & 0x008u) && std::isnormal(s0) && s0 < 0) match = true;'
+    ' if ((mask & 0x010u) && !std::isnormal(s0) && !std::isinf(s0)'
+    ' && !std::isnan(s0) && s0 != 0.0 && std::signbit(s0)) match = true;'
+    ' if ((mask & 0x020u) && s0 == 0.0 && std::signbit(s0)) match = true;'
+    ' if ((mask & 0x040u) && s0 == 0.0 && !std::signbit(s0)) match = true;'
+    ' if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0)'
+    ' && !std::isnan(s0) && s0 != 0.0 && !std::signbit(s0)) match = true;'
     ' if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0) match = true;'
     ' if ((mask & 0x200u) && std::isinf(s0) && s0 > 0) match = true;'
     ' return match; }}()',
@@ -1169,16 +1439,21 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     'pack_ll': '(({0} & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
     'pack_lh': '(({0} & 0xFFFFu) | ({1} & 0xFFFF0000u))',
     'pack_hh': '((({0} >> 16) & 0xFFFFu) | ({1} & 0xFFFF0000u))',
+    'pack_hl': '((({0} >> 16) & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
+    'cvt_pkrtz_f16_f32': '(static_cast<uint32_t>(util::f32_to_f16_rtz({0})) | '
+    '(static_cast<uint32_t>(util::f32_to_f16_rtz({1})) << 16))',
     'bfe': '[&]() {{ uint32_t base = {0}, field = {1};'
     ' uint32_t offset = field & 31u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return 0u;'
+    ' if (offset + width > 32) width = 32 - offset;'
     ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
     ' return (base >> offset) & mask; }}()',
     'bfe_i32': '[&]() {{ uint32_t base = {0}, field = {1};'
     ' uint32_t offset = field & 31u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return 0u;'
+    ' if (offset + width > 32) width = 32 - offset;'
     ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
     ' uint32_t extracted = (base >> offset) & mask;'
     ' if (width < 32 && (extracted & (1u << (width - 1))))'
@@ -1189,6 +1464,7 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' uint32_t offset = field & 63u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return static_cast<uint64_t>(0);'
+    ' if (offset + width > 64) width = 64 - offset;'
     ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
     ' return (base >> offset) & mask; }}()',
     'bfe_i64': '[&]() {{ uint64_t base = {0};'
@@ -1196,22 +1472,27 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' uint32_t offset = field & 63u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return static_cast<int64_t>(0);'
+    ' if (offset + width > 64) width = 64 - offset;'
     ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
     ' uint64_t extracted = (base >> offset) & mask;'
     ' if (width < 64 && (extracted & (1ULL << (width - 1))))'
     '   extracted |= ~mask;'
     ' return static_cast<int64_t>(extracted); }}()',
-    'ABSDIFF': '[&]() {{ auto a = static_cast<int32_t>({0});'
-    ' auto b = static_cast<int32_t>({1});'
+    'ABSDIFF': '[&]() {{ auto a = static_cast<int64_t>(static_cast<int32_t>({0}));'
+    ' auto b = static_cast<int64_t>(static_cast<int32_t>({1}));'
     ' return static_cast<uint32_t>(a > b ? a - b : b - a); }}()',
     'pack_b32_f16': '(({0} & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
     'v_readlane': '{0}',
 }
 
 _INLINE_TERNARY_OPS: dict[str, str] = {
-    'min3': 'std::min(std::min({0}, {1}), {2})',
-    'max3': 'std::max(std::max({0}, {1}), {2})',
-    'med3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    'min3_f': 'std::fmin(std::fmin({0}, {1}), {2})',
+    'max3_f': 'std::fmax(std::fmax({0}, {1}), {2})',
+    'med3_f': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b)); }}()',
+    'min3_i': 'std::min(std::min({0}, {1}), {2})',
+    'max3_i': 'std::max(std::max({0}, {1}), {2})',
+    'med3_i': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' return std::max(std::min(std::max(a, b), c), std::min(a, b)); }}()',
     'lerp_u8': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' uint32_t r = 0;'
@@ -1228,6 +1509,24 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'lshl_add': '(({0} << {1}) + {2})',
     'lshl_or': '(({0} << {1}) | {2})',
     'add_lshl': '(({0} + {1}) << {2})',
+    'ashr_pk_i8_i32': '[&]() -> uint32_t {{'
+    ' uint32_t shift = static_cast<uint32_t>({2}) & 31u;'
+    ' auto pack = [&](uint32_t src) -> uint32_t {{'
+    ' int32_t shifted = static_cast<int32_t>(src) >> shift;'
+    ' int32_t clamped = std::clamp(shifted, static_cast<int32_t>(-128), static_cast<int32_t>(127));'
+    ' return static_cast<uint32_t>(clamped) & 0xffu;'
+    ' }};'
+    ' return pack({0}) | (pack({1}) << 8);'
+    ' }}()',
+    'ashr_pk_u8_i32': '[&]() -> uint32_t {{'
+    ' uint32_t shift = static_cast<uint32_t>({2}) & 31u;'
+    ' auto pack = [&](uint32_t src) -> uint32_t {{'
+    ' int32_t shifted = static_cast<int32_t>(src) >> shift;'
+    ' int32_t clamped = std::clamp(shifted, static_cast<int32_t>(0), static_cast<int32_t>(255));'
+    ' return static_cast<uint32_t>(clamped);'
+    ' }};'
+    ' return pack({0}) | (pack({1}) << 8);'
+    ' }}()',
     'and_or': '(({0} & {1}) | {2})',
     'bfi': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' return (a & b) | (~a & c); }}()',
@@ -1273,14 +1572,38 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' : (sel == 0xC) ? 0u : (sel == 0xD) ? 0xFFu : 0u;'
     ' r |= static_cast<uint32_t>(byte) << (i*8);'
     ' }} return r; }}()',
-    'minimum3': 'std::min(std::min({0}, {1}), {2})',
-    'maximum3': 'std::max(std::max({0}, {1}), {2})',
-    'maxmin': 'std::min(std::max({0}, {1}), {2})',
-    'minmax': 'std::max(std::min({0}, {1}), {2})',
-    'maxmin_num': 'std::min(std::max({0}, {1}), {2})',
-    'minmax_num': 'std::max(std::min({0}, {1}), {2})',
-    'maximumminimum': 'std::min(std::max({0}, {1}), {2})',
-    'minimummaximum': 'std::max(std::min({0}, {1}), {2})',
+    'minimum3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }}()',
+    'maximum3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }}()',
+    'maxmin': 'std::fmin(std::fmax({0}, {1}), {2})',
+    'minmax': 'std::fmax(std::fmin({0}, {1}), {2})',
+    'maxmin_num': 'std::fmin(std::fmax({0}, {1}), {2})',
+    'minmax_num': 'std::fmax(std::fmin({0}, {1}), {2})',
+    'maximumminimum': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }}()',
+    'minimummaximum': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }}()',
+    'add_max_i32': '[&]() {{ uint32_t sum_bits = static_cast<uint32_t>({0}) + static_cast<uint32_t>({1});'
+    ' int32_t sum = static_cast<int32_t>(sum_bits); int32_t clamp = static_cast<int32_t>({2});'
+    ' return static_cast<uint32_t>(std::max(sum, clamp)); }}()',
+    'add_min_i32': '[&]() {{ uint32_t sum_bits = static_cast<uint32_t>({0}) + static_cast<uint32_t>({1});'
+    ' int32_t sum = static_cast<int32_t>(sum_bits); int32_t clamp = static_cast<int32_t>({2});'
+    ' return static_cast<uint32_t>(std::min(sum, clamp)); }}()',
+    'add_max_u32': 'std::max(static_cast<uint32_t>({0}) + static_cast<uint32_t>({1}), static_cast<uint32_t>({2}))',
+    'add_min_u32': 'std::min(static_cast<uint32_t>({0}) + static_cast<uint32_t>({1}), static_cast<uint32_t>({2}))',
     'addc_co': '[&]() {{ uint64_t w = static_cast<uint64_t>({0})'
     ' + static_cast<uint64_t>({1})'
     ' + static_cast<uint64_t>({2});'
@@ -1356,7 +1679,7 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' return -y; }}()',
     'cubema': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
     ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
-    ' return 2.0f * std::max({{ax, ay, az}}); }}()',
+    ' return 2.0f * std::fmax(ax, std::fmax(ay, az)); }}()',
 }
 
 
@@ -1374,10 +1697,36 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
 
+    if len(args) == 1 and callee in (
+        'cvt_f32_fp8',
+        'cvt_f32_bf8',
+        'cvt_f16_fp8',
+        'cvt_f16_bf8',
+    ):
+        arg = args[0]
+        if ctx.fp8_byte_select is not None:
+            arg = f'(({arg} >> (({ctx.fp8_byte_select}) * 8u)) & 0xFFu)'
+        if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f32_fp8':
+            return (
+                f'std::bit_cast<uint32_t>(({ctx.fp8_decode_e5m3_select}) ? '
+                f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg})) : '
+                f'util::fp8_e4m3_to_f32(static_cast<uint8_t>({arg})))'
+            )
+        if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f16_fp8':
+            return (
+                f'static_cast<uint32_t>(util::f32_to_f16(({ctx.fp8_decode_e5m3_select}) ? '
+                f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg})) : '
+                f'util::fp8_e4m3_to_f32(static_cast<uint8_t>({arg}))))'
+            )
+        return _INLINE_UNARY_OPS[callee].format(arg)
+
     if len(args) == 1 and callee in _INLINE_UNARY_OPS:
         return _INLINE_UNARY_OPS[callee].format(args[0])
     if len(args) == 2 and callee in _INLINE_BINARY_OPS:
         return _INLINE_BINARY_OPS[callee].format(args[0], args[1])
+    if callee in ('min3', 'max3', 'med3'):
+        suffix = '_f' if node.ty and node.ty.base == 'F' else '_i'
+        return _INLINE_TERNARY_OPS[callee + suffix].format(args[0], args[1], args[2])
     if len(args) == 3 and callee in _INLINE_TERNARY_OPS:
         return _INLINE_TERNARY_OPS[callee].format(args[0], args[1], args[2])
 
@@ -1417,10 +1766,26 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
     if not has_neg and not has_abs:
         return src_expr
 
-    is_f64 = node.ty and node.ty.base == 'F' and node.ty.size == 64
-    fp_type = 'double' if is_f64 else 'float'
+    src_child = node.children[1]
+    src_ty = src_child.ty
+    if src_ty and src_ty.base in ('I', 'U'):
+        return src_expr
 
-    parts = [f'[&]() {{ {fp_type} sv = {src_expr};']
+    is_64 = node.ty and node.ty.size == 64
+    fp_type = 'double' if is_64 else 'float'
+
+    src_is_raw = src_child.kind == SemaNodeKind.INSTOPERAND or (
+        src_child.kind == SemaNodeKind.CAST
+        and src_child.children
+        and src_child.children[0].kind == SemaNodeKind.INSTOPERAND
+        and src_child.ty
+        and src_child.ty.base == 'B'
+    )
+    if src_is_raw and node.ty and node.ty.size in (32, 64):
+        init = f'std::bit_cast<{fp_type}>({src_expr})'
+    else:
+        init = src_expr
+    parts = [f'[&]() {{ {fp_type} sv = {init};']
     if has_abs:
         parts.append(f' if (inst_.abs & (1u << {src_idx})) sv = std::fabs(sv);')
     if has_neg:
@@ -1440,7 +1805,7 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
     if len(node.children) < 2:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)
-    is_f64 = node.ty and node.ty.base == 'F' and node.ty.size == 64
+    is_f64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
     suffix = '' if is_f64 else 'f'
     return (
@@ -1464,7 +1829,7 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
     if len(node.children) < 2:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)
-    is_f64 = node.ty and node.ty.base == 'F' and node.ty.size == 64
+    is_f64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
     suffix = '' if is_f64 else 'f'
     return (

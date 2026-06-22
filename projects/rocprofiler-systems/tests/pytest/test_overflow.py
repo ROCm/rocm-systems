@@ -48,8 +48,8 @@ class TestOverflow(RocprofsysTest):
             mode,
             "parallel-overhead",
             env=overflow_env,
-            rewrite_args=["-e", "-v", "2"],
-            runtime_args=["-e", "-v", "1"],
+            binary_rewrite_args=["-e", "-v", "2"],
+            runtime_instrument_args=["-e", "-v", "1"],
             run_args=["30", "2", "200"],
         )
         self.assert_regex(result, mode, pass_regex=self.PASS_REGEX)

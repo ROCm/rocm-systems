@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_NVMLWRAP_H_
 #define NCCL_NVMLWRAP_H_
@@ -27,7 +28,7 @@
                                                       (ver << 24U))
 
 typedef struct nvmlDevice_st* nvmlDevice_t;
-#define NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE   16
+#define NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE   32
 
 typedef enum nvmlEnableState_enum
 {

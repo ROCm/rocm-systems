@@ -4,6 +4,7 @@
 #include "core/rocprofiler-sdk.hpp"
 #include "api.hpp"
 #include "binary/analysis.hpp"
+#include "common/env_vars.hpp"
 #include "common/synchronized.hpp"
 #include "core/common.hpp"
 #include "core/common_types.hpp"
@@ -95,10 +96,10 @@ get_roctx_client()
 {
     if(!g_roctx_client)
     {
-        const auto _domains =
-            tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
-                             .value_or(std::string{}),
-                         " ,;:\t\n");
+        const auto _domains = tim::delimit(
+            config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
+                .value_or(std::string{}),
+            " ,;:\t\n");
         const auto has_marker_domain =
             (std::find(_domains.begin(), _domains.end(), "marker_api") !=
                  _domains.end() ||
@@ -2416,7 +2417,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // Only initialize once per session
     if(tool_init_done.exchange(true)) return 0;
 
-    auto domains = settings::instance()->at("ROCPROFSYS_ROCM_DOMAINS");
+    auto domains = settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS });
 
     std::stringstream _domains_ss;
     for(const auto& itr : domains->get_choices())
@@ -3067,12 +3068,11 @@ extern "C"
     {
         // only activate once
         {
-            static bool _first = true;
-            if(!_first) return nullptr;
-            _first = false;
+            static std::atomic<bool> _first{ true };
+            if(!_first.exchange(false)) return nullptr;
         }
 
-        if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
+        if(!rocprofsys::get_env(rocprofsys::env_vars::INIT_TOOLING, true)) return nullptr;
         if(!tim::settings::enabled()) return nullptr;
 
         if(!sdk_tool_configure(version, runtime_version, id)) return nullptr;

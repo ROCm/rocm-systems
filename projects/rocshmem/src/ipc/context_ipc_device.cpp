@@ -304,4 +304,14 @@ __device__ uint64_t IPCContext::signal_fetch_wave(const uint64_t *sig_addr) {
   return value;
 }
 
+/******************************************************************************
+ ******************** TILE API STUB IMPLEMENTATION ****************************
+ *****************************************************************************/
+
+__device__ int IPCContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t team,
+                                                [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
+}
+
 }  // namespace rocshmem

@@ -13,7 +13,6 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/environment/types.hpp>
 #include <timemory/mpl/types.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/locking.hpp>
 
@@ -96,8 +95,6 @@ namespace trait     = ::tim::trait;      // NOLINT
 namespace cereal    = ::tim::cereal;     // NOLINT
 
 using ::tim::auto_lock_t;  // NOLINT
-using ::tim::get_env;      // NOLINT
-using ::tim::set_env;      // NOLINT
 using ::tim::type_mutex;   // NOLINT
 
 struct construct_on_thread

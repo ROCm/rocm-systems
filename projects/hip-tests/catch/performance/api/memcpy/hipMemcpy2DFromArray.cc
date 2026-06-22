@@ -1,0 +1,124 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "memcpy_performance_common.hh"
+
+/**
+ * @addtogroup memcpy memcpy
+ * @{
+ * @ingroup PerformanceTestMemory
+ */
+
+class Memcpy2DFromArrayBenchmark : public Benchmark<Memcpy2DFromArrayBenchmark> {
+ public:
+  void operator()(void* dst, size_t dst_pitch, hipArray_const_t src, size_t width, size_t height,
+                  hipMemcpyKind kind) {
+    TIMED_SECTION(kTimerTypeCpu) {
+      HIP_CHECK(hipMemcpy2DFromArray(dst, dst_pitch, src, 0, 0, width, height, kind));
+    }
+  }
+};
+
+static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
+                         bool enable_peer_access = false) {
+  Memcpy2DFromArrayBenchmark benchmark;
+  benchmark.AddSectionName("(" + std::to_string(width) + ", " + std::to_string(height) + ")");
+
+  if (kind == hipMemcpyDeviceToHost) {
+    size_t allocation_size = width * height * sizeof(int);
+    LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc, allocation_size);
+    ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), hipArrayDefault);
+    benchmark.Run(host_allocation.ptr(), width * sizeof(int), array_allocation.ptr(),
+                  width * sizeof(int), height, hipMemcpyDeviceToHost);
+  } else {
+    // hipMemcpyDeviceToDevice
+    int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
+    int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
+
+    LinearAllocGuard2D<int> device_allocation(width, height);
+    HIP_CHECK(hipSetDevice(dst_device));
+    ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), hipArrayDefault);
+    HIP_CHECK(hipSetDevice(src_device));
+    benchmark.Run(device_allocation.ptr(), device_allocation.pitch(), array_allocation.ptr(),
+                  device_allocation.width(), device_allocation.height(), hipMemcpyDeviceToDevice);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemcpy2DFromArray` from Device to Host:
+ *    -# Allocation size
+ *      - Small: 4 KB x 32 B
+ *      - Medium: 8 KB x 32 B
+ *      - Large: 16 KB x 32 B
+ * Test source
+ * ------------------------
+ * - performance/api/memcpy/hipMemcpy2DFromArray.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToHost) {
+  CHECK_IMAGE_SUPPORT
+
+  const auto width = GENERATE(4_KB, 8_KB, 16_KB);
+  RunBenchmark(width, 32, hipMemcpyDeviceToHost);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemcpy2DFromArray` from Device to Device with peer access disabled:
+ *    -# Allocation size
+ *      - Small: 4 KB x 32 B
+ *      - Medium: 8 KB x 32 B
+ *      - Large: 16 KB x 32 B
+ * Test source
+ * ------------------------
+ * - performance/api/memcpy/hipMemcpy2DFromArray.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_DisablePeerAccess) {
+  CHECK_IMAGE_SUPPORT
+
+  const auto width = GENERATE(4_KB, 8_KB, 16_KB);
+  RunBenchmark(width, 32, hipMemcpyDeviceToDevice);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemcpy2DFromArray` from Device to Device with peer access enabled:
+ *    -# Allocation size
+ *      - Small: 4 KB x 32 B
+ *      - Medium: 8 KB x 32 B
+ *      - Large: 16 KB x 32 B
+ * Test source
+ * ------------------------
+ * - performance/api/memcpy/hipMemcpy2DFromArray.cc
+ * Test requirements
+ * ------------------------
+ *  - Multi-device
+ *  - Device supports Peer-to-Peer access
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_EnablePeerAccess) {
+  CHECK_IMAGE_SUPPORT
+
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  const auto width = GENERATE(4_KB, 8_KB, 16_KB);
+  RunBenchmark(width, 32, hipMemcpyDeviceToDevice, true);
+}
+
+/**
+ * End doxygen group memcpy.
+ * @}
+ */

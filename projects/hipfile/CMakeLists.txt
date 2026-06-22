@@ -46,9 +46,10 @@ set(HIPFILE_NVIDIA_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/nvidia_detail")
 set(HIPFILE_SRC_COMMON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/common")
 set(HIPFILE_TEST_COMMON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/common")
 set(HIPFILE_AMD_TEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/amd_detail")
+set(HIPFILE_THIRD_PARTY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third-party")
 
-set(AIS_CXX_STANDARD "17" CACHE STRING "C++ standard to build with")
-set_property(CACHE AIS_CXX_STANDARD PROPERTY STRINGS "17" "20")
+set(AIS_CXX_STANDARD "20" CACHE STRING "C++ standard to build with")
+set_property(CACHE AIS_CXX_STANDARD PROPERTY STRINGS "20" "23" "26")
 
 # Set the list of build types for ccmake/CMake GUI
 #
@@ -233,7 +234,6 @@ option(AIS_INSTALL_EXAMPLES "Install example programs" ON)
 #------------------
 option(AIS_INSTALL_TOOLS "Install tool programs" ON)
 
-
 #------
 # docs
 #------
@@ -293,6 +293,7 @@ endif()
 
 # Add the testing directories
 if(BUILD_TESTING)
+    include(AISUseGTest)
     add_subdirectory(test)
 endif()
 if(BUILD_TESTING AND AIS_BUILD_AMD_DETAIL)

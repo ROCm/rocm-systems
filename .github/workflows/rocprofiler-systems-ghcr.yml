@@ -86,8 +86,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.containers_list) }}
-        gpu: ${{ fromJSON(needs.prepare_matrix_ci.outputs.gpu_list) }}
+        system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
+        gpu: [ 'multiarch' ]
 
     steps:
       - name: Checkout Repository

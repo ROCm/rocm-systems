@@ -72,7 +72,7 @@ class FileClassificationVisitor:
             toolchain: Toolchain instance for binary operations
             database_handlers: List of database handler instances
             verbose: Enable verbose output
-            gpu_targets: If set, only classify database files for these GPU targets
+            gpu_targets: If set, only produce per-arch artifacts for these GPU targets
         """
         self.toolchain = toolchain
         self.database_handlers = database_handlers or []
@@ -357,6 +357,17 @@ class ArtifactSplitter:
                     # Extract architecture from target name (e.g., "hip-amdgcn-amd-amdhsa-gfx1100")
                     arch = extract_architecture_from_target(target_name)
                     if arch:
+                        if self.gpu_targets is not None:
+                            bare_arch = strip_target_features(arch)
+                            if bare_arch not in self.gpu_targets:
+                                code_object_index[arch] += 1
+                                if self.verbose:
+                                    print(
+                                        f"    Skipping kernel for {arch}: "
+                                        f"{file_name} (not in gpu_targets)"
+                                    )
+                                continue
+
                         kernel_path = unbundled.dest_dir / file_name
                         # Read kernel data while the file still exists
                         kernel_data = kernel_path.read_bytes()
