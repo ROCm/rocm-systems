@@ -1094,7 +1094,49 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 }
 
 // ================================================================================================
+void VirtualGPU::ClearCachedCompletionSignal() {
+  if (last_completion_signal_owner_ != nullptr) {
+    last_completion_signal_owner_->release();
+    last_completion_signal_owner_ = nullptr;
+  }
+  last_completion_signal_.handle = 0;
+}
+
+// ================================================================================================
+void VirtualGPU::ResetCachedQueueProgress() {
+  last_write_index_ = kInvalidQueueIndex;
+  last_packet_with_signal_index_ = kInvalidQueueIndex;
+  ClearCachedCompletionSignal();
+}
+
+// ================================================================================================
+void VirtualGPU::SetCachedCompletionSignal(hsa_signal_t signal, ProfilingSignal* owner) {
+  if (last_completion_signal_owner_ != owner) {
+    if (last_completion_signal_owner_ != nullptr) {
+      last_completion_signal_owner_->release();
+    }
+    last_completion_signal_owner_ = owner;
+    if (last_completion_signal_owner_ != nullptr) {
+      last_completion_signal_owner_->retain();
+    }
+  }
+  last_completion_signal_ = signal;
+}
+
+// ================================================================================================
+ProfilingSignal* VirtualGPU::GetCachedCompletionSignalOwner(hsa_signal_t signal) {
+  ProfilingSignal* owner = Barriers().GetLastSignal();
+  if ((owner == nullptr) || (owner->signal_.handle != signal.handle)) {
+    return nullptr;
+  }
+  return owner;
+}
+
+// ================================================================================================
 void VirtualGPU::SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer) {
+  if (gpu_queue_ != queue) {
+    ResetCachedQueueProgress();
+  }
   gpu_queue_ = queue;
   cached_read_dispatch_id_ = 0;
   metadata_preloader_.SetQueueBase(metadata_ring_buffer,
@@ -1982,6 +2024,7 @@ VirtualGPU::~VirtualGPU() {
   // Release any retained coalescing-window signal not freed via releaseGpuMemoryFence.
   {
     std::scoped_lock l(execution());
+    ResetCachedQueueProgress();
     SetCoalesceWindow(0, nullptr);
   }
 

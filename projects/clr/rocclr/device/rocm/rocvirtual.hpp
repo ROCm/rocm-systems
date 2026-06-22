@@ -694,6 +694,11 @@ class VirtualGPU : public device::VirtualDevice {
   //! Resets the current queue state. Note: should be called after AQL queue becomes idle
   void ResetQueueStates();
 
+  void ClearCachedCompletionSignal();
+  void ResetCachedQueueProgress();
+  void SetCachedCompletionSignal(hsa_signal_t signal, ProfilingSignal* owner);
+  ProfilingSignal* GetCachedCompletionSignalOwner(hsa_signal_t signal);
+
   //! Track the progress of the queue based on the last write index and completion signal.
   //! When skip_signal is true, only the write index is advanced and the completion signal
   //! is cleared. Used for graph pre-patched dispatches whose signals are externally
@@ -703,10 +708,11 @@ class VirtualGPU : public device::VirtualDevice {
                                  bool skip_signal = false) {
     last_write_index_ = index;
     if (skip_signal) {
-      last_completion_signal_.handle = 0;
+      ClearCachedCompletionSignal();
     } else if (packet.completion_signal.handle != 0) {
       last_packet_with_signal_index_ = index;
-      last_completion_signal_ = packet.completion_signal;
+      SetCachedCompletionSignal(packet.completion_signal,
+                                GetCachedCompletionSignalOwner(packet.completion_signal));
     }
   }
 
@@ -863,6 +869,7 @@ class VirtualGPU : public device::VirtualDevice {
   uint64_t last_packet_with_signal_index_ = kInvalidQueueIndex; //!< The last HW queue write index for a packet
                                               //!< with a completion signal
   hsa_signal_t last_completion_signal_{};     //!< The last completion signal
+  ProfilingSignal* last_completion_signal_owner_ = nullptr; //!< Retained owner of last signal
 
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations
