@@ -1541,6 +1541,9 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       }
       return 0;
     }
+    unsigned rejected_nr = nr - 0x40;
+    util::Logger::warn("DRM ioctl rejected: nr=0x", std::hex, nr, " (AMDGPU cmd 0x", rejected_nr,
+                       std::dec, ") fd=", fd);
     errno = EINVAL;
     return -1;
   }

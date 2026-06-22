@@ -179,14 +179,11 @@ private:
 
   void handle_doorbell(simdojo::Tick timestamp);
 
-  /// @brief Fetch AQL packets from all registered HW queues.
-  void fetch_packets();
-
   /// @brief Fetch AQL packets from a single HW queue.
-  void fetch_from_queue(HwQueue &queue, HwQueueState &qs);
+  void fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now);
 
   /// @brief Process SDMA packets from an SDMA queue's ring buffer.
-  void process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx);
+  void process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx, simdojo::Tick now);
 
   /// @brief Coarse invalidate of the GPU data caches (L1 V$ + L2/GL2).
   /// @details Emulated SDMA and CP writes land directly in the backing store,
@@ -323,6 +320,8 @@ private:
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   std::unique_ptr<CompletionTracker> completion_;
+
+  std::atomic<bool> invalid_pending_{false};
 
   void doorbell_poll_loop(std::stop_token stop);
   std::jthread doorbell_thread_;

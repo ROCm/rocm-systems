@@ -206,6 +206,8 @@ private:
                   amdgpu::Mtype mtype = amdgpu::Mtype::RW);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
 
+  void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
+
   int dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg);
   void *dispatch_mmap(KfdProcess &proc, void *addr, size_t length, int prot, int flags,
                       off_t offset);

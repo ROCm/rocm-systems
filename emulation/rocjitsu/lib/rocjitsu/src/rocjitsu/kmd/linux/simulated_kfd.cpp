@@ -112,6 +112,16 @@ void SimulatedKfd::unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size
   proc.unmap_pages(gpu_va, size);
 }
 
+void SimulatedKfd::update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base) {
+  if (gpu_ordinal >= gpus_.size())
+    return;
+  auto &g = gpus_[gpu_ordinal];
+  if (!g.soc)
+    return;
+  g.soc->for_each_cp(
+      [=](amdgpu::CommandProcessor *cp) { cp->set_doorbell_base(process_id, base); });
+}
+
 std::string SimulatedKfd::redirect_sysfs_path(const char *path) const {
   auto result = redirect_sysfs_root_path(path, topology_path(), topology().drm_path());
   if (!result.empty()) {
@@ -645,100 +655,110 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
   // signal to wake).
   if (proc.event_state_.is_closing())
     return -ESRCH;
-  switch (dispatch_request) {
-  case AMDKFD_IOC_GET_VERSION:
-    return get_version_ioctl(arg);
-  case AMDKFD_IOC_GET_CLOCK_COUNTERS:
-    return get_clock_counters_ioctl(arg);
-  case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
-    return get_process_apertures_ioctl(arg);
-  case AMDKFD_IOC_ACQUIRE_VM:
-    return acquire_vm_ioctl(arg);
-  case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU:
-    return alloc_memory_ioctl(proc, arg);
-  case AMDKFD_IOC_FREE_MEMORY_OF_GPU:
-    return free_memory_ioctl(proc, arg);
-  case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
-    return map_memory_ioctl(proc, arg);
-  case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
-    return unmap_memory_ioctl(proc, arg);
-  case AMDKFD_IOC_CREATE_QUEUE:
-    return create_queue_ioctl(proc, arg);
-  case AMDKFD_IOC_UPDATE_QUEUE:
-    return update_queue_ioctl(proc, arg);
-  case AMDKFD_IOC_DESTROY_QUEUE:
-    return destroy_queue_ioctl(proc, arg);
-  case AMDKFD_IOC_CREATE_EVENT:
-    return create_event_ioctl(proc, arg);
-  case AMDKFD_IOC_DESTROY_EVENT:
-    return destroy_event_ioctl(proc, arg);
-  case AMDKFD_IOC_SET_EVENT:
-    return set_event_ioctl(proc, arg);
-  case AMDKFD_IOC_RESET_EVENT:
-    return reset_event_ioctl(proc, arg);
-  // WAIT_EVENTS is handled before op_mutex_ above (it blocks on a condition
-  // variable and must not hold the per-process op lock), so it never reaches
-  // this switch.
-  case AMDKFD_IOC_SET_XNACK_MODE:
-    return set_xnack_mode_ioctl(arg);
-  case AMDKFD_IOC_SET_MEMORY_POLICY:
-    return set_memory_policy_ioctl(proc, arg);
-  case AMDKFD_IOC_AVAILABLE_MEMORY:
-    return get_available_memory_ioctl(proc, arg);
-  case AMDKFD_IOC_RUNTIME_ENABLE:
-    return runtime_enable_ioctl(proc, arg);
-  case AMDKFD_IOC_DBG_TRAP:
-    return debug_trap_ioctl(proc, arg);
-  case AMDKFD_IOC_SET_SCRATCH_BACKING_VA: {
-    auto *a = static_cast<kfd_ioctl_set_scratch_backing_va_args *>(arg);
-    uint32_t ord = gpu_ordinal(a->gpu_id);
-    {
-      std::lock_guard<std::mutex> plk(process_mutex_);
-      proc.gpu(ord).scratch_backing_va = a->va_addr;
+  auto dispatch_one = [&]() -> int {
+    switch (dispatch_request) {
+    case AMDKFD_IOC_GET_VERSION:
+      return get_version_ioctl(arg);
+    case AMDKFD_IOC_GET_CLOCK_COUNTERS:
+      return get_clock_counters_ioctl(arg);
+    case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
+      return get_process_apertures_ioctl(arg);
+    case AMDKFD_IOC_ACQUIRE_VM:
+      return acquire_vm_ioctl(arg);
+    case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU:
+      return alloc_memory_ioctl(proc, arg);
+    case AMDKFD_IOC_FREE_MEMORY_OF_GPU:
+      return free_memory_ioctl(proc, arg);
+    case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
+      return map_memory_ioctl(proc, arg);
+    case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
+      return unmap_memory_ioctl(proc, arg);
+    case AMDKFD_IOC_CREATE_QUEUE:
+      return create_queue_ioctl(proc, arg);
+    case AMDKFD_IOC_UPDATE_QUEUE:
+      return update_queue_ioctl(proc, arg);
+    case AMDKFD_IOC_DESTROY_QUEUE:
+      return destroy_queue_ioctl(proc, arg);
+    case AMDKFD_IOC_CREATE_EVENT:
+      return create_event_ioctl(proc, arg);
+    case AMDKFD_IOC_DESTROY_EVENT:
+      return destroy_event_ioctl(proc, arg);
+    case AMDKFD_IOC_SET_EVENT:
+      return set_event_ioctl(proc, arg);
+    case AMDKFD_IOC_RESET_EVENT:
+      return reset_event_ioctl(proc, arg);
+    // WAIT_EVENTS is handled before op_mutex_ above (it blocks on a condition
+    // variable and must not hold the per-process op lock), so it never reaches
+    // this switch.
+    case AMDKFD_IOC_SET_XNACK_MODE:
+      return set_xnack_mode_ioctl(arg);
+    case AMDKFD_IOC_SET_MEMORY_POLICY:
+      return set_memory_policy_ioctl(proc, arg);
+    case AMDKFD_IOC_AVAILABLE_MEMORY:
+      return get_available_memory_ioctl(proc, arg);
+    case AMDKFD_IOC_RUNTIME_ENABLE:
+      return runtime_enable_ioctl(proc, arg);
+    case AMDKFD_IOC_DBG_TRAP:
+      return debug_trap_ioctl(proc, arg);
+    case AMDKFD_IOC_SET_SCRATCH_BACKING_VA: {
+      auto *a = static_cast<kfd_ioctl_set_scratch_backing_va_args *>(arg);
+      uint32_t ord = gpu_ordinal(a->gpu_id);
+      {
+        std::lock_guard<std::mutex> plk(process_mutex_);
+        proc.gpu(ord).scratch_backing_va = a->va_addr;
+      }
+      util::Logger::vm([&](auto &os) {
+        os << "SET_SCRATCH_BACKING_VA pid=" << proc.process_id() << " gpu_id=" << a->gpu_id
+           << " va=" << std::hex << a->va_addr << std::dec;
+      });
+      return 0;
     }
-    util::Logger::vm([&](auto &os) {
-      os << "SET_SCRATCH_BACKING_VA pid=" << proc.process_id() << " gpu_id=" << a->gpu_id
-         << " va=" << std::hex << a->va_addr << std::dec;
+    case AMDKFD_IOC_SET_TRAP_HANDLER: {
+      auto *a = static_cast<kfd_ioctl_set_trap_handler_args *>(arg);
+      uint32_t ord = gpu_ordinal(a->gpu_id);
+      {
+        // Held under process_mutex_ for symmetry with SET_SCRATCH_BACKING_VA and
+        // to be race-free once the trap handler is wired into the SoC. NOTE: as of
+        // now trap_tba_addr/trap_tma_addr have no reader anywhere (the CP does not
+        // yet consume them), so this lock currently guards against a non-existent
+        // concurrent access — kept for forward-compatibility.
+        std::lock_guard<std::mutex> plk(process_mutex_);
+        proc.gpu(ord).trap_tba_addr = a->tba_addr;
+        proc.gpu(ord).trap_tma_addr = a->tma_addr;
+      }
+      return 0;
+    }
+    case AMDKFD_IOC_GET_TILE_CONFIG:
+      return get_tile_config_ioctl(arg);
+    case AMDKFD_IOC_GET_DMABUF_INFO:
+      return get_dmabuf_info_ioctl(proc, arg);
+    case AMDKFD_IOC_IMPORT_DMABUF:
+      return import_dmabuf_ioctl(proc, arg);
+    case AMDKFD_IOC_EXPORT_DMABUF:
+      return export_dmabuf_ioctl(proc, arg);
+    case AMDKFD_IOC_IPC_EXPORT_HANDLE:
+      return ipc_export_handle_ioctl(proc, arg);
+    case AMDKFD_IOC_IPC_IMPORT_HANDLE:
+      return ipc_import_handle_ioctl(proc, arg);
+    case AMDKFD_IOC_SVM:
+      // SVM requests carry a trailing attribute array, so libhsakmt sets _IOC_SIZE
+      // to the actual buffer size. canonical_ioctl_request() lets this follow the
+      // normal switch-dispatch style while still accepting those runtime-sized
+      // request values.
+      return svm_ioctl(proc, arg);
+    default:
+      util::Logger::debug_print("rocjitsu: unhandled ioctl 0x", std::hex, request);
+      return 0;
+    }
+  };
+  int ret = dispatch_one();
+  if (ret != 0) {
+    util::Logger::driver([&](auto &os) {
+      os << std::format("IOCTL_ERROR pid={} {} ret={}", proc.process_id(), ioctl_name(request),
+                        ret);
     });
-    return 0;
   }
-  case AMDKFD_IOC_SET_TRAP_HANDLER: {
-    auto *a = static_cast<kfd_ioctl_set_trap_handler_args *>(arg);
-    uint32_t ord = gpu_ordinal(a->gpu_id);
-    {
-      // Held under process_mutex_ for symmetry with SET_SCRATCH_BACKING_VA and to
-      // be race-free once the trap handler is wired into the SoC. NOTE: as of now
-      // trap_tba_addr/trap_tma_addr have no reader anywhere (the CP does not yet
-      // consume them), so this lock currently guards against a non-existent
-      // concurrent access — kept for forward-compatibility.
-      std::lock_guard<std::mutex> plk(process_mutex_);
-      proc.gpu(ord).trap_tba_addr = a->tba_addr;
-      proc.gpu(ord).trap_tma_addr = a->tma_addr;
-    }
-    return 0;
-  }
-  case AMDKFD_IOC_GET_TILE_CONFIG:
-    return get_tile_config_ioctl(arg);
-  case AMDKFD_IOC_GET_DMABUF_INFO:
-    return get_dmabuf_info_ioctl(proc, arg);
-  case AMDKFD_IOC_IMPORT_DMABUF:
-    return import_dmabuf_ioctl(proc, arg);
-  case AMDKFD_IOC_EXPORT_DMABUF:
-    return export_dmabuf_ioctl(proc, arg);
-  case AMDKFD_IOC_IPC_EXPORT_HANDLE:
-    return ipc_export_handle_ioctl(proc, arg);
-  case AMDKFD_IOC_IPC_IMPORT_HANDLE:
-    return ipc_import_handle_ioctl(proc, arg);
-  case AMDKFD_IOC_SVM:
-    // SVM requests carry a trailing attribute array, so libhsakmt sets _IOC_SIZE
-    // to the actual buffer size. canonical_ioctl_request() lets this follow the
-    // normal switch-dispatch style while still accepting those runtime-sized
-    // request values.
-    return svm_ioctl(proc, arg);
-  default:
-    util::Logger::debug_print("rocjitsu: unhandled ioctl 0x", std::hex, request);
-    return 0;
-  }
+  return ret;
 }
 
 void *SimulatedKfd::mmap(void *addr, size_t length, int prot, int flags, off_t offset) {
@@ -766,7 +786,6 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         (static_cast<uint64_t>(offset) & ~KFD_MMAP_TYPE_MASK) >> KFD_MMAP_GPU_ID_SHIFT;
     uint32_t db_gpu_id = static_cast<uint32_t>(encoded_gpu);
     uint32_t ord = gpu_ordinal(db_gpu_id);
-    auto *gpu = find_gpu(db_gpu_id);
 
     int doorbell_fd = -1;
     {
@@ -851,9 +870,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       // Use the local ptr (== the doorbell_gpu_va just written) rather than
       // re-reading gs.doorbell_gpu_va without alloc_mutex_.
       map_to_gpu(proc, reinterpret_cast<uint64_t>(ptr), ptr, length, amdgpu::Mtype::UC);
-      if (gpu && gpu->soc)
-        gpu->soc->for_each_cp(
-            [&](amdgpu::CommandProcessor *cp) { cp->set_doorbell_base(proc.process_id(), ptr); });
+      update_cp_doorbell_base(ord, proc.process_id(), ptr);
     }
     return ptr;
   }
@@ -1006,27 +1023,45 @@ int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length) {
 
 int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
   {
-    std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
-    for (auto &gs : proc.gpu_state_) {
-      if (gs.doorbell_page == addr) {
-        if (!proc.event_state_.is_closing()) {
-          errno = EPERM;
-          return -1;
+    uint32_t doorbell_ord = 0;
+    size_t doorbell_page_size = 0;
+    bool is_doorbell = false;
+    {
+      std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+      for (size_t ord = 0; ord < proc.gpu_state_.size(); ++ord) {
+        auto &gs = proc.gpu(ord);
+        if (gs.doorbell_page == addr) {
+          if (!proc.event_state_.is_closing()) {
+            errno = EPERM;
+            return -1;
+          }
+          uint64_t gpu_va = gs.doorbell_gpu_va;
+          doorbell_page_size = gs.doorbell_page_size;
+          gs.doorbell_page = nullptr;
+          gs.doorbell_gpu_va = 0;
+          gs.doorbell_page_size = 0;
+          if (gpu_va && doorbell_page_size)
+            unmap_from_gpu(proc, gpu_va, doorbell_page_size);
+          doorbell_ord = static_cast<uint32_t>(ord);
+          is_doorbell = true;
+          break;
         }
-        uint64_t gpu_va = gs.doorbell_gpu_va;
-        size_t page_size = gs.doorbell_page_size;
-        gs.doorbell_page = nullptr;
-        gs.doorbell_gpu_va = 0;
-        gs.doorbell_page_size = 0;
-        if (gpu_va && page_size)
-          unmap_from_gpu(proc, gpu_va, page_size);
-        // Unmap the exact page we mapped: use the recorded doorbell page size,
-        // not the caller-provided length. A length that differs from the tracked
-        // mapping would otherwise partially unmap the CPU page and leave it
-        // inconsistent with the GPU page-table unmap above.
-        libc_passthrough().munmap(addr, page_size ? page_size : length);
-        return 0;
       }
+    }
+    if (is_doorbell) {
+      // Unmap the exact page we mapped: use the recorded doorbell page size, not
+      // the caller-provided length. A length that differs from the tracked mapping
+      // would otherwise partially unmap the CPU page and leave it inconsistent
+      // with the GPU page-table unmap above. Both the munmap syscall and the CP
+      // notification run AFTER releasing alloc_mutex_: update_cp_doorbell_base
+      // takes the CP's hw_queue_mutex_, and the CP engine thread takes alloc_mutex_
+      // under hw_queue_mutex_ (allocate_scratch_backing), so holding alloc_mutex_
+      // here would be an alloc_mutex_->hw_queue_mutex_ inversion that can deadlock.
+      libc_passthrough().munmap(addr, doorbell_page_size ? doorbell_page_size : length);
+      // Clear the CP's doorbell base for this process: the page it pointed at is
+      // gone, so a stale base must not be dereferenced by the CP.
+      update_cp_doorbell_base(doorbell_ord, proc.process_id(), nullptr);
+      return 0;
     }
   }
   // release_page() clears page/page_size under EventState::mutex_, the same lock
@@ -1065,8 +1100,13 @@ int SimulatedKfd::get_process_apertures_ioctl(void *arg) {
     apertures[i].lds_limit = apertures[i].lds_base + 0xFFFFFFFFULL;
     apertures[i].scratch_base = 0x2000000000000ULL + static_cast<uint64_t>(i) * 0x10000000000ULL;
     apertures[i].scratch_limit = apertures[i].scratch_base + 0xFFFFFFFFULL;
-    apertures[i].gpuvm_base = 0x1000000000ULL;
-    apertures[i].gpuvm_limit = 0x3FFFFFFFFFFFULL;
+    // Wide GPUVM aperture: rocjitsu maps GPU VAs directly to host pointers (the
+    // doorbell base and GEM_VA mappings publish reinterpret_cast<uint64_t>(ptr) as
+    // the GPU VA), so this aperture must span the host address range the runtime
+    // validates VAs against — hence a low base and a 47-bit limit rather than the
+    // narrower hardware GPUVM window.
+    apertures[i].gpuvm_base = 0x10000ULL;
+    apertures[i].gpuvm_limit = 0x7FFFFFFFFFFFULL;
     apertures[i].gpu_id = gpus_[i].gpu_id;
     apertures[i].pad = 0;
   }
@@ -1221,6 +1261,10 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
     args->mmap_offset = alloc.handle << 12;
   }
 
+  util::Logger::cp([&](auto &os) {
+    os << std::format("ALLOC_MEMORY handle={} gpu_va={:#x} size={:#x} flags={:#x}", alloc.handle,
+                      va, args->size, args->flags);
+  });
   util::Logger::vm([&](auto &os) {
     os << std::format(
         "ALLOC pid={} handle={} gpu_va={:#x} size={} flags={:#x} memfd={} host_ptr={}",
@@ -1359,13 +1403,16 @@ int SimulatedKfd::map_memory_ioctl(KfdProcess &proc, void *arg) {
 
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
   auto it = proc.allocations_.find(args->handle);
-  if (it == proc.allocations_.end())
+  if (it == proc.allocations_.end()) {
+    util::Logger::cp(
+        [&](auto &os) { os << std::format("MAP_MEMORY_FAIL handle={} not found", args->handle); });
     return -EINVAL;
+  }
   auto &alloc = it->second;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("MAP_MEMORY handle={} gpu_va={:#x} size={} flags={:#x} host_ptr={:#x}",
-                      alloc.handle, alloc.gpu_va, alloc.size, alloc.flags,
-                      reinterpret_cast<uintptr_t>(alloc.host_ptr));
+  util::Logger::cp([&](auto &os) {
+    os << std::format("MAP_MEMORY handle={} gpu_va={:#x} size={:#x} n_devices={} host_ptr={}",
+                      alloc.handle, alloc.gpu_va, alloc.size, args->n_devices,
+                      alloc.host_ptr != nullptr);
   });
   if (alloc.host_ptr)
     map_to_gpu(proc, alloc.gpu_va, alloc.host_ptr, alloc.size, pte_mtype_for_flags(alloc.flags));

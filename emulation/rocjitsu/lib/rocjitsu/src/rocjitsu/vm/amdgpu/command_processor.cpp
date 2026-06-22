@@ -29,7 +29,6 @@ RJ_DIAGNOSTIC_POP
 #include <format>
 #include <limits>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <sys/mman.h>
@@ -391,13 +390,16 @@ void CommandProcessor::register_queue(HwQueue queue) {
                       reinterpret_cast<uintptr_t>(queue.doorbell_base));
   });
   bool start_poll = queue.host_accessible;
+  bool host_accessible = queue.host_accessible;
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     HwQueueState qs{};
     qs.queue_desc_va = queue.queue_desc_va;
     hw_queues_.push_back(std::move(queue));
     new_queue_states_.push_back(std::move(qs));
-    if (!is_primary_ && engine()) {
+    // KFD queues rely on the VM-level primary (rj_vm.cpp); only internal test
+    // queues need the CP to own the primary lifecycle.
+    if (!is_primary_ && engine() && !host_accessible) {
       engine()->register_as_primary();
       is_primary_ = true;
     }
@@ -519,9 +521,19 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
   using namespace std::chrono_literals;
   uint64_t poll_count = 0;
   while (!stop.stop_requested()) {
-    if (scan_doorbells())
+    bool doorbell_changed = scan_doorbells();
+    // Retry on a pending INVALID packet (the runtime has not finished writing it
+    // yet) even when no doorbell value changed. Pace those retries with the same
+    // 100us idle wait rather than spinning: a real doorbell change fires the event
+    // immediately (latency-sensitive), but an INVALID retry only needs to poll
+    // until the runtime finalizes the header, so it should not burn a core.
+    bool invalid_retry = !doorbell_changed && invalid_pending_.load(std::memory_order_acquire);
+    if (doorbell_changed)
       engine()->schedule_event_now(&doorbell_event_);
-    else
+    else if (invalid_retry) {
+      std::this_thread::sleep_for(100us);
+      engine()->schedule_event_now(&doorbell_event_);
+    } else
       std::this_thread::sleep_for(100us);
     ++poll_count;
 
@@ -1098,7 +1110,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   qs.entries.push_back(std::move(dp));
 }
 
-void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
+void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now) {
   if (!memory_)
     return;
   if (queue.host_accessible ? (queue.doorbell_base == nullptr) : (queue.doorbell_va == 0))
@@ -1133,7 +1145,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
     });
     if (read_idx >= write_idx)
       return;
-    process_sdma_ring(queue, read_idx, write_idx);
+    process_sdma_ring(queue, read_idx, write_idx, now);
     return;
   }
 
@@ -1167,19 +1179,35 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
     }
 
     uint8_t pkt_type = pkt.header & 0xFF;
-    util::Logger::vm([&](auto &os) {
-      os << std::format("PKT q={} slot={} type={} header={:#x} read_idx={}", queue.queue_id, slot,
-                        pkt_type, pkt.header, read_idx);
+    util::Logger::cp([&](auto &os) {
+      auto type_name = [](uint8_t t) -> const char * {
+        switch (t) {
+        case 0:
+          return "VENDOR_SPECIFIC";
+        case 1:
+          return "INVALID";
+        case 2:
+          return "KERNEL_DISPATCH";
+        case 3:
+          return "BARRIER_AND";
+        case 5:
+          return "BARRIER_OR";
+        default:
+          return "UNKNOWN";
+        }
+      };
+      os << std::format("PKT q={} slot={} type={}({}) header={:#x} barrier_bit={} read_idx={}",
+                        queue.queue_id, slot, pkt_type, type_name(pkt_type), pkt.header,
+                        (pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1, read_idx);
     });
 
     if (pkt_type == HSA_PACKET_TYPE_INVALID) {
-      auto *host_ptr = memory_->resolve_host_ptr(pkt_addr, queue.process_id);
-      uint16_t raw_header = 0;
-      if (host_ptr)
-        std::memcpy(&raw_header, host_ptr, sizeof(raw_header));
-      util::Logger::warn("INVALID pkt at 0x", std::hex, pkt_addr, " host=0x",
-                         reinterpret_cast<uintptr_t>(host_ptr), " raw=0x", raw_header);
+      util::Logger::cp([&](auto &os) {
+        os << std::format("{}: INVALID_RETRY q={} slot={} read_idx={} va={:#x}", name(),
+                          queue.queue_id, slot, read_idx, pkt_addr);
+      });
       process_limit = read_idx;
+      invalid_pending_.store(true, std::memory_order_release);
       break;
     }
 
@@ -1218,11 +1246,13 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
       }
       if (!has_deps)
         deps_satisfied = true;
+      util::Logger::cp([&](auto &os) {
+        os << std::format("BARRIER_DEP q={} type={} deps_ok={} has_deps={}", queue.queue_id,
+                          is_and ? "AND" : "OR", deps_satisfied, has_deps);
+      });
       if (!deps_satisfied) {
-        // Dependencies not ready. Stop fetching — don't advance read pointer
-        // past this packet. Schedule a re-check via doorbell event.
         process_limit = read_idx;
-        engine()->schedule_event_now(&doorbell_event_);
+        schedule_event(&doorbell_event_, now + 1);
         break;
       }
 
@@ -1241,6 +1271,10 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
     } else if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
       AmdExtKernelDispatchPacket ext{};
       std::memcpy(&ext, &pkt, sizeof(ext));
+      util::Logger::cp([&](auto &os) {
+        os << std::format("VENDOR_PKT q={} amd_format={} dep_sig={:#x}", queue.queue_id,
+                          ext.amd_format, ext.dep_signal.handle);
+      });
       if (ext.amd_format == kHsaAmdPacketTypeBarrierValue) {
         AmdBarrierValuePacket barrier{};
         std::memcpy(&barrier, &pkt, sizeof(barrier));
@@ -1292,9 +1326,13 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
           constexpr uint32_t SIG_VAL_OFF = 8;
           auto v = static_cast<int64_t>(
               read_gpu_u64(ext.dep_signal.handle + SIG_VAL_OFF, queue.process_id));
+          util::Logger::cp([&](auto &os) {
+            os << std::format("VENDOR_DEP_CHECK q={} dep_sig={:#x} val={}", queue.queue_id,
+                              ext.dep_signal.handle, v);
+          });
           if (v != 0) {
             process_limit = read_idx;
-            engine()->schedule_event_now(&doorbell_event_);
+            schedule_event(&doorbell_event_, now + 1);
             break;
           }
         }
@@ -1357,13 +1395,8 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
   }
 }
 
-void CommandProcessor::fetch_packets() {
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  for (size_t i = 0; i < hw_queues_.size(); ++i)
-    fetch_from_queue(hw_queues_[i], new_queue_states_[i]);
-}
-
-void CommandProcessor::handle_doorbell(simdojo::Tick) {
+void CommandProcessor::handle_doorbell(simdojo::Tick now) {
+  invalid_pending_.store(false, std::memory_order_relaxed);
   util::Logger::cp(
       [&](auto &os) { os << std::format("{}: DOORBELL queues={}", name(), hw_queues_.size()); });
 
@@ -1375,7 +1408,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
 
   // Fetch packets (uses last_doorbell values set by the poll thread).
   for (size_t i = 0; i < hw_queues_.size(); ++i)
-    fetch_from_queue(hw_queues_[i], new_queue_states_[i]);
+    fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
 
   // Ensure interrupt callback is set on completion tracker.
   if (completion_ && interrupt_cb_)
@@ -1471,13 +1504,27 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
         ++active_cus;
     os << std::format("{}: PHASE1_DONE remaining={} active_cus={}/{}", name(), remaining,
                       active_cus, cus_.size());
+    for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
+      auto &qs = new_queue_states_[qi];
+      if (qs.entries.empty())
+        continue;
+      os << std::format("\n  queue[{}] entries={} next_disp={} implicit_barrier={}", qi,
+                        qs.entries.size(), qs.next_dispatch_idx, qs.implicit_barrier_next);
+      for (size_t ei = 0; ei < qs.entries.size(); ++ei) {
+        auto &e = qs.entries[ei];
+        os << std::format(
+            "\n    [{}] d={} qid={} total_wgs={} disp={} comp={} barrier={} sig={:#x} non_kern={}",
+            ei, e.dispatch_id, e.queue_id, e.total_wgs, e.dispatched_wgs, e.completed_wgs,
+            e.barrier_bit, e.completion_signal, e.is_non_kernel());
+      }
+    }
   });
 
   // Re-fetch: pick up any packets the host submitted while we were executing
   // (e.g., barrier packets queued after a kernel dispatch). Process them
   // immediately so host signal waits see completed barriers before returning.
   for (size_t i = 0; i < hw_queues_.size(); ++i)
-    fetch_from_queue(hw_queues_[i], new_queue_states_[i]);
+    fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
   // Process any new non-kernel entries (barriers with total_wgs==0).
   for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
     auto &qs = new_queue_states_[qi];
@@ -1494,8 +1541,10 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
   if (completion_)
     completion_->drain_completions(new_queue_states_);
 
-  // Register as primary on first dispatch.
-  if (!is_primary_ && pending_entries() > 0) {
+  // Register as primary on first dispatch (internal test queues only).
+  // KFD queues rely on the VM-level primary registered at rj_vm.cpp.
+  bool kfd = has_kfd_queues();
+  if (!is_primary_ && pending_entries() > 0 && !kfd) {
     engine()->register_as_primary();
     is_primary_ = true;
   }
@@ -1509,24 +1558,20 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
     }
   }
 
-  bool do_teardown = false;
   bool all_done = completion_ && completion_->all_complete(new_queue_states_);
-  bool kfd = has_kfd_queues();
-  if (all_done && !kfd) {
-    if (is_primary_)
-      do_teardown = true;
-  }
+  bool should_release = all_done && is_primary_ && !kfd;
+
   util::Logger::cp([&](auto &os) {
-    os << std::format("{}: TEARDOWN_CHECK all_done={} kfd={} primary={} teardown={}", name(),
-                      all_done, kfd, is_primary_, do_teardown);
+    os << std::format("{}: TEARDOWN_CHECK all_done={} kfd={} primary={} release={}", name(),
+                      all_done, kfd, is_primary_, should_release);
   });
 
+  // CRITICAL: must unlock before stop_doorbell_monitor() — the doorbell poll
+  // thread takes hw_queue_mutex_ in scan_doorbells(); joining while holding
+  // the lock would deadlock.
   lock.unlock();
 
-  if (do_teardown) {
-    util::Logger::cp([&](auto &os) {
-      os << std::format("{}: STOPPING doorbell monitor + primary_release", name());
-    });
+  if (should_release) {
     stop_doorbell_monitor();
     engine()->primary_release();
     is_primary_ = false;
@@ -1656,7 +1701,8 @@ void CommandProcessor::invalidate_gpu_caches() {
     cu->l1_vector().invalidate_all();
 }
 
-void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx) {
+void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx,
+                                         simdojo::Tick now) {
   uint32_t ring_mask = (queue.ring_size / sizeof(uint32_t)) - 1;
 
   uint64_t rpos = read_idx / sizeof(uint32_t);
@@ -1699,7 +1745,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
   // write below to incorrectly advance past the pending packet.
   auto stop_and_retry_current_packet = [&] {
     write_read_ptr();
-    engine()->schedule_event_now(&doorbell_event_);
+    schedule_event(&doorbell_event_, now + 1);
   };
 
   while (rpos < wpos) {
