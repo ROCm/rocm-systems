@@ -1402,11 +1402,18 @@ TEST(BinaryTranslator, LocalCaveIgnoresUnreachableTextTail) {
          "after the large unreachable .text tail";
 }
 
-TEST(BinaryTranslator, PreservesKernargPreloadEntrySkipWindow) {
+TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
   auto image = make_large_amdgpu_elf_with_waitcnt_entry();
   AmdGpuCodeObject source_layout(image.data(), image.size());
   ASSERT_TRUE(source_layout.is_valid());
   ASSERT_FALSE(source_layout.text_sections().empty());
+  const auto *source_rodata = find_section(source_layout, ".rodata");
+  ASSERT_NE(source_rodata, nullptr);
+  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+
+  auto *source_kd = reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(
+      image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
 
   const auto *source_text = source_layout.text_sections()[0];
   auto *source_words = reinterpret_cast<uint32_t *>(image.data() + source_text->sectionOffset());
@@ -1428,13 +1435,29 @@ TEST(BinaryTranslator, PreservesKernargPreloadEntrySkipWindow) {
   const auto *text = translated.text_sections()[0];
   ASSERT_GT(text->size(), 256u);
   const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
-  EXPECT_EQ(target_words[0], build_s_branch(63, ROCJITSU_CODE_ARCH_CDNA3))
-      << "the compatibility prologue must still branch over the 256-byte preload skip window";
+  EXPECT_EQ(target_words[0], build_s_branch(64, ROCJITSU_CODE_ARCH_CDNA3))
+      << "old firmware enters the synthesized compatibility stub, which branches to the "
+         "translated compatibility source entry";
   for (size_t i = 1; i < 64; ++i)
     EXPECT_EQ(target_words[i], build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3))
-        << "preload skip window padding word " << i << " must remain executable padding";
-  EXPECT_EQ(target_words[64], 0xBF810000u)
-      << "compatible firmware starts at descriptor entry + 256 when kernargs are preloaded";
+        << "the synthesized launch window must keep the compatible firmware entry exactly 256 "
+           "bytes after the descriptor entry";
+  EXPECT_EQ(target_words[64], build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3))
+      << "compatible firmware enters at descriptor entry + 256 and branches to the translated "
+         "preloaded-kernarg source entry";
+  EXPECT_EQ(target_words[65], build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3))
+      << "the original compatibility source block is translated in the compact body";
+  EXPECT_EQ(target_words[66], 0xBF810000u)
+      << "the original compatible-firmware source entry is translated in the compact body";
+
+  const auto *target_rodata = find_section(translated, ".rodata");
+  ASSERT_NE(target_rodata, nullptr);
+  ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  const auto *target_kd = reinterpret_cast<const rocr::llvm::amdhsa::kernel_descriptor_t *>(
+      translated.image_data() + target_rodata->sectionOffset());
+  EXPECT_EQ(target_kd->kernel_code_entry_byte_offset, source_kd->kernel_code_entry_byte_offset)
+      << "the descriptor is redirected to the synthesized compatibility entry; compatible "
+         "firmware still reaches the synthesized +256 entry by adding the ABI skip";
 }
 
 TEST(InstructionBuilder, PatchPcrelBranchOffsetInRange) {
