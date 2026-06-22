@@ -4,7 +4,7 @@
 """Unit coverage for ``roofline.roofline_main``.
 
 These tests drive ``Roofline`` directly with mocked machine specs and
-self-contained temp CSVs; they never exercise the analyze CLI. 
+self-contained temp CSVs; they never exercise the analyze CLI.
 """
 
 import tempfile
