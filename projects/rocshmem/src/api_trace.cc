@@ -42,11 +42,6 @@ ROCPROFILER_REGISTER_DEFINE_IMPORT(rocshmem, ROCP_REG_VERSION)
 #include "context.hpp"
 #include "log.hpp"
 
-// Forward declare the rocshmem host context (defined in src/rocshmem.cpp)
-namespace rocshmem {
-    extern rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
-}
-
 // Forward declarations for implementation functions with C linkage
 extern "C" {
 __host__ void rocshmem_barrier_all_on_stream_impl(hipStream_t stream);
@@ -81,9 +76,7 @@ __host__ void rocshmem_signal_wait_until_on_stream_impl(uint64_t *sig_addr, int 
 
 namespace rocshmem
 {
-
-// Forward declaration of default context
-extern __constant__ rocshmem_ctx_t ROCSHMEM_CTX_DEFAULT;
+extern rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 
 namespace
 {
