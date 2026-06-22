@@ -61,8 +61,7 @@ def parse_exclude_gpu_key(key):
 
 def exclude_gpu_key_applies(os_suffix, is_windows, is_linux):
     """Return True if a key with the given OS suffix should be honoured on the
-    current host. ``None`` means OS-agnostic and always applies. eg component: rocprim
-    """
+    current host. ``None`` means OS-agnostic and always applies."""
     if os_suffix is None:
         return True
     if os_suffix == "windows":
@@ -180,8 +179,8 @@ def resolve_tier_tags(test_name, tier_patterns):
 
 # Matches lines like:
 #   #define SomeName "SomeName", "[tag1][tag2]"
-# Groups: (1) macro_name, (2) existing_tag_string
-_DEFINE_RE = re.compile(r'^(#define\s+(\S+)\s+"[^"]*",\s*")([^"]*)(")(.*)$')
+# Groups: (1) prefix up to and including the opening quote for the tags string,
+#         (2) macro/test name, (3) existing_tag_string, (4) closing quote, (5) trailing text
 
 
 def patch_header(header_path, tier_patterns, gpu_exclusion_tags):
@@ -214,19 +213,22 @@ def patch_header(header_path, tier_patterns, gpu_exclusion_tags):
             continue
 
         extra = ""
+        current_tags = existing_tags
 
         # Tier tags
         for tier in resolve_tier_tags(test_name, tier_patterns):
             tag = f"[{tier}]"
-            if tag not in existing_tags:
+            if tag not in current_tags:
                 extra += tag
+                current_tags += tag
                 added_tiers += 1
 
         # GPU exclusion labels (any naming convention from test_categories.yaml)
         for ex_tag in sorted(gpu_exclusion_tags.get(test_name, ())):
             tag = f"[{ex_tag}]"
-            if tag not in existing_tags:
+            if tag not in current_tags:
                 extra += tag
+                current_tags += tag
                 added_gpu += 1
 
         if extra:

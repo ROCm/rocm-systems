@@ -68,7 +68,7 @@ endif()
 #         per-test tags) and hip_test_parameters.hh.  Untouched from upstream.
 # Step 2: inject_category_tags.py post-processes hip_test_config.hh in-place,
 #         appending tier (quick / standard / comprehensive / full) and
-#         GPU-exclusion (ex_gpu_*) tags derived from test_categories.yaml.
+#         arch-exclusion (*_exclude) tags derived from test_categories.yaml.
 #         Any change to test_categories.yaml triggers a full rebuild via DEPENDS.
 add_custom_command(
     OUTPUT ${HIP_TEST_CONFIG_HEADER} ${HIP_TEST_PARAMETERS_HEADER}
