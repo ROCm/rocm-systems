@@ -8,8 +8,13 @@
 #include "comm.h"
 #include "transport.h"
 #include "bootstrap.h"
+#include "param.h"
+#include <algorithm>
 
 NCCL_PARAM(MultiSegmentRegister, "MULTI_SEGMENT_REGISTER", 1);
+
+// Defined in enqueue.cc; caps the number of channels used by the PAT algorithm.
+RCCL_PARAM_DECLARE(MaxPatNchannels);
 
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) {
   struct ringConnInfo {
@@ -67,19 +72,23 @@ fail:
 ncclResult_t ncclTransportPatConnect(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
   if (comm && comm->nRanks > 1) {
+    // Only connect the channels that the PAT algorithm is allowed to use.
+    int nChannels = comm->nChannels;
+    int maxPatNChannels = rcclParamMaxPatNchannels();
+    if (maxPatNChannels > 0) nChannels = std::min(nChannels, maxPatNChannels);
     for (int mask=1; mask<comm->nRanks; mask<<=1) {
       int prevPeer = (comm->rank + mask) % comm->nRanks;
       int nextPeer = (comm->rank + comm->nRanks - mask) % comm->nRanks;
-      for (int c = 0; c < comm->nChannels; c++) {
+      for (int c = 0; c < nChannels; c++) {
         NCCLCHECKGOTO(ncclTransportP2pConnect(comm, c, 1, &prevPeer, 1, &nextPeer, 0), ret, fail); // ReduceScatter
       }
       NCCLCHECKGOTO(ncclTransportP2pSetup(comm, &comm->graphs[NCCL_ALGO_TREE], 0), ret, fail);
-      for (int c = 0; c < comm->nChannels; c++) {
+      for (int c = 0; c < nChannels; c++) {
         NCCLCHECKGOTO(ncclTransportP2pConnect(comm, c, 1, &nextPeer, 1, &prevPeer, 0), ret, fail); // AllGather
       }
       NCCLCHECKGOTO(ncclTransportP2pSetup(comm, &comm->graphs[NCCL_ALGO_TREE], 0), ret, fail);
     }
-    INFO(NCCL_INIT, "Connected binomial trees");
+    INFO(NCCL_INIT, "Connected binomial trees (PAT channels %d)", nChannels);
   }
 exit:
   return ret;
