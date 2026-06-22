@@ -91,14 +91,15 @@ bool IpcSignal::IpcImport(const void* handle, size_t handle_size, const amd::Dev
   }
 
   // Lock the imported signal memory for GPU access.
-  // The IPC signal is CPU-only after dma-buf import; the packet processor
-  // (KFD compute VM) needs an explicit GPU-accessible RW mapping to write
-  // the completion signal value.
+  // The IPC signal is CPU-only after dma-buf import.
   if (dev != nullptr) {
     auto* rocDev = static_cast<const roc::Device*>(dev);
     constexpr size_t kSignalAbiSize = 4096;
     gpu_ptr_ = rocDev->hostLock(reinterpret_cast<void*>(signal_.handle),
-                                kSignalAbiSize, amd::Device::kNoAtomics);
+                                kSignalAbiSize, amd::Device::kAtomics);
+    if (gpu_ptr_ == nullptr) {
+       return false;
+    }
   }
 
   ws_ = WaitState::Active;
