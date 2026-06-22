@@ -11,6 +11,7 @@
 #include <vector>
 
 using namespace rocprofsys::common;
+namespace env_vars = rocprofsys::env_vars;
 
 static std::string
 find_env_var(const std::vector<std::string>& env, std::string_view var_name)
@@ -66,15 +67,15 @@ TEST_F(UpdateEnvTest, ReplaceMode_RemovesDuplicateEntries)
     // Same key present twice (e.g. one from shell env, one from config file).
     // REPLACE must leave exactly one entry; otherwise consolidate_env_entries
     // later joins the parts and turns REPLACE into APPEND.
-    m_env_vars.emplace_back("ROCPROFSYS_TRACE=true");
+    m_env_vars.emplace_back(std::string{ env_vars::TRACE } + "=true");
     m_env_vars.emplace_back("OTHER_VAR=keep");
-    m_env_vars.emplace_back("ROCPROFSYS_TRACE=true");
+    m_env_vars.emplace_back(std::string{ env_vars::TRACE } + "=true");
 
-    update_env(m_env_vars, "ROCPROFSYS_TRACE", false, update_mode::REPLACE, ":",
+    update_env(m_env_vars, env_vars::TRACE, false, update_mode::REPLACE, ":",
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 2);
-    EXPECT_EQ(m_env_vars[0], "ROCPROFSYS_TRACE=false");
+    EXPECT_EQ(m_env_vars[0], std::string{ env_vars::TRACE } + "=false");
     EXPECT_EQ(m_env_vars[1], "OTHER_VAR=keep");
 }
 
@@ -231,33 +232,35 @@ TEST_F(UpdateEnvTest, RealWorld_LD_PRELOAD_Prepend)
 
 TEST_F(UpdateEnvTest, RealWorld_ROCPROFSYS_Environment_Variables)
 {
-    update_env(m_env_vars, "ROCPROFSYS_TRACE", true, update_mode::REPLACE, ":",
+    update_env(m_env_vars, env_vars::TRACE, true, update_mode::REPLACE, ":",
                m_updated_envs, m_original_envs);
-    update_env(m_env_vars, "ROCPROFSYS_PROFILE", false, update_mode::REPLACE, ":",
+    update_env(m_env_vars, env_vars::PROFILE, false, update_mode::REPLACE, ":",
                m_updated_envs, m_original_envs);
-    update_env(m_env_vars, "ROCPROFSYS_USE_SAMPLING", true, update_mode::REPLACE, ":",
+    update_env(m_env_vars, env_vars::USE_SAMPLING, true, update_mode::REPLACE, ":",
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 3);
-    EXPECT_EQ(find_env_var(m_env_vars, "ROCPROFSYS_TRACE"), "ROCPROFSYS_TRACE=true");
-    EXPECT_EQ(find_env_var(m_env_vars, "ROCPROFSYS_PROFILE"), "ROCPROFSYS_PROFILE=false");
-    EXPECT_EQ(find_env_var(m_env_vars, "ROCPROFSYS_USE_SAMPLING"),
-              "ROCPROFSYS_USE_SAMPLING=true");
+    EXPECT_EQ(find_env_var(m_env_vars, env_vars::TRACE),
+              std::string{ env_vars::TRACE } + "=true");
+    EXPECT_EQ(find_env_var(m_env_vars, env_vars::PROFILE),
+              std::string{ env_vars::PROFILE } + "=false");
+    EXPECT_EQ(find_env_var(m_env_vars, env_vars::USE_SAMPLING),
+              std::string{ env_vars::USE_SAMPLING } + "=true");
 }
 
 TEST_F(UpdateEnvTest, RealWorld_Timing_DoubleValues)
 {
-    update_env(m_env_vars, "ROCPROFSYS_TRACE_DELAY", 1.5, update_mode::REPLACE, ":",
+    update_env(m_env_vars, env_vars::TRACE_DELAY, 1.5, update_mode::REPLACE, ":",
                m_updated_envs, m_original_envs);
-    update_env(m_env_vars, "ROCPROFSYS_SAMPLING_FREQ", 100.0, update_mode::REPLACE, ":",
+    update_env(m_env_vars, env_vars::SAMPLING_FREQ, 100.0, update_mode::REPLACE, ":",
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 2);
-    std::string delay_var = find_env_var(m_env_vars, "ROCPROFSYS_TRACE_DELAY");
-    std::string freq_var  = find_env_var(m_env_vars, "ROCPROFSYS_SAMPLING_FREQ");
+    std::string delay_var = find_env_var(m_env_vars, env_vars::TRACE_DELAY);
+    std::string freq_var  = find_env_var(m_env_vars, env_vars::SAMPLING_FREQ);
 
-    EXPECT_TRUE(delay_var.find("ROCPROFSYS_TRACE_DELAY=") == 0);
-    EXPECT_TRUE(freq_var.find("ROCPROFSYS_SAMPLING_FREQ=") == 0);
+    EXPECT_TRUE(delay_var.find(std::string{ env_vars::TRACE_DELAY } + "=") == 0);
+    EXPECT_TRUE(freq_var.find(std::string{ env_vars::SAMPLING_FREQ } + "=") == 0);
 }
 
 TEST_F(UpdateEnvTest, StringTypes_StdString)

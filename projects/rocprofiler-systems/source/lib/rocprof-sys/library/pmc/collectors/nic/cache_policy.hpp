@@ -127,6 +127,38 @@ struct cache_policy
               trait::name<category::amd_smi_nic_tx_ucast_bytes>::description,
               LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
+              "NIC TX RDMA ACK Timeout",
+              trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::description,
+              LONG_DESCRIPTION, COMPONENT, "timeouts", rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
+              "NIC RESP TX PKT SEQ Error",
+              trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::description,
+              LONG_DESCRIPTION, COMPONENT, "errors", rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
+              "NIC REQ RX PKT SEQ Error",
+              trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::description,
+              LONG_DESCRIPTION, COMPONENT, "errors", rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
+              "NIC REQ RX Impl NAK SEQ Error",
+              trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::description,
+              LONG_DESCRIPTION, COMPONENT, "errors", rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
     }
 
     /**

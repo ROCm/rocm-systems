@@ -234,6 +234,19 @@ option(AIS_INSTALL_EXAMPLES "Install example programs" ON)
 #------------------
 option(AIS_INSTALL_TOOLS "Install tool programs" ON)
 
+#------------------
+# Test programs
+#------------------
+# Whether to install the relocatable unit-test assets (binaries + ctest files)
+# so the suite can run from an installed/packaged tree. Default OFF, separate
+# from the build of the tests, matching the convention used by sibling projects
+# (e.g. rocprofiler-systems' ROCPROFSYS_INSTALL_TESTING). Installing the tests
+# requires building them, so enabling this forces BUILD_TESTING on.
+option(AIS_INSTALL_TESTS "Install unit-test programs" OFF)
+if(AIS_INSTALL_TESTS)
+    set(BUILD_TESTING ON CACHE BOOL "Build testing (forced on by AIS_INSTALL_TESTS)" FORCE)
+endif()
+
 #------
 # docs
 #------
@@ -293,6 +306,7 @@ endif()
 
 # Add the testing directories
 if(BUILD_TESTING)
+    include(AISUseGTest)
     add_subdirectory(test)
 endif()
 if(BUILD_TESTING AND AIS_BUILD_AMD_DETAIL)
@@ -318,4 +332,12 @@ endif()
 # Set up installs (must come AFTER target creation)
 #-----------------------------------------------------------------------------
 include(AISUseROCmCMake)
+# Install the relocatable unit-test assets (binaries + a self-locating
+# CTestTestfile.cmake) so the suite can run from an installed/packaged tree.
+# Gated on AIS_INSTALL_TESTS (which forces BUILD_TESTING on above, so the test
+# targets exist). Must come after the test targets are created
+# (add_subdirectory(test) above).
+if(AIS_INSTALL_TESTS)
+    include(AISInstallTests)
+endif()
 include(AISInstall)

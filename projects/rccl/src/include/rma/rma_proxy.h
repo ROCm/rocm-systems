@@ -11,7 +11,11 @@
 #include "nccl.h"
 #include "nccl_net.h"
 #include "nccl_common.h"
+#if defined(NCCL_OS_WINDOWS)
+#include "gin/gin_host_win_stub.h"
+#else
 #include "gin/gin_host.h"
+#endif
 #include "alloc.h"
 #include <thread>
 #include <mutex>

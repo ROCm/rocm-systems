@@ -19,6 +19,9 @@ hipError_t ihipBatchMemOperation(hipStream_t stream, cl_command_type cmdType, un
     return hipErrorContextIsDestroyed;
   }
 
+  // Reject work submission on a stream whose owning ctx has been destroyed.
+  CHECK_STREAM_DETACHED(stream);
+
   // Validate operations in paramArray
   for (unsigned int i = 0; i < count; i++) {
     // These operations are currently not supported
@@ -52,6 +55,9 @@ hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void
   if (!hip::isValid(stream)) {
     return hipErrorContextIsDestroyed;
   }
+
+  // Reject work submission on a stream whose owning ctx has been destroyed.
+  CHECK_STREAM_DETACHED(stream);
 
   amd::Memory* memory = getMemoryObject(hip::getCurrentDevice(), ptr, offset);
   if (!memory) {
