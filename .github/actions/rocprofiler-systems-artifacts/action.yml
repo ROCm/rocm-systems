@@ -1,0 +1,37 @@
+name: rocprofiler-systems failure artifact upload
+description: >
+  Upload CTest logs and test-output data files on job failure.
+  Both uploads use continue-on-error so a failed artifact upload does not
+  hide the underlying test failure.
+
+inputs:
+  name-prefix:
+    description: >
+      Prefix for the artifact name. Sanitizer jobs pass
+      "ctest-${{ matrix.sanitizer-type }}" to distinguish the three variants.
+    default: ctest
+  build-dir:
+    description: CMake binary directory, relative to projects/rocprofiler-systems/
+    default: build
+
+runs:
+  using: composite
+  steps:
+    - name: Upload CTest logs
+      if: failure()
+      continue-on-error: true
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.name-prefix }}-${{ github.job }}-${{ strategy.job-index }}-log
+        path: projects/rocprofiler-systems/${{ inputs.build-dir }}/*.log
+
+    - name: Upload data artifacts
+      if: failure()
+      continue-on-error: true
+      uses: actions/upload-artifact@v7
+      with:
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
+        path: |
+          projects/rocprofiler-systems/${{ inputs.build-dir }}/rocprofsys-tests-config/*.cfg
+          projects/rocprofiler-systems/${{ inputs.build-dir }}/rocprofsys-tests-output/**/*.txt
+          projects/rocprofiler-systems/${{ inputs.build-dir }}/rocprofsys-tests-output/**/*-instr*.json

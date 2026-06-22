@@ -1,0 +1,29 @@
+name: rocprofiler-systems ccache setup
+description: >
+  Restore and configure ccache. The calling job must set CCACHE_DIR in its env.
+
+inputs:
+  cache-key:
+    description: >
+      Full cache key prefix, e.g. "ccache-jammy-g++-7.2".
+      The current SHA is appended automatically.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ${{ inputs.cache-key }}-${{ github.sha }}
+        restore-keys: ${{ inputs.cache-key }}-
+
+    - name: Configure ccache
+      shell: bash
+      run: |
+        mkdir -p "${CCACHE_DIR}"
+        ccache --max-size=1G
+        ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+        ccache -z
+        ccache -p | head -20

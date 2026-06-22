@@ -17,7 +17,6 @@
                 "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
                 "ROCPROFSYS_USE_PYTHON": "ON"
             },
-            "generator": "Ninja",
             "hidden": true,
             "name": "default"
         },
@@ -25,6 +24,7 @@
             "binaryDir": "${sourceDir}/build/ci",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
+                "ROCPROFSYS_BUILD_CI": "ON",
                 "ROCPROFSYS_BUILD_GTEST": "ON",
                 "ROCPROFSYS_BUILD_TESTING": "ON",
                 "ROCPROFSYS_MAX_THREADS": "64"

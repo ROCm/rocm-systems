@@ -179,6 +179,14 @@ jobs:
           --output-dir .codecov \
           --label e2e-tests
 
+    - name: CDash link
+      if: always()
+      shell: bash
+      run: |
+        NAME="${{ github.repository_owner }}-${{ github.ref_name }}-code-coverage"
+        URL="https://my.cdash.org/index.php?project=rocprofiler-systems&filtercount=1&showfilters=1&field1=buildname&compare1=65&value1=${NAME}"
+        printf '### CDash Results\n[View build on CDash](%s)\n' "${URL}" >> "${GITHUB_STEP_SUMMARY}"
+
     - name: Generate Coverage Comment
       if: always()
       id: generatereport

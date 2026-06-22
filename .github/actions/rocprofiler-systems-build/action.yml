@@ -1,0 +1,21 @@
+name: rocprofiler-systems CMake build
+description: Build the configured rocprofiler-systems tree.
+
+inputs:
+  build-dir:
+    description: CMake binary directory, relative to projects/rocprofiler-systems/
+    default: build
+  build-jobs:
+    description: Parallel job count passed to cmake --build
+    default: "$(nproc)"
+
+runs:
+  using: composite
+  steps:
+    - name: Build
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      env:
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      run: cmake --build ${{ inputs.build-dir }} --parallel ${{ inputs.build-jobs }}

@@ -1,0 +1,18 @@
+name: rocprofiler-systems leftover buffered files check
+description: >
+  Fail the job if any buffered storage files from a previous run were left
+  behind in /tmp. These indicate the profiler did not flush cleanly.
+
+runs:
+  using: composite
+  steps:
+    - name: Check for leftover buffered files
+      shell: bash
+      timeout-minutes: 5
+      run: |
+        if find /tmp -maxdepth 1 -name 'buffered*' -print -quit | grep -q .; then
+          echo "Error: Found leftover buffered storage files in /tmp:"
+          ls -lh /tmp/buffered*
+          exit 1
+        fi
+        echo "✓ No buffered storage files found in /tmp"

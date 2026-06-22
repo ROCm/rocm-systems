@@ -1,0 +1,88 @@
+name: rocprofiler-systems CTest + CDash link
+description: >
+  Set ROCPROFSYS_PYTHON_HINTS, run ctest, then submit results to CDash and
+  write a CDash link to the GitHub step summary. All inputs that control ctest
+  filtering are optional — omitting them uses the standard non-GPU non-network
+  test run.
+
+inputs:
+  build-dir:
+    description: CMake binary directory, relative to projects/rocprofiler-systems/
+    default: build
+  python-prefix:
+    description: Root directory of conda/venv Python environments (parent of py3.X/)
+    default: /opt/conda/envs
+  label-exclude:
+    description: ctest -LE pattern (pipe-separated). Empty = no exclusion filter.
+    default: "network|gpu"
+  label-include:
+    description: ctest -L pattern. Empty = no inclusion filter (GPU CI uses "rocm").
+    default: ""
+  test-regex:
+    description: ctest -R regex. Empty = run all tests in the filtered set.
+    default: ""
+  exclude-regex:
+    description: ctest -E regex. Excludes tests whose name matches. Empty = no name exclusion.
+    default: ""
+  repeat-until-pass:
+    description: >
+      N for --repeat until-pass:N. Run each test up to N times to get a
+      passing result. Use 1 to disable retry (sanitizer jobs).
+    default: "3"
+  cdash-build-name:
+    description: Human-readable build identifier surfaced in the CDash URL.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set Python hints for CTest
+      shell: bash
+      run: |
+        HINTS=""
+        for env_dir in "${{ inputs.python-prefix }}"/py3.*/bin; do
+          [ -d "${env_dir}" ] && HINTS="${HINTS}${env_dir};"
+        done
+        echo "ROCPROFSYS_PYTHON_HINTS=${HINTS%;}" >> "${GITHUB_ENV}"
+
+    - name: Test
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        ctest_args=(
+          "--test-dir" "${{ inputs.build-dir }}"
+          "--output-on-failure"
+          "--repeat" "until-pass:${{ inputs.repeat-until-pass }}"
+        )
+        if [ -n "${{ inputs.label-exclude }}" ]; then
+          ctest_args+=("-LE" "${{ inputs.label-exclude }}")
+        fi
+        if [ -n "${{ inputs.label-include }}" ]; then
+          ctest_args+=("-L" "${{ inputs.label-include }}")
+        fi
+        if [ -n "${{ inputs.test-regex }}" ]; then
+          ctest_args+=("-R" "${{ inputs.test-regex }}")
+        fi
+        if [ -n "${{ inputs.exclude-regex }}" ]; then
+          ctest_args+=("-E" "${{ inputs.exclude-regex }}")
+        fi
+        ctest "${ctest_args[@]}"
+
+    - name: Submit to CDash
+      if: always()
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        cmake \
+          -DBUILD_DIR="${{ inputs.build-dir }}" \
+          -DBUILD_NAME="${{ inputs.cdash-build-name }}" \
+          -DSITE="${HOSTNAME:-GitHub}" \
+          -P cmake/CDashSubmit.cmake || true
+
+    - name: CDash link
+      if: always()
+      shell: bash
+      run: |
+        NAME="${{ inputs.cdash-build-name }}"
+        URL="https://my.cdash.org/index.php?project=rocprofiler-systems&filtercount=1&showfilters=1&field1=buildname&compare1=65&value1=${NAME}"
+        printf '### CDash Results\n[View build on CDash](%s)\n' "${URL}" >> "${GITHUB_STEP_SUMMARY}"

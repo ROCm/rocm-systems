@@ -544,6 +544,12 @@ configure_file(
     COPYONLY
 )
 
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/CTestCustom.cmake
+    ${PROJECT_BINARY_DIR}/CTestCustom.cmake
+    COPYONLY
+)
+
 install(
     FILES
         ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/setup-env.sh

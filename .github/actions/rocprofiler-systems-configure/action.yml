@@ -1,0 +1,41 @@
+name: rocprofiler-systems CMake configure
+description: >
+  Configure a rocprofiler-systems build. Uses the ci preset by default so
+  BUILD_CI, BUILD_TESTING, MAX_THREADS, and BUILD_TYPE are already set.
+  Callers supply only the flags that differ per distro or job.
+
+inputs:
+  build-dir:
+    description: CMake binary directory path, relative to projects/rocprofiler-systems/
+    default: build
+  preset:
+    description: CMake preset name
+    default: ci
+  cmake-flags:
+    description: >
+      Space-separated cmake -D flags to append after the preset.
+      Use the >- YAML folded scalar in the calling workflow to keep flags
+      readable across multiple lines without introducing newlines.
+    required: true
+  build-number:
+    description: Value for ROCPROFSYS_BUILD_NUMBER (identifies the run in CDash)
+    default: ${{ github.run_attempt }}
+
+runs:
+  using: composite
+  steps:
+    - name: Configure
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      env:
+        GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      run: |
+        git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+        git config --global --add safe.directory "${PWD}"
+        echo "CMake:     $(cmake --version | head -n 1)"
+        echo "Compiler:  $(${CXX:-g++} --version | head -n 1)"
+        cmake -B ${{ inputs.build-dir }} --preset ${{ inputs.preset }} \
+          ${{ inputs.cmake-flags }} \
+          -DROCPROFSYS_BUILD_NUMBER=${{ inputs.build-number }}

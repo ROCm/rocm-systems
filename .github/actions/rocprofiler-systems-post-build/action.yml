@@ -1,0 +1,93 @@
+name: rocprofiler-systems install, package, and smoke-test
+description: >
+  Install the build, optionally package with CPack, then run the install
+  smoke-test and the find_package user-API test.
+  For RHEL: set use-modulefile to 'false' (uses setup-env.sh instead).
+  For system-deps jobs: set skip-cpack to 'true' (no installer package).
+
+inputs:
+  build-dir:
+    description: CMake binary directory, relative to projects/rocprofiler-systems/
+    default: build
+  install-prefix:
+    description: >
+      Directory cmake installs into. Removed before the CPack re-install so
+      the smoke-test validates a clean package layout. Ignored when skip-cpack
+      is 'true' (install happens but no cleanup or CPack follow-on).
+    default: /opt/rocprofiler-systems
+  skip-cpack:
+    description: >
+      Set to 'true' for system-deps jobs that validate a plain cmake install
+      without producing a distributable package.
+    default: "false"
+  use-modulefile:
+    description: >
+      Set to 'false' for RHEL jobs that use setup-env.sh instead of
+      Environment Modules to activate the install tree.
+    default: "true"
+  python-executable:
+    description: >
+      Explicit python interpreter path for the smoke-test. Empty = use whatever
+      is on PATH. RHEL 8 needs /opt/conda/envs/py3.8/bin/python because the
+      system python (3.6) is too old for the test suite.
+    default: ""
+  test-flags:
+    description: Space-separated list of --test-rocprof-sys-X=1 names to pass to test-install.sh
+    default: "instrument avail sample python rewrite runtime"
+
+runs:
+  using: composite
+  steps:
+    - name: Install
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: cmake --install ${{ inputs.build-dir }}
+
+    - name: CPack and install from package
+      if: ${{ inputs.skip-cpack == 'false' }}
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        rm -rf "${{ inputs.install-prefix }}"
+        cd "${{ inputs.build-dir }}"
+        cpack -G STGZ
+        mkdir -p "${{ inputs.install-prefix }}"
+        ./rocprofiler-systems-*.sh \
+          --prefix="${{ inputs.install-prefix }}" \
+          --exclude-subdir \
+          --skip-license
+
+    - name: Test install (Environment Modules)
+      if: ${{ inputs.use-modulefile == 'true' }}
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename "${SHELL}")
+        module use "${{ inputs.install-prefix }}/share/modulefiles"
+        module avail
+        module load rocprofiler-systems
+        FLAGS=""
+        for f in ${{ inputs.test-flags }}; do FLAGS="${FLAGS} --test-rocprof-sys-${f}=1"; done
+        ./scripts/test-install.sh ${FLAGS}
+
+    - name: Test install (setup-env.sh)
+      if: ${{ inputs.use-modulefile == 'false' }}
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        source "${{ inputs.install-prefix }}/share/rocprofiler-systems/setup-env.sh"
+        PYTHON_EXE="${{ inputs.python-executable }}"
+        if [ -n "${PYTHON_EXE}" ]; then
+          export PYTHON_EXECUTABLE="${PYTHON_EXE}"
+          export PATH="$(dirname "${PYTHON_EXE}"):${PATH}"
+        fi
+        FLAGS=""
+        for f in ${{ inputs.test-flags }}; do FLAGS="${FLAGS} --test-rocprof-sys-${f}=1"; done
+        ./scripts/test-install.sh ${FLAGS}
+
+    - name: Test user API (find_package)
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: ./scripts/test-find-package.sh --install-dir "${{ inputs.install-prefix }}"

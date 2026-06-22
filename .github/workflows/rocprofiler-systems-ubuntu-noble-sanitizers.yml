@@ -19,7 +19,6 @@ on:
       - "!projects/rocprofiler-systems/source/docs/**"
       - "!projects/rocprofiler-systems/source/python/gui/**"
       - "!projects/rocprofiler-systems/docker/**"
-      - "!projects/rocprofiler-systems/CMakePresets.json"
   pull_request:
     paths:
       - ".github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml"
@@ -35,7 +34,6 @@ on:
       - "!projects/rocprofiler-systems/source/docs/**"
       - "!projects/rocprofiler-systems/source/python/gui/**"
       - "!projects/rocprofiler-systems/docker/**"
-      - "!projects/rocprofiler-systems/CMakePresets.json"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -61,13 +59,14 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
-      # Disable OpenMPI's binary patcher - it conflicts with ASAN's
+      # Disable OpenMPI's binary patcher — it conflicts with ASAN's
       # mprotect interceptor, causing SIGSEGV in all MPI/UCX tests.
       OMPI_MCA_patcher: ""
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
       - name: Install git
+        shell: bash
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates
@@ -77,11 +76,12 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
+            .github/actions/
             .gitmodules
           set-safe-directory: true
           submodules: true
 
-      - name: Install Packages
+      - name: Install packages
         timeout-minutes: 25
         uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
         with:
@@ -99,33 +99,22 @@ jobs:
               vim zip zlib1g-dev libucx-dev ucx-utils libomp-dev libopenmpi-dev &&
             apt-get autoclean
 
-      - name: Restore ccache
-        uses: actions/cache@v4
+      - uses: ./.github/actions/rocprofiler-systems-ccache
         with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-ubuntu-noble-sanitizers-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-${{ github.sha }}
-          restore-keys: |
-            ccache-ubuntu-noble-sanitizers-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-
-
-      - name: Configure ccache
-        run: |
-          mkdir -p "${CCACHE_DIR}"
-          ccache --max-size=1G
-          ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
-          ccache -z
-          ccache -p | head -20
+          cache-key: ccache-noble-sanitizers-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}
 
       - name: Configure git safe directory
+        shell: bash
         run: git config --global --add safe.directory '*'
 
-      - name: Initialize Submodules
+      - name: Initialize submodules
         shell: bash
         run: |
           git submodule update --init \
             projects/rocprofiler-systems/external/dyninst \
             projects/rocprofiler-systems/external/timemory
 
-      - name: Find Sanitizer Libraries and Configure Sanitizer Environment
+      - name: Find sanitizer libraries and configure sanitizer environment
         shell: bash
         working-directory: projects/rocprofiler-systems/
         run: |
@@ -157,7 +146,6 @@ jobs:
               echo "TSAN_LIBRARY=${TSAN_LIB}" >> $GITHUB_ENV
               echo "SANITIZER_CMAKE_FLAGS=-DTSAN_LIBRARY=${TSAN_LIB}" >> $GITHUB_ENV
               echo "TSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-thread.supp:second_deadlock_stack=1:print_suppressions=1:exitcode=${SANITIZER_EXIT_CODE}:log_path=${SANITIZER_LOG_DIR}/tsan" >> $GITHUB_ENV
-
               # Known TSan issue: logger fork tests (pthread_atfork + fork from
               # multi-threaded process) cause the test binary to hang during
               # process exit. TSan's exit-time cleanup deadlocks with the
@@ -174,8 +162,10 @@ jobs:
           fi
           echo "TEST_REGEX=${TEST_REGEX}" >> $GITHUB_ENV
 
-      - name: Configure, Build and Test
-        timeout-minutes: 300
+      # Configure stays inline: SANITIZER_CMAKE_FLAGS is set by the previous
+      # step and must be expanded as an env var, not a composite action input.
+      - name: Configure
+        timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-systems/
         env:
@@ -183,25 +173,15 @@ jobs:
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
-          git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
-          git config --global --add safe.directory ${PWD}
-          echo "CMake version: $(cmake --version | head -n 1)"
-          echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
-          echo "Build type: RelWithDebInfo"
-          echo "Sanitizer type: ${{ matrix.sanitizer-type }}"
-          echo "Sanitizer CMake flags: ${SANITIZER_CMAKE_FLAGS}"
-          TAG="-${{ matrix.sanitizer-type }}-sanitizer"
-          python3 ./scripts/run-ci.py -B build \
-            --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}${TAG} \
-            --build-jobs $(nproc) \
-            --repeat-until-pass 1 \
-            --site GitHub \
-            -- \
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          git config --global --add safe.directory "${PWD}"
+          echo "CMake:    $(cmake --version | head -n 1)"
+          echo "Compiler: $(${{ matrix.compiler }} --version | head -n 1)"
+          cmake -B build --preset ci \
             -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
-            -DROCPROFSYS_BUILD_TESTING=ON \
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
             -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
@@ -216,22 +196,30 @@ jobs:
             -DROCPROFSYS_BUILD_TBB=OFF \
             -DROCPROFSYS_BUILD_ELFUTILS=OFF \
             -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
-            -DROCPROFSYS_MAX_THREADS=64 \
             -DROCPROFSYS_DISABLE_EXAMPLES="transpose;parallel-overhead;user-api;openmp;mpi;python;lulesh;rccl;causal;videodecode;jpegdecode;roctx;thread-limit;transferBench;hpc;shmem;scratch-memory;sdma_test" \
-            -DROCPROFSYS_BUILD_NUMBER=1 \
-            -DCMAKE_PREFIX_PATH=/opt/rocm \
-            -- \
-            -R "${TEST_REGEX}"
+            -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
+            -DCMAKE_PREFIX_PATH=/opt/rocm
+
+      - name: Build
+        timeout-minutes: 40
+        uses: ./.github/actions/rocprofiler-systems-build
+
+      - name: Test
+        timeout-minutes: 250
+        uses: ./.github/actions/rocprofiler-systems-test
+        with:
+          label-exclude: ""
+          test-regex: ${{ env.TEST_REGEX }}
+          repeat-until-pass: "1"
+          cdash-build-name: >-
+            ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer
 
       - name: ccache stats
         if: always()
-        run: |
-          echo "=== ccache stats ==="
-          ccache -s -v || true
-          echo "=== ccache dir size ==="
-          du -sh "${CCACHE_DIR}" || true
+        shell: bash
+        run: ccache -s -v || true
 
-      - name: Print Sanitizer Logs
+      - name: Print sanitizer logs
         if: always()
         shell: bash
         working-directory: projects/rocprofiler-systems/
@@ -270,45 +258,19 @@ jobs:
           fi
           echo "No sanitizer findings detected (only suppression summaries)."
 
-      - name: Check for Leftover Buffered Files
-        timeout-minutes: 5
-        working-directory: projects/rocprofiler-systems/
-        run: |
-          set -v
-          if find /tmp -maxdepth 1 -name 'buffered*' -print -quit | grep -q .; then
-            echo "Error: Found leftover buffered storage files in /tmp:"
-            ls -lh /tmp/buffered*
-            exit 1
-          else
-            echo "✓ No buffered storage files found in /tmp"
-          fi
+      - name: Check for leftover buffered files
+        uses: ./.github/actions/rocprofiler-systems-check-leftover
 
-      - name: Test Clean Up
+      - name: Test clean up
         timeout-minutes: 10
+        shell: bash
         working-directory: projects/rocprofiler-systems/
         run: |
-          set -v
           du /tmp -d 1 -h
           du build/rocprof-sys-pytest-output -d 1 -h
           df -h
           rm -fr /tmp/* build/rocprof-sys-pytest-output/*
 
-      - name: CTest Artifacts
-        if: failure()
-        continue-on-error: True
-        uses: actions/upload-artifact@v7
+      - uses: ./.github/actions/rocprofiler-systems-artifacts
         with:
-          name: ctest-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-log
-          path: |
-            projects/rocprofiler-systems/build/*.log
-
-      - name: Data Artifacts
-        if: failure()
-        continue-on-error: True
-        uses: actions/upload-artifact@v7
-        with:
-          name: data-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-files
-          path: |
-            projects/rocprofiler-systems/build/rocprofsys-tests-config/*.cfg
-            projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*.txt
-            projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*-instr*.json
+          name-prefix: ctest-${{ matrix.sanitizer-type }}
