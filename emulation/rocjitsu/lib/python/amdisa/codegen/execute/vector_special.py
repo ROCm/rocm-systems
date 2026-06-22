@@ -506,7 +506,12 @@ def gen_vector_dot2c_bf16(dst: list[str], src: list[str]) -> str:
     return '\n'.join(L)
 
 
-def gen_vector_bitop3(dst: list[str], src: list[str], dtype: str | None) -> str:
+def gen_vector_bitop3(
+    dst: list[str],
+    src: list[str],
+    dtype: str | None,
+    true16_opsel: str | None = None,
+) -> str:
     """Generate V_BITOP3_B32/B16 body: 3-input LUT-based bitwise operation.
 
     The 8-bit truth table is packed into the VOP3 modifier fields:
@@ -523,9 +528,15 @@ def gen_vector_bitop3(dst: list[str], src: list[str], dtype: str | None) -> str:
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(f'    uint32_t a = {src[0]}.read_lane(wf, lane);')
-    L.append(f'    uint32_t b = {src[1]}.read_lane(wf, lane);')
-    L.append(f'    uint32_t c = {src[2]}.read_lane(wf, lane);')
+    if dtype == 'b16' and true16_opsel:
+        helper = '::rocjitsu::amdgpu::read_vop3_true16_src'
+        L.append(f'    uint32_t a = {helper}({src[0]}, wf, lane, {true16_opsel}, 0);')
+        L.append(f'    uint32_t b = {helper}({src[1]}, wf, lane, {true16_opsel}, 1);')
+        L.append(f'    uint32_t c = {helper}({src[2]}, wf, lane, {true16_opsel}, 2);')
+    else:
+        L.append(f'    uint32_t a = {src[0]}.read_lane(wf, lane);')
+        L.append(f'    uint32_t b = {src[1]}.read_lane(wf, lane);')
+        L.append(f'    uint32_t c = {src[2]}.read_lane(wf, lane);')
     L.append(f'    uint32_t result = 0;')
     L.append(f'    for (int i = 0; i < {nbits}; ++i) {{')
     L.append(
@@ -533,7 +544,13 @@ def gen_vector_bitop3(dst: list[str], src: list[str], dtype: str | None) -> str:
     )
     L.append('      result |= ((truth_table >> idx) & 1) << i;')
     L.append('    }')
-    L.append(f'    {dst[0]}.write_lane(wf, lane, result);')
+    if dtype == 'b16' and true16_opsel:
+        L.append(
+            f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, '
+            f'{true16_opsel}, result);'
+        )
+    else:
+        L.append(f'    {dst[0]}.write_lane(wf, lane, result);')
     L.append('  }')
     return '\n'.join(L)
 
@@ -632,8 +649,69 @@ def gen_vector_permlane64(dst: list[str], src: list[str]) -> str:
     return '\n'.join(L)
 
 
+def gen_vector_permlane_family(dst: list[str], src: list[str], op: str | None) -> str:
+    """Generate gfx1250 V_PERMLANE_{BCAST,DOWN,UP,XOR}_B32."""
+    if op not in ('bcast', 'down', 'up', 'xor'):
+        raise ValueError(f'unsupported permlane family operation: {op}')
+    L = []
+    L.append('  uint64_t exec = wf.exec();')
+    L.append('  uint32_t snap[64];')
+    L.append('  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
+    L.append(f'    snap[i] = {src[0]}.read_lane(wf, i);')
+    L.append(f'  uint32_t selector = {src[1]}.read_scalar(wf);')
+    L.append(f'  uint32_t lane_group_width = {src[2]}.read_scalar(wf);')
+    L.append(
+        '  if (lane_group_width == 0 || (lane_group_width & (lane_group_width - 1)) != 0)'
+    )
+    L.append('    lane_group_width = wf.wf_size();')
+    L.append('  lane_group_width = std::min(lane_group_width, wf.wf_size());')
+    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+    L.append('    if (!(exec & (1ULL << lane))) continue;')
+    L.append('    uint32_t group_base = (lane / lane_group_width) * lane_group_width;')
+    if op == 'bcast':
+        L.append('    uint32_t src_offset = selector % lane_group_width;')
+    elif op == 'down':
+        L.append('    uint32_t offset = lane - group_base;')
+        L.append('    uint32_t src_offset = offset + selector;')
+    elif op == 'up':
+        L.append('    uint32_t offset = lane - group_base;')
+        L.append(
+            '    uint32_t src_offset = (selector <= offset) ? (offset - selector) : lane_group_width;'
+        )
+    else:
+        L.append('    uint32_t offset = lane - group_base;')
+        L.append('    uint32_t src_offset = offset ^ selector;')
+    L.append('    uint32_t src_lane = group_base + src_offset;')
+    L.append('    if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {')
+    L.append(f'      {dst[0]}.write_lane(wf, lane, 0);')
+    L.append('      continue;')
+    L.append('    }')
+    L.append(f'    {dst[0]}.write_lane(wf, lane, snap[src_lane]);')
+    L.append('  }')
+    return '\n'.join(L)
+
+
+def gen_vector_permlane_idx_gen(dst: list[str], src: list[str]) -> str:
+    """Generate V_PERMLANE_IDX_GEN_B32."""
+    L = []
+    L.append('  uint64_t exec = wf.exec();')
+    L.append(f'  uint32_t selector = {src[1]}.read_scalar(wf);')
+    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+    L.append('    if (!(exec & (1ULL << lane))) continue;')
+    L.append(f'    uint32_t value = {src[0]}.read_lane(wf, lane);')
+    L.append(f'    {dst[0]}.write_lane(wf, lane, value ^ selector);')
+    L.append('  }')
+    return '\n'.join(L)
+
+
 def gen_vector_cvt_pk(
-    dst: list[str], src: list[str], cls: str, op: str | None, *, opsel: str = '0u'
+    dst: list[str],
+    src: list[str],
+    cls: str,
+    op: str | None,
+    *,
+    opsel: str = '0u',
+    fp8_format_select: str | None = None,
 ) -> str:
     """Generate pack/convert instructions."""
     L = []
@@ -692,6 +770,11 @@ def gen_vector_cvt_pk(
                 if op.startswith('fp8_')
                 else 'util::f32_to_bf8_e5m2_rne'
             )
+            conv_e5m3 = (
+                'util::f32_to_fp8_e5m3_rne'
+                if op.startswith('fp8_') and fp8_format_select is not None
+                else None
+            )
             if op.endswith('_f32'):
                 L.append(
                     f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));'
@@ -705,20 +788,21 @@ def gen_vector_cvt_pk(
                 L.append(
                     '    float s1 = util::f16_to_f32(static_cast<uint16_t>(raw >> 16));'
                 )
-            L.append(f'    uint32_t lo = {conv}(s0);')
-            L.append(f'    uint32_t hi = {conv}(s1);')
+            if conv_e5m3 is not None:
+                L.append(
+                    f'    uint32_t lo = ({fp8_format_select}) ? {conv_e5m3}(s0) : {conv}(s0);'
+                )
+                L.append(
+                    f'    uint32_t hi = ({fp8_format_select}) ? {conv_e5m3}(s1) : {conv}(s1);'
+                )
+            else:
+                L.append(f'    uint32_t lo = {conv}(s0);')
+                L.append(f'    uint32_t hi = {conv}(s1);')
             L.append(
                 '    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);'
             )
-            L.append(f'    bool word_hi = ({opsel} >> 3) & 1;')
-            L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
-            L.append('    if (word_hi)')
             L.append(
-                f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));'
-            )
-            L.append('    else')
-            L.append(
-                f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));'
+                f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed);'
             )
         elif op in ('f32_fp8', 'f32_bf8', 'f16_fp8', 'f16_bf8'):
             conv = (
@@ -803,6 +887,22 @@ def gen_vector_cvt_pk(
         L.append(f'    uint32_t lo = util::f32_to_bf16_rne(s0);')
         L.append(f'    uint32_t hi = util::f32_to_bf16_rne(s1);')
         L.append(f'    {dst[0]}.write_lane(wf, lane, lo | (hi << 16));')
+    elif cls == 'vector_cvt_sr_pk_f16_f32':
+        L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
+        L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
+        L.append(f'    uint32_t seed_lo = {src[2]}.read_lane(wf, lane);')
+        L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
+        L.append('    uint32_t lo = util::f32_to_f16_sr(s0, seed_lo);')
+        L.append('    uint32_t hi = util::f32_to_f16_sr(s1, seed_hi);')
+        L.append(f'    {dst[0]}.write_lane(wf, lane, lo | (hi << 16));')
+    elif cls == 'vector_cvt_sr_pk_bf16_f32':
+        L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
+        L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
+        L.append(f'    uint32_t seed_lo = {src[2]}.read_lane(wf, lane);')
+        L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
+        L.append('    uint32_t lo = util::f32_to_bf16_sr(s0, seed_lo);')
+        L.append('    uint32_t hi = util::f32_to_bf16_sr(s1, seed_hi);')
+        L.append(f'    {dst[0]}.write_lane(wf, lane, lo | (hi << 16));')
     elif cls == 'vector_pack_b32_f16':
         L.append(f'    uint32_t s0 = {src[0]}.read_lane(wf, lane) & 0xFFFF;')
         L.append(f'    uint32_t s1 = {src[1]}.read_lane(wf, lane) & 0xFFFF;')
@@ -817,6 +917,37 @@ def gen_vector_cvt_pk(
         L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
         L.append(
             f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(util::f32_to_bf16(s0)));'
+        )
+    elif cls == 'vector_cvt_sr_fp8_f16':
+        L.append(
+            f'    uint32_t raw = ::rocjitsu::amdgpu::read_vop3_true16_src({src[0]}, wf, lane, {opsel}, 0);'
+        )
+        L.append('    float s0 = util::f16_to_f32(static_cast<uint16_t>(raw));')
+        L.append(f'    uint32_t seed = {src[1]}.read_lane(wf, lane);')
+        if fp8_format_select is not None:
+            L.append(
+                f'    uint8_t result = ({fp8_format_select}) ? util::f32_to_fp8_e5m3_sr(s0, seed) : util::f32_to_fp8_e4m3_sr(s0, seed);'
+            )
+        else:
+            L.append('    uint8_t result = util::f32_to_fp8_e4m3_sr(s0, seed);')
+        L.append(f'    uint32_t dst_byte = ({opsel} >> 2) & 0x3;')
+        L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+        L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')
+        L.append(
+            f'    {dst[0]}.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));'
+        )
+    elif cls == 'vector_cvt_sr_bf8_f16':
+        L.append(
+            f'    uint32_t raw = ::rocjitsu::amdgpu::read_vop3_true16_src({src[0]}, wf, lane, {opsel}, 0);'
+        )
+        L.append('    float s0 = util::f16_to_f32(static_cast<uint16_t>(raw));')
+        L.append(f'    uint32_t seed = {src[1]}.read_lane(wf, lane);')
+        L.append('    uint8_t result = util::f32_to_bf8_e5m2_sr(s0, seed);')
+        L.append(f'    uint32_t dst_byte = ({opsel} >> 2) & 0x3;')
+        L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+        L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')
+        L.append(
+            f'    {dst[0]}.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));'
         )
     L.append('  }')
     return '\n'.join(L)
@@ -937,6 +1068,14 @@ def _scale_source_reader(src_fmt: str) -> list[str]:
     raise ValueError(f'unsupported scaled conversion source format: {src_fmt}')
 
 
+def _scale_e8m0_unpack_scale(scale_src: str) -> list[str]:
+    return [
+        f'    uint32_t scale_payload = {scale_src}.read_lane(wf, lane);',
+        '    uint32_t scale_byte = (scale_payload >> ((inst_.opsel & 0x3u) * 8u)) & 0xffu;',
+        '    float scale = util::e8m0_to_f32(static_cast<uint8_t>(scale_byte));',
+    ]
+
+
 def gen_vector_cvt_scale(
     dst: list[str], src: list[str], cls: str, op: str | None
 ) -> str:
@@ -962,9 +1101,12 @@ def gen_vector_cvt_scale(
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     _scale_read_vgpr_base(L, 'dst_base', dst[0])
     scale_src = src[2] if stochastic else src[1]
-    L.append(
-        f'    float scale = std::bit_cast<float>({scale_src}.read_lane(wf, lane));'
-    )
+    if direction == 'unpack':
+        L.extend(_scale_e8m0_unpack_scale(scale_src))
+    else:
+        L.append(
+            f'    float scale = std::bit_cast<float>({scale_src}.read_lane(wf, lane));'
+        )
     if stochastic:
         L.append(
             f'    uint32_t seed = static_cast<uint32_t>({src[1]}.read_lane(wf, lane));'
@@ -1087,6 +1229,9 @@ def gen_cvt_fp8(ctx) -> str:
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
     opsel = _opsel_field(ctx) if is_vop3 else '0u'
+    fp8_format_select = (
+        'inst_.clamp' if is_vop3 and ctx.arch_name == 'gfx1250' else None
+    )
 
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -1094,11 +1239,27 @@ def gen_cvt_fp8(ctx) -> str:
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
     if op == 'pk_fp8_f32':
-        _gen_pk_narrow_fp8(L, dst, src, 'util::f32_to_fp8_e4m3_rne', opsel)
+        _gen_pk_narrow_fp8(
+            L,
+            dst,
+            src,
+            'util::f32_to_fp8_e4m3_rne',
+            opsel,
+            fp8_format_select=fp8_format_select,
+            fp8_format_fn='util::f32_to_fp8_e5m3_rne',
+        )
     elif op == 'pk_bf8_f32':
         _gen_pk_narrow_fp8(L, dst, src, 'util::f32_to_bf8_e5m2_rne', opsel)
     elif op == 'sr_fp8_f32':
-        _gen_sr_narrow_fp8(L, dst, src, 'util::f32_to_fp8_e4m3_sr', opsel)
+        _gen_sr_narrow_fp8(
+            L,
+            dst,
+            src,
+            'util::f32_to_fp8_e4m3_sr',
+            opsel,
+            fp8_format_select=fp8_format_select,
+            fp8_format_fn='util::f32_to_fp8_e5m3_sr',
+        )
     elif op == 'sr_bf8_f32':
         _gen_sr_narrow_fp8(L, dst, src, 'util::f32_to_bf8_e5m2_sr', opsel)
     elif op == 'pk_f32_fp8':
@@ -1111,7 +1272,14 @@ def gen_cvt_fp8(ctx) -> str:
 
 
 def _gen_pk_narrow_fp8(
-    L: list[str], dst: list[str], src: list[str], cvt_fn: str, opsel: str = '0u'
+    L: list[str],
+    dst: list[str],
+    src: list[str],
+    cvt_fn: str,
+    opsel: str = '0u',
+    *,
+    fp8_format_select: str | None = None,
+    fp8_format_fn: str | None = None,
 ) -> None:
     """Pack 2×F32 → 2×FP8/BF8 with OPSEL[3] half selection, R-M-W."""
     L.append(
@@ -1120,30 +1288,45 @@ def _gen_pk_narrow_fp8(
     L.append(
         f'    float s1 = std::bit_cast<float>(static_cast<uint32_t>({src[1]}.read_lane(wf, lane)));'
     )
-    L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
-    L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
+    if fp8_format_select is not None and fp8_format_fn is not None:
+        L.append(
+            f'    uint8_t r0 = ({fp8_format_select}) ? {fp8_format_fn}(s0) : {cvt_fn}(s0);'
+        )
+        L.append(
+            f'    uint8_t r1 = ({fp8_format_select}) ? {fp8_format_fn}(s1) : {cvt_fn}(s1);'
+        )
+    else:
+        L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
+        L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
     L.append(
         '    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);'
     )
-    L.append(f'    bool hi = ({opsel} >> 3) & 1;')
-    L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
-    L.append('    if (hi)')
-    L.append(f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));')
-    L.append('    else')
     L.append(
-        f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));'
+        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed);'
     )
 
 
 def _gen_sr_narrow_fp8(
-    L: list[str], dst: list[str], src: list[str], cvt_fn: str, opsel: str = '0u'
+    L: list[str],
+    dst: list[str],
+    src: list[str],
+    cvt_fn: str,
+    opsel: str = '0u',
+    *,
+    fp8_format_select: str | None = None,
+    fp8_format_fn: str | None = None,
 ) -> None:
     """Single F32 → FP8/BF8 with stochastic rounding, OPSEL[3:2] byte sel, R-M-W."""
     L.append(
         f'    float s0 = std::bit_cast<float>(static_cast<uint32_t>({src[0]}.read_lane(wf, lane)));'
     )
     L.append(f'    uint32_t seed = {src[1]}.read_lane(wf, lane);')
-    L.append(f'    uint8_t result = {cvt_fn}(s0, seed);')
+    if fp8_format_select is not None and fp8_format_fn is not None:
+        L.append(
+            f'    uint8_t result = ({fp8_format_select}) ? {fp8_format_fn}(s0, seed) : {cvt_fn}(s0, seed);'
+        )
+    else:
+        L.append(f'    uint8_t result = {cvt_fn}(s0, seed);')
     L.append(f'    uint32_t dst_byte = ({opsel} >> 2) & 0x3;')
     L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
     L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')

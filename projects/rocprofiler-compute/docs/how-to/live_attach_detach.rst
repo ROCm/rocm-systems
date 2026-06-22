@@ -17,7 +17,7 @@ b) By pressing the Enter key after a successful attach within the same profiling
 
 Profiling options
 =================
-For using profiling options for PC sampling the configuration needed are:
+For using live attach and detach the configuration needed are:
 
 * ``--attach-pid``: Should be the process ID of the process of workload's application.
 * ``--attach-duration-msec``: (Optional) This is for setting up the synchronized detach, and is optional. Its unit is in milliseconds. When setting up, the detach will happen after this time has elapsed since the profiling session started. For example, setting it to 60000 yields 1 minute.

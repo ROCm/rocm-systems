@@ -1,0 +1,145 @@
+# Pytest corpus checks for emulation/rocjitsu/.
+#
+# Fast smoke tests for rocjitsu. This is likely going to be added to TheRock
+# tests, but it is currently a stopgap solution. It allows developers to
+# quickly check that their changes to rocjitsu didn't break gfx1250 emulation.
+name: "rocjitsu-test-corpus"
+
+on:
+  pull_request:
+    paths:
+      - "emulation/rocjitsu/**"
+      - ".github/workflows/rocjitsu-*.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "emulation/rocjitsu/**"
+      - ".github/workflows/rocjitsu-*.yml"
+  workflow_dispatch:
+    inputs:
+      corpus_repository:
+        description: "Repository containing the rocjitsu pytest corpus"
+        default: "ROCm/rocjitsu-test-corpus"
+        required: true
+      corpus_ref:
+        description: "Branch, tag, or SHA to check out from the corpus repository"
+        # Last updated on 2026/06/16.
+        default: "dc70e0519b3587543e3892149207b7658f04b56b"
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
+  ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
+  ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
+  ROCJITSU_CORPUS_CONFIG: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu/tests/corpus/iree_gfx1250_hip.json
+
+jobs:
+  pytest:
+    runs-on: azure-linux-scale-rocm
+    container:
+      image: ubuntu:24.04
+      env:
+        DEBIAN_FRONTEND: noninteractive
+    continue-on-error: true
+
+    steps:
+      - name: Install base dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cmake \
+            git \
+            libdrm-dev \
+            ninja-build
+
+      - name: Checkout rocm-systems
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+            .github
+
+      - name: Checkout rocjitsu corpus
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
+          # Last updated on 2026/06/16.
+          ref: dc70e0519b3587543e3892149207b7658f04b56b
+          path: rocjitsu-test-corpus
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install ROCm SDK
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --pre \
+            --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+            "rocm[devel]==7.14.0a20260619"
+
+          ROCM_ROOT="$(rocm-sdk path --root)"
+          ROCM_LIB="$(rocm-sdk path --root)"/lib
+          LLVM_BIN="${ROCM_LIB}/llvm/bin"
+          LLVM_LIB="${ROCM_LIB}/llvm/lib"
+          ROCM_SYSDEPS="${ROCM_LIB}/rocm_sysdeps"
+
+          test -x "${LLVM_BIN}/amdclang"
+          test -x "${LLVM_BIN}/amdclang++"
+          test -d "${LLVM_LIB}"
+
+          {
+            echo "ROCM_PATH=${ROCM_ROOT}"
+            echo "CC=${LLVM_BIN}/amdclang"
+            echo "CXX=${LLVM_BIN}/amdclang++"
+            echo "LD_LIBRARY_PATH=${ROCM_LIB}:${LD_LIBRARY_PATH:-}"
+          } >> "${GITHUB_ENV}"
+
+          if [ -d "${ROCM_SYSDEPS}/include" ]; then
+            {
+              echo "CFLAGS=-I${ROCM_SYSDEPS}/include"
+              echo "CXXFLAGS=-I${ROCM_SYSDEPS}/include -Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+            } >> "${GITHUB_ENV}"
+          else
+            echo "CXXFLAGS=-Wno-error=unknown-warning-option -Wno-error=nested-anon-types" >> "${GITHUB_ENV}"
+          fi
+
+          echo "${LLVM_BIN}" >> "${GITHUB_PATH}"
+
+      - name: Build rocjitsu
+        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
+        run: |
+          cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="${CC}" \
+            -DCMAKE_CXX_COMPILER="${CXX}" \
+            -DCMAKE_C_FLAGS="${CFLAGS:-}" \
+            -DCMAKE_CXX_FLAGS="${CXXFLAGS:-}" \
+            -DAMDCLANG="${CXX}"
+          cmake --build "${ROCJITSU_BUILD_DIR}"
+          echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
+
+      - name: Install corpus test dependencies
+        working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run corpus tests
+        working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
+        env:
+          ROCJITSU_ROOT: ${{ env.ROCJITSU_SOURCE_DIR }}
+          ROCJITSU_BUILD: ${{ env.ROCJITSU_BUILD_DIR }}
+        run: rocjitsu --config "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_gfx1250.json" -- pytest --config-files="${ROCJITSU_CORPUS_CONFIG}" --timeout 15

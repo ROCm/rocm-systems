@@ -24,7 +24,7 @@ namespace hipFile {
 
 BatchOperation::BatchOperation(std::unique_ptr<const hipFileIOParams_t> params,
                                std::shared_ptr<IBuffer> _buffer, std::shared_ptr<IFile> _file)
-    : io_params{std::move(params)}, buffer{_buffer}, file{_file}
+    : io_params{std::move(params)}, buffer{std::move(_buffer)}, file{std::move(_file)}
 {
     // Cookie allows the user to track which operation caused the error.
     // It would be ideal if this could be passed as a member within the exception.

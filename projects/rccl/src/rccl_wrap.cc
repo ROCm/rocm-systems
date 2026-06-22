@@ -98,8 +98,17 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
-  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx12") && comm->nNodes == 1){
-    info->protocol = rcclGetProtoForGfx12( info->func,sizePerRank);
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx12")){
+    if ( comm->nNodes == 1 ) {
+      info->protocol = rcclGetProtoForGfx12( info->func,sizePerRank);
+    }
+    const char* str = ncclGetEnv("NCCL_P2P_DISABLE");
+    if (str) { 
+      int disable = strtol(str, NULL, 0);
+      if (disable == 1) {
+        info->protocol = NCCL_PROTO_SIMPLE;
+      } 
+    }  
   } else if(!userProtocolInput && comm->nNodes >= 2 && (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather || info->func == ncclFuncAllReduce || info->func == ncclFuncBroadcast || info->func == ncclFuncReduce)) {
     auto tunableIndex = rcclGetTunableIndex(info->func);
     auto llMin = comm->minMaxLLRange[tunableIndex][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX];
@@ -410,6 +419,7 @@ static int symkHostRedOpToDev(ncclRedOp_t op) {
   case ncclProd: return (int)ncclDevProd;
   case ncclMin:
   case ncclMax:  return (int)ncclDevMinMax;
+  case ncclAvg:  return (int)ncclDevSumPostDiv;
   default:       return -1;
   }
 }
@@ -818,7 +828,7 @@ void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]) {
   static int maxNthreads[NCCL_NUM_PROTOCOLS] = {0};
   if (maxNthreads[NCCL_PROTO_SIMPLE] == 0) rcclGetMaxNthreads(comm, maxNthreads);
   defaultBuffSizes[NCCL_PROTO_LL]     = NCCL_LL_LINES_PER_THREAD*maxNthreads[NCCL_PROTO_LL]*NCCL_STEPS*sizeof(union ncclLLFifoLine);
-  defaultBuffSizes[NCCL_PROTO_LL128]  = NCCL_LL128_ELEMS_PER_THREAD*maxNthreads[NCCL_PROTO_LL128]*NCCL_STEPS*sizeof(uint64_t);
+  defaultBuffSizes[NCCL_PROTO_LL128]  = rcclLL128ElemsPerThreadFromArch(comm->archName)*maxNthreads[NCCL_PROTO_LL128]*NCCL_STEPS*sizeof(uint64_t);
   defaultBuffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); /* 4MiB */
 }
 
@@ -899,9 +909,9 @@ bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, const char* archName)
   if (info->protocol == NCCL_PROTO_LL128) {
 #if defined(ENABLE_LL128)
     if (info->acc)
-      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950"));
+      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx1250"));
     else
-      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx90a"));
+      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx90a") || IsArchMatch(archName, "gfx1250"));
 #else
     supported = false;
 #endif
