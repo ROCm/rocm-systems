@@ -385,6 +385,7 @@ add_subdirectory("src")
 
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
+    #add_subdirectory("tests/rocm_smi_test")
     add_subdirectory("tests/amd_smi_test")
     add_subdirectory("tests/python_unittest")
 endif()
@@ -400,6 +401,10 @@ if(BUILD_SHARED_LIBS)
     endif()
 endif()
 
+if(BUILD_EXAMPLES)
+    add_subdirectory("example")
+endif()
+
 include(CMakePackageConfigHelpers)
 
 configure_package_config_file(
@@ -408,10 +413,6 @@ configure_package_config_file(
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI}
     PATH_VARS CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR
 )
-
-if(BUILD_EXAMPLES)
-    add_subdirectory("example")
-endif()
 
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
