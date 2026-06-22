@@ -3953,6 +3953,7 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     // Let freeResources scope guard handle cleanup of host_buffer
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
+  pcs_data->staging_offset.store(0, std::memory_order_relaxed);
 
   // Cache per-XCC host buffer pointers (avoids calculation in hot path)
   for (uint32_t i = 0; i < pcs_data->num_xcc; i++) {
@@ -4083,11 +4084,11 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
           ? nullptr  // Clear stochastic (being destroyed)
           : pcs_stochastic_data_.device_data_base;  // Preserve if still active
 
-  size_t per_xcc_size = 0;
+  uint32_t per_xcc_size = 0;
   if (hosttrap_buffers && pcs_hosttrap_data_.device_data_base)
-    per_xcc_size = std::max(per_xcc_size, pcs_hosttrap_data_.per_xcc_device_stride);
+    per_xcc_size = std::max(per_xcc_size, static_cast<uint32_t>(pcs_hosttrap_data_.per_xcc_device_stride));
   if (stochastic_buffers && pcs_stochastic_data_.device_data_base)
-    per_xcc_size = std::max(per_xcc_size, pcs_stochastic_data_.per_xcc_device_stride);
+    per_xcc_size = std::max(per_xcc_size, static_cast<uint32_t>(pcs_stochastic_data_.per_xcc_device_stride));
 
   hsa_status_t tma_status = UpdateTrapHandlerWithPCS(hosttrap_buffers, stochastic_buffers, per_xcc_size);
   if (tma_status != HSA_STATUS_SUCCESS) {
@@ -4294,8 +4295,6 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
 hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& session) {
   if (!session.isActive()) return HSA_STATUS_SUCCESS;
 
-  session.stop();
-
   pcs_data_t* pcs_data = nullptr;
   auto method = session.method();
 
@@ -4307,8 +4306,13 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  // Stop sampling at KFD level first - this ensures no new samples are generated
+  // Stop sampling at KFD level first - this ensures no new trap handler invocations.
+  // Must happen before session.stop() so that isActive() check in flush spin loop
+  // doesn't race with trap handlers still writing to buffers.
   HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id(), session.ThunkId()));
+
+  // Now safe to mark session inactive - trap handlers are quiesced
+  session.stop();
 
   // Wake up XCC threads waiting on signals by setting value to -1 (exit sentinel)
   for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc; xcc_id++) {
@@ -4325,15 +4329,19 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
     }
   }
 
-  // Stop consumer thread - XCC threads will have notified it before exiting
+  // Stop consumer thread before final flush. This ordering is intentional:
+  // 1. XCC threads have already exited, so host_read/write_offset are stable
+  // 2. Consumer may have unprocessed notifications - that's OK, Flush handles it
+  // 3. Stopping consumer first avoids wasteful concurrent access (both use same buffers/mutexes)
+  // 4. Final flush reads all data from host buffers and delivers via callback
   pcs_data->consumer_exit.store(true, std::memory_order_release);
   pcs_data->consumer_cv.notify_one();
   if (pcs_data->consumer_thread.joinable()) {
     pcs_data->consumer_thread.join();
   }
 
-  // Flush any remaining samples using PcSamplingFlush
-  // This delivers partial data that didn't reach callback threshold
+  // Flush any remaining samples after consumer is stopped.
+  // This delivers partial data that didn't reach callback threshold.
   PcSamplingFlush(session);
 
   pcs_data->session = nullptr;
@@ -4539,7 +4547,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   memset(cmd_data, 0, cmd_data_sz);
 
   // ATOMIC_MEM: Atomically swap buf_write_val, return old value
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_ATOMIC_MEM, atomic_ex_cmd_sz, isa_->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_ATOMIC_MEM, atomic_ex_cmd_sz, supported_isas()[0]->GetMajorVersion());
   cmd_data[i++] = PM4_ATOMIC_MEM_DW1_ATOMIC(PM4_ATOMIC_MEM_GL2_OP_ATOMIC_SWAP_RTN_64);
   cmd_data[i++] = PM4_ATOMIC_MEM_DW2_ADDR_LO(buf_write_val_addr);
   cmd_data[i++] = PM4_ATOMIC_MEM_DW3_ADDR_HI(buf_write_val_addr >> 32);
@@ -4548,7 +4556,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   i += 3;  // Reserved DWORDs
 
   // COPY_DATA: Copy atomic return value to host-accessible old_val
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_COPY_DATA, copy_data_cmd_sz, isa_->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_COPY_DATA, copy_data_cmd_sz, supported_isas()[0]->GetMajorVersion());
   cmd_data[i++] =
       PM4_COPY_DATA_DW1(PM4_COPY_DATA_SRC_SEL_ATOMIC_RETURN_DATA | PM4_COPY_DATA_DST_SEL_TC_12 |
                         PM4_COPY_DATA_COUNT_SEL | PM4_COPY_DATA_WR_CONFIRM);
@@ -4565,7 +4573,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   // 2. Each XCC thread submits to the shared queue independently (no lock contention)
   // 3. The per-XCC threading model still provides parallelism at the thread level
   if (properties_.NumXcc > 1) {
-    cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, supported_isas()[0]->GetMajorVersion());
     cmd_data[1] = PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) |
                   PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }
@@ -4641,7 +4649,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
 
   // WAIT_REG_MEM: Wait for trap handler to finish writing samples
   cmd_data[i++] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, isa_->GetMajorVersion());
+      PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, supported_isas()[0]->GetMajorVersion());
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_EQUAL_TO_REFERENCE |
                                        PM4_WAIT_REG_MEM_MEM_SPACE_MEMORY_SPACE |
                                        PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM);
@@ -4653,10 +4661,10 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
                                        PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
 
   // ACQUIRE_MEM: Flush L2 cache for GFX12 before DMA copy
-  if (isa_->GetMajorVersion() == 12 &&
-      (isa_->GetMinorVersion() == 0 || isa_->GetMinorVersion() == 5)) {
+  if (supported_isas()[0]->GetMajorVersion() == 12 &&
+      (supported_isas()[0]->GetMinorVersion() == 0 || supported_isas()[0]->GetMinorVersion() == 5)) {
     cmd_data[i++] =
-        PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz, isa_->GetMajorVersion());
+        PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz, supported_isas()[0]->GetMajorVersion());
     cmd_data[i++] = 0;                                // DW1: COHER_CNTL
     cmd_data[i++] = 0;                                // DW2: COHER_SIZE
     cmd_data[i++] = 0;                                // DW3: COHER_SIZE_HI
@@ -4678,7 +4686,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   auto emit_dma_data = [&](uint8_t* src, uint8_t* dst, size_t bytes, bool is_last) {
     while (bytes > 0) {
       uint32_t chunk = std::min(bytes, (size_t)CP_DMA_DATA_TRANSFER_CNT_MAX);
-      cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz, isa_->GetMajorVersion());
+      cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz, supported_isas()[0]->GetMajorVersion());
       cmd_data[i++] = PM4_DMA_DATA_DW1(PM4_DMA_DATA_DST_SEL_DST_ADDR_USING_L2 |
                                        PM4_DMA_DATA_SRC_SEL_SRC_ADDR_USING_L2);
       cmd_data[i++] = PM4_DMA_DATA_DW2_SRC_ADDR_LO((uint64_t)src);
@@ -4708,7 +4716,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   }
 
   // WRITE_DATA: Reset buf_written_val for next cycle
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_WRITE_DATA, write_data_cmd_sz, isa_->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_WRITE_DATA, write_data_cmd_sz, supported_isas()[0]->GetMajorVersion());
   cmd_data[i++] = PM4_WRITE_DATA_DW1(PM4_WRITE_DATA_DST_SEL_TC_L2 |
                                      PM4_WRITE_DATA_WR_CONFIRM_WAIT_CONFIRMATION);
   cmd_data[i++] = PM4_WRITE_DATA_DW2_DST_MEM_ADDR_LO(buf_written_val_addr[which_buffer]);
@@ -4717,7 +4725,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
 
   // Add PRED_EXEC wrapper for multi-XCC (see atomic swap comment for rationale)
   if (properties_.NumXcc > 1) {
-    cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, supported_isas()[0]->GetMajorVersion());
     cmd_data[1] = PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) |
                   PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }
@@ -4809,40 +4817,23 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
 
 void GpuAgent::PcSamplingDeliverAggregatedSamples(pcs_data_t& pcs_data,
                                                    pcs::PcsRuntime::PcSamplingSession& session) {
-  // Deliver samples when aggregate pending data across all XCCs reaches buffer_size.
-  // Data from all XCCs is combined into a single staging buffer before callback,
-  // so the profiler receives ONE callback with a contiguous buffer - abstracting
-  // the multi-XCC topology from the profiler.
+  // Aggregate samples from all XCCs into staging buffer, then deliver if threshold reached.
+  // Key design: always drain per-XCC host buffers to staging buffer first, then check threshold.
+  // This reduces per-XCC host buffer pressure and prevents overflow, since data moves out
+  // immediately even if not enough for delivery yet.
   const size_t buffer_size = session.buffer_size();
   const size_t per_xcc_host_buffer_size = pcs_data.per_xcc_host_buffer_size;
 
   // Use delivery_mutex to serialize with PcSamplingFlush
   std::lock_guard<std::mutex> delivery_lock(pcs_data.delivery_mutex);
 
-  // Calculate total pending bytes across all XCCs (read-only check, no sample count reset yet)
-  size_t total_pending = 0;
-  for (uint32_t xcc_id = 0; xcc_id < pcs_data.num_xcc; xcc_id++) {
-    per_xcc_pcs_data_t& xcc = pcs_data.xcc_data[xcc_id];
-    std::lock_guard<std::mutex> lock(xcc.host_buffer_mutex);
-    total_pending += (xcc.host_write_offset - xcc.host_read_offset);
-  }
-
-  // Only deliver if we've reached the threshold
-  if (total_pending < buffer_size) {
-    return;
-  }
-
-  // Collect lost samples from all XCCs
-  size_t total_lost_samples = 0;
-  for (uint32_t xcc_id = 0; xcc_id < pcs_data.num_xcc; xcc_id++) {
-    total_lost_samples += pcs_data.xcc_data[xcc_id].lost_sample_count.exchange(0, std::memory_order_relaxed);
-  }
-
-  // Copy samples from all XCCs into the staging buffer (combined delivery)
+  // Get current staging offset (accumulates across calls until threshold reached)
   uint8_t* staging_buffer = pcs_data.staging_buffer;
-  size_t staging_offset = 0;
+  size_t staging_offset = pcs_data.staging_offset.load(std::memory_order_acquire);
 
-  for (uint32_t xcc_id = 0; xcc_id < pcs_data.num_xcc && staging_offset < buffer_size; xcc_id++) {
+  // Drain all available data from per-XCC host buffers into staging buffer.
+  // This immediately frees space in per-XCC buffers, reducing overflow risk.
+  for (uint32_t xcc_id = 0; xcc_id < pcs_data.num_xcc; xcc_id++) {
     per_xcc_pcs_data_t& xcc = pcs_data.xcc_data[xcc_id];
     std::lock_guard<std::mutex> lock(xcc.host_buffer_mutex);
 
@@ -4878,10 +4869,25 @@ void GpuAgent::PcSamplingDeliverAggregatedSamples(pcs_data_t& pcs_data,
     }
   }
 
-  // Make ONE callback to profiler with the combined staging buffer
-  if (staging_offset > 0) {
-    session.HandleSampleData(staging_buffer, staging_offset, nullptr, 0, total_lost_samples);
+  // Update staging offset (persists accumulated data for next call)
+  pcs_data.staging_offset.store(staging_offset, std::memory_order_release);
+
+  // Only deliver if we've reached the threshold
+  if (staging_offset < buffer_size) {
+    return;
   }
+
+  // Collect lost samples from all XCCs
+  size_t total_lost_samples = 0;
+  for (uint32_t xcc_id = 0; xcc_id < pcs_data.num_xcc; xcc_id++) {
+    total_lost_samples += pcs_data.xcc_data[xcc_id].lost_sample_count.exchange(0, std::memory_order_relaxed);
+  }
+
+  // Make one callback to profiler with the combined staging buffer
+  session.HandleSampleData(staging_buffer, staging_offset, nullptr, 0, total_lost_samples);
+
+  // Reset staging offset after delivery
+  pcs_data.staging_offset.store(0, std::memory_order_release);
 }
 
 void GpuAgent::PcSamplingConsumerThread(pcs_data_t& pcs_data) {
@@ -4963,13 +4969,14 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
   }
 
   // Deliver all remaining samples using staging buffer for combined callbacks
-  // Loop until all XCCs are drained
+  // Loop until all XCCs are drained.
+  // Start with any data already accumulated in staging buffer from normal operation.
   uint8_t* staging_buffer = pcs_data->staging_buffer;
   bool more_data = true;
+  size_t staging_offset = pcs_data->staging_offset.load(std::memory_order_acquire);
 
   while (more_data) {
     more_data = false;
-    size_t staging_offset = 0;
 
     // Copy samples from all XCCs into staging buffer, up to buffer_size
     for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc && staging_offset < buffer_size; xcc_id++) {
@@ -5011,12 +5018,16 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
       }
     }
 
-    // Make ONE callback with combined staging buffer
+    // Make one callback with combined staging buffer
     if (staging_offset > 0) {
       session.HandleSampleData(staging_buffer, staging_offset, nullptr, 0, total_lost_samples);
       total_lost_samples = 0;  // Only report lost samples on first callback
+      staging_offset = 0;      // Reset for next iteration
     }
   }
+
+  // Reset staging offset after flush completes
+  pcs_data->staging_offset.store(0, std::memory_order_release);
 
   return first_error;
 }

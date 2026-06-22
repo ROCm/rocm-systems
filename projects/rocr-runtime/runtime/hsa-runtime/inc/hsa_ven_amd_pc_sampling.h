@@ -146,7 +146,8 @@ typedef hsa_status_t (*hsa_ven_amd_pcs_data_copy_callback_t)(void* hsa_callback_
  *
  * This callback must not call ::hsa_ven_amd_pcs_flush.
  *
- * Callbacks are serialized by the runtime and will not be invoked concurrently. On multi-XCC GPUs,
+ * Callbacks for a given PC sampling session are serialized by the runtime and will not be
+ * invoked concurrently within that session. On multi-XCC GPUs,
  * data from all XCCs is aggregated internally before invoking the callback, so clients receive a
  * unified data stream regardless of the underlying hardware topology.
  *

@@ -1007,6 +1007,7 @@ class GpuAgent : public GpuAgentInt {
     /* Staging buffer for combined callback delivery */
     uint8_t* staging_buffer;          // Buffer to combine data from all XCCs before callback
     size_t staging_buffer_size;       // Size = session.buffer_size()
+    std::atomic<size_t> staging_offset;  // Current write position in staging buffer
 
     /* Per-XCC data array - cache-line aligned AoS for optimal cache behavior */
     per_xcc_pcs_data_t* xcc_data;  // Array of per-XCC structs (size = num_xcc)

@@ -250,9 +250,17 @@
 //       : gfx12 - ttmp7 - 31:16 : workgroup_z[15:0]  (SPI) and 15:0 : workgroup_y[15:0]  (SPI)
 
 trap_entry:
-  // Clear ttmp13 at trap entry - GFX9 does not use ttmp13 for VGPR MSBs (unlike GFX12.5)
-  // This prevents stale PC sampling flags from previous wave context causing misrouting
+  // Clear only PC sampling routing bits in ttmp13, preserving ABI fields.
+  // Per gfx94x ABI (lines 227-232): bit 23 = DebugEnabled (set by 1TH), bits 31:26 = IB_STS.
+  // Only bits 22:0 are "free" on 2TH entry, but bit 23 (DebugEnabled) must be preserved
+  // for correct debugtrap handling at line 349.
+.if .amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4
+  s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC  // clear bit 21
+  s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP    // clear bit 22
+.else
+  // For pre-gfx94x, ttmp13 is not used by ABI - safe to clear entirely
   s_mov_b32                             ttmp13, 0
+.endif
 
   // Extract trap_id from ttmp2
   s_bfe_u32                             ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE
@@ -296,7 +304,7 @@ trap_entry:
 
   s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0   // ttmp[2:3] = host_trap_buffers base
 .if .amdgcn.gfx_generation_minor >= 4
-  // GFX9.4+ (multi-XCC): ttmp13 already cleared at trap_entry
+  // GFX9.4+ (multi-XCC): PC sampling bits cleared at trap_entry (bits 21-22)
   // Multi-XCC: Load per_xcc_size and XCC_ID for offset calculation
   s_load_dword                          ttmp4, ttmp[14:15], 0x10        // ttmp4 = per_xcc_size
   s_getreg_b32                          ttmp5, hwreg(HW_REG_XCC_ID)     // ttmp5 = XCC_ID
@@ -362,7 +370,7 @@ trap_entry:
   s_bitcmp1_b32                         ttmp7, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT   // is stochastic_sample_trap
   s_cbranch_scc0                        .no_skip_debugtrap
 
-  // Handle stochastic trap (ttmp13 already cleared at trap_entry)
+  // Handle stochastic trap (PC sampling bits cleared at trap_entry)
   s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT, 1), 0
   s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0x8     // ttmp[2:3] = stochastic_trap_buffers base
   // Multi-XCC: Load per_xcc_size and XCC_ID for offset calculation
