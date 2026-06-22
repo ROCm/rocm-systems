@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(hotswap LANGUAGES CXX)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -10,6 +12,7 @@ set(HSA_RUNTIME_INC "${CMAKE_CURRENT_SOURCE_DIR}/../rocr-runtime/runtime/hsa-run
 
 # COMGR is required — provides amd_comgr_hotswap_rewrite.
 find_package(amd_comgr CONFIG REQUIRED)
+find_package(hsa-runtime64 CONFIG REQUIRED)
 
 find_path(HSA_INCLUDE_DIR hsa.h PATHS ${HSA_RUNTIME_INC} NO_DEFAULT_PATH REQUIRED)
 
@@ -36,9 +39,17 @@ target_include_directories(hsa-hotswap PRIVATE
   ${HSA_RUNTIME_INC}/..
 )
 
-target_link_libraries(hsa-hotswap PRIVATE amd_comgr)
+target_link_libraries(hsa-hotswap PRIVATE
+  amd_comgr
+  hsa-runtime64::hsa-runtime64
+)
 set_target_properties(hsa-hotswap PROPERTIES
   POSITION_INDEPENDENT_CODE ON)
+
+install(TARGETS hsa-hotswap
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 # Test executable
 add_executable(hotswap_test tests/hotswap_test.cpp hotswap.cpp)
