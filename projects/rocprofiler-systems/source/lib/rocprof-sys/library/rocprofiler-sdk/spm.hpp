@@ -34,11 +34,12 @@ get_request();
 ///
 /// Returns true when SPM is not requested. If SPM is requested, PR1 rejects runtime
 /// collection until the SDK-backed SPM path is implemented and validates the intended
-/// mutual exclusion with normal ROCm dispatch counter collection.
+/// mutual exclusion with ROCPROFSYS_ROCM_EVENTS and ROCPROFSYS_GPU_PERF_COUNTERS.
 [[nodiscard]]
 bool
 validate_beta_request(const beta_request&             request,
-                      const std::vector<std::string>& dispatch_counter_events);
+                      const std::vector<std::string>& dispatch_counter_events,
+                      const std::string&              device_counter_events);
 
 /// Sets the SDK beta opt-in environment variable for validated SPM requests.
 void

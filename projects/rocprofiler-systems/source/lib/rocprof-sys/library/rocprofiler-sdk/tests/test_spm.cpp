@@ -77,12 +77,50 @@ TEST(spm_beta_request, requested_reflects_enabled_flag_or_events)
 
 TEST(spm_beta_validation, accepts_when_spm_is_not_requested)
 {
-    EXPECT_TRUE(validate_beta_request(beta_request{}, {}));
+    EXPECT_TRUE(validate_beta_request(beta_request{}, {}, {}));
+}
+
+TEST(spm_beta_validation, rejects_enabled_request_without_events)
+{
+    auto request    = beta_request{};
+    request.enabled = true;
+
+    EXPECT_FALSE(validate_beta_request(request, {}, {}));
+}
+
+TEST(spm_beta_validation, rejects_rocm_dispatch_counter_conflict)
+{
+    const auto request = make_valid_requested_spm_request();
+
+    EXPECT_FALSE(validate_beta_request(request, { "SQ_WAVES" }, {}));
+}
+
+TEST(spm_beta_validation, rejects_gpu_perf_counter_conflict)
+{
+    const auto request = make_valid_requested_spm_request();
+
+    EXPECT_FALSE(validate_beta_request(request, {}, "SQ_WAVES"));
+}
+
+TEST(spm_beta_validation, rejects_zero_sample_interval)
+{
+    auto request            = make_valid_requested_spm_request();
+    request.sample_interval = 0;
+
+    EXPECT_FALSE(validate_beta_request(request, {}, {}));
+}
+
+TEST(spm_beta_validation, rejects_unsupported_sample_interval_unit)
+{
+    auto request                 = make_valid_requested_spm_request();
+    request.sample_interval_unit = "ns";
+
+    EXPECT_FALSE(validate_beta_request(request, {}, {}));
 }
 
 TEST(spm_beta_validation, rejects_requested_spm_until_runtime_collection_lands)
 {
     const auto request = make_valid_requested_spm_request();
 
-    EXPECT_FALSE(validate_beta_request(request, {}));
+    EXPECT_FALSE(validate_beta_request(request, {}, {}));
 }

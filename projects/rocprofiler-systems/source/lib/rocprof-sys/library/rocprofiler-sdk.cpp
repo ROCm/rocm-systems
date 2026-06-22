@@ -2474,6 +2474,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto _callback_domains = rocprofiler_sdk::get_callback_domains();
     auto _buffered_domain  = rocprofiler_sdk::get_buffered_domains();
     auto _counter_events   = rocprofiler_sdk::get_rocm_events();
+    auto _gpu_perf_events  = config::get_gpu_perf_counters();
     auto _spm_request      = rocprofiler_sdk::spm::get_request();
     auto _version          = rocprofiler_sdk::get_version();
     if(_version.formatted == 0)
@@ -2484,7 +2485,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto* _data        = as_client_data(user_data);
     _data->client_fini = fini_func;
 
-    if(!rocprofiler_sdk::spm::validate_beta_request(_spm_request, _counter_events))
+    if(!rocprofiler_sdk::spm::validate_beta_request(_spm_request, _counter_events,
+                                                    _gpu_perf_events))
     {
         return -1;
     }
@@ -2755,7 +2757,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 
 #if ROCPROFILER_VERSION >= 600
-    const auto gpu_perf_counters_setting = get_gpu_perf_counters();
+    const auto gpu_perf_counters_setting = _gpu_perf_events;
     if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
     {
         pmc::register_gpu_perf_counter_source(

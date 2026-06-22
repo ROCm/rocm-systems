@@ -8,6 +8,10 @@
 
 #include "logger/debug.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <string_view>
+
 namespace rocprofsys
 {
 namespace rocprofiler_sdk
@@ -20,6 +24,13 @@ constexpr auto beta_env_name  = "ROCPROFILER_SPM_BETA_ENABLED";
 constexpr auto beta_env_value = "1";
 
 constexpr bool runtime_collection_available = false;
+
+bool
+has_non_space_value(std::string_view value)
+{
+    return std::any_of(value.begin(), value.end(),
+                       [](unsigned char itr) { return std::isspace(itr) == 0; });
+}
 }  // namespace
 
 bool
@@ -45,21 +56,13 @@ get_request()
 
 bool
 validate_beta_request(const beta_request&             request,
-                      const std::vector<std::string>& dispatch_counter_events)
+                      const std::vector<std::string>& dispatch_counter_events,
+                      const std::string&              device_counter_events)
 {
     // Backstop for direct library load paths. rocprof-sys-run/sample reject SPM
     // earlier in the launcher, but tool_init must also fail closed for PR1.
     if(!request.requested()) return true;
 
-    if(!runtime_collection_available)
-    {
-        LOG_WARNING("SPM counter collection was requested, but Systems Profiler SPM "
-                    "runtime collection is not implemented in this build");
-        return false;
-    }
-
-    // The detailed runtime request checks below become reachable when PR2 enables
-    // runtime collection. PR1 intentionally rejects any requested SPM collection above.
     if(request.events.empty())
     {
         LOG_WARNING("SPM counter collection was enabled, but no counters were requested. "
@@ -70,7 +73,14 @@ validate_beta_request(const beta_request&             request,
     if(!dispatch_counter_events.empty())
     {
         LOG_WARNING("SPM counter collection is mutually exclusive with "
-                    "ROCPROFSYS_ROCM_EVENTS in the beta implementation");
+                    "ROCPROFSYS_ROCM_EVENTS");
+        return false;
+    }
+
+    if(has_non_space_value(device_counter_events))
+    {
+        LOG_WARNING("SPM counter collection is mutually exclusive with "
+                    "ROCPROFSYS_GPU_PERF_COUNTERS");
         return false;
     }
 
@@ -87,6 +97,13 @@ validate_beta_request(const beta_request&             request,
                     "{}",
                     request.sample_interval_unit,
                     common::rocm_spm_sample_interval_unit_sclk_cycles);
+        return false;
+    }
+
+    if(!runtime_collection_available)
+    {
+        LOG_WARNING("SPM counter collection was requested, but Systems Profiler SPM "
+                    "runtime collection is not implemented in this build");
         return false;
     }
 
