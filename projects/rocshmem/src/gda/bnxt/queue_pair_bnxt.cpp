@@ -223,7 +223,8 @@ __device__ void QueuePair::bnxt_quiet_single() {
   bnxt_poll_cq_until(bnxt_sq.depth);
 }
 
-__device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, int32_t length, uint8_t opcode) {
+__device__ void QueuePair::bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
+    uint32_t rkey, uintptr_t laddr, uint32_t lkey, uint8_t opcode) {
   struct bnxt_re_bsqe hdr;
   struct bnxt_re_rdma rdma;
   struct bnxt_re_sge sge;
@@ -267,7 +268,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   if (!inline_msg) {
     /* Populate SG Segment */
     sge.pa     = laddr;
-    sge.lkey   = get_lkey(laddr);
+    sge.lkey   = lkey;
     sge.length = length;
   }
 
@@ -289,18 +290,18 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
 }
 
 __device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
-    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
+    uintptr_t raddr, uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+    uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   if (wf_info.is_pe_group_first) {
     lock(&bnxt_sq.lock);
   }
 
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
-      /* Write WQE to SQ */
-      bnxt_write_rma_wqe(raddr, laddr, length, opcode);
-
-      /* Ring Doorbell */
-      bnxt_ring_doorbell(bnxt_sq.tail);
+      bnxt_write_rma_wqe(length, raddr, rkey, laddr, lkey, opcode);
+      if (ring_db) {
+        bnxt_ring_doorbell(bnxt_sq.tail);
+      }
     }
   }
 
@@ -310,12 +311,11 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
 }
 
 __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
-    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db) {
-
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
+    uint8_t opcode, bool ring_db) {
   lock(&bnxt_sq.lock);
 
-  /* Write WQE to SQ */
-  bnxt_write_rma_wqe(raddr, laddr, length, opcode);
+  bnxt_write_rma_wqe(length, raddr, rkey, laddr, lkey, opcode);
 
   if (ring_db) {
     bnxt_ring_doorbell(bnxt_sq.tail);
@@ -324,8 +324,9 @@ __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
   unlock(&bnxt_sq.lock);
 }
 
-__device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr,
-    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
+__device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr, uint32_t rkey,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    bool fetching, bool fence) {
   struct bnxt_re_bsqe hdr;
   struct bnxt_re_atomic amo;
   struct bnxt_re_sge sge;
@@ -349,6 +350,9 @@ __device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr,
   wqe_size  = BNXT_RE_HDR_WS_MASK & GDA_BNXT_WQE_SLOT_COUNT;
   hdr_flags = ((uint32_t) BNXT_RE_HDR_FLAGS_MASK)
             & ((uint32_t) BNXT_RE_WR_FLAGS_SIGNALED);
+  if (fence) {
+    hdr_flags |= ((uint32_t) BNXT_RE_WR_FLAGS_UC_FENCE);
+  }
   wqe_type  = BNXT_RE_HDR_WT_MASK & opcode;
 
   hdr.rsv_ws_fl_wt  = (wqe_size  << BNXT_RE_HDR_WS_SHIFT)
@@ -386,18 +390,18 @@ __device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr,
   return atomic_idx;
 }
 
-__device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
-    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching,
-    ActiveWFInfo &wf_info) {
+__device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    ActiveWFInfo &wf_info, bool fetching, bool fence) {
   uint32_t atomic_idx = 0;
 
-    if (wf_info.is_pe_group_first) {
+  if (wf_info.is_pe_group_first) {
     lock(&bnxt_sq.lock);
   }
 
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
-      atomic_idx = bnxt_write_amo_wqe(raddr, opcode, atomic_data, atomic_cmp, fetching);
+      atomic_idx = bnxt_write_amo_wqe(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
 
       /* Ring Doorbell */
       bnxt_ring_doorbell(bnxt_sq.tail);
@@ -417,13 +421,13 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
 }
 
 __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr,
-    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
+    uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    bool fetching, bool fence) {
   uint32_t atomic_idx = 0;
 
   lock(&bnxt_sq.lock);
 
-  /* Write WQE to SQ */
-  atomic_idx = bnxt_write_amo_wqe(raddr, opcode, atomic_data, atomic_cmp, fetching);
+  atomic_idx = bnxt_write_amo_wqe(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
 
   bnxt_ring_doorbell(bnxt_sq.tail);
 
