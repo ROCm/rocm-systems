@@ -59,6 +59,7 @@ ncclResult_t ncclRmaCeInit(struct ncclComm* comm){
       ceCtx->signalsWin = (struct ncclDevrWindow*)signalsWinDevHost->winHost;
     } else {
       ceCtx->signalsWin = (struct ncclDevrWindow*)signalsWinDev;
+      ceCtx->signalsWin->vidmem = signalsWinDev;
     }
 #else
     NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, signalsWinDev, &signalsWinDevHost), ret, fail);
@@ -237,12 +238,12 @@ ncclResult_t ncclRmaCePutLaunch(struct ncclComm* comm, struct ncclKernelPlan* pl
         NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceCtx->signalsWin, ceCtx->signalOffset + rankSlot, peerLsaRank, &peerSignal), ret, fail);
         ceCtx->signalOpSeqs[task->peer]++;
         // [RCCL] cuStreamWriteValue64 driver entry isn't available on HIP; use a
-        // single-op batch write (flags=0; no CU_STREAM_WRITE_VALUE_DEFAULT equiv).
+        // single-op batch write
         hipStreamBatchMemOpParams writeOp[1] = {};
         writeOp[0].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_64;
         writeOp[0].writeValue.address = (CUdeviceptr)ceCtx->signalOpSeqsDev;
         writeOp[0].writeValue.value64 = ceCtx->signalOpSeqs[task->peer];
-        writeOp[0].writeValue.flags = 0;
+        writeOp[0].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
         NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, 1, writeOp), ret, fail);
         CUDACHECKGOTO(cudaMemcpyAsync(peerSignal, ceCtx->signalOpSeqsDev, sizeof(uint64_t), cudaMemcpyDeviceToDevice, stream), ret, fail);
       } else {

@@ -61,9 +61,14 @@ static ncclResult_t regGpuFlushDmabufCuMem(struct ncclIbGpuFlush* gpuFlush,
 
   int access =
     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ;
-  NCCLCHECK(wrap_ibv_reg_dmabuf_mr(&gpuFlush->gpuMr, pd, 0, regLen,
-                                   (uint64_t)gpuAddr, gpuFlush->dmabufFd,
-                                   access));
+  ncclResult_t regRet =
+    wrap_ibv_reg_dmabuf_mr(&gpuFlush->gpuMr, pd, 0, regLen, (uint64_t)gpuAddr,
+                           gpuFlush->dmabufFd, access);
+  if (regRet != ncclSuccess) {
+    close(gpuFlush->dmabufFd);
+    gpuFlush->dmabufFd = -1;
+    return regRet;
+  }
   return ncclSuccess;
 }
 
