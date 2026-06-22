@@ -282,8 +282,8 @@ existing contents first:
 
 .. note::
 
-   CI jobs and automated runs should never reuse a workload directory; either each run
-   should profile into a fresh directory or runs should utilize ``--overwrite``.
+   Automated runs should never reuse a workload directory; either each run
+   should profile into a fresh directory or use ``--overwrite``.
 
 Examples:
 

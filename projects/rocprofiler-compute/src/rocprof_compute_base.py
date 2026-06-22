@@ -553,33 +553,24 @@ class RocProfCompute:
         )
 
     @staticmethod
-    def _clear_directory_contents(output_dir: Path) -> None:
-        """Remove everything inside a directory, preserving the directory."""
-        for child in output_dir.iterdir():
-            if child.is_dir() and not child.is_symlink():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
-
-    def _prepare_workload_directory(self, output_dir: Path) -> None:
+    def prepare_workload_directory(output_dir: Path, overwrite: bool) -> None:
         """Enforce single-run ownership of the workload directory.
 
         A workload directory holds the output of exactly one profile run, so
         profiling refuses to write into a non-empty directory unless the user
         has authorized overwriting it with --overwrite, in which case the
-        existing contents are wiped so the new run starts clean.
+        existing directory is removed so the new run starts clean.
         """
         if output_dir.is_dir() and any(output_dir.iterdir()):
-            if not getattr(self.__args, "overwrite", False):
+            if not overwrite:
                 console_error(
-                    f"Workload directory '{output_dir}' is not empty. Re-run "
-                    "with --overwrite to wipe it and re-profile, or choose a "
-                    "different --output-directory."
+                    f"Existing workload directory {output_dir} is not empty, "
+                    "please use --overwrite"
                 )
             console_warning(
-                f"--overwrite: clearing existing workload directory {output_dir}"
+                f"clearing existing directory {output_dir} due to --overwrite"
             )
-            self._clear_directory_contents(output_dir)
+            shutil.rmtree(output_dir)
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -603,7 +594,9 @@ class RocProfCompute:
             console_error(str(e))
 
         # Validate and prepare the workload directory before profiling.
-        self._prepare_workload_directory(Path(self.__args.output_directory))
+        self.prepare_workload_directory(
+            Path(self.__args.output_directory), self.__args.overwrite
+        )
 
         # enable file-based logging
         setup_file_handler(self.__args.loglevel, self.__args.output_directory)
@@ -724,8 +717,8 @@ class RocProfCompute:
         existing_roofline = roofline_csv.is_file()
         if existing_roofline and not getattr(self.__args, "overwrite", False):
             console_error(
-                f"'{roofline_csv}' already exists. Re-run with --overwrite to "
-                "regenerate it, or choose a different --output-directory."
+                f"{roofline_csv} already exists, please use --overwrite to "
+                "regenerate it"
             )
         console_log(
             "roofline",
@@ -752,7 +745,7 @@ class RocProfCompute:
             shutil.move(str(tmp_csv), str(roofline_csv))
 
         if existing_roofline:
-            console_log("roofline", f"Overwrote existing {roofline_csv}")
+            console_warning(f"Overwrote existing {roofline_csv}")
 
         console_log(
             "roofline",

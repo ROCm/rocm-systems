@@ -248,7 +248,8 @@ Examples:
         dest="name",
         help=(
             "\t\t\tAssign a name to workload.\n"
-            "\t\t\t--name will be ignored if used together with --output-directory."
+            "\t\t\t--name will be ignored if used together with --output-directory.\n"
+            "\t\t\tUse --overwrite to re-profile into an existing directory."
         ),
     )
     profile_group.add_argument(
@@ -294,7 +295,8 @@ Examples:
             "\t\t\t   %%rank%%: MPI process rank\n"
             '\t\t\t   %%env{NAME}%%: Environment variable "NAME"\n'
             "\t\t\t(DEFAULT: <current-working-directory>/workloads/<name>/%%gpumodel%%) without MPI,\n"  # noqa: E501
-            "\t\t\t <current-working-directory>/workloads/<name>/%%rank%% with MPI.)"
+            "\t\t\t <current-working-directory>/workloads/<name>/%%rank%% with MPI.)\n"
+            "\t\t\tUse --overwrite to re-profile into an existing directory."
         ),
     )
     profile_group.add_argument(
