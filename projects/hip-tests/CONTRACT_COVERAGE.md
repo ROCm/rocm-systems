@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 82
+- Contract tests: 95
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 495
-- Declared HIP runtime APIs directly exercised by contract tests: 61
-- Approximate declared API-name coverage: 12.3%
+- Declared HIP runtime APIs directly exercised by contract tests: 74
+- Approximate declared API-name coverage: 14.9%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 
 ## Contract domains
@@ -33,6 +33,9 @@ The percentages below are approximate API-name coverage against declarations par
 | `graph_topology` | 5 |
 | `graph_clone` | 3 |
 | `graph_update` | 3 |
+| `host_memory` | 5 |
+| `pitched_memory` | 4 |
+| `array_memory` | 4 |
 
 ## Coverage by API category
 
@@ -45,7 +48,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Stream | 5 | 23 | 21.7% |
 | Runtime / device | 9 | 45 | 20.0% |
 | Kernel launch / function attrs | 1 | 13 | 7.7% |
-| Memory / copy / memset | 9 | 137 | 6.6% |
+| Memory / copy / memset | 22 | 137 | 16.1% |
 | Other runtime APIs | 1 | 56 | 1.8% |
 | Module / library loading | 0 | 29 | 0.0% |
 | Texture / surface | 0 | 44 | 0.0% |
@@ -67,6 +70,19 @@ hipMemsetAsync
 hipMemsetD8
 hipMemsetD16
 hipMemsetD32
+hipHostMalloc
+hipHostFree
+hipHostRegister
+hipHostUnregister
+hipHostGetDevicePointer
+hipHostGetFlags
+hipMallocPitch
+hipMemcpy2D
+hipMallocArray
+hipFreeArray
+hipMemcpy2DToArray
+hipMemcpy2DFromArray
+hipArrayGetInfo
 ```
 
 ### Runtime / device
@@ -154,7 +170,7 @@ hipOccupancyAvailableDynamicSMemPerBlock
 
 ## Largest remaining gaps
 
-1. Memory surface beyond basics: arrays, pitched/2D/3D copies, host memory, memory pools, VMM, managed memory, peer copies.
+1. Memory surface beyond current basics: 3D copies and 3D arrays, memory pools, VMM, managed memory, and peer copies. Host allocation/registration, pitched allocation with 2D copies, and basic array allocation with 2D array copies are now covered.
 2. Texture and surface APIs.
 3. Module, library, and code-loading APIs.
 4. Context and driver-style APIs.
