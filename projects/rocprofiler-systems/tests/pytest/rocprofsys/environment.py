@@ -103,9 +103,16 @@ class TestEnvironment:
                 origin[key] = layer
         return merged, origin
 
-    def get_merged_environment(self) -> dict[str, str]:
-        """Return the effective merged environment (highest-precedence layer wins)."""
-        return self.merge()[0]
+    def get_merged_environment(self, config: "RocprofsysConfig") -> dict[str, str]:
+        """Return the effective merged environment (highest-precedence layer wins).
+
+        ROCm-derived defaults (:meth:`get_derived_defaults`) are applied at the
+        lowest precedence, so any base/test/user value overrides them.
+        """
+        merged = self.merge()[0]
+        for key, value in self.get_derived_defaults(config).items():
+            merged.setdefault(key, value)
+        return merged
 
     def format_layers(self) -> list[str]:
         """Format the environment grouped by ``[base]``, ``[test]``, ``[user]``.
@@ -155,6 +162,21 @@ class TestEnvironment:
         """
         owned = ("LD_LIBRARY_PATH", "LD_PRELOAD")
         self.user.update({k: v for k, v in os.environ.items() if k not in owned})
+
+    def get_derived_defaults(self, config: "RocprofsysConfig") -> dict[str, str]:
+        """ROCm-derived defaults, applied at the lowest precedence by
+        :meth:`get_merged_environment` (any layer overrides them). Each entry is
+        only produced when its derived target exists on disk.
+        """
+        defaults: dict[str, str] = {}
+
+        # LIBVA_DRIVERS_PATH: fall back to ROCm's bundled VA drivers.
+        if config.rocm_path:
+            sysdeps = (config.rocm_path / "lib" / "rocm_sysdeps" / "lib").resolve()
+            if sysdeps.is_dir():
+                defaults["LIBVA_DRIVERS_PATH"] = str(sysdeps)
+
+        return defaults
 
 
 def base_environment() -> dict[str, str]:

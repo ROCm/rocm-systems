@@ -221,7 +221,7 @@ class BaseRunner(ABC):
         )
         self.environment.set_user_environment()
 
-        self.env = self.environment.get_merged_environment()
+        self.env = self.environment.get_merged_environment(config)
 
     @abstractmethod
     def build_command(self) -> list[str]:
