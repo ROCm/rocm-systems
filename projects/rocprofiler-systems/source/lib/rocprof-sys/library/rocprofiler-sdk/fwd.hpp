@@ -3,7 +3,6 @@
 
 #pragma once
 
-// All rocprofiler-sdk headers come transitively through the backend shim.
 #include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/synchronized.hpp"
 #include "core/agent_manager.hpp"

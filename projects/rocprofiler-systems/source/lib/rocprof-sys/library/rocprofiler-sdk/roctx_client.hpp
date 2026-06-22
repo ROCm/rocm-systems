@@ -141,19 +141,20 @@ s_push_range_id()
     return id;
 }
 
-// iterate_args_callback uses the raw SDK callback signature — the types are
-// identical to Wrapper:: aliases at the ABI level.
-inline int
-iterate_args_callback(rocprofiler_callback_tracing_kind_t, std::int32_t,
+template <typename Wrapper>
+int
+iterate_args_callback(typename Wrapper::callback_tracing_kind, std::int32_t,
                       std::uint32_t arg_number, const void* const, std::int32_t,
                       const char* arg_type, const char* arg_name,
                       const char* arg_value_str, std::int32_t, void* data)
 {
     auto* args = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
+    {
         args->emplace_back(argument_info{ arg_number,
                                           rocprofsys::utility::demangle(arg_type),
                                           arg_name, arg_value_str });
+    }
     return 0;
 }
 
@@ -180,8 +181,8 @@ std::string
 collect_args(typename Wrapper::callback_tracing_record record)
 {
     auto args = function_args_t{};
-    Wrapper::iterate_callback_tracing_kind_operation_args(record, iterate_args_callback,
-                                                          2, &args);
+    Wrapper::iterate_callback_tracing_kind_operation_args(
+        record, iterate_args_callback<Wrapper>, 2, &args);
     return get_args_string(args);
 }
 
