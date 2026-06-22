@@ -542,6 +542,11 @@
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
+        },
+        {
+          "name": "TimeoutTests",
+          "description": "ncclTimeout host API unit tests: enum ordering, error string, async-error set/get/clear, argument validation",
+          "test_filter": "TimeoutTests.*"
         }
       ]
     },
@@ -1077,6 +1082,40 @@
           "name": "FaultInj_Cast_QpErrorClearRecovers",
           "description": "CAST path: after FaultClear on a faulted connection, a fresh connection completes 20 sends with no corruption and fatalCount==0",
           "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPostSendErrno",
+          "description": "CAST ops-overload: real ibv_post_send forced to return EAGAIN via shimmed ops table; isend fails or fatalCount > 0",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPostSendErrno"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqFlushNonFatal",
+          "description": "CAST ops-overload: poll_cq shim rewrites QP 0 completion status to WR_FLUSH_ERR; failover completes via surviving device, fatalCount==0",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqFlushNonFatal",
+          "env_variables": {
+            "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+            "NCCL_IB_MERGE_NICS": "1"
+          }
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqSynthFatal",
+          "description": "CAST ops-overload: poll_cq shim synthesizes a non-whitelisted REM_ACCESS_ERR completion; fatal/non-recoverable",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqSynthFatal"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPostRecvErrno",
+          "description": "CAST ops-overload: real ibv_post_recv forced to return EAGAIN via shimmed ops table on all receiver QPs; recv errors or never completes",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPostRecvErrno"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqInjectCountFinite",
+          "description": "CAST ops-overload: poll_cq rewrite with finite injectCount=1 per QP (WR_FLUSH_ERR); fault fires then stops, post-budget transfer is clean",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqInjectCountFinite"
+        },
+        {
+          "name": "FaultInj_Cast_OpsApiInvalidArgs",
+          "description": "CAST ops-overload: API guard branches - NULL comm returns ncclInvalidArgument; arm/clear on a registered context succeeds",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsApiInvalidArgs"
         }
       ]
     },
@@ -1904,6 +1943,119 @@
           "name": "Grow_NonBlocking",
           "description": "Non-blocking grow over IB transport; async-job worker thread must handle IB connection setup without races",
           "test_filter": "GrowMPITest.Grow_NonBlocking"
+        }
+      ]
+    },
+    "gin_nccl_timeout_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_FORCE_FINE_GRAIN_PCIE": "1"
+      },
+      "tests": [
+        {
+          "name": "AsyncErrorRoundTrip",
+          "description": "ncclTimeout async-error round-trip on a live comm; AllReduce healthy after clear",
+          "test_filter": "TimeoutMPITest.AsyncErrorRoundTrip"
+        },
+        {
+          "name": "AsyncErrorWithInFlightOp",
+          "description": "ncclTimeout injected during AllReduce is advisory and does not corrupt data",
+          "test_filter": "TimeoutMPITest.AsyncErrorWithInFlightOp"
+        },
+        {
+          "name": "ErrorStringConsistentAcrossRanks",
+          "description": "ncclGetErrorString(ncclTimeout) is identical on all ranks",
+          "test_filter": "TimeoutMPITest.ErrorStringConsistentAcrossRanks"
+        },
+        {
+          "name": "Lsa_HealthyBarrierReturnsSuccess",
+          "description": "LSA device barrier: all peers arrive -> ncclSuccess",
+          "test_filter": "LsaBarrierTimeoutMPITest.HealthyBarrierReturnsSuccess"
+        },
+        {
+          "name": "Lsa_AbsentPeerProducesTimeout",
+          "description": "LSA device barrier: absent peer -> ncclTimeout (2-rank LSA team)",
+          "test_filter": "LsaBarrierTimeoutMPITest.AbsentPeerProducesTimeout"
+        },
+        {
+          "name": "Lsa_ZeroBudgetAbsentPeerTimesOut",
+          "description": "LSA device barrier: zero budget + absent peer -> immediate ncclTimeout",
+          "test_filter": "LsaBarrierTimeoutMPITest.ZeroBudgetAbsentPeerTimesOut"
+        },
+        {
+          "name": "Lsa_RepeatedHealthyBarriersSucceed",
+          "description": "LSA device barrier: 64 sequential healthy barriers, no drift",
+          "test_filter": "LsaBarrierTimeoutMPITest.RepeatedHealthyBarriersSucceed"
+        },
+        {
+          "name": "Lsa_RecoversAfterTimeout",
+          "description": "LSA device barrier: fresh comm healthy after a timeout",
+          "test_filter": "LsaBarrierTimeoutMPITest.RecoversAfterTimeout"
+        },
+        {
+          "name": "Lsa_BackToBackTimeouts",
+          "description": "LSA device barrier: 4 sequential stuck barriers each yield ncclTimeout",
+          "test_filter": "LsaBarrierTimeoutMPITest.BackToBackTimeouts"
+        }
+      ]
+    },
+    "gin_nccl_timeout_tests_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "HSA_NO_SCRATCH_RECLAIM": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "Gin_HealthyBarrierReturnsSuccess",
+          "description": "GIN rail device barrier over IB: all peers arrive -> ncclSuccess",
+          "test_filter": "GinBarrierTimeoutMPITest.HealthyBarrierReturnsSuccess"
+        },
+        {
+          "name": "Gin_AbsentPeerProducesTimeout",
+          "description": "GIN rail device barrier over IB: absent rail peer -> ncclTimeout",
+          "test_filter": "GinBarrierTimeoutMPITest.AbsentPeerProducesTimeout"
+        },
+        {
+          "name": "Gin_ZeroBudgetAbsentPeerTimesOut",
+          "description": "GIN rail device barrier over IB: zero budget + absent peer -> immediate ncclTimeout",
+          "test_filter": "GinBarrierTimeoutMPITest.ZeroBudgetAbsentPeerTimesOut"
+        },
+        {
+          "name": "Gin_RepeatedHealthyBarriersSucceed",
+          "description": "GIN rail device barrier over IB: 32 sequential healthy barriers",
+          "test_filter": "GinBarrierTimeoutMPITest.RepeatedHealthyBarriersSucceed"
+        },
+        {
+          "name": "Gin_RecoversAfterTimeout",
+          "description": "GIN rail device barrier over IB: fresh comm healthy after a timeout",
+          "test_filter": "GinBarrierTimeoutMPITest.RecoversAfterTimeout"
+        },
+        {
+          "name": "Gin_BackToBackTimeouts",
+          "description": "GIN rail device barrier over IB: 4 sequential stuck barriers each yield ncclTimeout",
+          "test_filter": "GinBarrierTimeoutMPITest.BackToBackTimeouts"
         }
       ]
     },
@@ -2821,6 +2973,18 @@
       "name": "Grow MPI Tests - Multi-Node (4-rank, 2-node)",
       "description": "ncclCommGrow multi-node scenarios over IB transport: grow with SendRecv/AllReduce over network, parent destroy with IB teardown, elastic grow/shrink cycles over IB, and non-blocking grow with IB connection setup",
       "config": "grow_mpi_tests_multinode",
+      "enabled": true
+    },
+    {
+      "name": "ncclTimeout MPI Tests (2-rank)",
+      "description": "ncclTimeout coverage at 2 ranks: host async-error API on a live comm and the LSA device-barrier timeout (healthy/absent-peer/zero-budget/repeated/recover/back-to-back) with a 2-rank LSA team",
+      "config": "gin_nccl_timeout_tests",
+      "enabled": true
+    },
+    {
+      "name": "ncclTimeout GIN Barrier Tests - Multi-Node (4-rank, 2-node)",
+      "description": "ncclTimeout GIN rail device-barrier timeout over IB transport: healthy/absent-peer/zero-budget/repeated/recover/back-to-back across nodes",
+      "config": "gin_nccl_timeout_tests_multinode",
       "enabled": true
     },
     {
