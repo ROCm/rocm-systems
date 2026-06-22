@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(hotswap LANGUAGES CXX)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -39,6 +41,11 @@ target_include_directories(hsa-hotswap PRIVATE
 target_link_libraries(hsa-hotswap PRIVATE amd_comgr)
 set_target_properties(hsa-hotswap PROPERTIES
   POSITION_INDEPENDENT_CODE ON)
+
+install(TARGETS hsa-hotswap
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 # Test executable
 add_executable(hotswap_test tests/hotswap_test.cpp hotswap.cpp)
