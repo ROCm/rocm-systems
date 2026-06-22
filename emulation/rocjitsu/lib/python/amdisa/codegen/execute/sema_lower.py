@@ -1059,7 +1059,10 @@ def _lower_dst_write(
                 dst_ref = f'wf.vgpr_alloc().base + ({ctx.true16_dst_reg})'
                 read_dst = f'wf.cu().read_vgpr({dst_ref}, lane)'
                 write_dst = f'wf.cu().write_vgpr({dst_ref}, lane, merged);'
-            elif ctx.true16_dst_select == 'inst_.opsel & 0x8u':
+            elif ctx.true16_dst_select in {
+                'inst_.opsel & 0x8u',
+                'amdgpu::vop3_opsel(inst_) & 0x8u',
+            }:
                 return [
                     f'{ind}{{',
                     f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',
@@ -1187,9 +1190,9 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' if (s & (0xFu << (i * 4))) r |= (0xFu << (i * 4));'
     ' return r; }}()',
     'clz': '[&]() {{ auto s = static_cast<uint32_t>({0});'
-    ' return s == 0 ? 32u : static_cast<uint32_t>(std::countl_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s)); }}()',
     'clz64': '[&]() {{ auto s = static_cast<uint64_t>({0});'
-    ' return s == 0 ? 64u : static_cast<uint32_t>(std::countl_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s)); }}()',
     'cvt_hi_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(({0}) >> 16)))',
     'brev64': '[&]() {{ uint64_t s = {0}; uint64_t r = 0;'
     ' for (int i = 0; i < 64; ++i) r |= ((s >> i) & 1ULL) << (63 - i);'

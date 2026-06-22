@@ -232,7 +232,19 @@ LoadedConfig restore_checkpoint(const std::string &path) {
               wf_state->sgprs() ? wf_state->sgprs()->size() : cu->config().sgprs_per_wf;
           uint32_t num_vgprs = cu->config().vgprs_per_wf;
 
-          auto *wf = cu->dispatch_wf(wf_state->wg_id(), wf_state->pc(), num_sgprs, num_vgprs);
+          uint32_t wave_size = cu->wf_size();
+          if (auto *vgprs = wf_state->vgprs()) {
+            const size_t bytes_per_wave =
+                static_cast<size_t>(cu->vgpr_allocation_block_size()) * sizeof(uint32_t);
+            if (bytes_per_wave != 0 && vgprs->size() % bytes_per_wave == 0) {
+              const size_t saved_wave_size = vgprs->size() / bytes_per_wave;
+              if (saved_wave_size == 32 || saved_wave_size == 64)
+                wave_size = static_cast<uint32_t>(saved_wave_size);
+            }
+          }
+
+          auto *wf =
+              cu->dispatch_wf(wf_state->wg_id(), wf_state->pc(), num_sgprs, num_vgprs, wave_size);
           if (!wf)
             throw std::runtime_error("Failed to dispatch wavefront during checkpoint restoration");
 

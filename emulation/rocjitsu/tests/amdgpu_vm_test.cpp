@@ -6,6 +6,7 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -19,10 +20,12 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <sys/mman.h>
 #include <vector>
 
 namespace {
@@ -186,6 +189,62 @@ TEST(GpuMemoryTest, SparsePages) {
   EXPECT_EQ(mem->read32(0x0), 42u);
   EXPECT_EQ(mem->read32(0x100000), 99u);
   EXPECT_EQ(mem->read32(0x50000), 0u);
+}
+
+TEST(GpuMemoryTest, LowPassthroughPointersFallBackToSparseMemory) {
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint64_t kNullGuardGpuVa = 0x1000;
+  constexpr uint64_t kMmapMinAddrGpuVa = 0x10000;
+  constexpr uint64_t kHighGpuVa = 0x20000;
+
+  amdgpu::GpuMemory mem("test_mem");
+  mem.set_passthrough(true);
+  KfdProcess process(kProcessId);
+  mem.register_process(kProcessId, &process.page_table_, &process.page_table_mutex_);
+
+  process.map_pages(kNullGuardGpuVa, reinterpret_cast<void *>(kNullGuardGpuVa),
+                    KfdProcess::kPageSize);
+  EXPECT_EQ(mem.resolve_host_ptr(kNullGuardGpuVa + 0x980, kProcessId), nullptr);
+  mem.write8(kNullGuardGpuVa + 0x980, 0x5a, kProcessId);
+  EXPECT_EQ(mem.read8(kNullGuardGpuVa + 0x980, kProcessId), 0x5au);
+
+  if (!KfdProcess::host_page_mapped(reinterpret_cast<void *>(kMmapMinAddrGpuVa))) {
+    process.map_pages(kMmapMinAddrGpuVa, reinterpret_cast<void *>(kMmapMinAddrGpuVa),
+                      KfdProcess::kPageSize);
+    EXPECT_EQ(mem.resolve_host_ptr(kMmapMinAddrGpuVa + 0xe80, kProcessId), nullptr);
+    mem.write8(kMmapMinAddrGpuVa + 0xe80, 0xc3, kProcessId);
+    EXPECT_EQ(mem.read8(kMmapMinAddrGpuVa + 0xe80, kProcessId), 0xc3u);
+  }
+
+  alignas(4096) std::array<uint8_t, 4096> host_page{};
+  process.map_pages(kHighGpuVa, host_page.data(), host_page.size());
+  EXPECT_EQ(mem.resolve_host_ptr(kHighGpuVa + 4, kProcessId), host_page.data());
+  mem.write8(kHighGpuVa + 4, 0xa5, kProcessId);
+  EXPECT_EQ(host_page[4], 0xa5u);
+
+  mem.unregister_process(kProcessId);
+}
+
+TEST(GpuMemoryTest, InaccessibleHostMappingsFallBackToSparseMemory) {
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint64_t kGpuVa = 0x40000;
+
+  void *reserved =
+      mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(reserved, MAP_FAILED);
+
+  amdgpu::GpuMemory mem("test_mem");
+  mem.set_passthrough(true);
+  KfdProcess process(kProcessId);
+  mem.register_process(kProcessId, &process.page_table_, &process.page_table_mutex_);
+
+  process.map_pages(kGpuVa, reserved, KfdProcess::kPageSize);
+  EXPECT_EQ(mem.resolve_host_ptr(kGpuVa + 0x680, kProcessId), nullptr);
+  mem.write8(kGpuVa + 0x680, 0x7b, kProcessId);
+  EXPECT_EQ(mem.read8(kGpuVa + 0x680, kProcessId), 0x7bu);
+
+  mem.unregister_process(kProcessId);
+  EXPECT_EQ(munmap(reserved, KfdProcess::kPageSize), 0);
 }
 
 TEST(VmLifecycleTest, CreateAndDestroy) {
