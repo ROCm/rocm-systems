@@ -490,7 +490,7 @@ std::string
 expand_rocm_domain_shorthand(const std::string& shorthand)
 {
     using entry = std::pair<std::string_view, std::string_view>;
-    static constexpr std::array<entry, 12> shortcuts = { {
+    static constexpr std::array<entry, 13> shortcuts = { {
         { "hip", "hip_runtime_api" },
         { "hip_runtime", "hip_runtime_api" },
         { "hip_compiler", "hip_compiler_api" },
@@ -503,6 +503,7 @@ expand_rocm_domain_shorthand(const std::string& shorthand)
         { "marker", "marker_api" },
         { "roctx", "marker_api" },
         { "rccl", "rccl_api" },
+        { "hipfile", "hipfile_api" },
     } };
 
     auto it = std::find_if(shortcuts.begin(), shortcuts.end(),

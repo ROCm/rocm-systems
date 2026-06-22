@@ -416,6 +416,12 @@ get_callback_domains()
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
     }
 #endif
+#if(ROCPROFILER_VERSION >= 10302)
+    if(_version.formatted >= 10302)
+    {
+        supported.emplace(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API);
+    }
+#endif
 
     auto _data    = std::unordered_set<rocprofiler_callback_tracing_kind_t>{};
     auto _domains = tim::delimit(
