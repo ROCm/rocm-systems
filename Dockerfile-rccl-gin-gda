@@ -34,7 +34,8 @@ RUN apt-get update \
  && ln -s /opt/rocm/core/.info /opt/rocm/.info
 
 ## install dependencies
-RUN apt-get install -y --no-install-recommends \
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
     build-essential  \
     git \
     make \
@@ -71,6 +72,8 @@ RUN apt-get install -y --no-install-recommends \
     build-essential autoconf libtool flex bison pkg-config git \
     libibverbs-dev ibverbs-utils libibumad-dev libpci-dev librdmacm-dev rdma-core infiniband-diags \
     openmpi-bin openmpi-common libopenmpi-dev \
+# OPTIONAL: reqired to use mpirun launcher
+    openssh-server \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ## Not needed on Ubuntu 24, probably needed on Ubuntu22
@@ -81,6 +84,27 @@ RUN apt-get install -y --no-install-recommends \
 
 ## Set ROCm path
 ENV ROCM_PATH=/opt/rocm
+
+# OPTIONAL: Setup ssh (only needed to use mpirun launch method, e.g., rocshmem functional tests)
+# The following block is OPTIONAL and can be commented out if you only want to run 1-node testing
+# Note: all deployed containers must share the SAME KEY!
+#   Same docker image build must be deployed on all nodes (docker save, docker load)
+ARG SSH_PORT=2222
+RUN ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+# Alternative: comment line above, uncomment lines below:
+#   import an invariant ssh-key from outside the docker (so you can build the docker on each nodes)
+#COPY id_ed25519 /root/.ssh/id_ed25519
+#COPY id_ed25519.pub /root/.ssh/id_ed25519.pub
+RUN cat ~/.ssh/id_ed25519.pub >~/.ssh/authorized_keys && \
+    sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config && \
+    mkdir -p /run/sshd && ssh-keygen -A && \
+    echo " StrictHostKeyChecking=accept-new" >>/root/.ssh/config
+CMD ["sh", "-c", "\
+        set -e; \
+        rocshmem/bin/rocshmem_info \
+     && echo \"Starting SSH server for mpiexec with OMPI_MCA_plm_rsh_arg=$OMPI_MCA_plm_rsh_args\" \
+     && exec /usr/sbin/sshd -D"]
+# End of ssh setup
 
 # We use MPI only as a launcher, any MPI will do, use system install
 ## Install UCX
@@ -216,6 +240,7 @@ RUN mkdir rccl-tests \
 ENV PATH="${MPI_INSTALL_PREFIX}/bin:${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
 ENV LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${MPI_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:${ROCM_PATH}/core/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH}"
 ENV UCX_WARN_UNUSED_ENV_VARS=n
+ENV OMPI_MCA_plm_rsh_args=-p$SSH_PORT
 ENV OMPI_ALLOW_RUN_AS_ROOT=1
 ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 ENV NCL_DEBUG=VERSION
