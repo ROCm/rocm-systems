@@ -1,12 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit coverage for ``roofline.roofline_main`` (1:1 with the source module).
+"""Unit coverage for ``roofline.roofline_main``.
 
 These tests drive ``Roofline`` directly with mocked machine specs and
-self-contained temp CSVs; they never exercise the analyze CLI. The
-``generate_plot`` tests assert the WMMA (RDNA) legend labels, and the
-``cli_generate_plot`` tests assert the early-guard return paths.
+self-contained temp CSVs; they never exercise the analyze CLI. 
 """
 
 import tempfile
@@ -43,28 +41,21 @@ def make_run_parameters(
     return run_parameters
 
 
-class MockMI200Mspec:
-    """Minimal MachineSpecs stand-in for the MI200 (gfx90a) roofline path.
+class MockMspec:
+    """Minimal MachineSpecs"""
 
-    gfx90a supports FP32 per SUPPORTED_DATATYPES, so cli_generate_plot reaches
-    its later guards for a valid datatype and is rejected for an invalid one.
-    """
-
-    gpu_model = "MI200"
-    gpu_series = "mi200"
-    gpu_arch = "gfx90a"
+    def __init__(self, gpu_model: str, gpu_series: str, gpu_arch: str) -> None:
+        self.gpu_model = gpu_model
+        self.gpu_series = gpu_series
+        self.gpu_arch = gpu_arch
 
 
-class MockRDNAMspec:
-    """Minimal MachineSpecs stand-in for the RDNA (WMMA) roofline path.
+def mi200_mspec() -> MockMspec:
+    return MockMspec("MI200", "mi200", "gfx90a")
 
-    generate_plot only reads gpu_model (memory-level resolution), gpu_series
-    (matrix-op label via get_matrix_ops_type -> "WMMA"), and gpu_arch.
-    """
 
-    gpu_model = "rdna35_halo"
-    gpu_series = "navi3"
-    gpu_arch = "gfx1151"
+def rdna_mspec() -> MockMspec:
+    return MockMspec("rdna35_halo", "navi3", "gfx1151")
 
 
 def write_wmma_roofline_csv(workload_dir: str) -> None:
@@ -91,7 +82,7 @@ def wmma_roofline_instance(workload_dir: str) -> Roofline:
     run_parameters = make_run_parameters(
         workload_dir, ["FP64", "BF16"], matrix_ops_type="WMMA"
     )
-    return Roofline(MockArgs(["FP64", "BF16"]), MockRDNAMspec(), run_parameters)
+    return Roofline(MockArgs(["FP64", "BF16"]), rdna_mspec(), run_parameters)
 
 
 def legend_names(fig: go.Figure) -> set[str]:
@@ -106,7 +97,7 @@ def legend_names(fig: go.Figure) -> set[str]:
 def test_roofline_missing_file_handling() -> None:
     """cli_generate_plot with empty ai_data returns None at the ai_data guard."""
     run_parameters = make_run_parameters("", ["FP32"])
-    roofline_instance = Roofline(MockArgs(["FP32"]), MockMI200Mspec(), run_parameters)
+    roofline_instance = Roofline(MockArgs(["FP32"]), mi200_mspec(), run_parameters)
 
     result = roofline_instance.cli_generate_plot("FP32", ai_data={})
     assert result is None
@@ -115,7 +106,7 @@ def test_roofline_missing_file_handling() -> None:
 def test_roofline_invalid_datatype_cli() -> None:
     """cli_generate_plot with an unsupported datatype returns None."""
     run_parameters = make_run_parameters("", ["FP32"])
-    roofline_instance = Roofline(MockArgs(["FP32"]), MockMI200Mspec(), run_parameters)
+    roofline_instance = Roofline(MockArgs(["FP32"]), mi200_mspec(), run_parameters)
 
     result = roofline_instance.cli_generate_plot("INVALID_DATATYPE", ai_data={})
     assert result is None
