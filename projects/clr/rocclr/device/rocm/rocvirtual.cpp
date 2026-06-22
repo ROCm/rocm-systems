@@ -1572,7 +1572,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
         if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
              IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
             kernelNames != nullptr && i < kernelNames->size() &&
-            (isKernelDispatch || isExtKernelDispatch)) {
+            (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH || pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC)) {
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u",
                   (*kernelNames)[i] != nullptr ? (*kernelNames)[i]->c_str() : "<null>",
                   dev().index());
