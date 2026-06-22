@@ -5,7 +5,7 @@
 //===----------------------------------------------------------------------===//
 //
 // Portable helpers for discovering an agent's gfx target and ASIC revision via
-// the HSA runtime (HSA_AMD_AGENT_INFO_ASIC_REVISION). 
+// the HSA runtime (HSA_AMD_AGENT_INFO_ASIC_REVISION).
 //
 //===----------------------------------------------------------------------===//
 
@@ -45,12 +45,27 @@ std::string extract_gfx_target(const std::string &isa_name);
 // gate_allows_hotswap() (below) to decide whether to act.
 AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent);
 
-// Clears the per-agent-handle cache used by query_agent_gfx_revision(). 
+// Clears the per-agent-handle cache used by query_agent_gfx_revision().
 void reset_gfx_revision_cache();
 
-// HotSwap's activation policy: rewriting is performed only for gfx1250 silicon
-// at ASIC revision A0 (and only when the revision was successfully queried).
+// HotSwap's default activation policy: B0-to-A0 rewriting is performed only
+// for gfx1250 silicon at ASIC revision A0 (and only when the revision was
+// successfully queried).
 bool gate_allows_hotswap(const AgentGfxRevision &gfx);
+
+// Entry trampolines are a separate, opt-in rewrite that applies to gfx1250
+// regardless of stepping when AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES is enabled.
+bool gate_allows_entry_trampolines(const AgentGfxRevision &gfx);
+
+// Combined activation policy for libhsa-hotswap.so.
+bool gate_allows_hotswap_rewrite(const AgentGfxRevision &gfx,
+                                 bool entry_trampolines_requested);
+
+// Adds COMGR's hotswap-local gfx1250 stepping feature to an ISA name while
+// preserving any existing feature suffixes. Non-gfx1250 ISA names and ISA
+// names that already carry the stepping feature are returned unchanged.
+std::string add_gfx1250_stepping_feature(const std::string &isa_name,
+                                         bool is_b0);
 
 } // namespace rocr::hotswap
 

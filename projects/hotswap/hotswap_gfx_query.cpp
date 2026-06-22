@@ -18,27 +18,30 @@ namespace rocr::hotswap {
 std::string get_agent_isa_name(hsa_agent_t agent) {
   std::string name;
 
-  hsa_agent_iterate_isas(agent, [](hsa_isa_t isa, void *data) -> hsa_status_t {
-    uint32_t len = 0;
-    if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
-        HSA_STATUS_SUCCESS)
-      return HSA_STATUS_ERROR;
+  hsa_agent_iterate_isas(
+      agent,
+      [](hsa_isa_t isa, void *data) -> hsa_status_t {
+        uint32_t len = 0;
+        if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
+            HSA_STATUS_SUCCESS)
+          return HSA_STATUS_ERROR;
 
-    auto &out = *static_cast<std::string *>(data);
-    out.resize(len);
+        auto &out = *static_cast<std::string *>(data);
+        out.resize(len);
 
-    if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, out.data()) !=
-        HSA_STATUS_SUCCESS) {
-      out.clear();
-      return HSA_STATUS_ERROR;
-    }
+        if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, out.data()) !=
+            HSA_STATUS_SUCCESS) {
+          out.clear();
+          return HSA_STATUS_ERROR;
+        }
 
-    // HSA returns null-terminated length; trim it.
-    if (!out.empty() && out.back() == '\0')
-      out.pop_back();
+        // HSA returns null-terminated length; trim it.
+        if (!out.empty() && out.back() == '\0')
+          out.pop_back();
 
-    return HSA_STATUS_INFO_BREAK; // only need the first ISA
-  }, &name);
+        return HSA_STATUS_INFO_BREAK; // only need the first ISA
+      },
+      &name);
 
   return name;
 }
@@ -97,6 +100,28 @@ void reset_gfx_revision_cache() {
 bool gate_allows_hotswap(const AgentGfxRevision &gfx) {
   return gfx.revision_valid && gfx.gfx_target == "gfx1250" &&
          gfx.asic_revision == 0; // A0
+}
+
+bool gate_allows_entry_trampolines(const AgentGfxRevision &gfx) {
+  return gfx.gfx_target == "gfx1250";
+}
+
+bool gate_allows_hotswap_rewrite(const AgentGfxRevision &gfx,
+                                 bool entry_trampolines_requested) {
+  if (gate_allows_hotswap(gfx)) {
+    return true;
+  }
+  return entry_trampolines_requested && gate_allows_entry_trampolines(gfx);
+}
+
+std::string add_gfx1250_stepping_feature(const std::string &isa_name,
+                                         bool is_b0) {
+  if (extract_gfx_target(isa_name) != "gfx1250" ||
+      isa_name.find(":gfx1250-b0-specific+") != std::string::npos ||
+      isa_name.find(":gfx1250-b0-specific-") != std::string::npos) {
+    return isa_name;
+  }
+  return isa_name + (is_b0 ? ":gfx1250-b0-specific+" : ":gfx1250-b0-specific-");
 }
 
 } // namespace rocr::hotswap
