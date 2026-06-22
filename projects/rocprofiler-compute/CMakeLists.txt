@@ -560,6 +560,14 @@ add_test(
         tests/test_roofline_analyze.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_roofline_main
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_roofline_main.xml ${COV_OPTION}
+        tests/test_roofline_main.py ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Data imputation tests
 # -----------------------------------
@@ -820,6 +828,7 @@ if(${ENABLE_COVERAGE})
         test_mem_chart
         test_roofline_calc
         test_roofline_analyze
+        test_roofline_main
         test_data_imputation
         test_autogen_config
         test_tui_components
