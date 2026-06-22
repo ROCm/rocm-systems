@@ -23,7 +23,7 @@ jobs:
     # Runs on the self-hosted AIS runner where the system tests run. The job is
     # only compile + unit tests today, but this runner is the controlled host
     # we intend to eventually run the full ASAN/TSAN CI on.
-    runs-on: [AIS]
+    runs-on: [ubuntu-24.04]
     strategy:
       fail-fast: false
       matrix:
