@@ -3943,11 +3943,33 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   if (memHandle->imported && memHandle->is_fabric_handle) {
     status = targetAgent->driver().ImportMemoryHandle(
         *targetAgent, &driver_handle, ShareType::FABRIC_HANDLE,
-        &memHandle->driver_handle.fabric_handle);
-  } else {
+        &memHandle->driver_handle.driver_specific.kfd.fabric_handle);
+  } else if (memHandle->imported) {
     status = targetAgent->driver().ImportMemoryHandle(
         *targetAgent, &driver_handle, ShareType::DMABUF_FD,
         &memHandle->driver_handle.dmabuf_fd);
+  } else {
+    // Locally-owned allocation. Export a transient dma-buf from the retained KFD backing
+    // allocation and import it into the target agent. For the owning agent, pass the backing
+    // pointer so the thunk avoids a duplicate device allocation (bypass import).
+    Agent* ownerAgent = memHandle->agentOwner();
+    void* owner_mem = reinterpret_cast<void*>(memHandle->driver_handle.driver_specific.kfd.kfd_handle);
+    int dmabuf_fd = -1;
+    uint64_t export_offset = 0;
+    core::DriverMemoryHandle kfd_alloc = {};
+    kfd_alloc.handle = memHandle->driver_handle.driver_specific.kfd.kfd_handle;
+    kfd_alloc.size = memHandle->driver_handle.size;
+    status = ownerAgent->driver().ExportMemoryHandle(
+        *ownerAgent, kfd_alloc, ShareType::DMABUF_FD,
+        EXPORT_MEMORY_FLAGS_KFD_DMABUF, &dmabuf_fd, &export_offset);
+    if (status == HSA_STATUS_SUCCESS) {
+      void* reuse = (targetAgent == ownerAgent) ? owner_mem : nullptr;
+      status = targetAgent->driver().ImportMemoryHandle(
+          *targetAgent, &driver_handle, ShareType::DMABUF_FD, &dmabuf_fd, reuse);
+#if defined(__linux__)
+      rocr::os::DmaBufClose(dmabuf_fd);
+#endif
+    }
   }
   if (status != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(status, "Failed to import memory");
@@ -4066,15 +4088,24 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
   : region(nullptr),
     ref_count(1),
     use_count(0),
-    driver_handle({.dmabuf_fd = -1, .fabric_handle = fabric_handle}),
+    driver_handle({.dmabuf_fd = -1, .driver_specific = {.kfd = {.fabric_handle = fabric_handle}}}),
     imported(true),
     is_fabric_handle(true),
     alloc_flag(MemoryRegion::AllocateNoFlags) {
 }
 
 Runtime::MemoryHandle::~MemoryHandle() {
+  // Capture the retained backing allocation before DestroyMemoryHandle clears the handle.
+  void* owner_mem = reinterpret_cast<void*>(driver_handle.driver_specific.kfd.kfd_handle);
+  size_t owner_size = driver_handle.size;
+
   if (driver_handle.handle != 0 && region != nullptr)
     agentOwner()->driver().DestroyMemoryHandle(&driver_handle);
+
+  // Release the KFD backing allocation for locally-owned handles. Imported handles have
+  // no backing allocation (owner_mem == 0) and region == nullptr.
+  if (owner_mem != nullptr && region != nullptr)
+    region->Free(owner_mem, owner_size);
 }
 
 

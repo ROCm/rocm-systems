@@ -74,7 +74,21 @@ struct DriverMemoryHandle {
   int dmabuf_fd{-1};
   uint64_t mmap_offset{0};
   size_t size{0};
-  hsa_fabric_handle_t fabric_handle{};
+
+  /// @brief Driver-specific members.
+  ///
+  /// Exactly one union member is valid at a time, selected by the @ref core::Driver that
+  /// owns the handle. Each driver type contributes its own struct.
+  union DriverSpecific {
+    /// @brief Members specific to @ref KfdDriver.
+    struct Kfd {
+      hsa_fabric_handle_t fabric_handle;
+      /// For locally-owned allocations, the retained KFD backing allocation (virtual
+      /// address). 0 for imported handles. The backing allocation is the source of truth
+      /// and is released when the owning MemoryHandle is destroyed.
+      uint64_t kfd_handle;
+    } kfd;
+  } driver_specific{};
 
   bool IsValid() const { return handle != 0; }
 

@@ -617,17 +617,22 @@ hsa_status_t KfdDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
 hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                               const core::Agent& agent,
                                               core::DriverMemoryHandle* handle, uint64_t* offset) {
-  // Create handle by exporting and importing the memory from the owning agent.
+  // Obtain a driver memory handle for the owning agent that can be used for CPU-address
+  // lookup and on-demand export.
+  //
+  // The original KFD allocation (@p mem) is retained as the backing store and is released
+  // when the owning MemoryHandle is destroyed (see Runtime::MemoryHandle::~MemoryHandle).
+  // We intentionally do NOT free the KFD allocation here, nor do we re-export it: doing so
+  // (the previous behavior) forced every allocation through a duplicate DRM import and
+  // released the backing BO, which led to excessive device-memory consumption / spurious
+  // out-of-memory failures on some GPUs.
   (void)va;
 
   int source_fd = -1;
 
-  /*
-   * On Linux, export via KFD first (EXPORT_MEMORY_FLAGS_KFD_DMABUF) so the KFD section of the
-   * AMDGPU driver has a BO entry, then import into DRM. Re-export from DRM for the shareable fd.
-   * On Windows, KFD export and DRM export are equivalent.
-   */
-
+  // Export via KFD so the AMDGPU driver has a BO entry, then import it back (passing @p mem
+  // so the thunk recognizes the buffer belongs to this process and avoids a duplicate
+  // device allocation - "bypass import"). The transient fd is closed immediately.
   core::DriverMemoryHandle kfd_alloc = {};
   kfd_alloc.handle = reinterpret_cast<uint64_t>(mem);
   kfd_alloc.size = size;
@@ -647,36 +652,17 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return ret;
   assert(targetHandle.size == size);
 
-  int shareable_fd = source_fd;
-#if defined(__linux__)
-  // Re-export from DRM; the KFD fd was transient and is already closed.
-  ret = ExportMemoryHandle(agent, targetHandle, core::ShareType::DMABUF_FD, 0,
-                           &shareable_fd);
-  if (ret != HSA_STATUS_SUCCESS) {
-    DestroyMemoryHandle(&targetHandle);
-    return ret;
-  }
-  /*
-   * We converted mem into a driver handle. The driver handle will keep the reference count
-   * inside the KMD so we can free the original KFD allocation.
-   */
-  if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
-    DestroyMemoryHandle(&targetHandle);
-    rocr::os::DmaBufClose(shareable_fd);
-    return HSA_STATUS_ERROR;
-  }
-#endif
-
   const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
   const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
   if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
     DestroyMemoryHandle(&targetHandle);
-    rocr::os::DmaBufClose(shareable_fd);
     return HSA_STATUS_ERROR;
   }
 
   handle->handle = targetHandle.handle;
-  handle->dmabuf_fd = shareable_fd;
+  handle->dmabuf_fd = -1;  // No persistent fd; shareable fds are exported on demand.
+  handle->driver_specific.kfd.kfd_handle =
+      reinterpret_cast<uint64_t>(mem);  // Retained backing allocation.
   handle->size = size;
   return HSA_STATUS_SUCCESS;
 }
