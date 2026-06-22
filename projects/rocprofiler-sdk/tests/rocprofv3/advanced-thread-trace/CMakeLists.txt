@@ -65,13 +65,6 @@ if(attdecoder_FOUND)
     set(COMMON_PARAMS --att-library-path ${attdecoder_LIB_DIR} ${COMMON_PARAMS_NO_LIB})
 endif()
 
-set(ATT_EVENT_TRACE_DISABLED ${IS_DISABLED})
-if(NOT DEFINED rocm_version_NUMERIC_VERSION)
-    set(ATT_EVENT_TRACE_DISABLED ON)
-elseif(rocm_version_NUMERIC_VERSION LESS 71400)
-    set(ATT_EVENT_TRACE_DISABLED ON)
-endif()
-
 # hsa multiqueue dependency test with lib path
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path
@@ -329,29 +322,33 @@ rocprofiler_add_integration_validate_test(
          ${TARGET_CU}
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-att-event-tracing
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/event_tracing -o
+if(attdecoder_FOUND
+   AND NOT ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS
+   AND DEFINED rocm_version_NUMERIC_VERSION
+   AND rocm_version_NUMERIC_VERSION GREATER_EQUAL 71400)
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-att-event-tracing
+        COMMAND
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/event_tracing -o
             out --kernel-include-regex matrixTranspose -- $<TARGET_FILE:simple-transpose>
-    DEPENDS simple-transpose
-    TIMEOUT 45
-    LABELS "integration-tests"
-    DISABLED ${ATT_EVENT_TRACE_DISABLED}
-    FIXTURES_SETUP rocprofv3-test-att-event-tracing)
+        DEPENDS simple-transpose
+        TIMEOUT 45
+        LABELS "integration-tests"
+        FIXTURES_SETUP rocprofv3-test-att-event-tracing)
 
-rocprofiler_add_integration_validate_test(
-    rocprofv3-test-att-event-tracing-validate
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    DISCOVERY_ARGS -k test_occupancy_event_tracing_fields
-    TIMEOUT 45
-    LABELS "integration-tests"
-    DISABLED ${ATT_EVENT_TRACE_DISABLED}
-    FIXTURES_REQUIRED rocprofv3-test-att-event-tracing
-    ARGS --att-occupancy-event-trace-out-dir
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/event_tracing
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+    rocprofiler_add_integration_validate_test(
+        rocprofv3-test-att-event-tracing-validate
+        TEST_PATHS validate.py
+        COPY conftest.py
+        CONFIG pytest.ini
+        DISCOVERY_ARGS -k test_occupancy_event_tracing_fields
+        TIMEOUT 45
+        LABELS "integration-tests"
+        FIXTURES_REQUIRED rocprofv3-test-att-event-tracing
+        ARGS --att-occupancy-event-trace-out-dir
+             ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/event_tracing
+        FAIL_REGULAR_EXPRESSION "AssertionError")
+endif()
 
 # Other SIMD file tests
 set(IS_DISABLED_OTHER_SIMD ON)
