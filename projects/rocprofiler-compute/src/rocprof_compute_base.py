@@ -352,28 +352,28 @@ class RocProfCompute:
         if torch_operator is not None or list_torch_operators:
             if args.gui is not None:
                 console_error(
-                    "torch trace",
+                    "ml api trace",
                     "--torch-operator and --list-torch-operators are not "
                     "supported in --gui mode. Please remove --gui or run "
                     "without the torch-operator flags.",
                 )
             if args.tui:
                 console_error(
-                    "torch trace",
+                    "ml api trace",
                     "--torch-operator and --list-torch-operators are not "
                     "supported in --tui mode. Please remove --tui or run "
                     "without the torch-operator flags.",
                 )
             if args.spatial_multiplexing:
                 console_error(
-                    "torch trace",
+                    "ml api trace",
                     "--torch-operator and --list-torch-operators do not yet "
                     "support multi-node analysis via --spatial-multiplexing. "
                     "Please remove one of these options.",
                 )
             if args.output_format != "stdout":
                 console_error(
-                    "torch trace",
+                    "ml api trace",
                     "--torch-operator and --list-torch-operators are only "
                     "supported with --output-format stdout (the default). "
                     "The matched operator call tree is printed directly to "
@@ -385,21 +385,21 @@ class RocProfCompute:
             if torch_operator is not None:
                 if args.list_stats:
                     console_warning(
-                        "torch trace",
+                        "ml api trace",
                         "--torch-operator is ignored by --list-stats; the "
                         "full kernel stats table will be shown regardless "
                         "of the operator filter.",
                     )
                 if args.list_nodes:
                     console_warning(
-                        "torch trace",
+                        "ml api trace",
                         "--torch-operator is ignored by --list-nodes; the "
                         "node enumeration does not respect the operator "
                         "filter.",
                     )
                 if list_torch_operators:
                     console_warning(
-                        "torch trace",
+                        "ml api trace",
                         "--torch-operator is ignored when "
                         "--list-torch-operators is used; the full operator "
                         "tree will be shown. Drop --list-torch-operators to "

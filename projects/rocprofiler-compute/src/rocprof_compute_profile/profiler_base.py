@@ -35,6 +35,20 @@ from utils.utils_exceptions import (
 from utils.utils_profile import gen_sysinfo, run_prof
 from vendored import yaml
 
+# Maps each CLI flag to the backends it enables.
+_FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
+    "torch_trace": ("torch",),
+}
+
+
+def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
+    """Return the set of frameworks requested via CLI flags."""
+    selected: set[str] = set()
+    for flag, frameworks in _FLAG_TO_FRAMEWORKS.items():
+        if getattr(args, flag, False):
+            selected.update(frameworks)
+    return selected
+
 
 def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[str]]:
     """Locate the script argument in a Python command, skipping interpreter flags.
@@ -59,54 +73,66 @@ def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[
     return None, None
 
 
-def _prepare_torch_trace_injection(
+def _prepare_ml_api_trace_injection(
     remaining: list[str],
     resolved_exec_path: Path,
     is_python: bool,
     script_index: Optional[int],
     skip_flag: Optional[str],
+    frameworks: set[str],
 ) -> None:
-    """Rewrite the workload command to inject ROCTX markers for --torch-trace.
+    """Insert the inject_roctx launcher into the workload command.
 
-    Mutates *remaining* in-place.  Three cases:
-      1. Explicit Python interpreter  — insert inject_roctx.py before the script.
-      2. Direct .py script execution  — prepend sys.executable + inject_roctx.py.
-      3. Non-Python binary            — warn and leave the command untouched.
+    Modifies the ``remaining`` command list in place. The launcher is run by
+    absolute path, with the selected frameworks passed as ``--frameworks
+    <names>`` followed by ``--`` and the workload command. The rewrite depends
+    on the workload type:
+      1. Python interpreter — insert the launcher before the script.
+      2. Direct .py script  — prepend ``sys.executable`` and the launcher.
+      3. Other executables  — leave the command unchanged and emit a warning.
     """
-    inject_script = Path(__file__).parent.parent / "utils" / "inject_roctx.py"
-    if not inject_script.exists():
+    launch_script = (
+        Path(__file__).parent.parent / "utils" / "inject_roctx" / "launch.py"
+    )
+    if not launch_script.is_file():
         console_error(
-            f"Cannot find inject_roctx.py at {inject_script}. "
+            f"Cannot find inject_roctx launcher at {launch_script}. "
             "Please verify your installation."
         )
+
+    launcher = [
+        str(launch_script),
+        "--frameworks",
+        ",".join(sorted(frameworks)),
+        "--",
+    ]
 
     if is_python:
         if skip_flag:
             console_warning(
                 f"Cannot inject ROCTX markers into 'python {skip_flag}' "
                 "invocations. Launching workload as-is; "
-                "--torch-trace may have no effect."
+                "ML API tracing may have no effect."
             )
         elif not Path(remaining[script_index]).is_file():
             raise PythonScriptNotFoundError(remaining[script_index])
         else:
-            remaining.insert(script_index, str(inject_script))
+            remaining[script_index:script_index] = launcher
     elif resolved_exec_path.suffix in (".py", ".pyw", ".pyc", ".pyo"):
-        remaining.insert(0, str(inject_script))
-        remaining.insert(0, sys.executable)
+        remaining[0:0] = [sys.executable, *launcher]
     else:
         console_warning(
             "Command does not look like a Python entry point, "
             "skipping ROCTX auto-injection and launching workload as-is. "
-            "Ensure the binary already initializes PyTorch/ROCTX markers, "
-            "otherwise --torch-trace will have no effect."
+            "Ensure the binary already initializes ROCTX markers, "
+            "otherwise ML API tracing will have no effect."
         )
 
     if (resolved_exec_path.parent / "_internal").is_dir():
         console_warning(
             "Workload appears to be a self-contained binary. "
             "Such bundles typically ship private ROCm/HSA libraries, which "
-            "prevents --torch-trace from collecting data. "
+            "prevents ML API tracing from collecting data. "
             "Rebuild without packaging libhsa/libhip or "
             "adjust LD_LIBRARY_PATH to /opt/rocm before profiling."
         )
@@ -135,6 +161,8 @@ class RocProfCompute_Base:
     def sanitize(self) -> None:
         """Perform sanitization of inputs"""
         args = self.get_args()
+        selected_frameworks = _compute_selected_frameworks(args)
+        self._selected_frameworks: set[str] = selected_frameworks
 
         if (
             sum((
@@ -161,26 +189,26 @@ class RocProfCompute_Base:
                 "Please remove one of these options."
             )
 
-        if getattr(args, "torch_trace", False):
+        if selected_frameworks:
             if args.attach_pid:
                 console_error(
-                    "--torch-trace cannot be used with --attach-pid. "
-                    "Torch trace requires injecting ROCTX markers into the "
-                    "workload at launch; already-running processes cannot be "
-                    "instrumented. Please remove one of these options."
+                    "ML API tracing cannot be used with --attach-pid. "
+                    "ROCTX injection requires launching the workload; "
+                    "already-running processes cannot be instrumented. "
+                    "Please remove one of these options."
                 )
 
             if args.attach_duration_msec:
                 console_error(
-                    "--torch-trace cannot be used with --attach-duration-msec. "
+                    "ML API tracing cannot be used with --attach-duration-msec. "
                     "--attach-duration-msec only applies to --attach-pid, which "
-                    "is incompatible with --torch-trace. Please remove one of "
+                    "is incompatible with ML API tracing. Please remove one of "
                     "these options."
                 )
 
             if args.spatial_multiplexing is not None:
                 console_error(
-                    "--torch-trace does not yet support multi-node profiling "
+                    "ML API tracing does not yet support multi-node profiling "
                     "via --spatial-multiplexing. Please remove one of these "
                     "options."
                 )
@@ -220,7 +248,7 @@ class RocProfCompute_Base:
             resolved_exec_path = Path(exec_candidate).resolve()
 
             # Detect bare Python interpreter (no script, no -c/-m) regardless
-            # of --torch-trace — this always hangs the profiler.
+            # of ML API tracing — this always hangs the profiler.
             is_python = re.match(r"^python[0-9.]*$", resolved_exec_path.name)
             script_index: Optional[int] = None
             skip_flag: Optional[str] = None
@@ -229,13 +257,14 @@ class RocProfCompute_Base:
                 if script_index is None and skip_flag is None:
                     raise NoScriptInCommandError(args.remaining)
 
-            if getattr(args, "torch_trace", False):
-                _prepare_torch_trace_injection(
+            if selected_frameworks:
+                _prepare_ml_api_trace_injection(
                     args.remaining,
                     resolved_exec_path,
                     bool(is_python),
                     script_index,
                     skip_flag,
+                    selected_frameworks,
                 )
             args.remaining = shlex.join(args.remaining)
         elif not args.attach_pid:
@@ -329,7 +358,7 @@ class RocProfCompute_Base:
                 workload_dir=args.output_directory,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
-                torch_trace_enabled=getattr(args, "torch_trace", False),
+                ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
                 retain_rocpd_output=args.retain_rocpd_output,
             )
 

@@ -26,6 +26,8 @@ test_categories:
       - test_num_xcds_cli_output
       - test_mi_gpu_spec
       - test_utils_profile_csv
+      - test_inject_roctx_package
+      - test_torch_cpp_loader
       - test_autogen_config
       - test_import_guard
       - test_mem_chart
@@ -88,6 +90,8 @@ test_categories:
       - test_analysis_db
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_inject_roctx_package
+      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_mem_chart
@@ -149,6 +153,8 @@ test_categories:
       - test_analysis_db
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_inject_roctx_package
+      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_mem_chart
@@ -210,6 +216,8 @@ test_categories:
       - test_analysis_db
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_inject_roctx_package
+      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_mem_chart

@@ -733,7 +733,7 @@ Display all PyTorch operators captured during profiling:
 
 Output is grouped by source location (``file:line``) and shows full operator
 hierarchy (``/``-separated) and kernel stats. A consolidated CSV
-(``torch_trace/consolidated.csv``) is written with all operator/kernel data;
+(``ml_api_trace/consolidated.csv``) is written with all operator/kernel data;
 see :ref:`torch-operator-profiling` for details.
 
 The flat **Operator summary** table below the call tree has one row per

@@ -2832,7 +2832,7 @@ def test_torch_trace_profile(
     Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
     and counter CSVs), then runs analyze with --list-torch-operators and
     --torch-operator (shell-style fnmatch glob patterns like *relu, all), and verifies
-    torch_trace directory, consolidated CSV contents (hierarchy, kernel, counters),
+    ml_api_trace directory, consolidated CSV contents (hierarchy, kernel, counters),
     and CLI output format (call tree grouped by source location, aggregated stats,
     kernel IDs, sort order).
     Requires PyTorch and GPU; not included in default suite.
@@ -2965,12 +2965,12 @@ def test_torch_trace_profile(
 
     list_output = capsys.readouterr().out
 
-    # 7. torch_trace directory created with consolidated.csv
-    torch_trace_dir = Path(workload_dir) / "torch_trace"
-    assert torch_trace_dir.exists(), "torch_trace directory not created"
+    # 7. ml_api_trace directory created with consolidated.csv
+    ml_api_trace_dir = Path(workload_dir) / "ml_api_trace"
+    assert ml_api_trace_dir.exists(), "ml_api_trace directory not created"
 
-    consolidated_csv = torch_trace_dir / "consolidated.csv"
-    assert consolidated_csv.exists(), "consolidated.csv not found in torch_trace"
+    consolidated_csv = ml_api_trace_dir / "consolidated.csv"
+    assert consolidated_csv.exists(), "consolidated.csv not found in ml_api_trace"
 
     # 8. Consolidated CSV contains hierarchy, kernel names, and counter values
     df = pd.read_csv(consolidated_csv)
