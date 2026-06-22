@@ -266,6 +266,87 @@ TEST(category_region_serialization, serialize_annotation_args_span_skips_invalid
     EXPECT_EQ(args[0].arg_value, "7");
 }
 
+TEST(category_region_serialization, serialize_annotation_args_span_pointer)
+{
+    int   target = 0;
+    void* ptr    = &target;
+
+    // ROCPROFSYS_PTR maps to a pointer C++ type, so the value is taken by value (the
+    // address itself) and formatted as a hex address rather than being dereferenced.
+    rocprofsys_annotation_t annotations[] = {
+        { "ptr", ROCPROFSYS_PTR, ptr },
+    };
+
+    auto args = parse(serialize_annotation_args(
+        std::span<const rocprofsys_annotation_t>{ annotations, 1 }));
+    ASSERT_EQ(args.size(), 1u);
+    EXPECT_EQ(args[0].arg_number, 0u);
+    EXPECT_EQ(args[0].arg_name, "ptr");
+    EXPECT_NE(args[0].arg_type, "string");
+    EXPECT_FALSE(args[0].arg_type.empty());
+    EXPECT_TRUE(starts_with(args[0].arg_value, "0x"));
+}
+
+// ---------------------------------------------------------------------------------------
+// entry_key ordering (used as the std::map key for the pending-entry stacks)
+// ---------------------------------------------------------------------------------------
+
+TEST(category_region_cache, entry_key_ordering)
+{
+    entry_key a{ "aaa", "cat" };
+    entry_key b{ "bbb", "cat" };  // differs by name
+    entry_key c{ "aaa", "dog" };  // same name, differs by category
+
+    // different names are ordered by name
+    EXPECT_TRUE(a < b);
+    EXPECT_FALSE(b < a);
+
+    // equal names fall back to ordering by category
+    EXPECT_TRUE(a < c);
+    EXPECT_FALSE(c < a);
+
+    // fully equal keys: neither precedes the other
+    entry_key a_copy{ "aaa", "cat" };
+    EXPECT_FALSE(a < a_copy);
+    EXPECT_FALSE(a_copy < a);
+}
+
+// ---------------------------------------------------------------------------------------
+// cache_start (pushes a pending entry onto the per-thread stack)
+// ---------------------------------------------------------------------------------------
+
+TEST(category_region_cache, cache_start_pushes_pending_entry)
+{
+    using category_t = rocprofsys::category::host;
+    const char* name = "start_region";
+    entry_key   key{ name, rocprofsys::trait::name<category_t>::value };
+
+    map_name_to_args.clear();
+    cache_start<category_t>(name, serialize_name_value_pairs("a", 1, "b", 2));
+
+    auto itr = map_name_to_args.find(key);
+    ASSERT_TRUE(itr != map_name_to_args.end());
+    ASSERT_EQ(itr->second.size(), 1u);
+
+    const auto& entry = itr->second.back();
+    EXPECT_EQ(entry.arg_count, 2u);
+    EXPECT_GT(entry.start_ts, 0u);
+
+    auto args = parse(entry.args);
+    ASSERT_EQ(args.size(), 2u);
+    EXPECT_EQ(args[0].arg_name, "a");
+    EXPECT_EQ(args[1].arg_name, "b");
+
+    // a second push for the same key stacks a new (nested) pending entry; the argless
+    // overload records zero args
+    cache_start<category_t>(name);
+    ASSERT_EQ(map_name_to_args[key].size(), 2u);
+    EXPECT_EQ(map_name_to_args[key].back().arg_count, 0u);
+    EXPECT_TRUE(map_name_to_args[key].back().args.empty());
+
+    map_name_to_args.clear();
+}
+
 // ---------------------------------------------------------------------------------------
 // append_cache_args (free function operating on the per-thread pending-entry stack)
 // ---------------------------------------------------------------------------------------
