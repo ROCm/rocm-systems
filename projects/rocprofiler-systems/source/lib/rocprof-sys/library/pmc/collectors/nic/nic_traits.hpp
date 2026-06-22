@@ -150,9 +150,20 @@ struct nic_traits
             {
                 if(!device->is_supported())
                 {
-                    LOG_WARNING(
-                        "NIC device [{}] ({}) has no supported RDMA metrics, skipping",
-                        device->get_index(), device->get_name());
+                    // Warn only when the user explicitly requested this device; under
+                    // ALL an unsupported (e.g. non-RDMA) NIC is expected, not an error.
+                    if(filter.mode == device_selection_mode::SPECIFIC)
+                    {
+                        LOG_WARNING("Requested NIC device [{}] ({}) has no supported "
+                                    "RDMA metrics, skipping",
+                                    device->get_index(), device->get_name());
+                    }
+                    else
+                    {
+                        LOG_DEBUG("NIC device [{}] ({}) has no supported RDMA metrics, "
+                                  "skipping",
+                                  device->get_index(), device->get_name());
+                    }
                     continue;
                 }
                 LOG_INFO("NIC device [{}] ({}) enabled for AI NIC PMC sampling",
