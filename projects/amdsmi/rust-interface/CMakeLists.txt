@@ -63,7 +63,19 @@ add_custom_target(amdsmi_rust_source ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/sou
 find_program(CARGO_EXECUTABLE NAMES cargo)
 
 if(NOT CARGO_EXECUTABLE)
-    message(FATAL_ERROR "Cargo not found. Install Rust from https://rustup.rs before building the Rust interface.")
+    set(_CARGO_FALLBACK "$ENV{HOME}/.cargo/bin/cargo")
+    if(EXISTS "${_CARGO_FALLBACK}")
+        message(
+            WARNING
+            "cargo not found on PATH; using ${_CARGO_FALLBACK}. Add ~/.cargo/bin to PATH to suppress this warning."
+        )
+        set(CARGO_EXECUTABLE "${_CARGO_FALLBACK}")
+    else()
+        message(
+            FATAL_ERROR
+            "Cargo not found. Install Rust from https://rustup.rs and ensure ~/.cargo/bin is on your PATH."
+        )
+    endif()
 endif()
 
 # Determine the Cargo build command

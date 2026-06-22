@@ -61,9 +61,6 @@ levels as strings instead of dictionary objects**.
 - **Renamed "AINIC version" to "ionic version" in `amd-smi version` output**.  
   - The label now correctly reflects that it shows the ionic kernel driver version.
 
-- **Changed build process for rust interface to require Rust**.  
-  - The build process previsouly attempted to install rust automatically if it wasn't already present if the BUILD_RUST_WRAPPER option was enabled. This respresented a security risk, so users must now ensure that Rust is already installed before building amd-smi with the BUILD_RUST_WRAPPER option.
-
 ### Removed
 
 - **Removed the non-functional `--decode` flag from `amd-smi ras`**. Out-of-band CPER decoding is available via `amd-smi ras --afid --cper-file <path>` or `--afid --folder <DIR>`.
