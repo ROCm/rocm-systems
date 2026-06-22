@@ -4,9 +4,7 @@
 """Roofline coverage for the ``analyze`` roofline path.
 
 MI200 (gfx90a) tests run through the ``analyze`` CLI and assert that roofline
-HTML is generated, including the per-datatype VALU/MFMA legend. Unit-level
-coverage of ``Roofline`` (WMMA legends, ``cli_generate_plot`` guards) lives in
-``test_roofline_main.py``.
+HTML is generated, including the per-datatype VALU/MFMA legend.
 """
 
 import shutil
