@@ -246,3 +246,18 @@ contract:
   Contract_GraphUpdate_ExecMemcpyNodeSetParams1D_UpdatesCopyDestination:
     <<: *level_0
     tags: [graph_update]
+  Contract_HostMemory_HostMalloc_ReturnsUsablePointer:
+    <<: *level_0
+    tags: [host_memory]
+  Contract_HostMemory_HostFree_Succeeds:
+    <<: *level_0
+    tags: [host_memory]
+  Contract_HostMemory_HostRegisterUnregister_Succeeds:
+    <<: *level_0
+    tags: [host_memory]
+  Contract_HostMemory_HostGetDevicePointer_RoundTripsBytes:
+    <<: *level_0
+    tags: [host_memory]
+  Contract_HostMemory_HostGetFlags_IncludesRequestedFlags:
+    <<: *level_0
+    tags: [host_memory]
