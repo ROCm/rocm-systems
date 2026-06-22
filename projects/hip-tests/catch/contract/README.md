@@ -25,6 +25,9 @@ The first domains are:
 - `graph_update`: graph exec memcpy and memset node parameter update contracts
 - `host_memory`: host allocation, registration, device-pointer, and flag contracts
 - `pitched_memory`: pitched allocation and host/device 2D copy contracts
+- `array_memory`: HIP array allocation and 2D array copy contracts
+
+Some domains are capability-gated. For example, `array_memory` skips on devices without image/array support, and `pitched_memory` skips on runtime paths where `hipMallocPitch` reports out of memory for tiny allocations. These skips indicate an unsupported local capability, not a contract failure.
 
 Run the layer with:
 

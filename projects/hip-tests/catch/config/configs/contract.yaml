@@ -273,3 +273,15 @@ contract:
   Contract_PitchedMemory_FreePitchedAllocation_Succeeds:
     <<: *level_0
     tags: [pitched_memory]
+  Contract_ArrayMemory_MallocArray_ReturnsUsableArray:
+    <<: *level_0
+    tags: [array_memory]
+  Contract_ArrayMemory_Memcpy2DToArrayAndBack_RoundTripsBytes:
+    <<: *level_0
+    tags: [array_memory]
+  Contract_ArrayMemory_FreeArray_Succeeds:
+    <<: *level_0
+    tags: [array_memory]
+  Contract_ArrayMemory_ArrayGetInfo_ReturnsDescriptorIfAvailable:
+    <<: *level_0
+    tags: [array_memory]
