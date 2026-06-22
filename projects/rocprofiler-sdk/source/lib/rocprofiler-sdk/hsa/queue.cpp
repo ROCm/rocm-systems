@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/common/container/pool.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
@@ -83,6 +84,13 @@ namespace hsa
 namespace
 {
 constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
+
+bool
+debug_qi_hang()
+{
+    static const auto enabled = common::get_env("ROCPROFILER_DEBUG_QI_HANG", 0) != 0;
+    return enabled;
+}
 
 template <typename DomainT, typename... Args>
 inline bool
@@ -970,6 +978,25 @@ Queue::release_signal(pooled_signal_t* signal)
 {
     if(signal && signal->in_use())
     {
+        if(debug_qi_hang())
+        {
+            const auto value_before_release = get_core_table()->hsa_signal_load_scacquire_fn(
+                signal->get().value);
+            ROCP_WARNING << fmt::format("QI_RELEASE signal={} pool_index={} "
+                                        "value_before_release={} in_use={}",
+                                        signal->get().value.handle,
+                                        signal->index(),
+                                        value_before_release,
+                                        signal->in_use());
+            if(value_before_release != 0)
+            {
+                ROCP_WARNING << fmt::format(
+                    "QI_RELEASE_NONZERO signal={} pool_index={} value_before_release={}",
+                    signal->get().value.handle,
+                    signal->index(),
+                    value_before_release);
+            }
+        }
         // signal->get().data = nullptr;
         ROCP_WARNING_IF(!signal->release())
             << fmt::format("Failed to release a pooled signal: hsa_signal_t{{.handle={}}}",

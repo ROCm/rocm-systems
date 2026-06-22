@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
 #include "include/rocprofiler-sdk/kfd/kfd_id.h"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/mpl.hpp"
 #include "lib/common/static_object.hpp"
@@ -92,6 +93,13 @@ using queue_record_t              = rocprofiler_buffer_tracing_kfd_queue_record_
 namespace
 {
 using kfd_seq_t = std::make_index_sequence<KFD_EVENT_LAST>;
+
+bool
+debug_qi_hang()
+{
+    static const auto enabled = common::get_env("ROCPROFILER_DEBUG_QI_HANG", 0) != 0;
+    return enabled;
+}
 
 static_assert(kfd_bitmask(std::index_sequence<KFD_EVENT_PAGE_FAULT_START,
                                               KFD_EVENT_PAGE_MIGRATE_END,
@@ -1433,6 +1441,84 @@ emplace_event_buffer_record(const context_t* ctx, const kfd_event_record& rec)
 }
 
 void
+log_kfd_event_record(const kfd_event_record& event)
+{
+    if(!debug_qi_hang()) return;
+
+    switch(event.kind)
+    {
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE:
+        {
+            const auto& rec = event.data.page_migrate_event;
+            ROCP_WARNING << fmt::format(
+                "KFD_EVENT kind={} operation={} gpu_id={} pid={} timestamp={} address={} "
+                "migration_size={}",
+                static_cast<int>(event.kind),
+                event.operation,
+                rec.dst_agent.handle,
+                rec.pid,
+                rec.timestamp,
+                rec.start_address.value,
+                rec.end_address.value - rec.start_address.value);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT:
+        {
+            const auto& rec = event.data.page_fault_event;
+            ROCP_WARNING << fmt::format(
+                "KFD_EVENT kind={} operation={} gpu_id={} pid={} timestamp={} address={}",
+                static_cast<int>(event.kind),
+                event.operation,
+                rec.agent_id.handle,
+                rec.pid,
+                rec.timestamp,
+                rec.address.value);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE:
+        {
+            const auto& rec = event.data.queue_event;
+            ROCP_WARNING << fmt::format(
+                "KFD_EVENT kind={} operation={} gpu_id={} pid={} timestamp={}",
+                static_cast<int>(event.kind),
+                event.operation,
+                rec.agent_id.handle,
+                rec.pid,
+                rec.timestamp);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU:
+        {
+            const auto& rec = event.data.unmap_event;
+            ROCP_WARNING << fmt::format(
+                "KFD_EVENT kind={} operation={} gpu_id={} pid={} timestamp={} address={} "
+                "migration_size={}",
+                static_cast<int>(event.kind),
+                event.operation,
+                rec.agent_id.handle,
+                rec.pid,
+                rec.timestamp,
+                rec.start_address.value,
+                rec.end_address.value - rec.start_address.value);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS:
+        {
+            const auto& rec = event.data.dropped_event;
+            ROCP_WARNING << fmt::format(
+                "KFD_EVENT kind={} operation={} pid={} timestamp={} dropped_count={}",
+                static_cast<int>(event.kind),
+                event.operation,
+                rec.pid,
+                rec.timestamp,
+                rec.count);
+            break;
+        }
+        default: break;
+    }
+}
+
+void
 handle_reporting(std::string_view event_data)
 {
     // We can check the operation only after parsing the event
@@ -1449,6 +1535,8 @@ handle_reporting(std::string_view event_data)
         << fmt::format("kfd_events: Invalid record operation: ({}, {})",
                        static_cast<int>(event.kind),
                        event.operation);
+
+    log_kfd_event_record(event);
 
     auto buffered_contexts = get_contexts(event.kind);
 
@@ -1486,6 +1574,14 @@ poll_events(small_vector<pollfd> file_handles)
 
     pthread_setname_np(pthread_self(), "bg:poll-kfd");
 
+    if(debug_qi_hang())
+    {
+        ROCP_WARNING << fmt::format("KFD_THREAD_START thread={} fd_count={} exit_fd={}",
+                                    static_cast<unsigned long long>(pthread_self()),
+                                    file_handles.size(),
+                                    exitfd.fd);
+    }
+
     for(auto& fd : file_handles)
     {
         ROCP_INFO << fmt::format(
@@ -1498,13 +1594,30 @@ poll_events(small_vector<pollfd> file_handles)
 
         if(poll_ret == -1)
         {
+            const auto poll_errno = errno;
             ROCP_CI_LOG(WARNING)
                 << "Background thread file descriptors for page-migration are invalid";
+            if(debug_qi_hang())
+            {
+                ROCP_WARNING << fmt::format("KFD_POLL_ERROR ret={} errno={} fd_count={} "
+                                            "exit_revents={}",
+                                            poll_ret,
+                                            poll_errno,
+                                            file_handles.size(),
+                                            exitfd.revents);
+            }
             return;
         }
 
         if((exitfd.revents & POLLIN) != 0)
         {
+            if(debug_qi_hang())
+            {
+                ROCP_WARNING << fmt::format(
+                    "KFD_THREAD_EXIT reason=exitfd fd_count={} exit_revents={}",
+                    file_handles.size(),
+                    exitfd.revents);
+            }
             for(const auto& f : file_handles)
             {
                 close(f.fd);
@@ -1524,6 +1637,14 @@ poll_events(small_vector<pollfd> file_handles)
             if((fd.revents & POLLIN) != 0)
             {
                 size_t status_size   = read(fd.fd, scratch_buffer.data(), scratch_buffer.size());
+                if(debug_qi_hang())
+                {
+                    ROCP_WARNING << fmt::format("KFD_READ fd={} index={} status_size={} revents={}",
+                                                fd.fd,
+                                                i,
+                                                status_size,
+                                                fd.revents);
+                }
                 auto   event_strings = std::string_view{scratch_buffer.data(), status_size};
                 kfd_readlines(event_strings, handle_reporting);
             }

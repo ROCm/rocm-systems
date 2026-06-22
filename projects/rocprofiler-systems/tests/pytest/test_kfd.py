@@ -36,6 +36,7 @@ def kfd_environment() -> dict[str, str]:
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,kfd_events",
         "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING": "ON",
         "ROCPROFSYS_USE_AMD_SMI": "OFF",
+        "ROCPROFILER_DEBUG_QI_HANG": "1",
         "HSA_XNACK": "1",
     }
 

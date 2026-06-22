@@ -78,6 +78,13 @@ auto s_intercept_active    = std::atomic<bool>{false};  // actively intercepting
 auto s_intercept_dynamic   = std::atomic<bool>{false};  // dynamically add queue states
 
 bool
+debug_qi_hang()
+{
+    static const auto enabled = common::get_env("ROCPROFILER_DEBUG_QI_HANG", 0) != 0;
+    return enabled;
+}
+
+bool
 should_bypass_inline_intercept()
 {
     return (!s_intercept_installed.load(std::memory_order_acquire) ||
@@ -218,14 +225,54 @@ publish_submitted_packets(QueueState* state, uint64_t submit_pos)
         << "publish_submitted_packets: submit_pos (" << submit_pos
         << ") regressed below last_published_submit_pos (" << tls.last_published_submit_pos << ")";
 
+    const auto debug = debug_qi_hang();
+    auto       real_rdid = uint64_t{0};
+    if(debug)
+    {
+        const auto prev_real_wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
+        real_rdid                 = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
+        ROCP_WARNING << fmt::format(
+            "QI_PUBLISH_BEGIN submit_pos={} prev_real_wdid={} real_rdid={} doorbell_value={} "
+            "last_published_submit_pos={}",
+            submit_pos,
+            prev_real_wdid,
+            real_rdid,
+            submit_pos - 1,
+            tls.last_published_submit_pos);
+        if(submit_pos < prev_real_wdid)
+        {
+            ROCP_WARNING << fmt::format(
+                "QI_PUBLISH_REGRESS submit_pos={} prev_real_wdid={} real_rdid={} "
+                "last_published_submit_pos={}",
+                submit_pos,
+                prev_real_wdid,
+                real_rdid,
+                tls.last_published_submit_pos);
+        }
+    }
+
     __atomic_store_n(state->real_wdid, submit_pos, __ATOMIC_RELEASE);
     (*tls.ring_doorbell)(state->doorbell_signal, static_cast<hsa_signal_value_t>(submit_pos - 1));
+    if(debug)
+    {
+        ROCP_WARNING << fmt::format(
+            "QI_PUBLISH_END submit_pos={} new_real_wdid={} real_rdid={} doorbell_value={}",
+            submit_pos,
+            __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE),
+            real_rdid,
+            submit_pos - 1);
+    }
     tls.last_published_submit_pos = submit_pos;
 }
 
 inline void
 wait_for_free_slot(QueueState* state, uint64_t submit_pos)
 {
+    const auto debug         = debug_qi_hang();
+    auto       wait_start    = std::chrono::steady_clock::time_point{};
+    auto       next_stall_ms = int64_t{1000};
+    if(debug) wait_start = std::chrono::steady_clock::now();
+
     while(true)
     {
         auto real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
@@ -239,6 +286,25 @@ wait_for_free_slot(QueueState* state, uint64_t submit_pos)
         // packets beyond the last visible write index, publish progress so the
         // consumer can observe and drain them.
         publish_submitted_packets(state, submit_pos);
+        if(debug)
+        {
+            const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        std::chrono::steady_clock::now() - wait_start)
+                                        .count();
+            if(elapsed_ms >= next_stall_ms)
+            {
+                ROCP_WARNING << fmt::format(
+                    "QI_RING_FULL_STALL elapsed_ms={} submit_pos={} real_rdid={} real_wdid={} "
+                    "ring_used={} ring_size={}",
+                    elapsed_ms,
+                    submit_pos,
+                    real_rdid,
+                    __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE),
+                    ring_used,
+                    state->ring_size);
+                next_stall_ms = elapsed_ms + 5000;
+            }
+        }
         cpu_relax();
     }
 }
@@ -343,6 +409,39 @@ async_signal_handler(hsa_signal_t                            completion_signal,
 
     auto signal_value = starting_value;
     auto niterations  = uint64_t{0};
+    const auto debug         = debug_qi_hang();
+    auto       wait_start    = std::chrono::steady_clock::time_point{};
+    auto       next_stall_ms = int64_t{1000};
+
+    auto last_dispatch_id   = rocprofiler_dispatch_id_t{0};
+    auto last_kernel_id     = uint64_t{0};
+    auto last_signal_pooled = false;
+    auto queue_id           = rocprofiler_queue_id_t{.handle = 0};
+    if(debug) wait_start = std::chrono::steady_clock::now();
+    if(debug && !session->packet_data.empty())
+    {
+        const auto& last_packet = session->packet_data.back();
+        last_dispatch_id       = last_packet.callback_record.dispatch_info.dispatch_id;
+        last_kernel_id         = last_packet.callback_record.dispatch_info.kernel_id;
+        last_signal_pooled     = (last_packet.pooled_signal != nullptr);
+        queue_id               = last_packet.callback_record.dispatch_info.queue_id;
+    }
+
+    if(debug)
+    {
+        ROCP_WARNING << fmt::format(
+            "QI_WAIT_START signal={} starting_value={} packet_count={} queue_id={} queue_ptr={} "
+            "last_dispatch_id={} last_kernel_id={} last_signal_pooled={} fini_status={}",
+            completion_signal.handle,
+            starting_value,
+            session->packet_data.size(),
+            queue_id.handle,
+            fmt::ptr(session->queue.intercept_queue()),
+            last_dispatch_id,
+            last_kernel_id,
+            last_signal_pooled,
+            registration::get_fini_status());
+    }
 
     // Stop only on completion or finalization; never run cleanup while the kernel is live.
     while(true)
@@ -367,6 +466,53 @@ async_signal_handler(hsa_signal_t                            completion_signal,
                 niterations,
                 signal_value,
                 starting_value);
+
+        if(debug)
+        {
+            const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        std::chrono::steady_clock::now() - wait_start)
+                                        .count();
+            if(elapsed_ms >= next_stall_ms)
+            {
+                ROCP_WARNING << fmt::format(
+                    "QI_WAIT_STALL elapsed_ms={} iterations={} signal={} value={} "
+                    "starting_value={} queue_id={} queue_ptr={} last_dispatch_id={} "
+                    "last_kernel_id={} last_signal_pooled={} fini_status={}",
+                    elapsed_ms,
+                    niterations,
+                    completion_signal.handle,
+                    signal_value,
+                    starting_value,
+                    queue_id.handle,
+                    fmt::ptr(session->queue.intercept_queue()),
+                    last_dispatch_id,
+                    last_kernel_id,
+                    last_signal_pooled,
+                    registration::get_fini_status());
+                next_stall_ms = elapsed_ms + 5000;
+            }
+        }
+    }
+
+    if(debug)
+    {
+        const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - wait_start)
+                                    .count();
+        const auto* reason = (signal_value < starting_value)          ? "completed"
+                             : (registration::get_fini_status() != 0) ? "fini"
+                                                                      : "unknown";
+        ROCP_WARNING << fmt::format(
+            "QI_WAIT_DONE reason={} elapsed_ms={} iterations={} signal={} final_value={} "
+            "starting_value={} packet_count={} fini_status={}",
+            reason,
+            elapsed_ms,
+            niterations,
+            completion_signal.handle,
+            signal_value,
+            starting_value,
+            session->packet_data.size(),
+            registration::get_fini_status());
     }
 
     ROCP_INFO << fmt::format("Async signal handler invoked for signal {{.handle={}}} with "
@@ -383,11 +529,50 @@ async_signal_handler(hsa_signal_t                            completion_signal,
 
     for(auto& packet : session->packet_data)
     {
+        const auto dispatch_id = packet.callback_record.dispatch_info.dispatch_id;
+        const auto kernel_id   = packet.callback_record.dispatch_info.kernel_id;
+        const auto packet_queue_id = packet.callback_record.dispatch_info.queue_id;
+        const auto pooled     = (packet.pooled_signal != nullptr);
+
+        if(debug)
+        {
+            ROCP_WARNING << fmt::format(
+                "QI_DISPATCH_COMPLETE_BEGIN dispatch_id={} kernel_id={} signal={} pooled={} "
+                "queue_id={}",
+                dispatch_id,
+                kernel_id,
+                packet.completion_signal.handle,
+                pooled,
+                packet_queue_id.handle);
+        }
         auto dispatch_time = kernel_dispatch::get_dispatch_time(*session, packet);
         kernel_dispatch::dispatch_complete(*session, packet, dispatch_time);
+        if(debug)
+        {
+            ROCP_WARNING << fmt::format(
+                "QI_DISPATCH_COMPLETE_END dispatch_id={} kernel_id={} signal={} pooled={} "
+                "queue_id={}",
+                dispatch_id,
+                kernel_id,
+                packet.completion_signal.handle,
+                pooled,
+                packet_queue_id.handle);
+        }
 
         // if the completion signal was from the pool, we just release it back to the pool for
         // reuse.
+        if(debug)
+        {
+            ROCP_WARNING << fmt::format(
+                "QI_SIGNAL_CLEANUP dispatch_id={} kernel_id={} signal={} pooled={} "
+                "value_before_cleanup={} action={}",
+                dispatch_id,
+                kernel_id,
+                packet.completion_signal.handle,
+                pooled,
+                get_core_table()->hsa_signal_load_scacquire_fn(packet.completion_signal),
+                pooled ? "release_pool" : "subtract_app_signal");
+        }
         if(packet.pooled_signal)
         {
             Queue::release_signal(packet.pooled_signal);
@@ -584,7 +769,15 @@ write_interceptor(Queue*                                queue,
             if(!existing_completion_signal)
                 _packet_data.pooled_signal = create_signal(&completion_signal);
 
+            const auto value_before_sigadd = (debug_qi_hang())
+                                                 ? get_core_table()->hsa_signal_load_scacquire_fn(
+                                                       completion_signal)
+                                                 : hsa_signal_value_t{0};
             get_core_table()->hsa_signal_add_scacq_screl_fn(completion_signal, 1);
+            const auto value_after_sigadd = (debug_qi_hang())
+                                                ? get_core_table()->hsa_signal_load_scacquire_fn(
+                                                      completion_signal)
+                                                : hsa_signal_value_t{0};
 
             // set the completion signal to the kernel packet
             _packet_data.completion_signal = completion_signal;
@@ -617,6 +810,21 @@ write_interceptor(Queue*                                queue,
                                                     kernel_packet.kernel_dispatch.grid_size_y,
                                                     kernel_packet.kernel_dispatch.grid_size_z},
                     .reserved_padding = {0}}};
+
+            if(debug_qi_hang())
+            {
+                ROCP_WARNING << fmt::format(
+                    "QI_SIGADD dispatch_id={} kernel_id={} signal={} pooled={} existing={} "
+                    "value_before={} value_after={} queue_id={}",
+                    dispatch_id,
+                    kernel_id,
+                    completion_signal.handle,
+                    _packet_data.pooled_signal != nullptr,
+                    existing_completion_signal,
+                    value_before_sigadd,
+                    value_after_sigadd,
+                    queue->get_id().handle);
+            }
 
             {
                 auto tracer_data = _packet_data.callback_record;
@@ -676,6 +884,20 @@ write_interceptor(Queue*                                queue,
                 last_completion_signal.handle,
                 current_signal_value);
 
+            if(debug_qi_hang())
+            {
+                const auto& last_packet = _info_session.packet_data.back();
+                ROCP_WARNING << fmt::format(
+                    "QI_WATCH signal={} starting_value={} last_dispatch_id={} last_kernel_id={} "
+                    "packet_count={} queue_id={}",
+                    last_completion_signal.handle,
+                    current_signal_value,
+                    last_packet.callback_record.dispatch_info.dispatch_id,
+                    last_packet.callback_record.dispatch_info.kernel_id,
+                    _info_session.packet_data.size(),
+                    last_packet.callback_record.dispatch_info.queue_id.handle);
+            }
+
             auto _shared_info_session =
                 std::make_shared<queue_info_session_t>(std::move(_info_session));
             get_async_signal_handler()->async(
@@ -716,6 +938,18 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
     if(scan_pos >= wptr_end)
     {
+        if(debug_qi_hang())
+        {
+            ROCP_WARNING << fmt::format(
+                "QI_EARLY_SCANGE queue={} value={} scan_pos={} wptr_end={} real_wdid={} "
+                "real_rdid={}",
+                fmt::ptr(state_ptr->hsa_queue),
+                value,
+                scan_pos,
+                wptr_end,
+                __atomic_load_n(state_ptr->real_wdid, __ATOMIC_ACQUIRE),
+                __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE));
+        }
         ring_doorbell(state_ptr->doorbell_signal, value);
         return;
     }
@@ -744,6 +978,18 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
     if(drained == 0)
     {
+        if(debug_qi_hang())
+        {
+            ROCP_WARNING << fmt::format(
+                "QI_EARLY_DRAINED0 queue={} value={} scan_pos={} wptr_end={} real_wdid={} "
+                "real_rdid={}",
+                fmt::ptr(state_ptr->hsa_queue),
+                value,
+                scan_pos,
+                wptr_end,
+                __atomic_load_n(state_ptr->real_wdid, __ATOMIC_ACQUIRE),
+                __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE));
+        }
         ring_doorbell(state_ptr->doorbell_signal, value);
         return;
     }
@@ -791,6 +1037,40 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
     state_ptr->next_scan_pos   = scan_end;
     state_ptr->next_submit_pos = tls.submit_pos;
+
+    if(debug_qi_hang())
+    {
+        const auto expected = wptr_end - scan_pos;
+        ROCP_WARNING << fmt::format(
+            "QI_DOORBELL queue={} value={} scan_pos={} wptr_end={} expected={} drained={} "
+            "next_submit_pos={} real_wdid={} real_rdid={} virtual_wptr={}",
+            fmt::ptr(state_ptr->hsa_queue),
+            value,
+            scan_pos,
+            wptr_end,
+            expected,
+            drained,
+            state_ptr->next_submit_pos,
+            __atomic_load_n(state_ptr->real_wdid, __ATOMIC_ACQUIRE),
+            __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE),
+            state_ptr->virtual_wptr.load(std::memory_order_acquire));
+        if(drained != expected)
+        {
+            ROCP_WARNING << fmt::format(
+                "QI_LOST_REMAINDER queue={} value={} scan_pos={} wptr_end={} expected={} "
+                "drained={} next_submit_pos={} real_wdid={} real_rdid={} virtual_wptr={}",
+                fmt::ptr(state_ptr->hsa_queue),
+                value,
+                scan_pos,
+                wptr_end,
+                expected,
+                drained,
+                state_ptr->next_submit_pos,
+                __atomic_load_n(state_ptr->real_wdid, __ATOMIC_ACQUIRE),
+                __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE),
+                state_ptr->virtual_wptr.load(std::memory_order_acquire));
+        }
+    }
 
     auto real_rdid = __atomic_load_n(state_ptr->real_rdid, __ATOMIC_ACQUIRE);
     auto ring_used = (state_ptr->next_submit_pos - real_rdid);
