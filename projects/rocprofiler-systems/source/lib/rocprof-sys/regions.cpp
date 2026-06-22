@@ -45,7 +45,7 @@ invoke_category_region_start(rocprofsys_category_t _category, const char* name,
             });
         // Annotation lambda cannot be decoded in category_region::start(),
         // append args here
-        if(_annotations && config::get_perfetto_annotations())
+        if(_annotations)
             component::category_region<category_type>::append_cache_args(
                 name, serialize_annotation_args(std::span<const rocprofsys_annotation_t>{
                           _annotations, _annotation_count }));
@@ -77,7 +77,7 @@ invoke_category_region_stop(rocprofsys_category_t _category, const char* name,
         if(!trait::runtime_enabled<category_type>::get()) return;
 
         // Append pop-time annotations to the cached entry before stop() flushes it
-        if(_annotations && config::get_perfetto_annotations())
+        if(_annotations)
             component::category_region<category_type>::append_cache_args(
                 name, serialize_annotation_args(std::span<const rocprofsys_annotation_t>{
                           _annotations, _annotation_count }));
