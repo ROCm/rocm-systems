@@ -706,19 +706,22 @@ int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
 }
 
 void AqlQueue::Suspend() {
-  suspended_ = true;
-  [[maybe_unused]] auto err =
-      agent_->driver().UpdateQueue(queue_id_, 0, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL);
+  auto err =
+      agent_->driver().UpdateQueue(queue_id_, 0, priority_, ring_buf_, ring_buf_alloc_bytes_, nullptr);
   assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
+  if (err == HSA_STATUS_SUCCESS) {
+    suspended_ = true;
+  }
 }
 
 void AqlQueue::Resume() {
   if (suspended_) {
-    suspended_ = false;
     auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_, ring_buf_,
-                                            ring_buf_alloc_bytes_, NULL);
-    // Best-effort resume - log but continue on failure
-    (void)err;
+                                            ring_buf_alloc_bytes_, nullptr);
+    assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
+    if (err == HSA_STATUS_SUCCESS) {
+      suspended_ = false;
+    }
   }
 }
 
@@ -1714,13 +1717,15 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
 
     if (in_signal) hsa_signal_store_screlease(*in_signal, 0);
   } else if (!in_signal) {
-    // On gfx9 and newer, if in_signal is not provided, we block and wait for own signal
+    // On gfx9 and newer, if in_signal is not provided, we block and wait for own signal.
+    // hsa_signal_wait can return spuriously, so loop until condition is met.
     hsa_signal_value_t ret;
-    ret = hsa_signal_wait_scacquire(local_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                    HSA_WAIT_STATE_ACTIVE);
-    err = hsa_signal_destroy(local_signal);
-    (void)ret;
-    (void)err;
+    do {
+      ret = hsa_signal_wait_scacquire(local_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                      HSA_WAIT_STATE_ACTIVE);
+      if (ret == 0) break;
+    } while (true);
+    hsa_signal_destroy(local_signal);
   }
 }
 

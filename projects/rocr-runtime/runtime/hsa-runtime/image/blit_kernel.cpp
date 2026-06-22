@@ -119,19 +119,19 @@ static void* Allocate(hsa_agent_t agent, size_t size) {
   //use the host accessible kernarg pool
   hsa_amd_memory_pool_t pool = ImageRuntime::instance()->kernarg_pool();
 
-  void* ptr = NULL;
+  void* ptr = nullptr;
 
   hsa_status_t status = AMD::hsa_amd_memory_pool_allocate(pool, size, 0, &ptr);
   assert(status == HSA_STATUS_SUCCESS);
 
-  if (status != HSA_STATUS_SUCCESS) return NULL;
+  if (status != HSA_STATUS_SUCCESS) return nullptr;
 
-  status = AMD::hsa_amd_agents_allow_access(1, &agent, NULL, ptr);
+  status = AMD::hsa_amd_agents_allow_access(1, &agent, nullptr, ptr);
   assert(status == HSA_STATUS_SUCCESS);
 
   if (status != HSA_STATUS_SUCCESS) {
     AMD::hsa_amd_memory_pool_free(ptr);
-    return NULL;
+    return nullptr;
   }
   return ptr;
 }
@@ -255,14 +255,14 @@ hsa_status_t BlitKernel::CopyBufferToImage(
     return HSA::hsa_memory_copy(dst_memory, src_memory, size);
   }
 
-  const Image* dst_image_view = NULL;
+  const Image* dst_image_view = nullptr;
 
   hsa_status_t status = ConvertImage(dst_image, &dst_image_view);
   if (HSA_STATUS_SUCCESS != status) {
     return status;
   }
 
-  assert(dst_image_view != NULL);
+  assert(dst_image_view != nullptr);
 
   hsa_kernel_dispatch_packet_t packet = { };
 
@@ -365,14 +365,14 @@ hsa_status_t BlitKernel::CopyImageToBuffer(
     return HSA::hsa_memory_copy(dst_memory, src_memory, size);
   }
 
-  const Image* src_image_view = NULL;
+  const Image* src_image_view = nullptr;
 
   hsa_status_t status = ConvertImage(src_image, &src_image_view);
   if (HSA_STATUS_SUCCESS != status) {
     return status;
   }
 
-  assert(src_image_view != NULL);
+  assert(src_image_view != nullptr);
 
   hsa_kernel_dispatch_packet_t packet = { };
 
@@ -465,7 +465,7 @@ hsa_status_t BlitKernel::CopyImage(
 
   const Image* src_image_view = &src_image;
   const Image* dst_image_view = &dst_image;
-  const BlitCodeInfo* blit_code = NULL;
+  const BlitCodeInfo* blit_code = nullptr;
 
   if (copy_type == KERNEL_OP_COPY_IMAGE_DEFAULT) {
     // Linear to linear image copy.
@@ -475,14 +475,14 @@ hsa_status_t BlitKernel::CopyImage(
       return status;
     }
 
-    assert(src_image_view != NULL);
+    assert(src_image_view != nullptr);
 
     status = ConvertImage(dst_image, &dst_image_view);
     if (HSA_STATUS_SUCCESS != status) {
       return status;
     }
 
-    assert(dst_image_view != NULL);
+    assert(dst_image_view != nullptr);
 
     const hsa_ext_image_geometry_t src_geometry = src_image_view->desc.geometry;
     const hsa_ext_image_geometry_t dst_geometry = dst_image_view->desc.geometry;
@@ -940,7 +940,7 @@ hsa_status_t BlitKernel::LaunchKernel(BlitQueue& blit_queue,
 
   // Setup completion signal.
   hsa_signal_t kernel_signal = {0};
-  hsa_status_t status = HSA::hsa_signal_create(1, 0, NULL, &kernel_signal);
+  hsa_status_t status = HSA::hsa_signal_create(1, 0, nullptr, &kernel_signal);
   if (HSA_STATUS_SUCCESS != status) {
     return status;
   }
