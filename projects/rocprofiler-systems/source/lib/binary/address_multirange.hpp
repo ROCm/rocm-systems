@@ -26,6 +26,8 @@ struct address_multirange
     address_multirange& operator+=(address_range _v);
 
     template <typename Tp>
+        requires(std::is_integral_v<concepts::unqualified_type_t<Tp>> ||
+                 std::is_same_v<concepts::unqualified_type_t<Tp>, address_range>)
     bool contains(Tp&& _v) const;
 
     auto size() const { return m_fine_ranges.size(); }
@@ -40,14 +42,11 @@ private:
 };
 
 template <typename Tp>
+    requires(std::is_integral_v<concepts::unqualified_type_t<Tp>> ||
+             std::is_same_v<concepts::unqualified_type_t<Tp>, address_range>)
 ROCPROFSYS_INLINE bool
 address_multirange::contains(Tp&& _v) const
 {
-    using type = concepts::unqualified_type_t<Tp>;
-    static_assert(std::is_integral<type>::value ||
-                      std::is_same<type, address_range>::value,
-                  "Error! operator+= supports only integrals or address_ranges");
-
     if(!m_coarse_range.contains(_v)) return false;
     return std::any_of(m_fine_ranges.begin(), m_fine_ranges.end(),
                        [_v](auto&& itr) { return itr.contains(_v); });

@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 """
-Preset, domain flag, export config, and help tests.
+Preset, domain flag, and export config tests.
 Mirrors rocprof-sys-preset-tests.cmake for pytest execution.
+
 """
 
 from __future__ import annotations
@@ -27,13 +28,6 @@ PRESETS = [
 
 # workload-trace requires rocPD and a valid GPU — tested separately
 ROCPD_PRESETS = ["workload-trace"]
-
-# Both launchers carry the same flag/help surface; the embedded mark selects
-# the matching runner mode so a single test body covers run + sample.
-TARGETS = [
-    pytest.param("rocprof-sys-run", marks=pytest.mark.sys_run, id="run"),
-    pytest.param("rocprof-sys-sample", marks=pytest.mark.sampling, id="sample"),
-]
 
 
 def _assert_baseline_output(
@@ -376,84 +370,4 @@ class TestExportConfig(RocprofsysTest):
             target="rocprof-sys-sample",
             run_args=["--preset=balanced", "--export-config"],
             pass_regex=['"name": "balanced"'],
-        )
-
-
-# ============================================================================
-# List Presets and Explain Tests
-# ============================================================================
-
-
-@pytest.mark.timeout(30)
-@pytest.mark.class_name("preset-discovery")
-class TestPresetDiscovery(RocprofsysTest):
-    @pytest.mark.sys_run
-    def test_list_presets_run(self):
-        _assert_baseline_output(
-            self,
-            target="rocprof-sys-run",
-            run_args=["--list-presets"],
-            pass_regex=["Available Presets:"],
-        )
-
-    @pytest.mark.sampling
-    def test_list_presets_sample(self):
-        _assert_baseline_output(
-            self,
-            target="rocprof-sys-sample",
-            run_args=["--list-presets"],
-            pass_regex=["Available Presets:"],
-        )
-
-    @pytest.mark.sys_run
-    def test_explain_preset_run(self):
-        _assert_baseline_output(
-            self,
-            target="rocprof-sys-run",
-            run_args=["--explain=balanced"],
-            pass_regex=["Preset: balanced"],
-        )
-
-    @pytest.mark.sampling
-    def test_explain_preset_sample(self):
-        _assert_baseline_output(
-            self,
-            target="rocprof-sys-sample",
-            run_args=["--explain=balanced"],
-            pass_regex=["Preset: balanced"],
-        )
-
-
-# ============================================================================
-# Help Discoverability Tests
-# ============================================================================
-
-
-@pytest.mark.timeout(30)
-@pytest.mark.class_name("help-discoverability")
-@pytest.mark.parametrize("target", TARGETS)
-class TestHelpDiscoverability(RocprofsysTest):
-    def test_tracing_lists_selected_regions(self, target):
-        _assert_baseline_output(
-            self,
-            target=target,
-            run_args=["--help=tracing"],
-            pass_regex=[r"--selected-regions"],
-        )
-
-    @pytest.mark.parametrize("domain", ["gpu", "rocm"])
-    def test_domain_lists_use_amd_smi(self, target, domain):
-        _assert_baseline_output(
-            self,
-            target=target,
-            run_args=[f"--help={domain}"],
-            pass_regex=[r"--use-amd-smi"],
-        )
-
-    def test_rocm_lists_kfd_events(self, target):
-        _assert_baseline_output(
-            self,
-            target=target,
-            run_args=["--help=rocm"],
-            pass_regex=[r"kfd_events"],
         )

@@ -9,7 +9,6 @@ env:
   AIS_INPUT_CXX_STANDARD: ${{ inputs.cxx_standard }}
   AIS_INPUT_JOB_DESIGNATOR: ${{ inputs.job_designator }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
-  AIS_INPUT_UPLOAD_ARTIFACTS: ${{ inputs.upload_artifacts }}
   AIS_MOUNT_PATH: /mnt/ais/ext4
   AIS_PKG_MGR: >-
     ${{
@@ -99,14 +98,14 @@ jobs:
         run: |
           echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
           echo "AIS_GHA_CMD_FILES_DIR=${GITHUB_ENV%/*}" >> "${GITHUB_ENV}"
-          echo "AIS_SAFE_COMPILER_NAME=$(echo ${AIS_INPUT_CXX_COMPILER} | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
+          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
         # We should expect that there are multiple instances of this job with different cxx_compilers.
         # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
         run: |
           echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
       - name: Fetching code repository...
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           path: rocm-systems
@@ -149,14 +148,19 @@ jobs:
         run: |
           docker exec \
             -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
+            -e "_AIS_SAFE_COMPILER_NAME=${AIS_SAFE_COMPILER_NAME}" \
+            -e "_AIS_INPUT_CXX_STANDARD=${AIS_INPUT_CXX_STANDARD}" \
             -e "BUILD_ID=${AIS_INPUT_BUILD_ID}" \
             -e "JOB_DESIGNATOR=${AIS_INPUT_JOB_DESIGNATOR}" \
             -t \
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              export CPACK_DEBIAN_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}~$(source /etc/os-release && echo ${VERSION_ID})"
-              export CPACK_RPM_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}"
+              # Embed compiler+standard in the package release so the per-combo
+              # artifacts (named after the package filename) stay unique.
+              _AIS_CXX_TAG="${_AIS_SAFE_COMPILER_NAME}.cxx${_AIS_INPUT_CXX_STANDARD}"
+              export CPACK_DEBIAN_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}.${_AIS_CXX_TAG}~$(source /etc/os-release && echo ${VERSION_ID})"
+              export CPACK_RPM_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}.${_AIS_CXX_TAG}"
               cmake \
                 -DCMAKE_BUILD_TYPE=Debug \
                 -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
@@ -328,14 +332,26 @@ jobs:
           docker cp \
             "${AIS_CONTAINER_NAME}:/ais/build/hipfile" \
             ${GITHUB_WORKSPACE}/hipfile-build-dir
-      - name: Upload runtime hipFile package as an artifact
+      # Trim build intermediates the self-hosted system-test job doesn't need
+      # before uploading. ctest only needs the test executables, runtime *.so's
+      # and the CTestTestfile.cmake chain -- not the *.o (CMakeFiles/), the
+      # FetchContent source/subbuild trees, or the coverage data the build job
+      # already consumed.
+      - name: Prune build directory before upload
+        if: ${{ inputs.upload_artifacts }}
+        run: |
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type d -name CMakeFiles -prune -exec rm -rf {} +
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type d -path '*/_deps/*' \( -name '*-src' -o -name '*-subbuild' \) -prune -exec rm -rf {} +
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type f \( -name '*.profraw' -o -name '*.profdata' -o -name '*.gcno' -o -name '*.gcda' -o -name 'coverage-*.txt' \) -delete
+      - name: Upload hipFile build directory as an artifact
         if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: hipfile-build-dir-${{ inputs.platform }}
+          name: hipfile-build-dir-${{ inputs.platform }}-${{ inputs.rocm_version }}-${{ inputs.cxx_compiler }}-cxx${{ inputs.cxx_standard }}
           path: ${{ github.workspace }}/hipfile-build-dir
           if-no-files-found: error
           retention-days: 1
+          compression-level: 9
       - name: Clean CMake build directories
         run: |
           docker exec \

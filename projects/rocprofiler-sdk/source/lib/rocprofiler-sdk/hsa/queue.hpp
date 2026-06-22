@@ -163,7 +163,7 @@ public:
 
     // Tracks the number of in flight kernel executions we
     // are waiting on. We cannot destroy Queue until all kernels
-    // have comleted.
+    // have completed.
     void    async_started() { _core_api.hsa_signal_add_relaxed_fn(_active_kernels, 1); }
     void    async_complete() { _core_api.hsa_signal_subtract_relaxed_fn(_active_kernels, 1); }
     int64_t active_async_packets() const

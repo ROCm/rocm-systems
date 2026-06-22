@@ -77,7 +77,7 @@ public:
     {
         if(is_mi300_)
         {
-            // PRED_EXEC aplies to MI300 only
+            // PRED_EXEC applies to MI300 only
             pos_ = cmd_buffer->DwSize();
             builder.BuildPredExecPacket(cmd_buffer, target_xcc_, 0);
             initial_buff_size_ = cmd_buffer->DwSize();
@@ -88,7 +88,7 @@ public:
     {
         if(is_mi300_)
         {
-            // PRED_EXEC aplies to MI300 only
+            // PRED_EXEC applies to MI300 only
             CmdBuffer pred_exec;
             // update first PRED_EXEC packet to its correct value
             builder.BuildPredExecPacket(
@@ -306,7 +306,7 @@ public:
         return 1;
     };
 
-    // Build PMC enable PM4 comands - enable CP counting for a specific queue
+    // Build PMC enable PM4 commands - enable CP counting for a specific queue
     void Enable(CmdBuffer* cmd_buffer)
     {
         // Program Compute Perfcount Enable register to support perf counting
@@ -314,7 +314,7 @@ public:
                                       Primitives::COMPUTE_PERFCOUNT_ENABLE_ADDR,
                                       Primitives::cp_perfcount_enable_value());
     }
-    // Build PMC disable PM4 comands - enable CP counting for a specific queue
+    // Build PMC disable PM4 commands - enable CP counting for a specific queue
     void Disable(CmdBuffer* cmd_buffer)
     {
         // Program Compute Perfcount Enable register to support perf counting
@@ -322,14 +322,14 @@ public:
                                       Primitives::COMPUTE_PERFCOUNT_ENABLE_ADDR,
                                       Primitives::cp_perfcount_disable_value());
     }
-    // Build PMC waite-idle PM4 comands - enable CP counting for a specific queue
+    // Build PMC waite-idle PM4 commands - enable CP counting for a specific queue
     void WaitIdle(CmdBuffer* cmd_buffer)
     {
         // Program Compute Perfcount WaiteIdle register to support perf counting
         builder.BuildWriteWaitIdlePacket(cmd_buffer);
     }
 
-    // Build PMC start PM4 comands
+    // Build PMC start PM4 commands
     void Start(CmdBuffer* cmd_buffer, const counters_vector& counters_vec) override
     {
         // Issue barrier command
@@ -346,7 +346,7 @@ public:
         // Reset perf counters
         SetPerfmonCntl(
             cmd_buffer, Primitives::cp_perfmon_cntl_reset_value(), counters_vec.get_attr());
-        // Enable SQ Counter Control enable perfomance counter in graphics pipeline if implied
+        // Enable SQ Counter Control enable performance counter in graphics pipeline if implied
         Primitives::validate_counters(counters_vec.get_attr());
         if(counters_vec.get_attr() & CounterBlockTcAttr)
         {
@@ -472,7 +472,7 @@ public:
                 }
                 else
                 {
-                    // MI200 and MI300 have seperate select and control registers
+                    // MI200 and MI300 have separate select and control registers
                     const auto sdma_index = counter_des.block_des.index;
                     const auto target_aid_index =
                         sdma_index / (block_info->instance_count / MAX_AID);
@@ -746,7 +746,7 @@ public:
             }
             else if(block_info->attr & CounterBlockSdmaAttr)
             {
-                // Stop SDMA: this code path appplies only to non-MI300
+                // Stop SDMA: this code path applies only to non-MI300
                 if(reg_info.control_addr.offset == 0)
                 {
                     // MI100: stopped per instance
@@ -907,7 +907,7 @@ public:
         return read_counter * sizeof(uint32_t);
     }
 
-    // Build PMC stop PM4 comands
+    // Build PMC stop PM4 commands
     void Stop(CmdBuffer* cmd_buffer, const counters_vector& counters_vec) override
     {
         GCMode gc_mode =
@@ -1003,7 +1003,7 @@ public:
         builder.BuildWriteWaitIdlePacket(cmd_buffer);
     }
 
-    // Build PMC read PM4 comands
+    // Build PMC read PM4 commands
     uint32_t Read(CmdBuffer*             cmd_buffer,
                   const counters_vector& counters_vec,
                   void*                  data_buffer) override

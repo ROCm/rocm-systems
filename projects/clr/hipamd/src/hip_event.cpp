@@ -207,7 +207,26 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
 
   constexpr bool kMarkerTs = true;
   constexpr bool kFlushCache = false;
-  command = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags, batch_flush);
+
+  // Check hipEventDisableTiming flag to skip profiling/timing infrastructure
+  const bool enable_profiling = !(flags & hipEventDisableTiming);
+
+  auto* marker = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags,
+                                      batch_flush, enable_profiling);
+
+  // Only timing-disabled events opt into coalescing: a non-null coalesceEvent()
+  // marks the record eligible and carries its identity for the device layer.
+  if (flags & hipEventDisableTiming) {
+    // Assign monotonic ID on first record to avoid address-reuse collision
+    if (coalesce_id_ == 0) {
+      coalesce_id_ = GenerateCoalesceId();
+    }
+    marker->setCoalesceEvent(coalesce_id_);
+    marker->setSyncedSinceRecord(WasSyncedSinceLastRecord());
+  }
+
+  command = marker;
+
   return hipSuccess;
 }
 
@@ -422,6 +441,7 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, uint32_t 
   }
 
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
   auto* const e = reinterpret_cast<hip::Event*>(event);
   auto* const hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
@@ -544,6 +564,10 @@ hipError_t hipEventSynchronize(hipEvent_t event) {
 
   auto* e = reinterpret_cast<hip::Event*>(event);
   const auto status = e->synchronize();
+  // Mark event as synced to prevent coalescing until next record
+  if (status == hipSuccess) {
+    e->MarkSynced();
+  }
   // Release freed memory for all memory pools on the device
   g_devices[e->deviceId()]->ReleaseFreedMemory();
   HIP_RETURN(status);

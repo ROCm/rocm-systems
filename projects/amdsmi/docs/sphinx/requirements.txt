@@ -205,7 +205,7 @@ requests==2.33.0
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference]==1.33.1
+rocm-docs-core[api-reference]==1.35.0
     # via -r requirements.in
 roman-numerals-py==3.1.0
     # via sphinx
