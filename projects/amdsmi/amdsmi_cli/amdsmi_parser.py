@@ -34,6 +34,7 @@ from pathlib import Path
 from _version import __version__
 from amdsmi_helpers import AMDSMIHelpers
 import amdsmi_cli_exceptions
+import amdsmi_init
 
 
 # Valid value ranges for CPU `set` arguments, defined by the HSMP protocol and
@@ -1950,9 +1951,14 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     help=argparse.SUPPRESS,
                 )
-                metric_parser.add_argument(
-                    "-X", "--partition", action="store_true", required=False, help=partition_help
-                )
+                if amdsmi_init.is_partition_metrics_enabled():
+                    metric_parser.add_argument(
+                        "-X",
+                        "--partition",
+                        action="store_true",
+                        required=False,
+                        help=partition_help,
+                    )
 
             # Options to only display to Hypervisors
             # Need to resolve the -G for guard, but technically should never intersect since it's VF only

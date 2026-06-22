@@ -22,6 +22,7 @@
 import json
 import logging
 import time
+import os
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 from amdsmi.amdsmi_interface import AMDSMI_MAX_RAIL_INDEX
@@ -333,6 +334,17 @@ class MetricCommands:
         # Fetch partition metrics once per GPU; the sections below reuse this result
         gpu_partition_metrics = None
         if args.partition:
+            # Validate feature toggle (should not reach here if flag not added, but defensive check)
+            if not os.environ.get("AMDSMI_ENABLE_PARTITION_METRICS", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            ):
+                logging.warning(
+                    "Partition metrics feature not enabled. Set AMDSMI_ENABLE_PARTITION_METRICS=1"
+                )
+                args.partition = False
             try:
                 gpu_partition_metrics = amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(
                     args.gpu

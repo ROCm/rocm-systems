@@ -8,8 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added `--partition` flag to `amd-smi metric` for partition-scoped metrics**.  
+- **Added `--partition` flag to `amd-smi metric` for partition-scoped metrics** (feature toggle required).  
   - The `-X`/`--partition` flag switches the temperature, clock, and usage categories to partition-level data sources; throttle metrics are already partition-aware.
+  - **Requires setting `AMDSMI_ENABLE_PARTITION_METRICS=1` environment variable** to enable this feature.
   - Reuses the existing temperature/clock/usage section schema and adds partition-only AID/XCP/MID entries within it; socket-only fields with no partition equivalent report `N/A`.
   - When `--partition` is set with `--temperature`: adds MID and per-XCP/XCD temperatures.
   - When `--partition` is set with `--clock`: sources GFX/VCLK/DCLK/SOCCLK from partition metrics and adds per-AID and per-XCP clock entries with their limits.
