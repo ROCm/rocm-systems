@@ -69,6 +69,7 @@ HIP_TEST_CASE(Unit_hipMemcpy_DynamicQueueChurn_StagedCopies) {
     }
     HIP_CHECK(hipMalloc(&device_buffers[dev], kSize));
     HIP_CHECK(hipMemset(device_buffers[dev], 0, kSize));
+    HIP_CHECK(hipDeviceSynchronize());
   }
 
   HIP_CHECK(hipSetDevice(0));
