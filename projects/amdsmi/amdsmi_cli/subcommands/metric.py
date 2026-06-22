@@ -698,18 +698,20 @@ class MetricCommands:
 
                 clock_unit = "MHz"
 
-                # Select the data source: partition-scoped metrics when --partition
-                # is set, otherwise socket-level gpu_metrics. Both expose identical
-                # field names, so a single population path serves both.
+                # Select the data source:
+                #   - partition metrics when --partition is set
+                #   - socket-level gpu_metrics otherwise
+                # Both expose the same field names, so one population path serves both.
                 clock_source = (
                     gpu_partition_metrics
                     if (args.partition and gpu_partition_metrics is not None)
                     else gpu_metric
                 )
 
-                # Fetch per-type clock limits once. These are reused by the min/max
-                # section below and by the per-AID/XCP partition breakdown, so the
-                # partition path adds no extra amdsmi_get_clock_info calls.
+                # Fetch per-type clock limits once, then reuse them in:
+                #   - the min/max section below
+                #   - the per-AID/XCP partition breakdown
+                # so the partition path adds no extra amdsmi_get_clock_info calls.
                 gfx_clock_info_dict = None
                 vclk_clock_info_dict = None
                 dclk_clock_info_dict = None
@@ -1037,9 +1039,9 @@ class MetricCommands:
                     except Exception as e:
                         logging.debug("Failed to get deep sleep status for gpu %s | %s", gpu_id, e)
 
-                # Per-AID / per-XCP partition clock breakdown. Only populated when
-                # --partition is requested and partition metrics are available. Clock
-                # limits reuse the dicts fetched once above (no extra syscalls).
+                # Per-AID / per-XCP partition clock breakdown.
+                # Populated only when --partition is set and partition metrics exist.
+                # Clock limits reuse the dicts fetched once above (no extra syscalls).
                 if args.partition and gpu_partition_metrics is not None:
                     current_vclk_clocks = gpu_partition_metrics.get("current_vclk0s", "N/A")
                     current_dclk_clocks = gpu_partition_metrics.get("current_dclk0s", "N/A")
@@ -1122,9 +1124,9 @@ class MetricCommands:
                                 xcp_clocks["gfx_max_clk"] = self.helpers.unit_format(
                                     self.logger, gfx_clock_info_dict["max_clk"], clock_unit
                                 )
-                            # Only report lock status when the field is supported. An
-                            # unsupported value reads as "N/A"; a value of 0 is valid
-                            # and means all gfx domains are unlocked.
+                            # Only report lock status when the field is supported:
+                            #   - unsupported reads as "N/A" (skip)
+                            #   - 0 is valid and means all gfx domains are unlocked
                             if gfxclk_lock_status != "N/A":
                                 is_locked = (gfxclk_lock_status >> xcp_idx) & 1
                                 xcp_clocks["gfx_clk_locked"] = (
@@ -1196,9 +1198,10 @@ class MetricCommands:
                         e.get_error_info(),
                     )
 
-                # Select the data source: partition-scoped metrics when --partition
-                # is set, otherwise socket-level gpu_metrics. Both expose identical
-                # field names, so a single population path serves both.
+                # Select the data source:
+                #   - partition metrics when --partition is set
+                #   - socket-level gpu_metrics otherwise
+                # Both expose the same field names, so one population path serves both.
                 temp_source = (
                     gpu_partition_metrics
                     if (args.partition and gpu_partition_metrics is not None)
