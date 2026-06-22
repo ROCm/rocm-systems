@@ -39,6 +39,7 @@ SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= RESULT_COPY;
 }
 
 void SMovB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mov_b32_sop1(*this, wf); }
@@ -62,6 +63,7 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= RESULT_COPY;
 }
 
 void SMovB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mov_b64_sop1(*this, wf); }
@@ -868,6 +870,7 @@ SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
   flags_ |= WRITES_EXEC;
+  flags_ |= RESULT_OR;
 }
 
 void SOrSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -895,6 +898,7 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
   flags_ |= WRITES_EXEC;
+  flags_ |= RESULT_OR;
 }
 
 void SOrSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {

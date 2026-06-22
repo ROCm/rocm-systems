@@ -922,6 +922,7 @@ SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= RESULT_OR;
 }
 
 void SOrB32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_or_b32_sop2(*this, wf); }
@@ -958,6 +959,7 @@ SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= RESULT_OR;
 }
 
 void SOrB64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_or_b64_sop2(*this, wf); }
