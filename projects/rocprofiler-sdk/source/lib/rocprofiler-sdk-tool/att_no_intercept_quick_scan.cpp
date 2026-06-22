@@ -38,6 +38,12 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <iostream>
+
+#define LOG_TRACE ROCP_TRACE
+//#define LOG_INFO ROCP_INFO
+//#define LOG_TRACE std::cout << std::endl
+#define LOG_INFO std::cout << std::endl
 
 namespace rocprofiler
 {
@@ -91,25 +97,22 @@ warn_limited(std::atomic<uint64_t>& counter, std::string_view message)
 {
     auto count = counter.fetch_add(1, std::memory_order_relaxed) + 1;
     if(count <= 16)
-    {
         ROCP_WARNING << message;
-    }
     else if(count == 17)
-    {
         ROCP_WARNING << "suppressing additional ATT no-intercept warnings of this kind";
-    }
 }
 
 std::optional<rocprofiler_kernel_id_t>
 resolve_kernel_id(agent_state& state, const rocprofiler_thread_trace_decoder_pc_t& entry_point)
 {
-    auto lock       = std::lock_guard<std::mutex>{state.mutex};
+    auto shared_lock = std::shared_lock{state.mutex};
+
     auto find_exact = [&state](entry_key key) -> std::optional<rocprofiler_kernel_id_t> {
         if(auto itr = state.kernels_by_entry.find(key); itr != state.kernels_by_entry.end())
             return itr->second;
         return std::nullopt;
     };
-    auto find_range = [&state](entry_key key) -> std::optional<rocprofiler_kernel_id_t> {
+    auto find_range = [&](entry_key key) -> std::optional<rocprofiler_kernel_id_t> {
         auto ranges_itr = state.kernel_ranges_by_code_object.find(key.code_object_id);
         if(ranges_itr == state.kernel_ranges_by_code_object.end()) return std::nullopt;
 
@@ -117,8 +120,12 @@ resolve_kernel_id(agent_state& state, const rocprofiler_thread_trace_decoder_pc_
         {
             if(key.address >= range.begin && key.address < range.end)
             {
-                state.kernels_by_entry[key] = range.kernel_id;
-                return range.kernel_id;
+                auto range_copy = range;
+                shared_lock.unlock();
+                auto unique_lock = std::unique_lock{state.mutex};
+
+                state.kernels_by_entry[key] = range_copy.kernel_id;
+                return range_copy.kernel_id;
             }
         }
 
@@ -133,22 +140,20 @@ resolve_kernel_id(agent_state& state, const rocprofiler_thread_trace_decoder_pc_
     return std::nullopt;
 }
 
-bool
-is_cut_end_event(const rocprofiler_thread_trace_decoder_event_t& event)
-{
-    return event.type == ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH ||
-           event.type == ROCPROF_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE_TS;
-}
-
 void
 handle_dispatch(scan_context& context, const rocprofiler_thread_trace_decoder_dispatch_t& dispatch)
 {
     auto& state = *context.state;
     state.stats.dispatches_seen.fetch_add(1, std::memory_order_relaxed);
 
+    LOG_TRACE << "Received dispatch: " << dispatch.entry_point.code_object_id << " / "
+              << dispatch.entry_point.address << " at me/pipe " << int(dispatch.me_id) << "/"
+              << int(dispatch.pipe_id);
+
     auto kernel_id = resolve_kernel_id(state, dispatch.entry_point);
     if(!kernel_id)
     {
+        LOG_TRACE << "Unknown dispatch found.";
         state.stats.unknown_dispatches.fetch_add(1, std::memory_order_relaxed);
     }
     else if((context.kernel_target_filter == nullptr || context.kernel_target_filter(*kernel_id)) &&
@@ -161,9 +166,10 @@ handle_dispatch(scan_context& context, const rocprofiler_thread_trace_decoder_di
             trace.active       = true;
             trace.offset_begin = dispatch.byte_offset;
         }
+        LOG_INFO << "Dispatch cut at : " << *kernel_id << " byte " << dispatch.byte_offset;
+
         trace.kernel_id = *kernel_id;
-        trace.remaining_dispatches =
-            (state.consecutive_kernels > 0) ? state.consecutive_kernels : 1;
+        trace.remaining_dispatches = std::max<uint64_t>(state.consecutive_kernels, 1);
         trace.flush_count = 0;
         state.stats.target_dispatches.fetch_add(1, std::memory_order_relaxed);
     }
@@ -195,10 +201,16 @@ handle_event(scan_context& context, const rocprofiler_thread_trace_decoder_event
         return;
     }
 
-    if(!is_cut_end_event(event) && trace.flush_count == 0) return;
+    bool is_dispatch_end = event.type == ROCPROF_TRACE_DECODER_EVENT_DISPATCH_END;
+    bool is_flush = event.type == ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH || event.type == ROCPROF_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE_TS;
 
-    if(++trace.flush_count == 2)
+    if(!is_dispatch_end && !is_flush && trace.flush_count == 0) return;
+
+    if (is_flush || trace.flush_count > 0) trace.flush_count++;
+
+    if(trace.flush_count == 2)
     {
+        LOG_INFO << "Cut trace at byte: " << event.byte_offset;
         trace.offset_end = event.byte_offset;
         trace.complete   = true;
     }
@@ -314,7 +326,7 @@ record_code_object_symbols(agent_state& state,
 
     if(sizes_by_name.empty() && sizes_by_vaddr.empty()) return;
 
-    auto  lock                 = std::lock_guard<std::mutex>{state.mutex};
+    auto  lock                 = std::unique_lock{state.mutex};
     auto& code_object          = state.code_objects[code_object_id];
     code_object.code_object_id = code_object_id;
     for(auto& [name, size] : sizes_by_name)
