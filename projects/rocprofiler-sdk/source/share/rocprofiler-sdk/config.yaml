@@ -13753,7 +13753,8 @@ rocprofiler-sdk:
             - gfx1150
           expression: reduce(SQC_DCACHE_HITS,sum)
     - name: SQC_DCACHE_INFLIGHT_LEVEL
-      description: Level count total outstanding transactions in data cache (per-SQ, nondeterministic)
+      description: Level count total outstanding transactions in data cache (per-SQ, 
+        nondeterministic)
       properties: []
       definitions:
         - architectures:
@@ -13808,7 +13809,8 @@ rocprofiler-sdk:
             - gfx1150
           expression: reduce(SQC_ICACHE_HITS,sum)
     - name: SQC_ICACHE_INFLIGHT_LEVEL
-      description: Level count total outstanding transactions in instruction cache (per-SQ, nondeterministic)
+      description: Level count total outstanding transactions in instruction cache (per-SQ, 
+        nondeterministic)
       properties: []
       definitions:
         - architectures:
@@ -13881,7 +13883,9 @@ rocprofiler-sdk:
             - gfx1150
           expression: reduce(SQC_TC_INST_REQ,sum)
     - name: SQ_BUSY_CYCLES_avr
-      description: SQ_BUSY_CYCLES averaged over SQ (shader engine) instances. The Shader Processor Group (SPG) perf specification exposes this counter per SE; avr matches reduce(SQ_BUSY_CYCLES,avr) for occupancy-style ratios.
+      description: SQ_BUSY_CYCLES averaged over SQ (shader engine) instances. The Shader Processor 
+        Group (SPG) perf specification exposes this counter per SE; avr matches 
+        reduce(SQ_BUSY_CYCLES,avr) for occupancy-style ratios.
       properties: []
       definitions:
         - architectures:
