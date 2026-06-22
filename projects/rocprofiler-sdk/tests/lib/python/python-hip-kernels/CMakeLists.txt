@@ -30,11 +30,14 @@ set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
 find_package(rocprofiler-sdk REQUIRED)
+find_package(rocprofiler-sdk-roctx REQUIRED)
 
 set_source_files_properties(python-hip-kernels.cpp PROPERTIES LANGUAGE HIP)
 add_library(python-hip-kernels SHARED)
 target_sources(python-hip-kernels PRIVATE python-hip-kernels.cpp)
-target_link_libraries(python-hip-kernels PRIVATE rocprofiler-sdk::tests-build-flags)
+target_link_libraries(
+    python-hip-kernels PRIVATE rocprofiler-sdk::tests-build-flags
+                               rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
 set_target_properties(
     python-hip-kernels
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"

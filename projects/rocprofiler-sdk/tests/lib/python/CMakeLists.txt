@@ -19,5 +19,30 @@ function(rocprofiler_tests_configure_python_package_sources RELATIVE_DEST)
 endfunction()
 
 add_subdirectory(python-hip-kernels)
+add_subdirectory(python-hsa)
+
+# python-rccl hard-depends on RCCL at build time (it includes <rccl/rccl.h> and links
+# roc::rccl), so it can only be built when RCCL is installed. rccl_FOUND is set by the
+# top-level find_package(rccl) in cmake/rocprofiler_config_interfaces.cmake and inherited
+# here.
+if(rccl_FOUND)
+    add_subdirectory(python-rccl)
+endif()
+
+# python-rocdecode / python-rocjpeg hard-depend on the codec libs + headers at build time
+# (they include the codec headers and link rocDecode::rocDecode / rocJPEG::rocJPEG), so
+# build them only when the packages are discoverable AND new enough. rocDecode_FOUND /
+# rocJPEG_FOUND and the versions are set by the top-level find_package() in
+# cmake/rocprofiler_config_interfaces.cmake and inherited here. The version gates mirror
+# tests/bin/CMakeLists.txt (which builds the rocdecode/rocjpeg demo binaries). These are
+# optional, source-installable ROCm components.
+if(rocDecode_FOUND AND rocDecode_VERSION VERSION_GREATER 0.8.0)
+    add_subdirectory(python-rocdecode)
+endif()
+
+if(rocJPEG_FOUND AND rocJPEG_VERSION VERSION_GREATER 0.6.0)
+    add_subdirectory(python-rocjpeg)
+endif()
+
 add_subdirectory(torchesque)
 add_subdirectory(tritonesque)
