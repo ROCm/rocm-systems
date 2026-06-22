@@ -1,5 +1,5 @@
 outs:
-- md5: 4e29a0c86aaa3d57dbb6b79fc488a77e
-  size: 291664
+- md5: 567d3202cea8a83f9d8b33dab21a8029
+  size: 291396
   hash: md5
   path: pal_lz4.lib

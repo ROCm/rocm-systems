@@ -78,8 +78,6 @@ enum class AmdGpuMachineType : uint8
     Gfx1102 = 0x47,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1102
     Gfx1103 = 0x44,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1103
     Gfx1150 = 0x43,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1150
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 945
-#endif
     Gfx1151 = 0x4A,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1151
     Gfx1152 = 0x55,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1152
     Gfx1153 = 0x58,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1153
@@ -406,8 +404,17 @@ union ApiCompositeDataValue
         uint32 primInfo           : 2; ///< Number of vertex per primitive
         uint32 numSamples         : 5; ///< Number of coverage samples
         uint32 dynamicSourceBlend : 1; ///< Whether to enable dynamic dual source blend.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 995
         uint32 rasterStream       : 3; ///< Which vertex stream to rasterize. Reserved for future.
-        uint32 reserved           : 21;
+#else
+        uint32 rasterStream       : 2; ///< Which vertex stream to rasterize.
+#endif
+        uint32 patchControlPoints : 6; ///< Number of patch control points.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 995
+        uint32 reserved           : 15;
+#else
+        uint32 reserved           : 16;
+#endif
     };
 
     uint32 u32All; ///< Flags packed as 32-bit uint.
@@ -794,6 +801,17 @@ enum class CbConstUsageType : uint8
     Gt0Int,
     Other
 };
+
+#if PAL_BUILD_GRIMLOCK
+/// Tuning preference for WGP configuration.
+enum class WgpTune : uint8
+{
+    TuneDefault,
+    TuneForRWGP,
+    TuneForTWGP,
+    Count
+};
+#endif
 
 /// Defines the various methods for how tessellated patches can be distributed amongst the GPU's shader engines.
 enum class TessDistributionMode : uint8

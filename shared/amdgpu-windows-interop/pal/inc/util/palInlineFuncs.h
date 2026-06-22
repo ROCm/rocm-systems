@@ -1505,25 +1505,6 @@ constexpr typename std::common_type<T1, T2, typename std::common_type<Ts...>::ty
     return Lcm(Lcm(value1, value2), values...);
 }
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 919
-/// Returns the length of a wchar_t based string.
-///
-/// @returns The length of the given string in wide characters
-inline size_t Wcslen(
-    const wchar_t* pWideStr)
-{
-    return wcslen(pWideStr);
-}
-
-/// Performs a reverse string find of wide character wc.
-///
-/// @returns The matching character at the end of the string or nullptr if not found.
-inline wchar_t* Wcsrchr(wchar_t *pStr, wchar_t wc)
-{
-    return wcsrchr(pStr, wc);
-}
-#endif
-
 /// Compile-time function to report if two values from unrelated strong enums are equivalent.  This is useful for
 /// static asserts ensuring it is safe to cast an enum without a conversion lookup table.
 template <typename T1, typename T2>

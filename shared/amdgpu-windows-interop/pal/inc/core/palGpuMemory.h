@@ -77,7 +77,7 @@ enum class GpuMemPriorityOffset : uint32
     Count
 };
 
-/// Specifies access mode for unmapped pages in a virtual GPU memory.
+/// Speicfies access mode for unmapped pages in a virtual Gpu Memory.
 enum class VirtualGpuMemAccessMode : uint32
 {
     Undefined = 0x0, ///< Used in situations where no special accessMode needed.
@@ -133,12 +133,6 @@ union GpuMemoryCreateFlags
                                                   ///  indicating the driver must manage both
                                                   ///  CPU caches and GPU caches that are not flushed on
                                                   ///  command buffer boundaries.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
-        uint64 xdmaBuffer                   :  1; ///< GPU memory will be used for an XDMA cache buffer for
-                                                  ///  transferring data
-#else
-        uint64 reserved1                    :  1; ///< Delete this bit when the MAJOR_VERSION backcompat is removed.
-#endif
                                                   ///  between GPUs in a multi-GPU configuration.
         uint64 turboSyncSurface             :  1; ///< The memory will be used for TurboSync private swapchain primary.
         uint64 typedBuffer                  :  1; ///< GPU memory will be permanently considered a single
@@ -214,10 +208,13 @@ union GpuMemoryCreateFlags
                                                   ///  completes. Required for ISP camera capture surfaces
                                                   ///  (D3D11_DDI_BIND_CAPTURE) and any other allocation that
                                                   ///  needs post-residency MC address notification.
+        uint64 noUnmappedSmemAccess         :  1; ///< Memory won't be accessed by scalar loads. Ignored if not virtual.
         uint64 reserved                     : 25; ///< Reserved for future use.
     };
     uint64     u64All;                            ///< Flags packed as 64-bit uint.
 };
+
+static_assert(sizeof(GpuMemoryCreateFlags) == sizeof(uint64));
 
 /// Specifies properties of a typed buffer pseudo-object. When this is specified in GpuMemoryCreateInfo along with the
 /// typedBuffer flag, the GPU memory object has been permanently cast as a single typed buffer.  A typed buffer is very
@@ -298,9 +295,9 @@ struct GpuMemoryCreateInfo
                                            ///  This GPU memory will be permanently considered a typed buffer.
 
     VirtualGpuMemAccessMode virtualAccessMode; ///< Access mode for virtual GPU memory's unmapped pages, WDDM only.
-    gpusize                 surfaceBusAddr;    ///< Surface bus address of Bus Addressable Memory.
+    gpusize                 surfaceBusAddr;    ///< Surface bus address of Bus Addresable Memory.
                                                ///  Only valid when GpuMemoryCreateFlags::sdiExternal is set.
-    gpusize                 markerBusAddr;     ///< Marker bus address of Bus Addressable Memory. The client can:
+    gpusize                 markerBusAddr;     ///< Marker bus address of Bus Addresable Memory. The client can:
                                                ///  1. Write to marker
                                                ///  2. Let GPU wait until a value is written to marker before issuing
                                                ///     the next command.
@@ -409,7 +406,7 @@ struct ExternalGpuMemoryOpenInfo
     } flags;                        ///< External Gpu memory open info flags.
 };
 
-/// The fundamental information that describes a GPU memory object that is stored directly in each IGpuMemory.
+/// The fundemental information that describes a GPU memory object that is stored directly in each IGpuMemory.
 /// It can be accessed without a virtual call via IGpuMemory::Desc().
 struct GpuMemoryDesc
 {
@@ -559,7 +556,7 @@ struct GpuMemoryExportInfo
  * @see IDevice::OpenExternalSharedGpuMemory
  *
  *
- * All of these kinds of GPU memory are assigned a set of fundamental properties specified in GpuMemoryDesc which are
+ * All of these kinds of GPU memory are assigned a set of fundemental properties specified in GpuMemoryDesc which are
  * either specified by the client or by PAL.  There are specific rules these properties must follow; those rules are
  * documented here to avoid duplication.  Violating these rules will cause the device's corresponding "get size"
  * functions to return an error code, the create/open functions may not validate their arguments.
@@ -656,7 +653,7 @@ public:
     virtual OsExternalHandle ExportExternalHandle(const GpuMemoryExportInfo& exportInfo) const = 0;
 #endif
 
-    /// Returns a structure containing some fundamental information that describes this GPU memory object.
+    /// Returns a structure containing some fundemental information that describes this GPU memory object.
     ///
     /// @returns A reference to this allocation's GpuMemoryDesc.
     const GpuMemoryDesc& Desc() const { return m_desc; }

@@ -154,6 +154,10 @@ typedef void (PAL_STDCALL* CmdDumpCallback)(
     uint32                        numChunks,
     void*                         pUserData);
 
+/// Defines callback function to allow client to modify WaveSize value.
+/// waveSize is defined as scratch allocated per wave, in units of bytes.
+typedef gpusize (PAL_STDCALL *CalcWaveSizeFunc)(gpusize waveSize);
+
 /// Specifies properties for @ref IQueue creation.  Input structure to IDevice::CreateQueue().
 struct QueueCreateInfo
 {
@@ -220,6 +224,9 @@ struct PerSubQueueSubmitInfo
     const CmdBufInfo* pCmdBufInfoList;  ///< Null, or an array of cmdBufferCount structs providing additional
                                         ///  info about the command buffers being submitted.  If non-null,
                                         ///  elements are ignored if their isValid flag is false.
+    gpusize**         ppWaveSizes;      ///< Array of pointers that PAL will write the calculated wave size into
+    uint32            numWaveSizes;     ///< Number of entries in ppWaveSizes
+    CalcWaveSizeFunc  pfnCalcWaveSize;  ///< Optional callback used to modify wave size
 };
 
 /// Specifies all information needed to execute a set of command buffers.  Input structure to IQueue::Submit().
@@ -351,7 +358,7 @@ struct PresentSwapChainInfo
     PresentMode presentMode;    ///< Chooses between windowed and fullscreen present.
     IImage*     pSrcImage;      ///< The image to be presented.
     ISwapChain* pSwapChain;     ///< The swap chain associated with the source image.
-    uint32      imageIndex;     ///< The index of the source image within the swap chain. Ownership of this image
+    uint32      imageIndex;     ///< The index of the source image within the swap chain. Owership of this image
                                 ///  index will be released back to the swap chain if this call succeeds.
     uint32      rectangleCount; ///< Number of valid rectangles in the pRectangles array.
     uint32      syncInterval;   ///< Applicable only when syncIntervalOverride is set
@@ -372,13 +379,9 @@ struct PresentSwapChainInfo
     {
         struct
         {
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 941
-            uint32 notifyOnly           :  1; ///< True if it is a notify-only present
-#else
             uint32 notifyOnly           :  1; ///< Indicates that a present occurred outside of PAL. PAL must not
                                               ///  execute a present if this is true but may update internal
                                               ///  tracking state.
-#endif
             uint32 isTemporaryMono      :  1; ///< True if WS Stereo is enabled, but 3D display mode turned off.
             uint32 turboSyncEnabled     :  1; ///< Whether TurboSync is enabled.
             uint32 syncIntervalOverride :  1; ///< Override default syncInterval with the value in syncInterval
@@ -574,7 +577,7 @@ public:
     /// the presentable image index, eventually deadlocking the swap chain.
     ///
     /// Overall support for direct presents can be queried at platform creation time via supportNonSwapChainPresents
-    /// in @ref PlatformProperties.  Support for particular present modes is specified via supportedDirectPresentModes
+    /// in @ref PlatformProperties.  Support for particular present modes is specifed via supportedDirectPresentModes
     /// in @ref DeviceProperties.
     ///
     /// @note  Any images specified in presentInfo must be made resident before calling this function.

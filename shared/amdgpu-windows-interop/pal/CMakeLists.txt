@@ -51,6 +51,8 @@ target_link_libraries(pal
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/DriverUtilsService.lib
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/dd_settings.lib
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/SettingsRpcService2.lib
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/dd_crc32.lib
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddApi.lib
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddRpcServer.lib
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddNet.lib
         ${CMAKE_CURRENT_SOURCE_DIR}/lib/Release/x64/ddRpcShared.lib
@@ -86,7 +88,9 @@ target_include_directories(pal
         inc/gpuUtil
         inc/util
         shared/inc
+        shared/devdriver/shared/legacy
         shared/devdriver/shared/legacy/inc
+        shared/devdriver/shared/legacy/core/inc
         shared/devdriver/third_party/dd_crc32/inc
         shared/metrohash/src
 )

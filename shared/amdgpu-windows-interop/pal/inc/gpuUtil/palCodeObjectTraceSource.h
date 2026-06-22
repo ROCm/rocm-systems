@@ -156,11 +156,7 @@ public:
     virtual void OnTraceAccepted(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override;
     virtual void OnTraceBegin(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override { }
     virtual void OnTraceEnd(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override { }
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
-    virtual void OnPostambleEnd(
-        Pal::uint32      gpuIndex,
-        Pal::ICmdBuffer* pCmdBuf) override { }
-#endif
+    virtual void OnPostambleEnd(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override { }
     virtual void OnTraceFinished() override;
 
     virtual const char* GetName()    const override { return CodeObjectTraceSourceName; }

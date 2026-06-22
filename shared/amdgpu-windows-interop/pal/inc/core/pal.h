@@ -103,9 +103,6 @@ constexpr uint32 InvalidVidPnSourceId     = ~0u; ///< In cases where PAL cannot 
 constexpr uint32 MaxVertexBuffers         = 32;  ///< Maximum number of vertex buffers per pipeline.
 constexpr uint32 MaxColorTargets          = 8;   ///< Maximum number of color targets.
 constexpr uint32 MaxStreamOutTargets      = 4;   ///< Maximum number of stream output target buffers.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 936
-constexpr uint32 MaxDescriptorSets        = 2;   ///< Maximum number of descriptor sets.
-#endif
 constexpr uint32 MaxMsaaRasterizerSamples = 16;  ///< Maximum number of MSAA samples supported by the rasterizer.
 constexpr uint32 MaxAvailableEngines      = 12;  ///< Maximum number of engines for a particular engine type.
 constexpr uint32 MaxNumPlanes             = 3;   ///< Maximum number of format planes.
@@ -117,7 +114,7 @@ constexpr uint64 InternalApiPsoHash       = UINT64_MAX;  ///< Default Hash for P
 /// Device::GetProperties, returned in DeviceProperties.engineProperties[].
 enum EngineType : uint32
 {
-    /// Corresponds to the graphics hardware engine (a.k.a. graphics ring a.k.a 3D).
+    /// Corresponds to the graphics hardware engine (a.k.a. graphcis ring a.k.a 3D).
     EngineTypeUniversal,
 
     /// Corresponds to asynchronous compute engines (ACE).
@@ -444,7 +441,7 @@ struct DirectCaptureInfo
             uint32 preflip              :  1;  ///< Requires pre-flip primary access
             uint32 postflip             :  1;  ///< Requires post-flip primary access. A DirectCapture resource cannot
                                                ///  have pre-flip and post-flip access at the same time
-            uint32 accessDesktop        :  1;  ///< Requires access to the desktop
+            uint32 accessDesktop        :  1;  ///< Requires acces to the desktop
             uint32 shared               :  1;  ///< This resource will be shared between APIs
             uint32 frameGenRatio        :  4;  ///< Frame generation ratio
             uint32 paceGeneratedFrame   :  1;  ///< Requires pacing the generated frames
