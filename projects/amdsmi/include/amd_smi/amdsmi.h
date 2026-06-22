@@ -3331,8 +3331,7 @@ amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_hand
  *
  *  @ingroup tagProcDiscovery
  *
- *  @platform{gpu_bm_linux} @platform{cpu_bm} @platform{guest_1vf}
- *  @platform{guest_mvf}
+ *  @platform{gpu_bm_linux} @platform{cpu_bm}
  *
  *  @details This function writes the processor's index into @p name as a decimal
  *  string (for example "0", "1", "2"). The index is the processor's zero-based
@@ -3356,7 +3355,7 @@ amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_hand
  *
  *  @ingroup tagProcDiscovery
  *
- *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm}
+ *  @platform{gpu_bm_linux} @platform{cpu_bm}
  *
  *  @details This function classifies a list of processor handles and returns the per-type
  *  totals. Counts are derived purely from ::amdsmi_get_processor_type and do not require
