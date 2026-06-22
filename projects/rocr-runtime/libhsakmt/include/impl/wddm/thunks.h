@@ -200,6 +200,14 @@ inline ErrorCode Evict(EvictArgs *args) {
   return TranslateNtStatus(DXCORE_CALL(D3DKMTEvict(args)));
 }
 
+inline ErrorCode Lock2(Lock2Args *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTLock2(args)));
+}
+
+inline ErrorCode Unlock2(Unlock2Args *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTUnlock2(args)));
+}
+
 inline ErrorCode ShareObjects(size_t num_allocations,
                                WinResourceHandle resource,
                                uint32_t flags,

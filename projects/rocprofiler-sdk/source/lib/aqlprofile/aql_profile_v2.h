@@ -37,9 +37,6 @@
 
 #include "lib/aqlprofile/version.h"
 
-#include <assert.h>  // static_assert / _Static_assert for ABI size locks
-#include <stddef.h>  // offsetof for ABI offset locks
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -64,7 +61,6 @@ typedef enum
     AQLPROFILE_AGENT_VERSION_NONE = 0,
     AQLPROFILE_AGENT_VERSION_V0   = 1,
     AQLPROFILE_AGENT_VERSION_V1   = 2,
-    AQLPROFILE_AGENT_VERSION_V2   = 3,
     AQLPROFILE_AGENT_VERSION_LAST
 } aqlprofile_agent_version_t;
 
@@ -235,88 +231,6 @@ typedef struct
     uint32_t location_id; /**< BDF (Bus/Device/function number) of the GPU agent
                              (HSA_AMD_AGENT_INFO_BDFID or KFD.location_id)*/
 } aqlprofile_agent_info_v1_t;
-
-/**
- * Dimensions of the per-(SE, SA) CU bitmap as defined by the DRM amdgpu kernel
- * uAPI struct drm_amdgpu_info_device.cu_bitmap. These are fixed by the kernel
- * ABI and are the same on every platform (mainline Linux, ROCm DKMS, distro
- * kernels), so this struct cannot widen them from userspace. For chips with
- * se_num > AQLPROFILE_DRM_CU_BITMAP_NUM_SE or shader_arrays_per_se >
- * AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE (e.g. Navi31's 6 SE), the kernel
- * only populates the first slice of the bitmap; consumers iterating beyond
- * that slice MUST bounds-check before indexing and fall back to a sequential
- * (non-harvest-aware) WGP iteration for the remaining SE/SA coordinates.
- */
-#define AQLPROFILE_DRM_CU_BITMAP_NUM_SE        4
-#define AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE 4
-
-/**
- * @brief Per-(SE, SA) active CU bitmap; shape mirrors
- * drm_amdgpu_info_device.cu_bitmap from the AMDGPU kernel uAPI.
- *
- * Defining the bitmap as a named type (rather than a bare 2D array embedded
- * in each consumer) gives a single source of truth for its dimensions and
- * makes struct-assignment well-defined for internal callers, so the layout
- * cannot silently diverge between the public V2 ABI and internal caches.
- */
-typedef struct
-{
-    uint32_t bits[AQLPROFILE_DRM_CU_BITMAP_NUM_SE][AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE];
-} aqlprofile_cu_bitmap_t;
-
-/* ABI lock: size of aqlprofile_cu_bitmap_t is part of the V2 ABI. Any change
- * here is a binary-incompatible break for V2 consumers and MUST be paired with
- * a V2 ABI version bump. Bumping AQLPROFILE_DRM_CU_BITMAP_NUM_SE or
- * AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE intentionally widens the bitmap and
- * will trip this assert at every consumer's build until they recompile against
- * the new size; that is the desired behaviour. */
-static_assert(sizeof(aqlprofile_cu_bitmap_t) == AQLPROFILE_DRM_CU_BITMAP_NUM_SE *
-                                                    AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE *
-                                                    sizeof(uint32_t),
-              "aqlprofile_cu_bitmap_t size locked to "
-              "AQLPROFILE_DRM_CU_BITMAP_NUM_SE * AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE uint32_t; "
-              "do NOT change without bumping the V2 ABI version");
-
-/**
- * @brief Extended agent info with physical CU topology for WGP harvesting support.
- *
- * cu_bitmap allows aqlprofile to iterate only over active (non-harvested) WGP
- * indices when reading per-WGP counters on GFX11+ GPUs. The bitmap alone is
- * sufficient: the highest set bit determines the maximum WGP coordinate to
- * iterate, and harvested WGPs (no CU bits set in their pair-window) are
- * skipped automatically. Values are obtainable from the DRM driver
- * (AMDGPU_INFO_DEV_INFO). Dimensions mirror the kernel uAPI; see the
- * AQLPROFILE_DRM_CU_BITMAP_NUM_* documentation above for the implication
- * for chips with more than 4 SEs.
- */
-typedef struct
-{
-    const char*            agent_gfxip;          /**< Agent GFXIP string */
-    uint32_t               xcc_num;              /**< Number of XCCs */
-    uint32_t               se_num;               /**< Number of Shader Engines */
-    uint32_t               cu_num;               /**< Active CU count */
-    uint32_t               shader_arrays_per_se; /**< Shader Arrays per SE */
-    uint32_t               domain;               /**< PCI domain */
-    uint32_t               location_id;          /**< BDF (Bus/Device/Function) */
-    aqlprofile_cu_bitmap_t cu_bitmap;            /**< Per-SE/SA active CU bitmap. */
-} aqlprofile_agent_info_v2_t;
-
-/* ABI lock: layout of aqlprofile_agent_info_v2_t. cu_bitmap was appended at the
- * end of the V2 struct; the offset assertion pins it to "all the prior V2
- * members" so any reordering or insertion of fields fails the build. The total
- * size assertion catches accidental padding changes (e.g. switching a member to
- * a wider type) that would silently break binary compat with already-compiled
- * V2 consumers. Any intentional change to the V2 layout MUST bump the V2 ABI
- * version. */
-static_assert(offsetof(aqlprofile_agent_info_v2_t, cu_bitmap) ==
-                  sizeof(const char*) + 6 * sizeof(uint32_t),
-              "aqlprofile_agent_info_v2_t::cu_bitmap offset changed; "
-              "prior V2 members were reordered or resized - this is a V2 ABI break");
-
-static_assert(sizeof(aqlprofile_agent_info_v2_t) ==
-                  sizeof(const char*) + 6 * sizeof(uint32_t) + sizeof(aqlprofile_cu_bitmap_t),
-              "aqlprofile_agent_info_v2_t total size changed; "
-              "padding or member layout drifted - this is a V2 ABI break");
 
 /**
  * @brief Struct containing a handle to a registered agent
@@ -503,7 +417,7 @@ aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t     agent,
  * @param[in] handle The handle returned from aqlprofile_pmc_create_packets()
  * @param[in] callback CB where the resulting event values are going to be returned
  * @param[in] userdata Data sent back to user
- * @retval HSA_STATUS_SUCCESS all operations exited succesfully
+ * @retval HSA_STATUS_SUCCESS all operations exited successfully
  * @retval HSA_STATUS_ERROR if some callback returns an error
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if invalid handle is given
  */
@@ -552,7 +466,7 @@ aqlprofile_pmc_delete_packets(aqlprofile_handle_t handle);
  * @param[in] handle The handle returned from aqlprofile_att_create_packets()
  * @param[in] callback CB where the resulting data is going to be returned
  * @param[in] userdata Data sent back to user
- * @retval HSA_STATUS_SUCCESS all operations exited succesfully
+ * @retval HSA_STATUS_SUCCESS all operations exited successfully
  * @retval HSA_STATUS_ERROR if some callback returns an error
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if invalid handle is given
  */
@@ -576,7 +490,7 @@ typedef struct
  * @param[out] packets Packets returned by this function to start and stop thread trace
  * @param[in] profile Agent information and extra parameters for thread trace
  * @param[in] callback Memory allocation fn which may request cpu or gpu memory
- * @retval HSA_STATUS_SUCCESS if all packets created succesfully
+ * @retval HSA_STATUS_SUCCESS if all packets created successfully
  * @retval HSA_STATUS_ERROR otherwise
  */
 hsa_status_t
@@ -600,11 +514,11 @@ aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
  * @param[out] header If not zero, must be inserted as first 8 bytes.
  * @param[out] query_status To be inserted before calls to aqlprofile_att_get_buffer_status
  * @param[out] buffer_swap array of AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS transition packets
- * @param[inout] num_buffer_swap In: # of packets in number buffer_swap. Out: # of buffers used.
+ * @param[in,out] num_buffer_swap In: # of packets in number buffer_swap. Out: # of buffers used.
  * @param[in] handle Created in aqlprofile_att_create_packets()
  * @param[in] shader_engine_id Shader engine to get packets from
  * @param[in] flags Must be zero
- * @retval HSA_STATUS_SUCCESS if all packets created succesfully
+ * @retval HSA_STATUS_SUCCESS if all packets created successfully
  * @retval HSA_STATUS_ERROR otherwise
  */
 hsa_status_t
@@ -635,7 +549,7 @@ typedef struct aqlprofile_att_buffer_status_t
  * @param[in] handle What was passed to aqlprofile_att_get_buffer_packets
  * @param[in] shader_engine_id Shader engine (SE) ID
  * @param[in] flags Must be zero
- * @retval HSA_STATUS_SUCCESS if all packets created succesfully
+ * @retval HSA_STATUS_SUCCESS if all packets created successfully
  * @retval HSA_STATUS_ERROR otherwise
  */
 hsa_status_t
@@ -660,7 +574,7 @@ typedef hsa_status_t (*aqlprofile_eventname_callback_t)(int id, const char* name
  * @param [in] callback Callback to use for iteration of dimensions
  * @param [in] user_data Data to supply to callback @ref aqlprofile_eventname_callback_t
  * @retval HSA_STATUS_SUCCESS if successful
- * @retval HSA_STATUS_ERROR if error on interation
+ * @retval HSA_STATUS_ERROR if error on iteration
  * @retval OTHERS If @ref aqlprofile_eventname_callback_t returns non-HSA_STATUS_SUCCESS,
  *         that value is returned.
  */
@@ -736,7 +650,7 @@ typedef struct
 
 typedef struct
 {
-    void*  data;  // Valid until delete_packets() is scalled. Caller must save contents otherwise.
+    void*  data;  // Valid until delete_packets() is called. Caller must save contents otherwise.
     size_t size;  // Size of "data"
 } aqlprofile_spm_buffer_desc_t;
 

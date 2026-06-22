@@ -1,6 +1,9 @@
 name: rocprofiler-systems RedHat Linux (GCC, Python, ROCm)
 run-name: redhat
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
@@ -73,7 +76,8 @@ jobs:
             rocm-version: '7.0'
 
     steps:
-    - uses: actions/checkout@v6
+    - &sparse-checkout
+      uses: actions/checkout@v6
       with:
         sparse-checkout: |
           projects/rocprofiler-systems/
@@ -116,7 +120,8 @@ jobs:
           ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-
           ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-
 
-    - name: Configure ccache
+    - &configure-ccache
+      name: Configure ccache
       run: |
         mkdir -p "${CCACHE_DIR}"
         ccache --max-size=1G
@@ -164,7 +169,8 @@ jobs:
           --
           -LE "network|gpu"
 
-    - name: ccache stats
+    - &ccache-stats
+      name: ccache stats
       if: always()
       run: |
         echo "=== ccache stats ==="
@@ -210,6 +216,195 @@ jobs:
       run: |
         set -v
         ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
+
+    - name: CTest Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v7
+      with:
+        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
+        path: |
+          projects/rocprofiler-systems/build/*.log
+
+    - name: Data Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v7
+      with:
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
+        path: |
+          projects/rocprofiler-systems/build/rocprofsys-tests-config/*.cfg
+          projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*.txt
+          projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*-instr*.json
+
+    - name: Kill Perfetto
+      if: success() || failure()
+      continue-on-error: True
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set +e
+        RUNNING_PROCS=$(pgrep trace_processor_shell)
+        if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
+
+  rhel-system-deps:
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-rhel-${{ matrix.os-release }}
+      options: --shm-size=512m
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # RHEL 8.10's system TBB (2018.2) is older than the effective
+        # minimum (2018.6) required by the oneTBB targets
+        os-release: ['9', '10']
+        compiler: ['g++', 'amdclang++']
+        include:
+          - compiler: 'g++'
+            cc: 'gcc'
+            use-clang-omp: 'OFF'
+          - compiler: 'amdclang++'
+            cc: 'amdclang'
+            use-clang-omp: 'ON'
+
+    steps:
+    - *sparse-checkout
+
+    - name: Configure Env
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run:
+        echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
+        echo "/opt/rocm/bin" >> $GITHUB_PATH &&
+        echo "/opt/rocm/llvm/bin" >> $GITHUB_PATH &&
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV &&
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV &&
+        env
+
+    - name: Install Packages
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+          if [ $OS_VERSION_MAJOR -eq 10 ]; then
+            # TODO: Move package install to the docker.
+            dnf install -y --enablerepo=crb mpich mpich-devel
+            echo "/usr/lib64/mpich/bin" >> $GITHUB_PATH
+          fi
+
+    - name: Install System Dependency Packages
+      timeout-minutes: 25
+      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 25
+        max_attempts: 5
+        shell: bash
+        command: |
+          # System TBB (ROCPROFSYS_BUILD_TBB=OFF) lives in CodeReady Builder (crb)
+          # on RHEL 9/10; binutils-devel provides libiberty/BFD
+          # (ROCPROFSYS_BUILD_LIBIBERTY=OFF). elfutils (libdw/libelf) is already
+          # present in the base image.
+          dnf install -y --enablerepo=crb tbb-devel
+          dnf install -y binutils-devel
+          dnf clean all
+
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-redhat-system-deps-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ github.sha }}
+        restore-keys: |
+          ccache-redhat-system-deps-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-
+
+    - *configure-ccache
+
+    - name: Install Python Test Dependencies
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        for env_dir in /opt/conda/envs/py3.{8,9,10,11,12,13}/; do
+          if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
+            echo "Installing requirements into ${env_dir}"
+            "${env_dir}bin/python3" -m pip install -r requirements.txt
+          fi
+        done
+
+    - name: Configure, Build, and Test with System Dependencies
+      timeout-minutes: 115
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      env:
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      run: |
+        git config --global --add safe.directory ${GITHUB_WORKSPACE}
+        git config --global --add safe.directory ${PWD}
+        echo "CMake version: $(cmake --version | head -n 1)"
+        echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
+        echo "ROCm version: 7.2"
+        echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=OFF; Dyninst from source)"
+        python3 ./scripts/run-ci.py -B build \
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-rhel-${{ matrix.os-release }}-system-deps-${{ matrix.compiler }} \
+          --build-jobs $(nproc) \
+          --site GitHub \
+          -- \
+          -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
+          -DROCPROFSYS_BUILD_TESTING=ON \
+          -DROCPROFSYS_USE_PYTHON=ON \
+          -DROCPROFSYS_USE_MPI_HEADERS=ON \
+          -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON \
+          -DROCPROFSYS_BUILD_DYNINST=ON \
+          -DROCPROFSYS_BUILD_TBB=OFF \
+          -DROCPROFSYS_BUILD_ELFUTILS=OFF \
+          -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
+          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
+          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
+          -DROCPROFSYS_STRIP_LIBRARIES=OFF \
+          -DROCPROFSYS_MAX_THREADS=64 \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network" \
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
+          -DUSE_CLANG_OMP=${{ matrix.use-clang-omp }} \
+          -- \
+          -LE "network|gpu"
+
+    - *ccache-stats
+
+    - name: Check for Leftover Buffered Files
+      timeout-minutes: 5
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        if find /tmp -maxdepth 1 -name 'buffered*' -print -quit | grep -q .; then
+          echo "Error: Found leftover buffered storage files in /tmp:"
+          ls -lh /tmp/buffered*
+          exit 1
+        else
+          echo "✓ No buffered storage files found in /tmp"
+        fi
+
+    - name: Install
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        cmake --install build --prefix /opt/rocprofiler-systems
+
+    - name: Test Install
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+        export PYTHON_EXECUTABLE=/opt/conda/envs/py3.8/bin/python
+        export PATH=/opt/conda/envs/py3.8/bin:${PATH}
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,rewrite,runtime,python}=1
 
     - name: CTest Artifacts
       if: failure()

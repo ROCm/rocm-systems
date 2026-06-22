@@ -89,7 +89,7 @@ $ ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8
 ```
 
 Run 64 MPI processes on nodes with 8 GPUs each, for a total of 64 GPUs spread across 8 nodes.
-Scanning from 8 Bytes to 32GiB (Gibibytes), doubling between each test (`-f 2`).
+Scanning from 8 Bytes to 8GiB (Gibibytes), doubling between each test (`-f 2`).
 (NB: The rccl-tests binaries must be compiled with `MPI=1` for this case)
 
 ```shell
@@ -136,7 +136,7 @@ All tests support the same set of arguments :
   * `-d,--datatype <nccltype/all>` Specify which datatype to use. Default : Float.
   * `-r,--root <root/all>` Specify which root to use. Only for operations with a root like broadcast or reduce. Default : 0.
   * `-Y,--memory_type <coarse/fine/host/managed>` Specify memory type for buffer allocation. Default: Coarse
-  * `-u,--cumask <d0,d1,d2,d3>` CU mask for GPU selection (hexadecimal values). Default: None
+  * `-U,--cumask <d0,d1,d2,d3>` CU mask for GPU selection (hexadecimal values). Default: None
 * Performance
   * `-n,--iters <iteration count>` number of iterations. Default : 20.
   * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 1.
@@ -146,7 +146,7 @@ All tests support the same set of arguments :
 * Test operation
   * `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel. Default : 0.
   * `-c,--check <check iteration count>` perform count iterations, checking correctness of results on each iteration. This can be quite slow on large numbers of GPUs. Default : 1.
-  * `-z,--blocking <0/1>` Make RCCL collective blocking, i.e. have CPUs wait and sync after each collective. Default : 0.
+  * `-z,--blocking <0/1/2>` Make RCCL collective blocking: 0=non-blocking, 1=wait for completion and barrier, 2=wait without barrier. Default : 0.
   * `-y,--stream_null <0/1>` Use NULL stream instead of creating a new stream. Default : 0.
   * `-G,--cudagraph <num graph launches>` Capture iterations as a HIP graph and then replay specified number of times. Default : 0.
   * `-C,--report_cputime <0/1>` Report CPU time instead of latency. Default : 0.
@@ -160,6 +160,7 @@ All tests support the same set of arguments :
   * `-q,--delay_inout_place <delay in microseconds>` Delay between out-of-place and in-place runs (in microseconds). Default: 10.
   * `-E,--rotating_tensor <0/1>` Enable rotating tensor pattern. Default : 0.
   * `-A,--output_algo_proto_channels <0/1>` Report Algorithm/Protocol/Channels for each message size. Default : 0.
+  * `-u,--unalign <index of first element>` Misalign source and destination buffers. Default : 0.
 * Device API (RCCL 2.28+)
   * `-D,--device_implementation <implementation number>` Enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0).
   * `-V,--device_cta_count <number>` Set number of CTAs for device implementation (default: 16).
@@ -202,6 +203,6 @@ $ LD_LIBRARY_PATH=/path/to/rccl-install/lib/ HSA_FORCE_FINE_GRAIN_PCIE=1 python3
 
 ## Copyright
 
-NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2025, NVIDIA CORPORATION. All rights reserved.
+NCCL tests are provided under the BSD license. All source code and accompanying documentation is copyright (c) 2016-2026, NVIDIA CORPORATION. All rights reserved.
 
-All modifications are copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+All modifications are copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.

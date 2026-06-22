@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/units.hpp"
 #include "core/perfetto.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/thread_info.hpp"
@@ -10,7 +11,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <spdlog/fmt/fmt.h>
-#include <timemory/units.hpp>
 
 #include <vector>
 
@@ -447,7 +447,7 @@ private:
            !memory_it->second.track_indexes.empty())
         {
             const double usage =
-                metric_values.memory_usage / static_cast<double>(tim::units::megabyte);
+                metric_values.memory_usage / static_cast<double>(units::megabyte);
             TRACE_COUNTER(
                 "device_memory_usage",
                 counter_track::at(device_index, memory_it->second.track_indexes[0]), ts,
