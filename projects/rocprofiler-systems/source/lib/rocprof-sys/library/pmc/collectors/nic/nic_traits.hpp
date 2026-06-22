@@ -135,18 +135,12 @@ struct nic_traits
 
         for(auto& device : devices)
         {
-            if(!device->is_supported())
-            {
-                LOG_DEBUG("NIC device [{}] ({}) has no supported RDMA metrics, skipping",
-                          device->get_index(), device->get_name());
-                continue;
-            }
-
             bool should_include = false;
             switch(filter.mode)
             {
-                case device_selection_mode::ALL: should_include = true; break;
-                case device_selection_mode::NONE: should_include = false; break;
+                case device_selection_mode::ALL:
+                    should_include = true;
+                    break;
                 case device_selection_mode::SPECIFIC:
                     should_include = filter.names.count(device->get_name()) > 0;
                     break;
@@ -154,6 +148,12 @@ struct nic_traits
 
             if(should_include)
             {
+                if(!device->is_supported())
+                {
+                    LOG_WARNING("NIC device [{}] ({}) has no supported RDMA metrics, skipping",
+                                device->get_index(), device->get_name());
+                    continue;
+                }
                 LOG_INFO("NIC device [{}] ({}) enabled for AI NIC PMC sampling",
                          device->get_index(), device->get_name());
                 auto supported = device->get_supported_metrics();
