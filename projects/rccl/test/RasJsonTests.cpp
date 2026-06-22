@@ -102,26 +102,34 @@ static std::string queryRas(const std::string& format, const std::string& portSt
 // actually returns a structured document rather than the human-readable text
 // banner.
 TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
-  // Pick a free port in the parent so the isolated child uses an address that
-  // doesn't collide with stale/other RCCL processes on the host (the RAS
-  // default port 28028 is shared and may already be in use).
-  int port = pickFreePort();
-  ASSERT_GT(port, 0) << "Could not allocate a free TCP port for RAS";
-  std::string portStr = std::to_string(port);
-  // Use 127.0.0.1 explicitly (not "localhost") so the RAS server binds on the
-  // same IPv4 address that pickFreePort() probed.  On Ubuntu 24.04, resolving
-  // "localhost" via getaddrinfo(AF_UNSPEC) returns ::1 first, which would cause
-  // the RAS bind() to target an IPv6 port that pickFreePort() never checked.
-  std::string rasAddr = "127.0.0.1:" + portStr;
-
   RUN_ISOLATED_TEST_WITH_ENV(
       "RasJson_JsonFormatIsSupportedAndDistinctFromText",
-      [portStr]() {
+      []() {
         int devCount = 0;
         if (hipGetDeviceCount(&devCount) != hipSuccess || devCount < 1) {
           GTEST_SKIP() << "No HIP-visible GPU; skipping";
         }
         ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        // Pick the RAS port and publish NCCL_RAS_ADDR *inside* this process,
+        // which is the same process that runs ncclCommInitRank() (so the RAS
+        // server binds here) and queryRas() (so the client connects here).
+        // The process-isolation harness re-execs the test binary, which would
+        // re-run any port selection placed in the TEST() body in a *second*
+        // process; the server and client would then disagree on the port and
+        // every connect() would get ECONNREFUSED.  Owning the port here keeps
+        // them in lockstep.
+        //
+        // Use 127.0.0.1 explicitly (not "localhost") so the RAS server binds on
+        // the same IPv4 address pickFreePort() probed: on hosts where
+        // getaddrinfo("localhost", AF_UNSPEC) returns ::1 first, the bind would
+        // otherwise target an IPv6 port that was never checked for being free.
+        int port = pickFreePort();
+        ASSERT_GT(port, 0) << "Could not allocate a free TCP port for RAS";
+        std::string portStr = std::to_string(port);
+        std::string rasAddr = "127.0.0.1:" + portStr;
+        ASSERT_EQ(setenv("NCCL_RAS_ENABLE", "1", /*overwrite=*/1), 0);
+        ASSERT_EQ(setenv("NCCL_RAS_ADDR", rasAddr.c_str(), /*overwrite=*/1), 0);
 
         ncclUniqueId id;
         ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
@@ -152,7 +160,7 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
 
         ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
       },
-      {{"NCCL_RAS_ENABLE", "1"}, {"NCCL_RAS_ADDR", rasAddr}});
+      {{"NCCL_RAS_ENABLE", "1"}});
 }
 
 }  // namespace RcclUnitTesting
