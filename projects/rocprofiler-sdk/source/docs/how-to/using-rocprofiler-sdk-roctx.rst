@@ -185,7 +185,7 @@ Two modes of operation
 
 When running ``rocprofv3`` without the ``--selected-regions`` option, profiling is **enabled** as soon as the application starts. The ``roctxProfilerPause()`` and ``roctxProfilerResume()`` APIs are used to temporarily hide specific sections of code from profiling.
 
-- Use case: Profile everything exluding the specific regions.
+- Use case: Profile everything excluding the specific regions.
 - Profiler starts: **Enabled**
 - ``roctxProfilerPause()``: Temporarily stops data collection.
 - ``roctxProfilerResume()``: Resumes data collection.

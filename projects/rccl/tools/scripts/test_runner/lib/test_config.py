@@ -22,12 +22,78 @@ except ImportError:
 
 _SCHEMA_PATH = Path(__file__).parent / "schema.json"
 
-# Set default WORKDIR to rccl root directory if not already defined
+# Compute canonical project roots so builds work regardless of the caller's $PWD.
 # This file is at: rccl/tools/scripts/test_runner/lib/test_config.py
-# rccl root is 5 directories up
+#   parents[4] -> the rccl root (".../projects/rccl")
+# rccl-tests is a sibling checkout of rccl (".../projects/rccl-tests"), so it is
+# resolved relative to the rccl root, NOT relative to $PWD (running the test
+# runner from the rccl directory would otherwise look for a non-existent
+# rccl/rccl-tests). Both can be overridden via the environment.
+_rccl_root = Path(__file__).resolve().parents[4]
 if "WORKDIR" not in os.environ:
-    _rccl_root = Path(__file__).resolve().parents[4]
     os.environ["WORKDIR"] = str(_rccl_root)
+if "RCCL_TESTS_DIR" not in os.environ:
+    os.environ["RCCL_TESTS_DIR"] = str(_rccl_root.parent / "rccl-tests")
+
+
+def expand_env_vars(value):
+    """
+    Expand environment variables in a string with bash-style default support.
+
+    Supports ${VAR}, $VAR, and ${VAR:-default} (including nested expansion in
+    the default value). Unlike os.path.expandvars, this honors the ":-" default
+    syntax. Unset ${VAR}/$VAR references are left intact.
+
+    This is a module-level function so it can be reused outside the config
+    processor (e.g. when the executor resolves test binary paths).
+
+    Args:
+        value: String that may contain environment variables
+
+    Returns:
+        str: String with environment variables expanded
+
+    Examples:
+        "${HOME}/code" -> "/home/user/code"
+        "$ROCM_PATH/bin" -> "/opt/rocm/bin"
+        "${UNDEFINED:-/default}" -> "/default" (bash-style default)
+        "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build" -> expands $PWD in the default
+    """
+    if not isinstance(value, str):
+        return value
+
+    # Replace ${VAR:-default} patterns (default value is recursively expanded).
+    def replace_with_default(match):
+        var_name = match.group(1)
+        default_value = match.group(2)
+        result = os.environ.get(var_name)
+        if result is None:
+            result = expand_env_vars(default_value)
+        return result
+
+    # All three forms are expanded together, repeatedly, until the string
+    # stabilizes. This resolves arbitrarily nested references such as
+    # "${RCCL_HOME:-${WORKDIR}/build/debug}" or
+    # "${RCCL_HOME:-${WORKDIR:-$PWD}/build/debug}": the inner ${WORKDIR}/$PWD is
+    # resolved on one pass, which turns the outer default brace-free so the
+    # ${VAR:-default} pattern can match it on the next pass. The default group
+    # excludes braces ([^{}]*) so the innermost default is always matched first.
+    # Unset references collapse to themselves, so iteration reaches a fixed
+    # point; the range() bound just guards against pathological input.
+    default_pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*):-([^{}]*)\}')
+    braced_pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
+    bare_pattern = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)')
+    resolve = lambda m: os.environ.get(m.group(1), m.group(0))
+
+    for _ in range(10):
+        new_value = default_pattern.sub(replace_with_default, value)
+        new_value = braced_pattern.sub(resolve, new_value)
+        new_value = bare_pattern.sub(resolve, new_value)
+        if new_value == value:
+            break
+        value = new_value
+
+    return value
 
 
 class TestConfigProcessor:
@@ -114,33 +180,7 @@ class TestConfigProcessor:
             "${UNDEFINED:-/default}" -> "/default" (bash-style default)
             "${WORKDIR:-$HOME/code}" -> expands $HOME in default if WORKDIR not set
         """
-        if not isinstance(value, str):
-            return value
-
-        # Pattern to match ${VAR}, ${VAR:-default}, or $VAR
-        # First, handle ${VAR:-default} pattern
-        def replace_with_default(match):
-            var_name = match.group(1)
-            default_value = match.group(2)
-            # Get the env var, or use default
-            result = os.environ.get(var_name)
-            if result is None:
-                # Recursively expand env vars in the default value
-                result = self._expand_env_var(default_value)
-            return result
-
-        # Replace ${VAR:-default} patterns
-        value = re.sub(r'\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}', replace_with_default, value)
-
-        # Replace ${VAR} patterns
-        value = re.sub(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}',
-                      lambda m: os.environ.get(m.group(1), m.group(0)), value)
-
-        # Replace $VAR patterns (but not ${ to avoid double replacement)
-        value = re.sub(r'\$([A-Za-z_][A-Za-z0-9_]*)',
-                      lambda m: os.environ.get(m.group(1), m.group(0)), value)
-
-        return value
+        return expand_env_vars(value)
 
     def _expand_env_vars_in_dict(self, data):
         """
@@ -287,8 +327,12 @@ class TestConfigProcessor:
         Returns:
             list: Tests with defaults applied
         """
-        # Fields that can have defaults at config level
-        default_fields = ["is_gtest", "binary", "num_ranks", "num_nodes", "num_gpus", "timeout"]
+        # Fields that can have defaults at config level. is_pytest/test_dir/
+        # python_bin/setup_venv/venv_dir/requirements drive pytest-harness suites.
+        default_fields = [
+            "is_gtest", "binary", "num_ranks", "num_nodes", "num_gpus", "timeout",
+            "is_pytest", "test_dir", "python_bin", "setup_venv", "venv_dir", "requirements",
+        ]
 
         processed_tests = []
         for test in tests:
@@ -338,8 +382,14 @@ class TestConfigProcessor:
                 "binary": combined_config.get("binary"),
                 "num_ranks": combined_config.get("num_ranks"),
                 "num_nodes": combined_config.get("num_nodes"),
-                "num_gpus": combined_config.get("num_gpus", 8),
-                "timeout": combined_config.get("timeout")
+                "num_gpus": combined_config.get("num_gpus", "auto"),
+                "timeout": combined_config.get("timeout"),
+                "is_pytest": combined_config.get("is_pytest"),
+                "test_dir": combined_config.get("test_dir"),
+                "python_bin": combined_config.get("python_bin"),
+                "setup_venv": combined_config.get("setup_venv"),
+                "venv_dir": combined_config.get("venv_dir"),
+                "requirements": combined_config.get("requirements"),
             }
             # Remove None values
             config_defaults = {k: v for k, v in config_defaults.items() if v is not None}
@@ -351,7 +401,13 @@ class TestConfigProcessor:
                 "num_ranks": suite.get("num_ranks"),
                 "num_nodes": suite.get("num_nodes"),
                 "num_gpus": suite.get("num_gpus"),
-                "timeout": suite.get("timeout")
+                "timeout": suite.get("timeout"),
+                "is_pytest": suite.get("is_pytest"),
+                "test_dir": suite.get("test_dir"),
+                "python_bin": suite.get("python_bin"),
+                "setup_venv": suite.get("setup_venv"),
+                "venv_dir": suite.get("venv_dir"),
+                "requirements": suite.get("requirements"),
             }
             # Remove None values
             suite_defaults = {k: v for k, v in suite_defaults.items() if v is not None}
@@ -364,13 +420,25 @@ class TestConfigProcessor:
             if tests and merged_defaults:
                 combined_config["tests"] = self._apply_test_defaults(tests, merged_defaults)
 
+            # Propagate suite-entry-level mpi_args (additive, appended after any
+            # config-level mpi_args). Accepts a string or list at either level.
+            suite_mpi_args = suite.get("mpi_args")
+            if suite_mpi_args is not None:
+                def _as_list(value):
+                    if value is None:
+                        return []
+                    return list(value) if isinstance(value, (list, tuple)) else [value]
+                combined_config["mpi_args"] = (
+                    _as_list(combined_config.get("mpi_args")) + _as_list(suite_mpi_args)
+                )
+
             # Add suite-specific details
             combined_config["suite_details"] = {
                 "name": suite.get("name"),
                 "description": suite.get("description", ""),
                 "num_nodes": suite.get("num_nodes", 1),
                 "num_ranks": suite.get("num_ranks", 1),
-                "num_gpus": suite.get("num_gpus", 8),
+                "num_gpus": suite.get("num_gpus", "auto"),
                 "enabled": suite.get("enabled", True)
             }
 
@@ -413,6 +481,16 @@ class TestConfigProcessor:
             dict: Build configuration with CMake options, environment variables, etc.
         """
         return self.config.get("build_configuration", {})
+
+    def get_rccl_tests_build_config(self):
+        """
+        Get the rccl-tests build configuration settings.
+
+        Returns:
+            dict: rccl-tests build configuration (source_dir, install_flags,
+                  parallel_jobs, env_variables, etc.). Empty dict if not present.
+        """
+        return self.config.get("rccl_tests_build_configuration", {})
 
     def validate_config(self):
         """

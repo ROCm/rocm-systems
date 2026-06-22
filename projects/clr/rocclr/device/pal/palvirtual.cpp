@@ -2351,10 +2351,13 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   size_t vaddr_offset = 0;
   size_t phys_offset = 0;
   if (phys_mem_obj != nullptr) {
-    constexpr bool kParent = false;
-    vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
-        phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
-        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
+    vaddr_sub_obj =
+        dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
+    if (vaddr_sub_obj == nullptr) {
+      LogError("PAL Command: MapMemObjBookkeeping failed!");
+      profilingEnd(vcmd);
+      return;
+    }
 
     pal::Memory* phys_pal_mem = dev().getGpuMemory(phys_mem_obj);
     phymem_igpu_mem = phys_pal_mem->iMem();
@@ -2388,22 +2391,19 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   setGpuEvent(event);
   if (result == Pal::Result::Success) {
     if (phys_mem_obj != nullptr) {
-      // assert the vaddr_mem_obj wasn't mapped already
-      assert(amd::MemObjMap::FindMemObj(vcmd.ptr()) == nullptr);
-      amd::MemObjMap::AddMemObj(vcmd.ptr(), vaddr_sub_obj);
-      vaddr_sub_obj->getUserData().phys_mem_obj = phys_mem_obj;
-      phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
+      constexpr bool kImportVmmForInterprocess = false;
+      dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
+                                         kImportVmmForInterprocess);
     } else {
       // assert the vaddr_mem_obj is mapped and needs to be removed
       vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
       assert(vaddr_sub_obj != nullptr);
       assert(vcmd.ptr() == vaddr_sub_obj->getSvmPtr());
 
-      amd::MemObjMap::RemoveMemObj(vcmd.ptr());
-      if (vaddr_sub_obj->getUserData().phys_mem_obj != nullptr) {
-        vaddr_sub_obj->getUserData().phys_mem_obj->getUserData().vaddr_mem_obj = nullptr;
-        vaddr_sub_obj->getUserData().phys_mem_obj = nullptr;
-      }
+      constexpr bool kDestroyVirtualBuffer = false;
+      constexpr bool kReleaseSubObj = false;
+      dev().UnmapMemObjBookkeeping(vaddr_sub_obj, const_cast<void*>(vcmd.ptr()),
+                                   kDestroyVirtualBuffer, kReleaseSubObj);
     }
   }
   profilingEnd(vcmd);
