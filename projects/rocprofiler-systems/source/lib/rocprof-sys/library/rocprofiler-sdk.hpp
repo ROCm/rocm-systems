@@ -664,7 +664,7 @@ library_sdk<Wrapper>::start_context(typename Wrapper::context_id ctx)
 {
     if(is_initialized(ctx) && !is_active(ctx))
     {
-        ROCPROFILER_CALL(Wrapper::start_context(ctx));
+        rocprofiler_call<Wrapper>(Wrapper::start_context(ctx), "Wrapper::start_context");
     }
 }
 
@@ -674,7 +674,7 @@ library_sdk<Wrapper>::stop_context(typename Wrapper::context_id ctx)
 {
     if(is_initialized(ctx) && is_active(ctx))
     {
-        ROCPROFILER_CALL(Wrapper::stop_context(ctx));
+        rocprofiler_call<Wrapper>(Wrapper::stop_context(ctx), "Wrapper::stop_context");
     }
 }
 
@@ -707,7 +707,7 @@ library_sdk<Wrapper>::flush()
             auto status = Wrapper::flush_buffer(itr);
             if(status != Wrapper::STATUS_ERROR_BUFFER_BUSY)
             {
-                ROCPROFILER_CALL(status);
+                rocprofiler_call<Wrapper>(status, "Wrapper::flush_buffer");
             }
         }
     }
@@ -1169,7 +1169,8 @@ library_sdk<Wrapper>::flush_counter_tracks_to_zero(
 {
     if(timestamp == 0)
     {
-        ROCPROFILER_CALL(Wrapper::get_timestamp(&timestamp));
+        rocprofiler_call<Wrapper>(Wrapper::get_timestamp(&timestamp),
+                                  "Wrapper::get_timestamp");
     }
     auto* storage = get_counter_storage();
     if(!storage) return;
@@ -1288,8 +1289,10 @@ library_sdk<Wrapper>::create_agent_profile(typename Wrapper::agent_id      agent
     if(!counters_v.empty())
     {
         auto profile_v = typename Wrapper::counter_config_id{};
-        ROCPROFILER_CALL(Wrapper::create_counter_config(agent_id, counters_v.data(),
-                                                        counters_v.size(), &profile_v));
+        rocprofiler_call<Wrapper>(
+            Wrapper::create_counter_config(agent_id, counters_v.data(), counters_v.size(),
+                                           &profile_v),
+            "Wrapper::create_counter_config");
         profile = profile_v;
     }
 
@@ -1322,7 +1325,7 @@ library_sdk<Wrapper>::tool_code_object_callback(
     typename Wrapper::user_data_t* /*user_data*/, void* /*callback_data*/)
 {
     auto ts = typename Wrapper::timestamp_t{};
-    ROCPROFILER_CALL(Wrapper::get_timestamp(&ts));
+    rocprofiler_call<Wrapper>(Wrapper::get_timestamp(&ts), "Wrapper::get_timestamp");
 
     if(record.kind == Wrapper::CALLBACK_TRACING_CODE_OBJECT)
     {
@@ -1523,7 +1526,7 @@ library_sdk<Wrapper>::tool_tracing_callback(
 #endif
 
     auto ts = typename Wrapper::timestamp_t{};
-    ROCPROFILER_CALL(Wrapper::get_timestamp(&ts));
+    rocprofiler_call<Wrapper>(Wrapper::get_timestamp(&ts), "Wrapper::get_timestamp");
     const char* name = "";
     Wrapper::query_callback_op_name(record.kind, record.operation, &name, nullptr);
 
@@ -2549,8 +2552,9 @@ library_sdk<Wrapper>::counter_record_callback(
     for(size_t i = 0; i < record_count; ++i)
     {
         auto _counter_id = typename Wrapper::counter_id{};
-        ROCPROFILER_CALL(
-            Wrapper::query_record_counter_id(record_data[i].id, &_counter_id));
+        rocprofiler_call<Wrapper>(
+            Wrapper::query_record_counter_id(record_data[i].id, &_counter_id),
+            "Wrapper::query_record_counter_id");
         if(!_aggregate.emplace(_counter_id, record_data[i]).second)
             _aggregate[_counter_id].counter_value += record_data[i].counter_value;
     }
@@ -2676,12 +2680,17 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
     _data->initialize();
     if(!_counter_events.empty()) _data->initialize_event_info();
 
-    ROCPROFILER_CALL(Wrapper::create_context(&_data->primary_ctx));
-    ROCPROFILER_CALL(Wrapper::create_context(&_data->code_object_ctx));
-    ROCPROFILER_CALL(Wrapper::configure_callback_tracing_service(
-        _data->code_object_ctx, Wrapper::CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,
-        tool_code_object_callback, _data));
-    ROCPROFILER_CALL(Wrapper::create_context(&_data->control_ctx));
+    rocprofiler_call<Wrapper>(Wrapper::create_context(&_data->primary_ctx),
+                              "Wrapper::create_context");
+    rocprofiler_call<Wrapper>(Wrapper::create_context(&_data->code_object_ctx),
+                              "Wrapper::create_context");
+    rocprofiler_call<Wrapper>(Wrapper::configure_callback_tracing_service(
+                                  _data->code_object_ctx,
+                                  Wrapper::CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,
+                                  tool_code_object_callback, _data),
+                              "Wrapper::configure_callback_tracing_service");
+    rocprofiler_call<Wrapper>(Wrapper::create_context(&_data->control_ctx),
+                              "Wrapper::create_context");
 
     auto external_corr_id_request_kinds =
         std::array<typename Wrapper::external_correlation_request_kind, 3>{
@@ -2719,27 +2728,32 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
             auto _ops = sdk_core<Wrapper>::get_operations(itr);
             _data->backtrace_operations.emplace(
                 itr, sdk_core<Wrapper>::get_backtrace_operations(itr));
-            ROCPROFILER_CALL(Wrapper::configure_callback_tracing_service(
-                _data->primary_ctx, itr, _ops.data(), _ops.size(), tool_tracing_callback,
-                _data));
+            rocprofiler_call<Wrapper>(Wrapper::configure_callback_tracing_service(
+                                          _data->primary_ctx, itr, _ops.data(),
+                                          _ops.size(), tool_tracing_callback, _data),
+                                      "Wrapper::configure_callback_tracing_service");
         }
     }
 
     constexpr auto buffer_size = 16 * 4096;
     constexpr auto watermark   = 15 * 4096;
 
-    ROCPROFILER_CALL(Wrapper::configure_external_correlation_id_request_service(
-        _data->primary_ctx, external_corr_id_request_kinds.data(),
-        external_corr_id_request_kinds.size(),
-        set_kernel_rename_and_stream_correlation_id, _data));
+    rocprofiler_call<Wrapper>(
+        Wrapper::configure_external_correlation_id_request_service(
+            _data->primary_ctx, external_corr_id_request_kinds.data(),
+            external_corr_id_request_kinds.size(),
+            set_kernel_rename_and_stream_correlation_id, _data),
+        "Wrapper::configure_external_correlation_id_request_service");
 
 #if(ROCPROFILER_VERSION >= 700)
     if((_buffered_domain.count(Wrapper::BUFFER_TRACING_KERNEL_DISPATCH) > 0) ||
        (_buffered_domain.count(Wrapper::BUFFER_TRACING_MEMORY_COPY) > 0))
     {
-        ROCPROFILER_CALL(Wrapper::configure_callback_tracing_service(
-            _data->primary_ctx, Wrapper::CALLBACK_TRACING_HIP_STREAM, nullptr, 0,
-            tool_hip_stream_callback, nullptr));
+        rocprofiler_call<Wrapper>(Wrapper::configure_callback_tracing_service(
+                                      _data->primary_ctx,
+                                      Wrapper::CALLBACK_TRACING_HIP_STREAM, nullptr, 0,
+                                      tool_hip_stream_callback, nullptr),
+                                  "Wrapper::configure_callback_tracing_service");
     }
 #endif
 
@@ -2748,49 +2762,65 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
 
     if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KERNEL_DISPATCH) > 0)
     {
-        ROCPROFILER_CALL(Wrapper::create_buffer(
-            _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
-            tool_tracing_buffered, tool_data, &_data->kernel_dispatch_buffer));
-        ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, Wrapper::BUFFER_TRACING_KERNEL_DISPATCH, nullptr, 0,
-            _data->kernel_dispatch_buffer));
+        rocprofiler_call<Wrapper>(
+            Wrapper::create_buffer(_data->primary_ctx, buffer_size, watermark,
+                                   Wrapper::BUFFER_POLICY_LOSSLESS, tool_tracing_buffered,
+                                   tool_data, &_data->kernel_dispatch_buffer),
+            "Wrapper::create_buffer");
+        rocprofiler_call<Wrapper>(Wrapper::configure_buffer_tracing_service(
+                                      _data->primary_ctx,
+                                      Wrapper::BUFFER_TRACING_KERNEL_DISPATCH, nullptr, 0,
+                                      _data->kernel_dispatch_buffer),
+                                  "Wrapper::configure_buffer_tracing_service");
     }
 
     if(_buffered_domain.count(Wrapper::BUFFER_TRACING_MEMORY_COPY) > 0)
     {
-        ROCPROFILER_CALL(Wrapper::create_buffer(
-            _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
-            tool_tracing_buffered, tool_data, &_data->memory_copy_buffer));
-        ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, Wrapper::BUFFER_TRACING_MEMORY_COPY, nullptr, 0,
-            _data->memory_copy_buffer));
+        rocprofiler_call<Wrapper>(
+            Wrapper::create_buffer(_data->primary_ctx, buffer_size, watermark,
+                                   Wrapper::BUFFER_POLICY_LOSSLESS, tool_tracing_buffered,
+                                   tool_data, &_data->memory_copy_buffer),
+            "Wrapper::create_buffer");
+        rocprofiler_call<Wrapper>(Wrapper::configure_buffer_tracing_service(
+                                      _data->primary_ctx,
+                                      Wrapper::BUFFER_TRACING_MEMORY_COPY, nullptr, 0,
+                                      _data->memory_copy_buffer),
+                                  "Wrapper::configure_buffer_tracing_service");
     }
 
     if(_buffered_domain.count(Wrapper::BUFFER_TRACING_SCRATCH_MEMORY) > 0)
     {
-        ROCPROFILER_CALL(Wrapper::create_buffer(
-            _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
-            tool_tracing_buffered, tool_data, &_data->scratch_memory_buffer));
-        ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, Wrapper::BUFFER_TRACING_SCRATCH_MEMORY, nullptr, 0,
-            _data->scratch_memory_buffer));
+        rocprofiler_call<Wrapper>(
+            Wrapper::create_buffer(_data->primary_ctx, buffer_size, watermark,
+                                   Wrapper::BUFFER_POLICY_LOSSLESS, tool_tracing_buffered,
+                                   tool_data, &_data->scratch_memory_buffer),
+            "Wrapper::create_buffer");
+        rocprofiler_call<Wrapper>(Wrapper::configure_buffer_tracing_service(
+                                      _data->primary_ctx,
+                                      Wrapper::BUFFER_TRACING_SCRATCH_MEMORY, nullptr, 0,
+                                      _data->scratch_memory_buffer),
+                                  "Wrapper::configure_buffer_tracing_service");
     }
 
 #if(ROCPROFILER_VERSION >= 600)
     if(_buffered_domain.count(Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION) > 0)
     {
-        ROCPROFILER_CALL(Wrapper::create_buffer(
-            _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
-            tool_tracing_buffered, tool_data, &_data->memory_alloc_buffer));
+        rocprofiler_call<Wrapper>(
+            Wrapper::create_buffer(_data->primary_ctx, buffer_size, watermark,
+                                   Wrapper::BUFFER_POLICY_LOSSLESS, tool_tracing_buffered,
+                                   tool_data, &_data->memory_alloc_buffer),
+            "Wrapper::create_buffer");
         if(_data->memory_alloc_buffer.handle == 0UL)
         {
             LOG_CRITICAL("Failed to create memory allocation buffer");
             ::rocprofsys::set_state(::rocprofsys::State::Finalized);
             ::std::abort();
         }
-        ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION, nullptr, 0,
-            _data->memory_alloc_buffer));
+        rocprofiler_call<Wrapper>(Wrapper::configure_buffer_tracing_service(
+                                      _data->primary_ctx,
+                                      Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION, nullptr,
+                                      0, _data->memory_alloc_buffer),
+                                  "Wrapper::configure_buffer_tracing_service");
     }
 #endif
 
@@ -2807,61 +2837,85 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
 
     if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT) > 0)
     {
-        ROCPROFILER_CALL(Wrapper::create_buffer(
-            _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
-            tool_tracing_buffered, tool_data, &_data->kfd_page_fault_buffer));
-        ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT, nullptr, 0,
-            _data->kfd_page_fault_buffer));
+        rocprofiler_call<Wrapper>(
+            Wrapper::create_buffer(_data->primary_ctx, buffer_size, watermark,
+                                   Wrapper::BUFFER_POLICY_LOSSLESS, tool_tracing_buffered,
+                                   tool_data, &_data->kfd_page_fault_buffer),
+            "Wrapper::create_buffer");
+        rocprofiler_call<Wrapper>(Wrapper::configure_buffer_tracing_service(
+                                      _data->primary_ctx,
+                                      Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT, nullptr, 0,
+                                      _data->kfd_page_fault_buffer),
+                                  "Wrapper::configure_buffer_tracing_service");
     }
     if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0)
     {
-        ROCPROFILER_CALL(Wrapper::create_buffer(
-            _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
-            tool_tracing_buffered, tool_data, &_data->kfd_page_migrate_buffer));
-        ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE, nullptr, 0,
-            _data->kfd_page_migrate_buffer));
+        rocprofiler_call<Wrapper>(
+            Wrapper::create_buffer(_data->primary_ctx, buffer_size, watermark,
+                                   Wrapper::BUFFER_POLICY_LOSSLESS, tool_tracing_buffered,
+                                   tool_data, &_data->kfd_page_migrate_buffer),
+            "Wrapper::create_buffer");
+        rocprofiler_call<Wrapper>(Wrapper::configure_buffer_tracing_service(
+                                      _data->primary_ctx,
+                                      Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE, nullptr,
+                                      0, _data->kfd_page_migrate_buffer),
+                                  "Wrapper::configure_buffer_tracing_service");
     }
     if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_QUEUE) > 0)
     {
-        ROCPROFILER_CALL(Wrapper::create_buffer(
-            _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
-            tool_tracing_buffered, tool_data, &_data->kfd_queue_buffer));
-        ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_QUEUE, nullptr, 0,
-            _data->kfd_queue_buffer));
+        rocprofiler_call<Wrapper>(
+            Wrapper::create_buffer(_data->primary_ctx, buffer_size, watermark,
+                                   Wrapper::BUFFER_POLICY_LOSSLESS, tool_tracing_buffered,
+                                   tool_data, &_data->kfd_queue_buffer),
+            "Wrapper::create_buffer");
+        rocprofiler_call<Wrapper>(Wrapper::configure_buffer_tracing_service(
+                                      _data->primary_ctx,
+                                      Wrapper::BUFFER_TRACING_KFD_QUEUE, nullptr, 0,
+                                      _data->kfd_queue_buffer),
+                                  "Wrapper::configure_buffer_tracing_service");
     }
     if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE) > 0)
     {
-        ROCPROFILER_CALL(Wrapper::create_buffer(
-            _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
-            tool_tracing_buffered, tool_data, &_data->kfd_event_queue_buffer));
+        rocprofiler_call<Wrapper>(
+            Wrapper::create_buffer(_data->primary_ctx, buffer_size, watermark,
+                                   Wrapper::BUFFER_POLICY_LOSSLESS, tool_tracing_buffered,
+                                   tool_data, &_data->kfd_event_queue_buffer),
+            "Wrapper::create_buffer");
         auto kfd_event_queue_ops = std::array<typename Wrapper::tracing_operation, 1>{
             Wrapper::KFD_EVENT_QUEUE_RESTORE_RESCHEDULED
         };
-        ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE,
-            kfd_event_queue_ops.data(), kfd_event_queue_ops.size(),
-            _data->kfd_event_queue_buffer));
+        rocprofiler_call<Wrapper>(
+            Wrapper::configure_buffer_tracing_service(
+                _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE,
+                kfd_event_queue_ops.data(), kfd_event_queue_ops.size(),
+                _data->kfd_event_queue_buffer),
+            "Wrapper::configure_buffer_tracing_service");
     }
     if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0)
     {
-        ROCPROFILER_CALL(Wrapper::create_buffer(
-            _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
-            tool_tracing_buffered, tool_data, &_data->kfd_event_unmap_buffer));
-        ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU, nullptr,
-            0, _data->kfd_event_unmap_buffer));
+        rocprofiler_call<Wrapper>(
+            Wrapper::create_buffer(_data->primary_ctx, buffer_size, watermark,
+                                   Wrapper::BUFFER_POLICY_LOSSLESS, tool_tracing_buffered,
+                                   tool_data, &_data->kfd_event_unmap_buffer),
+            "Wrapper::create_buffer");
+        rocprofiler_call<Wrapper>(Wrapper::configure_buffer_tracing_service(
+                                      _data->primary_ctx,
+                                      Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                                      nullptr, 0, _data->kfd_event_unmap_buffer),
+                                  "Wrapper::configure_buffer_tracing_service");
     }
     if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
     {
-        ROCPROFILER_CALL(Wrapper::create_buffer(
-            _data->primary_ctx, buffer_size, watermark, Wrapper::BUFFER_POLICY_LOSSLESS,
-            tool_tracing_buffered, tool_data, &_data->kfd_event_dropped_buffer));
-        ROCPROFILER_CALL(Wrapper::configure_buffer_tracing_service(
-            _data->primary_ctx, Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS, nullptr,
-            0, _data->kfd_event_dropped_buffer));
+        rocprofiler_call<Wrapper>(
+            Wrapper::create_buffer(_data->primary_ctx, buffer_size, watermark,
+                                   Wrapper::BUFFER_POLICY_LOSSLESS, tool_tracing_buffered,
+                                   tool_data, &_data->kfd_event_dropped_buffer),
+            "Wrapper::create_buffer");
+        rocprofiler_call<Wrapper>(Wrapper::configure_buffer_tracing_service(
+                                      _data->primary_ctx,
+                                      Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+                                      nullptr, 0, _data->kfd_event_dropped_buffer),
+                                  "Wrapper::configure_buffer_tracing_service");
     }
 #endif
 
@@ -2874,16 +2928,21 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
                 _agent_id, create_agent_profile(_agent_id, _counter_events, _data));
         }
 
-        ROCPROFILER_CALL(Wrapper::create_context(&_data->counter_ctx));
+        rocprofiler_call<Wrapper>(Wrapper::create_context(&_data->counter_ctx),
+                                  "Wrapper::create_context");
         auto _operations = std::array<typename Wrapper::tracing_operation, 1>{
             Wrapper::KERNEL_DISPATCH_COMPLETE,
         };
-        ROCPROFILER_CALL(Wrapper::configure_callback_tracing_service(
-            _data->counter_ctx, Wrapper::CALLBACK_TRACING_KERNEL_DISPATCH,
-            _operations.data(), _operations.size(), tool_tracing_callback, _data));
-        ROCPROFILER_CALL(Wrapper::configure_callback_dispatch_counting_service(
-            _data->counter_ctx, dispatch_counting_service_callback, _data,
-            counter_record_callback, _data));
+        rocprofiler_call<Wrapper>(
+            Wrapper::configure_callback_tracing_service(
+                _data->counter_ctx, Wrapper::CALLBACK_TRACING_KERNEL_DISPATCH,
+                _operations.data(), _operations.size(), tool_tracing_callback, _data),
+            "Wrapper::configure_callback_tracing_service");
+        rocprofiler_call<Wrapper>(
+            Wrapper::configure_callback_dispatch_counting_service(
+                _data->counter_ctx, dispatch_counting_service_callback, _data,
+                counter_record_callback, _data),
+            "Wrapper::configure_callback_dispatch_counting_service");
     }
 
 #if ROCPROFILER_VERSION >= 600
@@ -2900,8 +2959,10 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
         if(itr.handle > 0)
         {
             auto client_thread = typename Wrapper::callback_thread_id{};
-            ROCPROFILER_CALL(Wrapper::create_callback_thread(&client_thread));
-            ROCPROFILER_CALL(Wrapper::assign_callback_thread(itr, client_thread));
+            rocprofiler_call<Wrapper>(Wrapper::create_callback_thread(&client_thread),
+                                      "Wrapper::create_callback_thread");
+            rocprofiler_call<Wrapper>(Wrapper::assign_callback_thread(itr, client_thread),
+                                      "Wrapper::assign_callback_thread");
         }
     }
 
@@ -3022,7 +3083,8 @@ library_sdk<Wrapper>::tool_attach_init([[maybe_unused]]
 
     for(std::uint64_t i = 0; i < context_ids_length; ++i)
     {
-        ROCPROFILER_CALL(Wrapper::start_context(context_ids[i]));
+        rocprofiler_call<Wrapper>(Wrapper::start_context(context_ids[i]),
+                                  "Wrapper::start_context");
     }
     ::rocprofsys::rocprofiler_sdk::start();
     return 0;
@@ -3058,12 +3120,14 @@ library_sdk<Wrapper>::sdk_tool_configure(std::uint32_t                  version,
     LOG_INFO("{} is using rocprofiler-sdk v{}.{}.{} ({})", id->name, major, minor, patch,
              runtime_version);
 
-    ROCPROFILER_CALL(Wrapper::at_internal_thread_create(
-        &library_sdk::thread_precreate, &library_sdk::thread_postcreate,
-        static_cast<typename Wrapper::runtime_library_t>(
-            Wrapper::LIBRARY | Wrapper::HSA_LIBRARY | Wrapper::HIP_LIBRARY |
-            Wrapper::MARKER_LIBRARY),
-        nullptr));
+    rocprofiler_call<Wrapper>(Wrapper::at_internal_thread_create(
+                                  &library_sdk::thread_precreate,
+                                  &library_sdk::thread_postcreate,
+                                  static_cast<typename Wrapper::runtime_library_t>(
+                                      Wrapper::LIBRARY | Wrapper::HSA_LIBRARY |
+                                      Wrapper::HIP_LIBRARY | Wrapper::MARKER_LIBRARY),
+                                  nullptr),
+                              "Wrapper::at_internal_thread_create");
 
     return true;
 }

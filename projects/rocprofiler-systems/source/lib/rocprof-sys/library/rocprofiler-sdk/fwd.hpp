@@ -18,35 +18,30 @@
 #include <exception>
 #include <memory>
 #include <optional>
+#include <source_location>
 #include <utility>
 #include <vector>
-
-// The ROCPROFILER_CALL macro uses raw SDK identifiers which remain accessible
-// via the transitive SDK includes from the backend shim.
-#ifndef ROCPROFILER_CALL
-#    define ROCPROFILER_CALL(result)                                                     \
-        {                                                                                \
-            rocprofiler_status_t ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) =          \
-                (result);                                                                \
-            if(ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) != Wrapper::STATUS_SUCCESS)  \
-            {                                                                            \
-                auto        msg        = std::stringstream{};                            \
-                std::string status_msg = rocprofiler_get_status_string(                  \
-                    ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__));                       \
-                msg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] "           \
-                    << "rocprofiler-sdk call [" << #result                               \
-                    << "] failed with error code "                                       \
-                    << ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__)                      \
-                    << " :: " << status_msg;                                             \
-                LOG_WARNING("{}", msg.str());                                            \
-            }                                                                            \
-        }
-#endif
 
 namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
+
+/// Log-and-continue helper for SDK calls not yet migrated to sdk_check<Wrapper>.
+/// Uses Wrapper::STATUS_SUCCESS and Wrapper::get_status_string — no raw SDK symbols.
+template <typename Wrapper>
+inline void
+rocprofiler_call(typename Wrapper::status_t status, const char* expr,
+                 std::source_location loc = std::source_location::current())
+{
+    if(status != Wrapper::STATUS_SUCCESS)
+    {
+        LOG_WARNING(
+            "[{}][{}:{}] rocprofiler-sdk call [{}] failed with error code {} :: {}", expr,
+            loc.file_name(), loc.line(), expr, static_cast<int>(status),
+            Wrapper::get_status_string(status));
+    }
+}
 
 using hardware_counter_info = ::tim::hardware_counters::info;
 using callback_arg_array_t  = std::vector<std::pair<std::string, std::string>>;
@@ -244,10 +239,14 @@ private:
             auto _info     = typename Wrapper::counter_info_v0_t{};
             auto _dim_info = std::vector<typename Wrapper::dimension_info_t>{};
 
-            ROCPROFILER_CALL(Wrapper::query_counter_info(
-                counters[i], Wrapper::COUNTER_INFO_VERSION_0, &_info));
-            ROCPROFILER_CALL(Wrapper::iterate_counter_dimensions(
-                counters[i], dimensions_info_callback, &_dim_info));
+            rocprofiler_call<Wrapper>(
+                Wrapper::query_counter_info(counters[i], Wrapper::COUNTER_INFO_VERSION_0,
+                                            &_info),
+                "Wrapper::query_counter_info");
+            rocprofiler_call<Wrapper>(
+                Wrapper::iterate_counter_dimensions(counters[i], dimensions_info_callback,
+                                                    &_dim_info),
+                "Wrapper::iterate_counter_dimensions");
 
             if(!_info.is_constant)
                 data_v->at(agent_id).emplace_back(agent_id, _info, std::move(_dim_info));
