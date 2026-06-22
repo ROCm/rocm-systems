@@ -157,7 +157,7 @@ void printDeviceMem(const char* label) {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -215,7 +215,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -277,7 +277,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -326,7 +326,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemoryTrim") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemoryTrim) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -373,7 +373,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemoryTrim") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -463,7 +463,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -564,7 +564,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes"
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -681,7 +681,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -742,7 +742,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -836,7 +836,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -952,7 +952,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 

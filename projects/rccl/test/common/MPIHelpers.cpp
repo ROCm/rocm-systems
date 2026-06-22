@@ -110,6 +110,46 @@ namespace
         return out;
     }
 
+    // Stable per-process label derived from the --gtest_filter argument.
+    //
+    // The per-rank stdout/stderr log file is opened once at process startup
+    // (before GTest knows which test is running) and is later looked up by name
+    // when reading it back, so the label must be constant for the whole process.
+    // The test runner launches one fully-qualified test per process, so the
+    // filter identifies that test and lets every rank's file be matched to it
+    // (e.g. `ls *<TestName>*`). Wildcard/list filters that don't map to a single
+    // test yield an empty label so the filename stays unchanged.
+    const std::string& getRunLabel()
+    {
+        static const std::string label = []() -> std::string {
+            std::string   filter;
+            std::ifstream f("/proc/self/cmdline", std::ios::binary);
+            if(f)
+            {
+                const std::string key = "--gtest_filter=";
+                std::string       arg;
+                char              c;
+                while(f.get(c))
+                {
+                    if(c == '\0')
+                    {
+                        if(arg.rfind(key, 0) == 0)
+                            filter = arg.substr(key.size());
+                        arg.clear();
+                    }
+                    else
+                    {
+                        arg += c;
+                    }
+                }
+            }
+            if(filter.empty() || filter.find_first_of("*:?") != std::string::npos)
+                return {};
+            return sanitizeForFilename(filter);
+        }();
+        return label;
+    }
+
     // Build a per-test, per-rank NCCL debug log path.
     //
     // Pattern: <logdir>/rccl_<TestSuite>.<TestName>_rank<R>_pid<P>.log
@@ -396,9 +436,15 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
 
     // Rank 0 with per-rank logging: Output to BOTH console AND log file (tee behavior)
     // Print banner before redirection
+    const std::string& run_label = getRunLabel();
+    const std::string  file_glob = (run_label.empty() ? std::string{"rccl_test"}
+                                                       : "rccl_test_" + run_label)
+                                   + "_rank_*_pid*.log";
+
     TEST_INFO("Per-Rank Logging ENABLED (RCCL_MPI_LOG_ALL_RANKS=1)");
     TEST_INFO("Rank 0     : Output to BOTH console AND %s", log_filename.c_str());
     TEST_INFO("Ranks 1-N  : Output redirected to per-rank log files");
+    TEST_INFO("Rank files : %s  (each rank has its own PID)", file_glob.c_str());
     TEST_INFO("Log dir    : %s  (override: RCCL_TEST_LOG_DIR)", getLogBaseDir().c_str());
 
     // Save original stdout/stderr for tee thread
@@ -452,7 +498,9 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
 
 std::string getRankLogFilePath(int rank)
 {
-    return getLogBaseDir() + "/rccl_test_rank_" + std::to_string(rank)
+    const std::string& label  = getRunLabel();
+    const std::string  prefix = label.empty() ? std::string{"rccl_test"} : "rccl_test_" + label;
+    return getLogBaseDir() + "/" + prefix + "_rank_" + std::to_string(rank)
            + "_pid" + std::to_string(::getpid()) + ".log";
 }
 

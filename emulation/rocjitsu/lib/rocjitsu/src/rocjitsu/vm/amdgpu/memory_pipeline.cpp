@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "util/log.h"
 
@@ -230,29 +231,6 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
   }
 }
 
-uint64_t update_ds_barrier_arrive(uint64_t state, uint64_t decrement, bool has_decrement) {
-  constexpr uint64_t kPendingMask = (1ull << 29) - 1ull;
-  constexpr uint32_t kPhaseShift = 29;
-  constexpr uint32_t kInitCountShift = 32;
-
-  const uint64_t init_count = state >> kInitCountShift;
-  uint64_t phase = (state >> kPhaseShift) & 0x7ull;
-  uint64_t pending = state & kPendingMask;
-
-  if (pending == 0) {
-    phase = (phase + 7) & 0x7ull;
-    pending = init_count;
-  }
-
-  if (has_decrement) {
-    pending = decrement >= pending ? 0 : pending - decrement;
-  } else if (pending > 0) {
-    --pending;
-  }
-
-  return (init_count << kInitCountShift) | (phase << kPhaseShift) | pending;
-}
-
 /// @brief Apply a floating-point atomic RMW operation.
 template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {
   switch (op) {
@@ -267,6 +245,17 @@ template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {
   }
 }
 
+uint32_t atomic_source_stride(const VectorMemState &d) {
+  const bool uses_two_sources =
+      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
+  const uint32_t fallback = uses_two_sources ? d.elem_size * 2 : d.elem_size;
+  if (d.wf_size == 0 || d.store_data.empty())
+    return fallback;
+
+  const size_t per_lane = d.store_data.size() / d.wf_size;
+  return per_lane == 0 ? fallback : static_cast<uint32_t>(per_lane);
+}
+
 /// @brief Perform a per-lane atomic RMW through L2.
 ///
 /// Reads old value from L2, applies the atomic operation, writes new value
@@ -275,16 +264,17 @@ template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {
 void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint32_t vmid) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
+  const bool uses_two_sources =
+      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
+  const uint32_t src_stride = atomic_source_stride(d);
+  const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
+                      d.atomic_op == AtomicOp::FMAX);
 
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
 
     uint64_t ea = d.per_lane_addr[lane];
-    bool uses_two_sources = (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
-    uint32_t src_stride = uses_two_sources ? esz * 2 : esz;
-    bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
-                  d.atomic_op == AtomicOp::FMAX);
 
     // Perform the atomic RMW under L2's atomic lock.
     l2->atomic_rmw(
@@ -343,6 +333,11 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, L1VectorCache *l1, uint3
 void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
+  const bool uses_two_sources =
+      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
+  const uint32_t src_stride = atomic_source_stride(d);
+  const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
+                      d.atomic_op == AtomicOp::FMAX);
 
   if (d.atomic_op == AtomicOp::APPEND || d.atomic_op == AtomicOp::CONSUME) {
     uint32_t addr = 0;
@@ -379,11 +374,6 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
       continue;
 
     auto addr = static_cast<uint32_t>(d.per_lane_addr[lane]);
-    bool uses_two_sources = (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
-    uint32_t src_stride = uses_two_sources ? esz * 2 : esz;
-
-    bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
-                  d.atomic_op == AtomicOp::FMAX);
 
     if (esz == 4) {
       uint32_t old_val = lds->read32(addr);
@@ -410,7 +400,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
         const bool has_decrement = d.store_data.size() >= lane * src_stride + 8;
         if (has_decrement)
           std::memcpy(&decrement, &d.store_data[lane * src_stride], 8);
-        new_val = update_ds_barrier_arrive(old_val, decrement, has_decrement);
+        new_val = lds_barrier_cell_update_arrive(old_val, has_decrement ? decrement : 1);
       } else if (is_fp) {
         double old_f = std::bit_cast<double>(old_val);
         double src_f;

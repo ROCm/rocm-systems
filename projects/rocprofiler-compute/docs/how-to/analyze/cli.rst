@@ -156,7 +156,7 @@ There are three high-level GPU analysis views:
       --------------------------------------------------------------------------------
       2. System Speed-of-Light
       ╒═════════╤═══════════════════════════╤═══════════════════════╤══════════════════╤════════════════════╤════════════════════════╕
-      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ PoP                    │
+      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ Percent of Peak        │
       ╞═════════╪═══════════════════════════╪═══════════════════════╪══════════════════╪════════════════════╪════════════════════════╡
       │ 2.1.0   │ VALU FLOPs                │ 0.0                   │ Gflop            │ 22630.4            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
@@ -239,7 +239,7 @@ There are three high-level GPU analysis views:
       --------------------------------------------------------------------------------
       2. System Speed-of-Light
       ╒═════════╤═══════════════════════════╤═══════════════════════╤══════════════════╤════════════════════╤════════════════════════╕
-      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ PoP                    │
+      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ Percent of Peak        │
       ╞═════════╪═══════════════════════════╪═══════════════════════╪══════════════════╪════════════════════╪════════════════════════╡
       │ 2.1.0   │ VALU FLOPs                │ 0.0                   │ Gflop            │ 22630.4            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
@@ -733,7 +733,7 @@ Display all PyTorch operators captured during profiling:
 
 Output is grouped by source location (``file:line``) and shows full operator
 hierarchy (``/``-separated) and kernel stats. A consolidated CSV
-(``torch_trace/consolidated.csv``) is written with all operator/kernel data;
+(``ml_api_trace/consolidated.csv``) is written with all operator/kernel data;
 see :ref:`torch-operator-profiling` for details.
 
 The flat **Operator summary** table below the call tree has one row per

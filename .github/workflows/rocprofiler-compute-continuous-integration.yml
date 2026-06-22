@@ -158,6 +158,10 @@ jobs:
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
 
+      - name: Output TheRock Manifest
+        run: |
+          cat ${{ env.ROCM_PATH }}/share/therock/therock_manifest.json
+
       - name: Install Python Requirements
         working-directory: projects/rocprofiler-compute
         run: |

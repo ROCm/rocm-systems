@@ -14,6 +14,7 @@
 #include "comgrctx.hpp"
 #include "amd_hsa_elf.hpp"
 #include "hip_comgr_helper.hpp"
+#include "hotswap.hpp"
 
 #if ROCM_KPACK_ENABLED
 #include <rocm_kpack/kpack.h>
@@ -464,6 +465,18 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     }
   }
 
+  // HotSwap: also request supported source ISAs for forwarding (skipped when forcing SPIRV).
+  if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+    for (auto device : devices) {
+      const std::string target_gfx = device->devices()[0]->isa().processorName();
+      for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
+        if (target_gfx == p.target) {
+          unique_isa_names.insert(std::string("amdgcn-amd-amdhsa--") + p.source);
+        }
+      }
+    }
+  }
+
   std::map<std::string, std::pair<const void*, size_t>> code_obj_map;  //!< code object map
   if (is_compressed) {
     if (!UncompressAndPopulateCodeObject(image_, unique_isa_names, code_obj_map)) {
@@ -490,9 +503,37 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       auto native_co = code_obj_map.find(device_name);           // Native Code Object
       auto generic_co = code_obj_map.find(generic_target_name);  // generic Code Object
 
+      // HotSwap: pick the first supported source bundle for this device's target.
+      auto hotswap_co = code_obj_map.end();
+      if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+        const std::string target_gfx = device->devices()[0]->isa().processorName();
+        for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
+          if (target_gfx != p.target) {
+            continue;
+          }
+          for (auto it = code_obj_map.begin(); it != code_obj_map.end(); ++it) {
+            if (amd::hotswap::IsaIsGfx(it->first, p.source)) {
+              hotswap_co = it;
+              break;
+            }
+          }
+          if (hotswap_co != code_obj_map.end()) {
+            break;
+          }
+        }
+      }
 
-      // If the size is not 0, that means we found the native isa code object
-      if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+      // HotSwap: forward the chosen source bundle first so the HSA loader transpiles/rewrites it.
+      if (hotswap_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+        LogPrintfInfo("HotSwap: forwarding %s for transpilation to device %s",
+                      hotswap_co->first.c_str(), device_name.c_str());
+        hip_status =
+            AddDevProgram(device, hotswap_co->second.first, hotswap_co->second.second, fdesc);
+        if (hip_status != hipSuccess) {
+          break;
+        }
+        // If the size is not 0, that means we found the native isa code object
+      } else if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
         hip_status =
             AddDevProgram(device, native_co->second.first, native_co->second.second, fdesc);
         if (hip_status != hipSuccess) {
