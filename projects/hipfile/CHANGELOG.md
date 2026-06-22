@@ -29,3 +29,7 @@
 ### Known issues
 
 * Batch and async API calls are not supported on the AMD backend
+* Poor performance with small I/O sizes (<= 64KiB) and many threads/processes
+* Poor performance within QEMU virtual machine when PCIe devices are not attached to PCIe root ports
+* High memory usage with many processes
+* GPU resets encountered with many processes
