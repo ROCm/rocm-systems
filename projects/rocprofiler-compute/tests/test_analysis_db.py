@@ -408,6 +408,132 @@ def test_calc_dataframe_expressions_with_builtin_vars():
     assert pd.isna(result.iloc[1])
 
 
+def test_calc_dataframe_expressions_empty_returns_assignable_series():
+    """An empty expression_df returns an empty Series, not a DataFrame."""
+    expression_df = pd.DataFrame(columns=["metric_id", "value_name", "value"])
+
+    result = db_analysis.calc_dataframe_expressions(
+        pd.DataFrame({"Counter1": [1, 2, 3]}),
+        {"gpu_arch": "gfx942"},
+        expression_df,
+    )
+
+    assert isinstance(result, pd.Series)
+    assert result.empty
+    # Reproduces the call site: assigning the result as a single column must
+    # not raise "Columns must be same length as key".
+    expression_df["value"] = result
+
+
+# =============================================================================
+# calc_metrics_data + _iter_metric_table_rows tests
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "table_id, table_df, expected_ids",
+    [
+        pytest.param(
+            201,
+            pd.DataFrame(
+                {"Metric": ["Wavefronts"], "Avg": ["expr"]},
+                index=pd.Index(["2.1.0"], name="Metric_ID"),
+            ),
+            ["2.1.0"],
+            id="metric_table_included",
+        ),
+        pytest.param(
+            1801,
+            pd.DataFrame(
+                {"Channel": [" TCC "], "Avg": ["expr"]},
+                index=pd.Index(["18.1.0"], name="Metric_ID"),
+            ),
+            ["18.1.0"],
+            id="channel_table_included",
+        ),
+        pytest.param(
+            1,
+            pd.DataFrame({"from_csv": ["pmc_kernel_top.csv"]}),
+            [],
+            id="non_metric_table_skipped",
+        ),
+        pytest.param(
+            402,
+            pd.DataFrame(
+                {"Metric": ["FP32 FLOPs"], "Avg": ["expr"]},
+                index=pd.Index(["4.2.0"], name="Metric_ID"),
+            ),
+            [],
+            id="roofline_table_402_skipped",
+        ),
+    ],
+)
+def test_iter_metric_table_rows_table_inclusion(table_id, table_df, expected_ids):
+    """Only metric/channel tables yield rows; other dfs and roofline table 402
+    are skipped (so a config with no metric table yields nothing)."""
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {table_id: table_df}
+
+    rows = list(db_analysis._iter_metric_table_rows(arch_config))
+
+    assert [metric_id for metric_id, _df, _row in rows] == expected_ids
+
+
+def test_iter_metric_table_rows_yields_in_df_order_with_source_frame():
+    """Rows yield in df order, each carrying its own source frame."""
+    metric_df = pd.DataFrame(
+        {"Metric": ["Wavefronts"], "Avg": ["expr"]},
+        index=pd.Index(["2.1.0"], name="Metric_ID"),
+    )
+    channel_df = pd.DataFrame(
+        {"Channel": [" TCC "], "Avg": ["expr"]},
+        index=pd.Index(["18.1.0"], name="Metric_ID"),
+    )
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {
+        201: metric_df,
+        1: pd.DataFrame({"from_csv": ["pmc_kernel_top.csv"]}),
+        1801: channel_df,
+    }
+
+    rows = list(db_analysis._iter_metric_table_rows(arch_config))
+
+    assert [metric_id for metric_id, _df, _row in rows] == ["2.1.0", "18.1.0"]
+    assert rows[0][1] is metric_df
+    assert rows[1][1] is channel_df
+
+
+def test_calc_metrics_data_empty_filter_preserves_schema_and_warns():
+    """With no metric tables, the output frames keep their columns and a
+    warning is emitted."""
+    workload_path = "/fake/workload"
+    arch_config = schema.ArchConfig()
+    # Only a non-metric table survives the filter (no Metric/Channel column).
+    arch_config.dfs = {1: pd.DataFrame({"from_csv": ["pmc_kernel_top.csv"]})}
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    with patch(
+        "rocprof_compute_analyze.analysis_db.console_warning"
+    ) as console_warning_mock:
+        metrics_info, expressions = analyzer.calc_metrics_data()
+
+    assert metrics_info[workload_path].empty
+    assert "pct_of_peak" in metrics_info[workload_path].columns
+    assert "metric_id" in metrics_info[workload_path].columns
+    assert list(expressions[workload_path].columns) == [
+        "metric_id",
+        "value_name",
+        "value",
+    ]
+    console_warning_mock.assert_called_once()
+
+
 # =============================================================================
 # Noise-clamp warning + summary tests
 # =============================================================================
