@@ -62,8 +62,8 @@ jobs:
     if: ${{ needs.nvidia-clr-build-setup.outputs.should_build == 'true' }}
     runs-on: azure-linux-scale-rocm
     container:
-      # CUDA 13.1.2 Ubuntu 24.04
-      image: nvidia/cuda@sha256:08d6facb6a72f918beb3ffe5b57cff72402a203f44428831262e95c7466d4188
+      # CUDA 13.2.0 Ubuntu 24.04
+      image: nvidia/cuda@sha256:b66239c62d5aa5481cb8151c7ff410e0d8d3d4a75cb4c90e66e89639ded490f4
     env:
       BUILD_DIR: ${{ github.workspace }}/build
     steps:
