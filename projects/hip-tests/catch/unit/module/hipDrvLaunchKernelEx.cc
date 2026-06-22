@@ -469,17 +469,17 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
   )";
 
   hiprtcProgram prog;
-  HIP_CHECK(hiprtcCreateProgram(&prog, fill_src, "fill.cu", 0, nullptr, nullptr));
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, fill_src, "fill.cu", 0, nullptr, nullptr));
   char arch_flag[64];
   snprintf(arch_flag, sizeof(arch_flag), "--offload-arch=%s", prop.gcnArchName);
   const char* opts[] = {arch_flag};
   REQUIRE(hiprtcCompileProgram(prog, 1, opts) == HIPRTC_SUCCESS);
 
   size_t code_size;
-  HIP_CHECK(hiprtcGetCodeSize(prog, &code_size));
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &code_size));
   std::vector<char> code(code_size);
-  HIP_CHECK(hiprtcGetCode(prog, code.data()));
-  hiprtcDestroyProgram(&prog);
+  HIPRTC_CHECK(hiprtcGetCode(prog, code.data()));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 
   hipModule_t mod;
   hipFunction_t fn;
