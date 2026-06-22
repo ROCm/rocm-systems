@@ -1082,6 +1082,40 @@
           "name": "FaultInj_Cast_QpErrorClearRecovers",
           "description": "CAST path: after FaultClear on a faulted connection, a fresh connection completes 20 sends with no corruption and fatalCount==0",
           "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPostSendErrno",
+          "description": "CAST ops-overload: real ibv_post_send forced to return EAGAIN via shimmed ops table; isend fails or fatalCount > 0",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPostSendErrno"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqFlushNonFatal",
+          "description": "CAST ops-overload: poll_cq shim rewrites QP 0 completion status to WR_FLUSH_ERR; failover completes via surviving device, fatalCount==0",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqFlushNonFatal",
+          "env_variables": {
+            "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+            "NCCL_IB_MERGE_NICS": "1"
+          }
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqSynthFatal",
+          "description": "CAST ops-overload: poll_cq shim synthesizes a non-whitelisted REM_ACCESS_ERR completion; fatal/non-recoverable",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqSynthFatal"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPostRecvErrno",
+          "description": "CAST ops-overload: real ibv_post_recv forced to return EAGAIN via shimmed ops table on all receiver QPs; recv errors or never completes",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPostRecvErrno"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqInjectCountFinite",
+          "description": "CAST ops-overload: poll_cq rewrite with finite injectCount=1 per QP (WR_FLUSH_ERR); fault fires then stops, post-budget transfer is clean",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqInjectCountFinite"
+        },
+        {
+          "name": "FaultInj_Cast_OpsApiInvalidArgs",
+          "description": "CAST ops-overload: API guard branches - NULL comm returns ncclInvalidArgument; arm/clear on a registered context succeeds",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsApiInvalidArgs"
         }
       ]
     },
