@@ -190,13 +190,13 @@ public:
   /// @param val New EXEC mask value.
   void set_exec(uint64_t val) { exec_ = val & lane_mask(); }
 
-  /// @brief Return the vector condition code.
-  /// @returns VCC register value.
+  /// @brief Return the VCC scalar register pair.
+  /// @returns Raw VCC register value.
   uint64_t vcc() const { return vcc_; }
 
-  /// @brief Set the vector condition code.
+  /// @brief Set the VCC scalar register pair.
   /// @param val New VCC value.
-  void set_vcc(uint64_t val) { vcc_ = val & lane_mask(); }
+  void set_vcc(uint64_t val) { vcc_ = val; }
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.

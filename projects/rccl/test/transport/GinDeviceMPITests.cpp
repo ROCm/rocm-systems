@@ -2809,4 +2809,190 @@ TEST_F(GinMPIDeviceTests, RailConnection_Create) {
   (void)ncclDevCommDestroy(comm, &devComm);
 }
 
+
+std::string intraNodeSymReason() {
+  MPI_Comm nodeComm;
+  MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &nodeComm);
+  int nodeSize = 0;
+  MPI_Comm_size(nodeComm, &nodeSize);
+  MPI_Comm_free(&nodeComm);
+  if (nodeSize < 2)
+    return "Symmetric ReduceScatter requires >=2 ranks per node";
+  return "";
+}
+
+// End-to-end ReduceScatter through the public collective API on symmetric
+// (NCCL_WIN_COLL_SYMMETRIC) buffers. Registering the buffers makes the
+// symmetric-memory RS kernel (RailA2A_LsaLD) eligible, so this drives the
+// production kernel path -- not a hand-written reference kernel.
+TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (auto reason = crossNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (auto reason = intraNodeSymReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_GE(nRanks, 2);
+  ASSERT_LE(nRanks, 8);
+
+  // 1 (alignment/tail edges), 1024 (medium), 65536 (saturating).
+  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
+
+  for (size_t count : counts) {
+    SCOPED_TRACE(::testing::Message() << "count=" << count);
+
+    // Send buffer holds one block per rank; recv holds this rank's block.
+    const size_t sendElems = count * static_cast<size_t>(nRanks);
+    const size_t sendBytes = sendElems * sizeof(float);
+    const size_t recvBytes = count * sizeof(float);
+
+    void* dSend = nullptr;
+    void* dRecv = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, sendBytes));
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, recvBytes));
+    auto memCleanup = makeScopeGuard([&]() {
+      if (dSend) (void)ncclMemFree(dSend);
+      if (dRecv) (void)ncclMemFree(dRecv);
+    });
+
+    ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclCommWindowRegister(comm, dSend, sendBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclCommWindowRegister(comm, dRecv, recvBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+    auto winCleanup = makeScopeGuard([&]() {
+      if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+      if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+    });
+
+    // sendbuf[j] = j + rank. After RS-sum, rank r's output element i is
+    // sum over all ranks s of ((r*count + i) + s) -- a closed form we check
+    // exactly (values stay < 2^24, so float arithmetic is exact here).
+    std::vector<float> hostSend(sendElems);
+    for (size_t j = 0; j < sendElems; j++)
+      hostSend[j] = static_cast<float>(j + static_cast<size_t>(rank));
+    std::vector<float> hostRecv(count, -1.0f);
+    ASSERT_MPI_EQ(hipSuccess,
+        hipMemcpy(dSend, hostSend.data(), sendBytes, hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess,
+        hipMemcpy(dRecv, hostRecv.data(), recvBytes, hipMemcpyHostToDevice));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclReduceScatter(dSend, dRecv, count, ncclFloat32, ncclSum, comm, stream));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Expected[i] on rank r = nRanks*(r*count + i) + nRanks*(nRanks-1)/2.
+    ASSERT_EQ(hipSuccess,
+        hipMemcpy(hostRecv.data(), dRecv, recvBytes, hipMemcpyDeviceToHost));
+    const double sumOfRanks = static_cast<double>(nRanks) * (nRanks - 1) / 2.0;
+    for (size_t i = 0; i < count; i++) {
+      const double base = static_cast<double>(static_cast<size_t>(rank) * count + i);
+      const float expected = static_cast<float>(nRanks * base + sumOfRanks);
+      ASSERT_EQ(expected, hostRecv[i]) << "rank=" << rank << " i=" << i;
+    }
+  }
+}
+
+// Same as ReduceScatter_Symmetric but exercises ncclAvg, which drives the
+// FuncSumPostDiv post-divide path on the symmetric RS kernel (RailA2A_LsaLD).
+TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric_Avg) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (auto reason = crossNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (auto reason = intraNodeSymReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_GE(nRanks, 2);
+  ASSERT_LE(nRanks, 8);
+
+  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
+
+  for (size_t count : counts) {
+    SCOPED_TRACE(::testing::Message() << "count=" << count);
+
+    const size_t sendElems = count * static_cast<size_t>(nRanks);
+    const size_t sendBytes = sendElems * sizeof(float);
+    const size_t recvBytes = count * sizeof(float);
+
+    void* dSend = nullptr;
+    void* dRecv = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, sendBytes));
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, recvBytes));
+    auto memCleanup = makeScopeGuard([&]() {
+      if (dSend) (void)ncclMemFree(dSend);
+      if (dRecv) (void)ncclMemFree(dRecv);
+    });
+
+    ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclCommWindowRegister(comm, dSend, sendBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclCommWindowRegister(comm, dRecv, recvBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+    auto winCleanup = makeScopeGuard([&]() {
+      if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+      if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+    });
+
+    std::vector<float> hostSend(sendElems);
+    for (size_t j = 0; j < sendElems; j++)
+      hostSend[j] = static_cast<float>(j + static_cast<size_t>(rank));
+    std::vector<float> hostRecv(count, -1.0f);
+    ASSERT_MPI_EQ(hipSuccess,
+        hipMemcpy(dSend, hostSend.data(), sendBytes, hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess,
+        hipMemcpy(dRecv, hostRecv.data(), recvBytes, hipMemcpyHostToDevice));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclReduceScatter(dSend, dRecv, count, ncclFloat32, ncclAvg, comm, stream));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Avg = sum/nRanks; expected[i] on rank r = (r*count + i) + (nRanks-1)/2.
+    // The kernel multiplies by a float 1/nRanks, so allow a small tolerance.
+    ASSERT_EQ(hipSuccess,
+        hipMemcpy(hostRecv.data(), dRecv, recvBytes, hipMemcpyDeviceToHost));
+    const double sumOfRanks = static_cast<double>(nRanks) * (nRanks - 1) / 2.0;
+    for (size_t i = 0; i < count; i++) {
+      const double base = static_cast<double>(static_cast<size_t>(rank) * count + i);
+      const double expected = (nRanks * base + sumOfRanks) / nRanks;
+      const double tol = (expected < 0 ? -expected : expected) * 1e-5 + 1e-3;
+      ASSERT_NEAR(expected, static_cast<double>(hostRecv[i]), tol)
+          << "rank=" << rank << " i=" << i;
+    }
+  }
+}
+
 #endif  // MPI_TESTS_ENABLED
