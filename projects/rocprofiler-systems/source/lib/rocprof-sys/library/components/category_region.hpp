@@ -758,8 +758,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        if(config::get_perfetto_annotations())
-            append_cache_args(_data.tool_id.c_str(), serialize_annotation_args(_args...));
+        append_cache_args(_data.tool_id.c_str(), serialize_annotation_args(_args...));
     }
 }
 
@@ -771,8 +770,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
 {
     if constexpr(sizeof...(Args) > 0)
     {
-        if(config::get_perfetto_annotations())
-            append_cache_args(_data.tool_id.c_str(), serialize_return_arg(_args...));
+        append_cache_args(_data.tool_id.c_str(), serialize_return_arg(_args...));
     }
 
     stop<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
@@ -801,8 +799,7 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        if(config::get_perfetto_annotations())
-            append_cache_args(_name.data(), serialize_annotation_args(_args...));
+        append_cache_args(_name.data(), serialize_annotation_args(_args...));
     }
 }
 
@@ -814,8 +811,7 @@ category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
 {
     if constexpr(sizeof...(Args) > 0)
     {
-        if(config::get_perfetto_annotations())
-            append_cache_args(_name.data(), serialize_return_arg(_args...));
+        append_cache_args(_name.data(), serialize_return_arg(_args...));
     }
 
     stop<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
