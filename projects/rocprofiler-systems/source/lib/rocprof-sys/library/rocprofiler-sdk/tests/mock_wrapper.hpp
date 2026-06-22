@@ -20,21 +20,22 @@ namespace rocprofsys::mock::rocprofiler_sdk
 
 struct handle_t
 {
-    std::uint64_t handle;
+    std::uint64_t handle                            = 0;
     bool          operator==(const handle_t&) const = default;
 };
 
 // Scalar alias types (replace rocprofiler_*_t enum typedefs)
-using status_t                             = std::uint64_t;
-using agent_type_t                         = int;
-using agent_version_t                      = int;
-using buffer_category_t                    = int;
-using buffer_policy_t                      = int;
-using runtime_library_t                    = int;
-using callback_phase_t                     = int;
-using tracing_operation                    = std::int32_t;
-using callback_tracing_kind                = int;
-using buffer_tracing_kind                  = int;
+using status_t              = std::uint64_t;
+using agent_type_t          = int;
+using agent_version_t       = int;
+using buffer_category_t     = int;
+using buffer_policy_t       = int;
+using runtime_library_t     = int;
+using callback_phase_t      = int;
+using tracing_operation     = std::int32_t;
+using callback_tracing_kind = int;
+using buffer_tracing_kind =
+    unsigned int;  // distinct from callback_tracing_kind for sdk_core overload resolution
 using external_correlation_request_kind    = int;
 using counter_info_version_id_t            = int;
 using scratch_memory_operation_t           = int;
@@ -86,18 +87,28 @@ struct record_header_t
     void*         payload  = nullptr;
 };
 
-// User data (struct instead of union for GMock copyability)
+// User data (struct instead of union for GMock copyability).
+// Includes both .value and .ptr to match the real SDK union's two active members.
 struct user_data_t
 {
     std::uint64_t value                                = 0;
+    void*         ptr                                  = nullptr;
     bool          operator==(const user_data_t&) const = default;
 };
 
 using kernel_id_t = std::uint64_t;
 
-// Dimension info stubs — field names match what backend.hpp accesses
+// Dimension info stub — carries fields required by both backend.hpp
+// (.dimension_name/.index) and fwd.hpp / SDK iterate_counter_dimensions
+// (.name/.instance_size/.id).
 struct dim_info_t
 {
+    // Fields accessed via Wrapper::dimension_info_t (SDK callback parameter)
+    const char*   name          = nullptr;
+    std::size_t   instance_size = 0;
+    std::uint64_t id            = 0;
+
+    // Legacy field names used by backend.hpp when accessing counter_info_v1_t dimensions
     const char*   dimension_name = nullptr;
     std::uint64_t index          = 0;
 };
@@ -109,9 +120,11 @@ struct dim_instance_t
     dim_info_t**  dimensions       = nullptr;
 };
 
-// Counter info stubs (match mock_sdk.hpp layout)
+// Counter info stubs.  counter_info_v0_t matches the real SDK struct which has
+// an .id field first (rocprofiler_counter_info_v0_t::id).
 struct counter_info_v0_t
 {
+    handle_t    id          = {};
     const char* name        = nullptr;
     const char* description = nullptr;
     const char* block       = nullptr;
@@ -240,33 +253,183 @@ struct callback_tracing_record_t
     void*                 payload        = nullptr;
 };
 
-// Opaque record stubs
+// Record stubs with all fields accessed by tool_tracing_buffered,
+// tool_tracing_callback, and related production-code paths.
+
 struct kernel_dispatch_record_t
 {
-    std::uint64_t size = 0;
+    struct
+    {
+        std::uint64_t kernel_id            = 0;
+        handle_t      agent_id             = {};
+        handle_t      queue_id             = {};
+        std::uint64_t dispatch_id          = 0;
+        std::uint32_t private_segment_size = 0;
+        std::uint32_t group_segment_size   = 0;
+        struct
+        {
+            std::uint32_t x = 0, y = 0, z = 0;
+        } workgroup_size;
+        struct
+        {
+            std::uint32_t x = 0, y = 0, z = 0;
+        } grid_size;
+    } dispatch_info;
+    correlation_id_t correlation_id  = {};
+    std::uint64_t    start_timestamp = 0;
+    std::uint64_t    end_timestamp   = 0;
+    std::uint64_t    thread_id       = 0;
+    std::uint64_t    size            = 0;
 };
+
 struct kernel_dispatch_data_t
-{};
-struct memory_copy_record_t
-{};
+{
+    struct
+    {
+        std::uint64_t dispatch_id = 0;
+        handle_t      agent_id    = {};
+        handle_t      queue_id    = {};
+    } dispatch_info;
+    std::uint64_t start_timestamp = 0;
+    std::uint64_t end_timestamp   = 0;
+};
+
 struct scratch_memory_record_t
-{};
+{
+    std::uint64_t              size            = 0;
+    buffer_tracing_kind        kind            = 0;
+    scratch_memory_operation_t operation       = 0;
+    std::uint64_t              start_timestamp = 0;
+    std::uint64_t              end_timestamp   = 0;
+    std::uint64_t              thread_id       = 0;
+    handle_t                   agent_id        = {};
+    handle_t                   queue_id        = {};
+    int                        flags           = 0;
+    correlation_id_t           correlation_id  = {};
+};
+
+struct memory_copy_record_t
+{
+    std::uint64_t       size            = 0;
+    buffer_tracing_kind kind            = 0;
+    int                 operation       = 0;
+    std::uint64_t       start_timestamp = 0;
+    std::uint64_t       end_timestamp   = 0;
+    std::uint64_t       thread_id       = 0;
+    handle_t            dst_agent_id    = {};
+    handle_t            src_agent_id    = {};
+    std::uint64_t       bytes           = 0;
+    correlation_id_t    correlation_id  = {};
+};
+
 struct code_object_load_data_t
-{};
+{
+    const char* uri = nullptr;
+};
+
 struct kernel_symbol_data_t
-{};
+{
+    std::uint64_t kernel_id   = 0;
+    const char*   kernel_name = nullptr;
+};
+
+// marker_payload_t mirrors the union in rocprofiler_callback_tracing_marker_api_data_t.
 struct marker_payload_t
-{};
+{
+    struct
+    {
+        struct
+        {
+            const char* message = nullptr;
+        } roctxMarkA;
+        struct
+        {
+            const char* message = nullptr;
+        } roctxRangePushA;
+        struct
+        {
+        } roctxRangePop;
+        struct
+        {
+            const char* message = nullptr;
+        } roctxRangeStartA;
+        struct
+        {
+            std::uint64_t id = 0;
+        } roctxRangeStop;
+    } args;
+
+    struct
+    {
+        std::uint64_t roctx_range_id_t_retval = 0;
+    } retval;
+};
+
+// ompt_data_t — minimal union with sub-fields accessed in tool_tracing_callback.
 struct ompt_data_t
-{};
+{
+    struct
+    {
+        struct
+        {
+            int flags = 0;
+        } implicit_task;
+        struct
+        {
+            int thread_type = 0;
+        } thread_begin;
+        struct
+        {
+            int   flags         = 0;
+            void* parallel_data = nullptr;
+        } parallel_begin;
+        struct
+        {
+            int   flags         = 0;
+            void* parallel_data = nullptr;
+        } parallel_end;
+        struct
+        {
+            int flags = 0;
+        } task_create;
+        struct
+        {
+            int flags = 0;
+        } cancel;
+    } args;
+};
+
 struct rccl_api_data_t
 {};
+
 struct hip_stream_data_t
-{};
+{
+    handle_t stream_id = {};
+};
+
 struct memory_alloc_record_t
-{};
+{
+    std::uint64_t       size            = 0;
+    buffer_tracing_kind kind            = 0;
+    int                 operation       = 0;
+    std::uint64_t       start_timestamp = 0;
+    std::uint64_t       end_timestamp   = 0;
+    std::uint64_t       thread_id       = 0;
+    handle_t            agent_id        = {};
+    std::uint64_t       allocation_size = 0;
+    address_t           address         = {};
+    correlation_id_t    correlation_id  = {};
+};
+
+// dispatch_counting_data_t mirrors rocprofiler_dispatch_counting_service_data_t.
 struct dispatch_counting_data_t
-{};
+{
+    struct
+    {
+        handle_t      agent_id    = {};
+        std::uint64_t dispatch_id = 0;
+    } dispatch_info;
+};
 
 // Client types
 struct client_id_t
@@ -282,23 +445,75 @@ struct nccl_comm_struct
 {};
 using nccl_comm_t = nccl_comm_struct*;
 
-// Callback / iterator function pointer types
-using buffer_tracing_cb_t                  = void*;
-using callback_tracing_cb_t                = void*;
-using external_correlation_id_request_cb_t = void*;
-using internal_thread_library_cb_t         = void*;
-using query_available_agents_cb_t          = void*;
-using callback_tracing_operation_args_cb_t = void*;
-using available_counters_cb_t              = void*;
-using available_dimensions_cb_t            = void*;
-using device_counting_agent_cb_t           = void*;
-using device_counting_service_cb_t         = void*;
-using dispatch_counting_service_cb         = void*;
-using dispatch_counting_record_cb          = void*;
+// Callback / iterator function pointer types.
+// The concrete types below match what tool_init (and related production paths)
+// actually pass — GCC rejects implicit function-pointer → void* conversion at -Werror.
+using callback_tracing_cb_t = void (*)(callback_tracing_record_t, user_data_t*, void*);
+using buffer_tracing_cb_t   = void (*)(handle_t, handle_t, record_header_t**, std::size_t,
+                                     void*, std::uint64_t);
+using external_correlation_id_request_cb_t = int (*)(std::uint64_t, handle_t, int,
+                                                     std::int32_t, std::uint64_t,
+                                                     user_data_t*, void*);
+using internal_thread_library_cb_t         = void (*)(int, void*);
+using dispatch_counting_service_cb         = void (*)(dispatch_counting_data_t, handle_t*,
+                                              user_data_t*, void*);
+using dispatch_counting_record_cb = void (*)(dispatch_counting_data_t, counter_record_t*,
+                                             std::size_t, user_data_t, void*);
 
-// Name-info stub (return type for get_callback/buffer_tracing_names)
+// Remaining callback types — made concrete where production code passes a real
+// function pointer; void* elsewhere.
+using query_available_agents_cb_t          = void*;
+using callback_tracing_operation_args_cb_t = int (*)(int, std::int32_t, std::uint32_t,
+                                                     const void* const, std::int32_t,
+                                                     const char*, const char*,
+                                                     const char*, std::int32_t, void*);
+using available_counters_cb_t      = std::uint64_t (*)(handle_t, handle_t*, std::size_t,
+                                                  void*);
+using available_dimensions_cb_t    = std::uint64_t (*)(handle_t, const dim_info_t*,
+                                                    std::size_t, void*);
+using device_counting_agent_cb_t   = void*;
+using device_counting_service_cb_t = void*;
+
+// Name-info stub (return type for get_callback/buffer_tracing_names).
+//
+// sdk_core<Wrapper> iterates the result of get_callback_tracing_names() with:
+//   - .size()                 → size_t  (outer loop guard — we return 0)
+//   - [size_t idx]            → name_info_value_t  (.name field + .items())
+//   - [callback_tracing_kind] → name_info_value_t  (.items() range-for)
+//   - [buffer_tracing_kind]   → name_info_value_t  (unsigned int key)
+//
+// Since size() == 0 the outer loops never execute, but the compiler must still
+// instantiate operator[] and items() bodies.
+struct name_info_value_t
+{
+    std::string_view name{};
+
+    // items() returns pairs (operation_id, name_ptr) — empty so inner loops skip.
+    std::vector<std::pair<std::int32_t, const std::string_view*>> items() const
+    {
+        return {};
+    }
+};
+
 struct name_info_t
-{};
+{
+    std::size_t size() const { return 0; }
+
+    name_info_value_t operator[](std::size_t) const { return {}; }
+    name_info_value_t operator[](int) const { return {}; }  // callback_tracing_kind
+    name_info_value_t operator[](unsigned int) const
+    {
+        return {};
+    }  // buffer_tracing_kind
+
+    // Universal conversion: allows name_info_t to be assigned to the real SDK
+    // name_info types (which are default-constructible) without SDK includes here.
+    template <typename T>
+    operator T() const  // NOLINT(google-explicit-constructor)
+    {
+        return T{};
+    }
+};
 
 // ─── gmock_wrapper ────────────────────────────────────────────────────────────
 
@@ -955,3 +1170,22 @@ struct backend
 };
 
 }  // namespace rocprofsys::mock::rocprofiler_sdk
+
+// ─── std::hash specialization ────────────────────────────────────────────────
+//
+// client_data<Wrapper> uses unordered_map keyed on Wrapper::agent_id and
+// related handle types.  All of those are aliased to handle_t, so a single
+// std::hash specialization unblocks construction of client_data<mock_backend>.
+
+namespace std
+{
+template <>
+struct hash<::rocprofsys::mock::rocprofiler_sdk::handle_t>
+{
+    std::size_t operator()(
+        const ::rocprofsys::mock::rocprofiler_sdk::handle_t& h) const noexcept
+    {
+        return std::hash<std::uint64_t>{}(h.handle);
+    }
+};
+}  // namespace std

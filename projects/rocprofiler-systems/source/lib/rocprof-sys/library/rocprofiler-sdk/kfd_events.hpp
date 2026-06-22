@@ -35,25 +35,28 @@ public:
 
     static void metadata_initialize(const client_data<Wrapper>* tool_data);
 
-    static void page_fault_callback(const client_data<Wrapper>*           tool_data,
-                                    const backend::kfd_page_fault_record* record);
+    static void page_fault_callback(
+        const client_data<Wrapper>*                    tool_data,
+        const typename Wrapper::kfd_page_fault_record* record);
 
-    static void page_migrate_callback(const client_data<Wrapper>*             tool_data,
-                                      const backend::kfd_page_migrate_record* record);
+    static void page_migrate_callback(
+        const client_data<Wrapper>*                      tool_data,
+        const typename Wrapper::kfd_page_migrate_record* record);
 
-    static void queue_callback(const client_data<Wrapper>*      tool_data,
-                               const backend::kfd_queue_record* record);
+    static void queue_callback(const client_data<Wrapper>*               tool_data,
+                               const typename Wrapper::kfd_queue_record* record);
 
-    static void event_queue_callback(const client_data<Wrapper>*            tool_data,
-                                     const backend::kfd_event_queue_record* record);
+    static void event_queue_callback(
+        const client_data<Wrapper>*                     tool_data,
+        const typename Wrapper::kfd_event_queue_record* record);
 
     static void event_unmap_from_gpu_callback(
-        const client_data<Wrapper>*            tool_data,
-        const backend::kfd_event_unmap_record* record);
+        const client_data<Wrapper>*                     tool_data,
+        const typename Wrapper::kfd_event_unmap_record* record);
 
     static void event_dropped_events_callback(
-        const client_data<Wrapper>*              tool_data,
-        const backend::kfd_event_dropped_record* record);
+        const client_data<Wrapper>*                       tool_data,
+        const typename Wrapper::kfd_event_dropped_record* record);
 
 private:
     // ─── Operation name helpers ───────────────────────────────────────────────
@@ -64,7 +67,8 @@ private:
         return "KFD Event";
     }
 
-    static const char* get_operation_name(const backend::kfd_page_fault_record* record)
+    static const char* get_operation_name(
+        const typename Wrapper::kfd_page_fault_record* record)
     {
         switch(record->operation)
         {
@@ -80,7 +84,8 @@ private:
         }
     }
 
-    static const char* get_operation_name(const backend::kfd_page_migrate_record* record)
+    static const char* get_operation_name(
+        const typename Wrapper::kfd_page_migrate_record* record)
     {
         switch(record->operation)
         {
@@ -95,7 +100,8 @@ private:
         }
     }
 
-    static const char* get_operation_name(const backend::kfd_queue_record* record)
+    static const char* get_operation_name(
+        const typename Wrapper::kfd_queue_record* record)
     {
         switch(record->operation)
         {
@@ -110,7 +116,8 @@ private:
         }
     }
 
-    static const char* get_operation_name(const backend::kfd_event_queue_record* record)
+    static const char* get_operation_name(
+        const typename Wrapper::kfd_event_queue_record* record)
     {
         switch(record->operation)
         {
@@ -131,7 +138,8 @@ private:
         }
     }
 
-    static const char* get_operation_name(const backend::kfd_event_unmap_record* record)
+    static const char* get_operation_name(
+        const typename Wrapper::kfd_event_unmap_record* record)
     {
         switch(record->operation)
         {
@@ -146,7 +154,7 @@ private:
     }
 
     static const char* get_operation_name(
-        [[maybe_unused]] const backend::kfd_event_dropped_record* record)
+        [[maybe_unused]] const typename Wrapper::kfd_event_dropped_record* record)
     {
         return "DROPPED_EVENTS";
     }
@@ -159,12 +167,14 @@ private:
         return 1;
     }
 
-    static std::uint64_t get_pmc_value(const backend::kfd_page_fault_record* record)
+    static std::uint64_t get_pmc_value(
+        const typename Wrapper::kfd_page_fault_record* record)
     {
         return record->address.value;
     }
 
-    static std::uint64_t get_pmc_value(const backend::kfd_page_migrate_record* record)
+    static std::uint64_t get_pmc_value(
+        const typename Wrapper::kfd_page_migrate_record* record)
     {
         if(record->end_address.value < record->start_address.value)
         {
@@ -176,17 +186,19 @@ private:
     }
 
     static std::uint64_t get_pmc_value(
-        [[maybe_unused]] const backend::kfd_queue_record* record)
+        [[maybe_unused]] const typename Wrapper::kfd_queue_record* record)
     {
         return 1;
     }
 
-    static std::uint64_t get_pmc_value(const backend::kfd_event_dropped_record* record)
+    static std::uint64_t get_pmc_value(
+        const typename Wrapper::kfd_event_dropped_record* record)
     {
         return record->count;
     }
 
-    static std::uint64_t get_pmc_value(const backend::kfd_event_unmap_record* record)
+    static std::uint64_t get_pmc_value(
+        const typename Wrapper::kfd_event_unmap_record* record)
     {
         if(record->end_address.value < record->start_address.value)
         {
@@ -342,8 +354,9 @@ kfd_events<Wrapper>::metadata_initialize(const client_data<Wrapper>* tool_data)
 
 template <typename Wrapper>
 void
-kfd_events<Wrapper>::page_fault_callback(const client_data<Wrapper>*           tool_data,
-                                         const backend::kfd_page_fault_record* record)
+kfd_events<Wrapper>::page_fault_callback(
+    const client_data<Wrapper>*                    tool_data,
+    const typename Wrapper::kfd_page_fault_record* record)
 {
     if(!record) return;
 
@@ -389,8 +402,9 @@ kfd_events<Wrapper>::page_fault_callback(const client_data<Wrapper>*           t
 
 template <typename Wrapper>
 void
-kfd_events<Wrapper>::page_migrate_callback(const client_data<Wrapper>* tool_data,
-                                           const backend::kfd_page_migrate_record* record)
+kfd_events<Wrapper>::page_migrate_callback(
+    const client_data<Wrapper>*                      tool_data,
+    const typename Wrapper::kfd_page_migrate_record* record)
 {
     if(!record) return;
 
@@ -466,8 +480,8 @@ kfd_events<Wrapper>::page_migrate_callback(const client_data<Wrapper>* tool_data
 
 template <typename Wrapper>
 void
-kfd_events<Wrapper>::queue_callback(const client_data<Wrapper>*      tool_data,
-                                    const backend::kfd_queue_record* record)
+kfd_events<Wrapper>::queue_callback(const client_data<Wrapper>*               tool_data,
+                                    const typename Wrapper::kfd_queue_record* record)
 {
     if(!record) return;
 
@@ -510,8 +524,9 @@ kfd_events<Wrapper>::queue_callback(const client_data<Wrapper>*      tool_data,
 
 template <typename Wrapper>
 void
-kfd_events<Wrapper>::event_queue_callback(const client_data<Wrapper>* tool_data,
-                                          const backend::kfd_event_queue_record* record)
+kfd_events<Wrapper>::event_queue_callback(
+    const client_data<Wrapper>*                     tool_data,
+    const typename Wrapper::kfd_event_queue_record* record)
 {
     if(!record) return;
     // Only process RESTORE_RESCHEDULED operations
@@ -558,7 +573,8 @@ kfd_events<Wrapper>::event_queue_callback(const client_data<Wrapper>* tool_data,
 template <typename Wrapper>
 void
 kfd_events<Wrapper>::event_unmap_from_gpu_callback(
-    const client_data<Wrapper>* tool_data, const backend::kfd_event_unmap_record* record)
+    const client_data<Wrapper>*                     tool_data,
+    const typename Wrapper::kfd_event_unmap_record* record)
 {
     if(!record) return;
 
@@ -607,7 +623,7 @@ template <typename Wrapper>
 void
 kfd_events<Wrapper>::event_dropped_events_callback(
     const client_data<Wrapper>* /*tool_data*/,
-    const backend::kfd_event_dropped_record* record)
+    const typename Wrapper::kfd_event_dropped_record* record)
 {
     if(!record) return;
 

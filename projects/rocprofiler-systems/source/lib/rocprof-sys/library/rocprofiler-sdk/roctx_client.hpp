@@ -263,7 +263,8 @@ roctx_client<Wrapper, MarkerWriterPolicy>::handle_marker_core_enter(
             {
                 const auto& name =
                     trace_cache::get_metadata_registry().get_callback_tracing_info().at(
-                        record.kind, record.operation);
+                        static_cast<typename Wrapper::callback_tracing_kind>(record.kind),
+                        record.operation);
                 m_writer.write_begin(name);
             }
             break;
@@ -354,7 +355,8 @@ roctx_client<Wrapper, MarkerWriterPolicy>::handle_marker_core_exit(
             {
                 const auto& name =
                     trace_cache::get_metadata_registry().get_callback_tracing_info().at(
-                        record.kind, record.operation);
+                        static_cast<typename Wrapper::callback_tracing_kind>(record.kind),
+                        record.operation);
                 m_writer.write_end(name, begin_ts, ts, args_str, record);
             }
             break;
