@@ -47,6 +47,7 @@
 #include <cstring>
 #include <regex>
 #include <string>
+#include <algorithm>
 #if defined(__linux__)
 #include <link.h>
 #include <dlfcn.h>
@@ -672,7 +673,13 @@ hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count) {
 
   // Host and unmapped SVM addresses copy via host.
   if (info.hostBaseAddress <= ptr && endPtr <= (ptrdiff_t)info.hostBaseAddress + info.sizeInBytes) {
-    memset(ptr, value, count * sizeof(uint32_t));
+    // fast-path memset check
+    uint8_t byte = static_cast<uint8_t>(value);
+    if ((uint32_t(byte) * 0x01010101u) == value) {
+      std::memset(ptr, value, count * sizeof(uint32_t));
+    } else {
+      std::fill_n(static_cast<uint32_t*>(ptr), count, value);
+    }
     return HSA_STATUS_SUCCESS;
   }
 
@@ -908,7 +915,7 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
       .ui32 = {.kmtHandle = ((flags & HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != 0)}};
 
   auto status =
-      hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags);
+      HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags));
   if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   assert(num_agents > 0);
@@ -1397,8 +1404,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   // deferred export will not run into this problem.
   int dmabuf_fd;
   uint64_t dmabufOffset;
-  
-  auto err = hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &dmabufOffset);
+
+  auto err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &dmabufOffset));
   assert(dmabufOffset/pageSize == fragOffset && "DMA Buf inconsistent with pointer offset.");
   if (err != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
@@ -1779,7 +1786,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]));
   };
 
-  while (!async_events_control_.exit) {
+  while (!async_events_control_.exit.load(std::memory_order_acquire)) {
     // Update hsa_signals pointer at start of each iteration since PushBack
     // at the end of the previous iteration may have reallocated the vector.
     hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
@@ -2714,7 +2721,14 @@ void Runtime::LoadTools() {
               getpid(), rocp_reg_status, rocprofiler_register_error_string(rocp_reg_status));
     }
 
-    bool allow_v1_registration = false;
+    // rocprofiler-register (v3) provides tracing only; the comgr hotswap tool must
+    // intercept and modify HSA calls (it wraps hsa_code_object_reader_create_from_memory),
+    // which requires the v1 HSA_TOOLS_LIB path. Allow v1 registration specifically for
+    // that first-party tool so it loads via HSA_TOOLS_LIB alone, without re-enabling v1
+    // for other tools. General v1 behavior is otherwise unchanged.
+    static constexpr const char* kHotswapToolLib = "libamd_comgr_hotswap_tool.so";
+    bool allow_v1_registration =
+        flag().tools_lib_names().find(kHotswapToolLib) != std::string::npos;
     if (os::IsEnvVarSet("HSA_TOOLS_ROCPROFILER_V1_TOOLS")) {
       // assume true if env variable is set
       allow_v1_registration = true;
@@ -2875,7 +2889,7 @@ void Runtime::CloseTools() {
 }
 
 void Runtime::AsyncEventsControl::Shutdown() {
-  exit = true;
+  exit.store(true, std::memory_order_release);
   hsa_signal_handle(wake)->StoreRelaxed(1);
   os::WaitForThread(thread_);
   os::CloseThread(thread_);
@@ -3528,7 +3542,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     attr.type = HSA_SVM_ATTR_PREFERRED_LOC;
     attr.value = 0;
 
-    AMD::CpuAgent* cpu = nullptr;
+    Agent* cpu_agent = nullptr;
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, 1, &attr));
 
     if (status == HSAKMT_STATUS_SUCCESS &&
@@ -3539,17 +3553,16 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
         // Already on a CPU agent; skip prefetch for this region
         op->target_cpus.push_back(UINT32_MAX);
         continue;
-      } else if (agent->device_type() == core::Agent::kAmdGpuDevice) {
-        AMD::GpuAgent* gpu = static_cast<AMD::GpuAgent*>(agent);
-        cpu = static_cast<AMD::CpuAgent*>(gpu->GetNearestCpuAgent());
+      } else {
+        cpu_agent = agent->GetNearestCpuAgent();
       }
     }
 
-    if (!cpu) {
+    if (!cpu_agent) {
       // Fallback to use first available CPU agent when nearest fails
-      cpu = static_cast<AMD::CpuAgent*>(cpu_agents_[0]);
+      cpu_agent = cpu_agents_[0];
     }
-    op->target_cpus.push_back(cpu->node_id());
+    op->target_cpus.push_back(cpu_agent->node_id());
   }
 
   // Dependancy signals already at 0 need not be monitored.
@@ -3659,7 +3672,7 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
 
         int fd;
         uint64_t off;
-        hsa_status_t err = (hsaKmtExportDMABufHandle(const_cast<void*>(ptr), size, &fd, &off) == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+        hsa_status_t err = (HSAKMT_CALL(hsaKmtExportDMABufHandle(const_cast<void*>(ptr), size, &fd, &off)) == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
         if (err != HSA_STATUS_SUCCESS) {
           assert((err != HSA_STATUS_ERROR_INVALID_ARGUMENT) &&
                  "Thunk does not recognize an expected allocation.");
@@ -3717,7 +3730,7 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   }
 
   reserved_address_map_[addr] = AddressHandle(addr, size, true);
-  *va = addr; 
+  *va = addr;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -3936,7 +3949,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
         *targetAgent, &driver_handle, ShareType::DMABUF_FD,
         &memHandle->driver_handle.dmabuf_fd);
   }
-  if (status != HSA_STATUS_SUCCESS) 
+  if (status != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(status, "Failed to import memory");
 }
 
@@ -4013,7 +4026,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
      * to look up the VA when sharing this BO to a third party driver. We only
      * need this in the process that owns this memory allocation.
      */
-    auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
+    auto cpu_agent = agentOwner()->GetNearestCpuAgent();
     auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
                         std::forward_as_tuple(cpu_agent),
                         std::forward_as_tuple(this, cpu_agent, va,
@@ -4236,8 +4249,7 @@ hsa_status_t Runtime::VMemoryGetAccess(const void* va, hsa_access_permission_t* 
   if (!mappedHandleFound) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
   Agent* agent = Agent::Convert(agent_handle);
-  if (agent == NULL || !agent->IsValid() || agent->device_type() != core::Agent::kAmdGpuDevice)
-    return HSA_STATUS_ERROR_INVALID_AGENT;
+  if (agent == NULL || !agent->IsValid()) return HSA_STATUS_ERROR_INVALID_AGENT;
 
   auto agentPermsIt = mappedHandleIt->second.allowed_agents.find(agent);
   if (agentPermsIt != mappedHandleIt->second.allowed_agents.end()) {

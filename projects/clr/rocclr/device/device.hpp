@@ -2219,6 +2219,10 @@ class Device : public RuntimeObject {
   //! prevents signal destruction from blocking on an armed-but-idle signal.
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const {}
 
+  //! Block until all in-flight HSA async signal handlers (e.g. profiling
+  //! completion callbacks) have finished running.
+  virtual void WaitForHsaAsyncHandlersIdle() {}
+
   struct HwEventPatch {
     static constexpr int kCompletionSignal = -1;
     static constexpr int kExtDispatchDepSignal = -2;
