@@ -441,7 +441,7 @@ class GpuAgent : public GpuAgentInt {
   __forceinline uint32_t enumeration_index() const { return enum_index_; }
 
   // @brief returns true if agent uses MES scheduler
-  __forceinline const bool isMES() const { return (isa_->GetMajorVersion() >= 11) ? true : false; };
+  __forceinline const bool isMES() const { return (supported_isas()[0]->GetMajorVersion() >= 11) ? true : false; };
 
   // @brief returns the libdrm device handle
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
@@ -474,8 +474,8 @@ class GpuAgent : public GpuAgentInt {
   const size_t MAX_SCRATCH_APERTURE_PER_XCC_GFX12 = (2ULL << 32); // 8GB
   __forceinline size_t MaxScratchDevice() const {
     return properties_.NumXcc *
-          (isa_->GetMajorVersion() >= 12 ? MAX_SCRATCH_APERTURE_PER_XCC_GFX12 :
-                                            MAX_SCRATCH_APERTURE_PER_XCC);
+          (supported_isas()[0]->GetMajorVersion() >= 12 ? MAX_SCRATCH_APERTURE_PER_XCC_GFX12 :
+                                                           MAX_SCRATCH_APERTURE_PER_XCC);
   }
 
   void ReserveScratch();
@@ -721,8 +721,6 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Array of regions owned by this agent.
   std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
-
-  core::Isa* isa_;
 
   // @brief HSA profile.
   hsa_profile_t profile_;
