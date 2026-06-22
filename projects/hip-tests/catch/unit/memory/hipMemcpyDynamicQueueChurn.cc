@@ -48,7 +48,8 @@ HIP_TEST_CASE(Unit_hipMemcpy_DynamicQueueChurn_StagedCopies) {
     HIP_SKIP_TEST("Requires at least 8 GPUs");
   }
 
-  constexpr size_t kSize = 1ULL * 1024ULL * 1024ULL * 1024ULL;
+  const size_t kSize = isQuickLevel() ? 128ULL * 1024ULL * 1024ULL
+                                      : 1ULL * 1024ULL * 1024ULL * 1024ULL;
   void* device_buffers[8] = {};
   void* host_buffers[2] = {};
 
@@ -56,7 +57,14 @@ HIP_TEST_CASE(Unit_hipMemcpy_DynamicQueueChurn_StagedCopies) {
     HIP_CHECK(hipSetDevice(dev));
     for (int peer = 0; peer < 8; ++peer) {
       if (peer != dev) {
-        hipDeviceEnablePeerAccess(peer, 0);
+        int can_access_peer = 0;
+        HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, dev, peer));
+        if (can_access_peer != 0) {
+          hipError_t peer_access = hipDeviceEnablePeerAccess(peer, 0);
+          if (peer_access != hipSuccess && peer_access != hipErrorPeerAccessAlreadyEnabled) {
+            HIP_CHECK(peer_access);
+          }
+        }
       }
     }
     HIP_CHECK(hipMalloc(&device_buffers[dev], kSize));
@@ -103,7 +111,7 @@ HIP_TEST_CASE(Unit_hipMemcpy_DynamicQueueChurn_StagedCopies) {
   for (auto& thread : threads) {
     thread.join();
   }
-  REQUIRE_FALSE(failed.load(std::memory_order_relaxed));
+  const bool transfer_failed = failed.load(std::memory_order_relaxed);
   HIP_CHECK(hipDeviceSynchronize());
 
   for (size_t i = 0; i < std::size(kTransfers); ++i) {
@@ -118,4 +126,5 @@ HIP_TEST_CASE(Unit_hipMemcpy_DynamicQueueChurn_StagedCopies) {
     HIP_CHECK(hipFree(device_buffers[dev]));
   }
   HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE_FALSE(transfer_failed);
 }
