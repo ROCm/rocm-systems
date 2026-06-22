@@ -20,15 +20,6 @@ config["cleanup"] = True
 
 roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
 
-_, roofline_soc = common.gpu_soc()
-
-
-def skip_if_no_roofline_soc() -> None:
-    if roofline_soc is None or roofline_soc == "":
-        pytest.skip("No supported GPU detected")
-    if roofline_soc == "MI100":
-        pytest.skip("Roofline not supported on MI100")
-
 
 # =============================================================================
 # Roofline HTML generation
@@ -42,8 +33,6 @@ def test_analyze_generates_roofline_html(
     Analyze generates roofline HTML from existing workload data.
     Uses MI200 workload with roofline.csv.
     """
-    skip_if_no_roofline_soc()
-
     workload_dir = common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
@@ -70,8 +59,6 @@ def test_analyze_roofline_datatype_independently(
     Analyze with multiple data types.
     Verifies each datatype can be requested independently.
     """
-    skip_if_no_roofline_soc()
-
     workload_dir = common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
@@ -99,8 +86,6 @@ def test_analyze_roofline_multiple_datatypes_single_invocation(
     Analyze with multiple data types in a single invocation.
     Verifies the multi-datatype request path works end to end.
     """
-    skip_if_no_roofline_soc()
-
     workload_dir = common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
@@ -151,8 +136,6 @@ def test_analyze_roofline_idempotent(
     Running analyze twice on the same profiling output should produce
     consistent results without errors.
     """
-    skip_if_no_roofline_soc()
-
     workload_dir = common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
@@ -183,22 +166,21 @@ def test_analyze_corrupted_roofline_csv_graceful(
     """
     Analyze with a corrupted roofline.csv should handle gracefully.
     """
-    if Path(roofline_dir).exists():
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workload_dir = Path(temp_dir) / "corrupted_workload"
-            shutil.copytree(roofline_dir, workload_dir)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        workload_dir = Path(temp_dir) / "corrupted_workload"
+        shutil.copytree(roofline_dir, workload_dir)
 
-            roofline_csv = workload_dir / "roofline.csv"
-            roofline_csv.write_text("this,is,bad,csv")
+        roofline_csv = workload_dir / "roofline.csv"
+        roofline_csv.write_text("this,is,bad,csv")
 
-            code = binary_handler_analyze_rocprof_compute([
-                "analyze",
-                "-b",
-                "4",
-                "--path",
-                str(workload_dir),
-            ])
-            assert code == 0
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "-b",
+            "4",
+            "--path",
+            str(workload_dir),
+        ])
+        assert code == 0
 
 
 def test_roof_invalid_data_type(
@@ -308,8 +290,6 @@ def test_analyze_roofline_datatype_html_legend(
     FP8/FP4/FP6 are intentionally excluded: they are unsupported on the
     available gfx90a (MI200) test data and are covered by the unit tests.
     """
-    skip_if_no_roofline_soc()
-
     workload_dir = common.setup_workload_dir(roofline_dir, param_id=dtype)
 
     assert (Path(workload_dir) / "roofline.csv").exists()

@@ -7,22 +7,13 @@ These tests drive ``Roofline`` directly with mocked machine specs and
 self-contained temp CSVs; they never exercise the analyze CLI.
 """
 
+import argparse
 import tempfile
 from pathlib import Path
 
 import plotly.graph_objects as go
 
 from roofline.roofline_main import Roofline
-
-
-class MockArgs:
-    """Minimal args namespace for Roofline construction."""
-
-    def __init__(self, roofline_data_type: list[str]) -> None:
-        self.roof_only = True
-        self.mem_level = "ALL"
-        self.sort = "ALL"
-        self.roofline_data_type = roofline_data_type
 
 
 def make_run_parameters(
@@ -58,6 +49,21 @@ def rdna_mspec() -> MockMspec:
     return MockMspec("rdna35_halo", "navi3", "gfx1151")
 
 
+def make_roofline(
+    mspec: MockMspec,
+    roofline_data_type: list[str],
+    workload_dir: str = "",
+    **extra: object,
+) -> Roofline:
+    """Construct a Roofline for the unit tests.
+
+    Roofline never reads its ``args`` argument on the cli_generate_plot /
+    generate_plot paths, so a bare Namespace suffices.
+    """
+    run_parameters = make_run_parameters(workload_dir, roofline_data_type, **extra)
+    return Roofline(argparse.Namespace(), mspec, run_parameters)
+
+
 def write_wmma_roofline_csv(workload_dir: str) -> None:
     """Write a roofline.csv with RDNA BW + VALU + WMMA matrix columns."""
     # rdna35_halo memory levels resolve to LDS/L0/L1/L2 (MALL skipped).
@@ -79,10 +85,12 @@ def write_wmma_roofline_csv(workload_dir: str) -> None:
 
 
 def wmma_roofline_instance(workload_dir: str) -> Roofline:
-    run_parameters = make_run_parameters(
-        workload_dir, ["FP64", "BF16"], matrix_ops_type="WMMA"
+    return make_roofline(
+        rdna_mspec(),
+        ["FP64", "BF16"],
+        workload_dir=workload_dir,
+        matrix_ops_type="WMMA",
     )
-    return Roofline(MockArgs(["FP64", "BF16"]), rdna_mspec(), run_parameters)
 
 
 def legend_names(fig: go.Figure) -> set[str]:
@@ -96,8 +104,7 @@ def legend_names(fig: go.Figure) -> set[str]:
 
 def test_roofline_missing_file_handling() -> None:
     """cli_generate_plot with empty ai_data returns None at the ai_data guard."""
-    run_parameters = make_run_parameters("", ["FP32"])
-    roofline_instance = Roofline(MockArgs(["FP32"]), mi200_mspec(), run_parameters)
+    roofline_instance = make_roofline(mi200_mspec(), ["FP32"])
 
     result = roofline_instance.cli_generate_plot("FP32", ai_data={})
     assert result is None
@@ -105,8 +112,7 @@ def test_roofline_missing_file_handling() -> None:
 
 def test_roofline_invalid_datatype_cli() -> None:
     """cli_generate_plot with an unsupported datatype returns None."""
-    run_parameters = make_run_parameters("", ["FP32"])
-    roofline_instance = Roofline(MockArgs(["FP32"]), mi200_mspec(), run_parameters)
+    roofline_instance = make_roofline(mi200_mspec(), ["FP32"])
 
     result = roofline_instance.cli_generate_plot("INVALID_DATATYPE", ai_data={})
     assert result is None
