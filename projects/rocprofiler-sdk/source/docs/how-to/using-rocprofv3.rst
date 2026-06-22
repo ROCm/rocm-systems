@@ -32,10 +32,8 @@ Setting GPU performance level for PMC profiling
 ---------------------------------------------
 
 On RDNA3 (Navi3x) and RDNA4 (Navi4x) GPUs, the ``AUTO`` performance mode disables GPU profiling
-in hardware: the perfmon clock is gated off
-(``RLC_CGTT_MGCG_OVERRIDE.PERFMON_CLOCK_STATE = 0``), which prevents performance counters from
-functioning. Setting the performance level to ``stable_std`` (or any non-``AUTO`` mode that sets
-``PERFMON_CLOCK_STATE = 1``) turns the perfmon clock back on and enables PMC profiling.
+in hardware: the perfmon clock is gated off, which prevents performance counters from functioning.
+Setting the performance level to ``STABLE_STD`` turns the perfmon clock back on and enables PMC profiling.
 
 This is a hardware feature enablement requirement. Without it, PMC profiling on these GPUs
 produces no meaningful counter data.
