@@ -264,6 +264,27 @@ The output directory can be parameterized with the following keywords:
 If MPI rank is detected and the output directory does not include ``%rank%``,
 ROCm Compute Profiler appends ``/<rank>`` to avoid collisions across ranks.
 
+Each profiling run should use a fresh output directory. A workload directory
+holds the output of exactly one profile run, so profiling into a directory that
+already contains files stops with an error instead of silently mixing two runs.
+To re-profile in place, re-run with ``--overwrite``, which wipes the directory's
+existing contents first:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name vcopy --overwrite -- ./vcopy -n 1048576 -b 256
+
+.. warning::
+
+   ``--overwrite`` deletes the existing contents of the target directory. It is
+   an explicit authorization to discard prior data; nothing is removed without
+   it.
+
+.. note::
+
+   CI jobs and automated runs should never reuse a workload directory; either each run
+   should profile into a fresh directory or runs should utilize ``--overwrite``.
+
 Examples:
 
 * Profiling without MPI:
@@ -834,24 +855,28 @@ To target a specific GPU device, use ``--device``:
    $ rocprof-compute profile --name my_bench --bench-only --device 2
 
 To regenerate benchmark data in an existing profiled workload directory, use
-``--output-directory`` to point at the workload path directly:
+``--output-directory`` to point at the workload path directly. Because this
+replaces the existing ``roofline.csv``, it requires ``--overwrite`` to authorize
+overwriting that file. Unlike a full profile, ``--bench-only`` replaces only
+``roofline.csv`` and leaves the rest of the workload (counter data, traces)
+untouched:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
+   $ rocprof-compute profile --bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
 
 .. note::
 
    ``--bench-only`` writes ``roofline.csv`` only; rendering a roofline
    chart additionally requires application performance counters from a
    ``--roof-only`` (or regular profile) run. The intended workflow is to
-   profile first, then re-run ``--bench-only`` against that workload
+   profile first, then re-run ``--bench-only --overwrite`` against that workload
    later to refresh stale peak values before analyzing:
 
    .. code-block:: shell-session
 
       $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy
-      $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
+      $ rocprof-compute profile --bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
       $ rocprof-compute analyze --path workloads/vcopy/MI300X_A1
 
 .. _torch-operator-mapping:

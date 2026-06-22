@@ -298,6 +298,20 @@ Examples:
         ),
     )
     profile_group.add_argument(
+        "--overwrite",
+        dest="overwrite",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            "\t\t\tAuthorize overwriting an existing workload directory.\n"
+            "\t\t\tWithout this flag, profiling into a directory that already\n"
+            "\t\t\tcontains profile data errors out instead of mixing runs.\n"
+            "\t\t\tEach profiling run should use a fresh output directory; use\n"
+            "\t\t\tthis flag only when intentionally re-profiling in place."
+        ),
+    )
+    profile_group.add_argument(
         "--kokkos-trace",
         dest="kokkos_trace",
         required=False,
