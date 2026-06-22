@@ -26,11 +26,17 @@ constexpr int threadsPerBlock = 256;
 constexpr int blocks =
     (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 
-static bool CaptureStreamAndLaunchGraph(int* A_d, int* B_d, int* C_d, int* A_h, int* B_h, int* C_h,
+// Captures a stream into a graph, launches it and validates the result. Returns
+// the boolean outcome through resultOut. When threadSafe is true the optionally
+// thread-safe check macros are used so the same function can run from a worker
+// thread (call HIP_CHECK_THREAD_FINALIZE() on the main thread after joining);
+// when false it behaves like a normal single-threaded helper.
+static void CaptureStreamAndLaunchGraph(int* A_d, int* B_d, int* C_d, int* A_h, int* B_h, int* C_h,
                                         hipStreamCaptureMode mode, hipStream_t& stream1,
-                                        hipStream_t& stream2, hipGraph_t& graph,
+                                        hipStream_t& stream2, hipGraph_t& graph, bool* resultOut,
                                         bool verifyStreamSync = false,
-                                        std::function<bool()> verifyFunc1 = nullptr) {
+                                        std::function<bool()> verifyFunc1 = nullptr,
+                                        bool threadSafe = false) {
   auto verifyFunc = [&]() {
     // Validate the computation
     for (size_t i = 0; i < N; i++) {
@@ -45,25 +51,26 @@ static bool CaptureStreamAndLaunchGraph(int* A_d, int* B_d, int* C_d, int* A_h, 
   hipGraphExec_t graphExec{nullptr};
   size_t Nbytes = N * sizeof(int);
   hipEvent_t e;
-  HIP_CHECK(hipEventCreate(&e));
-  HIP_CHECK(hipStreamBeginCaptureToGraph(stream1, graph, nullptr, nullptr, 0, mode));
-  HIP_CHECK(hipEventRecord(e, stream1));
-  HIP_CHECK(hipStreamWaitEvent(stream2, e, 0));
-  HIP_CHECK(hipMemsetAsync(C_d, 0, Nbytes, stream1));
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream1));
-  HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream2));
-  HIP_CHECK(hipEventRecord(e, stream2));
-  HIP_CHECK(hipStreamWaitEvent(stream1, e, 0));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipEventCreate(&e));
+  HIP_CHECK_OPT_THREAD(threadSafe,
+                       hipStreamBeginCaptureToGraph(stream1, graph, nullptr, nullptr, 0, mode));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipEventRecord(e, stream1));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipStreamWaitEvent(stream2, e, 0));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipMemsetAsync(C_d, 0, Nbytes, stream1));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream1));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream2));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipEventRecord(e, stream2));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipStreamWaitEvent(stream1, e, 0));
   HipTest::vectorSUB<<<dim3(blocks), dim3(threadsPerBlock), 0, stream1>>>(A_d, B_d, C_d, N);
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream1));
-  HIP_CHECK(hipStreamEndCapture(stream1, &graph));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream1));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipStreamEndCapture(stream1, &graph));
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  REQUIRE(graphExec != nullptr);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  REQUIRE_OPT_THREAD(threadSafe, graphExec != nullptr);
 
   // Replay the recorded sequence multiple times
-  HIP_CHECK(hipGraphLaunch(graphExec, stream1));
-  HIP_CHECK(hipStreamSynchronize(stream1));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphLaunch(graphExec, stream1));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipStreamSynchronize(stream1));
   bool res = true;
   if (verifyStreamSync) {
     // Verify if hipStreamSynchronize() works as expected
@@ -71,73 +78,14 @@ static bool CaptureStreamAndLaunchGraph(int* A_d, int* B_d, int* C_d, int* A_h, 
     res = res && verifyFunc();
   }
 
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipEventDestroy(e));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphExecDestroy(graphExec));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipEventDestroy(e));
 
   if (!verifyStreamSync) {
     // After hipGraphExecDestroy(), all internal streams are
     // surely synced!
     res = verifyFunc1 ? verifyFunc1() : true;
     res = res && verifyFunc();
-  }
-  return res;
-}
-
-// Thread-safe variant of CaptureStreamAndLaunchGraph executed from worker threads.
-// Uses the *_THREAD check macros (which defer failures and early-return on error,
-// hence void) and writes its boolean result through resultOut. Call
-// HIP_CHECK_THREAD_FINALIZE() on the main thread after the worker joins.
-static void CaptureStreamAndLaunchGraphThread(int* A_d, int* B_d, int* C_d, int* A_h, int* B_h,
-                                              int* C_h, hipStreamCaptureMode mode,
-                                              hipStream_t& stream1, hipStream_t& stream2,
-                                              hipGraph_t& graph, bool verifyStreamSync,
-                                              bool* resultOut) {
-  auto verifyFunc = [&]() {
-    // Validate the computation
-    for (size_t i = 0; i < N; i++) {
-      if (C_h[i] != (A_h[i] - B_h[i])) {
-        fprintf(stderr, "Error at %zu: C=%d, A=%d, B=%d\n", i, C_h[i], A_h[i], B_h[i]);
-        return false;
-      }
-    }
-    return true;
-  };
-
-  hipGraphExec_t graphExec{nullptr};
-  size_t Nbytes = N * sizeof(int);
-  hipEvent_t e;
-  HIP_CHECK_THREAD(hipEventCreate(&e));
-  HIP_CHECK_THREAD(hipStreamBeginCaptureToGraph(stream1, graph, nullptr, nullptr, 0, mode));
-  HIP_CHECK_THREAD(hipEventRecord(e, stream1));
-  HIP_CHECK_THREAD(hipStreamWaitEvent(stream2, e, 0));
-  HIP_CHECK_THREAD(hipMemsetAsync(C_d, 0, Nbytes, stream1));
-  HIP_CHECK_THREAD(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream1));
-  HIP_CHECK_THREAD(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream2));
-  HIP_CHECK_THREAD(hipEventRecord(e, stream2));
-  HIP_CHECK_THREAD(hipStreamWaitEvent(stream1, e, 0));
-  HipTest::vectorSUB<<<dim3(blocks), dim3(threadsPerBlock), 0, stream1>>>(A_d, B_d, C_d, N);
-  HIP_CHECK_THREAD(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream1));
-  HIP_CHECK_THREAD(hipStreamEndCapture(stream1, &graph));
-
-  HIP_CHECK_THREAD(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  REQUIRE_THREAD(graphExec != nullptr);
-
-  // Replay the recorded sequence multiple times
-  HIP_CHECK_THREAD(hipGraphLaunch(graphExec, stream1));
-  HIP_CHECK_THREAD(hipStreamSynchronize(stream1));
-  bool res = true;
-  if (verifyStreamSync) {
-    // Verify if hipStreamSynchronize() works as expected
-    res = verifyFunc();
-  }
-
-  HIP_CHECK_THREAD(hipGraphExecDestroy(graphExec));
-  HIP_CHECK_THREAD(hipEventDestroy(e));
-
-  if (!verifyStreamSync) {
-    // After hipGraphExecDestroy(), all internal streams are
-    // surely synced!
-    res = verifyFunc();
   }
   *resultOut = res;
 }
@@ -160,7 +108,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_BasicFunctional) {
   std::vector<int> A_h(N), B_h(N), C_h(N);
   size_t Nbytes = N * sizeof(int);
   hipStream_t stream1, stream2;
-  bool ret;
+  bool ret = false;
   hipGraph_t graph{nullptr};
 
   // Fill with data
@@ -180,25 +128,25 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_BasicFunctional) {
   SECTION("Capture stream and launch graph when mode is global") {
     SECTION("Verify after hipGraphExecDestroy()") { verifyStreamSync = false; }
     SECTION("Verify after hipStreamSynchronize()") { verifyStreamSync = true; }
-    ret = CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h.data(), B_h.data(), C_h.data(),
-                                      hipStreamCaptureModeGlobal, stream1, stream2, graph,
-                                      verifyStreamSync);
+    CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h.data(), B_h.data(), C_h.data(),
+                                hipStreamCaptureModeGlobal, stream1, stream2, graph, &ret,
+                                verifyStreamSync);
   }
 
   SECTION("Capture stream and launch graph when mode is local") {
     SECTION("Verify after hipGraphExecDestroy()") { verifyStreamSync = false; }
     SECTION("Verify after hipStreamSynchronize()") { verifyStreamSync = true; }
-    ret = CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h.data(), B_h.data(), C_h.data(),
-                                      hipStreamCaptureModeThreadLocal, stream1, stream2, graph,
-                                      verifyStreamSync);
+    CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h.data(), B_h.data(), C_h.data(),
+                                hipStreamCaptureModeThreadLocal, stream1, stream2, graph, &ret,
+                                verifyStreamSync);
   }
 
   SECTION("Capture stream and launch graph when mode is relaxed") {
     SECTION("Verify after hipGraphExecDestroy()") { verifyStreamSync = false; }
     SECTION("Verify after hipStreamSynchronize()") { verifyStreamSync = true; }
-    ret = CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h.data(), B_h.data(), C_h.data(),
-                                      hipStreamCaptureModeRelaxed, stream1, stream2, graph,
-                                      verifyStreamSync);
+    CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h.data(), B_h.data(), C_h.data(),
+                                hipStreamCaptureModeRelaxed, stream1, stream2, graph, &ret,
+                                verifyStreamSync);
   }
 
   HIP_CHECK(hipStreamDestroy(stream1));
@@ -229,7 +177,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_CaptureIndepGraph) {
   std::vector<int> A2_h(N), B2_h(N), C2_h(N);
   size_t Nbytes = N * sizeof(int);
   hipStream_t stream1, stream2;
-  bool ret;
+  bool ret = false;
   hipGraph_t graph{nullptr};
   hipGraphNode_t memcpyNode1, memcpyNode2, memcpyNode3, kernelNode;
 
@@ -290,9 +238,9 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_CaptureIndepGraph) {
   // Capture an independent graph from stream
   SECTION("Verify after hipGraphExecDestroy()") { verifyStreamSync = false; }
   SECTION("Verify after hipStreamSynchronize()") { verifyStreamSync = true; }
-  ret = CaptureStreamAndLaunchGraph(A1_d, B1_d, C1_d, A1_h.data(), B1_h.data(), C1_h.data(),
-                                    hipStreamCaptureModeGlobal, stream1, stream2, graph,
-                                    verifyStreamSync, verifyFunc);
+  CaptureStreamAndLaunchGraph(A1_d, B1_d, C1_d, A1_h.data(), B1_h.data(), C1_h.data(),
+                              hipStreamCaptureModeGlobal, stream1, stream2, graph, &ret,
+                              verifyStreamSync, verifyFunc);
   REQUIRE(ret == true);
 
   HIP_CHECK(hipStreamDestroy(stream1));
@@ -1100,7 +1048,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_MultipleFlags) {
   std::vector<int> A_h(N), B_h(N), C_h(N);
   size_t Nbytes = N * sizeof(int);
   hipStream_t stream1, stream2;
-  bool ret;
+  bool ret = false;
   hipGraph_t graph{nullptr};
 
   // Fill with data
@@ -1130,9 +1078,9 @@ HIP_TEST_CASE(Unit_hipStreamBeginCaptureToGraph_MultipleFlags) {
   bool verifyStreamSync = false;
   SECTION("Verify after hipGraphExecDestroy()") { verifyStreamSync = false; }
   SECTION("Verify after hipStreamSynchronize()") { verifyStreamSync = true; }
-  ret = CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h.data(), B_h.data(), C_h.data(),
-                                    hipStreamCaptureModeGlobal, stream1, stream2, graph,
-                                    verifyStreamSync);
+  CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h.data(), B_h.data(), C_h.data(),
+                              hipStreamCaptureModeGlobal, stream1, stream2, graph, &ret,
+                              verifyStreamSync);
   REQUIRE(ret == true);
 
   HIP_CHECK(hipStreamDestroy(stream1));
@@ -1242,8 +1190,8 @@ void threadCaptureExec(int* A_d, int* B_d, int* C_d, int* A_h, int* B_h, int* C_
                        hipStream_t* stream1, hipStream_t* stream2, hipGraph_t* graph,
                        bool verifyStreamSync) {
   bool ret = false;
-  CaptureStreamAndLaunchGraphThread(A_d, B_d, C_d, A_h, B_h, C_h, hipStreamCaptureModeRelaxed,
-                                    *stream1, *stream2, *graph, verifyStreamSync, &ret);
+  CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h, B_h, C_h, hipStreamCaptureModeRelaxed, *stream1,
+                              *stream2, *graph, &ret, verifyStreamSync, nullptr, true);
   int val = 0;
   if (ret) {
     val = 1;
