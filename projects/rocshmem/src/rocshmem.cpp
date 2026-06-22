@@ -808,7 +808,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
   *xaxis_team = ROCSHMEM_TEAM_INVALID;
 
   if (parent_team == ROCSHMEM_TEAM_INVALID) {
-    LOG_ERROR("Parent team is invaid");
+    LOG_ERROR("Parent team is invalid");
     return ROCSHMEM_ERROR;
   }
   if (xrange < 1) {
@@ -1263,9 +1263,22 @@ __host__ void rocshmem_barrier_all() {
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_all();
 }
 
+__host__ void rocshmem_barrier(rocshmem_team_t team) {
+  LOG_API("host::barrier (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier(team);
+}
+
 
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream) {
   RocshmemGetFunctionTable()->barrier_all_on_stream_fn(stream);
+}
+
+__host__ void rocshmem_barrier_on_stream(rocshmem_team_t team,
+                                         hipStream_t stream) {
+  LOG_API("host::barrier_on_stream (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_on_stream(team, stream);
 }
 
 __host__ void rocshmem_quiet_on_stream(hipStream_t stream) {
@@ -1274,6 +1287,13 @@ __host__ void rocshmem_quiet_on_stream(hipStream_t stream) {
 
 __host__ void rocshmem_sync_all_on_stream(hipStream_t stream) {
   RocshmemGetFunctionTable()->sync_all_on_stream_fn(stream);
+}
+
+__host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
+                                           hipStream_t stream) {
+  LOG_API("host::team_sync_on_stream (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_on_stream(team, stream);
 }
 
 __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,
@@ -1319,6 +1339,12 @@ __host__ void rocshmem_sync_all() {
   LOG_API("host::sync_all");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_all();
+}
+
+__host__ void rocshmem_team_sync(rocshmem_team_t team) {
+  LOG_API("host::team_sync (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync(team);
 }
 
 template <typename T>

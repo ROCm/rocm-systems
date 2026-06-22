@@ -40,21 +40,20 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation") {
   int clusterSize;
   hipDeviceProp_t props;
   hipLaunchConfig_t config = {};
-  hipError_t hip_error;
 
   config.blockDim = {1024};
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
-  hip_error =
-      hipOccupancyMaxPotentialClusterSize(&clusterSize, reinterpret_cast<const void*>(f1), &config);
 
-  if (props.clusterLaunch) {
-    INFO("Max potential cluster size is: " << clusterSize);
-    // at the time of this writing a SPI could be drive up to 15 CUs. The number of CUs per SE
-    // varies per silicon, but any AMD silicon should have at least 8
-    REQUIRE((clusterSize > 8 && clusterSize <= 16));
-  } else {
-    REQUIRE(hip_error == hipErrorInvalidClusterSize);
+  if (!props.clusterLaunch) {
+    HIP_SKIP_TEST("cluster launches are not supported on this device");
   }
+
+  HIP_CHECK(
+      hipOccupancyMaxPotentialClusterSize(&clusterSize, reinterpret_cast<const void*>(f1), &config));
+  INFO("Max potential cluster size is: " << clusterSize);
+  // at the time of this writing a SPI could be drive up to 15 CUs. The number of CUs per SE
+  // varies per silicon, but any AMD silicon should have at least 8
+  REQUIRE((clusterSize > 8 && clusterSize <= 16));
 }
 
 // TODO gehernan enable this test (requires distributed shared memory)
@@ -66,6 +65,13 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialClusterSize_Verify_Launch") {
   hipError_t hip_error;
   hipLaunchConfig_t config = {};
   int clusterSize;
+  hipDeviceProp_t props;
+
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+
+  if (!props.clusterLaunch) {
+    HIP_SKIP_TEST("cluster launches are not supported on this device");
+  }
 
   SECTION("launch with maximum size no shmem") {
     hipLaunchConfig_t f1config = {};

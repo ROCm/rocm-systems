@@ -168,6 +168,7 @@ inline constexpr uint32_t SHT_DYNSYM = 11;
 
 inline constexpr uint8_t kElfSymbolBindGlobal = 1;
 inline constexpr uint8_t kElfSymbolTypeObject = 1;
+inline constexpr uint8_t kElfSymbolTypeFunc = 2;
 
 inline constexpr uint8_t elf_symbol_bind(uint8_t info) { return info >> 4; }
 inline constexpr uint8_t elf_symbol_type(uint8_t info) { return info & 0xf; }

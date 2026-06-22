@@ -18,15 +18,15 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter
 using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::device_type;
 
-template <typename DriverProvider>
+template <typename BackendProvider>
 struct gpu_perf_counter_traits
 {
     using metrics_t         = pmc::collectors::gpu_perf_counter::metrics;
     using enabled_metrics_t = pmc::collectors::gpu_perf_counter::enabled_metrics;
-    using device_t          = device<typename DriverProvider::driver_t>;
+    using device_t          = device<typename BackendProvider::backend_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
-    using driver_t          = typename DriverProvider::driver_t;
+    using backend_t         = typename BackendProvider::backend_t;
 
     static constexpr const char* device_name = "GPU";
 
