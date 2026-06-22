@@ -580,9 +580,9 @@ class TestEvaluationPipeline:
         msg = mock_warning.call_args.args[0]
         assert "VALU Utilization can go up to 200%" in msg
 
-    def make_pop_dfs(
+    def make_pct_of_peak_dfs(
         self,
-        pop_flags: list,
+        pct_of_peak_flags: list,
         avg_values: list,
         peak_values: list,
         value_col: str = "Avg",
@@ -590,50 +590,51 @@ class TestEvaluationPipeline:
     ):
         """Build (dfs, dfs_type) fixture for compute_pct_of_peak tests."""
         df = pd.DataFrame({
-            "Metric": [f"M{i}" for i in range(len(pop_flags))],
+            "Metric": [f"M{i}" for i in range(len(pct_of_peak_flags))],
             value_col: avg_values,
             peak_col: peak_values,
-            "Pct of Peak": pop_flags,
+            "Percent of Peak": pct_of_peak_flags,
         })
         return {1: df}, {1: "metric_table"}
 
-    def test_compute_pct_of_peak_pop_true_writes_correct_value(self):
-        """A pop=True row gets 100 * value / peak written into Pct of Peak."""
-        dfs, dfs_type = self.make_pop_dfs(
-            pop_flags=[True], avg_values=[50.0], peak_values=[200.0]
+    def test_compute_pct_of_peak_true_writes_correct_value(self):
+        """A pct_of_peak=True row writes 100 * value / peak into Percent of Peak."""
+        dfs, dfs_type = self.make_pct_of_peak_dfs(
+            pct_of_peak_flags=[True], avg_values=[50.0], peak_values=[200.0]
         )
         compute_pct_of_peak(dfs, dfs_type)
-        assert dfs[1].loc[0, "Pct of Peak"] == pytest.approx(25.0)
+        assert dfs[1].loc[0, "Percent of Peak"] == pytest.approx(25.0)
 
-    def test_compute_pct_of_peak_pop_false_writes_empty_string(self):
-        """A pop=False row gets an empty string in Pct of Peak."""
-        dfs, dfs_type = self.make_pop_dfs(
-            pop_flags=[False], avg_values=[50.0], peak_values=[200.0]
+    def test_compute_pct_of_peak_false_writes_empty_string(self):
+        """A pct_of_peak=False row gets an empty string in Percent of Peak."""
+        dfs, dfs_type = self.make_pct_of_peak_dfs(
+            pct_of_peak_flags=[False], avg_values=[50.0], peak_values=[200.0]
         )
         compute_pct_of_peak(dfs, dfs_type)
-        assert dfs[1].loc[0, "Pct of Peak"] == ""
+        assert dfs[1].loc[0, "Percent of Peak"] == ""
 
     def test_compute_pct_of_peak_zero_peak_writes_empty_string(self):
-        """A pop=True row with zero peak gets an empty string (division undefined)."""
-        dfs, dfs_type = self.make_pop_dfs(
-            pop_flags=[True], avg_values=[50.0], peak_values=[0.0]
+        """A pct_of_peak=True row with zero peak gets an empty
+        string (division undefined)."""
+        dfs, dfs_type = self.make_pct_of_peak_dfs(
+            pct_of_peak_flags=[True], avg_values=[50.0], peak_values=[0.0]
         )
         compute_pct_of_peak(dfs, dfs_type)
-        assert dfs[1].loc[0, "Pct of Peak"] == ""
+        assert dfs[1].loc[0, "Percent of Peak"] == ""
 
-    def test_compute_pct_of_peak_skips_df_without_pop_column(self):
-        """A metric_table with no Pct of Peak column is left untouched."""
+    def test_compute_pct_of_peak_skips_df_without_pct_of_peak_column(self):
+        """A metric_table with no Percent of Peak column is left untouched."""
         df = pd.DataFrame({"Metric": ["M1"], "Avg": [50.0], "Peak": [200.0]})
         dfs, dfs_type = {1: df}, {1: "metric_table"}
         compute_pct_of_peak(dfs, dfs_type)
-        assert "Pct of Peak" not in dfs[1].columns
+        assert "Percent of Peak" not in dfs[1].columns
 
     def test_compute_pct_of_peak_skips_non_metric_table(self):
-        """A non-metric_table df is skipped even if it has a Pct of Peak column."""
-        df = pd.DataFrame({"Pct of Peak": [True], "Avg": [50.0], "Peak": [200.0]})
+        """A non-metric_table df is skipped even if it has a Percent of Peak column."""
+        df = pd.DataFrame({"Percent of Peak": [True], "Avg": [50.0], "Peak": [200.0]})
         dfs, dfs_type = {1: df}, {1: "raw_csv_table"}
         compute_pct_of_peak(dfs, dfs_type)
-        assert bool(dfs[1].loc[0, "Pct of Peak"]) is True
+        assert bool(dfs[1].loc[0, "Percent of Peak"]) is True
 
     def test_compute_pct_of_peak_prefers_avg_over_value_column(self):
         """Avg is preferred over Value when both columns are present."""
@@ -642,11 +643,11 @@ class TestEvaluationPipeline:
             "Avg": [50.0],
             "Value": [999.0],
             "Peak": [200.0],
-            "Pct of Peak": [True],
+            "Percent of Peak": [True],
         })
         dfs, dfs_type = {1: df}, {1: "metric_table"}
         compute_pct_of_peak(dfs, dfs_type)
-        assert dfs[1].loc[0, "Pct of Peak"] == pytest.approx(25.0)
+        assert dfs[1].loc[0, "Percent of Peak"] == pytest.approx(25.0)
 
     def test_compute_pct_of_peak_prefers_peak_over_peak_empirical(self):
         """When both Peak and Peak (Empirical) are present, Peak is used."""
@@ -655,22 +656,22 @@ class TestEvaluationPipeline:
             "Avg": [50.0],
             "Peak": [200.0],
             "Peak (Empirical)": [500.0],
-            "Pct of Peak": [True],
+            "Percent of Peak": [True],
         })
         dfs, dfs_type = {1: df}, {1: "metric_table"}
         compute_pct_of_peak(dfs, dfs_type)
-        assert dfs[1].loc[0, "Pct of Peak"] == pytest.approx(25.0)
+        assert dfs[1].loc[0, "Percent of Peak"] == pytest.approx(25.0)
 
     def test_compute_pct_of_peak_skips_when_no_value_column(self):
         """A metric_table with no recognised value column is left untouched."""
         df = pd.DataFrame({
             "Metric": ["M1"],
             "Peak": [200.0],
-            "Pct of Peak": [True],
+            "Percent of Peak": [True],
         })
         dfs, dfs_type = {1: df}, {1: "metric_table"}
         compute_pct_of_peak(dfs, dfs_type)
-        assert bool(dfs[1].loc[0, "Pct of Peak"]) is True
+        assert bool(dfs[1].loc[0, "Percent of Peak"]) is True
 
 
 # =============================================================================

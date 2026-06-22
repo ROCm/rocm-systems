@@ -5,6 +5,13 @@
 #==================================================================================================
 cmake_minimum_required(VERSION 3.16)
 
+# Locate the shared rocm-systems tree so standalone RCCL builds can pick up
+# shared/ctest/TestCategories.cmake (the test-categories block in test/CMakeLists.txt
+# is gated on ROCM_SYSTEMS_ROOT and is otherwise silently skipped).
+if(NOT DEFINED ROCM_SYSTEMS_ROOT)
+  set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Determine version from makefiles/version.mk (NCCL-style version variables)
 #==================================================================================================
 file(READ makefiles/version.mk version_mk_text)
@@ -716,6 +723,7 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/net/example)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
+    add_subdirectory(plugins/profiler/proxytrace)
   endif()
   add_subdirectory(test)
 

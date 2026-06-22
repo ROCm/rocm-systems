@@ -56,6 +56,7 @@
 #include "suites/functional/memory_alignment.h"
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
+#include "suites/functional/memory_fill.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
@@ -199,6 +200,13 @@ TEST(rocrtstFunc, MemoryAllocateContiguousTest) {
   if (!RunCustomTestProlog(&ma)) return;
   ma.MemoryAllocateContiguousTest();
   RunCustomTestEpilog(&ma);
+}
+
+TEST(rocrtstFunc, MemoryFillTest) {
+  MemoryFill mf;
+  if (!RunCustomTestProlog(&mf)) return;
+  mf.MemoryFillTest();
+  RunCustomTestEpilog(&mf);
 }
 
 TEST(rocrtstFunc, Concurrent_Init_Test) {

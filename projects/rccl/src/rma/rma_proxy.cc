@@ -15,7 +15,6 @@
 #include "comm.h"
 #include "bootstrap.h"
 #include "compiler.h"
-#include "nccl_merge_stubs.h"
 #include "rma/rma.h"
 #include "rma/rma_proxy.h"
 #include "dev_runtime.h"
