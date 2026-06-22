@@ -265,10 +265,9 @@ If MPI rank is detected and the output directory does not include ``%rank%``,
 ROCm Compute Profiler appends ``/<rank>`` to avoid collisions across ranks.
 
 Each profiling run should use a fresh output directory. A workload directory
-holds the output of exactly one profile run, so profiling into a directory that
-already contains files stops with an error instead of silently mixing two runs.
-To re-profile in place, re-run with ``--overwrite``, which wipes the directory's
-existing contents first:
+holds the output of exactly one run, so profiling into a non-empty directory
+fails with an error rather than silently mixing runs. To re-profile in place,
+add ``--overwrite``, which clears the directory first:
 
 .. code-block:: shell-session
 
@@ -276,14 +275,13 @@ existing contents first:
 
 .. warning::
 
-   ``--overwrite`` deletes the existing contents of the target directory. It is
-   an explicit authorization to discard prior data; nothing is removed without
-   it.
+   ``--overwrite`` deletes the target directory's existing contents. Nothing is
+   removed without it.
 
 .. note::
 
-   Automated runs should never reuse a workload directory; either each run
-   should profile into a fresh directory or use ``--overwrite``.
+   Automated runs should never reuse a workload directory: profile into a fresh
+   directory each time, or pass ``--overwrite``.
 
 Examples:
 
@@ -854,12 +852,11 @@ To target a specific GPU device, use ``--device``:
 
    $ rocprof-compute profile --name my_bench --bench-only --device 2
 
-To regenerate benchmark data in an existing profiled workload directory, use
-``--output-directory`` to point at the workload path directly. Because this
-replaces the existing ``roofline.csv``, it requires ``--overwrite`` to authorize
-overwriting that file. Unlike a full profile, ``--bench-only`` replaces only
-``roofline.csv`` and leaves the rest of the workload (counter data, traces)
-untouched:
+To regenerate benchmark data in an existing workload directory, point
+``--output-directory`` at the workload path. This replaces the existing
+``roofline.csv``, so it requires ``--overwrite``. Unlike a full profile,
+``--bench-only`` replaces only ``roofline.csv`` and leaves the rest of the
+workload (counter data, traces) untouched:
 
 .. code-block:: shell-session
 

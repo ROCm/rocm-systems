@@ -306,11 +306,10 @@ Examples:
         default=False,
         action="store_true",
         help=(
-            "\t\t\tAuthorize overwriting an existing workload directory.\n"
-            "\t\t\tWithout this flag, profiling into a directory that already\n"
-            "\t\t\tcontains profile data errors out instead of mixing runs.\n"
-            "\t\t\tEach profiling run should use a fresh output directory; use\n"
-            "\t\t\tthis flag only when intentionally re-profiling in place."
+            "\t\t\tOverwrite an existing workload directory.\n"
+            "\t\t\tWithout it, profiling into a non-empty directory fails\n"
+            "\t\t\tinstead of mixing runs. Use a fresh directory per run;\n"
+            "\t\t\tpass this flag only to re-profile in place."
         ),
     )
     profile_group.add_argument(

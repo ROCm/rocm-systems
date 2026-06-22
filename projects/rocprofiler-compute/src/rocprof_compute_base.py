@@ -554,12 +554,8 @@ class RocProfCompute:
 
     @staticmethod
     def prepare_workload_directory(output_dir: Path, overwrite: bool) -> None:
-        """Enforce single-run ownership of the workload directory.
-
-        A workload directory holds the output of exactly one profile run, so
-        profiling refuses to write into a non-empty directory unless the user
-        has authorized overwriting it with --overwrite, in which case the
-        existing directory is removed so the new run starts clean.
+        """Error if the output directory is non-empty unless overwrite is set,
+        in which case its contents are removed before profiling.
         """
         if output_dir.is_dir() and any(output_dir.iterdir()):
             if not overwrite:
@@ -568,9 +564,13 @@ class RocProfCompute:
                     "please use --overwrite"
                 )
             console_warning(
-                f"clearing existing directory {output_dir} due to --overwrite"
+                f"Clearing existing directory {output_dir} due to --overwrite"
             )
-            shutil.rmtree(output_dir)
+            for child in output_dir.iterdir():
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
