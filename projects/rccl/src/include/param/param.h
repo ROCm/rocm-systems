@@ -42,8 +42,8 @@
   namespace key_guards { \
   struct guard_##key {}; \
   }; \
-  NCCL_PARAM_COMPILER_EXPORT_SYMBOL extern constexpr char name##Key[] = #key; \
-  NCCL_PARAM_COMPILER_EXPORT_SYMBOL ncclParam<type> name{name##Key, default, parser, #type, flags, desc};
+  extern constexpr char name##Key[] = #key; \
+  ncclParam<type> name{name##Key, default, parser, #type, flags, desc};
 
 // Usage: USE_NCCL_PARAM(name, type)
 // name and type must match the DEFINE_NCCL_PARAM.
@@ -154,7 +154,9 @@ private:
 
   // Load value from environment variable via EnvPlugin chain
   void loadValue() {
-    const char* envPluginValue = ncclParamEnvPluginGet(info.key);
+    // Special params with NO_ENVPLUGIN_INIT flag do not try init EnvPlugin
+    bool tryEnvPluginInit = !(info.flags & NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT);
+    const char* envPluginValue = ncclParamEnvPluginGet(info.key, tryEnvPluginInit);
     if (envPluginValue != nullptr) {
       T resolvedValue;
       ncclResult_t resolved = parser.resolve(envPluginValue, resolvedValue);
@@ -186,7 +188,9 @@ inline const char* ncclParam<const char*>::operator()() {
 
 template <>
 inline void ncclParam<const char*>::loadValue() {
-  const char* envPluginValue = ncclParamEnvPluginGet(info.key);
+  // Special params with NO_ENVPLUGIN_INIT flag do not try init EnvPlugin
+  bool tryEnvPluginInit = !(info.flags & NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT);
+  const char* envPluginValue = ncclParamEnvPluginGet(info.key, tryEnvPluginInit);
   if (envPluginValue != nullptr) {
     cstrData = envPluginValue;
     value = cstrData.c_str();

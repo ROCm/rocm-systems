@@ -178,7 +178,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 
   template <int BeginIx>
   __device__ void readLLBeginAll(int offset, ncclLLFifoLine (&line)[MaxRecv]) {
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int i = BeginIx; i < MaxRecv; i++) {
       // Yes, for some template arguments this code will be unreachable.  That's fine.
       // coverity[dead_error_line]
@@ -382,7 +382,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
         // u4[2] would be simpler, but that throws warnings on some compilers
         u4[sizeof(T) <= 2 ? 2 : 0] = misalign + eltN * sizeof(T) > 8 ? load(p + 2) : 0;
       } else {
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
         for (int i = 0; i < EltPerLine; i++) {
           // Yes, for some template arguments this code will be unreachable.  That's fine.
           // coverity[dead_error_line]
@@ -411,7 +411,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       T elt[EltPerLine];
     };
     u8 = val;
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int i = 0; i < EltPerLine; i++) {
       // Yes, for some template arguments this code will be unreachable.  That's fine.
       // coverity[dead_error_line]
@@ -459,7 +459,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       }
       if (RECV) {
         data = !SRC ? peerData : applyReduce(redOp, peerData, data);
-#pragma unroll MaxRecv
+NVCC_PRAGMA_UNROLL(MaxRecv)
         // Yes, for some template arguments this code will be unreachable.  That's fine.
         // coverity[dead_error_line]
         for (int i = 1; i < MaxRecv && i < fan.nrecv(); i++) {

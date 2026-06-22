@@ -502,16 +502,19 @@ ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
         ncclProfiler->startEvent(plan->comm->profilerContext, &ct->eventHandle, &eDescr);
       }
     }
-    // comm->seqNumber values are updated even if the plugin is not active, since they are used by RAS as well.
-    // The test for "persistent" is a workaround for graph-captured collectives.  In their case this function may not be
+    // comm->seqNumber values are updated even if the plugin is not active, since they are used by RAS
+    // as well.
+    // The test for "persistent" is a workaround for graph-captured collectives.  In their case this
+    // function may not be
     // consistently invoked on all the ranks, which would lead to mismatched counter values and thus false-positive
     // reports from RAS.  Instead, we choose not to include graph-captured collectives in our counts.  An exception is
     // made if ncclProfileKernelCh profiler events are active, as they result in proxy events always being added, which
     // gives the consistency.
     if (!plan->persistent ||
         (COMPILER_EXPECT(ncclProfiler != NULL, 0) && (plan->groupEventHandle || ct->collApiEventHandle) &&
-         (ct->eActivationMask & ncclProfileKernelCh)))
+         (ct->eActivationMask & ncclProfileKernelCh))) {
       COMPILER_ATOMIC_FETCH_ADD(&plan->comm->seqNumber[ct->func], 1ULL, std::memory_order_relaxed);
+    }
     ct = ct->next;
   }
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0)) {
@@ -780,7 +783,8 @@ bool ncclProfilerPluginLoaded(void) {
 
 ncclResult_t ncclProfilerCallback(void** eHandle, int type, void* pHandle, int64_t pluginId, void* extData) {
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0)) {
-    if (type == ncclProfilerNetEventStart) { // start
+    if (type == ncclProfilerNetEventStart) {
+      // start
       struct ncclProxyEventHandle* p = (struct ncclProxyEventHandle*)pHandle;
       struct ncclProxySubArgs* sub = p->subArgPtr;
       if (sub->eActivationMask & ncclProfileNetPlugin) {
@@ -792,13 +796,16 @@ ncclResult_t ncclProfilerCallback(void** eHandle, int type, void* pHandle, int64
         eDescr.netPlugin.data = extData;
         ncclProfiler->startEvent(sub->profilerContext, eHandle, &eDescr);
       }
-    } else if (type == ncclProfilerNetEventStop) { // stop
+    } else if (type == ncclProfilerNetEventStop) {
+      // stop
       ncclProfiler->stopEvent(*eHandle);
-    } else if (type == ncclProfilerNetEventUpdate) { // update
+    } else if (type == ncclProfilerNetEventUpdate) {
+      // update
       ncclProfilerEventStateArgs_t args = {};
       args.netPlugin.data = extData;
       ncclProfiler->recordEventState(*eHandle, ncclProfilerNetPluginUpdate, &args);
-    } else { // update and stop
+    } else {
+      // update and stop
       ncclProfilerEventStateArgs_t args = {};
       args.netPlugin.data = extData;
       ncclProfiler->recordEventState(*eHandle, ncclProfilerNetPluginUpdate, &args);

@@ -59,10 +59,10 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
   __device__ __attribute__((noinline)) void run() {
 #endif
     const int tid = threadIdx.x;
-  const int tn = blockDim.x;
-  const int wid = tid / WARP_SIZE;
-  const int nWarps = tn / WARP_SIZE;
-  const int lane = tid % WARP_SIZE;
+    const int tn = blockDim.x;
+    const int wid = tid / WARP_SIZE;
+    const int nWarps = tn / WARP_SIZE;
+    const int lane = tid % WARP_SIZE;
 
   struct Shared {
     uint32_t workSendMask; // bitmasks of which work indices have send/recv
@@ -133,11 +133,11 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
   if (nWorks <= workIx) return;
 
     // Thread range for whole work (send & recv combined)
-  int subtid = tid - workIx * nWarpPerWork * WARP_SIZE;
-  int subtn = nWarpPerWork * WARP_SIZE;
+    int subtid = tid - workIx * nWarpPerWork * WARP_SIZE;
+    int subtn = nWarpPerWork * WARP_SIZE;
 
     // A send primtive of sufficient size requires 2 cuda barrier ids.
-  constexpr int nSendWarpsForExtraGroup = NCCL_SIMPLE_EXTRA_GROUP_IF_NTHREADS_GE / WARP_SIZE;
+    constexpr int nSendWarpsForExtraGroup = NCCL_SIMPLE_EXTRA_GROUP_IF_NTHREADS_GE / WARP_SIZE;
     // Count up all group ids used below this workIx:
   int group, extra;
     // Each recv gets one group id:

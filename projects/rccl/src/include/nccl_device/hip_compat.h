@@ -217,6 +217,30 @@ struct atomic_ref {
       return __atomic_fetch_add(ptr, val, order);
     }
   }
+
+  NCCL_DEVICE_INLINE bool compare_exchange_weak(T& expected, T desired,
+                                                memory_order success,
+                                                memory_order failure) const {
+    if constexpr (sizeof(T) == 4) {
+      unsigned int exp = *reinterpret_cast<unsigned int*>(&expected);
+      unsigned int des = *reinterpret_cast<unsigned int*>(&desired);
+      bool ok = __hip_atomic_compare_exchange_weak(reinterpret_cast<unsigned int*>(ptr),
+                                                   &exp, des, success, failure,
+                                                   toHipMemoryScope(Scope));
+      expected = *reinterpret_cast<T*>(&exp);
+      return ok;
+    } else if constexpr (sizeof(T) == 8) {
+      unsigned long long exp = *reinterpret_cast<unsigned long long*>(&expected);
+      unsigned long long des = *reinterpret_cast<unsigned long long*>(&desired);
+      bool ok = __hip_atomic_compare_exchange_weak(reinterpret_cast<unsigned long long*>(ptr),
+                                                   &exp, des, success, failure,
+                                                   toHipMemoryScope(Scope));
+      expected = *reinterpret_cast<T*>(&exp);
+      return ok;
+    } else {
+      return __atomic_compare_exchange_n(ptr, &expected, desired, /*weak=*/1, success, failure);
+    }
+  }
 };
 
 // __builtin_amdgcn_fence requires compile-time constant arguments, so we

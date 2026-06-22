@@ -177,7 +177,8 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
     struct channelMasks recvMask = comm->connectRecv[recvPeer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)];
     struct channelMasks sendMask = comm->connectSend[sendPeer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)];
 
-    // Data[i] contains all ncclConnect information for all send and receive connections with a given send and recv peer
+    // Data[i] contains all ncclConnect information for all send and receive connections with a given send and recv
+    // peer
     // This data is packed in the array based on the number of sendChannels and recvChannels connected with these peers
     // The first N entries contain recvData, connection information for recv connections
     // The next M entries contain sendData, connection information for send connections
@@ -236,22 +237,26 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
         recvData[p] = data[p] + sendChannels;
       }
     } else {
-      if (recvChannels)
+      if (recvChannels) {
         NCCLCHECKGOTO(bootstrapSend(comm->bootstrap, recvPeer, bootstrapTag, recvData[p],
                                     sizeof(struct ncclConnect) * recvChannels),
                       ret, fail);
-      if (sendChannels)
+      }
+      if (sendChannels) {
         NCCLCHECKGOTO(bootstrapSend(comm->bootstrap, sendPeer, bootstrapTag, sendData[p],
                                     sizeof(struct ncclConnect) * sendChannels),
                       ret, fail);
-      if (sendChannels)
+      }
+      if (sendChannels) {
         NCCLCHECKGOTO(bootstrapRecv(comm->bootstrap, sendPeer, bootstrapTag, sendData[p],
                                     sizeof(struct ncclConnect) * sendChannels),
                       ret, fail);
-      if (recvChannels)
+      }
+      if (recvChannels) {
         NCCLCHECKGOTO(bootstrapRecv(comm->bootstrap, recvPeer, bootstrapTag, recvData[p],
                                     sizeof(struct ncclConnect) * recvChannels),
                       ret, fail);
+      }
     }
     TIME_STOP(2);
 
@@ -274,7 +279,7 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
           int recvDataOffset = 0;
           for (int c = 0; c < MAXCHANNELS; c++) {
             TIME_START(3);
-            // if (sendMask & (1UL<<c)) {
+            // if (sendMask & (1UL<<c)) ;
             if (sendMask.masks[c / 64] & (1UL << (c % 64))) {
               struct ncclConnector* conn = comm->channels[c].peers[sendPeer]->send + connIndex;
               // This connector hasn't completed connection yet
@@ -298,7 +303,7 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
 
             // Start with recv channels
             TIME_START(4);
-            // if (recvMask & (1UL<<c)) {
+            // if (recvMask & (1UL<<c)) ;
             if (recvMask.masks[c / 64] & (1UL << (c % 64))) {
               struct ncclConnector* conn = comm->channels[c].peers[recvPeer]->recv + connIndex;
               // This connector hasn't completed connection yet
@@ -346,8 +351,9 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
     struct timeval now;
     gettimeofday(&now, NULL);
     float elapsed = (now.tv_sec - timeStart.tv_sec) * 1.0 + (now.tv_usec - timeStart.tv_usec) * 1e-6;
-    if (elapsed > 1.0)
+    if (elapsed > 1.0) {
       INFO(NCCL_PROFILE, "timings: rank %d nranks %d P2p connect done in %.2f", comm->rank, comm->nRanks, elapsed);
+    }
     if (timeReported) {
       printf("\rP2p connect done in %d:%02d                                                                       \n",
              ((int)elapsed) / 60, ((int)elapsed) % 60);
@@ -446,7 +452,8 @@ bool ncclTransportCollNetSetup(struct ncclComm* comm, struct ncclTopoGraph* coll
   }
   // prepare connect handles
   NCCLCHECK(ncclCalloc(&masterConnects, nMasters));
-  if (type == collNetRecv) { // recv side: AllGather
+  if (type == collNetRecv) {
+    // recv side: AllGather
     // all ranks must participate
     NCCLCHECKGOTO(ncclCalloc(&allConnects, nranks), ret, cleanup);
     allConnects[rank].isMaster = isMaster;
@@ -460,7 +467,8 @@ bool ncclTransportCollNetSetup(struct ncclComm* comm, struct ncclTopoGraph* coll
         c++;
       }
     }
-  } else { // send side : copy in connect info received from peer recv master
+  } else {
+    // send side : copy in connect info received from peer recv master
     if (isMaster) memcpy(masterConnects + comm->node, connect, sizeof(struct ncclConnect));
   }
   // connect

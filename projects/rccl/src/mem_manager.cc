@@ -1061,9 +1061,7 @@ ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags) {
 exit:
   ncclGroupErrCheck(ret);
   NCCLCHECK(ncclGroupEndInternal());
-  if (comm && !comm->config.blocking) {
-    NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
-  }
+  if (comm && !comm->config.blocking) NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
   CUDACHECK(cudaSetDevice(saveDev));
   return ret;
 fail:
@@ -1110,9 +1108,7 @@ ncclResult_t ncclCommResume_impl(ncclComm_t comm) {
 exit:
   ncclGroupErrCheck(ret);
   NCCLCHECK(ncclGroupEndInternal());
-  if (comm && !comm->config.blocking) {
-    NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
-  }
+  if (comm && !comm->config.blocking) NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
   CUDACHECK(cudaSetDevice(saveDev));
   return ret;
 fail:
@@ -1151,7 +1147,7 @@ ncclResult_t ncclCommMemStats_impl(ncclComm_t comm, ncclCommMemStat_t stat, uint
              COMPILER_ATOMIC_LOAD(&manager->totalOffload, std::memory_order_relaxed);
     return ncclSuccess;
   case ncclStatGpuMemSuspended:
-      // Boolean: 0=active, 1=suspended
+    // Boolean: 0=active, 1=suspended
     *value = __atomic_load_n(&manager->released, __ATOMIC_ACQUIRE) ? 1 : 0;
     return ncclSuccess;
   default:

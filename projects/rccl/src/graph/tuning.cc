@@ -1021,6 +1021,7 @@ static const float nvlsEfficiency[NCCL_NUM_COMPCAPS] = {
 #endif
 
 // Default tuner constants (positional initializers for C++17 compatibility)
+// clang-format off
 static const ncclTunerConstants_t ncclTunerConstantsDefaults = {
   // baseLatencies
   {
@@ -1101,6 +1102,7 @@ static const ncclTunerConstants_t ncclTunerConstantsDefaults = {
     {0.0, 96.0, 43.1} /* Blackwell (N1/N2/N4) */
   }
 };
+// clang-format on
 
 NCCL_PARAM(PatEnable, "PAT_ENABLE", 0);
 static int ncclPatEnable(struct ncclComm* comm) {
@@ -1302,11 +1304,13 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
         if ((a == NCCL_ALGO_NVLS || a == NCCL_ALGO_COLLNET_DIRECT) && p == NCCL_PROTO_SIMPLE &&
             (coll == ncclFuncAllGather || coll == ncclFuncReduceScatter) && comm->nNodes > 1) {
           int nHeads = 0;
-          if (coll == ncclFuncAllGather && comm->nNodes > 1 && (!comm->ncclCollNet || !comm->ncclCollNet->iallgather))
+          if (coll == ncclFuncAllGather && comm->nNodes > 1 && (!comm->ncclCollNet || !comm->ncclCollNet->iallgather)) {
             busBw = 0.0f;
+          }
           if (coll == ncclFuncReduceScatter && comm->nNodes > 1 &&
-              (!comm->ncclCollNet || !comm->ncclCollNet->ireducescatter))
+              (!comm->ncclCollNet || !comm->ncclCollNet->ireducescatter)) {
             busBw = 0.0f;
+          }
           if (comm->config.collnetEnable) nHeads = comm->collNetHeadsNum;
           else busBw = 0.0f;
           if (busBw > 0.0f) {
@@ -1330,6 +1334,7 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
         comm->bandwidths[coll][a][p] = busBw;
         comm->latencies[coll][a][p] = baseLat[a][p];
         float intraLat = comm->tunerConstants.hwLatencies[intraHw[a]][a][p];
+        // With ppn=1 latencies are fully exposed, use the Tree network latency
         float interLat = ppn == 1 ? comm->tunerConstants.hwLatencies[NCCL_HW_NET][NCCL_ALGO_TREE][p] :
                                     comm->tunerConstants.hwLatencies[NCCL_HW_NET][a][p];
         interLat += graphs[a]->latencyInter;
@@ -1342,10 +1347,8 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
             if (graphs[a]->sameChannels) {
               comm->latencies[coll][a][p] += lat;
             } else {
-              if (p == NCCL_PROTO_SIMPLE)
-                lat =
-                  comm->tunerConstants
-                    .hwLatencies[hw[a]][NCCL_ALGO_TREE][p]; // Add some chunk latency, waiting for proper chunk modeling
+              // Add some chunk latency, waiting for proper chunk modeling
+              if (p == NCCL_PROTO_SIMPLE) lat = comm->tunerConstants.hwLatencies[hw[a]][NCCL_ALGO_TREE][p];
               comm->latencies[coll][a][p] += nsteps * lat;
             }
           } else {
@@ -1365,8 +1368,8 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
           }
         } else if (a == NCCL_ALGO_COLLNET_DIRECT) {
           comm->latencies[coll][a][p] +=
-            2 * (std::min(1, (nRanks / nNodes - 1)) * intraLat + (nRanks / nNodes - 1) * 0.4) +
-            interLat; // Add 0.4 us arity serialization latency
+            // Add 0.4 us arity serialization latency
+            2 * (std::min(1, (nRanks / nNodes - 1)) * intraLat + (nRanks / nNodes - 1) * 0.4) + interLat;
         } else if (a == NCCL_ALGO_COLLNET_CHAIN) {
           comm->latencies[coll][a][p] += 2 * (nRanks / nNodes - 1) * intraLat + interLat;
         } else if (a == NCCL_ALGO_NVLS) {
@@ -1451,6 +1454,7 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
       if (comm->config.collnetEnable == 0 &&
           (a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN || (a == NCCL_ALGO_NVLS && comm->nNodes > 1)))
         disable = 1;
+      if (comm->config.collnetEnable && a == NCCL_ALGO_COLLNET_CHAIN && comm->collNetChainSupport == 0) disable = 1;
       // Disable CollNet+Direct if not on an NVSwitch system
       if (nvsCount == 0 && a == NCCL_ALGO_COLLNET_DIRECT) disable = 1;
       if (disable) algoEnable[f * NCCL_NUM_ALGORITHMS + a] = 0;
@@ -1483,9 +1487,10 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
           } else {
             // Enable LL128 only up to PXB. Don't enable LL128 over PxN because PxN can encapsulate PxB or P2C links.
             pEnable &= (graphs[a]->typeInter <= PATH_PXB);
-            if (!ncclParamLl128C2c() && minCompCap >= 90)
+            if (!ncclParamLl128C2c() && minCompCap >= 90) {
               INFO(NCCL_GRAPH, "Disabling LL128 over all PxN connections (PXB and C2C). This ensures that no C2C link "
                                "will be used by LL128.");
+            }
           }
           pEnable &= (graphs[a]->typeIntra <= PATH_NVB);
           // Enable LL128 for interoperability between GPUs with different compcap (Hopper and above)

@@ -113,28 +113,22 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
     topoRanks->treeToChild0[c] = -1;
     topoRanks->treeToChild1[c] = -1;
     topoRanks->nvlsHeads[c] = -1; // Align NVLS with Tree/Ring sentinels
+  }
 
+  for (int c = 0; c < nChannels; c++) {
     struct ncclChannel* channel = comm->channels + c;
     channel->ring.prev = channel->ring.next = -1;
     channel->tree.up = -1;
     channel->collnetChain.up = -1;
-    for (int i = 0; i < NCCL_MAX_TREE_ARITY; i++) {
-      channel->tree.down[i] = -1;
-      channel->collnetChain.down[i] = -1;
-    }
+    for (int i = 0; i < NCCL_MAX_TREE_ARITY; i++) channel->tree.down[i] = -1;
+    for (int i = 0; i < NCCL_MAX_TREE_ARITY; i++) channel->collnetChain.down[i] = -1;
     channel->collnetDirect.out = -1;
     channel->collnetDirect.headRank = -1;
     channel->collnetDirect.nHeads = 0;
     channel->collnetDirect.shift = 0;
     for (int i = 0; i < NCCL_MAX_DIRECT_ARITY + 1; i++) channel->collnetDirect.heads[i] = -1;
-    for (int i = 0; i < NCCL_MAX_DIRECT_ARITY; i++) {
-      channel->collnetDirect.up[i] = -1;
-      channel->collnetDirect.down[i] = -1;
-    }
-  }
-
-  for (int c = 0; c < nChannels; c++) {
-    struct ncclChannel* channel = comm->channels + c;
+    for (int i = 0; i < NCCL_MAX_DIRECT_ARITY; i++) channel->collnetDirect.up[i] = -1;
+    for (int i = 0; i < NCCL_MAX_DIRECT_ARITY; i++) channel->collnetDirect.down[i] = -1;
 
     int* ringIntra = graphs[NCCL_ALGO_RING]->intra + c * localRanks;
     int* treeIntra = graphs[NCCL_ALGO_TREE]->intra + c * localRanks;
@@ -681,7 +675,8 @@ static ncclResult_t connectCollNet(struct ncclComm* comm, struct ncclTopoGraph* 
     sprintf(line, "CollNetDirect channel %d rank %d ", c, rank);
     int nDown = 0;
     for (int i = 0; i < nHeads; i++) {
-      if (rank == heads[i]) { // is head
+      if (rank == heads[i]) {
+        // is head
         channel->collnetDirect.headRank = i; // Mark the index for deciding offset in the CUDA kernel
         channel->collnetDirect.out = comm->nRanks; // Set root of collnetDirect to id nranks
         int* collNetIntra = collNetGraph->intra + i * localRanks;
@@ -1226,6 +1221,7 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
 
   // Duplication should be complete now
   nChannels = comm->nChannels = std::min(maxChannels, (nChannels <= maxChannels / 2) ? nChannels * 2 : nChannels);
+
   // Setup CollNet
   if (comm->config.collnetEnable) {
     struct ncclTopoGraph* collNetChainGraph = graphs[NCCL_ALGO_COLLNET_CHAIN];

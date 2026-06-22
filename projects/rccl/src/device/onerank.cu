@@ -28,10 +28,10 @@ __global__ __launch_bounds__(512, 1) void oneRankReduce(void* dst, void* src, vo
   int bid = blockIdx.x;
   int bn = gridDim.x;
 
-    // each block/channel gets a roughly equal segment of 16 byte packs
+  // each block/channel gets a roughly equal segment of 16 byte packs
   constexpr int EltPerPack = 16 / sizeof(T);
-  intptr_t i0 = (bid + 0) * alignUp(nElts / bn, EltPerPack);
-  intptr_t i1 = (bid + 1) * alignUp(nElts / bn, EltPerPack);
+  intptr_t i0 = (bid + 0) * alignUp(divUp(nElts, bn), EltPerPack);
+  intptr_t i1 = (bid + 1) * alignUp(divUp(nElts, bn), EltPerPack);
   i0 = min(i0, nElts);
   i1 = min(i1, nElts);
 

@@ -213,12 +213,12 @@ struct ncclConnInfo {
   // Regular comm mechanism
   char* buffs[NCCL_NUM_PROTOCOLS]; // Local for recv, remote for send
   void* mhandles[NCCL_NUM_PROTOCOLS];
-  uint64_t* tail; // Local for recv, remote for send
-  uint64_t* head; // Local for send, remote for recv
+  uint64_t* tail;     // Local for recv, remote for send
+  uint64_t* head;     // Local for send, remote for recv
 
-  int flags; // Direct communication / other flags
-  int shared; // Buffers are shared
-  int stepSize; // Step size for the SIMPLE buffer
+  int flags;          // Direct communication / other flags
+  int shared;         // Buffers are shared
+  int stepSize;       // Step size for the SIMPLE buffer
   void** ptrExchange; // Pointer exchange for direct communication
   uint64_t* redOpArgExchange; // PreOp scaler exchange for direct pull case
 
@@ -471,7 +471,7 @@ struct alignas(16) ncclDevWorkBcast {
   uint8_t pad[8];
 };
 
-__device__ constexpr int ncclProtoGrainSize(int proto) {
+__host__ __device__ constexpr int ncclProtoGrainSize(int proto) {
   return proto == NCCL_PROTO_LL     ? 16 :
          proto == NCCL_PROTO_LL128  ? WARP_SIZE * NCCL_LL128_SHMEM_ELEMS_PER_THREAD / NCCL_LL128_LINEELEMS *
                                         NCCL_LL128_DATAELEMS * sizeof(uint64_t) :
@@ -480,8 +480,9 @@ __device__ constexpr int ncclProtoGrainSize(int proto) {
 }
 
 template <typename Int>
-__device__ inline void ncclCollCbdPart(struct ncclDevWorkColl* work, uint32_t channelId, int proto, int eltSize,
-                                       Int* count, Int* partOffset, Int* partCount, Int* chunkCount) {
+__host__ __device__ inline void ncclCollCbdPart(struct ncclDevWorkColl* work, uint32_t channelId, int proto,
+                                                int eltSize, Int* count, Int* partOffset, Int* partCount,
+                                                Int* chunkCount) {
   int eltPerGrain = ncclProtoGrainSize(proto) / eltSize;
   int nMidChannels = work->channelHi - work->channelLo - 1;
   // We can assum that nMidChannels<0 implies countMid==0, which let's us assume
@@ -645,6 +646,7 @@ struct alignas(16) ncclDevKernelArgs {
   // struct ncclDevWorkBatch batches[];
 };
 
+
 template <size_t capacity>
 struct alignas(16) ncclDevKernelArgsStorage {
   union {
@@ -742,7 +744,7 @@ __host__ __device__ constexpr int ncclTmaShmemScratchWarpSize(void) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #else
 // The amount of dynamic shmem per block
-__device__ constexpr int ncclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH) {
+__host__ __device__ constexpr int ncclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH) {
   return cudaArch < 700 ? 0 : ncclShmemScratchWarpSize(cudaArch) * (NCCL_MAX_NTHREADS / WARP_SIZE);
 }
 #endif

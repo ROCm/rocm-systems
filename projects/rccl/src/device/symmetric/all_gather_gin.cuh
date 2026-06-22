@@ -6,8 +6,8 @@
  *************************************************************************/
 
 #include "sym_kernels.h"
-#include "kernel.cuh"
-#include "primitives.cuh"
+#include "symmetric/kernel.h"
+#include "symmetric/primitives.h"
 #include "gin_scratch__types.h"
 
 __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct ncclSymkDevWorkArgs const* args) {
@@ -24,7 +24,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
   uint64_t localSignalValue = *localSignalPtr;
   const int ringThreads = WARP_SIZE;
 
-  bar.sync(cta, cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  bar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
 
   handler.template forEachWorkNoFusion<uint8_t>([&] __device__(size_t nElts, size_t nAllElts, ncclSymPtr<uint8_t> input,
                                                                ncclSymPtr<uint8_t> output) {
@@ -38,7 +38,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
         if (dataPeer == rail.rank) {
           while (remainingElts) {
             size_t chunkElts = min(remainingElts, size_t(chunkSize));
-              // Send data chunk to next peer in ring
+            // Send data chunk to next peer in ring
             gin.put(rail, nextPeer, output + dgrank * nAllElts + offset, input + offset, chunkElts,
                     ncclGin_SignalInc{railSignals + rail.rank}, ncclGin_None{}, warps);
             offset += chunkElts;
@@ -47,9 +47,9 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
         } else {
           while (remainingElts) {
             size_t chunkElts = min(remainingElts, size_t(chunkSize));
-              // Wait for ready signal from next peer before sending
+            // Wait for ready signal from next peer before sending
             gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
-              // Send data chunk to next peer in ring
+            // Send data chunk to next peer in ring
             gin.put(rail, nextPeer, output + dgrank * nAllElts + offset, output + dgrank * nAllElts + offset, chunkElts,
                     ncclGin_SignalInc{railSignals + rail.rank}, ncclGin_None{}, warps);
             offset += chunkElts;
@@ -61,7 +61,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
       gin.flush(warps);
     } else {
       ncclCoopWarpSpan warps(1, blockDim.x / WARP_SIZE - 1, 1);
-        // Loop through rail ranks starting from itself
+      // Loop through rail ranks starting from itself
       for (int step = 0; step < rail.nRanks; step++) {
         int dataPeer = (rail.rank - step + rail.nRanks) % rail.nRanks;
         int dgrank = ncclTeamRankToWorld(handler.comm, rail, dataPeer);
@@ -70,7 +70,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
         if (dataPeer == rail.rank) {
           while (remainingElts) {
             size_t chunkElts = min(remainingElts, size_t(chunkSize));
-              // Put self rank's data
+            // Put self rank's data
             bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), input + offset,
                           output + dgrank * nAllElts + offset, chunkElts);
             offset += chunkElts;
@@ -79,7 +79,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
         } else {
           while (remainingElts) {
             size_t chunkElts = min(remainingElts, size_t(chunkSize));
-              // Wait for signal from other peers before putting their data
+            // Wait for signal from other peers before putting their data
             gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
             bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), output + dgrank * nAllElts + offset,
                           output + dgrank * nAllElts + offset, chunkElts);
@@ -96,5 +96,5 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
   if (threadIdx.x == ringThreads) {
     *localSignalPtr = localSignalValue;
   }
-  bar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+  bar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);
 }

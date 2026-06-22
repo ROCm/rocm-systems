@@ -23,7 +23,6 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata, Pipeline, useAcc>> {
   static constexpr int MaxRecv = Fan::MaxRecv, MaxSend = Fan::MaxSend;
   static constexpr int Input = 0, Output = 1, Acc = 2;
-  ;
   RedOp redOp;
   const int tid;
   const int nthreads;
@@ -144,7 +143,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     int ix[WordPerThread / 2];
 #pragma unroll
     for (int g = 0; g < WordPerThread / 2; g++) {
-      ix[g] = g * WARP_SIZE - 16 * (g / 2) + wid - (g % 2) * (wid / 4);
+      ix[g] = g * WARP_SIZE - 4 * (g / 2) + wid - (g % 2) * (wid / 8);
     }
     if (reinterpret_cast<uintptr_t>(src) % 16 == 0) {
       /* We are aligned to 16 bytes, so load directly to registers no shmem.
@@ -153,7 +152,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
        * defer that shuffle, which incurs a dependency stall, until after other
        * memops are launched by the caller.
        */
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
       for (int g = 0; g < WordPerThread / 2; g++) {
         if (!flagThread || g % 2 == 0) {
           if (ix[g] * EltPer16B < eltN) load128((uint64_t*)(src + ix[g] * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
@@ -165,11 +164,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       int misalignment = reinterpret_cast<uintptr_t>(src) % 16;
       uint64_t* src8 = reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(src) & -uintptr_t(16));
       uint64_t* shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
       for (int g = 0; g < WordPerThread / 2; g++)
         if ((g * WARP_SIZE + wid) * 16 < misalignment + eltN * sizeof(T))
           load128(src8 + 2 * (g * WARP_SIZE + wid), regs[2 * g + 0], regs[2 * g + 1]);
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
       for (int g = 0; g < WordPerThread / 2; g++)
         storeShmem128(shm8 + 2 * (g * WARP_SIZE + wid), regs[2 * g + 0], regs[2 * g + 1]);
 
@@ -178,9 +177,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       // Now load from shmem stage to regs. Preserve the same pre-shuffled layout
       // as the aligned case since Finish() will be applied regardless.
       T* shm = (T*)shm8 + misalignment / sizeof(T);
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
       for (int g = 0; g < WordPerThread / 2; g++) {
-        // int ix = g*WARP_SIZE - 16*(g/2) + wid - (g%2)*(wid/4);
         if (!flagThread || g % 2 == 0) {
           if (ix[g] * EltPer16B < eltN)
             loadShmemMisaligned128(shm + ix[g] * EltPer16B, regs[2 * g + 0], regs[2 * g + 1]);
@@ -192,7 +190,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsFinish(uint64_t (&regs)[WordPerThread]) {
     // Move data out of flag registers into the vacant registers.
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int g = 1; g < WordPerThread / 2; g += 2) {
       if (flagThread) regs[2 * g] = regs[2 * g - 1];
     }
@@ -202,17 +200,17 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   __device__ __forceinline__ void storeRegs(T* dst, uint64_t (&regs)[WordPerThread], int eltN) {
     constexpr int EltPer16B = 16 / sizeof(T);
     // Reverse Finish() register permuatation.
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int g = 1; g < WordPerThread / 2; g += 2) {
       if (flagThread) regs[2 * g - 1] = regs[2 * g];
     }
 
-    // Write to dst if 4-byte aligned, shmem otherwise.
+    // Write to dst if 16-byte aligned, shmem otherwise.
     int misalignment = reinterpret_cast<uintptr_t>(dst) % 16;
     uint64_t* shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int g = 0; g < WordPerThread / 2; g++) {
-      int ix = g * WARP_SIZE - 16 * (g / 2) + wid - (g % 2) * (wid / 4);
+      int ix = g * WARP_SIZE - 4 * (g / 2) + wid - (g % 2) * (wid / 8);
       if (!flagThread || g % 2 == 0) {
         if (misalignment == 0 && (ix + 1) * EltPer16B <= eltN)
           store128((uint64_t*)(dst + ix * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
@@ -243,14 +241,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       int spins = 0;
       do {
         needReload = false;
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           load128(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
           needReload |= flagThread && (vr[u + 1] != flag);
         }
         needReload &= (0 == checkAbort(abort, 1, spins));
       } while (__any(needReload));
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
     }
 
@@ -260,7 +258,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       // peer's data with memory loads of src data.
       loadRegsFinish(v);
       if (SrcBuf == Input) {
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           v[u] = applyPreOp(redOp, v[u]);
           if (!flagThread) v[u + 1] = applyPreOp(redOp, v[u + 1]);
@@ -271,7 +269,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     /************************ Recv rest *********************/
     if (RECV) {
       { // Consume data from first recv
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           v[u] = SRC ? applyReduce(redOp, vr[u], v[u]) : vr[u];
           v[u + 1] = SRC ? applyReduce(redOp, vr[u + 1], v[u + 1]) : vr[u + 1];
@@ -287,7 +285,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         int spins = 0;
         do {
           needReload = false;
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
           for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
             load128(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
             needReload |= flagThread && (vr[u + 1] != flag);
@@ -295,10 +293,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
           needReload &= (0 == checkAbort(abort, 1, spins));
         } while (__any(needReload));
 
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
 
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           v[u] = applyReduce(redOp, vr[u], v[u]);
           v[u + 1] = applyReduce(redOp, vr[u + 1], v[u + 1]);
@@ -308,7 +306,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     /********************** End Recv ************************/
 
     if (postOp) {
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
         v[u] = applyPostOp(redOp, v[u]);
         v[u + 1] = applyPostOp(redOp, v[u + 1]);
@@ -325,14 +323,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       for (int i = 1; i < MaxSend && i < fan.nsend(); i++) {
         uint64_t flag = sendFlag(i);
         uint64_t* ptr = sendPtr(i) + ll128Offset;
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           store128(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
         }
       }
       uint64_t flag = sendFlag(0);
       uint64_t* ptr = sendPtr(0) + ll128Offset;
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
         store128(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
       }

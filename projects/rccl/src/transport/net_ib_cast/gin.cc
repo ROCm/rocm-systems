@@ -131,16 +131,11 @@ ncclResult_t IbCastGinIbInit(void** ctx, uint64_t commId, ncclDebugLogger_t logF
 }
 
 // GIN Entry point, which will then morph into either the GDAKI or PROXY backend
+// [RCCL] ncclGin_v14_t has 17 fields (name + 16 function pointers);
+// IbCastGinIb is a stub — only init() is non-NULL.
 ncclGin_t IbCastGinIb = {"GIN_IB", IbCastGinIbInit,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL};
+                         NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                         NULL, NULL, NULL, NULL, NULL, NULL};
 
 ncclResult_t IbCastGinIbFinalize(void* ctx) {
   if (ctx) free(ctx);
@@ -817,24 +812,22 @@ ncclResult_t IbCastGinIbProxyIFlush(void* ginCtx, int context, void* mhandle, ui
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
+// [RCCL] IbCastGinIbProxy needs to be updated for gin_v14 API (AICOMRCCL follow-up).
+// Function signatures changed between gin_v13 and gin_v14; stub mismatched slots with NULL.
 ncclGin_t IbCastGinIbProxy = {"GIN_IB_PROXY",
-                              IbCastGinIbProxyInit,
-                              IbCastDevices,
-                              IbCastGinIbProxyGetProperties,
-                              IbCastListen,
-                              IbCastGinIbProxyConnect,
-                              IbCastGinIbProxyCreateContext,
-                              IbCastGinIbProxyRegMrSym,
-                              IbCastGinIbProxyRegMrSymDmaBuf,
-                              IbCastGinIbProxyDeregMrSym,
-                              IbCastGinIbProxyDestroyContext,
-                              IbCastGinIbCloseColl,
-                              IbCastCloseListen,
-                              IbCastGinIbProxyIPut,
-                              IbCastGinIbProxyIPutSignal,
-                              IbCastGinIbProxyIGet,
-                              IbCastGinIbProxyIFlush,
-                              IbCastGinIbProxyTest,
-                              NULL,
-                              NULL,
-                              IbCastGinIbFinalize};
+                              IbCastGinIbProxyInit,     // init(3 params) - OK
+                              IbCastDevices,             // devices - OK
+                              NULL,                      // getGinProperties - was getProperties(2) now (1)
+                              NULL,                      // getProperties - TODO: add adapter
+                              IbCastListen,              // listen - OK
+                              NULL,                      // connect - TODO: signature changed
+                              NULL,                      // createContext - gin_v14 params changed
+                              NULL,                      // regMrSym - TODO
+                              NULL,                      // regMrSymDmaBuf - TODO
+                              NULL,                      // deregMrSym - TODO
+                              NULL,                      // destroyContext - TODO
+                              IbCastGinIbCloseColl,      // closeColl - OK
+                              IbCastCloseListen,         // closeListen - OK
+                              NULL,                      // ginProgress - TODO
+                              NULL,                      // queryLastError - new in gin_v14
+                              IbCastGinIbFinalize};      // finalize - OK

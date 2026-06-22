@@ -2,6 +2,18 @@
 
 Full documentation for RCCL is available at [https://rccl.readthedocs.io](https://rccl.readthedocs.io)
 
+## Unreleased - RCCL 2.30.7 for ROCm 7.12
+
+### Changed
+* Compatibility with NCCL 2.30.7.
+
+### Known issues
+* The `07_kernel_fusion` example category introduced upstream exists only in the CUDA tree and has not been ported to HIP/RCCL.
+* Hierarchical zero-SM collectives (`NCCL_CTA_POLICY_ZERO`) use the RMA CE path, which is unverified on ROCm.
+* The new GPU Push Interface (GPI) backend for GIN (`NCCL_GIN_GPI_ENABLE`) is CUDA/DOCA-specific and is disabled on AMD (`NCCL_GIN_GPI_ENABLE=0`).
+* MPS with MLOPart support is CUDA-specific and has not been validated on ROCm.
+* IB ports requiring global route headers (`IBV_QPF_GRH_REQUIRED`) and subnet-aware routing (`NCCL_IB_SUBNET_AWARE_ROUTING`) are synced in `net_ib` but not yet ported to `net_ib_cast`.
+
 ## Unreleased - RCCL 2.30.4 for ROCm 7.12
 
 ### Changed

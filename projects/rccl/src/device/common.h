@@ -60,6 +60,7 @@ struct ncclShmemGroup {
   void* dsts[NCCL_MAX_ARITY + 1];
   void* acc;
   uint64_t barrier;
+  uint32_t barrier_any_vote; // scratch for barrierAny()/subBarrierAny() on AMD
   union {
     unpackGroupShmem unpack;
   } devicePlugin;
@@ -296,8 +297,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
       if (ncclShmem.args.workStorageType == ncclDevWorkStorageTypeArgs) {
         char* src = (char*)args + (batch.offsetBase + srcWork * workSize + packInWork * 16);
         tmp = *(ulonglong2*)src; // becomes ld.param.v2.u64
-      }
-      if (ncclShmem.args.workStorageType != ncclDevWorkStorageTypeArgs) {
+      } else {
         char* src = (char*)ncclShmem.args.workBuf +
                     ((batch.offsetBase + srcWork * workSize + packInWork * 16) & ncclShmem.args.workMask);
         tmp = *(ulonglong2*)src; // becomes ld.v2.u64
@@ -372,7 +372,7 @@ struct RunWorkBatch {
       __syncthreads();
     }
 
-#pragma unroll 1
+NVCC_PRAGMA_UNROLL_DISABLED
     for (int w = 0; w < ncclShmem.nWorks; w++) {
       struct ncclDevWorkColl* work = (struct ncclDevWorkColl*)(ncclShmem.workStorage + w * ncclShmem.workSize);
       if (w != 0) {

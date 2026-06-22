@@ -39,6 +39,7 @@ static_assert(sizeof(hipMemFabricHandle_compat_t) == 64,
               "hipMemFabricHandle_t size diverged from the 64-byte compat layout; "
               "update HIP_IPC_HANDLE_SIZE / serialization code in mem_manager.{h,cc}");
 #endif
+
 #endif
 
 struct ncclComm;

@@ -42,9 +42,9 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
   T* inputBuf = (T*)work->sendbuff;
   T* outputBuf = (T*)work->recvbuff;
 
-    // If isNetOffload == true, we only use 1 warp to drive Ring algo/network communication
-    // and the rest of warps proceed to copy src data into dst buffer in parallel when AG
-    // is not in-place.
+  // If isNetOffload == true, we only use 1 warp to drive Ring algo/network communication
+  // and the rest of warps proceed to copy src data into dst buffer in parallel when AG
+  // is not in-place.
   if (isNetOffload) {
     workNthreads = WARP_SIZE;
     chunkCount = NCCL_MAX_NET_SIZE;
@@ -109,25 +109,20 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
 #if defined(__gfx942__)  // Use a single slice per simple primitive for a single node on some GFX9 devices.
 #define rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work) \
   if (work->rcclUseOneSlice) { \
-    runRing<T, RedOp, \
-            ProtoSimple<ALLGATHER_CHUNKSTEPS / ALLGATHER_SLICESTEPS_SINGLE_NODE, ALLGATHER_SLICESTEPS_SINGLE_NODE>, \
-            false>(tid, nthreads, work); \
+    runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS / ALLGATHER_SLICESTEPS_SINGLE_NODE, ALLGATHER_SLICESTEPS_SINGLE_NODE>, false>(tid, nthreads, work); \
   } else { \
-    runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS / ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>( \
-      tid, nthreads, work); \
+    runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS / ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>(tid, nthreads, work); \
   }
 #elif defined(__gfx950__)
 #define rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work) \
   if (work->rcclUseOneSlice) { \
     runRing<T, RedOp, ProtoSimple<1, 1>, false>(tid, nthreads, work); \
   } else { \
-    runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS / ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>( \
-      tid, nthreads, work); \
+    runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS / ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>(tid, nthreads, work); \
   }
 #else
 #define rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work) \
-  runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS / ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>( \
-    tid, nthreads, work);
+  runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS / ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>(tid, nthreads, work);
 #endif
 
 template <typename T, typename RedOp>
@@ -179,7 +174,8 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
     if (tid == nworkers) shmem->parallelFactor = 0;
     __syncthreads();
 
-    if (tid == nworkers) { // Algo computation thread
+    if (tid == nworkers) {
+      // Algo computation thread
       PatAGAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, NCCL_PAT_NWORKERS / WARP_SIZE, channelOffset,
                                 channelOffset + channelCount, count, chunkCount, rank, nranks);
       int parallelFactor = shmem->parallelFactor = patAlgo.getParallelFactor();
@@ -196,7 +192,8 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         step++;
         if (last == 2) break;
       }
-    } else if (tid < nworkers) { // Worker threads
+    } else if (tid < nworkers) {
+      // Worker threads
       T* inputBuf = (T*)work->sendbuff;
       T* outputBuf = (T*)work->recvbuff;
       int parallelFactor = 0;

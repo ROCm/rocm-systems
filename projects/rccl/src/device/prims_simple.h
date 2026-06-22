@@ -79,12 +79,38 @@ class Primitives<T, RedOp, Fan, Direct,
 #endif
   }
 
-  inline __device__ void barrierAny() {
-    barrier();
+  __device__ bool barrierAny(int vote) {
+    if (nthreads == WARP_SIZE) {
+      return __any_sync((uint64_t)~0ull, vote);
+    } else {
+#if !defined(__HIP_PLATFORM_AMD__)
+      int name = 15 - group;
+      return barrier_red_or(vote, name, nthreads);
+#else
+      // AMD: accumulate votes into scratch field across the barrier.
+      ncclShmem.groups[group].barrier_any_vote = 0;
+      barrier();
+      if (vote) atomicOr(&ncclShmem.groups[group].barrier_any_vote, 1u);
+      barrier();
+      return ncclShmem.groups[group].barrier_any_vote != 0;
+#endif
+    }
   }
-
-  inline __device__ void subBarrierAny() {
-    barrier();
+  __device__ bool subBarrierAny(int vote) {
+    if (nworkers == WARP_SIZE) {
+      return __any_sync((uint64_t)~0ull, vote);
+    } else {
+#if !defined(__HIP_PLATFORM_AMD__)
+      int name = 15 - group - (nworkers != nthreads ? 1 : 0);
+      return barrier_red_or(vote, name, nworkers);
+#else
+      ncclShmem.groups[group].barrier_any_vote = 0;
+      subBarrier();
+      if (vote) atomicOr(&ncclShmem.groups[group].barrier_any_vote, 1u);
+      subBarrier();
+      return ncclShmem.groups[group].barrier_any_vote != 0;
+#endif
+    }
   }
 
   inline __device__ uint64_t loadStepValue(uint64_t* ptr) {
@@ -159,7 +185,8 @@ class Primitives<T, RedOp, Fan, Direct,
         // it as a base would compute an invalid GPU address.
         if ((flags & DirectWrite) && directBuff != nullptr) {
           ptrs[index] = directBuff + dstIx + offset;
-        } else if ((flags & DirectRead) && directBuff != nullptr) { // empty send
+        } else if (flags & DirectRead) {
+          // empty send
           ptrs[index] = nullptr;
         } else {
           ptrs[index] = connEltsFifo + (step % NCCL_STEPS) * connStepSize;
@@ -223,30 +250,35 @@ class Primitives<T, RedOp, Fan, Direct,
     int offset = 0;
 
     if (tid < nworkers && offset < nelem && !isNetOffload) {
-// Worker-only loop for non-empty slices. Non-workers and empty slices are
-// processed in the loop following this if block. The benefit of splitting
-// the loop like this is we pull two branches out of the critical path.
-// Using "number of branch insns (taken or not) encountered dynamically"
-// as the performance metric, then:
-//   perf_orig = 2*numslices
-//   perf_new = 2+numslices
-// So the new code and old code behave the same for numslices=2, and for
-// numslices>2 the new code is superior. And note that in the case
-// numslices=1, the loop is trivially unrollable (single iteration) so we
-// don't incur that that tail branch and we still have perf_new=2.
-//
-// ORIGINAL CODE:
-//   unrolled for(slices) {
-//     if(worker) { // This branch removed
-//       wait();
-//       subBarrier();
-//       if(slice not empty) // This branch removed
-//         ReduceCopyMulti();
-//     }
-//     barrier();
-//     post();
-//   } // Since we no longer unroll, new branch added here
-#pragma unroll 1
+      // Worker-only loop for non-empty slices. Non-workers and empty slices are
+      // processed in the loop following this if block. The benefit of splitting
+      // the loop like this is we pull two branches out of the critical path.
+      // Using "number of branch insns (taken or not) encountered dynamically"
+      // as the performance metric, then:
+      //   perf_orig = 2*numslices
+      //   perf_new = 2+numslices
+      // So the new code and old code behave the same for numslices=2, and for
+      // numslices>2 the new code is superior. And note that in the case
+      // numslices=1, the loop is trivially unrollable (single iteration) so we
+      // don't incur that that tail branch and we still have perf_new=2.
+      //
+      // ORIGINAL CODE:
+      //   unrolled for(slices) {
+      //     if(worker) { // This branch removed
+      //       wait();
+      //       subBarrier();
+      //       if(slice not empty) // This branch removed
+      //         ReduceCopyMulti();
+      //     }
+      //     barrier();
+      //     post();
+      //   } // Since we no longer unroll, new branch added here
+#if __CUDA_ARCH__ < 700
+      // Above doesn't matter on older hardware.
+      NVCC_PRAGMA_UNROLL(SlicePerChunk)
+#else
+      NVCC_PRAGMA_UNROLL_DISABLED
+#endif
       do {
         sliceSize = sliceSize < nelem - offset ? sliceSize : nelem - offset;
         if (tid == 0) {
@@ -320,11 +352,11 @@ class Primitives<T, RedOp, Fan, Direct,
       } while (slice < SlicePerChunk && offset < nelem);
     }
 
-// Non-workers come straight here. Workers too but only once the remaining
-// slices are all empty. Since empty slices are the uncommon case, and
-// worker perf is the limiter, perf-wise this loop is effectively unentered,
-// hence just a single branch insn.
-#pragma unroll 1
+    // Non-workers come straight here. Workers too but only once the remaining
+    // slices are all empty. Since empty slices are the uncommon case, and
+    // worker perf is the limiter, perf-wise this loop is effectively unentered,
+    // hence just a single branch insn.
+    NVCC_PRAGMA_UNROLL_DISABLED
     while (slice < SlicePerChunk) {
       sliceSize = sliceSize < nelem - offset ? sliceSize : nelem - offset;
       { // Only workers could have Wait roles so we know the slice must be empty
@@ -369,7 +401,7 @@ public:
 
   template <int Recv, int Send, typename Fn>
   __device__ __forceinline__ void process(Fn&& fn, uint32_t sendDirectFlag = 0, uint32_t recvDirectFlag = 0) {
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int slice = 0; slice < SlicePerChunk; slice++) {
       if (tid < nworkers) {
         int nsend, nrecv;
@@ -388,7 +420,8 @@ public:
             if (isSendNotRecv) {
               if (flags & DirectWrite) {
                 ptrs[index] = directBuff;
-              } else if (flags & DirectRead) { // empty send
+              } else if (flags & DirectRead) {
+                // empty send
                 ptrs[index] = nullptr;
               } else {
                 ptrs[index] = connEltsFifo + (step % NCCL_STEPS) * connStepSize;
@@ -397,7 +430,7 @@ public:
               if (flags & DirectRead) {
                 ptrs[index] = directBuff;
               } else if (flags & DirectWrite) {
-                if (Send) ptrs[index] = directBuff; // send to next from my output buffer
+                if (Send) ptrs[index] = directBuff;  // send to next from my output buffer
                 else ptrs[index] = nullptr;
               } else {
                 ptrs[index] = connEltsFifo + (step % NCCL_STEPS) * connStepSize;
@@ -456,9 +489,9 @@ private:
     constexpr int DirectSend = /*1 &&*/ Direct && DirectSend1;
     int offset = 0; // slice offset
     int sliceSize = stepSize * StepPerSlice;
-    int dataSize = max(DIVUP(peerElem, 16 * SlicePerChunk) * 16, sliceSize / 32); // per-peer slice size
+    int dataSize = max(DIVUP(peerElem, 16 * SlicePerChunk) * 16, sliceSize / 32);  // per-peer slice size
 
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_AUTO
     for (int slice = 0; slice < SlicePerChunk; ++slice) {
       ssize_t realSize = max(0, min(dataSize, peerElem - offset));
       bool fenceNeeded = false;
@@ -470,7 +503,7 @@ private:
           // realSize is not accurate here; but intra-node does not rely on sizes FIFO
           waitPeer<0, DirectSend, 0, 1, 1, 0>(0, inpIx, offset, realSize);
           subBarrier();
-#pragma unroll 1
+          NVCC_PRAGMA_UNROLL_AUTO
           // Loop over peers
           for (int j = 0; j < fan.nsend(); j++) {
             int i = (j + shift) % fan.nsend();
@@ -494,7 +527,7 @@ private:
           // Adjust remote index with peer offset in case we are directly pulling from peer's output buffer
           waitPeer<DirectRecv, 0, 1, 0, 0, 1>(outIx + pOffset, outIx + pOffset, offset, realSize);
           subBarrier();
-#pragma unroll 1
+          NVCC_PRAGMA_UNROLL_AUTO
           for (int j = 0; j < fan.nrecv(); j++) {
             int i = (j + shift) % fan.nrecv();
             pOffset = i * peerOffset;
@@ -532,9 +565,8 @@ private:
       STORE(connStepPtr, step); // Return credits in case we rounded up.
     }
     if (flags & RoleWaitRecv) {
-      if ((flags & PatMode) == 0)
-        ncclShmem.groups[group].recvConns[index] =
-          conn; // WaitRecv role saves since that's who needs it in setDataPtrs()
+      // WaitRecv role saves since that's who needs it in setDataPtrs()
+      if ((flags & PatMode) == 0) ncclShmem.groups[group].recvConns[index] = conn;
       flags |= (conn->flags & NCCL_NVLS_MIN_POLL) ? NvlsMinPolling : 0;
       connStepPtr = conn->tail;
       connStepCache = loadStepValue(connStepPtr);
@@ -585,9 +617,8 @@ private:
       connEltsFifo = (T*)conn->buffs[NCCL_PROTO_SIMPLE];
     }
     if (flags & RoleWaitSend) {
-      if ((flags & PatMode) == 0)
-        ncclShmem.groups[group].sendConns[index] =
-          conn; // WaitSend role saves since that's who needs it in setDataPtrs()
+      // WaitSend role saves since that's who needs it in setDataPtrs()
+      if ((flags & PatMode) == 0) ncclShmem.groups[group].sendConns[index] = conn;
       flags |= (conn->flags & NCCL_NVLS_MIN_POLL) ? NvlsMinPolling : 0;
       connStepPtr = conn->head;
       connStepCache = loadStepValue(connStepPtr);
@@ -625,67 +656,67 @@ public:
                                         struct ncclDevWorkColl* collWork = nullptr,
                                         struct ncclDevWorkP2p* p2pWork = nullptr, int stepSize_ = 0,
                                         int mode = primsModeDefault)
-    : tid(tid), tidInBlock(threadIdx.x), nthreads(nthreads), /*compiler warnings*/
+    : tid(tid), nthreads(nthreads), tidInBlock(threadIdx.x),
 #ifdef ENABLE_WARP_SPEED
-      stepSize(stepSize_ == 0 ? ncclShmem.comm.buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS / sizeof(T) : stepSize_),
-      group(ncclShmem.warpComm ? tidInBlock / WARP_SIZE : group), threadsPerBlock(blockDim.x){
+      group(ncclShmem.warpComm ? tidInBlock / WARP_SIZE : group), threadsPerBlock(blockDim.x),
 #else
-      stepSize(stepSize_ == 0 ? ncclShmem.comm.buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS / sizeof(T) : stepSize_),
-      group(group), threadsPerBlock(blockDim.x) {
+      group(group), threadsPerBlock(blockDim.x),
 #endif
-                                                                    barriers = &ncclShmem.groups[group].barrier;
-  // PAT uses the same barrier for each group
-  barriers_pat = &ncclShmem.barrier_pat;
-  this->nworkers = nthreads;
+      stepSize(stepSize_ == 0 ? ncclShmem.comm.buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS / sizeof(T) : stepSize_) {
+    barriers = &ncclShmem.groups[this->group].barrier;
+    // PAT uses the same barrier for each group
+    barriers_pat = &ncclShmem.barrier_pat;
+    this->nworkers = nthreads;
 #ifdef ENABLE_WARP_SPEED
-  auto* channel = ncclShmem.warpComm ? &ncclShmem.warpChannel[tidInBlock / WARP_SIZE] : &ncclShmem.channel;
+    auto* channel = ncclShmem.warpComm ? &ncclShmem.warpChannel[tidInBlock / WARP_SIZE] : &ncclShmem.channel;
 #else
     auto* channel = &ncclShmem.channel;
 #endif
-  int peer = -1;
-  flags = 0;
-  index = -1;
-  if (mode == primsModeDefault) { // Connect to ranks in sendPeers/recvPeers
-    // // For send operations, we need an extra warp to overlap the threadfence and the copy
-    // this->nworkers = nthreads - (MaxSend > 0 && nthreads >= NCCL_SIMPLE_EXTRA_GROUP_IF_NTHREADS_GE ? WARP_SIZE : 0);
+    int peer = -1;
+    flags = 0;
+    index = -1;
+    if (mode == primsModeDefault) {
+      // Connect to ranks in sendPeers/recvPeers
+      // // For send operations, we need an extra warp to overlap the threadfence and the copy
+      // this->nworkers = nthreads - (MaxSend > 0 && nthreads >= NCCL_SIMPLE_EXTRA_GROUP_IF_NTHREADS_GE ? WARP_SIZE : 0);
 
-    int nrecv = 0, nsend = 0;
-    // Yes, for some template arguments this code will be unreachable.  That's fine.
-    // coverity[dead_error_line]
-    while (nrecv < MaxRecv && recvPeers[nrecv] != -1) nrecv++;
-    // coverity[dead_error_line]
-    while (nsend < MaxSend && sendPeers[nsend] != -1) nsend++;
-    this->fan = Fan(nrecv, nsend);
+      int nrecv = 0, nsend = 0;
+      // Yes, for some template arguments this code will be unreachable.  That's fine.
+      // coverity[dead_error_line]
+      while (nrecv < MaxRecv && recvPeers[nrecv] != -1) nrecv++;
+      // coverity[dead_error_line]
+      while (nsend < MaxSend && sendPeers[nsend] != -1) nsend++;
+      this->fan = Fan(nrecv, nsend);
 
-    constexpr int ThreadPerSync =
-      MaxSend >= 16 || MaxRecv >= 16 ?
-        32 : // NVLS may have an arity > 8. In that case increase the size of the groups
-        MaxSend >= 8 || MaxRecv >= 8 ?
-        16 :
-        8; // Allows for all roles (WaitRecv/WaitSend/PostRecv/PostSend) within a single warp
-    static_assert(MaxSend <= ThreadPerSync && MaxRecv <= ThreadPerSync, "Not enough threads to cover all peers");
+      constexpr int ThreadPerSync =
+        MaxSend >= 16 || MaxRecv >= 16 ?
+          32 : // NVLS may have an arity > 8. In that case increase the size of the groups
+          MaxSend >= 8 || MaxRecv >= 8 ?
+          16 :
+          8; // Allows for all roles (WaitRecv/WaitSend/PostRecv/PostSend) within a single warp
+      static_assert(MaxSend <= ThreadPerSync && MaxRecv <= ThreadPerSync, "Not enough threads to cover all peers");
 
-    assert(2 * (nrecv + nsend) <= nthreads); // Ensure no thread is assigned more than one role.
-    // Coverity assumes that index will equal tid based on the line below, but it doesn't consider the setting
-    // of flags.  This results in multiple false positive overruns being reported here and in all_reduce.h.
-    // Unfortunately, we've been unsuccessful in trying to silence them with a single directive here so
-    // instead it's being done at the callers.
-    // coverity[assignment:FALSE]
-    if (tid < nrecv) {
-      flags |= RoleWaitRecv;
-      index = tid;
-    }
-    // Yes, for some template arguments this code will be unreachable.  That's fine.
-    // coverity[dead_error_begin]
-    else if (tid < nrecv + nsend) {
-      flags |= RoleWaitSend;
-      index = tid - nrecv;
-    } else if (nthreads - nsend <= tid) {
-      flags |= RolePostSend;
-      index = tid - (nthreads - nsend);
-    } else if (nthreads - nrecv - nsend <= tid) {
-      flags |= RolePostRecv;
-      index = tid - (nthreads - nrecv - nsend);
+      assert(2 * (nrecv + nsend) <= nthreads); // Ensure no thread is assigned more than one role.
+      // Coverity assumes that index will equal tid based on the line below, but it doesn't consider the setting
+      // of flags.  This results in multiple false positive overruns being reported here and in all_reduce.h.
+      // Unfortunately, we've been unsuccessful in trying to silence them with a single directive here so
+      // instead it's being done at the callers.
+      // coverity[assignment:FALSE]
+      if (tid < nrecv) {
+        flags |= RoleWaitRecv;
+        index = tid;
+      }
+      // Yes, for some template arguments this code will be unreachable.  That's fine.
+      // coverity[dead_error_begin]
+      else if (tid < nrecv + nsend) {
+        flags |= RoleWaitSend;
+        index = tid - nrecv;
+      } else if (nthreads - nsend <= tid) {
+        flags |= RolePostSend;
+        index = tid - (nthreads - nsend);
+      } else if (nthreads - nrecv - nsend <= tid) {
+        flags |= RolePostRecv;
+        index = tid - (nthreads - nrecv - nsend);
     }
 
     if (flags & (RoleWaitRecv | RolePostRecv)) peer = recvPeers[index];
@@ -714,21 +745,21 @@ public:
     if (flags & (RoleWaitSend | RolePostSend))
       loadSendConn(channel->peers[peer], connIndexSend, collWork ? collWork->direct : 0, sendIpcReg, sendNetReg);
 
-    // if (barrierAny(flags & NetDeviceUnpack)) {
-    //   flags |= AnyNetDeviceUnpack;
-    //   // RoleWaitRecv starts at tid=0, so this creates the bitmask of which recv peers
-    //   // have NetDeviceUnpack.
-    //   uint32_t mask = __ballot_sync(~0u, ((flags & RoleWaitRecv) && (flags & NetDeviceUnpack)) ? 1 : 0);
-    //   if (tid == 0) {
-    //     ncclShmem.groups[this->group].devicePlugin.unpack.unpackNetDeviceIndexMask = mask;
-    //   }
-    // }
-
     // coverity[negative_returns:FALSE] => coverity thinks that index could be -1 but that's not actually the case
     // coverity[var_deref_model] => coverity thinks work can dereferenced if NULL but this is not the case
     setDataPtrs(inputBuf, outputBuf, redOpArg, (struct ncclDevWorkCollReg*)collWork, sendIpcReg || recvIpcReg, peer,
                 collWork != nullptr ? collWork->acc : nullptr);
     // coverity[uninit_member] => coverity thinks fan.n is not initialized
+
+    if (barrierAny(flags & NetDeviceUnpack)) {
+      flags |= AnyNetDeviceUnpack;
+      // RoleWaitRecv starts at tid=0, so this creates the bitmask of which recv peers
+      // have NetDeviceUnpack.
+      uint32_t mask = (uint32_t)__ballot_sync((uint64_t)~0ull, ((flags & RoleWaitRecv) && (flags & NetDeviceUnpack)) ? 1 : 0);
+      if (tid == 0) {
+        ncclShmem.groups[this->group].devicePlugin.unpack.unpackNetDeviceIndexMask = mask;
+      }
+    }
   } else if (mode == primsModePatRs || mode == primsModePatAg) { // Connect to all ranks +/- 2^n
     flags |= PatMode;
     const int roles[5] = {RoleWaitRecv, RolePostRecv, RoleWaitSend, RolePostSend, RoleInput | RoleOutput};
@@ -764,6 +795,7 @@ public:
       ncclShmem.groups[group].userInput = (void*)inputBuf;
       ncclShmem.groups[group].userOutput = (void*)outputBuf;
       ncclShmem.groups[group].redOpArgs = redOpArg; // scaler for local input
+
     }
     patBarrier();
   }
@@ -930,13 +962,7 @@ __device__ void setDataPtrs(void const* inputBuf, void* outputBuf, uint64_t redO
       }
     }
   }
-}
 
-__device__ void moveDataPtrs(intptr_t delta) {
-  if (tid == 0) {
-    ncclShmem.groups[group].userInput = (T*)ncclShmem.groups[group].userInput + delta;
-    ncclShmem.groups[group].userOutput = (T*)ncclShmem.groups[group].userOutput + delta;
-  }
 }
 
 __device__ __forceinline__ void setDataPtrs(void const* inputBuf, void* outputBuf = nullptr) {
@@ -1257,5 +1283,11 @@ __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatSh
     st_relaxed_sys_global(peer->headPtr, step);
   }
 }
-}
-;
+
+  __device__ void moveDataPtrs(intptr_t delta) {
+    if (tid == 0) {
+      ncclShmem.groups[group].userInput = (T*)ncclShmem.groups[group].userInput + delta;
+      ncclShmem.groups[group].userOutput = (T*)ncclShmem.groups[group].userOutput + delta;
+    }
+  }
+};

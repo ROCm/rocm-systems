@@ -22,7 +22,7 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
   CUDACHECK(cudaGetDevice(&cudaDev));
   CUDACHECK(cuDeviceGet(&currentDev, cudaDev));
   // Ignore error if CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED is not supported
-  (void)cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev);
+  (void)CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
   if (!flag) return ncclSuccess;
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -86,28 +86,21 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
       ncclCuMemAlloc(&ptr, &handle, CU_MEM_HANDLE_TYPE_FABRIC, CUDA_IPC_MIN, comm->memManager, ncclMemOffload);
     if (ret != ncclSuccess) {
       // Return an error if this is a MNNVL capable system but FABRIC handles are not supported
-      WARN("MNNVL (cliqueSize %d) is available but not working on this system. Check afmctl. Set NCCL_MNNVL_ENABLE=0 "
-           "to ignore this issue.",
+      WARN("MNNVL (cliqueSize %d) is available but not working on this system. Check the IMEX channel configuration "
+           "(/dev/nvidia-caps-imex-channels). Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
            comm->clique.size);
       return ncclSystemError;
     }
-    err = cuMemExportToShareableHandle(&cuDesc, handle, CU_MEM_HANDLE_TYPE_FABRIC, 0);
-    if (err != CUDA_SUCCESS) {
-    // || (err = cuMemImportFromShareableHandle(&handle, &cuDesc, CU_MEM_HANDLE_TYPE_FABRIC)) != CUDA_SUCCESS
-    // Note: cuMemImportFromShareableHandle is intentionally NOT tested here.
-    // Same-process round-trip of a fabric handle is not currently supported — the import call
-    // fails even on a correctly configured MNNVL system. Cross-process import is validated
-    // implicitly when the first actual P2P transfer succeeds after MNNVL is enabled.
-    // The ImportFromShareableHandle check above is preserved to document what was tried and why
-    // it was removed, so future maintainers don't re-add it expecting it to work.
+    err = CUPFN(cuMemExportToShareableHandle(&cuDesc, handle, CU_MEM_HANDLE_TYPE_FABRIC, 0));
+    if (err != CUDA_SUCCESS ||
+        (err = CUPFN(cuMemImportFromShareableHandle(&handle, &cuDesc, CU_MEM_HANDLE_TYPE_FABRIC))) != CUDA_SUCCESS) {
       const char* errStr;
-      (void)cuGetErrorString(err, &errStr);
+      (void)pfn_cuGetErrorString(err, &errStr);
       NCCLCHECK(ncclCuMemFree(ptr, comm->memManager));
       // Return an error if this is a MNNVL capable system but it's not working
-      WARN("MNNVL rank%d (cliqueSize %d) is available but not working on this system: "
-           "cuMemExportToShareableHandle/cuMemImportFromShareableHandle failed: %s. Check afmctl. Set "
-           "NCCL_MNNVL_ENABLE=0 to ignore this issue.",
-           comm->rank, comm->clique.size, errStr);
+      WARN("MNNVL (cliqueSize %d) is available but not working on this system. Check the IMEX configuration "
+           "(nvidia-imex-ctl -N). Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
+           comm->clique.size);
       return ncclSystemError;
     }
     NCCLCHECK(ncclCuMemFree(ptr, comm->memManager));

@@ -30,6 +30,10 @@
 //   so it is not exported; this stub provides the symbol and silently drops logs.
 void __attribute__((weak)) ncclDebugLog(ncclDebugLogLevel, unsigned long,
                                         const char*, int, const char*, ...) {}
+// New signature added in v2.30.7 (upstream renamed ncclDebugLog → ncclDebugLogInternal).
+void __attribute__((weak)) ncclDebugLogInternal(ncclDebugLogLevel, unsigned long,
+                                                const char*, const char*, int,
+                                                const char*, ...) {}
 
 // ============================================================================
 // Internal structures and variables from alt_rsmi.cc (TEST USE ONLY)

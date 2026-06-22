@@ -16,10 +16,10 @@ ncclResult_t CudaPtrCheck(const void* pointer, struct ncclComm* comm, const char
     WARN("%s : %s %p is not a valid pointer", opname, ptrname, pointer);
     return ncclInvalidArgument;
   }
-#if ROCM_VERSION < 50500
-  if (attr.memoryType == cudaMemoryTypeDevice && attr.device != comm->cudaDev) {
-#else
+#if CUDART_VERSION >= 10000 || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (attr.type == cudaMemoryTypeDevice && attr.device != comm->cudaDev) {
+#else
+  if (attr.memoryType == cudaMemoryTypeDevice && attr.device != comm->cudaDev) {
 #endif
     WARN("%s : %s allocated on device %d mismatchs with NCCL device %d", opname, ptrname, attr.device, comm->cudaDev);
     return ncclInvalidArgument;
@@ -100,11 +100,12 @@ static ncclResult_t registrationCheck(struct ncclInfo* info) {
     int infoIdx = r * 2;
     if (cmpBufInfo[0].isSymRegistered != bufInfo[infoIdx].isSymRegistered ||
         cmpBufInfo[1].isSymRegistered != bufInfo[infoIdx + 1].isSymRegistered) {
-      if (comm->rank == 0)
+      if (comm->rank == 0) {
         WARN("Coll %s size %ld symmetric registration check failed on rank %d: sendReg %d recvReg %d mismatch with "
              "rank 0 sendReg %d recvReg %d",
              info->opName, size, r, bufInfo[infoIdx].isSymRegistered, bufInfo[infoIdx + 1].isSymRegistered,
              cmpBufInfo[0].isSymRegistered, cmpBufInfo[1].isSymRegistered);
+      }
       ret = ncclInvalidArgument;
       goto fail;
     }
@@ -131,20 +132,22 @@ static ncclResult_t registrationCheck(struct ncclInfo* info) {
       info->coll == ncclFuncGather) {
     if (cmpBufInfo[0].isSymRegistered) {
       if (sendWinMismatch) {
-        if (comm->rank == 0)
+        if (comm->rank == 0) {
           WARN("Coll %s size %ld symmetric registration check failed on rank %d: send buffer window (0x%lx) mismatch "
                "with rank 0 (0x%lx)",
                info->opName, size, sendWinMismatchRank, bufInfo[sendWinMismatchRank * 2].bigOffset,
                cmpBufInfo[0].bigOffset);
+        }
         ret = ncclInvalidArgument;
         goto fail;
       }
       if (sendUserMismatch) {
-        if (comm->rank == 0)
+        if (comm->rank == 0) {
           WARN("Coll %s size %ld symmetric registration check failed on rank %d: send buffer user offset (0x%lx) "
                "mismatch with rank 0 (0x%lx)",
                info->opName, size, sendUserMismatchRank, bufInfo[sendUserMismatchRank * 2].userOffset,
                cmpBufInfo[0].userOffset);
+        }
         ret = ncclInvalidArgument;
         goto fail;
       }
@@ -155,20 +158,22 @@ static ncclResult_t registrationCheck(struct ncclInfo* info) {
       info->coll == ncclFuncScatter) {
     if (cmpBufInfo[1].isSymRegistered) {
       if (recvWinMismatch) {
-        if (comm->rank == 0)
+        if (comm->rank == 0) {
           WARN("Coll %s size %ld symmetric registration check failed on rank %d: recv buffer window (0x%lx) mismatch "
                "with rank 0 (0x%lx)",
                info->opName, size, recvWinMismatchRank, bufInfo[recvWinMismatchRank * 2 + 1].bigOffset,
                cmpBufInfo[1].bigOffset);
+        }
         ret = ncclInvalidArgument;
         goto fail;
       }
       if (recvUserMismatch) {
-        if (comm->rank == 0)
+        if (comm->rank == 0) {
           WARN("Coll %s size %ld symmetric registration check failed on rank %d: recv buffer user offset (0x%lx) "
                "mismatch with rank 0 (0x%lx)",
                info->opName, size, recvUserMismatchRank, bufInfo[recvUserMismatchRank * 2 + 1].userOffset,
                cmpBufInfo[1].userOffset);
+        }
         ret = ncclInvalidArgument;
         goto fail;
       }
@@ -185,7 +190,8 @@ fail:
 ncclResult_t ncclArgsGlobalCheck(struct ncclArgsInfo* argsInfo) {
   struct ncclInfo* info = &argsInfo->info;
   if (info->coll != ncclFuncSend && info->coll != ncclFuncRecv && info->coll != ncclFuncPutSignal &&
-      info->coll != ncclFuncSignal && info->coll != ncclFuncWaitSignal) { // exclude one-sided and sendrecv operations
+      info->coll != ncclFuncSignal && info->coll != ncclFuncWaitSignal) {
+    // exclude one-sided and sendrecv operations
     // Check registration globally
     NCCLCHECK(registrationCheck(info));
   }

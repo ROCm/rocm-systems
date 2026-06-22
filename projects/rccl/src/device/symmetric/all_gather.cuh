@@ -19,27 +19,33 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
 
   Pack* inpPacks = (Pack*)input.localPtr() + intptr_t(w) * UnrollPacks * WARP_SIZE + (EnableTma ? 0 : lane);
   ncclSymPtr<Pack> outPacks = (ncclSymPtr<Pack>)output + intptr_t(w) * UnrollPacks * WARP_SIZE + (EnableTma ? 0 : lane);
+
   Pack tmp[UnrollPacks];
 
+#if __CUDA_ARCH__ >= 1000
   int lw = threadIdx.x / WARP_SIZE;
   extern __shared__ char smemScratch[];
   using tmaSmemStruct_t = tmaSmemStruct<Pack, UnrollPacks>;
   constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
   tmaSmemStruct_t* tmaSmem = reinterpret_cast<tmaSmemStruct_t*>(smemScratch + lw * smemSizePerWarp);
+#endif
   bool skip = false; // all lanes issue loads/stores
 
+#if __CUDA_ARCH__ >= 1000
   if NCCL_IF_CONSTEXPR (EnableTma) {
     if (lane == 0) {
       // lane0 issues async.cp.bulk commands
-      __mbarrier_init(&tmaSmem->bar, 1);
+      init(&tmaSmem->bar, 1);
     } else {
       // other lanes can skip the loop
       skip = true;
     }
   }
+#endif
 
   nIters -= w;
   if (0 < nIters) {
+#if __CUDA_ARCH__ >= 1000
     if NCCL_IF_CONSTEXPR (EnableTma) {
       if (lane == 0) {
         cp_async_bulk_global_to_shared(tmaSmem->buff[0], inpPacks, &tmaSmem->bar, tileSize);
@@ -47,8 +53,10 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
         while (!barrier_try_wait_token_relaxed(&tmaSmem->bar, token)) {
         }
       }
-    } else {
-#pragma unroll
+    } else
+#endif
+    {
+NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollPacks; u++) {
         tmp[u] = inpPacks[u * WARP_SIZE];
       }
@@ -62,35 +70,41 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
       int dr = inPlace ? 1 : 0;
       int r = rank + dr;
       if (r == nRanks) r = 0;
-#pragma unroll 2
+NVCC_PRAGMA_UNROLL(2)
       for (int partial = 0; partial <= 1 && !skip; partial++) {
-#pragma unroll 1
+NVCC_PRAGMA_UNROLL_DISABLED
         for (int i = 0; partial ? i < 1 : (dr + UnrollPeers <= nRanks); partial ? i++ : (dr += UnrollPeers)) {
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
           for (int ur = 0; ur < UnrollPeers - partial; ur++) {
             if (partial && dr == nRanks) break;
+#if __CUDA_ARCH__ >= 1000
             if NCCL_IF_CONSTEXPR (EnableTma) {
               cp_async_bulk_shared_to_global(outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize);
-            } else {
-#pragma unroll UnrollPacks
+            } else
+#endif
+            {
+NVCC_PRAGMA_UNROLL(UnrollPacks)
               for (int u = 0; u < UnrollPacks; u++) {
                 outPacks.lsaPtr(r)[u * WARP_SIZE] = tmp[u];
               }
             }
             if (++r == nRanks) r = 0;
           }
+#if __CUDA_ARCH__ >= 1000
           if NCCL_IF_CONSTEXPR (EnableTma) {
             if (lane == 0) {
-              cp_async_bulk_commit_group();
-              cp_async_bulk_wait_all_read();
+              ptx::cp_async_bulk_commit_group();
+              ptx::cp_async_bulk_wait_group_read(ptx::n32_t<0>());
             }
           }
+#endif
         }
       }
       inpPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
       outPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
       nIters -= wn;
       if (nIters <= 0) break;
+#if __CUDA_ARCH__ >= 1000
       if NCCL_IF_CONSTEXPR (EnableTma) {
         if (lane == 0) {
           cp_async_bulk_global_to_shared(tmaSmem->buff[0], inpPacks, &tmaSmem->bar, tileSize);
@@ -98,8 +112,10 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
           while (!barrier_try_wait_token_relaxed(&tmaSmem->bar, token)) {
           }
         }
-      } else {
-#pragma unroll
+      } else
+#endif
+      {
+NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollPacks; u++) {
           tmp[u] = inpPacks[u * WARP_SIZE];
         }
@@ -115,22 +131,22 @@ static __device__ void bcastEnds(ncclSymkArgsHandler const& handler, int tn, int
   int const& nRanks = handler.comm.nRanks;
   BytePack<sizeof(T)>* inpPacks = (BytePack<sizeof(T)>*)input.localPtr();
   ncclSymPtr<BytePack<sizeof(T)>> outPacks = (ncclSymPtr<BytePack<sizeof(T)>>)output;
-#pragma unroll 1
+NVCC_PRAGMA_UNROLL_DISABLED
   for (size_t i = t; i < nPreElts + nSufElts; i += tn) {
     size_t elt = i < nPreElts ? i : nElts - nPreElts - nSufElts + i;
     BytePack<sizeof(T)> tmp = inpPacks[elt];
     int dr = inPlace ? 1 : 0;
     int r = rank + dr;
     if (r == nRanks) r = 0;
-#pragma unroll 1
+NVCC_PRAGMA_UNROLL_DISABLED
     for (; dr + UnrollPeers <= nRanks; dr += UnrollPeers) {
-#pragma unroll UnrollPeers
+NVCC_PRAGMA_UNROLL(UnrollPeers)
       for (int u = 0; u < UnrollPeers; u++) {
         outPacks.lsaPtr(r)[elt] = tmp;
         if (++r == nRanks) r = 0;
       }
     }
-#pragma unroll UnrollPeers
+NVCC_PRAGMA_UNROLL(UnrollPeers)
     for (int u = 0; u < UnrollPeers; u++) {
       if (dr + u == nRanks) break;
       outPacks.lsaPtr(r)[elt] = tmp;
@@ -149,6 +165,7 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
 
   uint32_t alignment = uint32_t(input.offset - output.offset);
   uint32_t nPreBytes = (EnableTma && alignment % 256 == 0) ? (256 - input.offset) % 256 : (16 - input.offset) % 16;
+
   nPreBytes = min((size_t)nPreBytes, nBytes);
   uintptr_t cursor = nPreBytes;
 
@@ -260,7 +277,7 @@ static __device__ void allgather_LL_body(ncclSymkArgsHandler& handler, ncclLLA2A
   int t = threadIdx.x;
   constexpr int tn = ncclSymkMaxThreads;
 
-#pragma unroll 1
+NVCC_PRAGMA_UNROLL_DISABLED
   while (0 < nElts) {
     int nIterPacks = min(nPacks, tn);
     if (t < nIterPacks) {
@@ -275,11 +292,11 @@ static __device__ void allgather_LL_body(ncclSymkArgsHandler& handler, ncclLLA2A
 #if 1
       // NOTE: Unrolling speedup on eos nranks=8 size=64K: 5.7us vs 6.7us
     constexpr int Unroll = 4;
-#pragma unroll 1
+NVCC_PRAGMA_UNROLL_DISABLED
     for (int i = t; i < (nRanks * nIterPacks & -(Unroll * tn)); i += Unroll * tn) {
       Pack got[Unroll];
       lla2a.template recvUnrolled<Unroll, Unroll>(i, Unroll, tn, /*&*/ got);
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < Unroll; u++) {
         storePack<Pack>(output + peer * nStrideElts, pack * EltPerPack, nElts, got[u]);
         peer += tn_div_nPacks;
@@ -297,7 +314,7 @@ static __device__ void allgather_LL_body(ncclSymkArgsHandler& handler, ncclLLA2A
     if (n != 0) {
       Pack got[Unroll];
       lla2a.template recvUnrolled<1, Unroll>(i, n, tn, /*&*/ got);
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < Unroll; u++) {
         if (u != 0 && u == n) break;
         storePack(output + peer * nStrideElts, pack * EltPerPack, nElts, got[u]);
@@ -311,7 +328,7 @@ static __device__ void allgather_LL_body(ncclSymkArgsHandler& handler, ncclLLA2A
     }
 #else
       // The non-unrolled but "obviously correct" implementation for reference.
-#pragma unroll 1
+NVCC_PRAGMA_UNROLL_DISABLED
     for (int i = t; i < nRanks * nIterPacks; i += tn) {
       Pack got = lla2a.template recv<Pack>(i);
       storePack(output + peer * nStrideElts, pack * EltPerPack, nElts, got);

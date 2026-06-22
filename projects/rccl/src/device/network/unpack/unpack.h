@@ -22,8 +22,7 @@ inline __device__ void load64gpu(const uint64_t* ptr, uint64_t& v) {
 #if __CUDA_ARCH__ >= 700
   asm volatile("ld.relaxed.gpu.u64 {%0}, [%1];" : "=l"(v) : "l"(ptr) : "memory");
 #else
-      // asm volatile("ld.volatile.global.u64 {%0}, [%1];"
-      // : "=l"(v) : "l"(ptr) : "memory");
+  // asm volatile("ld.volatile.global.u64 {%0}, [%1];" : "=l"(v) : "l"(ptr) : "memory");
 #endif
 }
 
@@ -67,13 +66,13 @@ inline __device__ void bulkLoad<1>(const int t, const uint32_t len, char* cpy_sr
 #ifdef ALIGNED_LOAD
     load128((uint64_t*)(cpy_src + data_s), reg.u64[0], reg.u64[1]);
 #else
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int i = 0; i < 16; i++) {
       reg[i] = ld_volatile_global<1>((uintptr_t)((uint8_t*)(cpy_src + data_s) + i));
     }
 #endif
 
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int i = 0; i < 16; i++) {
       st_global<1>((uintptr_t)((uint8_t*)(cpy_dst + data_s) + i), reg[i]);
     }
@@ -89,13 +88,13 @@ inline __device__ void bulkLoad<2>(const int t, const uint32_t len, char* cpy_sr
 #ifdef ALIGNED_LOAD
     load128((uint64_t*)(cpy_src + data_s), reg.u64[0], reg.u64[1]);
 #else
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int i = 0; i < 8; i++) {
       reg[i] = ld_volatile_global<2>((uintptr_t)((uint16_t*)(cpy_src + data_s) + i));
     }
 #endif
 
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int i = 0; i < 8; i++) {
       st_global<2>((uintptr_t)((uint16_t*)(cpy_dst + data_s) + i), reg[i]);
     }
@@ -111,13 +110,13 @@ inline __device__ void bulkLoad<4>(const int t, const uint32_t len, char* cpy_sr
 #ifdef ALIGNED_LOAD
     load128((uint64_t*)(cpy_src + data_s), reg.u64[0], reg.u64[1]);
 #else
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int i = 0; i < 4; i++) {
       reg[i] = ld_volatile_global<4>((uintptr_t)((uint32_t*)(cpy_src + data_s) + i));
     }
 #endif
 
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int i = 0; i < 4; i++) {
       st_global<4>((uintptr_t)((uint32_t*)(cpy_dst + data_s) + i), reg[i]);
     }
@@ -133,13 +132,13 @@ inline __device__ void bulkLoad<8>(const int t, const uint32_t len, char* cpy_sr
 #ifdef ALIGNED_LOAD
     load128((uint64_t*)(cpy_src + data_s), reg.u64[0], reg.u64[1]);
 #else
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int i = 0; i < 2; i++) {
       reg[i] = ld_volatile_global<8>((uintptr_t)((uint64_t*)(cpy_src + data_s) + i));
     }
 #endif
 
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int i = 0; i < 2; i++) {
       st_global<8>((uintptr_t)((uint64_t*)(cpy_dst + data_s) + i), reg[i]);
     }
@@ -235,8 +234,8 @@ inline __device__ void ncclNetDeviceUnpackInner(const int tid, const int tidInBl
   // Currently, even/odd groups perform send/recv separately. We don't really need space for send side.
   // Total size is N page per warp * 16 B per page * 20 WARPS max = 320 * N bytes, N == WARP_SHM_PAGE_CNT
   static_assert(ncclShmemScratchWarpSize() >= WARP_SHM_SIZE, "Each warp must have enough scratch space");
-  s_meta = (loadMeta*)ncclScratchForWarp(tidInBlock /
-                                         WARP_SIZE); // (loadMeta*) (ncclShmem.devicePlugin.unpack.meta + shm_off);
+  // (loadMeta*) (ncclShmem.devicePlugin.unpack.meta + shm_off);
+  s_meta = (loadMeta*)ncclScratchForWarp(tidInBlock / WARP_SIZE);
 
   load64gpu(g_meta_struct->cnt + head, meta_cnt);
 

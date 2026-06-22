@@ -13,7 +13,10 @@
 #include <cstdint>
 #include <dlfcn.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
+#include <dirent.h>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <arpa/inet.h>
@@ -29,6 +32,10 @@
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #include <atomic>
+#include <fcntl.h>
+#include <limits.h>
+#include <cstdio>
+#include <cctype>
 
 static thread_local char ncclDlErrorBuf[256] = {0};
 
@@ -98,6 +105,10 @@ void ncclOsAlignedFree(void* ptr) {
 
 void ncclOsSetEnv(const char* name, const char* value) {
   setenv(name, value, 0);
+}
+
+char* ncclOsStrSep(char** stringp, const char* delim) {
+  return strsep(stringp, delim);
 }
 
 char* ncclOsRealpath(const char* path, char* resolved_path) {
@@ -219,12 +230,14 @@ ncclResult_t ncclOsSocketSetFlags(struct ncclSocket* sock) {
   // setsockopt should not fail even if the sizes are too large, do not change the default if unset by the user (=-1)
   rcvBuf = ncclParamSocketMaxRecvBuff();
   sndBuf = ncclParamSocketMaxSendBuff();
-  if (sndBuf > 0)
+  if (sndBuf > 0) {
     SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_SNDBUF, (char*)&sndBuf, sizeof(int)),
                  "setsockopt SO_SNDBUF", ret, fail);
-  if (rcvBuf > 0)
+  }
+  if (rcvBuf > 0) {
     SYSCHECKGOTO(setsockopt(sock->socketDescriptor, SOL_SOCKET, SO_RCVBUF, (char*)&rcvBuf, sizeof(int)),
                  "setsockopt SO_RCVBUF", ret, fail);
+  }
 exit:
   return ret;
 fail:
@@ -232,13 +245,10 @@ fail:
 }
 
 void ncclOsSocketResetAccept(struct ncclSocket* sock) {
-  char line[SOCKET_NAME_MAXLEN + 1];
-  INFO(NCCL_NET | NCCL_INIT, "socketFinalizeAccept: didn't receive a valid magic from %s",
-       ncclSocketToString(&sock->addr, line));
-  // Ignore spurious connection and accept again
+  // Close the accepted peer and return to listening for another connection (see socketFinalizeAccept logging).
   (void)close(sock->socketDescriptor);
   sock->socketDescriptor = NCCL_INVALID_SOCKET;
-  sock->state = ncclSocketStateAccepting;
+  sock->state = ncclSocketStateBadHandshake;
   sock->finalizeCounter = 0;
 }
 
@@ -332,11 +342,13 @@ ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr,
   char line[SOCKET_NAME_MAXLEN + 1];
   if (sock->asyncFlag || sock->abortFlag) block = 0;
   do {
-    if (op == NCCL_SOCKET_RECV)
+    if (op == NCCL_SOCKET_RECV) {
       bytes = recv(sock->socketDescriptor, data + (*offset), size - (*offset), block ? 0 : MSG_DONTWAIT);
-    if (op == NCCL_SOCKET_SEND)
+    }
+    if (op == NCCL_SOCKET_SEND) {
       bytes = send(sock->socketDescriptor, data + (*offset), size - (*offset),
                    block ? MSG_NOSIGNAL : MSG_DONTWAIT | MSG_NOSIGNAL);
+    }
     if (op == NCCL_SOCKET_RECV && bytes == 0) {
       *closed = 1;
       return ncclSuccess;
@@ -454,7 +466,8 @@ static bool matchSubnet(struct ifaddrs local_if, union ncclSocketAddress* remote
     struct in6_addr& remote_in6 = remote_addr.sin6_addr;
     bool same = true;
     int len = 16;  // IPv6 address is 16 unsigned char
-    for (int c = 0; c < len; c++) {  // Network byte order is big-endian
+    for (int c = 0; c < len; c++) {
+      // Network byte order is big-endian
       char c1 = local_in6.s6_addr[c] & mask_in6.s6_addr[c];
       char c2 = remote_in6.s6_addr[c] & mask_in6.s6_addr[c];
       if (c1 ^ c2) {
@@ -607,6 +620,109 @@ ncclResult_t ncclOsNvmlOpen(ncclOsLibraryHandle* handle) {
   return ncclSuccess;
 }
 
+/* Topology/PCI detection functions */
+#define BUSID_SIZE (sizeof("0000:00:00.0"))
+#define BUSID_REDUCED_SIZE (sizeof("0000:00"))
+
+static void memcpylower(char* dst, const char* src, const size_t size) {
+  for (size_t i = 0; i < size; i++) dst[i] = tolower(src[i]);
+}
+
+ncclResult_t ncclOsGetPciPath(const char* busId, char** path) {
+  char busPath[] = "/sys/class/pci_bus/0000:00/../../0000:00:00.0";
+  memcpylower(busPath + sizeof("/sys/class/pci_bus/") - 1, busId, BUSID_REDUCED_SIZE - 1);
+  memcpylower(busPath + sizeof("/sys/class/pci_bus/0000:00/../../") - 1, busId, BUSID_SIZE - 1);
+  *path = realpath(busPath, NULL);
+  if (*path == NULL) {
+    WARN("Could not find real path of %s", busPath);
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen) {
+  char filePath[PATH_MAX];
+  snprintf(filePath, sizeof(filePath), "%s/%s", path, fileName);
+  int offset = 0;
+  FILE* file;
+  if ((file = fopen(filePath, "r")) != NULL) {
+    while (feof(file) == 0 && ferror(file) == 0 && offset < maxLen) {
+      int len = fread(strValue + offset, 1, maxLen - offset, file);
+      offset += len;
+    }
+    fclose(file);
+  }
+  if (offset == 0) {
+    strValue[0] = '\0';
+    INFO(NCCL_GRAPH, "Topology detection : could not read %s, ignoring", filePath);
+  } else {
+    strValue[offset - 1] = '\0';
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass, size_t maxLen) {
+  char* path = NULL;
+  NOWARN(ncclOsGetPciPath(busId, &path), NCCL_GRAPH);
+  if (path == NULL) {
+    deviceClass[0] = '\0';
+    return ncclSystemError;
+  }
+  ncclResult_t ret = ncclOsTopoGetStrFromSys(path, "class", deviceClass, maxLen);
+  free(path);
+  return ret;
+}
+
+ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
+  *nlinks = 0;
+  *peers = NULL;
+
+  // Path to Broadcom switch virtual links in sysfs
+  char dirPath[] = "/sys/kernel/pci_switch_link/virtual_switch_links/0000:00:00.0";
+  memcpylower(dirPath + sizeof("/sys/kernel/pci_switch_link/virtual_switch_links/") - 1, busId, BUSID_SIZE - 1);
+
+  DIR* dir = opendir(dirPath);
+  if (dir) {
+    struct dirent* file;
+    while ((file = readdir(dir)) != NULL) {
+      // Check if the entry is a valid PCI bus ID format
+      if (strlen(file->d_name) != BUSID_SIZE - 1) continue;
+
+      // Validate that this is a real PCI device
+      char* path;
+      if (ncclOsGetPciPath(file->d_name, &path) != ncclSuccess) continue;
+      free(path);
+
+      // Add to peers list
+      NCCLCHECK(ncclRealloc(peers, (*nlinks) * BUSID_SIZE, ((*nlinks) + 1) * BUSID_SIZE));
+      memcpy((*peers) + BUSID_SIZE * (*nlinks)++, file->d_name, BUSID_SIZE);
+    }
+    closedir(dir);
+  }
+
+  return ncclSuccess;
+}
+
+ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, size_t maxLen) {
+  char filePath[PATH_MAX];
+  snprintf(filePath, sizeof(filePath), "/sys/devices/system/node/node%u/cpumap", numaId);
+  int offset = 0;
+  FILE* file = fopen(filePath, "r");
+  if (file != NULL) {
+    while (feof(file) == 0 && ferror(file) == 0 && offset < (int)maxLen - 1) {
+      int len = fread(affinityStr + offset, 1, maxLen - 1 - offset, file);
+      offset += len;
+    }
+    fclose(file);
+  }
+  while (offset > 0 && (affinityStr[offset - 1] == '\n' || affinityStr[offset - 1] == '\r')) offset--;
+  affinityStr[offset] = '\0';
+  if (offset == 0) {
+    INFO(NCCL_GRAPH, "Topology detection: could not read %s, using empty affinity", filePath);
+  }
+  return ncclSuccess;
+}
+
 // Shared memory implementation for Linux
 #include "comm.h"
 #include <sys/stat.h>
@@ -628,6 +744,7 @@ void ncclOsShmHandleInit(ncclShmDescriptor shmDesc, char* shmPath, size_t shmSiz
     int slen = strlen(shmPath);
     handle->shmPath = (char*)malloc(slen + 1);
     memcpy(handle->shmPath, shmPath, slen + 1);
+    INFO_LOC(NCCL_ALLOC_HOST, "SHM path string Size %d pointer %p", slen + 1, handle->shmPath);
     if (hptr) memset(hptr, 0, shmSize);
   } else {
     handle->shmPath = NULL;
@@ -679,7 +796,7 @@ ncclResult_t ncclOsShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize, vo
       ret = ncclSystemError;
       goto fail;
     }
-    INFO(NCCL_ALLOC, "Allocated %ld bytes of shared memory in %s", realShmSize, shmPath);
+    INFO_LOC(NCCL_ALLOC_HOST, "Allocated %ld bytes of shared memory in %s", realShmSize, shmPath);
   } else {
     SYSCHECKGOTO(fd = open(shmPath, O_RDWR, S_IRUSR | S_IWUSR), "open", ret, fail);
   }

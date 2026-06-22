@@ -10,12 +10,12 @@
 
 NCCL_PARAM(IbResiliencyPortRecovery, "IB_RESILIENCY_PORT_RECOVERY", 0);
 NCCL_PARAM(IbResiliencyPortRecoveryStartDelay, "IB_RESILIENCY_PORT_RECOVERY_START_DELAY", 200); // In milliseconds
-NCCL_PARAM(IbResiliencyPortRecoveryAliveMsgBatchInterval, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_INTERVAL",
-           500); // In milliseconds
+// In milliseconds
+NCCL_PARAM(IbResiliencyPortRecoveryAliveMsgBatchInterval, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_INTERVAL", 500);
 NCCL_PARAM(IbResiliencyPortRecoveryAliveMsgBatchSize, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE", 5);
 NCCL_PARAM(IbResiliencyPortRecoveryAliveMsgSequenceSize, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_SEQUENCE_SIZE", 5);
-NCCL_PARAM(IbResiliencyPortRecoveryAliveMsgTimeout, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_TIMEOUT",
-           4000); // In milliseconds
+// In milliseconds
+NCCL_PARAM(IbResiliencyPortRecoveryAliveMsgTimeout, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_TIMEOUT", 4000);
 NCCL_PARAM(IbResiliencyPortRecoveryAckTimeout, "IB_RESILIENCY_PORT_RECOVERY_ACK_TIMEOUT", 5000); // In milliseconds
 NCCL_PARAM(IbResiliencyPortRecoveryAttemptsMax, "IB_RESILIENCY_PORT_RECOVERY_ATTEMPTS_MAX", 5);
 
@@ -40,7 +40,8 @@ std::thread ncclIbPortRecoveryAsyncThread;
 // Reference count of active resiliency contexts using port recovery
 static std::atomic<int> ncclIbPortRecoveryRefCount(0);
 
-// Flag indicating the recovery thread is active - cleared by ncclIbPortRecoveryThreadStop() to signal the async thread to exit
+// Flag indicating the recovery thread is active - cleared by ncclIbPortRecoveryThreadStop() to signal the async
+// thread to exit
 static std::atomic<bool> ncclIbPortRecoveryThreadActive(false);
 
 // Mutex protecting shared state between the async recovery thread and callers:
@@ -223,7 +224,7 @@ static inline ncclResult_t ncclIbPortRecoveryContextInit(struct ncclIbResiliency
   if (!outRecoveryCtx) return ncclInternalError;
   ncclIbPortRecoveryContext* recoveryCtx = (ncclIbPortRecoveryContext*)malloc(sizeof(ncclIbPortRecoveryContext));
   if (!recoveryCtx) {
-    WARN("NET/IB: %s: Failed to allocate failure queue node (comm=%p)", __func__, resCtx->baseComm);
+    WARN("NET/IB: Failed to allocate failure queue node (comm=%p)", resCtx->baseComm);
     *outRecoveryCtx = NULL;
     return ncclInternalError;
   }
@@ -368,7 +369,6 @@ ncclResult_t ncclIbPortRecoverySenderQpsToRts(struct ncclIbResiliency* resCtx, s
   ncclIbQpInfo* remQpInfo = NULL;
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
     int localDevIndex = localQpIndex % sendComm->base.vProps.ndevs;
-    ;
     ncclIbSendCommDev* sendCommDev = &sendComm->devs[localDevIndex];
     ncclIbDev* ibDev = &ncclIbDevs[sendCommDev->base.ibDevN];
     localQp = &resCtx->portRecoveryQps[localQpIndex];
@@ -388,6 +388,7 @@ ncclResult_t ncclIbPortRecoverySenderQpsToRts(struct ncclIbResiliency* resCtx, s
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
     rtrAttr->localIbPort = remDevInfo->ib_port;
+    rtrAttr->localPortFlags = ibDev->portAttr.flags;
     rtrAttr->localGid = sendCommDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = sendCommDev->base.gidInfo.localGidIndex;
     NCCLCHECK(ncclIbQpRtr(localQp));
@@ -445,6 +446,7 @@ ncclResult_t ncclIbPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
     rtrAttr->localIbPort = remDevInfo->ib_port;
+    rtrAttr->localPortFlags = ibDev->portAttr.flags;
     rtrAttr->localGid = recvCommDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = recvCommDev->base.gidInfo.localGidIndex;
     NCCLCHECK(ncclIbQpRtr(localQp));
@@ -763,7 +765,7 @@ static inline ncclResult_t ncclIbPortRecoveryPostAliveMessages(struct ncclIbPort
   struct ibv_send_wr wr[NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX];
   int nMsgsToPost = ncclParamIbResiliencyPortRecoveryAliveMsgSequenceSize();
   if (nMsgsToPost > NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX) {
-    WARN("NET/IB: %s: Requested alive message batch size %d exceeds maximum supported %d", __func__, nMsgsToPost,
+    WARN("NET/IB: Requested alive message batch size %d exceeds maximum supported %d", nMsgsToPost,
          NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX);
     return ncclInternalError;
   }
@@ -994,7 +996,7 @@ static inline ncclResult_t ncclIbPortRecoveryProgressAliveMessages(ncclIbPortRec
   }
   switch (progressResult) {
   case ncclIbPortRecoveryStateProgressResultGoToPrevState:
-    WARN("NET/IB: %s: Unexpected GoToPrevState result in AliveMessages state for device %d (%s comm=%p)", __func__,
+    WARN("NET/IB: Unexpected GoToPrevState result in AliveMessages state for device %d (%s comm=%p)",
          recoveryContext->devIndex, recoveryContext->resCtx->baseComm->isSend ? "send" : "recv",
          recoveryContext->resCtx->baseComm);
     return ncclInternalError;

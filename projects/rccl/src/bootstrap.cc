@@ -431,9 +431,9 @@ struct extInfo {
 #define BOOTSTRAP_HANDLE(h, i) ((struct ncclBootstrapHandle*)((char*)h + i * NCCL_UNIQUE_ID_BYTES))
 
 // Bootstrap-side accept wrapper. ncclSocketAccept's default behavior
-// (retryOnBadMagic=true) loops internally on bad-magic events, which can
+// (retry=true) loops internally on bad-handshake events, which can
 // monopolize CPU and starve legitimate peer connects when a non-NCCL TCP
-// peer hits the bootstrap listen socket. We pass retryOnBadMagic=false and
+// peer hits the bootstrap listen socket. We pass retry=false and
 // drive the retry from here: close the rejected socket, yield 1ms, retry.
 // abortFlag is honored between iterations.
 static ncclResult_t bootstrapAccept(struct ncclSocket* sock, struct ncclSocket* listenSock,
@@ -443,8 +443,8 @@ static ncclResult_t bootstrapAccept(struct ncclSocket* sock, struct ncclSocket* 
       return ncclInternalError;
     }
     NCCLCHECK(ncclSocketInit(sock));
-    NCCLCHECK(ncclSocketAccept(sock, listenSock, /*retryOnBadMagic=*/false));
-    if (sock->state != ncclSocketStateBadMagic) return ncclSuccess;
+    NCCLCHECK(ncclSocketAccept(sock, listenSock, /*retry=*/false));
+    if (sock->state != ncclSocketStateBadHandshake) return ncclSuccess;
     INFO(NCCL_INIT | NCCL_NET, "bootstrap: rejected bad-magic peer connection on listen sock, retrying accept");
     (void)ncclSocketClose(sock);
     usleep(1000);
@@ -580,7 +580,8 @@ static void* bootstrapRoot(void* rargs) {
   BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_ROOT_SEND]);
   // here we need to send info only to my own local process
   for (int r = 0; r < n2send; ++r) {
-    // use nrecv to periodize: if 1 root, we will send the first one to the last one, if >1 roots we will send the additional one we have received
+    // use nrecv to periodize: if 1 root, we will send the first one to the last one,
+    // if >1 roots we will send the additional one we have received
     int next = BOOTSTRAP_PID(r + 1, nrecv);
     if (memcmp(&zeroAddress, &rankAddressesRoot[r], sizeof(union ncclSocketAddress)) != 0 &&
         memcmp(&zeroInfo, &rankInfo[next], sizeof(struct ringConnectInfo)) != 0) {
@@ -793,11 +794,12 @@ static ncclResult_t netGetDevice(int rank, struct ncclComm* comm, int* dev) {
           devId++;
         }
         if (devOOB == -1) {
-          if (!searchNot)
+          if (!searchNot) {
             WARN("no device found matching %s%s, verify NCCL_OOB_NET_IFNAME", searchExact ? "exactly " : "", userIfEnv);
-          else
+          } else {
             WARN("no device found after excluding %s%s, verify NCCL_OOB_NET_IFNAME", searchExact ? "exactly " : "",
                  userIfEnv);
+          }
           return ncclInvalidArgument;
         }
       } else {
@@ -1113,7 +1115,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
   // Set magic: for grow existing ranks, receive from coordinator; otherwise use handle magic.
   // This is consistent with the magic created in ncclCommGetUniqueId.
   if (handles != NULL) {
-    comm->magic = state->magic = BOOTSTRAP_HANDLE(handles, 0)->magic; // state and comm magic set to the first magic ID
+    // state and comm magic set to the first magic ID
+    comm->magic = state->magic = BOOTSTRAP_HANDLE(handles, 0)->magic;
   } else if (parent != NULL) {
     comm->magic = state->magic = hashCombine(parent->magic, parent->childCount);
   } else {
@@ -1171,9 +1174,10 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
     }
   }
   int curr_root = rootIdFromRank(rank, nranks, nHandles, offset);
-  if (curr_root >= 0)
+  if (curr_root >= 0) {
     NCCLCHECK(createListenSocket(comm, BOOTSTRAP_HANDLE(handles, curr_root)->magic, &listenSockRoot,
                                  &info.listenRootAddress, ncclSocketTypeBootstrap));
+  }
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_CREATE]);
 
   // stagger connection times to avoid an overload of the root
@@ -1221,7 +1225,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
     NCCLCHECK(ncclSocketClose(&listenSockRoot));
   }
   if (parent && comm->isGrow && rank != parent->nRanks - 1) {
-    // Grow: Ranks 0 to N-2 use the parent bootstrap to recv connection information to the next rank. This is consistent with the bootstrapSend above.
+    // Grow: Ranks 0 to N-2 use the parent bootstrap to recv connection information to the next rank.
+    // This is consistent with the bootstrapSend above.
     NCCLCHECK(bootstrapRecv(parent->bootstrap, rank + 1, 0, &nextPeer, sizeof(nextPeer)));
   }
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_RECV]);
@@ -1274,8 +1279,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
 
   // Initialize RAS
   if (ncclParamRasEnable() == 1) {
-    // The RAS thread will take care of freeing the memory allocated below.
-    NCCLCHECK(ncclCalloc(&rasRanks, nranks));
+    // The RAS thread will take ownership after ncclRasAddRanks succeeds.
+    NCCLCHECKGOTO(ncclCalloc(&rasRanks, nranks), result, fail);
     memcpy(&rasRanks[rank].addr, &bootstrapNetIfAddr, sizeof(rasRanks[rank].addr));
     rasRanks[rank].pid = ncclOsGetPid();
     rasRanks[rank].cudaDev = comm->cudaDev;
@@ -1331,8 +1336,11 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
                 fail);
 
   if (ncclParamRasEnable() == 1 && performRasAddRanks) {
-    if (ncclRasAddRanks(rasRanks, nranks) != ncclSuccess)
+    if (ncclRasAddRanks(rasRanks, nranks) != ncclSuccess) {
       INFO(NCCL_INIT | NCCL_RAS, "Continuing in spite of a RAS initialization error");
+    } else {
+      rasRanks = nullptr;
+    }
   }
 
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_TOTAL]);
@@ -1342,6 +1350,7 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
        timers[BOOTSTRAP_INIT_TIME_SEND] / 1e9, timers[BOOTSTRAP_INIT_TIME_RECV] / 1e9,
        timers[BOOTSTRAP_INIT_TIME_RING] / 1e9, timers[BOOTSTRAP_INIT_TIME_DELAY] / 1e9);
 exit:
+  free(rasRanks);
   return result;
 fail:
   free(proxySocket);
@@ -1389,8 +1398,9 @@ ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclCo
                                ncclSocketTypeBootstrap));
 
   if (ncclParamRasEnable() == 1) {
-    if (ncclRasCommInit(comm, nullptr) != ncclSuccess)
+    if (ncclRasCommInit(comm, nullptr) != ncclSuccess) {
       INFO(NCCL_INIT | NCCL_RAS, "Continuing in spite of a RAS initialization error");
+    }
   }
 
   // Get addr from next rank using the parent's connections
@@ -1651,20 +1661,28 @@ static ncclResult_t socketRingAllGather(struct ncclSocket* nextSock, struct nccl
   int totalSteps = nranks / 2;
   BOOTSTRAP_PROF_OPEN(tFirst);
   for (int step = 0; step < totalSteps; step++) {
+    // N ranks requires (N-1)/2 steps for the double ring  algorithm.
+    // If N is even, the last step is requires a single send/recv
     bool isFinalUnidirectional = (step == totalSteps - 1) && (nranks % 2 == 0);
     int sendSliceRing0 = (rank - step + nranks) % nranks;
     int recvSliceRing0 = (rank - step - 1 + nranks) % nranks;
     int sendSliceRing1 = (rank + step) % nranks;
     int recvSliceRing1 = (rank + step + 1) % nranks;
     if (isFinalUnidirectional) {
+      // Final unidirectional step, only Ring0 is used
       NCCLCHECKGOTO(socketSendRecv(nextSock, data + sendSliceRing0 * size, size, prevSock, data + recvSliceRing0 * size,
                                    size),
                     res, exit);
     } else {
-      struct ncclSocketOp ops[4] = {{NCCL_SOCKET_SEND, nextSock, data + sendSliceRing0 * size, size, 0},
-                                    {NCCL_SOCKET_RECV, prevSock, data + recvSliceRing0 * size, size, 0},
-                                    {NCCL_SOCKET_SEND, prevSock, data + sendSliceRing1 * size, size, 0},
-                                    {NCCL_SOCKET_RECV, nextSock, data + recvSliceRing1 * size, size, 0}};
+      // Bidirectional step: Ring0 and Ring1 are used simultaneously
+      // clang-format off
+      struct ncclSocketOp ops[4] = {
+        {NCCL_SOCKET_SEND, nextSock, data + sendSliceRing0 * size, size, 0},  // Ring0: send to next
+        {NCCL_SOCKET_RECV, prevSock, data + recvSliceRing0 * size, size, 0},  // Ring0: recv from prev
+        {NCCL_SOCKET_SEND, prevSock, data + sendSliceRing1 * size, size, 0},  // Ring1: send to prev
+        {NCCL_SOCKET_RECV, nextSock, data + recvSliceRing1 * size, size, 0}   // Ring1: recv from next
+      };
+      // clang-format on
       NCCLCHECKGOTO(socketDoubleSendRecv(ops), res, exit);
     }
     if (step == 0) {
@@ -1881,8 +1899,9 @@ static ncclResult_t bootstrapP2PBroadcast(void* commState, int* ranks, int rank,
   if (nranks == 1) return ncclSuccess;
   if (rank == root) {
     for (int i = 0; i < nranks; i++) {
-      if (i != root)
+      if (i != root) {
         NCCLCHECK(bootstrapSend(commState, ranks ? ranks[i] : i, /*tag=*/ranks ? ranks[i] : i, bcastData, size));
+      }
     }
   } else {
     NCCLCHECK(bootstrapRecv(commState, ranks ? ranks[root] : root, /*tag=*/ranks ? ranks[rank] : rank, bcastData,

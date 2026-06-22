@@ -33,6 +33,7 @@ static const char* events = nullptr;
 static int sock = -1;
 
 static void printUsage(const char* argv0) {
+  // clang-format off
   fprintf(stderr,
           "Usage: %s [OPTION]...\n"
           "Query the state of a running NCCL job.\n"
@@ -45,29 +46,31 @@ static void printUsage(const char* argv0) {
           "                      combinations like lifecycle,trace (lifecycle by default)\n"
           "  -p, --port=PORT     TCP port of the RAS client socket of the NCCL job\n"
           "                      (" STR(NCCL_RAS_CLIENT_PORT) " by default)\n"
-                                  "  -t, --timeout=SECS  Maximum time for the local NCCL process to wait for\n"
-                                  "                      responses from other NCCL processes\n"
-                                  "                      (" STR(RAS_COLLECTIVE_LEG_TIMEOUT_SEC) " secs by default; 0 disables the timeout)\n"
-                                                                    "  -v, --verbose       Increase the verbosity "
-                                                                    "level of the RAS output\n"
-                                                                    "      --help          Print this help and exit\n"
-                                                                    "      --version       Print the version number "
-                                                                    "and exit\n",
-                                    argv0);
+          "  -t, --timeout=SECS  Maximum time for the local NCCL process to wait for\n"
+          "                      responses from other NCCL processes\n"
+          "                      (" STR(RAS_COLLECTIVE_LEG_TIMEOUT_SEC) " secs by default; 0 disables the timeout)\n"
+          "  -v, --verbose       Increase the verbosity level of the RAS output\n"
+          "      --help          Print this help and exit\n"
+          "      --version       Print the version number and exit\n", argv0);
+  // clang-format on
 }
 
 static void parseArgs(int argc, char** argv) {
   int c;
   int optIdx = 0;
-  struct option longOpts[] = {{"format", required_argument, NULL, 'f'},
-                              {"help", no_argument, NULL, 'e'},
-                              {"host", required_argument, NULL, 'h'},
-                              {"monitor", optional_argument, NULL, 'm'},
-                              {"port", required_argument, NULL, 'p'},
-                              {"timeout", required_argument, NULL, 't'},
-                              {"verbose", no_argument, NULL, 'v'},
-                              {"version", no_argument, NULL, 'r'},
-                              {0}};
+  // clang-format off
+  struct option longOpts[] = {
+    {"format",  required_argument, NULL, 'f'},
+    {"help",    no_argument,       NULL, 'e'},
+    {"host",    required_argument, NULL, 'h'},
+    {"monitor", optional_argument, NULL, 'm'},
+    {"port",    required_argument, NULL, 'p'},
+    {"timeout", required_argument, NULL, 't'},
+    {"verbose", no_argument,       NULL, 'v'},
+    {"version", no_argument,       NULL, 'r'},
+    {0}
+  };
+  // clang-format on
 
   while ((c = getopt_long(argc, argv, "f:h:m::p:t:v", longOpts, &optIdx)) != -1) {
     switch (c) {
@@ -348,8 +351,10 @@ static int getNCCLStatus() {
       else perror("read socket");
       return 1;
     }
-    if (bytes == 0) // EOF
+    if (bytes == 0) {
+      // EOF
       break;
+    }
     if (fwrite(msgBuf, 1, bytes, stdout) != bytes) {
       fprintf(stderr, "fwrite to stdout failed!\n");
       return 1;

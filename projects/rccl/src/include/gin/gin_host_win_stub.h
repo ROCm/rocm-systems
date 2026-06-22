@@ -17,6 +17,7 @@
 #include "nccl.h"
 #include "nccl_common.h"
 #include "plugin/nccl_net.h"
+#include "os.h"
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -25,18 +26,19 @@
 
 typedef void* ncclGinWindow_t;
 
-/* Config type (same layout as ncclGinConfig_v13_t in gin_v13.h) */
+/* Config type (same layout as ncclGinConfig_v14_t in gin_v14.h) */
 typedef struct {
   int nSignals;
   int nCounters;
   int nContexts;
   int queueDepth;
   int trafficClass;
+  int backendVersion;
 } ncclGinConfig_t;
 
-/* Plugin struct (same layout as ncclGin_v13_t) so gin->name, gin->regMrSym, etc. compile. Not used at runtime on Windows.
- * When __CUDACC__ is defined we are in a .cu file: use a different struct tag (ncclGinHostPlugin) so the name "ncclGin"
- * is left for the device stub's type alias (ncclGin_BackendMask<...>), avoiding redefinition. */
+/* Plugin struct (same layout as ncclGin_v14_t) so gin->name, gin->regMrSym, etc. compile. Not used at runtime on
+ * Windows. When __CUDACC__ is defined we are in a .cu file: use a different struct tag (ncclGinHostPlugin) so the
+ * name "ncclGin" is left for the device stub's type alias (ncclGin_BackendMask<...>), avoiding redefinition. */
 #if defined(__CUDACC__)
 struct ncclGinHostPlugin {
 #else
@@ -82,6 +84,7 @@ struct ncclGinStateDevComm {
 };
 
 struct ncclGinState {
+  ncclAffinity cpuAffinity;
   ncclGin_t* ncclGin;
   void* ginInstance;
   bool connected;
@@ -96,7 +99,8 @@ struct ncclGinState {
   std::condition_variable cond;
   ncclResult_t asyncResult;
   int ginVersion;
-
+  bool supportsStrongSignals;
+  bool supportsVASignals;
   struct ncclGinStateDevComm* devComms;
   ncclGinConnectionType_t ginConnectionType;
 };
@@ -108,6 +112,8 @@ struct ncclDevComm;
 ncclResult_t setLocalGinType(struct ncclComm* comm);
 ncclResult_t getGlobalGinType(struct ncclComm* comm, ncclGinType_t* ginType);
 ncclResult_t getGlobalRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType);
+ncclResult_t ncclGetGinType(struct ncclComm* comm, ncclGinType_t* ginType);
+ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType);
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm);
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm);
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,

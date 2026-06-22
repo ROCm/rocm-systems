@@ -29,7 +29,6 @@ ncclResult_t ncclTopoPrint(struct ncclTopoSystem* system);
 
 ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm* comm);
 ncclResult_t ncclTopoCheckCrossNicSupport(bool* supported);
-ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused);
 void ncclTopoFree(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm);
@@ -37,7 +36,6 @@ ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm);
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks);
 ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink);
 ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* allNvlinkConnected);
-ncclResult_t ncclCheckMultiRank(struct ncclComm* comm);
 ncclResult_t ncclTopoComputeCommCPU(struct ncclComm* comm);
 
 // Query topology
@@ -55,6 +53,7 @@ enum ncclTopoGdrMode {
 };
 ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* topo, int rank, int64_t netId, int read,
                               enum ncclTopoGdrMode* gdrMode);
+
 enum ncclTopoFlushType {
   ncclTopoFlushNone = 0,   // no flush needed
   ncclTopoFlushAlways = 1, // flush always needed
@@ -105,8 +104,9 @@ ncclResult_t ncclTopoGetNetCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetNvsCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev);
 ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm* comm, int* localGinDevs, int* localGinCount);
+ncclResult_t ncclTopoGetLocalRmaDevs(struct ncclComm* comm, int* localRmaDevs, int* localRmaCount);
 ncclResult_t ncclTopoGetLocalGpu(struct ncclTopoSystem* system, int64_t netId, int* gpuIndex);
-ncclResult_t getLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int* count, float* bw);
+ncclResult_t ncclTopoGetLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int* count, float* bw);
 
 enum netDevsPolicy {
   NETDEVS_POLICY_AUTO = 0x0,
@@ -116,10 +116,12 @@ enum netDevsPolicy {
 };
 ncclResult_t ncclTopoGetNetDevsPolicy(enum netDevsPolicy* policy, int* policyNum);
 
-// Allows for up to 32 NICs per node on GB200-NVL72
+// Allows for up to 32 NICs per node on GB200-NVL72 (AMD: up to 64 GPUs/node)
 #define NCCL_TOPO_MAX_NODES 64
 ncclResult_t ncclTopoGetLocal(struct ncclTopoSystem* system, int type, int index, int resultType,
                               int locals[NCCL_TOPO_MAX_NODES], int* localCount, int* pathType);
+ncclResult_t ncclTopoGetDevNodes(struct ncclTopoSystem* system, int64_t baseId, struct ncclTopoNode** nodes,
+                                 int* nNodes);
 
 // Local (myself)
 #define PATH_LOC 0
@@ -142,7 +144,8 @@ ncclResult_t ncclTopoGetLocal(struct ncclTopoSystem* system, int type, int index
 // Connection between a GPU and a NIC using the C2C connection to the CPU and the PCIe connection to the NIC
 #define PATH_P2C 6
 
-// Connection between a GPU and a NIC using an intermediate GPU. Used to enable rail-local, aggregated network send/recv operations.
+// Connection between a GPU and a NIC using an intermediate GPU. Used to enable rail-local, aggregated network
+// send/recv operations.
 #define PATH_PXN 7
 
 // Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
@@ -165,13 +168,15 @@ extern const char* topoPathTypeStr[];
 ncclResult_t ncclTopoSearchInit(struct ncclTopoSystem* system);
 
 #define NCCL_TOPO_PATTERN_BALANCED_TREE \
-  1 // Spread NIC traffic between two GPUs (Tree parent + one child on first GPU, second child on second GPU)
+  1   // Spread NIC traffic between two GPUs (Tree parent + one child on first
+                                            // GPU, second child on second GPU)
 #define NCCL_TOPO_PATTERN_SPLIT_TREE \
-  2 // Spread NIC traffic between two GPUs (Tree parent on first GPU, tree children on the second GPU)
-#define NCCL_TOPO_PATTERN_TREE 3 // All NIC traffic going to/from the same GPU
-#define NCCL_TOPO_PATTERN_RING 4 // Ring
-#define NCCL_TOPO_PATTERN_NVLS 5 // NVLS+SHARP and NVLS+Tree
-#define NCCL_TOPO_PATTERN_COLLNET_DIRECT 6 // Collnet Direct
+  2      // Spread NIC traffic between two GPUs (Tree parent on first GPU, tree
+                                            // children on the second GPU)
+#define NCCL_TOPO_PATTERN_TREE 3            // All NIC traffic going to/from the same GPU
+#define NCCL_TOPO_PATTERN_RING 4            // Ring
+#define NCCL_TOPO_PATTERN_NVLS 5            // NVLS+SHARP and NVLS+Tree
+#define NCCL_TOPO_PATTERN_COLLNET_DIRECT 6  // Collnet Direct
 struct ncclTopoGraph {
   // Input / output
   int id; // ring : 0, tree : 1, collnet : 2, nvls : 3, collnetDirect : 4

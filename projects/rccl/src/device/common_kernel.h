@@ -68,12 +68,12 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
   RedFn redFn(redArg);
   uintptr_t minSrcs[MinSrcs + !MinSrcs];
   uintptr_t minDsts[MinDsts + !MinDsts];
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
   for (int s = 0; s < MinSrcs; s++) {
     minSrcs[s] = cvta_to_global(srcPtrFn(s)) + threadBytesBehind;
   }
 
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
   for (int d = 0; d < MinDsts; d++) {
     // Yes, for some template arguments this code will be unreachable.  That's fine.
     // coverity[dead_error_line]
@@ -87,7 +87,7 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
 
     // minSrcs[0] cannot be nullptr so we always process it
     {
-#pragma unroll Unroll
+NVCC_PRAGMA_UNROLL(Unroll)
       for (int u = 0; u < Unroll; u++) {
         if (0 < MultimemSrcs) {
           // applyLoadMultimem uses relaxed semantics for same reason we use volatile below.
@@ -101,13 +101,13 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
       }
     }
 
-#pragma unroll Unroll
+NVCC_PRAGMA_UNROLL((MinSrcs - 1 + !(MinSrcs - 1)))
     for (int s = 1; s < MinSrcs; s++) {
       // Yes, for some template arguments this code will be unreachable.  That's fine.
       // coverity[dead_error_begin]
       BytePack<BytePerPack> tmp[Unroll];
       // coverity[dead_error_line]
-#pragma unroll Unroll
+NVCC_PRAGMA_UNROLL(Unroll)
       for (int u = 0; u < Unroll; u++) {
         if (s < MultimemSrcs) {
           // applyLoadMultimem uses relaxed semantics for same reason we use volatile below.
@@ -119,7 +119,7 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
         }
         minSrcs[s] += WARP_SIZE * BytePerPack;
       }
-#pragma unroll Unroll
+NVCC_PRAGMA_UNROLL(Unroll)
       for (int u = 0; u < Unroll; u++) {
         // coverity[dead_error_line]
         acc[u] = applyReduce(redFn, acc[u], tmp[u]);
@@ -131,13 +131,13 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
       BytePack<BytePerPack> tmp[Unroll];
       // Yes, for some template arguments this code will be unreachable.  That's fine.
       // coverity[dead_error_line]
-#pragma unroll Unroll
+NVCC_PRAGMA_UNROLL(Unroll)
       for (int u = 0; u < Unroll; u++) {
         // Use volatile loads in case credits are polled for with volatile (instead of acquire).
         tmp[u] = ld_volatile_global<BytePerPack>(src);
         src += WARP_SIZE * BytePerPack;
       }
-#pragma unroll Unroll
+NVCC_PRAGMA_UNROLL(Unroll)
       for (int u = 0; u < Unroll; u++) {
         // Yes, for some template arguments this code will be unreachable.  That's fine.
         // coverity[dead_error_line]
@@ -146,13 +146,13 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
     }
 
     if (postOp) {
-#pragma unroll Unroll
+NVCC_PRAGMA_UNROLL(Unroll)
       for (int u = 0; u < Unroll; u++) acc[u] = applyPostOp(redFn, acc[u]);
     }
 
-#pragma unroll Unroll
+NVCC_PRAGMA_UNROLL((MinDsts + !MinDsts))
     for (int d = 0; d < MinDsts; d++) {
-#pragma unroll Unroll
+NVCC_PRAGMA_UNROLL(Unroll)
       // Yes, for some template arguments this code will be unreachable.  That's fine.
       // coverity[dead_error_begin]
       for (int u = 0; u < Unroll; u++) {
@@ -168,7 +168,7 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
     for (int d = MinDsts; (MinDsts < MaxDsts) && (d < MaxDsts) && (d < nDsts); d++) {
       uintptr_t dstPtr = cvta_to_global(dstPtrFn(d));
       uintptr_t dst = dstPtr + threadBytesBehind;
-#pragma unroll Unroll
+NVCC_PRAGMA_UNROLL(Unroll)
       for (int u = 0; u < Unroll; u++) {
         st_global<BytePerPack>(dst, acc[u]);
         dst += WARP_SIZE * BytePerPack;
@@ -176,11 +176,11 @@ __device__ __forceinline__ static void reduceCopyPacks(int nThreads, int& thread
     }
 
     nWarps = nThreads / WARP_SIZE;
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     for (int s = 0; s < MinSrcs; s++) {
       minSrcs[s] += (nWarps - 1) * BytePerHunk;
     }
-#pragma unroll
+NVCC_PRAGMA_UNROLL_AUTO
     // Yes, for some template arguments this code will be unreachable.  That's fine.
     // coverity[dead_error_line]
     for (int d = 0; d < MinDsts; d++) {

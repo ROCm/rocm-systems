@@ -26,6 +26,7 @@ static int rcclProtoGrainSize(int proto, ncclComm* comm) {
   }
 }
 
+
 ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan,
                                           struct ncclKernelPlanBudget* budget) {
   struct ncclKernelPlanner* planner = &comm->planner;
