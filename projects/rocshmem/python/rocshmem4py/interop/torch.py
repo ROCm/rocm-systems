@@ -230,16 +230,32 @@ def barrier_all(stream=None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Heap-base helper for device kernels
+# Direct peer pointer helper for device kernels
 # ---------------------------------------------------------------------------
 
-def get_heap_bases(tensor: 'torch.Tensor') -> 'torch.Tensor':
-    """Return an int64 CUDA tensor of per-PE base addresses for a symmetric tensor.
+
+def get_peer_ptr_table(tensor: 'torch.Tensor') -> 'torch.Tensor':
+    """Return an int64 CUDA tensor of direct peer pointers for ``tensor``.
 
     The returned tensor has shape ``(n_pes,)``, dtype ``torch.int64``, on
-    the current CUDA device.  Device kernels can use this array to translate
-    a local symmetric pointer to a peer's pointer via
-    ``heap_bases[peer] + (local_ptr - heap_bases[my_pe])``.
+    the current CUDA device.  Entry ``i`` is ``rocshmem_ptr(tensor.data_ptr(),
+    i)``: the current-PE-visible address of the same symmetric tensor on PE
+    ``i``.
+
+    Device kernels can translate a local symmetric-heap pointer relative to
+    ``tensor.data_ptr()`` with:
+
+    ``peer_ptr_table[peer] + (local_ptr - tensor.data_ptr())``
+
+    This requires ``local_ptr`` and ``tensor.data_ptr()`` to be live pointers
+    in the same symmetric heap. 
+
+    For the common case where ``local_ptr`` is already expressed as
+    ``tensor.data_ptr() + element_offsets``, it is sufficient to use:
+
+    ``peer_ptr_table[peer] + element_offsets``
+
+    The old name, ``get_heap_bases``, is retained as a compatibility alias.
 
     Entries are 0 for PEs whose memory is not directly accessible from
     the local PE (e.g. on the RO backend).  Device kernels using this
@@ -264,8 +280,18 @@ def get_heap_bases(tensor: 'torch.Tensor') -> 'torch.Tensor':
             "attribute). Use create_tensor() to allocate it."
         )
 
-    bases = rocshmem4py.rocshmem_get_heap_bases(tensor.data_ptr())
-    return torch.tensor(bases, dtype=torch.int64, device="cuda")
+    peer_ptr_table = rocshmem4py.rocshmem_get_peer_ptr_table(tensor.data_ptr())
+    return torch.tensor(peer_ptr_table, dtype=torch.int64, device="cuda")
+
+
+def get_heap_bases(tensor: 'torch.Tensor') -> 'torch.Tensor':
+    """Deprecated alias for :func:`get_peer_ptr_table`.
+
+    The returned tensor contains ``rocshmem_ptr(tensor.data_ptr(), pe)``
+    entries, not true heap base addresses. Use :func:`get_peer_ptr_table`
+    in new code.
+    """
+    return get_peer_ptr_table(tensor)
 
 
 # ---------------------------------------------------------------------------

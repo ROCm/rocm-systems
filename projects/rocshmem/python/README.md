@@ -11,7 +11,7 @@
 - **Teams**: Team split/destroy/translate with tracked lifecycle and WORLD/INVALID sentinels
 - **Team-scoped collectives**: Stream-ordered all-to-all and broadcast
 - **Framework-agnostic allocation**: `rocshmem_create_buffer` / `rocshmem_get_peer_buffer` work without any ML framework
-- **Heap-base introspection**: `rocshmem_get_heap_bases` for device-side pointer translation
+- **Direct peer pointer tables**: `rocshmem_get_peer_ptr_table` for Triton-style device-side pointer translation
 - **`__cuda_array_interface__`**: Zero-copy interop between `SymmetricBuffer` and PyTorch tensors
 - **PyTorch interop submodule**: `rocshmem4py.interop.torch` for tensor allocation, RMA, and collectives
 - **PyTorch coordination**: `init_with_torch()` / `finalize_with_torch()` for torch.distributed-based init
@@ -171,7 +171,8 @@ calling `rocshmem_finalize()`.
 | `SymmetricBuffer(size)` | RAII wrapper; exposes `__cuda_array_interface__` for zero-copy torch interop |
 | `rocshmem_create_buffer(nbytes)` | Collective allocation returning a `SymmetricBuffer` |
 | `rocshmem_get_peer_buffer(buf, peer)` | Non-owning `SymmetricBuffer` view of a peer's buffer (IPC only) |
-| `rocshmem_get_heap_bases(ptr)` | Per-PE base addresses for a symmetric allocation (for device-side pointer translation) |
+| `rocshmem_get_peer_ptr_table(ptr)` | Per-PE direct pointer table for the same symmetric object as `ptr` |
+| `rocshmem_get_heap_bases(ptr)` | Deprecated alias for `rocshmem_get_peer_ptr_table(ptr)` |
 
 #### PyTorch interop (`rocshmem4py.interop.torch`)
 
@@ -183,9 +184,20 @@ calling `rocshmem_finalize()`.
 | `put(dst, src, peer, stream=None)` | Stream-ordered put (all backends) |
 | `get(dst, src, peer, stream=None)` | Stream-ordered get (all backends) |
 | `barrier_all(stream=None)` | Stream-ordered collective barrier |
-| `get_heap_bases(tensor)` | `(n_pes,)` int64 GPU tensor of per-PE heap bases for a symmetric tensor |
+| `get_peer_ptr_table(tensor)` | `(n_pes,)` int64 GPU tensor of direct peer pointers for a symmetric tensor |
+| `get_heap_bases(tensor)` | Deprecated alias for `get_peer_ptr_table(tensor)` |
 | `alltoall(team, dst, src, stream=None)` | Stream-ordered all-to-all over a team |
 | `broadcast(team, dst, src, pe_root, stream=None)` | Stream-ordered broadcast over a team |
+
+`get_peer_ptr_table(reference_ptr)` returns `rocshmem_ptr(reference_ptr, pe)`
+for every PE. It does not expose the runtime's internal raw heap-base table. A
+device kernel can translate another local symmetric-heap pointer with
+`peer_ptr_table[pe] + (local_ptr - reference_ptr)`. If
+`reference_ptr = H[me] + R` and `local_ptr = H[me] + L`, then
+`peer_ptr_table[pe] = H[pe] + R`, so the reference pointer cancels and the
+result is `H[pe] + L`. This requires `reference_ptr` and `local_ptr` to be
+live pointers in the same symmetric heap coordinate system; they do not need to
+be inside the same individual allocation.
 
 ### Collectives
 

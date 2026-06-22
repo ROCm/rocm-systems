@@ -372,23 +372,42 @@ def rocshmem_create_buffer(nbytes: int) -> SymmetricBuffer:
 
 
 # ---------------------------------------------------------------------------
-# Heap-base introspection helpers for device-side pointer translation
+# Direct peer pointer helpers for device-side pointer translation
 # ---------------------------------------------------------------------------
 
-def rocshmem_get_heap_bases(ptr: int) -> list:
-    """Return the per-PE base pointer for a symmetric allocation.
 
-    For PE ``i``, returns ``rocshmem_ptr(ptr, i)`` — the address of the
-    same allocation in PE ``i``'s symmetric heap as visible from the
-    local PE.  Entries are 0 when ``rocshmem_ptr`` returns NULL (e.g. on
-    the RO backend, where direct remote dereference is unavailable).
+def rocshmem_get_peer_ptr_table(ptr: int) -> list:
+    """Return the per-PE direct pointer table for symmetric object ``ptr``.
 
-    This helper constructs the ``heap_bases`` array used by device kernels
-    that translate a local symmetric pointer to a peer's pointer via
-    ``heap_bases[peer] + (local_ptr - heap_bases[my_pe])``.
+    For PE ``i``, this returns ``rocshmem_ptr(ptr, i)``: the address of
+    the same symmetric object in PE ``i``'s heap as visible from the
+    current PE.  Entries are 0 when ``rocshmem_ptr`` returns NULL, for
+    example on non-direct RO paths where a GPU load/store cannot
+    dereference the remote object.
+
+    This exposes object peer pointers, not the rocSHMEM runtime's internal
+    heap-base table.  If ``ptr == H_me + R`` and ``local_ptr == H_me + L`` are
+    live pointers in the same symmetric heap, then:
+
+    ``peer_ptr_table[peer] = H_peer + R``
+
+    and a device kernel can translate ``local_ptr`` as:
+
+    ``peer_ptr_table[peer] + (local_ptr - ptr) = H_peer + L``.
     """
     n = rocshmem_n_pes()
     return [rocshmem_ptr(ptr, pe) for pe in range(n)]
+
+
+def rocshmem_get_heap_bases(ptr: int) -> list:
+    """Deprecated alias for :func:`rocshmem_get_peer_ptr_table`.
+
+    Historically this helper was named ``get_heap_bases``, but it has
+    always returned ``rocshmem_ptr(ptr, pe)`` for each PE. Those entries
+    are object-specific peer pointers, not true symmetric heap base
+    addresses.  Use :func:`rocshmem_get_peer_ptr_table` in new code.
+    """
+    return rocshmem_get_peer_ptr_table(ptr)
 
 
 def rocshmem_get_peer_buffer(buf: SymmetricBuffer, peer: int) -> SymmetricBuffer:
