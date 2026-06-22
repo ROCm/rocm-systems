@@ -78,7 +78,8 @@ unblocking_gotcha::shutdown()
 }
 
 template <size_t Idx, typename Ret, typename... Args>
-std::enable_if_t<(Idx < unblocking_gotcha::indexes::kill_idx), Ret>
+    requires(Idx < unblocking_gotcha::indexes::kill_idx)
+Ret
 unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                               Args... _args) const noexcept
 {

@@ -131,6 +131,19 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
           result, ignore1);
       ignore1:;
       }
+#ifdef GENERATE_SYM_KERNELS
+      if (sym == 1) {
+        // Symmetric kernels get max dynamic LDS, recorded in ncclSymkKernelMaxDynamicSmem[]
+        // so device (args->maxDynamicSmem) and launch (plan->kernelDynSmem) agree; matches upstream.
+        int dynSmem = maxSharedMem - attr.sharedSizeBytes;
+        if (dynSmem < 0) dynSmem = 0;
+        CUDACHECKGOTO(cudaFuncSetAttribute(fn,
+          cudaFuncAttributeMaxDynamicSharedMemorySize, dynSmem),
+          result, next_kernel);
+        ncclSymkKernelMaxDynamicSmem[k] = dynSmem;
+        continue; // sym kernels skip the non-symmetric ncclMaxSharedMem path
+      }
+#endif
       if (ncclMaxSharedMem != 0) {
         int sharedMemSize = ncclMaxSharedMem;
         if (sharedMemSize > (maxSharedMem-attr.sharedSizeBytes)) {
@@ -163,17 +176,12 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   }
 }
 
-RCCL_PARAM_DECLARE(EnableProxyTrace);
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 /*****************************************************************************/
 /*       Launch system : synchronization and CUDA kernel launch              */
 /*****************************************************************************/
 static ncclResult_t addProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op) {
   bool needed = true;
-  if (rcclParamEnableProxyTrace()) {
-    op->traceKey.commHash = comm->commHash;
-    op->traceKey.opCount = comm->opCount;
-  }
   NCCLCHECK(ncclProxySaveOp(comm, op, &needed));
   if (needed) {
     struct ncclProxyOp* q = ncclMemoryPoolAlloc<struct ncclProxyOp>(&comm->memPool_ncclProxyOp, &comm->memPermanent);
@@ -1304,7 +1312,7 @@ static ncclResult_t addP2pToPlan(
     op->rank = comm->rank;
     op->eActivationMask = p2pTasks[dir] ? p2pTasks[dir]->eActivationMask : 0;
     op->connIndex = connIndex[dir];
-    if (rcclParamEnableProxyTrace()) {
+    if (ncclProfilerProxyDiagEnabled()) {
       op->coll =  dir ? ncclFuncSend : ncclFuncRecv;
     }
     // The following are modified per channel part in addWorkToChannels():
@@ -1338,7 +1346,7 @@ static ncclResult_t addP2pToPlan(
       int nParts = dir ? work->nSendChannels : work->nRecvChannels;
       void* addr = dir ? work->sendAddr : work->recvAddr;
       size_t bytes = dir ? work->sendBytes : work->recvBytes;
-      if (rcclParamEnableProxyTrace()) {
+      if (ncclProfilerProxyDiagEnabled()) {
         proxyOps[dir].totalBytes = bytes;
       }
       proxyOps[dir].recvbuff = nullptr;
