@@ -181,6 +181,7 @@ def resolve_tier_tags(test_name, tier_patterns):
 #   #define SomeName "SomeName", "[tag1][tag2]"
 # Groups: (1) prefix up to and including the opening quote for the tags string,
 #         (2) macro/test name, (3) existing_tag_string, (4) closing quote, (5) trailing text
+_DEFINE_RE = re.compile(r'^(#define\s+(\S+)\s+"[^"]*",\s*")([^"]*)(")(.*)$')
 
 
 def patch_header(header_path, tier_patterns, gpu_exclusion_tags):

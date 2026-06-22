@@ -8,20 +8,12 @@ test_categories:
       - "Unit_[^_]+_Positive_Basic.*"
       - "Unit_[^_]+_Positive_Default.*"
 
-    exclude:
-    labels:
-      - "quick"
-
   standard:
     description: "Core functionality - Run on every PR (target: < 30 min)"
     # TODO: refine once timing data is available.
     # Current placeholder: all Unit_ tests (excludes ABM / perf / stress).
     test_patterns:
       - "Unit_.*"
-
-    exclude:
-    labels:
-      - "standard"
 
   comprehensive:
     description: "Extended testing - Run nightly (target: < 2 hours)"
@@ -30,10 +22,6 @@ test_categories:
     test_patterns:
       - "Unit_.*"
       - "ABM_.*"
-
-    exclude:
-    labels:
-      - "comprehensive"
 
   full:
     description: "Full testing - Run weekly (target: < 4 hours)"
@@ -49,17 +37,14 @@ test_categories:
       - "Performance_.*"
       - "Stress_.*"
 
-    exclude:
-    labels:
-      - "full"
-
 exclude_arch:
   exclude_gpu_gfx110X_windows:
     # Windows-only: all gfx110X variants (gfx1100, gfx1101, gfx1102, ...)
     # this block is ignored entirely when configuring on Linux.
+    # Names are base HIP_TEST_CASE names: the injector keys labels off the
+    # macro name and excludes all template instantiations of each case.
     test_patterns:
-      - "Unit_hipStreamValue_Wait_Blocking - uint64_t"
-      - "Unit_hipStreamValue_Wait_Blocking - uint32_t"
+      - "Unit_hipStreamValue_Wait_Blocking"
 
     labels:
       - "gfx110X_windows_exclude"
@@ -76,30 +61,24 @@ exclude_arch:
 
   exclude_gpu_gfx950_linux:
     # Linux-only
+    # Names are base HIP_TEST_CASE names: the injector keys labels off the
+    # macro name and excludes all template instantiations of each case.
     test_patterns:
       - "Unit_hipHostRegister_AsyncApis"
-      - "Unit_hipMemsetDSync - uint32_t"
-      - "Unit_hipMemsetDASyncMulti - int8_t"
-      - "Unit_hipStreamValue_Wait_Blocking - uint32_t"
+      - "Unit_hipMemsetDSync"
+      - "Unit_hipMemsetDASyncMulti"
+      - "Unit_hipStreamValue_Wait_Blocking"
       - "Unit_atomicExch_Positive_Same_Address_Compile_Time"
-      - "Unit_hipHostRegister_ReferenceFromKernelandhipMemset - int"
+      - "Unit_hipHostRegister_ReferenceFromKernelandhipMemset"
       - "Unit_hipHostRegister_Graphs"
       - "Unit_hipManagedKeyword_SingleGpu"
       - "Unit_hipMemsetSync"
       - "Unit_hipMemset2DSync"
-      - "Unit_hipMemsetDASyncMulti - int16_t"
-      - "Unit_hipStreamValue_Wait_Blocking - uint64_t"
-      - "Unit_hipHostRegister_ReferenceFromKernelandhipMemset - float"
-      - "Unit_hipMemsetDSync - int8_t"
       - "Unit_hipMemset3DSync"
-      - "Unit_hipMemsetDASyncMulti - uint32_t"
-      - "Unit_hipStreamValue_Write - TestParams<uint64_t, PtrType::DevicePtrToHost>"
-      - "Unit_hipHostRegister_ReferenceFromKernelandhipMemset - double"
+      - "Unit_hipStreamValue_Write"
       - "Unit_hipGetProcAddress_MemoryApisRegisterUnReg"
-      - "Unit_hipMemsetDSync - int16_t"
       - "Unit_hipMemsetASyncMulti"
       - "Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory"
-      - "Unit_hipStreamValue_Write - TestParams<uint32_t, PtrType::DevicePtrToHost>"
       # TODO(#4244): Flaky with compiler submodule update — subprocess aborted.
       - "Unit_NonHost_Printf_loop"
       - "Unit_NonHost_Printf_multiple_Threads"
