@@ -65,7 +65,6 @@ struct trace_range
     rocprofiler_kernel_id_t kernel_id            = 0;
     uint64_t                offset_begin         = 0;
     uint64_t                offset_end           = 0;
-    uint64_t                last_dispatch_offset = 0;
     uint64_t                remaining_dispatches = 0;
     uint8_t                 me_id                = 0;
     uint8_t                 pipe_id              = 0;
@@ -131,8 +130,7 @@ handle_dispatch(scan_context& context, const rocprofiler_thread_trace_decoder_di
     {
         LOG_TRACE << "Unknown dispatch found.";
     }
-    else if((context.kernel_target_filter == nullptr || context.kernel_target_filter(*kernel_id)) &&
-            !context.trace.complete)
+    else if((context.kernel_target_filter == nullptr || context.kernel_target_filter(*kernel_id)))
     {
         auto& trace = context.trace;
         if(!trace.active)
@@ -140,20 +138,21 @@ handle_dispatch(scan_context& context, const rocprofiler_thread_trace_decoder_di
             trace              = trace_range{};
             trace.active       = true;
             trace.offset_begin = dispatch.byte_offset;
+
+            LOG_INFO << "Dispatch cut at : " << *kernel_id << " byte " << dispatch.byte_offset;
         }
-        LOG_INFO << "Dispatch cut at : " << *kernel_id << " byte " << dispatch.byte_offset;
 
         trace.kernel_id = *kernel_id;
         trace.remaining_dispatches = std::max<uint64_t>(state.consecutive_kernels, 1);
         trace.flush_count = 0;
+        trace.complete = false;
     }
 
     auto& trace = context.trace;
     if(trace.active && !trace.complete && trace.remaining_dispatches > 0)
     {
-        trace.last_dispatch_offset = dispatch.byte_offset;
-        trace.me_id                = dispatch.me_id;
-        trace.pipe_id              = dispatch.pipe_id;
+        trace.me_id   = dispatch.me_id;
+        trace.pipe_id = dispatch.pipe_id;
         --trace.remaining_dispatches;
     }
 }
@@ -169,8 +168,7 @@ handle_event(scan_context& context, const rocprofiler_thread_trace_decoder_event
     if(!trace.active) return;
 
     if(trace.complete || trace.remaining_dispatches > 0 ||
-       event.byte_offset <= trace.last_dispatch_offset || event.me_id != trace.me_id ||
-       event.pipe_id != trace.pipe_id)
+       event.me_id != trace.me_id || event.pipe_id != trace.pipe_id)
     {
         return;
     }
@@ -180,7 +178,7 @@ handle_event(scan_context& context, const rocprofiler_thread_trace_decoder_event
 
     if(!is_dispatch_end && !is_flush && trace.flush_count == 0) return;
 
-    if (is_flush || trace.flush_count > 0) trace.flush_count++;
+    if(is_flush || trace.flush_count > 0) trace.flush_count++;
 
     if(trace.flush_count == 2)
     {
