@@ -1,6 +1,6 @@
 .. meta::
    :description: Install hipFile
-   :keywords: hipFile, install, ROCm, build, CMake, GPU IO, AMD, direct storage
+   :keywords: hipFile, install, ROCm, build, CMake, GPU I/O, AMD, direct storage
 
 .. _hipfile-installation:
 

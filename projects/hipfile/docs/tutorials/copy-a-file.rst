@@ -49,7 +49,7 @@ Run the resulting binary the same way as the Linux ``cp`` command:
 
 .. code:: shell
 
-   ./aiscp /path/to/source_file /path/to/dest_file
+   ./aiscp SOURCE DEST
 
 Both paths should sit on a file system that supports ``O_DIRECT``. If the source is empty, the program exits successfully without entering the read loop.
 
