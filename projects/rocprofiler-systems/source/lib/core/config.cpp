@@ -5,6 +5,7 @@
 #include "amd_smi.hpp"
 #include "common/defines.h"
 #include "common/env_vars.hpp"
+#include "common/environment.hpp"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
 #include "gpu.hpp"
@@ -1154,6 +1155,16 @@ configure_settings(bool _init)
     {
         kill_delay_config->set(0);
     }
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::GPU_PERF_COUNTERS,
+        "GPU hardware counters to collect via device counting service (PMC polled "
+        "sampling). Comma-separated list of counter names (e.g. "
+        "SQ_WAVES,SQ_BUSY_CYCLES). "
+        "Independent from ROCPROFSYS_ROCM_EVENTS which controls kernel dispatch "
+        "counters. "
+        "If empty, no PMC sampling is performed.",
+        "", "rocm", "hardware_counters", "pmc", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::RANK_FILTER_ID,
@@ -2714,6 +2725,13 @@ get_sampling_gpus()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
+std::string
+get_gpu_perf_counters()
+{
+    static auto _v = get_config()->find(std::string{ env_vars::GPU_PERF_COUNTERS });
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
 bool
 get_trace_thread_locks()
 {
@@ -2936,7 +2954,54 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 std::string
 get_ump_absolute_path()
 {
-    if(!settings_are_configured()) return settings::output_path();
+    auto ensure_dir = [](std::string path) {
+        if(!path.empty() && !tim::filepath::direxists(path))
+        {
+            tim::filepath::makedir(path);
+        }
+        return path;
+    };
+
+    auto current_working_directory = [] {
+        const auto* pwd = getenv("PWD");
+        if(pwd != nullptr && pwd[0] != '\0') return std::string{ pwd };
+
+        char* current_dir = getcwd(nullptr, 0);
+        if(current_dir == nullptr) return std::string{ "." };
+
+        auto result = std::string{ current_dir };
+        free(current_dir);
+        return result;
+    };
+
+    auto make_absolute = [&](std::string path) {
+        if(path.empty()) return path;
+
+        if(path.at(0) != '/')
+        {
+            path = fmt::format("{}/{}", current_working_directory(), path);
+        }
+
+        return (settings_are_configured())
+                   ? settings::format(std::move(path), get_config()->get_tag())
+                   : path;
+    };
+
+    if(settings_are_configured())
+    {
+        auto explicit_path = get_setting_value<std::string>(
+            std::string{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH });
+        if(explicit_path && !explicit_path->empty())
+            return ensure_dir(make_absolute(*explicit_path));
+    }
+
+    if(!settings_are_configured())
+    {
+        auto env_path =
+            rocprofsys::get_env<std::string>(env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "");
+        if(!env_path.empty()) return ensure_dir(make_absolute(env_path));
+        return settings::output_path();
+    }
 
     // Co-locate UMP output with the active backend: rocpd's .db dir when
     // rocpd is on and trace-cache Perfetto is not; otherwise the Perfetto
