@@ -213,3 +213,18 @@ contract:
   Contract_GraphEvent_RecordThenWait_OrdersMemcpy:
     <<: *level_0
     tags: [graph_event]
+  Contract_GraphTopology_GetNodes_ReturnsAddedNodes:
+    <<: *level_0
+    tags: [graph_topology]
+  Contract_GraphTopology_GetRootNodes_ReturnsDependencyFreeNode:
+    <<: *level_0
+    tags: [graph_topology]
+  Contract_GraphTopology_GetEdges_ReturnsDependencyEdge:
+    <<: *level_0
+    tags: [graph_topology]
+  Contract_GraphTopology_NodeDependencies_ReturnsConfiguredDependency:
+    <<: *level_0
+    tags: [graph_topology]
+  Contract_GraphTopology_NodeDependents_ReturnsConfiguredDependent:
+    <<: *level_0
+    tags: [graph_topology]
