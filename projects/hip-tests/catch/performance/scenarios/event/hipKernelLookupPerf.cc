@@ -113,8 +113,8 @@ HIP_TEST_CASE(Performance_hipKernelLookup) {
       HIP_CHECK_PERF(hipDeviceSynchronize());
     }
   }
+  HIP_CHECK_PERF(hipSetDevice(0));
   for (int i = 0; i < mgpu; i++) {
-    HIP_CHECK_PERF(hipSetDevice(i));
     for (auto s : stream_pools[i]) HIP_CHECK_PERF(hipStreamDestroy(s));
   }
 }

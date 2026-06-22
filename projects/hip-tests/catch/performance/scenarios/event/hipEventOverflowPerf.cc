@@ -144,8 +144,8 @@ HIP_TEST_CASE(Performance_hipEventOverflow) {
       HIP_CHECK_PERF(hipDeviceSynchronize());
     }
   }
+  HIP_CHECK_PERF(hipSetDevice(0));
   for (int i = 0; i < mgpu; i++) {
-    HIP_CHECK_PERF(hipSetDevice(i));
     for (auto* buf : memory_buffers[i]) HIP_CHECK_PERF(hipFree(buf));
     for (auto s : stream_pool[i]) HIP_CHECK_PERF(hipStreamDestroy(s));
   }
