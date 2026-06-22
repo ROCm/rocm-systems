@@ -18,6 +18,7 @@ The first domains are:
 - `graph`: graph lifecycle plus simple memcpy and memset node contracts
 - `occupancy`: portable occupancy query contracts for a tiny in-source kernel
 - `graph_capture`: stream capture lifecycle and captured memcpy graph contracts
+- `graph_kernel`: graph kernel node contracts with tiny in-source kernels
 
 Run the layer with:
 

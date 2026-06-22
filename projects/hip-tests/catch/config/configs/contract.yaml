@@ -195,3 +195,12 @@ contract:
   Contract_GraphCapture_GetCaptureInfo_ReturnsActiveState:
     <<: *level_0
     tags: [graph_capture]
+  Contract_GraphKernel_AddKernelNode_WritesExpectedValue:
+    <<: *level_0
+    tags: [graph_kernel]
+  Contract_GraphKernel_KernelNodeGetParams_ReturnsConfiguredParams:
+    <<: *level_0
+    tags: [graph_kernel]
+  Contract_GraphKernel_ExecKernelNodeSetParams_UpdatesLaunchValue:
+    <<: *level_0
+    tags: [graph_kernel]
