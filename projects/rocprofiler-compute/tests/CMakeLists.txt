@@ -55,6 +55,14 @@ set_target_properties(
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
 
+set(FMA_THROUGHPUT ../sample/fma_throughput.hip)
+set_source_files_properties(${FMA_THROUGHPUT} PROPERTIES LANGUAGE HIP)
+add_executable(fma_throughput ${FMA_THROUGHPUT})
+set_target_properties(
+    fma_throughput
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+)
+
 set(DYNAMIC_SHARED_SOURCES ../sample/dynamic_shared/dynamic_shared.hip)
 set_source_files_properties(${DYNAMIC_SHARED_SOURCES} PROPERTIES LANGUAGE HIP)
 add_executable(hip_dynamic_shared ${DYNAMIC_SHARED_SOURCES})
