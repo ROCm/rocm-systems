@@ -84,19 +84,19 @@ class RocprofsysConfig:
         """
         found_paths = []
         if self.rocm_path:
+            # Match discover_llvm_libdir_for_ompt() logic
+            candidates = [
+                self.rocm_path / "llvm" / "lib",
+                self.rocm_path / "lib" / "llvm" / "lib",
+            ]
             # Determine host triple
             clang_path = self.rocm_path / "lib" / "llvm" / "bin" / "amdclang"
             if clang_path.exists():
                 host_triple = subprocess.check_output(
                     [str(clang_path), "--print-target-triple"], text=True
                 ).strip()
-            # Match discover_llvm_libdir_for_ompt() logic
-            candidates = [
-                self.rocm_path / "llvm" / "lib",
-                self.rocm_path / "lib" / "llvm" / "lib",
-            ]
-            if host_triple:
-                candidates.append(self.rocm_path / "lib" / "llvm" / "lib" / host_triple)
+                if host_triple:
+                    candidates.append(self.rocm_path / "lib" / "llvm" / "lib" / host_triple)
             for candidate in candidates:
                 if candidate.exists():
                     found_paths.append(candidate)

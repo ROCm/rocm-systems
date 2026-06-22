@@ -17,12 +17,41 @@ add_library(
 # Query clang for host target triple for defines.h
 # This is useful when LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON and
 # the openmp libraries are installed one level deeper in lib/<host-target-triple>.
-execute_process(
-    COMMAND "${ROCM_PATH}/lib/llvm/bin/amdclang" --print-target-triple
-    OUTPUT_VARIABLE LLVM_HOST_TRIPLE
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    COMMAND_ERROR_IS_FATAL ANY
+find_program(
+    amdclang_EXECUTABLE
+    NAMES amdclang
+    HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+    ENV ROCM_PATH
+    /opt/rocm
+    PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
+    ENV ROCM_PATH
+    /opt/rocm
+    PATH_SUFFIXES bin llvm/bin lib/llvm/bin
 )
+mark_as_advanced(amdclang_EXECUTABLE)
+set(LLVM_HOST_TRIPLE "")
+if(amdclang_EXECUTABLE)
+    execute_process(
+        COMMAND "${amdclang_EXECUTABLE}" --print-target-triple
+        OUTPUT_VARIABLE LLVM_HOST_TRIPLE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _llvm_host_triple_result
+    )
+    if(NOT _llvm_host_triple_result EQUAL 0)
+        set(LLVM_HOST_TRIPLE "")
+        rocprofiler_systems_message(
+            FATAL
+            "Failed to query LLVM host triple from ${amdclang_EXECUTABLE}; "
+            "libomptarget discovery for LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON may not work."
+        )
+    endif()
+else()
+    rocprofiler_systems_message(
+        WARNING
+        "Could not find amdclang to determine the LLVM host triple; "
+        "libomptarget discovery for LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON may not work."
+    )
+endif()
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/defines.h.in
