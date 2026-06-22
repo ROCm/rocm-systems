@@ -262,6 +262,44 @@ class TestAmdSmiPartitionMetricTransforms(unittest.TestCase):
         self.assertEqual(clocks["XCP_0"]["gfx_clk_locked"], "DISABLED")
         self.assertEqual(clocks["XCP_1"]["gfx_clk_locked"], "ENABLED")
 
+    def test_clock_partition_na_xcp_omits_limits(self):
+        # An XCP with no current gfx_clk must not surface device-wide limits
+        # with no value; only its lock state is still reported.
+        partition_metrics = {
+            "current_gfxclks": [1500, "N/A"],
+            "gfxclk_lock_status": 0b10,  # XCP_0 unlocked, XCP_1 locked
+        }
+        result = self._invoke(
+            "clock",
+            partition=True,
+            gpu_metric={},
+            partition_metrics=partition_metrics,
+            num_partition=2,
+            interface_mocks={
+                "amdsmi_get_clock_info": {
+                    "min_clk": 100,
+                    "max_clk": 2000,
+                    "clk": 1500,
+                    "sleep_clk": 0,
+                    "clk_deep_sleep": 0,
+                },
+                "amdsmi_get_clk_freq": {
+                    "num_supported": 1,
+                    "current": 0,
+                    "frequency": [1000000000],
+                },
+            },
+        )
+        clocks = result["clock"]
+        # XCP_0 reported a value, so limits attach.
+        self.assertEqual(clocks["XCP_0"]["gfx_clk"]["value"], 1500)
+        self.assertEqual(clocks["XCP_0"]["gfx_min_clk"]["value"], 100)
+        # XCP_1 is N/A: no value, no phantom limits, lock state still present.
+        self.assertNotIn("gfx_clk", clocks["XCP_1"])
+        self.assertNotIn("gfx_min_clk", clocks["XCP_1"])
+        self.assertNotIn("gfx_max_clk", clocks["XCP_1"])
+        self.assertEqual(clocks["XCP_1"]["gfx_clk_locked"], "ENABLED")
+
     # ----- temperature -----------------------------------------------------
 
     def test_temperature_partition_source_and_full_xcd(self):

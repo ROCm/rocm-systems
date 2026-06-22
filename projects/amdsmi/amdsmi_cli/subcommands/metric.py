@@ -1117,7 +1117,9 @@ class MetricCommands:
                                     xcp_clocks["gfx_clk"] = self.helpers.unit_format(
                                         self.logger, gfx_clk_data, clock_unit
                                     )
-                            if gfx_clock_info_dict is not None:
+                            # Attach limits only when this XCP reported a current gfx_clk,
+                            # so an N/A XCP isn't surfaced with limits but no value.
+                            if "gfx_clk" in xcp_clocks and gfx_clock_info_dict is not None:
                                 xcp_clocks["gfx_min_clk"] = self.helpers.unit_format(
                                     self.logger, gfx_clock_info_dict["min_clk"], clock_unit
                                 )
