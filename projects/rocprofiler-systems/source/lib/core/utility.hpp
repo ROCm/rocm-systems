@@ -5,8 +5,8 @@
 
 #include "concepts.hpp"
 
+#include "common/delimit.hpp"
 #include <timemory/mpl/concepts.hpp>
-#include <timemory/utility/delimit.hpp>
 
 #include <algorithm>
 #include <array>

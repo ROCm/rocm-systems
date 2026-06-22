@@ -8,6 +8,8 @@
 #include "get_categories.hpp"
 #include "info_type.hpp"
 
+#include "common/join.hpp"
+
 #include <timemory/components/metadata.hpp>
 #include <timemory/components/properties.hpp>
 #include <timemory/defines.h>
@@ -133,16 +135,26 @@ get_availability<Type>::get_info()
         auto     itr = ids_set.begin();
         string_t db  = (markdown) ? "`\"" : (csv) ? "" : "\"";
         string_t de  = (markdown) ? "\"`" : (csv) ? "" : "\"";
-        if(has_metadata) description += ". " + metadata_t::extra_description();
+        if(has_metadata)
+        {
+            description += ". " + metadata_t::extra_description();
+        }
         description += ".";
         while(itr->empty())
+        {
             ++itr;
+        }
         if(itr != ids_set.end())
-            ids_str = TIMEMORY_JOIN("", TIMEMORY_JOIN("", db, *itr++, de));
+        {
+            ids_str = rocprofsys::join("", rocprofsys::join("", db, *itr++, de));
+        }
         for(; itr != ids_set.end(); ++itr)
         {
             if(!itr->empty())
-                ids_str = TIMEMORY_JOIN(", ", ids_str, TIMEMORY_JOIN("", db, *itr, de));
+            {
+                ids_str =
+                    rocprofsys::join(", ", ids_str, rocprofsys::join("", db, *itr, de));
+            }
         }
     }
 

@@ -7,6 +7,8 @@
 #include "core/demangler.hpp"
 #include "defines.hpp"
 
+#include "common/join.hpp"
+
 #include <timemory/components/types.hpp>
 #include <timemory/enum.h>
 #include <timemory/utility/types.hpp>
@@ -32,7 +34,7 @@ struct component_categories
         };
         (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
 
-        ROCPROFSYS_FOLD_EXPRESSION(_v.emplace(TIMEMORY_JOIN(
+        ROCPROFSYS_FOLD_EXPRESSION(_v.emplace(rocprofsys::join(
             "::", "component", _cleanup(rocprofsys::utility::demangle<Tp>(), "tim::"))));
     }
 

@@ -45,10 +45,11 @@
 
 #include "logger/debug.hpp"
 
+#include "common/delimit.hpp"
+#include <amd_smi/amdsmi.h>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/mpl/type_traits.hpp>
-#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/locking.hpp>
 
 #include <atomic>
