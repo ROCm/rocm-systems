@@ -358,11 +358,20 @@ static bool GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& ent
   // Zero out the structure first
   memset(&entry, 0, sizeof(entry));
 
+  // Get kernel-assigned queue ID (critical for dbgapi queue correlation)
+  uint32_t kernel_queue_id;
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetKernelQueueId(queue->aql_queue_id(), &kernel_queue_id));
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    fprintf(stderr, "[Core Dump] Failed to get kernel queue ID for queue %" PRIu64 "\n",
+            queue->aql_queue_id());
+    return false;
+  }
+
   // Runtime direct fields (7 fields) - zero cost access from queue object
   entry.ring_base_address = (uint64_t)queue->amd_queue_.hsa_queue.base_address;
   entry.write_pointer_address = (uint64_t)&queue->amd_queue_.write_dispatch_id;
   entry.read_pointer_address = (uint64_t)&queue->amd_queue_.read_dispatch_id;
-  entry.queue_id = (uint32_t)queue->aql_queue_id();
+  entry.queue_id = kernel_queue_id;
   entry.gpu_id = static_cast<const AMD::GpuAgent*>(queue->GetAgent())->properties().KFDGpuID;
   // entry.ring_size expects size in bytes, hsa_queue.size is in number of packets (64 bytes each)
   entry.ring_size = queue->amd_queue_.hsa_queue.size * 64;
@@ -374,7 +383,7 @@ static bool GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& ent
   // Get CWSR info via hsaKmtGetQueueInfo (triggers memory migration / implicit cache flush)
   // CWSR data is critical for debugger - fail if we can't get it
   HsaQueueInfo queue_info;
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetQueueInfo(queue->aql_queue_id(), &queue_info));
+  status = HSAKMT_CALL(hsaKmtGetQueueInfo(queue->aql_queue_id(), &queue_info));
   if (status != HSAKMT_STATUS_SUCCESS) {
     fprintf(stderr, "queue %" PRIu64 "\n", queue->aql_queue_id());
     return false;
