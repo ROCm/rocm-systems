@@ -237,3 +237,12 @@ contract:
   Contract_GraphClone_OriginalAndClone_AreDistinctHandles:
     <<: *level_0
     tags: [graph_clone]
+  Contract_GraphUpdate_ExecMemcpyNodeSetParams1D_UpdatesCopySource:
+    <<: *level_0
+    tags: [graph_update]
+  Contract_GraphUpdate_ExecMemsetNodeSetParams_UpdatesFillValue:
+    <<: *level_0
+    tags: [graph_update]
+  Contract_GraphUpdate_ExecMemcpyNodeSetParams1D_UpdatesCopyDestination:
+    <<: *level_0
+    tags: [graph_update]

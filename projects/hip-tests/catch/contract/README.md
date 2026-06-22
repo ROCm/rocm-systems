@@ -22,6 +22,7 @@ The first domains are:
 - `graph_event`: graph event record and wait node contracts
 - `graph_topology`: graph node, root, edge, dependency, and dependent introspection contracts
 - `graph_clone`: graph clone lifecycle and cloned memcpy graph contracts
+- `graph_update`: graph exec memcpy and memset node parameter update contracts
 
 Run the layer with:
 
