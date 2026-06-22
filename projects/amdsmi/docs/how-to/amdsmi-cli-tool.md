@@ -430,18 +430,25 @@ Command Modifiers:
 
 `-X`/`--partition` switches the `--temperature`, `--clock`, and `--usage` categories
 to partition-scoped data sources (available on MI300 or newer ASICs). It reuses the
-existing section schema and adds partition-only AID/XCP/MID entries within it; any
-socket-only field with no partition equivalent reports `N/A`. The `--violation`
-(throttle) category already reports per-XCP data and is unaffected by this flag.
+existing section schema; any socket-only field with no partition equivalent reports
+`N/A`. The `--violation` (throttle) category already reports per-XCP data and is
+unaffected by this flag.
 
-The partition-only keys added to each category are:
+The flag affects categories in two ways. `--clock` gains breakdown keys that exist
+only under `-X`:
 
-| Category | Added keys | Meaning |
-|----------|-----------|---------|
-| `--clock` | `aid_<N>` | Per-AID `vclk`/`dclk`/`socclk` with `*_min_limit`/`*_max_limit` |
-| `--clock` | `xcp_<N>` | Per-XCP `gfx_clk` with `gfx_min_clk`/`gfx_max_clk` and `gfx_clk_locked` |
+| Category | Keys added only under `-X` | Meaning |
+|----------|---------------------------|---------|
+| `--clock` | `AID_<N>` | Per-AID `vclk`/`dclk`/`socclk` with `*_min_limit`/`*_max_limit` |
+| `--clock` | `XCP_<N>` | Per-XCP `gfx_clk` with `gfx_min_clk`/`gfx_max_clk` and `gfx_clk_locked` |
+
+`--temperature` and `--usage` already expose these keys at the socket level; `-X`
+only switches the data source feeding them to partition-scoped metrics:
+
+| Category | Keys whose source switches | Meaning |
+|----------|---------------------------|---------|
 | `--temperature` | `aid`, `mid`, `xcd` | Per-AID, per-MID, and per-XCP/XCD temperatures |
-| `--usage` | `xcp_<N>` | Per-XCP GFX/JPEG/VCN activity |
+| `--usage` | `XCP_<N>` | Per-XCP GFX/JPEG/VCN activity |
 
 Example (`amd-smi metric --clock --partition --json`, abbreviated):
 
@@ -449,11 +456,11 @@ Example (`amd-smi metric --clock --partition --json`, abbreviated):
 {
     "clock": {
         "gfx_0": { "clk": "1800 MHz", "min_clk": "500 MHz", "max_clk": "2100 MHz" },
-        "aid_0": {
+        "AID_0": {
             "vclk": "1400 MHz", "vclk_min_limit": "500 MHz", "vclk_max_limit": "1500 MHz",
             "dclk": "1200 MHz", "socclk": "900 MHz"
         },
-        "xcp_0": { "gfx_clk": "1800 MHz", "gfx_min_clk": "500 MHz", "gfx_max_clk": "2100 MHz", "gfx_clk_locked": "DISABLED" }
+        "XCP_0": { "gfx_clk": "1800 MHz", "gfx_min_clk": "500 MHz", "gfx_max_clk": "2100 MHz", "gfx_clk_locked": "DISABLED" }
     }
 }
 ```

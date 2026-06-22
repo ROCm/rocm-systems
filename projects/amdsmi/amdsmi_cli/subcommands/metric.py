@@ -476,7 +476,7 @@ class MetricCommands:
                         if xcp_gfx_busy != "N/A" and isinstance(xcp_gfx_busy, list):
                             new_xcp_dict = {}
                             for xcp_idx, gfx_busy in enumerate(xcp_gfx_busy):
-                                new_xcp_dict[f"xcp_{xcp_idx}"] = (
+                                new_xcp_dict[f"XCP_{xcp_idx}"] = (
                                     list(gfx_busy) if isinstance(gfx_busy, list) else gfx_busy
                                 )
                             engine_usage["gfx_busy_inst"] = new_xcp_dict
@@ -484,7 +484,7 @@ class MetricCommands:
                         if xcp_jpeg_busy != "N/A" and isinstance(xcp_jpeg_busy, list):
                             new_xcp_dict = {}
                             for xcp_idx, jpeg_busy in enumerate(xcp_jpeg_busy):
-                                new_xcp_dict[f"xcp_{xcp_idx}"] = (
+                                new_xcp_dict[f"XCP_{xcp_idx}"] = (
                                     list(jpeg_busy) if isinstance(jpeg_busy, list) else jpeg_busy
                                 )
                             engine_usage["jpeg_busy"] = new_xcp_dict
@@ -492,7 +492,7 @@ class MetricCommands:
                         if xcp_vcn_busy != "N/A" and isinstance(xcp_vcn_busy, list):
                             new_xcp_dict = {}
                             for xcp_idx, vcn_busy in enumerate(xcp_vcn_busy):
-                                new_xcp_dict[f"xcp_{xcp_idx}"] = (
+                                new_xcp_dict[f"XCP_{xcp_idx}"] = (
                                     list(vcn_busy) if isinstance(vcn_busy, list) else vcn_busy
                                 )
                             engine_usage["vcn_busy"] = new_xcp_dict
@@ -500,21 +500,21 @@ class MetricCommands:
                         # Socket-level metrics with partition support (existing behavior)
                         new_xcp_dict = {}
                         for current_xcp in range(num_partition):
-                            new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
+                            new_xcp_dict[f"XCP_{current_xcp}"] = gpu_metric[
                                 "xcp_stats.gfx_busy_inst"
                             ][current_xcp]
                         engine_usage["gfx_busy_inst"] = new_xcp_dict
 
                         new_xcp_dict = {}
                         for current_xcp in range(num_partition):
-                            new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric["xcp_stats.jpeg_busy"][
+                            new_xcp_dict[f"XCP_{current_xcp}"] = gpu_metric["xcp_stats.jpeg_busy"][
                                 current_xcp
                             ]
                         engine_usage["jpeg_busy"] = new_xcp_dict
 
                         new_xcp_dict = {}
                         for current_xcp in range(num_partition):
-                            new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric["xcp_stats.vcn_busy"][
+                            new_xcp_dict[f"XCP_{current_xcp}"] = gpu_metric["xcp_stats.vcn_busy"][
                                 current_xcp
                             ]
                         engine_usage["vcn_busy"] = new_xcp_dict
@@ -1095,7 +1095,7 @@ class MetricCommands:
                                         self.logger, socclk_clk_info_dict["max_clk"], clock_unit
                                     )
                             if aid_clocks:
-                                clocks[f"aid_{aid_idx}"] = aid_clocks
+                                clocks[f"AID_{aid_idx}"] = aid_clocks
 
                     # Per-XCP GFX breakdown
                     if isinstance(current_gfx_clocks, list):
@@ -1131,7 +1131,7 @@ class MetricCommands:
                                     "ENABLED" if is_locked else "DISABLED"
                                 )
                             if xcp_clocks:
-                                clocks[f"xcp_{xcp_idx}"] = xcp_clocks
+                                clocks[f"XCP_{xcp_idx}"] = xcp_clocks
 
                 values_dict["clock"] = clocks
         if "temperature" in current_platform_args:
