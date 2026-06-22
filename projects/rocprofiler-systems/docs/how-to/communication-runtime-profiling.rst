@@ -104,7 +104,7 @@ ROCm Systems Profiler provides automatic output labeling based on MPI rank IDs:
 * When full MPI support is enabled (``ROCPROFSYS_USE_MPI=ON``), output files are labeled with the ``MPI_COMM_WORLD`` rank ID
 * The ``ROCPROFSYS_USE_PID`` setting controls whether process IDs or MPI rank IDs are used for output labeling
 
-For detailed information on building rocprofiler-systems with MPI support, see the :doc:`installation guide <../install/install>`.
+For detailed information on building ROCm Systems Profiler with MPI support, see the :doc:`installation guide <../install/install>`.
 
 Selective rank profiling
 -------------------------
@@ -184,6 +184,8 @@ Similarly, if the detected rank itself is out of the range ``[0, world_size - 1]
        # Show console output only from rank 0
        export ROCPROFSYS_RANK_FILTER_LOGS=0
        mpirun -n 16 rocprof-sys-sample -- <application_path>
+
+For more details on selective rank profiling using ``rocprofv3``, refer to :doc:`Using rocprofv3 with MPI <rocprofiler-sdk:how-to/using-rocprofv3-with-mpi>`.
 
 Custom MPI environment variables
 ----------------------------------
