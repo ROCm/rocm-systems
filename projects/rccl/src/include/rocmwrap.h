@@ -119,7 +119,10 @@ inline ncclResult_t ncclCudaDriverVersion(int* driver) {
 #endif
 
 // [RCCL] Upstream NCCL added this helper in cudawrap.h; on HIP we provide the
-// equivalent that resolves the "legacy NULL" stream alias.
+// equivalent that resolves the "legacy NULL" stream alias. Guard against
+// redefinition when both rocmwrap.h and cudawrap.h land in the same TU.
+#ifndef NCCL_CUDA_STREAM_IS_LEGACY_NULL_DEFINED
+#define NCCL_CUDA_STREAM_IS_LEGACY_NULL_DEFINED
 static inline ncclResult_t ncclCudaStreamIsLegacyNull(cudaStream_t stream, bool* isLegacy) {
 #if CUDART_VERSION >= 11030
   unsigned long long streamId = ~0ULL;
@@ -130,5 +133,6 @@ static inline ncclResult_t ncclCudaStreamIsLegacyNull(cudaStream_t stream, bool*
 #endif
   return ncclSuccess;
 }
+#endif
 
 #endif

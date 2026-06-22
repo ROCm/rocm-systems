@@ -75,7 +75,7 @@ typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_intercept_table_t
  *
  * @param [in] kind Intercept table kind
  * @param [out] name If non-null and the name is a constant string that does not require dynamic
- * allocation, this paramter will be set to the address of the string literal, otherwise it will
+ * allocation, this parameter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
  * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)

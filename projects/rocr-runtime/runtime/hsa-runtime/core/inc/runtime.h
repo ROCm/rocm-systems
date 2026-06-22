@@ -45,8 +45,10 @@
 #ifndef HSA_RUNTME_CORE_INC_RUNTIME_H_
 #define HSA_RUNTME_CORE_INC_RUNTIME_H_
 
+#include <cstdint>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -91,6 +93,25 @@
 #define SANITIZER_AMDGPU 1
 #endif
 #endif
+
+inline bool operator==(const hsa_amd_vmem_alloc_handle_t& lhs,
+                       const hsa_amd_vmem_alloc_handle_t& rhs) {
+  return lhs.handle == rhs.handle;
+}
+
+inline bool operator!=(const hsa_amd_vmem_alloc_handle_t& lhs,
+                       const hsa_amd_vmem_alloc_handle_t& rhs) {
+  return !(lhs == rhs);
+}
+
+namespace std {
+template <>
+struct hash<hsa_amd_vmem_alloc_handle_t> {
+  size_t operator()(const hsa_amd_vmem_alloc_handle_t& x) const {
+    return hash<uint64_t>()(x.handle);
+  }
+};
+}  // namespace std
 
 //---------------------------------------------------------------------------//
 //    Constants                                                              //
@@ -393,8 +414,6 @@ class Runtime {
   hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf,
                                             uint64_t* offset, uint64_t flags);
 
-  hsa_status_t DmaBufClose(int dmabuf);
-
   hsa_status_t VMemoryAddressReserve(void** ptr, size_t size, uint64_t address, uint64_t alignment, uint64_t flags);
 
   hsa_status_t VMemoryAddressFree(void* ptr, size_t size);
@@ -428,6 +447,10 @@ class Runtime {
   hsa_status_t VMemoryGetAllocPropertiesFromHandle(const hsa_amd_vmem_alloc_handle_t memoryHandle,
                                                    const core::MemoryRegion** mem_region,
                                                    hsa_amd_memory_type_t* type);
+  hsa_status_t VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_handle,
+                                         hsa_amd_vmem_alloc_handle_t handle, uint64_t flags);
+  hsa_status_t VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,
+                                         hsa_amd_vmem_alloc_handle_t* handle);
 
   hsa_status_t EnableLogging(uint8_t* flags, void* file);
 
@@ -603,7 +626,7 @@ class Runtime {
     void Shutdown();
 
     hsa_signal_t wake;
-    bool exit;
+    std::atomic<bool> exit;
 
     private:
     AsyncEventsInfo* info_;
@@ -962,6 +985,7 @@ class Runtime {
   std::map<uint64_t, size_t> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
   os::Thread ipc_sock_server_thread_;
+  bool ipc_sock_server_shutdown_in_progress_;
 
   lazy_ptr<AsyncEventsInfo> asyncSignals_;
   lazy_ptr<AsyncEventsInfo> asyncExceptions_;
@@ -988,35 +1012,38 @@ class Runtime {
   std::map<const void*, AddressHandle> reserved_address_map_;  // Indexed by VA
 
   struct MemoryHandle {
-    MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
-                 ThunkHandle thunk_handle, MemoryRegion::AllocateFlags alloc_flag)
-        : region(region),
-          size(size),
-          ref_count(1),
-          use_count(0),
-          thunk_handle(thunk_handle),
-          alloc_flag(alloc_flag) {}
+    MemoryHandle(const MemoryRegion* region, uint64_t flags_unused,
+                 DriverMemoryHandle driver_handle, MemoryRegion::AllocateFlags alloc_flag);
+    MemoryHandle(int dmabuf_fd);
+    MemoryHandle(hsa_fabric_handle_t fabric_handle);
+    ~MemoryHandle();
 
-    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(ThunkHandle handle) {
-      hsa_amd_vmem_alloc_handle_t ret_handle = {
-          static_cast<uint64_t>(reinterpret_cast<uintptr_t>(handle))};
+    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(MemoryHandle* memHandle) {
+      hsa_amd_vmem_alloc_handle_t ret_handle = { .handle = static_cast<uint64_t>(reinterpret_cast<uint64_t>(memHandle)) };
       return ret_handle;
     }
 
-    static __forceinline ThunkHandle Convert(hsa_amd_vmem_alloc_handle_t handle) {
-      return reinterpret_cast<void*>(handle.handle);
+    static __forceinline MemoryHandle* Convert(hsa_amd_vmem_alloc_handle_t handle) {
+      return reinterpret_cast<MemoryHandle*>(handle.handle);
     }
 
     __forceinline core::Agent* agentOwner() const { return region->owner(); }
 
     const MemoryRegion* region;
-    size_t size;
     int ref_count;
     int use_count;
-    ThunkHandle thunk_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
+    DriverMemoryHandle driver_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
+    bool imported; // True if this BO was imported from another process
+    bool is_fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
   };
-  std::map<ThunkHandle, MemoryHandle> memory_handle_map_;
+  // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
+  // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
+  // identifier.
+  std::unordered_map<hsa_amd_vmem_alloc_handle_t, std::unique_ptr<MemoryHandle>> memory_handles;
+
+  MemoryHandle* FindMemoryHandle(MemoryHandle* handle);
+  void ReleaseMemoryHandle(MemoryHandle* handle);
 
   struct MappedHandle;
   struct MappedHandleAllowedAgent {
@@ -1032,23 +1059,20 @@ class Runtime {
     Agent* targetAgent;
     hsa_access_permission_t permissions;
     MappedHandle* mappedHandle;
-    ShareableHandle shareable_handle;
+    DriverMemoryHandle driver_handle;
   };
 
   struct MappedHandle {
     MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
-                 uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
-                 hsa_access_permission_t perm, ShareableHandle shareable_handle);
+                 uint64_t offset, size_t size,
+                 hsa_access_permission_t perm);
 
-    __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
+    __forceinline core::Agent* agentOwner() const { return mem_handle->agentOwner(); }
 
     MemoryHandle* mem_handle;
     AddressHandle* address_handle;
     uint64_t offset;
     size_t size;
-    int drm_fd;
-    void* drm_cpu_addr;  // CPU Buffer address
-    ShareableHandle shareable_handle;
     std::map<Agent*, MappedHandleAllowedAgent> allowed_agents;
   };
   std::map<const void*, MappedHandle> mapped_handle_map_;  // Indexed by VA

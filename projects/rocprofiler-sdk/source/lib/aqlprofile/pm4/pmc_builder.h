@@ -28,14 +28,12 @@
 #include <set>
 #include <map>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
-#include "lib/aqlprofile/aqlprofile.hpp"  // aqlprofile_cu_bitmap_t (gated aql_profile_v2.h)
 #include "lib/aqlprofile/def/gpu_block_info.h"
 #include "lib/aqlprofile/pm4/cmd_config.h"
-#include "lib/aqlprofile/util/hsa_rsrc_factory.h"  // AgentInfo
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 
 namespace pm4_builder
 {
@@ -79,7 +77,7 @@ public:
     {
         if(is_mi300_)
         {
-            // PRED_EXEC aplies to MI300 only
+            // PRED_EXEC applies to MI300 only
             pos_ = cmd_buffer->DwSize();
             builder.BuildPredExecPacket(cmd_buffer, target_xcc_, 0);
             initial_buff_size_ = cmd_buffer->DwSize();
@@ -90,7 +88,7 @@ public:
     {
         if(is_mi300_)
         {
-            // PRED_EXEC aplies to MI300 only
+            // PRED_EXEC applies to MI300 only
             CmdBuffer pred_exec;
             // update first PRED_EXEC packet to its correct value
             builder.BuildPredExecPacket(
@@ -155,19 +153,6 @@ private:
     // TODO: Temporary patch for gfx1250's asymmetric CU design, will remove
     //       after CU mask support is added to agent_info
     bool asymmetric_cu_patch;
-
-    // WGP harvesting support (GFX11+): per-(SE, SA) active WGP physical indices.
-    //
-    // Sized in the constructor from the chip's actual se_number_ x sarrays_per_se_
-    // so we never overrun on parts that exceed the aqlprofile_cu_bitmap_t window
-    // (AQLPROFILE_DRM_CU_BITMAP_NUM_SE x AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE,
-    // e.g. Navi31: 6 SE x 2 SA = 12 SAs; MI200: 8 SE x 1 SA = 8 SAs), and so
-    // we remain forward-compatible with future GPUs whose SE x SA-per-SE
-    // topology is larger than any fixed compile-time bound.
-    //
-    // Outer: per-SE. Middle: per-SA. Inner: active (non-harvested) WGP indices
-    // for that SA, in increasing order. The count is just inner.size().
-    std::vector<std::vector<std::vector<uint32_t>>> active_wgp_indices_;
 
     void DebugTrace(uint32_t value)
     {
@@ -297,65 +282,6 @@ private:
                    : instance_index;
     }
 
-    // Populate active_wgp_indices_[se][sa] for the per-WGP read loop in
-    // bIsWGPcounter11 below. With the DRM cu_bitmap (V2 on GFX11+) the
-    // highest set bit caps the WGP range and harvested WGPs are skipped
-    // automatically; otherwise we synthesize a fully-active mask of
-    // wgp_per_sa_ contiguous WGPs.
-    //
-    // Logical -> raw translation for cu_bitmap indexing (chips with > NUM_SE
-    // logical SEs fold upper banks into upper SA columns; see kernel's
-    // mqd_symmetrically_map_cu_mask in kfd_mqd_manager.c). Without this,
-    // Navi31's logical SE 4-5 silently miss the bitmap and fall back to
-    // the synthesized mask, reinstating the WGP-aliasing bug on those SEs.
-    // The raw-coordinate bounds check is required because cu_bitmap.bits
-    // is a C array sized by the kernel ABI [NUM_SE][NUM_SA_PER_SE]; reading
-    // out of window is UB, not a guaranteed zero.
-    void build_active_wgp_indices(const AgentInfo* agent_info)
-    {
-        // Fits Navi31 (6 x 2), MI200 (8 x 1), and any future SE x SA-per-SE
-        // topology too large for a hardcoded kMaxSA.
-        active_wgp_indices_.assign(se_number_, std::vector<std::vector<uint32_t>>(sarrays_per_se_));
-
-        constexpr uint32_t kMaxWgpPerSa  = 16;
-        constexpr uint32_t bitmap_se_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
-        constexpr uint32_t bitmap_sa_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 1>;
-        // Matches the kernel's cu_bitmap_sh_mul (== SAs per SE: always 2 on GFX11).
-        const uint32_t cu_bitmap_sh_mul = sarrays_per_se_;
-        for(uint32_t se = 0; se < se_number_; ++se)
-        {
-            for(uint32_t sa = 0; sa < sarrays_per_se_; ++sa)
-            {
-                auto& indices = active_wgp_indices_.at(se).at(sa);
-
-                const uint32_t raw_se = se % bitmap_se_lim;
-                const uint32_t raw_sa = sa + (se / bitmap_se_lim) * cu_bitmap_sh_mul;
-
-                uint32_t cu_bm = (raw_se < bitmap_se_lim && raw_sa < bitmap_sa_lim)
-                                     ? agent_info->cu_bitmap.bits[raw_se][raw_sa]
-                                     : 0u;
-                if(cu_bm == 0)
-                {
-                    // No bitmap for this SA. Guard wgp_per_sa_==0 here so the
-                    // synthesized cu_bm is always non-zero by construction and
-                    // we never hand 0 to __builtin_clz below (which is UB).
-                    // (1u << 32) is also UB; clamp when wgp_per_sa_ covers the
-                    // full 32-bit window (16 WGPs * 2 CU bits).
-                    if(wgp_per_sa_ == 0) continue;
-                    cu_bm = (wgp_per_sa_ >= kMaxWgpPerSa) ? ~0u : ((1u << (wgp_per_sa_ * 2u)) - 1u);
-                }
-
-                const uint32_t max_cu_bit = 31u - __builtin_clz(cu_bm);
-                const uint32_t max_wgp    = max_cu_bit / 2u;
-                indices.reserve(max_wgp + 1);
-                for(uint32_t wgp = 0; wgp <= max_wgp; ++wgp)
-                {
-                    if(cu_bm & (3u << (wgp * 2))) indices.push_back(wgp);
-                }
-            }
-        }
-    }
-
 public:
     explicit GpuPmcBuilder(const AgentInfo* agent_info)
     : PmcBuilder()
@@ -368,9 +294,6 @@ public:
         this->wgp_per_sa_ = (agent_info->cu_num / 2 + sarrays_per_se_ * se_number_ - 1) /
                             (se_number_ * sarrays_per_se_);
         this->wgp_per_sa_ /= agent_info->xcc_num;
-
-        build_active_wgp_indices(agent_info);
-
         // Due to MI300 CP firmware issue we need to use mem_mapped_register mode to patch for GCEA
         // hang. Otherwise both perfcounters mode and mem_mapped_register mode should work.
         builder.bUsePerfCounterMode = (xcc_number_ > 1) ? false : true;
@@ -383,7 +306,7 @@ public:
         return 1;
     };
 
-    // Build PMC enable PM4 comands - enable CP counting for a specific queue
+    // Build PMC enable PM4 commands - enable CP counting for a specific queue
     void Enable(CmdBuffer* cmd_buffer)
     {
         // Program Compute Perfcount Enable register to support perf counting
@@ -391,7 +314,7 @@ public:
                                       Primitives::COMPUTE_PERFCOUNT_ENABLE_ADDR,
                                       Primitives::cp_perfcount_enable_value());
     }
-    // Build PMC disable PM4 comands - enable CP counting for a specific queue
+    // Build PMC disable PM4 commands - enable CP counting for a specific queue
     void Disable(CmdBuffer* cmd_buffer)
     {
         // Program Compute Perfcount Enable register to support perf counting
@@ -399,14 +322,14 @@ public:
                                       Primitives::COMPUTE_PERFCOUNT_ENABLE_ADDR,
                                       Primitives::cp_perfcount_disable_value());
     }
-    // Build PMC waite-idle PM4 comands - enable CP counting for a specific queue
+    // Build PMC waite-idle PM4 commands - enable CP counting for a specific queue
     void WaitIdle(CmdBuffer* cmd_buffer)
     {
         // Program Compute Perfcount WaiteIdle register to support perf counting
         builder.BuildWriteWaitIdlePacket(cmd_buffer);
     }
 
-    // Build PMC start PM4 comands
+    // Build PMC start PM4 commands
     void Start(CmdBuffer* cmd_buffer, const counters_vector& counters_vec) override
     {
         // Issue barrier command
@@ -423,7 +346,7 @@ public:
         // Reset perf counters
         SetPerfmonCntl(
             cmd_buffer, Primitives::cp_perfmon_cntl_reset_value(), counters_vec.get_attr());
-        // Enable SQ Counter Control enable perfomance counter in graphics pipeline if implied
+        // Enable SQ Counter Control enable performance counter in graphics pipeline if implied
         Primitives::validate_counters(counters_vec.get_attr());
         if(counters_vec.get_attr() & CounterBlockTcAttr)
         {
@@ -549,7 +472,7 @@ public:
                 }
                 else
                 {
-                    // MI200 and MI300 have seperate select and control registers
+                    // MI200 and MI300 have separate select and control registers
                     const auto sdma_index = counter_des.block_des.index;
                     const auto target_aid_index =
                         sdma_index / (block_info->instance_count / MAX_AID);
@@ -823,7 +746,7 @@ public:
             }
             else if(block_info->attr & CounterBlockSdmaAttr)
             {
-                // Stop SDMA: this code path appplies only to non-MI300
+                // Stop SDMA: this code path applies only to non-MI300
                 if(reg_info.control_addr.offset == 0)
                 {
                     // MI100: stopped per instance
@@ -903,8 +826,7 @@ public:
 
                         if(bIsWGPcounter11)
                         {
-                            const auto& indices = active_wgp_indices_.at(se_index).at(sarray);
-                            for(uint32_t wgp : indices)
+                            for(int wgp = 0; wgp < wgp_per_sa_; wgp++)
                             {
                                 if(block_info->instance_count > 1)
                                     grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(
@@ -985,7 +907,7 @@ public:
         return read_counter * sizeof(uint32_t);
     }
 
-    // Build PMC stop PM4 comands
+    // Build PMC stop PM4 commands
     void Stop(CmdBuffer* cmd_buffer, const counters_vector& counters_vec) override
     {
         GCMode gc_mode =
@@ -1081,7 +1003,7 @@ public:
         builder.BuildWriteWaitIdlePacket(cmd_buffer);
     }
 
-    // Build PMC read PM4 comands
+    // Build PMC read PM4 commands
     uint32_t Read(CmdBuffer*             cmd_buffer,
                   const counters_vector& counters_vec,
                   void*                  data_buffer) override

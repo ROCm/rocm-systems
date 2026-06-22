@@ -302,7 +302,7 @@ Use the following command to view the available domains:
      ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``,
      ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, and
      ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1``, an XNACK-capable
-     GPU, and ROCProfiler-SDK version 1.2.2 or above.
+     GPU, and ROCm 7.13 or later (ROCProfiler-SDK version 1.2.2 or above).
 
 For example, the following is a valid configuration:
 
@@ -355,8 +355,8 @@ unified-memory view is expected to be fault-only: page-fault totals and trigger
 breakdowns can populate, migration counters remain zero, and the Perfetto
 migration-throughput track is not shown.
 
-Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and
-ROCProfiler-SDK 1.2.2 or above. The KFD tracing domains
+Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and ROCm 7.13 or later
+(ROCProfiler-SDK 1.2.2 or above). The KFD tracing domains
 (``kfd_page_fault``, ``kfd_page_migrate``) are enabled automatically when this
 setting is on -- you do not need to add ``kfd_events`` to
 ``ROCPROFSYS_ROCM_DOMAINS`` separately.
@@ -365,6 +365,17 @@ setting is on -- you do not need to add ``kfd_events`` to
 
    export HSA_XNACK=1
    export ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON
+
+By default, unified-memory reports are written next to the active trace backend
+output. Set ``ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH`` to write
+``unified_memory`` reports to a dedicated directory:
+
+.. code-block:: shell
+
+   export ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH=ump-output
+
+For a step-by-step workflow with examples and sample output, see
+:doc:`Unified memory profiling <./unified-memory-profiling>`.
 
 ROCPROFSYS_SELECTED_REGIONS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

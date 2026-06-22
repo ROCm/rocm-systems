@@ -9,3 +9,20 @@ target_link_libraries(
 )
 
 target_include_directories(demangler-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
+
+add_library(output-format-tests OBJECT test_output_format.cpp)
+
+target_link_libraries(
+    output-format-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+        rocprofiler-systems-headers
+        rocprofiler-systems-timemory
+)
+
+target_include_directories(
+    output-format-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
+)

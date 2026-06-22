@@ -107,19 +107,20 @@ public:
                               uint32_t* queue_cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                              uint32_t* first_gws) const override;
-  hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
-                            size_t *offset) override;
-  hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent, core::ShareableHandle* handle,
-                            void* mem) override;
-  hsa_status_t DestroyImportedShareableHandle(core::ShareableHandle* handle) override;
-  hsa_status_t Map(core::ShareableHandle handle, void *mem, size_t offset,
+  hsa_status_t ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
+                                  core::ShareType type, uint32_t flags, void* export_handle,
+                                  uint64_t* export_offset = nullptr) override;
+  hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
+                                  core::ShareType type, void* import_handle,
+                                  void* mem = nullptr) override;
+  hsa_status_t DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) override;
+  hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
                    size_t size, hsa_access_permission_t perms) override;
-  hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,
+  hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
                      size_t size) override;
   hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
-                                     core::ShareableHandle* handle, uint64_t* offset, int* drm_fd,
-                                     uint64_t* drm_fd_offset) override;
-  hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) override;
+                                     core::DriverMemoryHandle* handle, uint64_t* offset) override;
+  hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) override;
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
   hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes, uint32_t* timeout,
@@ -129,6 +130,7 @@ public:
                               const void* buffer_base, uint64_t buffer_base_size) const override;
   hsa_status_t SetSigbusDelay(uint32_t node_id, uint32_t delay_ms) const override;
   hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const override;
+  hsa_status_t GetDeviceFd(uint32_t node_id, int *fd) const override;
   hsa_status_t GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const override;
   hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const override;
   hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const override;
@@ -153,21 +155,6 @@ public:
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
  private:
-  /// @brief Allocate agent accessible memory (system / local memory).
-  static void *AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
-                                 size_t size);
-
-  /// @brief Free agent accessible memory (system / local memory).
-  static bool FreeKfdMemory(void *mem, size_t size);
-
-  /// @brief Pin memory.
-  static bool MakeKfdMemoryResident(size_t num_node, const uint32_t *nodes,
-                                    const void *mem, size_t size,
-                                    uint64_t *alternate_va,
-                                    HsaMemMapFlags map_flag);
-
-  /// @brief Unpin memory.
-  static void MakeKfdMemoryUnresident(const void *mem);
 
   /// @brief Query for user preference and use that to determine Xnack mode
   /// of ROCm system. Return true if Xnack mode is ON or false if OFF. Xnack

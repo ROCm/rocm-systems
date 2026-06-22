@@ -19,4 +19,6 @@ extern ncclGin_t ncclGinIb;
 extern ncclGin_t ncclGinIbGdaki;
 extern ncclGin_t ncclGinIbProxy;
 
+extern ncclGin_t IbCastGinIb;
+extern ncclGin_t IbCastGinIbProxy;
 #endif

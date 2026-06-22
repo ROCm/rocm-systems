@@ -95,6 +95,50 @@ def kfd_gpu_properties(target: GfxTarget, device_id: int = 30000) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Realistic clinfo output template
+# ---------------------------------------------------------------------------
+
+_CLINFO_HEADER = """\
+Number of platforms:\t\t\t\t 1
+  Platform Profile:\t\t\t\t FULL_PROFILE
+  Platform Version:\t\t\t\t OpenCL 2.1 AMD-APP (3652.0)
+  Platform Name:\t\t\t\t AMD Accelerated Parallel Processing
+  Platform Vendor:\t\t\t\t Advanced Micro Devices, Inc.
+  Platform Extensions:\t\t\t\t cl_khr_icd cl_amd_event_callback
+
+
+  Platform Name:\t\t\t\t AMD Accelerated Parallel Processing
+"""
+
+_CLINFO_GPU_TEMPLATE = """\
+  Device Type:\t\t\t\t\t CL_DEVICE_TYPE_GPU
+  Vendor ID:\t\t\t\t\t 1002h
+  Board name:\t\t\t\t\t {board_name}
+  Device Topology:\t\t\t\t PCI[ B#{bus}, D#0, F#0 ]
+  Max compute units:\t\t\t\t 48
+  Name:\t\t\t\t\t\t {name}
+  Vendor:\t\t\t\t\t Advanced Micro Devices, Inc.
+  Device OpenCL C version:\t\t\t OpenCL C 2.0
+"""
+
+
+def clinfo_output(*targets: GfxTarget, board_name: str = "AMD GPU") -> str:
+    """Generate realistic clinfo output listing the given GPU targets."""
+    device_blocks = []
+    for i, target in enumerate(targets):
+        device_blocks.append(
+            _CLINFO_GPU_TEMPLATE.format(
+                name=target.name,
+                board_name=board_name,
+                bus=i + 1,
+            )
+        )
+    num_devices = len(targets)
+    header = _CLINFO_HEADER + f"Number of devices:\t\t\t\t {num_devices}\n"
+    return header + "".join(device_blocks)
+
+
+# ---------------------------------------------------------------------------
 # Platform patching helpers
 # ---------------------------------------------------------------------------
 
@@ -113,6 +157,7 @@ class FakePlatform:
     def __init__(self) -> None:
         self.kfd_nodes: dict[int, str] = {}  # node_id -> properties text
         self.env: dict[str, str] = {}
+        self.clinfo_output: str = ""
 
     def add_cpu_node(self, node_id: int) -> None:
         """Add a CPU-only KFD node."""
@@ -131,6 +176,10 @@ class FakePlatform:
         """Set a fake environment variable."""
         self.env[key] = value
 
+    def set_clinfo(self, output: str) -> None:
+        """Set fake ``clinfo`` subprocess output."""
+        self.clinfo_output = output
+
     def apply(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Monkeypatch _platform functions with this fake's state."""
         kfd_nodes = self.kfd_nodes
@@ -148,9 +197,13 @@ class FakePlatform:
         def fake_get_env(key: str) -> str | None:
             return env.get(key)
 
+        def fake_run_clinfo() -> str:
+            return self.clinfo_output
+
         monkeypatch.setattr(_platform, "list_kfd_nodes", fake_list_kfd_nodes)
         monkeypatch.setattr(_platform, "read_kfd_properties", fake_read_kfd_properties)
         monkeypatch.setattr(_platform, "get_env", fake_get_env)
+        monkeypatch.setattr(_platform, "run_clinfo", fake_run_clinfo)
 
 
 @pytest.fixture()

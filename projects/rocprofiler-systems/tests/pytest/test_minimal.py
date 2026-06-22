@@ -72,3 +72,16 @@ class TestMinimal(RocprofsysTest):
             subtest_name="ROCpd Recursion Validation",
             rules_files=recursion_rules,
         )
+
+        # Every 'recurse' frame carries a source_object trace-arg
+        # with the value 'minimal-recursion'
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto Debug Validation",
+            key_names=["source_object"],
+            key_counts=[deepest_depth],
+            pass_regex=[
+                r"key\s*::\s*debug\.source_object",
+                r"string_value\s*::\s*minimal-recursion",
+            ],
+        )
