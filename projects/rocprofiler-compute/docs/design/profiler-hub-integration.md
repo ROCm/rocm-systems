@@ -85,25 +85,42 @@ each PID, given the SDK db and the matching native db:
 ```sql
 ATTACH DATABASE :native_db AS native;
 
-INSERT INTO rocpd_pmc_event_{sdk_guid} (guid, event_id, pmc_id, value)
+INSERT INTO "<sdk_pmc_event_table>" (guid, event_id, pmc_id, value)
 SELECT
     sdk_kd.guid,
     sdk_kd.event_id,                      -- remapped to SDK event id space
     sdk_pmc.id,                           -- remapped to SDK info_pmc id space
     n_pmc.value
-FROM native.rocpd_pmc_event_{native_guid}  AS n_pmc
-JOIN native.rocpd_event_{native_guid}      AS n_ev
+FROM native.rocpd_pmc_event  AS n_pmc
+JOIN native.rocpd_event      AS n_ev
      ON n_ev.id = n_pmc.event_id
-JOIN rocpd_kernel_dispatch_{sdk_guid}      AS sdk_kd
+JOIN rocpd_kernel_dispatch   AS sdk_kd
      ON sdk_kd.dispatch_id = n_ev.correlation_id     -- dispatch_id carrier
-JOIN native.rocpd_info_pmc_{native_guid}   AS n_info
+JOIN native.rocpd_info_pmc   AS n_info
      ON n_info.id = n_pmc.pmc_id
-JOIN rocpd_info_pmc_{sdk_guid}             AS sdk_pmc
+JOIN rocpd_info_pmc          AS sdk_pmc
      ON sdk_pmc.symbol = n_info.symbol
      AND sdk_pmc.target_arch IS n_info.target_arch;
 
 DETACH DATABASE native;
 ```
+
+The read side uses the per-db base-name views (`rocpd_pmc_event`, `rocpd_event`,
+`rocpd_kernel_dispatch`, `rocpd_info_pmc`) that the rocpd schema bakes into every db as
+`SELECT * FROM <table>_<guid>`. Both the SDK db and the native db carry them (profiler-hub
+writes the same rocpd schema), so the merge never computes a guid suffix to read. The two
+dbs stay distinct through the `native.` qualifier versus the main schema, which is required
+so the `symbol` to SDK `pmc_id` remap joins native `rocpd_info_pmc` against the SDK
+`rocpd_info_pmc` instead of collapsing them. This is also why the rocpd Python package is
+not used for the merge: its `connect()` unions same-base tables across all inputs, which
+would merge the two `rocpd_info_pmc` tables and destroy that cross-tool identity.
+
+These base-name views are plain `SELECT *` views with no INSERT triggers, so they are not
+writable. The INSERT target therefore stays the physical SDK `rocpd_pmc_event_<guid>`
+table, whose name is taken from the SDK db's own metadata
+(`"rocpd_pmc_event" || (SELECT value FROM rocpd_metadata WHERE tag='uuid')`, where the
+stored `uuid` value already carries the leading underscore) rather than reconstructed by
+string-munging a discovered table name.
 
 The remap is needed because `event_id` is assigned independently by each tool, while
 `dispatch_id` is shared, so it is the only stable key to recover the SDK `event_id`. The
