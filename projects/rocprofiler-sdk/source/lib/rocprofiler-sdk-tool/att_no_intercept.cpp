@@ -36,11 +36,6 @@
 #include <utility>
 #include <iostream>
 
-//#define LOG_TRACE ROCP_TRACE
-//#define LOG_INFO ROCP_INFO
-#define LOG_TRACE std::cout << std::endl
-#define LOG_INFO std::cout << std::endl
-
 #define CHECK_PTR(_x) ROCP_FATAL_IF(_x == nullptr) << "Called after finalize()";
 
 namespace rocprofiler
@@ -201,7 +196,7 @@ start_agent_context(agent_state_t& state)
     if(state.started || state.finalized) return;
     
     state.started = true;
-    LOG_INFO << fmt::format("starting ATT no-intercept context for agent {}", state.name);
+    ROCP_INFO << fmt::format("starting ATT no-intercept context for agent {}", state.name);
     check_status(rocprofiler_start_context(state.context), "ATT no-intercept context start");
 }
 
@@ -275,7 +270,7 @@ configure(std::vector<agent_config> agents,
 
         auto* state_ptr = state.get();
         agent_states()->emplace(agent.id.handle, std::move(state));
-        LOG_INFO << fmt::format("configured ATT no-intercept context for agent {} ({})",
+        ROCP_INFO << fmt::format("configured ATT no-intercept context for agent {} ({})",
                                  state_ptr->id.handle,
                                  state_ptr->name);
     }
