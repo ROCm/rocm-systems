@@ -6,6 +6,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cassert>
 #include <cstring>
@@ -17,9 +18,10 @@ void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo:
                            uint32_t vmid) {
   if (backing_memory_) {
     if (op == simdojo::MessageOp::WRITE) {
-      static uint64_t wb_count = 0;
-      if (++wb_count <= 3)
-        util::Logger::vm("L2 writeback(backing) #", wb_count, " addr=0x", std::hex, addr,
+      static std::atomic<uint64_t> wb_count{0};
+      const uint64_t count = wb_count.fetch_add(1, std::memory_order_relaxed) + 1;
+      if (count <= 3)
+        util::Logger::vm("L2 writeback(backing) #", count, " addr=0x", std::hex, addr,
                          " size=", std::dec, size);
       for (uint32_t i = 0; i < size; ++i)
         backing_memory_->write8(addr + i, data[i], vmid);

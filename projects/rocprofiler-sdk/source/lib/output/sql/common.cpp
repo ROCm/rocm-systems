@@ -159,7 +159,7 @@ extract_row_count(sqlite3* conn, std::string_view query)
         return 0;
     }
 
-    ROCP_CI_LOG_IF(ERROR, _stmt == nullptr) << "Error preparing statment: " << query;
+    ROCP_CI_LOG_IF(ERROR, _stmt == nullptr) << "Error preparing statement: " << query;
 
     int64_t nrows = 0;
     if(_stmt && sqlite3_column_count(_stmt) == 1 && sqlite3_step(_stmt) == SQLITE_ROW)

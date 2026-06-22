@@ -68,10 +68,10 @@ namespace aql
 {
 /**
  * Class to construct AQL Packets for a specific agent and metric set.
- * Thie class checks that the counters supplied are collectable on the
+ * This class checks that the counters supplied are collectable on the
  * agent in question (including making sure that they stay within block
  * limits). construct_packet returns an AQLPacket class containing the
- * consturcted start/stop/read packets along with allocated buffers needed
+ * constructed start/stop/read packets along with allocated buffers needed
  * to collect the counter data.
  */
 class CounterPacketConstruct

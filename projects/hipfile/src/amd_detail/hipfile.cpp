@@ -390,6 +390,10 @@ try {
     hipFileInit();
     (void)flags; // Unused at this time.
 
+    if (iocbp == nullptr && nr > 0) {
+        return {hipFileInvalidValue, hipSuccess};
+    }
+
     std::shared_ptr<IBatchContext> batch_context = Context<DriverState>::get()->getBatchContext(batch_idp);
     batch_context->submit_operations(iocbp, nr);
 

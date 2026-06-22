@@ -525,7 +525,7 @@ write_interceptor(Queue*                                queue,
                                                   .correlation_id = corr_id,
                                                   .packet_data    = packet_data_array_t{}};
 
-        // Searching accross all the packets given during this write
+        // Searching across all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
         {
             const auto& original_packet = _packets[i].kernel_dispatch;

@@ -79,6 +79,27 @@ void TestFabricRead::Run(void) {
     auto device = processor_handles_[dv_ind];
     PrintDeviceHeader(device);
 
+    // Without a UALoE session the telemetry APIs must report NOT_SUPPORTED,
+    // not NOT_INIT.
+    {
+      amdsmi_fabric_telemetry_t* probe = nullptr;
+      err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, &probe);
+      ASSERT_NE(err, AMDSMI_STATUS_NOT_INIT);
+      if (err == AMDSMI_STATUS_SUCCESS) {
+        ASSERT_NE(probe, nullptr);
+        err = amdsmi_get_fabric_telemetry_data(device, probe);
+        ASSERT_NE(err, AMDSMI_STATUS_NOT_INIT);
+        err = amdsmi_free_fabric_telemetry(device, probe);
+        ASSERT_NE(err, AMDSMI_STATUS_NOT_INIT);
+      } else {
+        amdsmi_fabric_telemetry_t dummy = {};
+        err = amdsmi_get_fabric_telemetry_data(device, &dummy);
+        ASSERT_NE(err, AMDSMI_STATUS_NOT_INIT);
+        err = amdsmi_free_fabric_telemetry(device, &dummy);
+        ASSERT_NE(err, AMDSMI_STATUS_NOT_INIT);
+      }
+    }
+
     // ── amdsmi_get_gpu_fabric_info ─────────────────────────────────────────
     IF_VERB(STANDARD) { std::cout << "\t** Testing amdsmi_get_gpu_fabric_info()" << std::endl; }
 
