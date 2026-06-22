@@ -2970,13 +2970,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                             "the first code-object upload for each selected GPU agent";
         }
 
-        if(att_no_intercept && handle_consecutive_kernels)
-        {
-            ROCP_WARNING << "--att-no-intercept with --att-consecutive-kernels is accepted, "
-                            "but consecutive-kernel no-intercept cuts are not implemented yet; "
-                            "using single-dispatch quick-scan cuts";
-        }
-
         if(!att_no_intercept)
         {
             ROCP_ERROR_IF(handle_consecutive_kernels && handle_marker_trace)
@@ -3030,7 +3023,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                     id,
                     static_cast<uint64_t>(agent.gpu_index),
                     (agent.name != nullptr) ? std::string{agent.name} : std::string{},
-                    std::move(agent_params)});
+                    std::move(agent_params),
+                    tool::get_config().att_consecutive_kernels});
             }
             else if(!handle_consecutive_kernels && !handle_marker_trace)
             {

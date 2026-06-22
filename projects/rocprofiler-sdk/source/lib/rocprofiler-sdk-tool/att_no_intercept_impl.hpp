@@ -103,13 +103,14 @@ struct agent_stats
 
 struct agent_state
 {
-    rocprofiler_agent_id_t                            id         = {};
-    uint64_t                                          gpu_index  = 0;
-    std::string                                       name       = {};
-    rocprofiler_context_id_t                          context    = {};
-    std::vector<rocprofiler_thread_trace_parameter_t> parameters = {};
-    rocprofiler_user_data_t                           userdata   = {};
-    void*                                             backend    = nullptr;
+    rocprofiler_agent_id_t                            id                  = {};
+    uint64_t                                          gpu_index           = 0;
+    std::string                                       name                = {};
+    rocprofiler_context_id_t                          context             = {};
+    std::vector<rocprofiler_thread_trace_parameter_t> parameters          = {};
+    rocprofiler_user_data_t                           userdata            = {};
+    void*                                             backend             = nullptr;
+    uint64_t                                          consecutive_kernels = 0;
 
     std::mutex mutex     = {};
     bool       started   = false;

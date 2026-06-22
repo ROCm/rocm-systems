@@ -282,12 +282,13 @@ configure(std::vector<agent_config> agents,
     {
         if(agent_states().count(agent.id.handle) != 0) continue;
 
-        auto state          = std::make_unique<agent_state>();
-        state->id           = agent.id;
-        state->gpu_index    = agent.gpu_index;
-        state->name         = std::move(agent.name);
-        state->parameters   = std::move(agent.parameters);
-        state->userdata.ptr = state.get();
+        auto state                 = std::make_unique<agent_state>();
+        state->id                  = agent.id;
+        state->gpu_index           = agent.gpu_index;
+        state->name                = std::move(agent.name);
+        state->parameters          = std::move(agent.parameters);
+        state->consecutive_kernels = agent.consecutive_kernels;
+        state->userdata.ptr        = state.get();
 
         check_status(rocprofiler_create_context(&state->context),
                      "ATT no-intercept context creation");
