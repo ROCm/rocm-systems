@@ -13,26 +13,23 @@ namespace utility
 namespace
 {
 template <typename ContainerT, typename Arg>
-auto
-emplace_impl(ContainerT& _targ, Arg&& _v,
-             int) -> decltype(_targ.emplace(std::forward<Arg>(_v)))
+concept has_emplace =
+    requires(ContainerT& _targ, Arg&& _v) { _targ.emplace(std::forward<Arg>(_v)); };
+
+template <typename ContainerT, typename Arg>
+    requires has_emplace<ContainerT, Arg>
+decltype(auto)
+emplace(ContainerT& _targ, Arg&& _v)
 {
     return _targ.emplace(std::forward<Arg>(_v));
 }
 
 template <typename ContainerT, typename Arg>
-auto
-emplace_impl(ContainerT& _targ, Arg&& _v,
-             long) -> decltype(_targ.emplace_back(std::forward<Arg>(_v)))
-{
-    return _targ.emplace_back(std::forward<Arg>(_v));
-}
-
-template <typename ContainerT, typename Arg>
+    requires(!has_emplace<ContainerT, Arg>)
 decltype(auto)
 emplace(ContainerT& _targ, Arg&& _v)
 {
-    return emplace_impl(_targ, std::forward<Arg>(_v), 0);
+    return _targ.emplace_back(std::forward<Arg>(_v));
 }
 }  // namespace
 

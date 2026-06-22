@@ -22,7 +22,13 @@ foreach(example ${BASICS_EXAMPLES})
     add_executable(${example} "${example}.cpp")
     target_compile_features(${example} PRIVATE cxx_std_17)
     set_target_properties(${example} PROPERTIES CXX_EXTENSIONS OFF)
-    target_compile_options(${example} PRIVATE -Wall -Wextra -fno-sanitize=all)
+    target_compile_options(${example} PRIVATE -Wall -Wextra)
+    # hipfile is instrumented when the sanitizers are on; an uninstrumented
+    # executable linked against it dies at load with undefined __asan_*/__tsan_*
+    # symbols. Instrument the example too so it pulls in the sanitizer runtime.
+    if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
+        ais_add_sanitizers(${example})
+    endif()
 
     if(CMAKE_HIP_PLATFORM STREQUAL "amd")
         target_compile_definitions(${example} PRIVATE __HIP_PLATFORM_AMD__)
@@ -124,8 +130,14 @@ if(BUILD_TESTING)
             LABELS "system;hipfile;basics"
         )
         if(mode_name STREQUAL "managed" OR mode_name STREQUAL "pinned")
+            # Disabled modes never run, but ctest still chdir's into a test's
+            # WORKING_DIRECTORY to report it — and the fixture scratch dir is
+            # already cleaned up by then (disabled tests don't keep the fixture
+            # alive). Point them at the always-present build dir so reporting
+            # them doesn't emit a spurious "Failed to change working directory".
             set_tests_properties(basics_various-mem-rw_${mode_name} PROPERTIES
                 DISABLED TRUE
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
         endif()
     endforeach()
