@@ -215,7 +215,7 @@ build_standalone(rocprof_trace_decoder_handle_t handle,
 {
     if(offset_end <= offset_begin) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
 
-    output.assign((offset_end - offset_begin) + 4096, 0);
+    output.resize(offset_end - offset_begin + 4096);
     auto output_size = static_cast<uint64_t>(output.size());
     auto status      = rocprof_trace_decoder_build_standalone(handle,
                                                          chunk_index,
@@ -401,7 +401,8 @@ backend_shader_data(agent_state_t&                           state,
 
     for (auto& trace : completed)
     {
-        auto standalone = std::vector<uint8_t>{};
+        thread_local auto standalone = std::vector<uint8_t>{};
+
         status          = build_standalone(state.decoder,
                                 shader_data.chunk_index,
                                 scan_data,
