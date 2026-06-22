@@ -130,7 +130,7 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   // threads at a time; we need to mask away the threads that not part of this tile first
   if constexpr (!__hip_internal::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
     mask >>= (64 - group.num_threads());
-    mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
+    mask <<= (((internal::workgroup::thread_rank() % warpSize) / group.num_threads()) * group.num_threads());
   }
 
   // for coalesced_groups, the mask is simply the activemask
