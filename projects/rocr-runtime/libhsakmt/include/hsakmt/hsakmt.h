@@ -437,6 +437,21 @@ hsaKmtGetQueueInfo(
     HsaQueueInfo *QueueInfo	//IN
 );
 
+/**
+ * Get the kernel-assigned internal queue ID from a queue handle.
+ *
+ * @param[in] QueueId Queue handle returned from hsaKmtCreateQueue
+ * @param[out] KernelInternalQueueId Pointer to receive the kernel's internal queue ID
+ *
+ * @returns HSAKMT_STATUS_SUCCESS on success
+ */
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetKernelQueueId(
+    HSA_QUEUEID QueueId,              //IN
+    HSAuint32 *KernelInternalQueueId  //OUT
+);
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtQueueRingDoorbell(
