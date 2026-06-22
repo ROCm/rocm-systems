@@ -236,12 +236,14 @@ Example usage:
     # query: subparser args
     process_query_reporter_args = []
     process_query_reporter_args.append(output_config.add_args(query_reporter))
+    process_query_reporter_args.append(output_config.add_generic_args(query_reporter))
     process_query_reporter_args.append(query.add_args(query_reporter))
     process_query_reporter_args.append(time_window.add_args(query_reporter))
 
     # summary: subparser args
     process_generate_summary_args = []
     process_generate_summary_args.append(output_config.add_args(generate_summary))
+    process_generate_summary_args.append(output_config.add_generic_args(generate_summary))
     process_generate_summary_args.append(summary.add_args(generate_summary))
     process_generate_summary_args.append(time_window.add_args(generate_summary))
 
@@ -355,7 +357,7 @@ Example usage:
         for pitr in process_generate_summary_args:
             summary_args.update(pitr(input, args))
 
-        summary.generate_all_summaries(input, **summary_args)
+        summary.execute(input, **summary_args)
 
     print("Done. Exiting...")
 

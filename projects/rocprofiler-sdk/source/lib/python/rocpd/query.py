@@ -86,100 +86,164 @@ def export_sqlite_query(
         normalized_format = export_format.lower() if export_format else None
         _stdlib_formats = {None, "console", "csv", "json", "html", "md"}
 
-        if not _pandas_available:
-            if normalized_format in _stdlib_formats:
-                libpyrocpd.rocpd_log_warning(
-                    "Module 'pandas' not found. Install it with: pip install pandas. Using fallback path.\n"
-                )
-                return _export_without_pandas(
-                    conn, query, params, normalized_format, export_path, **kwargs
-                )
+        # parse backend here
+        export_backend = kwargs.get("export_backend", "auto")
+
+        if not isinstance(export_backend, list):
+            export_backend = [export_backend]
+
+        for backend_itr in export_backend:
+            if backend_itr == "pandas":
+                libpyrocpd.rocpd_log_info(f"User requested pandas backend for export")
+                if _pandas_available:
+                    return _export_with_pandas(
+                        conn,
+                        query,
+                        params,
+                        export_format,
+                        export_path,
+                        dashboard_template_path=dashboard_template_path,
+                        **kwargs,
+                    )
+                else:
+                    libpyrocpd.rocpd_log_warning(
+                        "Module 'pandas' not found but user requested pandas backend. Doing nothing.\n"
+                    )
+
+            elif backend_itr == "native":
+                libpyrocpd.rocpd_log_info(f"User requested native backend for export")
+                if normalized_format in _stdlib_formats:
+                    return _export_without_pandas(
+                        conn, query, params, normalized_format, export_path, **kwargs
+                    )
+                else:
+                    libpyrocpd.rocpd_log_error(
+                        f"Export format '{normalized_format}' requires pandas. User requested native backend. Doing nothing.\n"
+                    )
             else:
-                libpyrocpd.rocpd_log_error(
-                    f"Export format '{normalized_format}' requires pandas. Install it with: pip install pandas\n"
-                )
-                return None
-
-        # 1) Run the query via pandas
-        df = pd.read_sql_query(query, conn, params=params)
-
-        if df.empty:
-            sys.stderr.write(f"No results found for query: {query}\n")
-            sys.stderr.flush()
-            return None
-
-        if normalized_format in (None, "console"):
-            # 2) Print to console
-            print(df.to_string(index=False))
-            return None
-
-        elif normalized_format == "clipboard":
-            df.to_clipboard(excel=False)
-            return None
-
-        ext = normalized_format
-        export_path = export_path or f"query_output.{ext}"
-        if not export_path.endswith(f".{ext}"):
-            export_path = f"{export_path}.{ext}"
-        export_path = os.path.abspath(libpyrocpd.format_path(export_path, "rocpd"))
-
-        os.makedirs(os.path.dirname(export_path), exist_ok=True)
-
-        def write_export(content):
-            with open(export_path, "w") as ofs:
-                ofs.write(f"{content}\n")
-                ofs.flush()
-
-        # 3) Export based on format
-        if normalized_format == "csv":
-            import csv
-
-            cols = [f"{itr}" for itr in df.columns.tolist()]
-            col_names = (
-                [f"{itr}".title() for itr in cols]
-                if kwargs.get("title_columns", True)
-                else cols[:]
-            )
-            df.to_csv(
-                export_path,
-                index=False,
-                columns=cols,
-                header=col_names,
-                quoting=csv.QUOTE_NONNUMERIC,
-            )
-
-        elif normalized_format == "html":
-            write_export(df.to_html(index=False))
-
-        elif normalized_format == "md":
-            # pandas 1.0+ has to_markdown
-            try:
-                write_export(df.to_markdown(index=False))
-            except AttributeError:
-                # fallback: manually write markdown table
-                _df_to_markdown_fallback(df, export_path)
-
-        elif normalized_format == "pdf":
-            _export_df_to_pdf(df, export_path)
-
-        elif normalized_format == "dashboard":
-            _export_dashboard(
-                df, export_path=export_path, template_path=dashboard_template_path
-            )
-
-        elif normalized_format == "json":
-            df.to_json(export_path, index=False, indent=2, orient="records")
-
-        else:
-            print(f"Unsupported export format: {normalized_format}")
-            return None
-
-        print(f"Exported to: {export_path}\n")
-        return export_path
+                # automatically try pandas if available
+                if _pandas_available:
+                    return _export_with_pandas(
+                        conn,
+                        query,
+                        params,
+                        export_format,
+                        export_path,
+                        dashboard_template_path=dashboard_template_path,
+                        **kwargs,
+                    )
+                else:
+                    if normalized_format in _stdlib_formats:
+                        libpyrocpd.rocpd_log_warning(
+                            "Module 'pandas' not found. Install it with: pip install pandas. Using fallback path.\n"
+                        )
+                        return _export_without_pandas(
+                            conn, query, params, normalized_format, export_path, **kwargs
+                        )
+                    else:
+                        libpyrocpd.rocpd_log_error(
+                            f"Export format '{normalized_format}' requires pandas. Install it with: pip install pandas\n"
+                        )
 
     except Exception as e:
         print(f"Error: {e}")
         return None
+
+
+def _export_with_pandas(
+    conn,
+    query,
+    params,
+    export_format,
+    export_path,
+    dashboard_template_path=None,
+    **kwargs,
+):
+    """
+    Execute a SQLite query and export results using pandas.
+    Handles: console, clipboard, csv, html, md, pdf, dashboard, json.
+    """
+    import pandas as pd
+
+    libpyrocpd.rocpd_log_info(
+        f"Running query via pandas for export format: {export_format}"
+    )
+    # 1) Run the query via pandas
+    df = pd.read_sql_query(query, conn, params=params)
+
+    if df.empty:
+        sys.stderr.write(f"No results found for query: {query}\n")
+        sys.stderr.flush()
+        return None
+
+    if export_format in (None, "console"):
+        # 2) Print to console
+        print(df.to_string(index=False))
+        return None
+
+    elif export_format == "clipboard":
+        df.to_clipboard(excel=False)
+        return None
+
+    ext = export_format
+    export_path = export_path or f"query_output.{ext}"
+    if not export_path.endswith(f".{ext}"):
+        export_path = f"{export_path}.{ext}"
+    export_path = os.path.abspath(libpyrocpd.format_path(export_path, "rocpd"))
+
+    os.makedirs(os.path.dirname(export_path), exist_ok=True)
+
+    def write_export(content):
+        with open(export_path, "w") as ofs:
+            ofs.write(f"{content}\n")
+            ofs.flush()
+
+    # 3) Export based on format
+    if export_format == "csv":
+        import csv
+
+        cols = [f"{itr}" for itr in df.columns.tolist()]
+        col_names = (
+            [f"{itr}".title() for itr in cols]
+            if kwargs.get("title_columns", True)
+            else cols[:]
+        )
+        df.to_csv(
+            export_path,
+            index=False,
+            columns=cols,
+            header=col_names,
+            quoting=csv.QUOTE_NONNUMERIC,
+        )
+
+    elif export_format == "html":
+        write_export(df.to_html(index=False))
+
+    elif export_format == "md":
+        # pandas 1.0+ has to_markdown
+        try:
+            write_export(df.to_markdown(index=False))
+        except AttributeError:
+            # fallback: manually write markdown table
+            _df_to_markdown_fallback(df, export_path)
+
+    elif export_format == "pdf":
+        _export_df_to_pdf(df, export_path)
+
+    elif export_format == "dashboard":
+        _export_dashboard(
+            df, export_path=export_path, template_path=dashboard_template_path
+        )
+
+    elif export_format == "json":
+        df.to_json(export_path, index=False, indent=2, orient="records")
+
+    else:
+        print(f"Unsupported export format: {export_format}")
+        return None
+
+    print(f"Exported to: {export_path}\n")
+    return export_path
 
 
 def _export_without_pandas(conn, query, params, export_format, export_path, **kwargs):
@@ -191,6 +255,9 @@ def _export_without_pandas(conn, query, params, export_format, export_path, **kw
     import json
     import html as _html
 
+    libpyrocpd.rocpd_log_info(
+        f"Running query via stdlib for export format: {export_format}"
+    )
     cursor = conn.cursor()
     cursor.execute(query, params if params else ())
     rows = cursor.fetchall()
@@ -588,6 +655,7 @@ def execute(input, args, config=None, **kwargs):
         export_format=export_format,
         export_path=export_path,
         dashboard_template_path=dashboard_template,
+        **kwargs,
     )
 
     # 2) If --email-to was provided and we have a file, send it
