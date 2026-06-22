@@ -72,7 +72,6 @@ struct basic_block_signature;
 struct module_function;
 
 using string_t               = std::string;
-using string_view_t          = std::string_view;
 using stringstream_t         = std::stringstream;
 using strvec_t               = std::vector<string_t>;
 using strset_t               = std::set<string_t>;

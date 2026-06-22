@@ -96,7 +96,7 @@ get_roctx_client()
 {
     if(!g_roctx_client)
     {
-        const auto _domains = tim::delimit(
+        const auto _domains = rocprofsys::delimit(
             config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
                 .value_or(std::string{}),
             " ,;:\t\n");

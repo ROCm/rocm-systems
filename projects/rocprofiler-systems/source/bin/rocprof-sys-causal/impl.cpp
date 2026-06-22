@@ -10,13 +10,15 @@
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
 
+#include "common/delimit.hpp"
 #include <timemory/environment.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/console.hpp>
-#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
-#include <timemory/utility/join.hpp>
+
+#include "common/join.hpp"
+#include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
 #include <cmath>
@@ -40,7 +42,6 @@ namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace path     = rocprofsys::common::path;
 namespace env_vars = rocprofsys::env_vars;
-using namespace ::timemory::join;
 using rocprofsys::get_env;
 using rocprofsys::common::update_mode;
 using ::rocprofsys::utility::parse_numeric_range;
@@ -189,9 +190,9 @@ prepare_command_for_run(char* _exe, std::vector<char*>& _argv)
         if(!_injected)
         {
             throw std::runtime_error(
-                join("", "rocprof-sys-causal was unable to match \"", launcher,
-                     "\" to any arguments on the command line: \"",
-                     join(array_config{ " ", "", "" }, _argv), "\""));
+                fmt::format("rocprof-sys-causal was unable to match \"{}\" to any "
+                            "arguments on the command line: \"{}\"",
+                            launcher, fmt::join(_argv, " ")));
         }
 
         std::swap(_argv, _new_argv);
@@ -203,11 +204,11 @@ prepare_environment_for_run(std::vector<std::string>& _env)
 {
     if(launcher.empty())
     {
-        update_env(
-            _env, "LD_PRELOAD",
-            join(":", LIBPTHREAD_SO,
-                 path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"))),
-            true);
+        update_env(_env, "LD_PRELOAD",
+                   rocprofsys::join(":", LIBPTHREAD_SO,
+                                    path::realpath(path::get_internal_libpath(
+                                        "librocprof-sys-dl.so"))),
+                   true);
         update_env(_env, env_vars::SCRIPT_DIR, path::get_internal_script_path());
         update_env(_env, env_vars::ROOT, path::get_rocprofsys_root());
     }
@@ -228,7 +229,7 @@ void
 add_default_env(std::vector<std::string>& _environ, std::string_view _env_var,
                 Tp&& _env_val)
 {
-    auto       _key = join("", _env_var, "=");
+    auto       _key = rocprofsys::join("", _env_var, "=");
     const auto exists =
         std::any_of(_environ.begin(), _environ.end(), [&_key](const std::string& entry) {
             return std::string_view{ entry }.find(_key) == 0;
@@ -367,8 +368,8 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
         .min_count(0)
         .dtype("filepath")
         .action([&](parser_t& p) {
-            _config_file =
-                join(array_config{ ":" }, p.get<std::vector<std::string>>("config"));
+            _config_file = fmt::format(
+                "{}", fmt::join(p.get<std::vector<std::string>>("config"), ":"));
         });
     parser
         .add_argument(
@@ -530,7 +531,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
                 _virtual_speedups.clear();
                 for(const auto& itr : _val)
                 {
-                    for(const auto& ditr : tim::delimit(itr, ",; \t\n\r"))
+                    for(const auto& ditr : rocprofsys::delimit(itr, ",; \t\n\r"))
                     {
                         for(auto nitr :
                             parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(
@@ -790,7 +791,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             _write_config(_ofs, _causal_envs_tmp.at(i));
             auto _cfg_name = (_config_file.empty())
                                  ? fname.str()
-                                 : join(array_config{ ":" }, _config_file, fname.str());
+                                 : rocprofsys::join(':', _config_file, fname.str());
             auto _cfg = std::map<std::string_view, std::string>{ { env_vars::CONFIG_FILE,
                                                                    _cfg_name } };
             _causal_envs.emplace_back(_cfg);

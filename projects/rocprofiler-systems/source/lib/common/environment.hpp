@@ -57,6 +57,45 @@ struct posix_env
     static char* getenv(const char* name) { return ::getenv(name); }
 };
 
+/// @brief Parse a string into a boolean.
+///
+/// All-digit strings are truthy when non-zero (an overflowing digit string is
+/// also truthy); other values are matched case-insensitively against the false
+/// tokens off/false/no/n/f/0 (anything else is truthy). An empty string yields
+/// @p fallback.
+/// @param value    The string to interpret.
+/// @param fallback Returned when @p value is empty.
+/// @return The parsed boolean.
+[[nodiscard]] inline bool
+to_bool(std::string_view value, bool fallback = false)
+{
+    if(value.empty()) return fallback;
+
+    if(value.find_first_not_of("0123456789") == std::string_view::npos)
+    {
+        // Parse with from_chars so a very large all-digit value cannot throw
+        // (std::stoi would throw std::out_of_range). Any non-zero digit string,
+        // including one that overflows, is truthy.
+        std::uint64_t numeric{};
+        const auto*   last   = value.data() + value.size();
+        const auto [ptr, ec] = std::from_chars(value.data(), last, numeric);
+        if(ec == std::errc::result_out_of_range) return true;
+        if(ec == std::errc{} && ptr == last) return numeric != 0;
+        return true;
+    }
+
+    std::string lower{ value };
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char chr) { return std::tolower(chr); });
+
+    constexpr auto false_values = std::array{
+        std::string_view{ "off" }, std::string_view{ "false" }, std::string_view{ "no" },
+        std::string_view{ "n" },   std::string_view{ "f" },     std::string_view{ "0" },
+    };
+    return !std::any_of(false_values.begin(), false_values.end(),
+                        [&lower](std::string_view val) { return lower == val; });
+}
+
 /// @brief Environment variable read/write facade, parameterised over the backend.
 ///
 /// All conversion and parsing logic lives here. Use @c environment<posix_env> (the
@@ -92,31 +131,7 @@ private:
             throw std::runtime_error(
                 std::string{ "No boolean value provided for " }.append(env_id));
         }
-
-        if(env_sv.find_first_not_of("0123456789") == std::string_view::npos)
-        {
-            // Parse with from_chars so a very large all-digit value cannot throw
-            // (std::stoi would throw std::out_of_range). Any non-zero digit string,
-            // including one that overflows, is truthy.
-            std::uint64_t numeric{};
-            const auto*   last   = env_sv.data() + env_sv.size();
-            const auto [ptr, ec] = std::from_chars(env_sv.data(), last, numeric);
-            if(ec == std::errc::result_out_of_range) return true;
-            if(ec == std::errc{} && ptr == last) return numeric != 0;
-            return true;
-        }
-
-        std::string lower{ env_sv };
-        std::transform(lower.begin(), lower.end(), lower.begin(),
-                       [](unsigned char chr) { return std::tolower(chr); });
-
-        constexpr auto false_values = std::array{
-            std::string_view{ "off" }, std::string_view{ "false" },
-            std::string_view{ "no" },  std::string_view{ "n" },
-            std::string_view{ "f" },   std::string_view{ "0" },
-        };
-        return !std::any_of(false_values.begin(), false_values.end(),
-                            [&lower](std::string_view val) { return lower == val; });
+        return to_bool(env_sv, fallback);
     }
 
     template <typename Tp>

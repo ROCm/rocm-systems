@@ -733,7 +733,7 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
             auto reject_list = rocprofsys::get_env<std::string>(
                 TIMEMORY_SETTINGS_PREFIX "MPIP_REJECT_LIST", "");
             // add environment setting
-            for(const auto& itr : tim::delimit(reject_list))
+            for(const auto& itr : rocprofsys::delimit(reject_list))
                 _reject.insert(itr);
             return _reject;
         };
@@ -745,7 +745,7 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
             auto permit_list = rocprofsys::get_env<std::string>(
                 TIMEMORY_SETTINGS_PREFIX "MPIP_PERMIT_LIST", "");
             // add environment setting
-            for(const auto& itr : tim::delimit(permit_list))
+            for(const auto& itr : rocprofsys::delimit(permit_list))
                 _permit.insert(itr);
             return _permit;
         };
