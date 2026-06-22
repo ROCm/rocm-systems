@@ -49,6 +49,11 @@ add_executable(
     transcendental_test.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
+    patch/instruction_builder_test.cpp
+    patch/trampoline_builder_test.cpp
+    patch/instrumentor_test.cpp
+    patch/error_report_test.cpp
+    code/code_object_target_id_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     kfd_ioctl_test.cpp
@@ -295,6 +300,7 @@ if(HSA_RUNTIME64)
         set(HAS_CDNA3_GPU FALSE)
         set(HAS_RDNA4_GPU FALSE)
         set(HAS_GFX1201_GPU FALSE)
+        set(HAS_CDNA2_GPU FALSE)
         if(ROCM_AGENT_ENUM)
             execute_process(
                 COMMAND ${ROCM_AGENT_ENUM}
@@ -317,6 +323,9 @@ if(HSA_RUNTIME64)
             endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx1201")
                 set(HAS_GFX1201_GPU TRUE)
+            endif()
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx90a")
+                set(HAS_CDNA2_GPU TRUE)
             endif()
         endif()
 
@@ -526,6 +535,76 @@ if(HSA_RUNTIME64)
                 STATUS
                 "CDNA4->CDNA3 dispatch tests built but NOT registered with CTest "
                 "(no CDNA3 GPU)"
+            )
+        endif()
+
+        # --- HSA DBI smoke test: gfx90a kernel patched with inlined nop ---
+        # Build always; register with CTest only when a gfx90a GPU is present.
+        add_executable(hsa_dbi_smoke_test dbi/hsa_dbi_smoke_test.cpp)
+        target_include_directories(
+            hsa_dbi_smoke_test
+            PRIVATE
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+                ${CMAKE_SOURCE_DIR}/lib/util/include
+                ${RJ_HSA_INCLUDE_DIR}
+        )
+        target_link_libraries(
+            hsa_dbi_smoke_test
+            PRIVATE
+                ${RJ_OBJECT_LIBS}
+                ${HSA_RUNTIME64}
+                GTest::gtest
+                GTest::gtest_main
+        )
+        target_link_options(
+            hsa_dbi_smoke_test
+            PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+        )
+        target_compile_definitions(
+            hsa_dbi_smoke_test
+            PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
+        )
+        add_dependencies(hsa_dbi_smoke_test device_kernels)
+        rj_configure_target(hsa_dbi_smoke_test TEST)
+
+        # Local helper: register one TEST_F case from hsa_dbi_smoke_test as a
+        # CTest entry. <group> is the part of the fixture name after
+        # "HsaDbiSmoke" (Static or Hardware). Scoped here because it's only
+        # used by the calls immediately below.
+        function(register_hsa_dbi_smoke_case group case)
+            set(oneValueArgs TIMEOUT)
+            cmake_parse_arguments(RJ_DBI "" "${oneValueArgs}" "" ${ARGN})
+            set(name "HsaDbiSmoke${group}.${case}")
+            add_test(
+                NAME "${name}"
+                COMMAND hsa_dbi_smoke_test --gtest_filter=${name}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            if(RJ_DBI_TIMEOUT)
+                set_tests_properties(
+                    "${name}"
+                    PROPERTIES TIMEOUT ${RJ_DBI_TIMEOUT}
+                )
+            endif()
+        endfunction()
+
+        # Static-only test: no GPU needed, runs anywhere the binary is built.
+        register_hsa_dbi_smoke_case(Static PatchedElfActuallyContainsInstrumentation)
+
+        if(HAS_CDNA2_GPU)
+            # Hardware-gated tests. The two that dispatch get an explicit
+            # timeout; the load+validate one runs quickly enough for the
+            # default.
+            register_hsa_dbi_smoke_case(Hardware PatchedElfLoadsAndValidatesInHsaExecutable)
+            register_hsa_dbi_smoke_case(Hardware PatchedKernelDispatchMatchesOriginal TIMEOUT 30)
+            register_hsa_dbi_smoke_case(Hardware TrampolineIsActuallyExecutedByGpu TIMEOUT 30)
+            message(STATUS "HSA DBI smoke test enabled (gfx90a detected)")
+        else()
+            message(
+                STATUS
+                "HSA DBI smoke test built but NOT registered with CTest "
+                "(no gfx90a)"
             )
         endif()
     endif()

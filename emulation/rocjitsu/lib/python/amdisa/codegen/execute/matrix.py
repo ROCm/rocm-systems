@@ -58,6 +58,10 @@ def _gfx1250_wmma_spec(
         if input_type == 'BF16' and (M, N, K) == (16, 16, 32):
             return f'exec_wmma_bf16_spec<{M}, {N}, {K}>'
         return None
+    if result_type == 'BF16F32':
+        if input_type == 'BF16' and (M, N, K) == (16, 16, 32):
+            return 'exec_wmma_bf16f32_16x16x32_bf16'
+        return None
     # result F32
     if input_type in ('F32', 'XF32') and N % 16 == 0:
         return f'exec_wmma_f32_f32_spec<{M}, {N}, {K}>'
@@ -124,9 +128,7 @@ def gen_mfma(
             f'  throw util::UnimplementedInst(mnemonic());'
         )
 
-    result_type = m.group(1)  # F32, I32, F64
-    if result_type == 'BF16F32':
-        result_type = 'F32'
+    result_type = m.group(1)  # F32, I32, F64, BF16F32
     M, N, K = int(m.group(2)), int(m.group(3)), int(m.group(4))
     input_type = m.group(5)  # F32, XF32, F16, BF16, I8, F64, etc.
     is_swmmac = name.startswith('V_SWMMAC_')
@@ -426,7 +428,10 @@ def gen_mfma(
             )
             L.append(f'            src0_base,')
             L.append(f'            src1_base,')
-            L.append(f'            s2, extract_a, extract_b, const_acc);')
+            L.append(
+                f'            s2, extract_a, extract_b, const_acc,'
+                f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
+            )
             L.append(f'      }});')
             L.append(f'  if (!dispatched)')
             L.append(f'    throw util::UnimplementedInst(mnemonic());')
@@ -455,9 +460,15 @@ def gen_mfma(
                 # the generic exec_wmma_* runtime path.
                 spec = _gfx1250_wmma_spec(result_type, input_type, M, N, K)
                 if spec is not None:
-                    L.append(
-                        f'  amdgpu::{spec}(cu, dst, src0_base, src1_base, s2, const_acc);'
-                    )
+                    if result_type in ('F32', 'BF16F32'):
+                        L.append(
+                            f'  amdgpu::{spec}(cu, dst, src0_base, src1_base, s2, const_acc,'
+                            f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
+                        )
+                    else:
+                        L.append(
+                            f'  amdgpu::{spec}(cu, dst, src0_base, src1_base, s2, const_acc);'
+                        )
                 else:
                     if result_type == 'F16':
                         exec_fn = 'exec_wmma_f16'
@@ -465,10 +476,17 @@ def gen_mfma(
                         exec_fn = 'exec_wmma_bf16'
                     else:
                         exec_fn = 'exec_wmma_f32'
-                    L.append(
-                        f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst, src0_base,'
-                        f' src1_base, s2, {ea}, {eb}, const_acc);'
-                    )
+                    if exec_fn == 'exec_wmma_f32':
+                        L.append(
+                            f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst, src0_base,'
+                            f' src1_base, s2, {ea}, {eb}, const_acc,'
+                            f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
+                        )
+                    else:
+                        L.append(
+                            f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst, src0_base,'
+                            f' src1_base, s2, {ea}, {eb}, const_acc);'
+                        )
         elif input_type in ('F8_F6_F4', 'F8F6F4'):
             # f8f6f4 MFMA: cbsz/blgp encode data format, NOT lane
             # permutation. Use dispatch_matrix_fmt_pair to select the

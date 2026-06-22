@@ -383,7 +383,7 @@ class GpuAgent : public GpuAgentInt {
 
   hsa_status_t Preload(uint64_t flags);
 
-  core::Agent* GetNearestCpuAgent(void) const;
+  core::Agent* GetNearestCpuAgent() const override;
 
   void RegisterGangPeer(core::Agent& gang_peer, unsigned int bandwidth_factor) override;
 
@@ -441,7 +441,7 @@ class GpuAgent : public GpuAgentInt {
   __forceinline uint32_t enumeration_index() const { return enum_index_; }
 
   // @brief returns true if agent uses MES scheduler
-  __forceinline const bool isMES() const { return (isa_->GetMajorVersion() >= 11) ? true : false; };
+  __forceinline const bool isMES() const { return (supported_isas()[0]->GetMajorVersion() >= 11) ? true : false; };
 
   // @brief returns the libdrm device handle
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
@@ -474,8 +474,8 @@ class GpuAgent : public GpuAgentInt {
   const size_t MAX_SCRATCH_APERTURE_PER_XCC_GFX12 = (2ULL << 32); // 8GB
   __forceinline size_t MaxScratchDevice() const {
     return properties_.NumXcc *
-          (isa_->GetMajorVersion() >= 12 ? MAX_SCRATCH_APERTURE_PER_XCC_GFX12 :
-                                            MAX_SCRATCH_APERTURE_PER_XCC);
+          (supported_isas()[0]->GetMajorVersion() >= 12 ? MAX_SCRATCH_APERTURE_PER_XCC_GFX12 :
+                                                           MAX_SCRATCH_APERTURE_PER_XCC);
   }
 
   void ReserveScratch();
@@ -634,8 +634,14 @@ class GpuAgent : public GpuAgentInt {
   // @brief Current short duration scratch memory size.
   size_t scratch_used_large_;
 
+  struct HsaSignalLess {
+    bool operator()(const hsa_signal_t& lhs, const hsa_signal_t& rhs) const {
+      return lhs.handle < rhs.handle;
+    }
+  };
+
   // @brief Notifications for scratch release.
-  std::map<hsa_signal_t, hsa_signal_value_t> scratch_notifiers_;
+  std::map<hsa_signal_t, hsa_signal_value_t, HsaSignalLess> scratch_notifiers_;
 
   // @brief Default scratch size per queue.
   size_t queue_scratch_len_;
@@ -715,8 +721,6 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Array of regions owned by this agent.
   std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
-
-  core::Isa* isa_;
 
   // @brief HSA profile.
   hsa_profile_t profile_;

@@ -1,0 +1,30 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Nightly trigger for Multi-Arch CI
+#
+# This workflow triggers therock-multi-arch-ci.yml via workflow_dispatch
+# with specific GPU families. This is needed because TheRock's setup_multi_arch
+# workflow runs all families when triggered by schedule, ignoring inputs.
+# By using workflow_dispatch, TheRock respects our specified families.
+
+name: TheRock Multi-Arch CI Nightly Trigger
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  multi-arch-ci-nightly-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Multi-Arch CI with specific GPU families
+        uses: benc-uk/workflow-dispatch@e2e5e9a103e331dad343f381a29e654aea3cf8fc # v1.2.4
+        with:
+          workflow: therock-multi-arch-ci.yml
+          ref: develop
+          inputs: '{ "linux_amdgpu_families": "gfx94X,gfx950", "windows_amdgpu_families": "gfx1151" }'

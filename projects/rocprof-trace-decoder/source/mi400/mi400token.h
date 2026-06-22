@@ -115,7 +115,7 @@ union misc_type
     {
         uint64_t header : 7;
         uint64_t tm     : 3;
-        uint64_t fields : 8;
+        uint64_t fields : 7;
         uint64_t CLF    : 1;
         uint64_t CLL    : 1;
         uint64_t CLID   : 4;

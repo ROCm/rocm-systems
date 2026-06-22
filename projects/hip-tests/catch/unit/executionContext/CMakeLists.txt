@@ -1,6 +1,7 @@
 set(TEST_SRC
   hipGreenCtxCreate.cc
   hipExecutionCtxStreamCreate.cc
+  hipExecutionCtxStreamDetached.cc
   hipExecutionCtxRecordEvent.cc
   hipExecutionCtxResourceSplit.cc
   hipExecutionCtxSmAlignment.cc
