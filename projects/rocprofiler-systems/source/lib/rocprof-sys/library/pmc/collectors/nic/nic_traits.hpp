@@ -139,6 +139,8 @@ struct nic_traits
             switch(filter.mode)
             {
                 case device_selection_mode::ALL: should_include = true; break;
+                // Unreachable (early return above), kept for switch exhaustiveness
+                case device_selection_mode::NONE: should_include = false; break;
                 case device_selection_mode::SPECIFIC:
                     should_include = filter.names.count(device->get_name()) > 0;
                     break;
