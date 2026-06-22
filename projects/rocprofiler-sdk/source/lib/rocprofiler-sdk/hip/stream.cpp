@@ -553,7 +553,7 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
             }
             else
             {
-                ROCP_INFO << fmt::format(
+                ROCP_TRACE << fmt::format(
                     "[hip stream] {} has been designated as a stream set function", _info.name);
                 _func = create_read_functor<TableIdx, OpIdx>(_func);
             }
