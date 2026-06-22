@@ -34,22 +34,18 @@ Panel Config:
           value: SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128 + GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: $L2Bw_empirical_peak * 1e9
-          pct_of_peak: true
         GL1 Cache BW:
           value: 64 * SUM(TCP_GL1_REQ_READ_sum + TCP_GL1_REQ_WRITE_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: $L1Bw_empirical_peak * 1e9
-          pct_of_peak: true
         GL0 Cache BW (TCP Cache):
           value: 64 * SUM(TCP_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: $L0Bw_empirical_peak * 1e9
-          pct_of_peak: true
         LDS BW:
           value: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: $LDSBw_empirical_peak * 1e9
-          pct_of_peak: true
 
   - metric_table:
       id: 402
