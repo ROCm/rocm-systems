@@ -1717,7 +1717,10 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   }
 
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
-  uint64_t read = Hsa::queue_load_read_index_relaxed(gpu_queue_);
+  // read index is only used for AQL logging below; avoid the atomic load otherwise
+  uint64_t read = IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+      ? Hsa::queue_load_read_index_relaxed(gpu_queue_)
+      : 0;
 
   setFenceDirty(true);
   auto cache_state = extractAqlBits(packetHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
@@ -1818,7 +1821,10 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   }
 
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
-  uint64_t read = Hsa::queue_load_read_index_relaxed(gpu_queue_);
+  // read index is only used for AQL logging below; avoid the atomic load otherwise
+  uint64_t read = IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+      ? Hsa::queue_load_read_index_relaxed(gpu_queue_)
+      : 0;
 
   TrackQueueProgress(barrier_value_packet_, index);
 
