@@ -40,11 +40,6 @@
 #include <vector>
 #include <iostream>
 
-#define LOG_TRACE ROCP_TRACE
-//#define LOG_INFO ROCP_INFO
-//#define LOG_TRACE std::cout << std::endl
-#define LOG_INFO std::cout << std::endl
-
 namespace rocprofiler
 {
 namespace tool
@@ -53,15 +48,9 @@ namespace att_no_intercept
 {
 namespace
 {
-struct backend_agent
-{
-    rocprof_trace_decoder_handle_t decoder = {};
-};
-
-struct trace_range
+struct trace_range_t
 {
     bool                    active               = false;
-    bool                    complete             = false;
     rocprofiler_kernel_id_t kernel_id            = 0;
     uint64_t                offset_begin         = 0;
     uint64_t                offset_end           = 0;
@@ -73,13 +62,14 @@ struct trace_range
 
 struct scan_context
 {
-    agent_state*           state                = nullptr;
-    kernel_target_filter_t kernel_target_filter = nullptr;
-    trace_range            trace                = {};
+    agent_state_t*              state                = nullptr;
+    kernel_target_filter_t      kernel_target_filter = nullptr;
+    trace_range_t               trace                = {};
+    std::vector<trace_range_t>* completed            = {};
 };
 
 std::optional<rocprofiler_kernel_id_t>
-resolve_kernel_id(agent_state& state, const rocprofiler_thread_trace_decoder_pc_t& entry_point)
+resolve_kernel_id(agent_state_t& state, const rocprofiler_thread_trace_decoder_pc_t& entry_point)
 {
     auto shared_lock = std::shared_lock{state.mutex};
 
@@ -121,35 +111,34 @@ handle_dispatch(scan_context& context, const rocprofiler_thread_trace_decoder_di
 {
     auto& state = *context.state;
 
-    LOG_TRACE << "Received dispatch: " << dispatch.entry_point.code_object_id << " / "
+    ROCP_TRACE << "Received dispatch: " << dispatch.entry_point.code_object_id << " / "
               << dispatch.entry_point.address << " at me/pipe " << int(dispatch.me_id) << "/"
               << int(dispatch.pipe_id);
 
     auto kernel_id = resolve_kernel_id(state, dispatch.entry_point);
     if(!kernel_id)
     {
-        LOG_TRACE << "Unknown dispatch found.";
+        ROCP_TRACE << "Unknown dispatch found.";
     }
     else if((context.kernel_target_filter == nullptr || context.kernel_target_filter(*kernel_id)))
     {
         auto& trace = context.trace;
         if(!trace.active)
         {
-            trace              = trace_range{};
+            trace              = trace_range_t{};
             trace.active       = true;
             trace.offset_begin = dispatch.byte_offset;
 
-            LOG_INFO << "Dispatch cut at : " << *kernel_id << " byte " << dispatch.byte_offset;
+            ROCP_INFO << "Dispatch cut at : " << *kernel_id << " byte " << dispatch.byte_offset;
         }
 
         trace.kernel_id = *kernel_id;
         trace.remaining_dispatches = std::max<uint64_t>(state.consecutive_kernels, 1);
         trace.flush_count = 0;
-        trace.complete = false;
     }
 
     auto& trace = context.trace;
-    if(trace.active && !trace.complete && trace.remaining_dispatches > 0)
+    if(trace.active && trace.remaining_dispatches > 0)
     {
         trace.me_id   = dispatch.me_id;
         trace.pipe_id = dispatch.pipe_id;
@@ -167,7 +156,7 @@ handle_event(scan_context& context, const rocprofiler_thread_trace_decoder_event
     auto& trace = context.trace;
     if(!trace.active) return;
 
-    if(trace.complete || trace.remaining_dispatches > 0 ||
+    if(trace.remaining_dispatches > 0 ||
        event.me_id != trace.me_id || event.pipe_id != trace.pipe_id)
     {
         return;
@@ -182,9 +171,10 @@ handle_event(scan_context& context, const rocprofiler_thread_trace_decoder_event
 
     if(trace.flush_count == 2)
     {
-        LOG_INFO << "Cut trace at byte: " << event.byte_offset;
+        ROCP_INFO << "Cut trace at byte: " << event.byte_offset;
         trace.offset_end = event.byte_offset;
-        trace.complete   = true;
+        context.completed->emplace_back(std::move(trace));
+        trace = {};
     }
 }
 
@@ -255,7 +245,7 @@ build_standalone(rocprof_trace_decoder_handle_t handle,
 }
 
 void
-forward_cut(agent_state&                           state,
+forward_cut(agent_state_t&                           state,
             rocprofiler_thread_trace_shader_data_t original,
             std::vector<uint8_t>&                  standalone,
             shader_data_forwarder_t                shader_data_forwarder)
@@ -278,7 +268,7 @@ forward_cut(agent_state&                           state,
 }
 
 void
-record_code_object_symbols(agent_state& state,
+record_code_object_symbols(agent_state_t& state,
                            uint64_t     code_object_id,
                            const void*  code_object_data,
                            uint64_t     code_object_size)
@@ -315,56 +305,37 @@ backend_supported()
     return true;
 }
 
-void*
-backend_create(agent_state& state)
+void
+backend_create(agent_state_t& state)
 {
-    auto* backend = new backend_agent{};
-    auto  status  = rocprof_trace_decoder_create_handle(&backend->decoder);
+    auto status = rocprof_trace_decoder_create_handle(&state.decoder);
+
     if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
     {
         ROCP_ERROR << fmt::format("failed to create ATT no-intercept decoder for agent {}: {}",
                                   state.id.handle,
                                   rocprof_trace_decoder_get_status_string(status));
-        delete backend;
-        return nullptr;
     }
 
-    status = rocprof_trace_decoder_quick_scan(backend->decoder, 0, nullptr, 0, nullptr, nullptr);
+    status = rocprof_trace_decoder_quick_scan(state.decoder, 0, nullptr, 0, nullptr, nullptr);
     if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
     {
         auto msg = fmt::format("ATT no-intercept quick-scan support is unavailable for "
                                "agent {}: {}",
                                state.id.handle,
                                rocprof_trace_decoder_get_status_string(status));
-        (void) rocprof_trace_decoder_destroy_handle(backend->decoder);
-        delete backend;
         ROCP_FATAL << msg;
-        return nullptr;
     }
-
-    return backend;
 }
 
 void
-backend_destroy(agent_state& state)
+backend_destroy(agent_state_t& state)
 {
-    auto* backend = static_cast<backend_agent*>(state.backend);
-    if(backend == nullptr) return;
-
-    auto status = rocprof_trace_decoder_destroy_handle(backend->decoder);
-    if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
-    {
-        ROCP_WARNING << fmt::format("failed to destroy ATT no-intercept decoder for agent {}: {}",
-                                    state.id.handle,
-                                    rocprof_trace_decoder_get_status_string(status));
-    }
-
-    delete backend;
-    state.backend = nullptr;
+    (void) rocprof_trace_decoder_destroy_handle(state.decoder);
 }
 
 void
-backend_code_object_load(agent_state&                                                state,
+backend_code_object_load(agent_state_t&                                                state,
                          const rocprofiler_callback_tracing_code_object_load_data_t& data)
 {
     if(data.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
@@ -386,14 +357,11 @@ backend_code_object_load(agent_state&                                           
 }
 
 void
-backend_shader_data(agent_state&                           state,
+backend_shader_data(agent_state_t&                           state,
                     rocprofiler_thread_trace_shader_data_t shader_data,
                     shader_data_forwarder_t                shader_data_forwarder,
                     kernel_target_filter_t                 kernel_target_filter)
 {
-    auto* backend = static_cast<backend_agent*>(state.backend);
-    if(backend == nullptr) return;
-
     if((shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL) != 0 ||
        (shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL) != 0)
     {
@@ -405,11 +373,15 @@ backend_shader_data(agent_state&                           state,
     auto* scan_data = static_cast<const uint8_t*>(shader_data.data) + shader_data.read_offset;
     auto  scan_size = shader_data.data_size - shader_data.read_offset;
 
+    thread_local std::vector<trace_range_t> completed{};
+    completed.clear();
+
     auto context                 = scan_context{};
     context.state                = &state;
     context.kernel_target_filter = kernel_target_filter;
+    context.completed            = &completed;
 
-    auto status = rocprof_trace_decoder_quick_scan(backend->decoder,
+    auto status = rocprof_trace_decoder_quick_scan(state.decoder,
                                                    shader_data.chunk_index,
                                                    scan_data,
                                                    scan_size,
@@ -425,32 +397,33 @@ backend_shader_data(agent_state&                           state,
         return;
     }
 
-    const auto& trace = context.trace;
-    if(!trace.active) return;
-    if(!trace.complete) return;
+    ROCP_WARNING_IF(context.trace.active) << "Context not ended";
 
-    auto standalone = std::vector<uint8_t>{};
-    status          = build_standalone(backend->decoder,
-                              shader_data.chunk_index,
-                              scan_data,
-                              scan_size,
-                              trace.offset_begin,
-                              trace.offset_end,
-                              standalone);
-
-    if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+    for (auto& trace : completed)
     {
-        ROCP_WARNING << fmt::format("ATT no-intercept standalone cut failed for agent {} "
-                                 "chunk {} range {}..{}: {}",
-                                 state.id.handle,
-                                 shader_data.chunk_index,
-                                 trace.offset_begin,
-                                 trace.offset_end,
-                                 rocprof_trace_decoder_get_status_string(status));
-        return;
-    }
+        auto standalone = std::vector<uint8_t>{};
+        status          = build_standalone(state.decoder,
+                                shader_data.chunk_index,
+                                scan_data,
+                                scan_size,
+                                trace.offset_begin,
+                                trace.offset_end,
+                                standalone);
 
-    forward_cut(state, shader_data, standalone, shader_data_forwarder);
+        if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << fmt::format("ATT no-intercept standalone cut failed for agent {} "
+                                    "chunk {} range {}..{}: {}",
+                                    state.id.handle,
+                                    shader_data.chunk_index,
+                                    trace.offset_begin,
+                                    trace.offset_end,
+                                    rocprof_trace_decoder_get_status_string(status));
+            return;
+        }
+
+        forward_cut(state, shader_data, standalone, shader_data_forwarder);
+    }
 }
 }  // namespace att_no_intercept
 }  // namespace tool
