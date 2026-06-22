@@ -63,8 +63,7 @@ void simpleVectorAdd(size_t numElements, int iters, hipStream_t stream, bool thr
     HIPCHECK(hipDeviceSynchronize());
 
     if (threadSafe) {
-      size_t mismatchCount = HipTest::checkVectorADD(A_h, B_h, C_h, numElements, true, false);
-      REQUIRE_THREAD(mismatchCount == 0);
+      HipTest::checkVectorADDT(A_h, B_h, C_h, numElements);
     } else {
       HipTest::checkVectorADD(A_h, B_h, C_h, numElements);
     }

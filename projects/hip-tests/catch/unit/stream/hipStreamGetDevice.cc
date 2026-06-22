@@ -9,7 +9,6 @@
 #include <hip_test_checkers.hh>
 
 #define NUMBER_OF_THREADS 10
-static bool thread_results[NUMBER_OF_THREADS];
 
 /**
  * @addtogroup hipStreamGetDevice hipStreamGetDevice
@@ -121,46 +120,32 @@ HIP_TEST_CASE(Unit_hipStreamGetDevice_Usecase) {
  *    - HIP_VERSION >= 5.6
  */
 
-static bool validateStreamGetDevice() {
+static void validateStreamGetDevice() {
   int gpu = 0;
   hipDevice_t device_from_stream;
   hipStream_t stream;
-  // Runs on worker threads: avoid thread-unsafe Catch2 macros. Fold the status
-  // into the return value and let the main thread validate it via REQUIRE.
-  if (hipStreamCreate(&stream) != hipSuccess) {
-    return false;
-  }
-  bool res = (hipStreamGetDevice(stream, &device_from_stream) == hipSuccess);
-  res = res && (device_from_stream == gpu);
-  // Always destroy the stream once created, regardless of earlier failures, to
-  // avoid leaking it.
-  res = (hipStreamDestroy(stream) == hipSuccess) && res;
-  return res;
+  HIP_CHECK_THREAD(hipStreamCreate(&stream));
+  HIP_CHECK_THREAD(hipStreamGetDevice(stream, &device_from_stream));
+  HIP_CHECK_THREAD(hipStreamDestroy(stream));
+
+  REQUIRE_THREAD(device_from_stream == gpu);
 }
 
-static void thread_Test(int threadNum) { thread_results[threadNum] = validateStreamGetDevice(); }
-
-static bool test_hipStreamGetDevice_MThread() {
+static void test_hipStreamGetDevice_MThread() {
   std::vector<std::thread> tests;
 
   // Spawn the test threads
   for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    thread_results[idx] = false;
-    tests.push_back(std::thread(thread_Test, idx));
+    tests.push_back(std::thread(validateStreamGetDevice));
   }
   // Wait for all threads to complete
   for (std::thread& t : tests) {
     t.join();
   }
-  // Wait for thread
-  bool status = true;
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    status = status & thread_results[idx];
-  }
-  return status;
+  HIP_CHECK_THREAD_FINALIZE();
 }
 
-HIP_TEST_CASE(Unit_hipStreamGetDevice_MThread) { REQUIRE(true == test_hipStreamGetDevice_MThread()); }
+HIP_TEST_CASE(Unit_hipStreamGetDevice_MThread) { test_hipStreamGetDevice_MThread(); }
 
 /**
  * Test Description
