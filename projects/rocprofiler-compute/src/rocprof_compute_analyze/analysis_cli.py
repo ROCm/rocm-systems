@@ -17,8 +17,8 @@ from utils.utils_analysis import (
     build_call_trees_with_kernel_ids,
     build_operator_summary,
     get_matrix_ops_type,
-    process_torch_trace_output,
-    write_torch_trace_consolidated_csv,
+    process_ml_api_trace_output,
+    write_ml_api_trace_consolidated_csv,
 )
 from utils.utils_common import validate_roofline_csv
 
@@ -112,14 +112,14 @@ class cli_analysis(OmniAnalyze_Base):
             workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
             if getattr(args, "list_torch_operators", False):
-                consolidated_df, torch_trace_path = process_torch_trace_output(
+                consolidated_df, ml_api_trace_path = process_ml_api_trace_output(
                     path_info[0]
                 )
                 if consolidated_df.empty:
                     tty.list_torch_operators(path_info[0], {})
                     sys.exit(0)
 
-                write_torch_trace_consolidated_csv(consolidated_df, torch_trace_path)
+                write_ml_api_trace_consolidated_csv(consolidated_df, ml_api_trace_path)
                 call_trees = build_call_trees_with_kernel_ids(
                     consolidated_df=consolidated_df,
                     kernel_top_df=kernel_top_df,
@@ -250,28 +250,28 @@ class cli_analysis(OmniAnalyze_Base):
         evaluation runs once with the correct kernel filter — the same
         approach used by -k/--kernel.
         """
-        torch_trace_dir = Path(workload_path) / "torch_trace"
-        consolidated_path = torch_trace_dir / "consolidated.csv"
+        ml_api_trace_dir = Path(workload_path) / "ml_api_trace"
+        consolidated_path = ml_api_trace_dir / "consolidated.csv"
 
         if consolidated_path.exists():
             consolidated_df = pd.read_csv(consolidated_path)
             console_log(
-                "torch trace",
+                "ml api trace",
                 f"Loaded cached {consolidated_path}. "
-                "Delete torch_trace/ directory to force regeneration from raw traces.",
+                "Delete ml_api_trace/ directory to force regeneration from raw traces.",
             )
         else:
-            consolidated_df, torch_trace_path = process_torch_trace_output(
+            consolidated_df, ml_api_trace_path = process_ml_api_trace_output(
                 workload_path
             )
             if consolidated_df.empty:
                 console_warning(
-                    "torch trace",
+                    "ml api trace",
                     "No torch operator data found in this workload. "
                     "Proceeding without torch operator filter.",
                 )
                 return
-            write_torch_trace_consolidated_csv(consolidated_df, torch_trace_path)
+            write_ml_api_trace_consolidated_csv(consolidated_df, ml_api_trace_path)
 
         pattern_list = parse_torch_operator_patterns(args)
         all_operators = consolidated_df["Operator_Name"].dropna().unique()
@@ -286,7 +286,7 @@ class cli_analysis(OmniAnalyze_Base):
 
         if not matched_names:
             console_warning(
-                "torch trace",
+                "ml api trace",
                 f"No operators matched the pattern(s): {pattern_list}",
             )
             sys.exit(0)
@@ -302,7 +302,7 @@ class cli_analysis(OmniAnalyze_Base):
         }
 
         matched_df["Kernel_ID"] = matched_df["Kernel_Name"].str.strip().map(name_to_id)
-        workload.matched_torch_trace_df = matched_df
+        workload.matched_ml_api_trace_df = matched_df
 
         kernel_names = set(matched_df["Kernel_Name"].dropna().str.strip().unique())
         kernel_ids = sorted(
@@ -320,20 +320,20 @@ class cli_analysis(OmniAnalyze_Base):
         if kernel_ids:
             workload.filter_kernel_ids = kernel_ids
             console_log(
-                "torch trace",
+                "ml api trace",
                 f"Torch operator filter selected {len(kernel_ids)} kernel(s) "
                 "for metric analysis.",
             )
         else:
             if workload.filter_kernel_ids:
                 console_error(
-                    "torch trace",
+                    "ml api trace",
                     "No torch-operator kernels overlap with the -k filter "
                     f"{workload.filter_kernel_ids}. No kernels to analyze.",
                 )
             else:
                 console_error(
-                    "torch trace",
+                    "ml api trace",
                     "No kernels found for matched operators. No kernels to analyze.",
                 )
 
@@ -341,7 +341,7 @@ class cli_analysis(OmniAnalyze_Base):
         self, args: argparse.Namespace, workload: schema.Workload
     ) -> None:
         """Display matched torch operator call tree."""
-        matched_df = workload.matched_torch_trace_df
+        matched_df = workload.matched_ml_api_trace_df
         if matched_df.empty:
             return
 
@@ -358,6 +358,6 @@ class cli_analysis(OmniAnalyze_Base):
         print(f"{'=' * 80}")
 
         console_log(
-            "torch trace",
+            "ml api trace",
             f"Matched {len(matched_operators)} operator(s): {list(matched_operators)}",
         )
