@@ -583,6 +583,7 @@ library_sdk<Wrapper>::get_stream_id(Tp* record)
     auto _stream_id = typename Wrapper::stream_id{ 0 };
     if(record->correlation_id.external.ptr != nullptr)
     {
+        // Extract the stream id
         auto* _ecid_data = static_cast<kernel_rename_and_stream_data*>(
             record->correlation_id.external.ptr);
         _stream_id                            = _ecid_data->stream_id;
@@ -732,7 +733,11 @@ library_sdk<Wrapper>::get_roctx_client()
         const auto roctx_traced_regions = config::get_trace_region();
         const auto has_trace_regions    = !roctx_traced_regions.empty();
 
-        if(!has_marker_domain && !has_trace_regions) return nullptr;
+        // Case 1: no marker domain and no trace regions — nothing to do
+        if(!has_marker_domain && !has_trace_regions)
+        {
+            return nullptr;
+        }
 
         const auto roctx_config = roctx_client_config{
             has_marker_domain,          config::get_use_perfetto(),
@@ -757,8 +762,13 @@ void
 library_sdk<Wrapper>::shutdown()
 {
     auto roctx_client = get_roctx_client();
-    if(roctx_client) roctx_client->get_controller()->shutdown();
+    // Shutdown marker client (and trace_control) before rocprofiler-sdk finalization
+    if(roctx_client)
+    {
+        roctx_client->get_controller()->shutdown();
+    }
 
+    // shutdown
     if(tool_data && tool_data->client_id && tool_data->client_fini)
         tool_data->client_fini(*tool_data->client_id);
 }
@@ -1040,6 +1050,9 @@ std::uint64_t
 library_sdk<Wrapper>::get_scratch_mem_alloc_size(
     [[maybe_unused]] const typename Wrapper::scratch_memory_record& record)
 {
+// The version of rocprofiler_buffer_tracing_scratch_memory_record_t from ROCm < 7.1 does
+// not have the allocation_size field. ROCPROFILER_VERSION for both ROCm 7.0 and 7.1
+// is 1.0.0, so we need to check the ROCm version.
 #if ROCPROFSYS_ROCM_VERSION >= 70100
     return record.allocation_size;
 #else
@@ -1155,10 +1168,16 @@ library_sdk<Wrapper>::flush_counter_storage_outputs()
     {
         if(!storage || !storage->storage) continue;
         if(storage->manager)
+        {
             storage->manager->cleanup(cleanup_key);
+        }
         else
+        {
+            // No tim::manager at construction (add_cleanup was skipped); still flush
+            // timemory storage once at shutdown.
             counter_storage<Wrapper>::write(storage->storage.get(), storage->metric_name,
                                             storage->metric_description);
+        }
     }
 }
 
@@ -1201,13 +1220,17 @@ library_sdk<Wrapper>::finalize_sdk_common()
 
 template <typename Wrapper>
 std::vector<typename Wrapper::counter_id>
-library_sdk<Wrapper>::create_agent_profile(typename Wrapper::agent_id      agent_id,
-                                           const std::vector<std::string>& counters,
-                                           client_data<Wrapper>*           data)
+library_sdk<Wrapper>::create_agent_profile(
+    typename Wrapper::agent_id agent_id, const std::vector<std::string>& counters,
+    //  const tool_agent_vec_t&         gpu_agents,
+    //  const agent_counter_info_map_t& counters_info,
+    //  agent_counter_profile_map_t&    data)
+    client_data<Wrapper>* data)
 {
     using counter_vec_t = std::vector<typename Wrapper::counter_id>;
     if(!data) data = tool_data;
 
+    // check if already created
     if(data->agent_counter_profiles.find(agent_id) != data->agent_counter_profiles.end())
         return counter_vec_t{};
 
@@ -1217,12 +1240,14 @@ library_sdk<Wrapper>::create_agent_profile(typename Wrapper::agent_id      agent
     auto        counters_v   = counter_vec_t{};
     const auto* tool_agent_v = data->get_gpu_tool_agent(agent_id);
 
+    // Check if agent info is available (may not be for unsupported architectures)
     auto agent_info_it = data->agent_counter_info.find(agent_id);
     if(agent_info_it == data->agent_counter_info.end())
     {
         LOG_WARNING("Skipping GPU agent {} (device {}) due to unsupported "
                     "architecture or missing counter info",
                     agent_id.handle, tool_agent_v->device_id);
+
         data->agent_counter_profiles.emplace(agent_id, profile);
         return counter_vec_t{};
     }
@@ -1248,17 +1273,37 @@ library_sdk<Wrapper>::create_agent_profile(typename Wrapper::agent_id      agent
             }
 
             auto dev_id_v = std::stoul(dev_id_s);
+
+            LOG_DEBUG("tool agent device id={}, name={}, device_id={}",
+                      tool_agent_v->device_id, name_v, dev_id_v);
+
+            // skip this counter if the counter is for a specific device id (which
+            // doesn't this agent's device id)
             if(dev_id_v != tool_agent_v->device_id)
             {
-                --expected_v;
+                --expected_v;  // is not expected
                 continue;
             }
         }
 
+        // Removes any numeric index enclosed in square brackets at the end of the
+        // string. For example, "example[123]" will be converted to "example".
         auto _old_name_v = name_v;
         name_v =
             std::regex_replace(name_v, std::regex{ "^(.*)(\\[)([0-9]+)(\\])$" }, "$1");
 
+        if(name_v != _old_name_v)
+        {
+            LOG_DEBUG("tool agent device id={}, old_name={}, name={}",
+                      tool_agent_v->device_id, _old_name_v, name_v);
+        }
+        else if(name_v == itr)
+        {
+            LOG_DEBUG("tool agent device id={}, name={}", tool_agent_v->device_id,
+                      name_v);
+        }
+
+        // search the gpu agent counter info for a counter with a matching name
         for(const auto& citr : agent_info_it->second)
         {
             if(name_v == std::string_view{ citr.name })
@@ -1271,19 +1316,24 @@ library_sdk<Wrapper>::create_agent_profile(typename Wrapper::agent_id      agent
 
     if(counters_v.size() != expected_v)
     {
+        auto requested_counters = fmt::format("{}", fmt::join(counters, ", "));
+        auto found_counters     = fmt::format("{}", fmt::join(found_v, ", "));
+
+        // Determine which counters were not found
         auto missing_counters = std::vector<std::string>{};
         for(const auto& counter : counters)
+        {
             if(std::find(found_v.begin(), found_v.end(), counter) == found_v.end())
                 missing_counters.emplace_back(counter);
+        }
+        auto missing_counters_str = fmt::format("{}", fmt::join(missing_counters, ", "));
 
         LOG_WARNING("Unable to find all counters for agent {} (gpu-{}, {}). "
                     "Requested: {}. Found: {}. Missing: {}. Continuing with "
                     "available counters.",
                     tool_agent_v->agent->node_id, tool_agent_v->device_id,
-                    tool_agent_v->agent->name,
-                    fmt::format("{}", fmt::join(counters, ", ")),
-                    fmt::format("{}", fmt::join(found_v, ", ")),
-                    fmt::format("{}", fmt::join(missing_counters, ", ")));
+                    tool_agent_v->agent->name, requested_counters, found_counters,
+                    missing_counters_str);
     }
 
     if(!counters_v.empty())
@@ -1310,8 +1360,11 @@ library_sdk<Wrapper>::set_kernel_rename_and_stream_correlation_id(
     typename Wrapper::tracing_operation /*op*/, std::uint64_t /*internal_corr_id*/,
     typename Wrapper::user_data_t* external_corr_id, void* /*user_data*/)
 {
-    auto* _info           = new kernel_rename_and_stream_data{};
-    _info->stream_id      = stream_id_top();
+    auto* _info = new kernel_rename_and_stream_data{};
+
+    _info->stream_id = stream_id_top();
+
+    // Set the external correlation id service to point to struct
     external_corr_id->ptr = _info;
     return 0;
 }
@@ -1339,6 +1392,7 @@ library_sdk<Wrapper>::tool_code_object_callback(
                     _data.emplace_back(
                         code_object_callback_record_t<Wrapper>{ ts, record, data_v });
                 });
+                // Insert callback trace into database
                 trace_cache::get_metadata_registry().add_code_object(data_v);
             }
             else if(record.operation ==
@@ -1432,11 +1486,18 @@ library_sdk<Wrapper>::tool_tracing_callback_stop(
                                 "{} @ {}:{}", rocprofsys::utility::demangle(*_func),
                                 ::basename(_loc->c_str()), _line);
                             if(_bt_cnt < 10)
+                            {
+                                // Prepend zero for better ordering in UI. Only one
+                                // zero is ever necessary since stack depth is limited
+                                // to 16.
                                 tracing::add_perfetto_annotation(
                                     ctx, fmt::format("frame#0{}", _bt_cnt++), _entry);
+                            }
                             else
+                            {
                                 tracing::add_perfetto_annotation(
                                     ctx, fmt::format("frame#{}", _bt_cnt++), _entry);
+                            }
                         }
                     }
                 }
@@ -1448,6 +1509,7 @@ library_sdk<Wrapper>::tool_tracing_callback_stop(
             });
     }
 
+    // Insert callback trace into database
     auto args = function_args_t{};
     Wrapper::iterate_callback_tracing_kind_operation_args(record, iterate_args_callback,
                                                           2, &args);
@@ -1502,6 +1564,12 @@ library_sdk<Wrapper>::tool_tracing_callback(
     };
 
 #if(ROCPROFILER_VERSION >= 600)
+    // Skip implicit_task associated with an "initial-task-begin" occurrence as
+    // well as the thread_begin associated with an "initial-thread-begin" occurrence
+    // as they are generated by our tool.
+    // The two callbacks occur after our tool initializes OMPT but before the
+    // first OpenMP region (user code) begins.
+    // Note: Can occur multiple times (Ex: MPI+OpenMP hybrid)
     if(record.kind == Wrapper::CALLBACK_TRACING_OMPT)
     {
         auto* payload_data = static_cast<typename Wrapper::ompt_data_t*>(record.payload);
@@ -1511,7 +1579,7 @@ library_sdk<Wrapper>::tool_tracing_callback(
             case Wrapper::OMPT_ID_implicit_task:
             {
                 int flag = payload_data->args.implicit_task.flags;
-                if(flag & ompt_task_initial) return;
+                if(flag & ompt_task_initial) return;  // Skips both the start and end
                 break;
             }
             case Wrapper::OMPT_ID_thread_begin:
@@ -1522,6 +1590,11 @@ library_sdk<Wrapper>::tool_tracing_callback(
             }
             default: break;
         }
+        // TODO: Once finalization issue is fixed, skip the corresponding end
+        // of the thread_begin callback. Can be identified with:
+        // - thread_end: The thread_data ptr from the thread_begin callback generated
+        //    by the "initial-thread-begin" needs to match the thread_end's
+        //    thread_data ptr
     }
 #endif
 
@@ -1580,6 +1653,7 @@ library_sdk<Wrapper>::tool_tracing_callback(
                 tool_tracing_callback_start(category::rocm_rccl_api{}, record, user_data,
                                             ts);
                 break;
+            // MARKER_CORE_API is handled by roctx_client on control_ctx
             case Wrapper::CALLBACK_TRACING_NONE:
             case Wrapper::CALLBACK_TRACING_LAST:
             case Wrapper::CALLBACK_TRACING_MARKER_CONTROL_API:
@@ -1692,6 +1766,7 @@ library_sdk<Wrapper>::tool_tracing_callback(
                 {
                     auto* _data = static_cast<typename Wrapper::kernel_dispatch_data*>(
                         record.payload);
+                    // save for post-processing
                     get_kernel_dispatch_timestamps().emplace(
                         _data->dispatch_info.dispatch_id,
                         timing_interval<Wrapper>{ _data->start_timestamp,
@@ -1701,9 +1776,12 @@ library_sdk<Wrapper>::tool_tracing_callback(
 #if(ROCPROFILER_VERSION >= 600)
             case Wrapper::CALLBACK_TRACING_OMPT:
             {
+                // Callbacks that are received but that we do not process
                 static const std::set<typename Wrapper::ompt_operation_t>
                     ompt_no_process = {
-                        Wrapper::OMPT_ID_callback_functions,
+                        Wrapper::OMPT_ID_callback_functions,  // "Fake" callback
+                        // Not processed as these are received after our tool
+                        // finalizes
                         Wrapper::OMPT_ID_thread_end,
                     };
                 auto ompt_operation_type =
@@ -1721,6 +1799,9 @@ library_sdk<Wrapper>::tool_tracing_callback(
                         ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
                         ompt_pop_parallel_callback(record, ts, _bt_data);
                         break;
+                    // Unlike parallel callbacks, we cannot receive the corresponding
+                    // end to thread_begin. Set thread_begin as "instant" so the user
+                    // can see callback without it spanning the entire track
                     case Wrapper::OMPT_ID_thread_begin:
                     case Wrapper::OMPT_ID_lock_init:
                     case Wrapper::OMPT_ID_lock_destroy:
@@ -1740,13 +1821,19 @@ library_sdk<Wrapper>::tool_tracing_callback(
                     case Wrapper::OMPT_ID_task_dependence:
                     case Wrapper::OMPT_ID_error:
                     {
+                        // These callbacks are considered instant events and should
+                        // start and immediately call stop as no corresponding "end"
+                        // will be received
                         auto instant_ts = ts;
                         ompt_tracing_callback_start(record, user_data, instant_ts);
                         ompt_tracing_callback_stop(record, user_data, instant_ts,
                                                    _bt_data);
+                        // Although this has endpoint arg, treat it as instant event
                         ompt_cache_instant_event(record, instant_ts, _bt_data);
                         break;
                     }
+                    // case ROCPROFILER_OMPT_ID_device_unload: // Unsupported by
+                    // runtime
                     default:
                         LOG_WARNING("tool_tracing_callback: unhandled PHASE_NONE "
                                     "callback record: {}",
@@ -1782,9 +1869,12 @@ library_sdk<Wrapper>::ompt_get_unified_name(
 {
     std::string_view _name =
         tool_data->callback_tracing_info.at(record.kind, record.operation);
+
+    // Forces omp_parallel begin and end to have same name, allowing track to connect
     if(record.operation == Wrapper::OMPT_ID_parallel_begin ||
        record.operation == Wrapper::OMPT_ID_parallel_end)
         _name = "omp_parallel";
+
     return _name;
 }
 
@@ -1800,11 +1890,14 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
 
     auto ompt_operation_type =
         static_cast<typename Wrapper::ompt_operation_t>(record.operation);
+    // ROCProfiler-SDK documentation recommends using 1 for the ENTER phase to avoid seg.
+    // faults.
     auto max_deref = (record.phase == Wrapper::CALLBACK_PHASE_ENTER ||
                       ompt_operation_type == Wrapper::OMPT_ID_parallel_begin)
                          ? 1
                          : 2;
 
+    // Perform standard iteration of arguments
     if constexpr(std::is_same_v<ArgsT, callback_arg_array_t>)
         Wrapper::iterate_callback_tracing_kind_operation_args(record, save_args,
                                                               max_deref, &args);
@@ -1832,6 +1925,7 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
     auto* payload_data = static_cast<typename Wrapper::ompt_data_t*>(record.payload);
     if(!payload_data) return;
 
+    // Extract flags value
     switch(ompt_operation_type)
     {
         case Wrapper::OMPT_ID_parallel_begin:
@@ -1850,10 +1944,11 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
         default: break;
     }
 
+    // Textual representation of flags adapted from OMPT 5.0 specification
     switch(ompt_operation_type)
     {
-        case Wrapper::OMPT_ID_parallel_begin:
-        case Wrapper::OMPT_ID_parallel_end:
+        case Wrapper::OMPT_ID_parallel_begin:  // ompt_parallel_flag_t
+        case Wrapper::OMPT_ID_parallel_end:    // ompt_parallel_flag_t
         {
             const auto ft = std::string{ "ompt_parallel_flag_t" };
             if(flags_val & ompt_parallel_invoker_program)
@@ -1866,7 +1961,7 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
                 append(ft, "invoker_cause", "parallel_construct");
             break;
         }
-        case Wrapper::OMPT_ID_task_create:
+        case Wrapper::OMPT_ID_task_create:  // ompt_task_flag_t
         {
             const auto ft = std::string{ "ompt_task_flag_t" };
             if(flags_val & ompt_task_initial)
@@ -1877,30 +1972,34 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
                 append(ft, "classification", "explicit");
             else if(flags_val & ompt_task_target)
                 append(ft, "classification", "target");
-            std::string props;
-            props.reserve(60);
-            if(flags_val & ompt_task_undeferred) props += "undeferred, ";
-            if(flags_val & ompt_task_untied) props += "untied, ";
-            if(flags_val & ompt_task_final) props += "final, ";
-            if(flags_val & ompt_task_mergeable) props += "mergeable, ";
-            if(flags_val & ompt_task_merged) props += "merged, ";
-            if(!props.empty())
-                props.erase(props.size() - 2);
+
+            // Multiple/none can be set
+            std::string task_properties;
+            task_properties.reserve(60);
+            if(flags_val & ompt_task_undeferred) task_properties += "undeferred, ";
+            if(flags_val & ompt_task_untied) task_properties += "untied, ";
+            if(flags_val & ompt_task_final) task_properties += "final, ";
+            if(flags_val & ompt_task_mergeable) task_properties += "mergeable, ";
+            if(flags_val & ompt_task_merged) task_properties += "merged, ";
+
+            if(!task_properties.empty())
+                task_properties.erase(task_properties.size() - 2);
             else
-                props = "none";
-            append(ft, "properties", props);
+                task_properties = "none";
+            append(ft, "properties", task_properties);
             break;
         }
-        case Wrapper::OMPT_ID_implicit_task:
+        case Wrapper::OMPT_ID_implicit_task:  // initial (1) or implicit (2)
         {
             const auto ft = std::string{ "flags" };
+            // As of now, implicit_tasks with ompt_task_initial are filtered out
             if(flags_val & ompt_task_initial)
                 append(ft, "kind", "initial");
             else if(flags_val & ompt_task_implicit)
                 append(ft, "kind", "implicit");
             break;
         }
-        case Wrapper::OMPT_ID_cancel:
+        case Wrapper::OMPT_ID_cancel:  // ompt_cancel_flag_t
         {
             const auto ft = std::string{ "ompt_cancel_flag_t" };
             if(flags_val & ompt_cancel_parallel)
@@ -1927,6 +2026,7 @@ template <typename Wrapper>
 auto&
 library_sdk<Wrapper>::get_ompt_standard_cb_storage()
 {
+    // std::uint64_t -> internal id from rocprofiler_correlation_id_t
     static thread_local auto _v =
         std::unordered_map<std::uint64_t, rocprofsys_ompt_data_storage_t>{};
     return _v;
@@ -1936,6 +2036,7 @@ template <typename Wrapper>
 auto&
 library_sdk<Wrapper>::get_ompt_parallel_cb_storage()
 {
+    // uintptr_t -> parallel_data (see callback definition)
     static thread_local auto _v =
         std::unordered_map<uintptr_t, rocprofsys_ompt_data_storage_t>{};
     return _v;
@@ -2128,11 +2229,17 @@ library_sdk<Wrapper>::ompt_tracing_callback_stop(
                                                   rocprofsys::utility::demangle(*_func),
                                                   ::basename(_loc->c_str()), _line);
                         if(_bt_cnt < 10)
+                        {
+                            // Prepend zero for better ordering in UI. Only one zero
+                            // is ever necessary since stack depth is limited to 16.
                             tracing::add_perfetto_annotation(
                                 ctx, fmt::format("frame#0{}", _bt_cnt++), _entry);
+                        }
                         else
+                        {
                             tracing::add_perfetto_annotation(
                                 ctx, fmt::format("frame#{}", _bt_cnt++), _entry);
+                        }
                     }
                 }
             });
@@ -2198,7 +2305,11 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                 auto _queue_id           = record->dispatch_info.queue_id;
                 const auto*   _agent     = tool_data->get_gpu_tool_agent(_agent_id);
                 std::uint64_t _stream_id = get_stream_id(record).handle;
-                if(_stream_id == 0) _group_by_queue = true;
+                if(_stream_id == 0)
+                {
+                    // kernel_dispatch is not associated with a HIP stream
+                    _group_by_queue = true;
+                }
 
                 {
                     cache_category<category::rocm_kernel_dispatch>();
@@ -2225,6 +2336,7 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
 
                 if(get_use_perfetto())
                 {
+                    // Lambda to add common perfetto annotations for kernel dispatch
                     auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
                         if(config::get_perfetto_annotations())
                         {
@@ -2292,6 +2404,7 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
             }
             else if(header->kind == Wrapper::BUFFER_TRACING_SCRATCH_MEMORY)
             {
+                // Scratch memory event is not associated with a HIP stream
                 auto* record = static_cast<typename Wrapper::scratch_memory_record*>(
                     header->payload);
                 bool        _group_by_queue = _default_group_by_queue;
@@ -2369,6 +2482,7 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
             }
             else if(header->kind == Wrapper::BUFFER_TRACING_MEMORY_COPY)
             {
+                // memory_copy is not associated with a HIP stream
                 auto* record =
                     static_cast<typename Wrapper::memory_copy_record*>(header->payload);
                 bool        _group_by_queue = _default_group_by_queue;
@@ -2506,6 +2620,7 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
             else if(header->kind == Wrapper::BUFFER_TRACING_HSA_CORE_API ||
                     header->kind == Wrapper::BUFFER_TRACING_HSA_AMD_EXT_API)
             {
+                // Not handling those buffered events
                 continue;
             }
             else
@@ -2625,24 +2740,38 @@ library_sdk<Wrapper>::tool_hip_stream_callback(
     typename Wrapper::user_data_t* /*user_data*/, void* /*data*/)
 {
     if(record.kind != Wrapper::CALLBACK_TRACING_HIP_STREAM) return;
+    // Extract stream ID from record
     auto* stream_handle_data =
         static_cast<typename Wrapper::hip_stream_data*>(record.payload);
     auto stream_id = stream_handle_data->stream_id;
 
+    // STREAM_HANDLE_CREATE and DESTROY are no-ops
     if(record.operation == Wrapper::HIP_STREAM_CREATE)
     {
-        LOG_TRACE(" operation = Wrapper::HIP_STREAM_CREATE");
+        LOG_TRACE(" operation = ROCPROFILER_HIP_STREAM_CREATE");
     }
     else if(record.operation == Wrapper::HIP_STREAM_DESTROY)
     {
-        LOG_TRACE(" operation = Wrapper::HIP_STREAM_DESTROY");
+        LOG_TRACE(" operation = ROCPROFILER_HIP_STREAM_DESTROY");
     }
     else if(record.operation == Wrapper::HIP_STREAM_SET)
     {
         if(record.phase == Wrapper::CALLBACK_PHASE_ENTER)
+        {
+            // Push the stream ID onto the stream stack before underlying HIP function is
+            // called
+            LOG_TRACE(" operation = ROCPROFILER_HIP_STREAM_SET, phase = "
+                      "ROCPROFILER_CALLBACK_PHASE_ENTER");
             stream_id_push(stream_id);
+        }
         else if(record.phase == Wrapper::CALLBACK_PHASE_EXIT)
+        {
+            // Pop stream ID off of stream stack after underlying HIP function is
+            // completed
+            LOG_TRACE("operation = ROCPROFILER_HIP_STREAM_SET, phase = "
+                      "ROCPROFILER_CALLBACK_PHASE_EXIT");
             stream_id_pop();
+        }
     }
     else
     {
@@ -2660,9 +2789,11 @@ int
 library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
                                 void*                               user_data)
 {
+    // Only initialize once per session
     if(tool_init_done.exchange(true)) return 0;
 
     auto domains = settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS });
+
     std::stringstream _domains_ss;
     for(const auto& itr : domains->get_choices())
         _domains_ss << "- " << itr << "\n";
@@ -2672,7 +2803,10 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
     auto _buffered_domain  = sdk_core<Wrapper>::get_buffered_domains();
     auto _counter_events   = sdk_core<Wrapper>::get_rocm_events();
     auto _version          = sdk_core<Wrapper>::get_version();
-    if(_version.formatted == 0) LOG_WARNING("rocprofiler-sdk version not initialized");
+    if(_version.formatted == 0)
+    {
+        LOG_WARNING("rocprofiler-sdk version not initialized");
+    }
 
     auto* _data        = as_client_data<Wrapper>(user_data);
     _data->client_fini = fini_func;
@@ -2682,6 +2816,9 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
 
     rocprofiler_call<Wrapper>(Wrapper::create_context(&_data->primary_ctx),
                               "Wrapper::create_context");
+
+    // Code object callback on its own always-on context so kernel names are captured
+    // even when primary_ctx is stopped (region filter mode)
     rocprofiler_call<Wrapper>(Wrapper::create_context(&_data->code_object_ctx),
                               "Wrapper::create_context");
     rocprofiler_call<Wrapper>(Wrapper::configure_callback_tracing_service(
@@ -2689,6 +2826,8 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
                                   Wrapper::CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,
                                   tool_code_object_callback, _data),
                               "Wrapper::configure_callback_tracing_service");
+
+    // Control context for marker-based region filtering and pause/resume (always-on)
     rocprofiler_call<Wrapper>(Wrapper::create_context(&_data->control_ctx),
                               "Wrapper::create_context");
 
@@ -2701,11 +2840,15 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
 #endif
         };
 
+    // Insert the default stream and queue info to ensure that the default entry exists
     {
         trace_cache::get_metadata_registry().add_stream(0);
         trace_cache::get_metadata_registry().add_queue(0);
     }
 
+    // MARKER_CORE_API is handled by roctx_client on control_ctx
+    // ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,          ///< @see
+    // ::rocprofiler_hsa_core_api_id_t ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
     for(auto itr : {
             Wrapper::CALLBACK_TRACING_HSA_CORE_API,
             Wrapper::CALLBACK_TRACING_HSA_AMD_EXT_API,
@@ -2832,6 +2975,7 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
        _buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0 ||
        _buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
     {
+        // Initialize KFD event metadata
         rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
     }
 
@@ -2881,6 +3025,8 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
                                    Wrapper::BUFFER_POLICY_LOSSLESS, tool_tracing_buffered,
                                    tool_data, &_data->kfd_event_queue_buffer),
             "Wrapper::create_buffer");
+        // The only KFD_EVENT_QUEUE operation we want to process is RESTORE_RESCHEDULED.
+        // All others are captured within paired KFD_QUEUE operations
         auto kfd_event_queue_ops = std::array<typename Wrapper::tracing_operation, 1>{
             Wrapper::KFD_EVENT_QUEUE_RESTORE_RESCHEDULED
         };
@@ -2921,6 +3067,7 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
 
     if(!_counter_events.empty())
     {
+        // Resolve counter names to counter IDs per agent
         for(const auto& itr : _data->gpu_agents)
         {
             const auto& _agent_id = typename Wrapper::agent_id{ itr.agent->handle };
@@ -2928,6 +3075,7 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
                 _agent_id, create_agent_profile(_agent_id, _counter_events, _data));
         }
 
+        // --- Dispatch-mode kernel counters ---
         rocprofiler_call<Wrapper>(Wrapper::create_context(&_data->counter_ctx),
                                   "Wrapper::create_context");
         auto _operations = std::array<typename Wrapper::tracing_operation, 1>{
@@ -2966,6 +3114,8 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
         }
     }
 
+    // notify rocprofiler that initialization failed and all the contexts,
+    // buffers, etc. created should be ignored
     if(!is_valid(_data->primary_ctx)) return -1;
 
     gpu::add_device_metadata();
@@ -2976,6 +3126,10 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
         pmc::set_state(State::Active);
     }
 
+    // Setup roctx client (must happen within tool_init for rocprofiler-sdk context
+    // creation). Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API
+    // on control_ctx. trace_control's pause/resume callbacks are routed through
+    // roctx_client (registered later in library.cpp).
     auto roctx_client = get_roctx_client();
     if(roctx_client)
     {
@@ -2997,6 +3151,7 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
     {
         start();
     }
+    // no errors
     return 0;
 }
 
@@ -3012,6 +3167,10 @@ library_sdk<Wrapper>::tool_fini(void* callback_data)
     stop();
     finalize_sdk_common();
 
+    // Destroy buffers to drain in-flight async flush callbacks before
+    // deleting tool_data, which those callbacks may still be accessing.
+    // rocprofiler_destroy_buffer returns BUFFER_BUSY if a flush is still
+    // in progress, so retry until it succeeds or buffer is not found.
     for(auto itr : tool_data->get_buffers())
     {
         while(itr.handle > 0 &&
@@ -3036,11 +3195,16 @@ template <typename Wrapper>
 void
 library_sdk<Wrapper>::tool_attach_fini(void* /*tool_data_ptr*/)
 {
+    // Stop and flush SDK contexts/buffers so that buffer callbacks
+    // write their Perfetto events before Perfetto post-processing.
     ::rocprofsys::rocprofiler_sdk::stop();
     ::rocprofsys::rocprofiler_sdk::flush();
     finalize_sdk_common();
+
+    // Flush any pending region cache entries
     rocprofsys_flush_pending_region_cache_hidden();
 
+    // Write Perfetto trace output
     if(get_use_perfetto())
     {
         bool                             _perfetto_output_error = false;
@@ -3070,23 +3234,30 @@ library_sdk<Wrapper>::tool_attach_init([[maybe_unused]]
         rocprofsys_reset_for_reattach_hidden();
         reset_sdk_session_guards();
 
+        // Restart Perfetto for a new tracing session
         if(get_use_perfetto()) ::rocprofsys::perfetto::start();
+
         trace_cache::get_buffer_storage().start(getpid());
 
+        // Restart process sampler (AMD SMI, CPU freq polling thread)
         if(config::get_use_process_sampling())
         {
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
             ::rocprofsys::process_sampler::setup();
         }
+
         ::rocprofsys::set_state(::rocprofsys::State::Active);
     }
 
+    // Start all contexts provided by the SDK
     for(std::uint64_t i = 0; i < context_ids_length; ++i)
     {
         rocprofiler_call<Wrapper>(Wrapper::start_context(context_ids[i]),
                                   "Wrapper::start_context");
     }
+
     ::rocprofsys::rocprofiler_sdk::start();
+
     return 0;
 }
 
@@ -3100,19 +3271,24 @@ library_sdk<Wrapper>::sdk_tool_configure(std::uint32_t                  version,
                                          const char*                    runtime_version,
                                          typename Wrapper::client_id_t* id)
 {
+    // Only configure once per attach session
     if(sdk_configured.exchange(true)) return true;
 
+    // Ensure tooling is initialized and state is Active
     if(!rocprofsys::config::settings_are_configured() ||
        rocprofsys::get_state() < rocprofsys::State::Active)
     {
         rocprofsys_init_tooling_hidden();
     }
 
+    // set the client name
     id->name = "rocprofsys";
 
+    // store client info
     if(!tool_data) tool_data = new client_data<Wrapper>{};
     tool_data->client_id = id;
 
+    // compute major/minor/patch version info
     std::uint32_t major = version / 10000;
     std::uint32_t minor = (version % 10000) / 100;
     std::uint32_t patch = version % 100;
