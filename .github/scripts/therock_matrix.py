@@ -52,7 +52,7 @@ project_map = {
             "-DTHEROCK_ENABLE_ALL=OFF",
             "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON",
         ],
-        "projects_to_test": "rocr-debug-agent, rocgdb",
+        "projects_to_test": "rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
     },
     # debug agent changes don't have to exercise ROCgdb.
     "debug_tools-debug-agent": {
@@ -82,11 +82,11 @@ project_map = {
     # Also test rocr-debug-agent and rocgdb since those depend on runtimes.
     "runtimes": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "hip-tests, rocrtst, rocprofiler-sdk, rocr-debug-agent, rocgdb",
+        "projects_to_test": "hip-tests, rocrtst, rocprofiler-sdk, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
     },
     # Same test coverage as TheRock submodule-bump PRs (rocm-systems scope).
     # Nightly (schedule) uses this entry explicitly for alignment.
@@ -94,7 +94,7 @@ project_map = {
     # instead of above blanket addition of all tests, we can add logic to determine which mathlibs to test, based on file changes from last nightly run. Can be handled once the tests scripts move to component/monorepo src
     "nightly": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb, rocprim, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocprim, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma",
     },
 }
 

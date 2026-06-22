@@ -182,7 +182,13 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS-1)
 
 #define NCCL_LL128_MAX_NTHREADS 256
-#define NCCL_LL128_ELEMS_PER_THREAD 28
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+// Upstream NCCL value (120 = 8 lines * 15 dataElems for 128-byte lines).
+// On RCCL/HIP the host derives the per-channel LL128 buffer size from
+// rcclLL128ElemsPerThreadFromArch() (see rcclSetDefaultBuffSizes), so this
+// macro is unused on HIP and intentionally left undefined to prevent drift.
+#define NCCL_LL128_ELEMS_PER_THREAD 120
+#endif
 
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
 #define NCCL_LL128_SHMEM_SIZE (NCCL_LL128_SHMEM_ELEMS_PER_THREAD*NCCL_LL128_MAX_NTHREADS)

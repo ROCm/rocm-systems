@@ -1727,7 +1727,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 #ifdef ENABLE_WARP_SPEED
-  comm->topo->warpSpeedEnabled = (rcclParamWarpSpeedForceEnable() > 0 || (!parent && rcclCanUseWarpSpeedAuto(comm, nNodes)));
+  comm->topo->warpSpeedEnabled = (rcclParamWarpSpeedForceEnable() > 0 || ((!parent || comm->isGrow) && rcclCanUseWarpSpeedAuto(comm, nNodes)));
 #endif
 
   // For single node communicators that do not uses the full xgmi links per gpu, i.e., nranks < 8
@@ -1748,7 +1748,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
 
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
-  comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable();
+  // Default-enable LL128 on gfx1250 so NCCL_PROTO=LL128 is honored without
+  // also requiring RCCL_LL128_FORCE_ENABLE=1.
+  comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable()
+    || IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
 
   if (comm->ncclNet && comm->ncclNet->devices) {
