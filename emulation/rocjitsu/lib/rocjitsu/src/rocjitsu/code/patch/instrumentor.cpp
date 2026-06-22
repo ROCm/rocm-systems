@@ -89,6 +89,37 @@ std::string reg_name(RegisterRef ref) {
   return std::string(prefix) + std::to_string(ref.index);
 }
 
+// Special machine state has no save/restore path across a probe call yet.
+// Only SCC (via the trampoline envelope) and ordinary GPRs (via the spill
+// policy) are handled today. Until each special register gains a real consumer,
+// fail closed on any probe whose body touches them rather than letting it
+// silently corrupt the host kernel's state.
+bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *error_out) {
+  std::vector<const char *> touched;
+  if (summary.touches_exec)
+    touched.push_back("EXEC");
+  if (summary.touches_vcc)
+    touched.push_back("VCC");
+  if (summary.touches_m0)
+    touched.push_back("M0");
+  if (summary.touches_flat_scratch)
+    touched.push_back("FLAT_SCRATCH");
+  if (touched.empty())
+    return true;
+  if (error_out != nullptr) {
+    std::string msg = "probe body writes special machine state not yet preserved across a "
+                      "probe call:";
+    bool first = true;
+    for (const char *name : touched) {
+      msg += first ? " " : ", ";
+      msg += name;
+      first = false;
+    }
+    *error_out = std::move(msg);
+  }
+  return false;
+}
+
 } // namespace
 
 bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
@@ -195,6 +226,9 @@ bool validate_inline_nop_plan(const TrampolinePlan &plan, std::string *error_out
   return true;
 }
 
+// Only ordinary GPR clobbers feed the spill set. Special machine state in the
+// summary (EXEC/VCC/M0/FLAT_SCRATCH) is rejected up front by
+// check_probe_special_state
 RegisterSet compute_instrumentation_clobbers(const ProbeClobberSummary &probe_summary,
                                              const RegisterSet &builder_clobbers) {
   return probe_summary.ordinary_clobbers | builder_clobbers;
@@ -207,7 +241,7 @@ RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
 
 bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy, std::string *error_out) {
   if (policy == SpillPolicy::NoSpillsSupported && !spill_set.none()) {
-    std::string msg = "probe-call requires spilling live registers, unsupported as of 06/15/2026:";
+    std::string msg = "probe-call requires spilling live registers, not yet supported:";
     bool first = true;
     spill_set.for_each([&](RegisterRef ref) {
       msg += first ? " " : ", ";
@@ -470,6 +504,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // resource selection and the no-spill policy gate.
       auto summary = build_probe_clobber_summary(probe, &err);
       if (!summary) {
+        result.errors.push_back(std::move(err));
+        continue;
+      }
+
+      // Check for special machine state that has no save/restore path yet
+      if (!check_probe_special_state(*summary, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
