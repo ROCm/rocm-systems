@@ -176,8 +176,8 @@ struct collector
         {
             const auto   _device_id   = entry.device->get_index();
             const auto&  _device_name = entry.device->get_name();
-            const size_t _count =
-                m_sample_counts.count(_device_id) ? m_sample_counts.at(_device_id) : 0;
+            const auto   _it          = m_sample_counts.find(_device_id);
+            const size_t _count   = _it == m_sample_counts.end() ? 0 : _it->second;
             if(_count == 0)
             {
                 LOG_WARNING("No samples were collected for {} device '{}'",
