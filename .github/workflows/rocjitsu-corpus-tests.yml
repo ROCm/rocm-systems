@@ -88,7 +88,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --pre \
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
-            "rocm[devel]"
+            "rocm[devel]==7.14.0a20260619"
 
           ROCM_ROOT="$(rocm-sdk path --root)"
           ROCM_LIB="$(rocm-sdk path --root)"/lib

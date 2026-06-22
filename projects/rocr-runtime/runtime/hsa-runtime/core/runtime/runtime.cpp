@@ -1786,7 +1786,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]));
   };
 
-  while (!async_events_control_.exit) {
+  while (!async_events_control_.exit.load(std::memory_order_acquire)) {
     // Update hsa_signals pointer at start of each iteration since PushBack
     // at the end of the previous iteration may have reallocated the vector.
     hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
@@ -2889,7 +2889,7 @@ void Runtime::CloseTools() {
 }
 
 void Runtime::AsyncEventsControl::Shutdown() {
-  exit = true;
+  exit.store(true, std::memory_order_release);
   hsa_signal_handle(wake)->StoreRelaxed(1);
   os::WaitForThread(thread_);
   os::CloseThread(thread_);

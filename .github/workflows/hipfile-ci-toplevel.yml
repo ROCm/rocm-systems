@@ -9,6 +9,9 @@ on:
       - '.github/workflows/hipfile-*.yml'
       - '!**/*.md'
       - '!**/*.rst'
+      # ais-check is a self-contained Python tool with no dependency on the C++
+      # library, so its changes shouldn't trigger the full C++ build/test.
+      - '!projects/hipfile/tools/ais-check/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
