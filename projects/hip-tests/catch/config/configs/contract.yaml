@@ -183,3 +183,15 @@ contract:
   Contract_Occupancy_AvailableDynamicSmem_IsWithinDeviceLimit:
     <<: *level_0
     tags: [occupancy]
+  Contract_GraphCapture_BeginEndEmptyStream_ProducesGraph:
+    <<: *level_0
+    tags: [graph_capture]
+  Contract_GraphCapture_CapturedMemcpy_RoundTripsBytes:
+    <<: *level_0
+    tags: [graph_capture]
+  Contract_GraphCapture_IsCapturing_ReportsActiveDuringCapture:
+    <<: *level_0
+    tags: [graph_capture]
+  Contract_GraphCapture_GetCaptureInfo_ReturnsActiveState:
+    <<: *level_0
+    tags: [graph_capture]
