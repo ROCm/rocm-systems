@@ -18,275 +18,237 @@
 #    include <spdlog/fmt/fmt.h>
 #    include <unistd.h>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
-{
-
-// ─── Public template functions ────────────────────────────────────────────────
-
-template <typename Wrapper>
-void
-kfd_event_metadata_initialize(const client_data<Wrapper>* tool_data);
-
-template <typename Wrapper>
-void
-tool_kfd_page_fault_callback(const client_data<Wrapper>*           tool_data,
-                             const backend::kfd_page_fault_record* record);
-
-template <typename Wrapper>
-void
-tool_kfd_page_migrate_callback(const client_data<Wrapper>*             tool_data,
-                               const backend::kfd_page_migrate_record* record);
-
-template <typename Wrapper>
-void
-tool_kfd_queue_callback(const client_data<Wrapper>*      tool_data,
-                        const backend::kfd_queue_record* record);
-
-template <typename Wrapper>
-void
-tool_kfd_event_queue_callback(const client_data<Wrapper>*            tool_data,
-                              const backend::kfd_event_queue_record* record);
-
-template <typename Wrapper>
-void
-tool_kfd_event_unmap_from_gpu_callback(const client_data<Wrapper>*            tool_data,
-                                       const backend::kfd_event_unmap_record* record);
-
-template <typename Wrapper>
-void
-tool_kfd_event_dropped_events_callback(const client_data<Wrapper>*              tool_data,
-                                       const backend::kfd_event_dropped_record* record);
-
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
-
-// ─── Template implementations ────────────────────────────────────────────────
-
 namespace rocprofsys::rocprofiler_sdk
 {
 
-// ─── kfd_events_detail: helpers that specialize on concrete record types ──────
-
-namespace kfd_events_detail
-{
-
-template <typename Wrapper, typename RecordT>
-const char*
-get_kfd_operation_name([[maybe_unused]] const RecordT* record)
-{
-    return "KFD Event";
-}
+// ─── kfd_events<Wrapper> ─────────────────────────────────────────────────────
+//
+// All KFD event processing for a given SDK Wrapper type.
+// Public:  one static method per KFD buffer-tracing domain.
+// Private: operation-name helpers, PMC-value helpers, metadata/track helpers.
 
 template <typename Wrapper>
-inline const char*
-get_kfd_operation_name(const backend::kfd_page_fault_record* record)
+class kfd_events
 {
-    switch(record->operation)
+public:
+    // ─── Public API ──────────────────────────────────────────────────────────
+
+    static void metadata_initialize(const client_data<Wrapper>* tool_data);
+
+    static void page_fault_callback(const client_data<Wrapper>*           tool_data,
+                                    const backend::kfd_page_fault_record* record);
+
+    static void page_migrate_callback(const client_data<Wrapper>*             tool_data,
+                                      const backend::kfd_page_migrate_record* record);
+
+    static void queue_callback(const client_data<Wrapper>*      tool_data,
+                               const backend::kfd_queue_record* record);
+
+    static void event_queue_callback(const client_data<Wrapper>*            tool_data,
+                                     const backend::kfd_event_queue_record* record);
+
+    static void event_unmap_from_gpu_callback(
+        const client_data<Wrapper>*            tool_data,
+        const backend::kfd_event_unmap_record* record);
+
+    static void event_dropped_events_callback(
+        const client_data<Wrapper>*              tool_data,
+        const backend::kfd_event_dropped_record* record);
+
+private:
+    // ─── Operation name helpers ───────────────────────────────────────────────
+
+    template <typename RecordT>
+    static const char* get_operation_name([[maybe_unused]] const RecordT* record)
     {
-        case Wrapper::KFD_PAGE_FAULT_READ_FAULT_MIGRATED:
-            return "PAGE_FAULT_READ_FAULT_MIGRATED";
-        case Wrapper::KFD_PAGE_FAULT_READ_FAULT_UPDATED:
-            return "PAGE_FAULT_READ_FAULT_UPDATED";
-        case Wrapper::KFD_PAGE_FAULT_WRITE_FAULT_MIGRATED:
-            return "PAGE_FAULT_WRITE_FAULT_MIGRATED";
-        case Wrapper::KFD_PAGE_FAULT_WRITE_FAULT_UPDATED:
-            return "PAGE_FAULT_WRITE_FAULT_UPDATED";
-        default: return "PAGE_FAULT";
+        return "KFD Event";
     }
-}
 
-template <typename Wrapper>
-inline const char*
-get_kfd_operation_name(const backend::kfd_page_migrate_record* record)
-{
-    switch(record->operation)
+    static const char* get_operation_name(const backend::kfd_page_fault_record* record)
     {
-        case Wrapper::KFD_PAGE_MIGRATE_PREFETCH: return "PAGE_MIGRATE_PREFETCH";
-        case Wrapper::KFD_PAGE_MIGRATE_PAGEFAULT_GPU: return "PAGE_MIGRATE_PAGEFAULT_GPU";
-        case Wrapper::KFD_PAGE_MIGRATE_PAGEFAULT_CPU: return "PAGE_MIGRATE_PAGEFAULT_CPU";
-        case Wrapper::KFD_PAGE_MIGRATE_TTM_EVICTION: return "PAGE_MIGRATE_TTM_EVICTION";
-        default: return "PAGE_MIGRATE";
+        switch(record->operation)
+        {
+            case Wrapper::KFD_PAGE_FAULT_READ_FAULT_MIGRATED:
+                return "PAGE_FAULT_READ_FAULT_MIGRATED";
+            case Wrapper::KFD_PAGE_FAULT_READ_FAULT_UPDATED:
+                return "PAGE_FAULT_READ_FAULT_UPDATED";
+            case Wrapper::KFD_PAGE_FAULT_WRITE_FAULT_MIGRATED:
+                return "PAGE_FAULT_WRITE_FAULT_MIGRATED";
+            case Wrapper::KFD_PAGE_FAULT_WRITE_FAULT_UPDATED:
+                return "PAGE_FAULT_WRITE_FAULT_UPDATED";
+            default: return "PAGE_FAULT";
+        }
     }
-}
 
-template <typename Wrapper>
-inline const char*
-get_kfd_operation_name(const backend::kfd_queue_record* record)
-{
-    switch(record->operation)
+    static const char* get_operation_name(const backend::kfd_page_migrate_record* record)
     {
-        case Wrapper::KFD_QUEUE_EVICT_SVM: return "QUEUE_EVICT_SVM";
-        case Wrapper::KFD_QUEUE_EVICT_USERPTR: return "QUEUE_EVICT_USERPTR";
-        case Wrapper::KFD_QUEUE_EVICT_TTM: return "QUEUE_EVICT_TTM";
-        case Wrapper::KFD_QUEUE_EVICT_SUSPEND: return "QUEUE_EVICT_SUSPEND";
-        case Wrapper::KFD_QUEUE_EVICT_CRIU_CHECKPOINT:
-            return "QUEUE_EVICT_CRIU_CHECKPOINT";
-        case Wrapper::KFD_QUEUE_EVICT_CRIU_RESTORE: return "QUEUE_EVICT_CRIU_RESTORE";
-        default: return "QUEUE_EVICT";
+        switch(record->operation)
+        {
+            case Wrapper::KFD_PAGE_MIGRATE_PREFETCH: return "PAGE_MIGRATE_PREFETCH";
+            case Wrapper::KFD_PAGE_MIGRATE_PAGEFAULT_GPU:
+                return "PAGE_MIGRATE_PAGEFAULT_GPU";
+            case Wrapper::KFD_PAGE_MIGRATE_PAGEFAULT_CPU:
+                return "PAGE_MIGRATE_PAGEFAULT_CPU";
+            case Wrapper::KFD_PAGE_MIGRATE_TTM_EVICTION:
+                return "PAGE_MIGRATE_TTM_EVICTION";
+            default: return "PAGE_MIGRATE";
+        }
     }
-}
 
-template <typename Wrapper>
-inline const char*
-get_kfd_operation_name(const backend::kfd_event_queue_record* record)
-{
-    switch(record->operation)
+    static const char* get_operation_name(const backend::kfd_queue_record* record)
     {
-        case Wrapper::KFD_EVENT_QUEUE_EVICT_SVM: return "QUEUE_EVICT_SVM_EVENT";
-        case Wrapper::KFD_EVENT_QUEUE_EVICT_USERPTR: return "QUEUE_EVICT_USERPTR_EVENT";
-        case Wrapper::KFD_EVENT_QUEUE_EVICT_TTM: return "QUEUE_EVICT_TTM_EVENT";
-        case Wrapper::KFD_EVENT_QUEUE_EVICT_SUSPEND: return "QUEUE_EVICT_SUSPEND_EVENT";
-        case Wrapper::KFD_EVENT_QUEUE_EVICT_CRIU_CHECKPOINT:
-            return "QUEUE_EVICT_CRIU_CHECKPOINT_EVENT";
-        case Wrapper::KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE:
-            return "QUEUE_EVICT_CRIU_RESTORE_EVENT";
-        case Wrapper::KFD_EVENT_QUEUE_RESTORE_RESCHEDULED:
-            return "QUEUE_RESTORE_RESCHEDULED_EVENT";
-        case Wrapper::KFD_EVENT_QUEUE_RESTORE: return "QUEUE_RESTORE_EVENT";
-        default: return "QUEUE_EVICT_EVENT";
+        switch(record->operation)
+        {
+            case Wrapper::KFD_QUEUE_EVICT_SVM: return "QUEUE_EVICT_SVM";
+            case Wrapper::KFD_QUEUE_EVICT_USERPTR: return "QUEUE_EVICT_USERPTR";
+            case Wrapper::KFD_QUEUE_EVICT_TTM: return "QUEUE_EVICT_TTM";
+            case Wrapper::KFD_QUEUE_EVICT_SUSPEND: return "QUEUE_EVICT_SUSPEND";
+            case Wrapper::KFD_QUEUE_EVICT_CRIU_CHECKPOINT:
+                return "QUEUE_EVICT_CRIU_CHECKPOINT";
+            case Wrapper::KFD_QUEUE_EVICT_CRIU_RESTORE: return "QUEUE_EVICT_CRIU_RESTORE";
+            default: return "QUEUE_EVICT";
+        }
     }
-}
 
-template <typename Wrapper>
-inline const char*
-get_kfd_operation_name(const backend::kfd_event_unmap_record* record)
-{
-    switch(record->operation)
+    static const char* get_operation_name(const backend::kfd_event_queue_record* record)
     {
-        case Wrapper::KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY:
-            return "UNMAP_FROM_GPU_MMU_NOTIFY";
-        case Wrapper::KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY_MIGRATE:
-            return "UNMAP_FROM_GPU_MMU_NOTIFY_MIGRATE";
-        case Wrapper::KFD_EVENT_UNMAP_FROM_GPU_UNMAP_FROM_CPU:
-            return "UNMAP_FROM_GPU_UNMAP_FROM_CPU";
-        default: return "UNMAP_FROM_GPU";
+        switch(record->operation)
+        {
+            case Wrapper::KFD_EVENT_QUEUE_EVICT_SVM: return "QUEUE_EVICT_SVM_EVENT";
+            case Wrapper::KFD_EVENT_QUEUE_EVICT_USERPTR:
+                return "QUEUE_EVICT_USERPTR_EVENT";
+            case Wrapper::KFD_EVENT_QUEUE_EVICT_TTM: return "QUEUE_EVICT_TTM_EVENT";
+            case Wrapper::KFD_EVENT_QUEUE_EVICT_SUSPEND:
+                return "QUEUE_EVICT_SUSPEND_EVENT";
+            case Wrapper::KFD_EVENT_QUEUE_EVICT_CRIU_CHECKPOINT:
+                return "QUEUE_EVICT_CRIU_CHECKPOINT_EVENT";
+            case Wrapper::KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE:
+                return "QUEUE_EVICT_CRIU_RESTORE_EVENT";
+            case Wrapper::KFD_EVENT_QUEUE_RESTORE_RESCHEDULED:
+                return "QUEUE_RESTORE_RESCHEDULED_EVENT";
+            case Wrapper::KFD_EVENT_QUEUE_RESTORE: return "QUEUE_RESTORE_EVENT";
+            default: return "QUEUE_EVICT_EVENT";
+        }
     }
-}
 
-template <typename Wrapper>
-inline const char*
-get_kfd_operation_name(const backend::kfd_event_dropped_record* /*record*/)
-{
-    return "DROPPED_EVENTS";
-}
-
-// ─── get_kfd_pmc_value ────────────────────────────────────────────────────────
-
-template <typename Wrapper, typename RecordT>
-std::uint64_t
-get_kfd_pmc_value([[maybe_unused]] const RecordT* record)
-{
-    return 1;
-}
-
-template <typename Wrapper>
-inline std::uint64_t
-get_kfd_pmc_value(const backend::kfd_page_fault_record* record)
-{
-    return record->address.value;
-}
-
-template <typename Wrapper>
-inline std::uint64_t
-get_kfd_pmc_value(const backend::kfd_page_migrate_record* record)
-{
-    if(record->end_address.value < record->start_address.value)
+    static const char* get_operation_name(const backend::kfd_event_unmap_record* record)
     {
-        LOG_WARNING("KFD page migrate: end_address ({:#x}) < start_address ({:#x})",
-                    record->end_address.value, record->start_address.value);
-        return 0;
+        switch(record->operation)
+        {
+            case Wrapper::KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY:
+                return "UNMAP_FROM_GPU_MMU_NOTIFY";
+            case Wrapper::KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY_MIGRATE:
+                return "UNMAP_FROM_GPU_MMU_NOTIFY_MIGRATE";
+            case Wrapper::KFD_EVENT_UNMAP_FROM_GPU_UNMAP_FROM_CPU:
+                return "UNMAP_FROM_GPU_UNMAP_FROM_CPU";
+            default: return "UNMAP_FROM_GPU";
+        }
     }
-    return record->end_address.value - record->start_address.value;
-}
 
-template <typename Wrapper>
-inline std::uint64_t
-get_kfd_pmc_value(const backend::kfd_queue_record* /*record*/)
-{
-    return 1;
-}
-
-template <typename Wrapper>
-inline std::uint64_t
-get_kfd_pmc_value(const backend::kfd_event_dropped_record* record)
-{
-    return record->count;
-}
-
-template <typename Wrapper>
-inline std::uint64_t
-get_kfd_pmc_value(const backend::kfd_event_unmap_record* record)
-{
-    if(record->end_address.value < record->start_address.value)
+    static const char* get_operation_name(
+        [[maybe_unused]] const backend::kfd_event_dropped_record* record)
     {
-        LOG_WARNING("KFD unmap_from_gpu: end_address ({:#x}) < start_address ({:#x})",
-                    record->end_address.value, record->start_address.value);
-        return 0;
+        return "DROPPED_EVENTS";
     }
-    return record->end_address.value - record->start_address.value;
-}
 
-// ─── Metadata / track helpers (no SDK types beyond what's in fwd.hpp) ─────────
+    // ─── PMC value helpers ────────────────────────────────────────────────────
 
-template <typename CategoryT>
+    template <typename RecordT>
+    static std::uint64_t get_pmc_value([[maybe_unused]] const RecordT* record)
+    {
+        return 1;
+    }
+
+    static std::uint64_t get_pmc_value(const backend::kfd_page_fault_record* record)
+    {
+        return record->address.value;
+    }
+
+    static std::uint64_t get_pmc_value(const backend::kfd_page_migrate_record* record)
+    {
+        if(record->end_address.value < record->start_address.value)
+        {
+            LOG_WARNING("KFD page migrate: end_address ({:#x}) < start_address ({:#x})",
+                        record->end_address.value, record->start_address.value);
+            return 0;
+        }
+        return record->end_address.value - record->start_address.value;
+    }
+
+    static std::uint64_t get_pmc_value(
+        [[maybe_unused]] const backend::kfd_queue_record* record)
+    {
+        return 1;
+    }
+
+    static std::uint64_t get_pmc_value(const backend::kfd_event_dropped_record* record)
+    {
+        return record->count;
+    }
+
+    static std::uint64_t get_pmc_value(const backend::kfd_event_unmap_record* record)
+    {
+        if(record->end_address.value < record->start_address.value)
+        {
+            LOG_WARNING("KFD unmap_from_gpu: end_address ({:#x}) < start_address ({:#x})",
+                        record->end_address.value, record->start_address.value);
+            return 0;
+        }
+        return record->end_address.value - record->start_address.value;
+    }
+
+    // ─── Metadata / track helpers ─────────────────────────────────────────────
+
+    template <typename CategoryT>
+    static void cache_category()
+    {
+        trace_cache::get_metadata_registry().add_string(trait::name<CategoryT>::value);
+    }
+
+    static void cache_add_thread_info(std::uint64_t tid)
+    {
+        trace_cache::get_metadata_registry().add_thread_info(
+            { getppid(), getpid(), tid, 0, 0, "{}" });
+    }
+
+    static void cache_add_track(const char* track_name, std::uint64_t tid)
+    {
+        trace_cache::get_metadata_registry().add_track({ track_name, tid, "{}" });
+    }
+
+    static const tool_agent* get_tool_agent(const client_data<Wrapper>* tool_data,
+                                            typename Wrapper::agent_id  agent_id)
+    {
+        const auto* ag = tool_data->get_gpu_tool_agent(agent_id);
+        if(ag) return ag;
+        for(const auto& itr : tool_data->cpu_agents)
+            if(agent_id.handle == itr.agent->handle) return &itr;
+        return nullptr;
+    }
+
+    static std::string agent_label(const tool_agent* _agent)
+    {
+        if(!_agent || !_agent->agent) return "?";
+        auto type = _agent->agent->type;
+        auto idx  = _agent->device_id;
+        return fmt::format("{} {}", type == agent_type::GPU ? "GPU" : "CPU", idx);
+    }
+
+    static std::string agent_node_id_str(const tool_agent* _agent)
+    {
+        if(_agent && _agent->agent) return std::to_string(_agent->agent->node_id);
+        return "null";
+    }
+};
+
+// ─── Template implementations ────────────────────────────────────────────────
+
+// ─── kfd_events<Wrapper>::metadata_initialize ─────────────────────────────────
+
+template <typename Wrapper>
 void
-cache_category()
+kfd_events<Wrapper>::metadata_initialize(const client_data<Wrapper>* tool_data)
 {
-    trace_cache::get_metadata_registry().add_string(trait::name<CategoryT>::value);
-}
-
-inline void
-cache_add_thread_info(std::uint64_t tid)
-{
-    trace_cache::get_metadata_registry().add_thread_info(
-        { getppid(), getpid(), tid, 0, 0, "{}" });
-}
-
-inline void
-cache_add_track(const char* track_name, std::uint64_t tid)
-{
-    trace_cache::get_metadata_registry().add_track({ track_name, tid, "{}" });
-}
-
-template <typename Wrapper>
-inline const tool_agent*
-get_tool_agent(const client_data<Wrapper>* tool_data, typename Wrapper::agent_id agent_id)
-{
-    const auto* ag = tool_data->get_gpu_tool_agent(agent_id);
-    if(ag) return ag;
-    for(const auto& itr : tool_data->cpu_agents)
-        if(agent_id.handle == itr.agent->handle) return &itr;
-    return nullptr;
-}
-
-inline std::string
-agent_label(const tool_agent* _agent)
-{
-    if(!_agent || !_agent->agent) return "?";
-    auto type = _agent->agent->type;
-    auto idx  = _agent->device_id;
-    return fmt::format("{} {}", type == agent_type::GPU ? "GPU" : "CPU", idx);
-}
-
-inline std::string
-agent_node_id_str(const tool_agent* _agent)
-{
-    if(_agent && _agent->agent) return std::to_string(_agent->agent->node_id);
-    return "null";
-}
-
-}  // namespace kfd_events_detail
-
-// ─── kfd_event_metadata_initialize<Wrapper> ───────────────────────────────────
-
-template <typename Wrapper>
-void
-kfd_event_metadata_initialize(const client_data<Wrapper>* tool_data)
-{
-    using namespace kfd_events_detail;
-
     // Initialize category strings in metadata registry
     cache_category<category::rocm_kfd_page_fault>();
     cache_category<category::rocm_kfd_page_migrate>();
@@ -376,19 +338,18 @@ kfd_event_metadata_initialize(const client_data<Wrapper>* tool_data)
     }
 }
 
-// ─── tool_kfd_page_fault_callback<Wrapper> ────────────────────────────────────
+// ─── kfd_events<Wrapper>::page_fault_callback ─────────────────────────────────
 
 template <typename Wrapper>
 void
-tool_kfd_page_fault_callback(const client_data<Wrapper>*           tool_data,
-                             const backend::kfd_page_fault_record* record)
+kfd_events<Wrapper>::page_fault_callback(const client_data<Wrapper>*           tool_data,
+                                         const backend::kfd_page_fault_record* record)
 {
-    using namespace kfd_events_detail;
     if(!record) return;
 
     auto        _beg_ns   = record->start_timestamp;
     auto        _end_ns   = record->end_timestamp;
-    const auto* _name     = get_kfd_operation_name<Wrapper>(record);
+    const auto* _name     = get_operation_name(record);
     auto        _pid      = record->pid;
     auto        _agent_id = record->agent_id;
     auto        _address  = record->address.value;
@@ -406,7 +367,7 @@ tool_kfd_page_fault_callback(const client_data<Wrapper>*           tool_data,
                                     "1;;string;;agent;;{};;",
                                   _address, _agent_nid);
 
-    auto pmc_value = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
+    auto pmc_value = static_cast<double>(get_pmc_value(record));
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,                                                         // thread_id
         _name,                                                       // name
@@ -424,19 +385,18 @@ tool_kfd_page_fault_callback(const client_data<Wrapper>*           tool_data,
     });
 }
 
-// ─── tool_kfd_page_migrate_callback<Wrapper> ─────────────────────────────────
+// ─── kfd_events<Wrapper>::page_migrate_callback ───────────────────────────────
 
 template <typename Wrapper>
 void
-tool_kfd_page_migrate_callback(const client_data<Wrapper>*             tool_data,
-                               const backend::kfd_page_migrate_record* record)
+kfd_events<Wrapper>::page_migrate_callback(const client_data<Wrapper>* tool_data,
+                                           const backend::kfd_page_migrate_record* record)
 {
-    using namespace kfd_events_detail;
     if(!record) return;
 
     auto        _beg_ns          = record->start_timestamp;
     auto        _end_ns          = record->end_timestamp;
-    const auto* _name            = get_kfd_operation_name<Wrapper>(record);
+    const auto* _name            = get_operation_name(record);
     auto        _pid             = record->pid;
     auto        _start_addr      = record->start_address.value;
     auto        _end_addr        = record->end_address.value;
@@ -474,7 +434,7 @@ tool_kfd_page_migrate_callback(const client_data<Wrapper>*             tool_data
                                 _start_addr, _end_addr, _src_nid, _dst_nid, _prefetch_nid,
                                 _preferred_nid, _error_code);
 
-    auto pmc_value = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
+    auto pmc_value = static_cast<double>(get_pmc_value(record));
 
     if(!_src_tool_agent || !_src_tool_agent->agent)
         LOG_WARNING("KFD page migrate: source agent not found for agent_id={}",
@@ -502,19 +462,18 @@ tool_kfd_page_migrate_callback(const client_data<Wrapper>*             tool_data
     });
 }
 
-// ─── tool_kfd_queue_callback<Wrapper> ────────────────────────────────────────
+// ─── kfd_events<Wrapper>::queue_callback ─────────────────────────────────────
 
 template <typename Wrapper>
 void
-tool_kfd_queue_callback(const client_data<Wrapper>*      tool_data,
-                        const backend::kfd_queue_record* record)
+kfd_events<Wrapper>::queue_callback(const client_data<Wrapper>*      tool_data,
+                                    const backend::kfd_queue_record* record)
 {
-    using namespace kfd_events_detail;
     if(!record) return;
 
     auto        _beg_ns   = record->start_timestamp;
     auto        _end_ns   = record->end_timestamp;
-    const auto* _name     = get_kfd_operation_name<Wrapper>(record);
+    const auto* _name     = get_operation_name(record);
     auto        _pid      = record->pid;
     auto        _agent_id = record->agent_id;
 
@@ -528,7 +487,7 @@ tool_kfd_queue_callback(const client_data<Wrapper>*      tool_data,
 
     auto _agent_nid = agent_node_id_str(_agent);
     auto args_str   = fmt::format("0;;string;;agent;;{};;", _agent_nid);
-    auto pmc_value  = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
+    auto pmc_value  = static_cast<double>(get_pmc_value(record));
 
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,                                                         // thread_id
@@ -547,14 +506,13 @@ tool_kfd_queue_callback(const client_data<Wrapper>*      tool_data,
     });
 }
 
-// ─── tool_kfd_event_queue_callback<Wrapper> ───────────────────────────────────
+// ─── kfd_events<Wrapper>::event_queue_callback ───────────────────────────────
 
 template <typename Wrapper>
 void
-tool_kfd_event_queue_callback(const client_data<Wrapper>*            tool_data,
-                              const backend::kfd_event_queue_record* record)
+kfd_events<Wrapper>::event_queue_callback(const client_data<Wrapper>* tool_data,
+                                          const backend::kfd_event_queue_record* record)
 {
-    using namespace kfd_events_detail;
     if(!record) return;
     // Only process RESTORE_RESCHEDULED operations
     // The only KFD_EVENT_QUEUE operation we want to process is RESTORE_RESCHEDULED.
@@ -562,7 +520,7 @@ tool_kfd_event_queue_callback(const client_data<Wrapper>*            tool_data,
     if(record->operation != Wrapper::KFD_EVENT_QUEUE_RESTORE_RESCHEDULED) return;
 
     auto        _timestamp = record->timestamp;
-    const auto* _name      = get_kfd_operation_name<Wrapper>(record);
+    const auto* _name      = get_operation_name(record);
     auto        _pid       = record->pid;
     auto        _agent_id  = record->agent_id;
 
@@ -576,7 +534,7 @@ tool_kfd_event_queue_callback(const client_data<Wrapper>*            tool_data,
 
     auto _agent_nid = agent_node_id_str(_agent);
     auto args_str   = fmt::format("0;;string;;agent;;{};;", _agent_nid);
-    auto pmc_value  = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
+    auto pmc_value  = static_cast<double>(get_pmc_value(record));
 
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,                  // thread_id
@@ -595,18 +553,17 @@ tool_kfd_event_queue_callback(const client_data<Wrapper>*            tool_data,
     });
 }
 
-// ─── tool_kfd_event_unmap_from_gpu_callback<Wrapper> ─────────────────────────
+// ─── kfd_events<Wrapper>::event_unmap_from_gpu_callback ──────────────────────
 
 template <typename Wrapper>
 void
-tool_kfd_event_unmap_from_gpu_callback(const client_data<Wrapper>*            tool_data,
-                                       const backend::kfd_event_unmap_record* record)
+kfd_events<Wrapper>::event_unmap_from_gpu_callback(
+    const client_data<Wrapper>* tool_data, const backend::kfd_event_unmap_record* record)
 {
-    using namespace kfd_events_detail;
     if(!record) return;
 
     auto        _timestamp  = record->timestamp;
-    const auto* _name       = get_kfd_operation_name<Wrapper>(record);
+    const auto* _name       = get_operation_name(record);
     auto        _pid        = record->pid;
     auto        _agent_id   = record->agent_id;
     auto        _start_addr = record->start_address.value;
@@ -625,7 +582,7 @@ tool_kfd_event_unmap_from_gpu_callback(const client_data<Wrapper>*            to
                                     "1;;std::uint64_t;;start_address;;{:#x};;"
                                     "2;;std::uint64_t;;end_address;;{:#x};;",
                                   _agent_nid, _start_addr, _end_addr);
-    auto pmc_value  = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
+    auto pmc_value  = static_cast<double>(get_pmc_value(record));
 
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,                  // thread_id
@@ -644,18 +601,18 @@ tool_kfd_event_unmap_from_gpu_callback(const client_data<Wrapper>*            to
     });
 }
 
-// ─── tool_kfd_event_dropped_events_callback<Wrapper> ─────────────────────────
+// ─── kfd_events<Wrapper>::event_dropped_events_callback ──────────────────────
 
 template <typename Wrapper>
 void
-tool_kfd_event_dropped_events_callback(const client_data<Wrapper>* /*tool_data*/,
-                                       const backend::kfd_event_dropped_record* record)
+kfd_events<Wrapper>::event_dropped_events_callback(
+    const client_data<Wrapper>* /*tool_data*/,
+    const backend::kfd_event_dropped_record* record)
 {
-    using namespace kfd_events_detail;
     if(!record) return;
 
     auto        _timestamp = record->timestamp;
-    const auto* _name      = get_kfd_operation_name<Wrapper>(record);
+    const auto* _name      = get_operation_name(record);
     auto        _pid       = record->pid;
     auto        _count     = record->count;
 
@@ -666,7 +623,7 @@ tool_kfd_event_dropped_events_callback(const client_data<Wrapper>* /*tool_data*/
     cache_add_track(track_name.c_str(), tid);
 
     auto args_str  = fmt::format("0;;std::uint64_t;;count;;{};;", _count);
-    auto pmc_value = static_cast<double>(get_kfd_pmc_value<Wrapper>(record));
+    auto pmc_value = static_cast<double>(get_pmc_value(record));
 
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,                  // thread_id

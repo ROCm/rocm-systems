@@ -2602,37 +2602,37 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
             {
                 auto* record = static_cast<typename Wrapper::kfd_page_fault_record*>(
                     header->payload);
-                tool_kfd_page_fault_callback(tool_data, record);
+                kfd_events<Wrapper>::page_fault_callback(tool_data, record);
             }
             else if(header->kind == Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE)
             {
                 auto* record = static_cast<typename Wrapper::kfd_page_migrate_record*>(
                     header->payload);
-                tool_kfd_page_migrate_callback(tool_data, record);
+                kfd_events<Wrapper>::page_migrate_callback(tool_data, record);
             }
             else if(header->kind == Wrapper::BUFFER_TRACING_KFD_QUEUE)
             {
                 auto* record =
                     static_cast<typename Wrapper::kfd_queue_record*>(header->payload);
-                tool_kfd_queue_callback(tool_data, record);
+                kfd_events<Wrapper>::queue_callback(tool_data, record);
             }
             else if(header->kind == Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE)
             {
                 auto* record = static_cast<typename Wrapper::kfd_event_queue_record*>(
                     header->payload);
-                tool_kfd_event_queue_callback(tool_data, record);
+                kfd_events<Wrapper>::event_queue_callback(tool_data, record);
             }
             else if(header->kind == Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
             {
                 auto* record = static_cast<typename Wrapper::kfd_event_unmap_record*>(
                     header->payload);
-                tool_kfd_event_unmap_from_gpu_callback(tool_data, record);
+                kfd_events<Wrapper>::event_unmap_from_gpu_callback(tool_data, record);
             }
             else if(header->kind == Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
             {
                 auto* record = static_cast<typename Wrapper::kfd_event_dropped_record*>(
                     header->payload);
-                tool_kfd_event_dropped_events_callback(tool_data, record);
+                kfd_events<Wrapper>::event_dropped_events_callback(tool_data, record);
             }
 #endif
             else if(header->kind == Wrapper::BUFFER_TRACING_HSA_CORE_API ||
@@ -2998,7 +2998,7 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
        _buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
     {
         // Initialize KFD event metadata
-        rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
+        kfd_events<Wrapper>::metadata_initialize(tool_data);
     }
 
     if(_buffered_domain.count(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT) > 0)
