@@ -27,6 +27,7 @@
 #include <rocprofiler-sdk/experimental/thread-trace/core.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -38,10 +39,11 @@ namespace att_no_intercept
 {
 struct agent_config
 {
-    rocprofiler_agent_id_t                            id         = {};
-    uint64_t                                          gpu_index  = 0;
-    std::string                                       name       = {};
-    std::vector<rocprofiler_thread_trace_parameter_t> parameters = {};
+    rocprofiler_agent_id_t                            id                  = {};
+    uint64_t                                          gpu_index           = 0;
+    std::string                                       name                = {};
+    std::vector<rocprofiler_thread_trace_parameter_t> parameters          = {};
+    uint64_t                                          consecutive_kernels = 0;
 };
 
 using shader_data_forwarder_t = void (*)(rocprofiler_thread_trace_shader_data_t,

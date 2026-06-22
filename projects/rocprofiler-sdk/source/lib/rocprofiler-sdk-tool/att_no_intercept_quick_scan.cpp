@@ -52,22 +52,25 @@ struct backend_agent
     rocprof_trace_decoder_handle_t decoder = {};
 };
 
-struct cut_candidate
+struct trace_range
 {
-    bool                    ready        = false;
-    rocprofiler_kernel_id_t kernel_id    = 0;
-    uint64_t                offset_begin = 0;
-    uint64_t                offset_end   = 0;
-    uint8_t                 me_id        = 0;
-    uint8_t                 pipe_id      = 0;
-    uint64_t                flush_count  = 0;
+    bool                    active               = false;
+    bool                    complete             = false;
+    rocprofiler_kernel_id_t kernel_id            = 0;
+    uint64_t                offset_begin         = 0;
+    uint64_t                offset_end           = 0;
+    uint64_t                last_dispatch_offset = 0;
+    uint64_t                remaining_dispatches = 0;
+    uint8_t                 me_id                = 0;
+    uint8_t                 pipe_id              = 0;
+    uint64_t                flush_count          = 0;
 };
 
 struct scan_context
 {
-    agent_state*               state                = nullptr;
-    kernel_target_filter_t     kernel_target_filter = nullptr;
-    std::vector<cut_candidate> candidates           = {};
+    agent_state*           state                = nullptr;
+    kernel_target_filter_t kernel_target_filter = nullptr;
+    trace_range            trace                = {};
 };
 
 std::atomic<uint64_t>&
@@ -134,8 +137,7 @@ bool
 is_cut_end_event(const rocprofiler_thread_trace_decoder_event_t& event)
 {
     return event.type == ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH ||
-           event.type == ROCPROF_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE_TS ||
-           event.type == ROCPROF_TRACE_DECODER_EVENT_DISPATCH_END;
+           event.type == ROCPROF_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE_TS;
 }
 
 void
@@ -148,46 +150,57 @@ handle_dispatch(scan_context& context, const rocprofiler_thread_trace_decoder_di
     if(!kernel_id)
     {
         state.stats.unknown_dispatches.fetch_add(1, std::memory_order_relaxed);
-        return;
+    }
+    else if((context.kernel_target_filter == nullptr || context.kernel_target_filter(*kernel_id)) &&
+            !context.trace.complete)
+    {
+        auto& trace = context.trace;
+        if(!trace.active)
+        {
+            trace              = trace_range{};
+            trace.active       = true;
+            trace.offset_begin = dispatch.byte_offset;
+        }
+        trace.kernel_id = *kernel_id;
+        trace.remaining_dispatches =
+            (state.consecutive_kernels > 0) ? state.consecutive_kernels : 1;
+        trace.flush_count = 0;
+        state.stats.target_dispatches.fetch_add(1, std::memory_order_relaxed);
     }
 
-    if(context.kernel_target_filter != nullptr && !context.kernel_target_filter(*kernel_id)) return;
-
-    state.stats.target_dispatches.fetch_add(1, std::memory_order_relaxed);
-
-    auto candidate         = cut_candidate{};
-    candidate.kernel_id    = *kernel_id;
-    candidate.offset_begin = dispatch.byte_offset;
-    candidate.me_id        = dispatch.me_id;
-    candidate.pipe_id      = dispatch.pipe_id;
-    context.candidates.emplace_back(candidate);
+    auto& trace = context.trace;
+    if(trace.active && !trace.complete && trace.remaining_dispatches > 0)
+    {
+        trace.last_dispatch_offset = dispatch.byte_offset;
+        trace.me_id                = dispatch.me_id;
+        trace.pipe_id              = dispatch.pipe_id;
+        --trace.remaining_dispatches;
+    }
 }
 
 void
 handle_event(scan_context& context, const rocprofiler_thread_trace_decoder_event_t& event)
 {
-    // TODO: Handle terminal single-dispatch cuts that only have one trailing cut-end event
+    // TODO: Handle terminal trace ranges that only have one trailing cut-end event
     // before chunk end. The current two-event rule avoids slicing off the end event but can
     // skip the last/only dispatch in a chunk.
     //
-    // TODO: Track at most one active target candidate per ME/pipe, or explicitly bound
-    // candidates by the next dispatch on that ME/pipe. Multiple target dispatches on the
-    // same ME/pipe can currently consume the same trailing events.
-    for(auto& candidate : context.candidates)
+    auto& trace = context.trace;
+    if(!trace.active) return;
+
+    if(trace.complete || trace.remaining_dispatches > 0 ||
+       event.byte_offset <= trace.last_dispatch_offset || event.me_id != trace.me_id ||
+       event.pipe_id != trace.pipe_id)
     {
-        if(candidate.ready || event.byte_offset <= candidate.offset_begin ||
-           event.me_id != candidate.me_id || event.pipe_id != candidate.pipe_id)
-        {
-            continue;
-        }
+        return;
+    }
 
-        if(!is_cut_end_event(event) && candidate.flush_count == 0) continue;
+    if(!is_cut_end_event(event) && trace.flush_count == 0) return;
 
-        if(++candidate.flush_count == 2)
-        {
-            candidate.offset_end = event.byte_offset;
-            candidate.ready      = true;
-        }
+    if(++trace.flush_count == 2)
+    {
+        trace.offset_end = event.byte_offset;
+        trace.complete   = true;
     }
 }
 
@@ -454,45 +467,45 @@ backend_shader_data(agent_state&                           state,
         return;
     }
 
-    for(const auto& candidate : context.candidates)
+    const auto& trace = context.trace;
+    if(!trace.active) return;
+
+    if(!trace.complete)
     {
-        if(!candidate.ready)
-        {
-            warn_limited(state.stats.cross_chunk_skips,
-                         fmt::format("ATT no-intercept skipped dispatch for kernel {} on agent {}: "
-                                     "single-dispatch cut crosses chunk boundary at chunk {}",
-                                     candidate.kernel_id,
-                                     state.id.handle,
-                                     shader_data.chunk_index));
-            continue;
-        }
-
-        auto standalone = std::vector<uint8_t>{};
-        status          = build_standalone(backend->decoder,
-                                  shader_data.chunk_index,
-                                  scan_data,
-                                  scan_size,
-                                  candidate.offset_begin,
-                                  candidate.offset_end,
-                                  standalone);
-
-        if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
-        {
-            warn_limited(state.stats.cut_build_failures,
-                         fmt::format("ATT no-intercept standalone cut failed for agent {} "
-                                     "chunk {} range {}..{}: {}",
-                                     state.id.handle,
-                                     shader_data.chunk_index,
-                                     candidate.offset_begin,
-                                     candidate.offset_end,
-                                     rocprof_trace_decoder_get_status_string(status)));
-            continue;
-        }
-
-        auto capture_id = next_capture_id().fetch_add(1, std::memory_order_relaxed);
-        forward_cut(state, shader_data, capture_id, standalone, shader_data_forwarder);
-        state.stats.cuts_built.fetch_add(1, std::memory_order_relaxed);
+        warn_limited(state.stats.cross_chunk_skips,
+                     fmt::format("ATT no-intercept skipped dispatch for kernel {} on agent {}: "
+                                 "dispatch range cut crosses chunk boundary at chunk {}",
+                                 trace.kernel_id,
+                                 state.id.handle,
+                                 shader_data.chunk_index));
+        return;
     }
+
+    auto standalone = std::vector<uint8_t>{};
+    status          = build_standalone(backend->decoder,
+                              shader_data.chunk_index,
+                              scan_data,
+                              scan_size,
+                              trace.offset_begin,
+                              trace.offset_end,
+                              standalone);
+
+    if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+    {
+        warn_limited(state.stats.cut_build_failures,
+                     fmt::format("ATT no-intercept standalone cut failed for agent {} "
+                                 "chunk {} range {}..{}: {}",
+                                 state.id.handle,
+                                 shader_data.chunk_index,
+                                 trace.offset_begin,
+                                 trace.offset_end,
+                                 rocprof_trace_decoder_get_status_string(status)));
+        return;
+    }
+
+    auto capture_id = next_capture_id().fetch_add(1, std::memory_order_relaxed);
+    forward_cut(state, shader_data, capture_id, standalone, shader_data_forwarder);
+    state.stats.cuts_built.fetch_add(1, std::memory_order_relaxed);
 }
 }  // namespace att_no_intercept
 }  // namespace tool
