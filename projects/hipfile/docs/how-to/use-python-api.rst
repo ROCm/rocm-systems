@@ -16,16 +16,16 @@
 ..     - python/hipfile/properties.py
 ..     - python/main.py
 
-******************
+*******************
 Use the Python API
-******************
+*******************
 
 The hipFile Python bindings let you perform GPU-accelerated file I/O from Python without writing C code. This page walks through each step of a typical workflow: opening the driver, registering buffers, reading and writing files, handling errors, and querying version and driver properties.
 
 For a complete worked example that copies a file through GPU memory and verifies the result with SHA-256 hashes, see :doc:`/tutorials/python-gpu-io`. For full API signatures and class details, see :doc:`/reference/api-python`.
 
 Import hipFile
-**************
+=================
 
 Import the top-level ``hipfile`` package. All public classes, functions, enums, and exceptions are re-exported from the package root:
 
@@ -43,7 +43,7 @@ Import the top-level ``hipfile`` package. All public classes, functions, enums, 
    )
 
 Open and close the driver
-*************************
+============================
 
 The ``Driver`` class manages the hipFile driver lifecycle. Use it as a context manager so the driver closes automatically when the block exits:
 
@@ -65,7 +65,7 @@ You can also call ``open()`` and ``close()`` explicitly:
    drv.close()
 
 Create and register a GPU buffer
-********************************
+=================================
 
 hipFile operates on GPU memory. After allocating device memory (for example, through ``ctypes`` bindings to ``hipMalloc``), wrap the pointer in a ``Buffer`` and register it with the driver.
 
@@ -96,7 +96,7 @@ When used as a context manager, ``Buffer`` calls ``register()`` on entry and ``d
 If the ``ctypes.c_void_p`` is null, ``from_ctypes_void_p`` raises ``ValueError``.
 
 Open a file handle
-******************
+===================
 
 ``FileHandle`` wraps ``os.open`` together with hipFile handle registration. Pass a filesystem path, the ``os.open`` flags, and optionally a file mode and handle type:
 
@@ -120,7 +120,7 @@ For writing, include ``os.O_WRONLY`` or ``os.O_RDWR`` with ``os.O_CREAT`` and ``
 The default file creation mode is ``0o644``. The default handle type is ``FileHandleType.OPAQUE_FD``.
 
 Read and write data
-*******************
+======================
 
 ``FileHandle.read`` and ``FileHandle.write`` each take four positional arguments:
 
@@ -146,7 +146,7 @@ Both methods return the number of bytes transferred:
 If a system-level I/O error occurs, an ``OSError`` is raised. If a hipFile or HIP driver error occurs, a ``HipFileException`` is raised.
 
 Handle errors
-*************
+===============
 
 ``HipFileException`` wraps both the ``hipFileOpError_t`` code and the underlying ``hipError_t`` from the HIP runtime:
 
@@ -185,7 +185,7 @@ The ``OpError`` enum mirrors every value from ``hipFileOpError_t``. Use it to ma
            print(f"HIP runtime error: {e.hip_err}")
 
 Query version and driver properties
-***********************************
+====================================
 
 ``get_version()`` returns a ``(major, minor, patch)`` tuple:
 

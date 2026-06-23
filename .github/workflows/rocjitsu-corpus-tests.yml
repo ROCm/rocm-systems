@@ -58,7 +58,8 @@ jobs:
             rocjitsu_config: amdgpu_rdna4_gfx1201_r9700_kmd.json
             corpus_config: iree_gfx1201_hip.json
     container:
-      image: ubuntu:24.04
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --user 0:0
       env:
         DEBIAN_FRONTEND: noninteractive
     continue-on-error: true

@@ -1304,6 +1304,7 @@ SIMD_DOTC_INT: dict[str, str] = {
 SIMD_DOTC_F16: dict[str, str] = {
     'v_dot2c_f32_f16_vop2': 'false',
     'v_dot2c_f32_f16_vop3': 'true',
+    'v_dot2acc_f32_f16_vop2': 'false',
 }
 
 
@@ -2469,14 +2470,17 @@ SIMD_LSHL_ADD_U64: set[str] = {'v_lshl_add_u64_vop3'}
 # --- VOP3 wide 32x32->64 multiply-add (v_mad_u64_u32 / v_mad_i64_i32) -------
 #
 # 32-bit src0/src1 multiplicands widened to 64 (zero-/sign-extend), 64-bit
-# low-half product, plus the 64-bit src2 addend. Routed through
+# low-half product, plus the 64-bit src2 addend, with the carry/overflow mask
+# written to sdst. Routed through
 # try_execute_mad_wide64_vop3_simd; the functor receives the two narrow operands
-# and the 64-bit addend.
+# and the 64-bit addend and returns SimdCarry<native<uint64_t>, mask>.
 SIMD_MAD_WIDE64: dict[str, str] = {
     'v_mad_u64_u32_vop3': (
         '[](auto a, auto b, auto c) {'
-        ' return util::stdx::static_simd_cast<util::native<uint64_t>>(a)'
-        ' * util::stdx::static_simd_cast<util::native<uint64_t>>(b) + c; }'
+        ' auto product = util::stdx::static_simd_cast<util::native<uint64_t>>(a)'
+        ' * util::stdx::static_simd_cast<util::native<uint64_t>>(b);'
+        ' auto result = product + c;'
+        ' return make_simd_carry(result, result < product); }'
     ),
     'v_mad_i64_i32_vop3': (
         '[](auto a, auto b, auto c) {'
@@ -2486,7 +2490,10 @@ SIMD_MAD_WIDE64: dict[str, str] = {
         ' auto wb = util::stdx::static_simd_cast<util::native<uint64_t>>('
         'util::stdx::static_simd_cast<util::native<int64_t>>('
         'util::stdx::static_simd_cast<util::narrow32<int32_t>>(b)));'
-        ' return wa * wb + c; }'
+        ' auto product = wa * wb;'
+        ' auto result = product + c;'
+        ' return make_simd_carry(result,'
+        ' ((~(product ^ c) & (product ^ result)) & (1ULL << 63)) != 0); }'
     ),
 }
 
