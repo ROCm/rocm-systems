@@ -1174,6 +1174,11 @@ template <> struct is_flag<amd_dbgapi_wave_stop_reasons_t> : std::true_type
 {
 };
 
+/* Enable bitwise operations for amd_dbgapi_process_attach_flags.  */
+template <> struct is_flag<amd_dbgapi_process_attach_flags> : std::true_type
+{
+};
+
 /* A monotonic counter with wrap-around detection. Type must be an integral
    unsigned type. The WrapAroundCheck functor returns true if the counter has
    wrapped around. The default functor is (new_value > old_value).  */
