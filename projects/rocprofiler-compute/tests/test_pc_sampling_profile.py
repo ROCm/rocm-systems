@@ -313,7 +313,7 @@ def test_pc_sampling_profile_cleanup_stale_output_noop_cases(tmp_path, monkeypat
 
 
 def test_pc_sampling_profile_v3_live_attach(tmp_path, monkeypatch):
-    """v3 live-attach appends --pid and --attach-duration-msec, no APP_CMD '--'."""
+    """v3 live-attach appends attach args and no APP_CMD '--'."""
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprof_cli_tool")
     options = ["--pid", "1234", "--attach-duration-msec", "500"]
 
@@ -326,6 +326,7 @@ def test_pc_sampling_profile_v3_live_attach(tmp_path, monkeypatch):
 
     assert mock_capture.called
     options_list = mock_capture.call_args[0][0]
+    assert "--attach-sync-output" in options_list
     pid_idx = options_list.index("--pid")
     assert options_list[pid_idx + 1] == "1234"
     dur_idx = options_list.index("--attach-duration-msec")
@@ -363,6 +364,7 @@ def test_pc_sampling_profile_sdk_live_attach(tmp_path, monkeypatch):
     options = {
         "ROCPROF_ATTACH_PID": "1234",
         "ROCPROF_ATTACH_LIBRARY": "lib.so",
+        "ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC": "1",
     }
 
     mock_capture = Mock()
@@ -377,6 +379,9 @@ def test_pc_sampling_profile_sdk_live_attach(tmp_path, monkeypatch):
     profiler._launch(options)
 
     mock_attach.assert_called_once()
+    new_env, attach_options = mock_attach.call_args.args
+    assert new_env["ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC"] == "1"
+    assert attach_options["ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC"] == "1"
     mock_capture.assert_not_called()
     mock_error.assert_not_called()
 
