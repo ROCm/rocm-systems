@@ -3404,9 +3404,10 @@ inline void execute_v_bfe_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
-      uint32_t src = static_cast<uint32_t>(inst.src0.read_lane(wf, lane));
-      uint32_t off = static_cast<uint32_t>(inst.src1.read_lane(wf, lane)) & 31u;
-      uint32_t w = static_cast<uint32_t>(inst.src2.read_lane(wf, lane)) & 31u;
+      uint32_t src = static_cast<uint32_t>(static_cast<int32_t>(inst.src0.read_lane(wf, lane)));
+      uint32_t off =
+          static_cast<uint32_t>(static_cast<int32_t>(inst.src1.read_lane(wf, lane))) & 31u;
+      uint32_t w = static_cast<uint32_t>(static_cast<int32_t>(inst.src2.read_lane(wf, lane))) & 31u;
       if (w == 0)
         return 0u;
       uint32_t mask = (uint32_t{1} << w) - 1u;
@@ -12665,9 +12666,9 @@ inline void execute_v_lshl_add_u32_vop3([[maybe_unused]] Inst &inst,
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         ::rocjitsu::amdgpu::lshl_masked(inst.src0.read_lane(wf, lane),
-                                                         inst.src1.read_lane(wf, lane)) +
-                             inst.src2.read_lane(wf, lane));
+                         (::rocjitsu::amdgpu::lshl_masked(inst.src0.read_lane(wf, lane),
+                                                          inst.src1.read_lane(wf, lane)) +
+                          inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -12681,9 +12682,9 @@ inline void execute_v_lshl_add_u64_vop3([[maybe_unused]] Inst &inst,
       continue;
     inst.vdst.write_lane64(
         wf, lane,
-        ::rocjitsu::amdgpu::lshl_masked(static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)),
-                                        static_cast<uint64_t>(inst.src1.read_lane(wf, lane))) +
-            static_cast<uint64_t>(inst.src2.read_lane64(wf, lane)));
+        (::rocjitsu::amdgpu::lshl_masked(static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)),
+                                         static_cast<uint64_t>(inst.src1.read_lane(wf, lane))) +
+         static_cast<uint64_t>(inst.src2.read_lane64(wf, lane))));
   }
 }
 
@@ -12697,9 +12698,9 @@ inline void execute_v_lshl_or_b32_vop3([[maybe_unused]] Inst &inst,
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         ::rocjitsu::amdgpu::lshl_masked(inst.src0.read_lane(wf, lane),
-                                                         inst.src1.read_lane(wf, lane)) |
-                             inst.src2.read_lane(wf, lane));
+                         (::rocjitsu::amdgpu::lshl_masked(inst.src0.read_lane(wf, lane),
+                                                          inst.src1.read_lane(wf, lane)) |
+                          inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -13326,13 +13327,11 @@ inline void execute_v_mad_legacy_u16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t a = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t b = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    uint16_t c = static_cast<uint16_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(
-        wf, lane,
-        static_cast<uint32_t>(static_cast<uint16_t>(
-            static_cast<uint32_t>(a) * static_cast<uint32_t>(b) + static_cast<uint32_t>(c))));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *
+                               static_cast<uint16_t>(inst.src1.read_lane(wf, lane))) +
+                              static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
   }
 }
 

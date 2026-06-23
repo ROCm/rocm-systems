@@ -1656,9 +1656,9 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' return (src >> off) & mask; }}()',
     'bfe_i': '[&]() -> uint32_t {{ uint32_t src=static_cast<uint32_t>({0});'
     ' uint32_t off=static_cast<uint32_t>({1}) & 31u; uint32_t w=static_cast<uint32_t>({2}) & 31u;'
-    ' if (w == 0) return 0u; uint32_t mask = (uint32_t{1} << w) - 1u;'
+    ' if (w == 0) return 0u; uint32_t mask = (uint32_t{{1}} << w) - 1u;'
     ' uint32_t extracted = static_cast<uint32_t>(static_cast<int32_t>(src) >> off) & mask;'
-    ' uint32_t signbit = uint32_t{1} << (w - 1u); return (extracted ^ signbit) - signbit; }}()',
+    ' uint32_t signbit = uint32_t{{1}} << (w - 1u); return (extracted ^ signbit) - signbit; }}()',
     'cubeid': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
     ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
     ' if (ax >= ay && ax >= az) return x >= 0 ? 0.0f : 1.0f;'

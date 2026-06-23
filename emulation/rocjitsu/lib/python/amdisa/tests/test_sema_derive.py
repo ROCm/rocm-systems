@@ -1133,6 +1133,14 @@ class TestDeriveVectorTernary:
         assert '::rocjitsu::amdgpu::mad_i24_u32' in cpp
         assert 'a * b' not in cpp
 
+    def test_signed_bfe_keeps_braced_one_literal(self):
+        sem = _FakeSem('V_BFE_I32', 'vector_ternary', 'bfe_i', 'i32')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+
+        assert 'uint32_t{1}' in cpp
+        assert 'uint32_tstatic_cast' not in cpp
+
 
 class TestDeriveVectorCmp:
     def test_cmp_eq_writes_vcc(self):
