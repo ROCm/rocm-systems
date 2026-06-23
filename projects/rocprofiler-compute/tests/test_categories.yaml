@@ -139,6 +139,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_roofline_profile_to_analyze
       - test_torch_trace_analysis
       - test_torch_trace_coverage
       - test_tui_components
@@ -198,6 +199,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_roofline_profile_to_analyze
       - test_torch_trace_analysis
       - test_torch_trace_coverage
       - test_tui_components
