@@ -2427,17 +2427,23 @@ struct alignas(16) FillPatternPayload {
   uint64_t hi;
 };
 
+// startByte rotates the pattern so the payload is byte-correct for a region whose
+// byte-offset-from-fill-start is startByte % patternSize.  This works for all supported
+// patternSizes (1/2/4/8/16) since patternSize is always a power of two, making the
+// bitwise AND a valid modulo.
 static inline void tilePatternBytes(unsigned char* dst, size_t dstSize, const void* pattern,
-                                    size_t patternSize) {
+                                    size_t patternSize, size_t startByte) {
   const auto* src = static_cast<const unsigned char*>(pattern);
   for (size_t i = 0; i < dstSize; ++i) {
-    dst[i] = src[i & (patternSize - 1)];
+    dst[i] = src[(startByte + i) & (patternSize - 1)];
   }
 }
 
-static inline FillPatternPayload buildTilePattern(const void* pattern, size_t patternSize) {
+static inline FillPatternPayload buildTilePattern(const void* pattern, size_t patternSize,
+                                                  size_t startByte) {
   FillPatternPayload payload = {};
-  tilePatternBytes(reinterpret_cast<unsigned char*>(&payload), sizeof(payload), pattern, patternSize);
+  tilePatternBytes(reinterpret_cast<unsigned char*>(&payload), sizeof(payload), pattern,
+                   patternSize, startByte);
   return payload;
 }
 
@@ -2460,14 +2466,6 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
 
   const uintptr_t fill_buf_addr = memory.virtualAddress() + origin[0];
 
-  if ((fill_buf_addr % patternSize) != 0) {
-    LogPrintfError(
-        "fillBuffer1D: buffer VA 0x%lx with origin %zu is not aligned to pattern size %zu; "
-        "kernel path requires (VA + origin) %% patternSize == 0",
-        memory.virtualAddress(), origin[0], patternSize);
-    return false;
-  }
-
   constexpr uint32_t kFillType = FillBufferUnAligned;
 
   cl_mem mem = as_cl<amd::Memory>(memory.owner());
@@ -2481,12 +2479,11 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
           patternSize == 16) &&
          "fillBuffer1D supports pattern sizes of 1/2/4/8/16 bytes");
 
-  // Body region uses uint64 stores unconditionally. Tile region uses ulong2
-  // stores; head/body/body_tail uint64 patterns are derived from the tile
-  // pattern's low half (no rotation needed under invariant
-  // addr % patternSize == 0).
+  // Body region uses uint64 stores unconditionally. Tile region uses ulong2 stores.
+  // Payloads are built after region offsets are computed so they can be rotated
+  // by regionByteOffset % patternSize, making every region byte-correct even when
+  // the destination address is not aligned to patternSize.
   constexpr size_t bodyElemSize = sizeof(uint64_t);
-  const FillPatternPayload tiled_pattern = buildTilePattern(pattern, patternSize);
 
   // Calculate head, body, body-tail, tail, and tiled body counts
   // Head/tail are byte counts. Body/body-tail are element counts.
@@ -2550,6 +2547,16 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   const size_t body_tail_offset = head_count + body_count * bodyElemSize + body_tile_count * tile_size;
   const size_t tile_offset = static_cast<size_t>(tile_start - fill_buf_addr);
 
+  // Build rotated payloads: each region's payload is rotated by its byte-offset-from-fill-start
+  // modulo patternSize so that the stored bytes are correct regardless of destination alignment.
+  // When all offsets are 0 (aligned case), all three payloads agree with the unrotated pattern.
+  const FillPatternPayload tiled_pattern =
+      buildTilePattern(pattern, patternSize, tile_offset % patternSize);
+  const uint64_t body_pattern =
+      buildTilePattern(pattern, patternSize, body_offset % patternSize).lo;
+  const uint64_t body_tail_pattern =
+      buildTilePattern(pattern, patternSize, body_tail_offset % patternSize).lo;
+
   constexpr size_t localWorkSize = 256;
   const size_t work_items = std::max(alignUp(body_tile_count, localWorkSize), localWorkSize);
   size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, work_items);
@@ -2566,16 +2573,18 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, origin[0]);
   setArgument(kernels_[kFillType], 1, sizeof(cl_mem), kernArgBase, 0, nullptr, kDirectVa);
   setArgument(kernels_[kFillType], 2, sizeof(tiled_pattern), &tiled_pattern);
-  setArgument(kernels_[kFillType], 3, sizeof(body_tile_count), &body_tile_count);
-  setArgument(kernels_[kFillType], 4, sizeof(body_tile_passes), &body_tile_passes);
-  setArgument(kernels_[kFillType], 5, sizeof(globalWorkSize), &globalWorkSize /* stride */);
-  setArgument(kernels_[kFillType], 6, sizeof(patternSize), &patternSize);
-  setArgument(kernels_[kFillType], 7, sizeof(tail_offset), &tail_offset);
-  setArgument(kernels_[kFillType], 8, sizeof(cl_mem), &mem, origin[0] + body_offset);
-  setArgument(kernels_[kFillType], 9, sizeof(cl_mem), &mem, origin[0] + body_tail_offset);
-  setArgument(kernels_[kFillType], 10, sizeof(cl_mem), &mem, origin[0] + tail_offset);
-  setArgument(kernels_[kFillType], 11, sizeof(cl_mem), &mem, origin[0] + tile_offset);
-  setArgument(kernels_[kFillType], 12, sizeof(counts), &counts);
+  setArgument(kernels_[kFillType], 3, sizeof(body_pattern), &body_pattern);
+  setArgument(kernels_[kFillType], 4, sizeof(body_tail_pattern), &body_tail_pattern);
+  setArgument(kernels_[kFillType], 5, sizeof(body_tile_count), &body_tile_count);
+  setArgument(kernels_[kFillType], 6, sizeof(body_tile_passes), &body_tile_passes);
+  setArgument(kernels_[kFillType], 7, sizeof(globalWorkSize), &globalWorkSize /* stride */);
+  setArgument(kernels_[kFillType], 8, sizeof(patternSize), &patternSize);
+  setArgument(kernels_[kFillType], 9, sizeof(tail_offset), &tail_offset);
+  setArgument(kernels_[kFillType], 10, sizeof(cl_mem), &mem, origin[0] + body_offset);
+  setArgument(kernels_[kFillType], 11, sizeof(cl_mem), &mem, origin[0] + body_tail_offset);
+  setArgument(kernels_[kFillType], 12, sizeof(cl_mem), &mem, origin[0] + tail_offset);
+  setArgument(kernels_[kFillType], 13, sizeof(cl_mem), &mem, origin[0] + tile_offset);
+  setArgument(kernels_[kFillType], 14, sizeof(counts), &counts);
 
   size_t globalWorkOffset[3] = {0, 0, 0};
   amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);

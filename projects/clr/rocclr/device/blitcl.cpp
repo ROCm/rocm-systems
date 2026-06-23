@@ -36,14 +36,16 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
 
     extern void __amd_fillBufferUnAligned(
         __global void* __restrict buf, __constant uchar* __restrict pattern,
-        ulong2 body_tile_pattern, ulong body_tile_count, ulong body_tile_passes, ulong stride,
+        ulong2 body_tile_pattern, ulong body_pattern, ulong body_tail_pattern,
+        ulong body_tile_count, ulong body_tile_passes, ulong stride,
         ulong pattern_size, ulong tail_offset, __global uchar* __restrict body_ptr,
         __global uchar* __restrict body_tail_ptr, __global uchar* __restrict tail_ptr,
         __global ulong2* __restrict element_tiled, ushort4 counts);
 
     __kernel void __amd_rocclr_fillBufferUnAligned(
         __global void* __restrict buf, __constant uchar* __restrict pattern,
-        ulong2 body_tile_pattern, ulong body_tile_count, ulong body_tile_passes, ulong stride,
+        ulong2 body_tile_pattern, ulong body_pattern, ulong body_tail_pattern,
+        ulong body_tile_count, ulong body_tile_passes, ulong stride,
         ulong pattern_size, ulong tail_offset, __global uchar* __restrict body_ptr,
         __global uchar* __restrict body_tail_ptr, __global uchar* __restrict tail_ptr,
         __global ulong2* __restrict element_tiled, ushort4 counts) {
@@ -52,8 +54,8 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       // Cleanup region: lanes 0..15 of group 0 wave 0 handle head/body/body_tail/tail.
       // Body and body_tail are always uint64 stores (always either 0 or 1 element).
       // Aligned-buffer case: counts are all zero, predicates fall through with no work.
-      // Under invariant addr % patternSize == 0, body_head/body_tail uint64 == body_tile_pattern.lo
-      // (no rotation needed); for patternSize=16 the cleanup region is unused entirely.
+      // body_pattern and body_tail_pattern are host-rotated u64 payloads (rotated by their
+      // byte-offset-from-fill-start mod patternSize), so the unaligned-base case is byte-correct.
       if (id < 16) {
         __global uchar* head_ptr = (__global uchar*)buf;
         const uint lane = (uint)id;
@@ -65,9 +67,9 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
         if (lane < head_end) {
           head_ptr[lane] = pattern[lane & (pattern_size - 1)];
         } else if (lane < body_end) {
-          *(__global ulong*)body_ptr = body_tile_pattern.lo;
+          *(__global ulong*)body_ptr = body_pattern;
         } else if (lane < body_tail_end) {
-          *(__global ulong*)body_tail_ptr = body_tile_pattern.lo;
+          *(__global ulong*)body_tail_ptr = body_tail_pattern;
         } else if (lane < tail_end) {
           const ulong tail_byte_idx = (ulong)(lane - body_tail_end);
           tail_ptr[tail_byte_idx] =
