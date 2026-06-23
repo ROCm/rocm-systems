@@ -124,9 +124,8 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
 // Isa::simd_capable_value() to keep the SIMD fast path off operands whose
 // scalar broadcast would throw at runtime.
 inline bool can_resolve_src_scalar(int ev, int m0_ev) {
-  bool ok = (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) ||
-            ev == 124 || ev == 126 || ev == 127 ||
-            (ev >= 128 && ev <= 208) || (ev >= 235 && ev <= 238) ||
+  bool ok = (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) || ev == 124 || ev == 126 ||
+            ev == 127 || (ev >= 128 && ev <= 208) || (ev >= 235 && ev <= 238) ||
             (ev >= 240 && ev <= 253);
   if (m0_ev == 125)
     ok = ok || ev == 125 || ev == 230 || ev == 231;
@@ -239,8 +238,10 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev <= 105) {
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
+                       static_cast<uint32_t>(val));
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
+                       static_cast<uint32_t>(val >> 32));
     return;
   }
   if (ev == 106) {
@@ -248,8 +249,10 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev >= 108 && ev <= 122) {
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));
-    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
+                       static_cast<uint32_t>(val));
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
+                       static_cast<uint32_t>(val >> 32));
     return;
   }
   if (ev == 124)
@@ -264,4 +267,4 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
 } // namespace amdgpu
 } // namespace rocjitsu
 
-#endif  // ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
+#endif // ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
