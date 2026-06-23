@@ -122,6 +122,4 @@ size_t ncclDevrGetWinOffset(struct ncclDevrWindow* winHost);
 ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset,
                                      struct ncclTeam lsaTeam, void** outPtr);
 
-// Copies the devComm data from "rank" to "lsaBarrier".  Assumes the same memory layout at source and destination.
-void ncclDevCommCopyLsaData(void* dstRankPtr, void const* srcRankPtr);
 #endif

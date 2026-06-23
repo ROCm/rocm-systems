@@ -8,6 +8,20 @@
 #include "dev_runtime.h"
 #include "comm.h"
 
+typedef struct ncclResourceWindow_vidmem_v23000 {
+  char reserved1[8];
+  char* lsaFlatBase;
+  char reserved2[8];
+  uint32_t stride4G;
+  uint32_t mcOffset4K;
+  char reserved3[32];  // NOTE: shrunk from 40 in 2.30u1 to reclaim 8 bytes
+} ncclResourceWindow_vidmem_v23000_t;
+
+static_assert(offsetof(ncclResourceWindow_vidmem_v23000, lsaFlatBase) == offsetof(ncclWindow_vidmem, lsaFlatBase));
+static_assert(offsetof(ncclResourceWindow_vidmem_v23000, stride4G) == offsetof(ncclWindow_vidmem, stride4G));
+static_assert(offsetof(ncclResourceWindow_vidmem_v23000, mcOffset4K) == offsetof(ncclWindow_vidmem, mcOffset4K));
+static_assert(sizeof(ncclResourceWindow_vidmem_v23000) == 64);
+
 struct ncclDevComm_v23000 {
   unsigned int magic;
   unsigned int version;
@@ -20,7 +34,7 @@ struct ncclDevComm_v23000 {
   ncclDevCommWindowTable_t windowTable;
 
   ncclWindow_t resourceWindow;
-  ncclResourceWindow_vidmem_t resourceWindow_inlined;
+  ncclResourceWindow_vidmem_v23000_t resourceWindow_inlined;
   // 2.30u1 reclaimed 8 bytes from resourceWindow_inlined's reserved3 (now 32
   // bytes) and placed hybridWorldGinBarrier in ncclDevComm in that space.
   ncclGinBarrierHandle_t hybridWorldGinBarrier;
@@ -83,6 +97,20 @@ static ncclResult_t ncclDevCommRequirementsFilter_v23000(ncclComm_t comm, ncclDe
   return ncclSuccess;
 }
 
+static void ncclDevCommCopyResourceWindowNewToOld_v23000(ncclResourceWindow_vidmem_v23000_t* old,
+                                                         ncclResourceWindow_vidmem_t const& nw) {
+  old->lsaFlatBase = nw.lsaFlatBase;
+  old->stride4G = nw.stride4G;
+  old->mcOffset4K = nw.mcOffset4K;
+}
+
+static void ncclDevCommCopyResourceWindowOldToNew_v23000(ncclResourceWindow_vidmem_t* nw,
+                                                         ncclResourceWindow_vidmem_v23000_t const& old) {
+  nw->lsaFlatBase = old.lsaFlatBase;
+  nw->stride4G = old.stride4G;
+  nw->mcOffset4K = old.mcOffset4K;
+}
+
 static ncclResult_t ncclDevCommCopyNewToOld_v23000(ncclComm_t comm, void* oldDevComm,
                                                    struct ncclDevComm const* newDevComm) {
   struct ncclDevComm_v23000* old = (struct ncclDevComm_v23000*)oldDevComm;
@@ -98,7 +126,7 @@ static ncclResult_t ncclDevCommCopyNewToOld_v23000(ncclComm_t comm, void* oldDev
   old->lsaSize_rcp32 = newDevComm->lsaSize_rcp32;
   old->windowTable = newDevComm->windowTable;
   old->resourceWindow = newDevComm->resourceWindow;
-  old->resourceWindow_inlined = newDevComm->resourceWindow_inlined;
+  ncclDevCommCopyResourceWindowNewToOld_v23000(&old->resourceWindow_inlined, newDevComm->resourceWindow_inlined);
   old->hybridWorldGinBarrier = newDevComm->hybridWorldGinBarrier;
   old->lsaMultimem = newDevComm->lsaMultimem;
   old->lsaBarrier = newDevComm->lsaBarrier;
@@ -137,7 +165,7 @@ static ncclResult_t ncclDevCommCopyOldToNew_v23000(ncclComm_t comm, struct ncclD
   newDevComm->lsaSize_rcp32 = old->lsaSize_rcp32;
   newDevComm->windowTable = old->windowTable;
   newDevComm->resourceWindow = old->resourceWindow;
-  newDevComm->resourceWindow_inlined = old->resourceWindow_inlined;
+  ncclDevCommCopyResourceWindowOldToNew_v23000(&newDevComm->resourceWindow_inlined, old->resourceWindow_inlined);
   newDevComm->hybridWorldGinBarrier = old->hybridWorldGinBarrier;
   newDevComm->lsaMultimem = old->lsaMultimem;
   newDevComm->lsaBarrier = old->lsaBarrier;
