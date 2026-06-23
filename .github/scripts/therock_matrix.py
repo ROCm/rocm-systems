@@ -53,7 +53,7 @@ project_map = {
             "-DTHEROCK_ENABLE_ALL=OFF",
             "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON",
         ],
-        "projects_to_test": "rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
+        "projects_to_test": "rocr-debug-agent, rocgdb",
     },
     # debug agent changes don't have to exercise ROCgdb.
     "debug_tools-debug-agent": {
@@ -90,7 +90,7 @@ project_map = {
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb",
     },
     # Same test coverage as TheRock submodule-bump PRs (rocm-systems scope).
     # Nightly (schedule) uses this entry explicitly for alignment with runtimes coverage.
