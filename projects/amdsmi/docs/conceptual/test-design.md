@@ -523,8 +523,8 @@ The top-level `CMakeLists.txt` wires this in with `add_subdirectory("tests/pytho
 | `functional/mock_values/` | `unit/gpu/mock_cper/` |
 | `functional/cross_process_serialization.{h,cc}` | `functional/system/cross_process_serialization.{h,cc}` |
 | `functional/kfd_atfork_read.{h,cc}` | `functional/system/kfd_atfork_read.{h,cc}` |
-| `functional/fabric_read.{h,cc}` | `functional/ifoe/fabric_read.{h,cc}` |
-| `functional/ifoe_info_read.{h,cc}` | `functional/ifoe/ifoe_info_read.{h,cc}` |
+| `functional/fabric_read.{h,cc}` | `functional/ifoe/fabric/fabric_read.{h,cc}` |
+| `functional/ifoe_info_read.{h,cc}` | `functional/ifoe/identity/ifoe_info_read.{h,cc}` |
 | `functional/computepartition_memallocmode_read_write.{h,cc}` | `functional/gpu/partition/computepartition_memallocmode_read_write.{h,cc}` |
 | `functional/err_cnt_read.{h,cc}` | `functional/gpu/ras/err_cnt_read.{h,cc}` |
 | `functional/evt_notif_read_write.{h,cc}` | `functional/gpu/events/evt_notif_read_write.{h,cc}` |
