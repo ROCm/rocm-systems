@@ -8,10 +8,6 @@ These tests run ``rocprof-compute profile`` against the multi-precision
 produced workload, exercising the full roofline pipeline (built-in microbenchmark
 -> ``roofline.csv`` -> AI calc -> per-datatype HTML) across the precisions the
 detected SoC supports.
-
-This is distinct from ``test_roofline_analyze.py``, which analyzes pre-recorded
-golden workloads. Every test skips (never fails) when no roofline-capable GPU is
-present.
 """
 
 from pathlib import Path
