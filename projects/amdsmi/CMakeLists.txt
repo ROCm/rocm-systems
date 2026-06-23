@@ -385,9 +385,8 @@ add_subdirectory("src")
 
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
-    #add_subdirectory("tests/rocm_smi_test")
     add_subdirectory("tests/amd_smi_test")
-    add_subdirectory("tests/python_unittest")
+    add_subdirectory("tests/python")
 endif()
 
 # python interface, CLI, and py-test depend on shared libraries

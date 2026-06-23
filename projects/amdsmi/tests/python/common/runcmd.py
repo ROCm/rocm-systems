@@ -18,6 +18,13 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""Subprocess helper for driving the ``amd-smi`` CLI binary.
+
+Defines ``Util`` (RunCmdSync/RunCmdAsync/ConvertStr/Print/GetFuncName) --
+the thin subprocess plumbing the CLI tests use to invoke the installed
+``amd-smi`` executable and capture its output.  Used only by the CLI
+tests; it has no amdsmi or unittest dependencies.
+"""
 
 import argparse
 import datetime
@@ -25,7 +32,6 @@ import locale
 import os
 import subprocess
 import sys
-
 
 version_number = "1.0.0"
 build_date = f"{datetime.datetime.now():%b %d %Y}"
@@ -94,7 +100,7 @@ class Util:
 
         try:
             func_name = sys._getframe(stack_line).f_back.f_code.co_name
-        except Exception as e:
+        except Exception:
             func_name = "Unknown"
             self.Print("EXCEPTION", f"Cannot get function name at stack_line {stack_line}")
         return func_name

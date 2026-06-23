@@ -20,102 +20,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import ctypes
-import inspect
 import json
-import sys
-import unittest
-import time
 import statistics
-import os
+import time
+import unittest
 
-sys.path.append("/opt/rocm/libexec/amdsmi_cli/")
-
-try:
-    import amdsmi
-except ImportError as exc:
-    print(f"Warning: Could not import amdsmi: {exc}")
-
-    # Create a minimal mock for testing
-    class MockAmdsmi:
-        def __init__(self):
-            pass
-
-        def __getattr__(self, name):
-            return lambda *args, **kwargs: None
-
-    amdsmi = MockAmdsmi()
-
-from amdsmi import (
-    amdsmi_init,
-    amdsmi_shut_down,
-    amdsmi_get_cpu_handles,
-    amdsmi_get_cpu_hsmp_driver_version,
-    AmdSmiInitFlags,
-    AmdSmiException,
-)
-
-# Error map dictionary
-error_map = {
-    "0": "AMDSMI_STATUS_SUCCESS",
-    "1": "AMDSMI_STATUS_INVAL",
-    "2": "AMDSMI_STATUS_NOT_SUPPORTED",
-    "3": "AMDSMI_STATUS_NOT_YET_IMPLEMENTED",
-    "4": "AMDSMI_STATUS_FAIL_LOAD_MODULE",
-    "5": "AMDSMI_STATUS_FAIL_LOAD_SYMBOL",
-    "6": "AMDSMI_STATUS_DRM_ERROR",
-    "7": "AMDSMI_STATUS_API_FAILED",
-    "8": "AMDSMI_STATUS_TIMEOUT",
-    "9": "AMDSMI_STATUS_RETRY",
-    "10": "AMDSMI_STATUS_NO_PERM",
-    "11": "AMDSMI_STATUS_INTERRUPT",
-    "12": "AMDSMI_STATUS_IO",
-    "13": "AMDSMI_STATUS_ADDRESS_FAULT",
-    "14": "AMDSMI_STATUS_FILE_ERROR",
-    "15": "AMDSMI_STATUS_OUT_OF_RESOURCES",
-    "16": "AMDSMI_STATUS_INTERNAL_EXCEPTION",
-    "17": "AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS",
-    "18": "AMDSMI_STATUS_INIT_ERROR",
-    "19": "AMDSMI_STATUS_REFCOUNT_OVERFLOW",
-    "20": "AMDSMI_STATUS_DIRECTORY_NOT_FOUND",
-    "21": "AMDSMI_STATUS_IPC_ERROR",
-    "30": "AMDSMI_STATUS_BUSY",
-    "31": "AMDSMI_STATUS_NOT_FOUND",
-    "32": "AMDSMI_STATUS_NOT_INIT",
-    "33": "AMDSMI_STATUS_NO_SLOT",
-    "34": "AMDSMI_STATUS_DRIVER_NOT_LOADED",
-    "39": "AMDSMI_STATUS_MORE_DATA",
-    "40": "AMDSMI_STATUS_NO_DATA",
-    "41": "AMDSMI_STATUS_INSUFFICIENT_SIZE",
-    "42": "AMDSMI_STATUS_UNEXPECTED_SIZE",
-    "43": "AMDSMI_STATUS_UNEXPECTED_DATA",
-    "44": "AMDSMI_STATUS_NON_AMD_CPU",
-    "45": "AMDSMI_STATUS_NO_ENERGY_DRV",
-    "46": "AMDSMI_STATUS_NO_MSR_DRV",
-    "47": "AMDSMI_STATUS_NO_HSMP_DRV",
-    "48": "AMDSMI_STATUS_NO_HSMP_SUP",
-    "49": "AMDSMI_STATUS_NO_HSMP_MSG_SUP",
-    "50": "AMDSMI_STATUS_HSMP_TIMEOUT",
-    "51": "AMDSMI_STATUS_NO_DRV",
-    "52": "AMDSMI_STATUS_FILE_NOT_FOUND",
-    "53": "AMDSMI_STATUS_ARG_PTR_NULL",
-    "54": "AMDSMI_STATUS_AMDGPU_RESTART_ERR",
-    "55": "AMDSMI_STATUS_SETTING_UNAVAILABLE",
-    "56": "AMDSMI_STATUS_CORRUPTED_EEPROM",
-    "0xFFFFFFFE": "AMDSMI_STATUS_MAP_ERROR",
-    "0xFFFFFFFF": "AMDSMI_STATUS_UNKNOWN_ERROR",
-}
-
-# Global variables needed for performance tests
-verbose = 1
-has_info_printed = False
-
-# Global constants matching original test file
-PASS = "AMDSMI_STATUS_SUCCESS"
-FAIL = "AMDSMI_STATUS_INVAL"
+import common.common as common
+from common.common import FAIL, PASS, amdsmi
 
 
-class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
+class TestCpuBenchmark(unittest.TestCase):
     """
     Standalone Performance testing class for AMDSMI Python APIs.
 
@@ -123,98 +37,43 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     It only runs performance-specific tests.
     """
 
-    # Class-level attributes to prevent IndexError and AttributeError
-    compute_partition_types = [
-        ("SPX", amdsmi.AmdSmiComputePartitionType.SPX, PASS)
-        if hasattr(amdsmi, "AmdSmiComputePartitionType")
-        else ("SPX", None, PASS),
-        ("DPX", amdsmi.AmdSmiComputePartitionType.DPX, PASS)
-        if hasattr(amdsmi, "AmdSmiComputePartitionType")
-        else ("DPX", None, PASS),
-        ("TPX", amdsmi.AmdSmiComputePartitionType.TPX, PASS)
-        if hasattr(amdsmi, "AmdSmiComputePartitionType")
-        else ("TPX", None, PASS),
-        ("QPX", amdsmi.AmdSmiComputePartitionType.QPX, PASS)
-        if hasattr(amdsmi, "AmdSmiComputePartitionType")
-        else ("QPX", None, PASS),
-        ("CPX", amdsmi.AmdSmiComputePartitionType.CPX, PASS)
-        if hasattr(amdsmi, "AmdSmiComputePartitionType")
-        else ("CPX", None, PASS),
-        ("INVALID", amdsmi.AmdSmiComputePartitionType.INVALID, FAIL)
-        if hasattr(amdsmi, "AmdSmiComputePartitionType")
-        else ("INVALID", None, FAIL),
-    ]
-
-    freq_inds = [
-        ("MIN", amdsmi.AmdSmiFreqInd.MIN, PASS)
-        if hasattr(amdsmi, "AmdSmiFreqInd")
-        else ("MIN", None, PASS),
-        ("MAX", amdsmi.AmdSmiFreqInd.MAX, PASS)
-        if hasattr(amdsmi, "AmdSmiFreqInd")
-        else ("MAX", None, PASS),
-        ("INVALID", amdsmi.AmdSmiFreqInd.INVALID, FAIL)
-        if hasattr(amdsmi, "AmdSmiFreqInd")
-        else ("INVALID", None, FAIL),
-    ]
-
-    dev_perf_levels = [
-        ("AUTO", amdsmi.AmdSmiDevPerfLevel.AUTO, PASS)
-        if hasattr(amdsmi, "AmdSmiDevPerfLevel")
-        else ("AUTO", None, PASS),
-        ("LOW", amdsmi.AmdSmiDevPerfLevel.LOW, PASS)
-        if hasattr(amdsmi, "AmdSmiDevPerfLevel")
-        else ("LOW", None, PASS),
-        ("HIGH", amdsmi.AmdSmiDevPerfLevel.HIGH, PASS)
-        if hasattr(amdsmi, "AmdSmiDevPerfLevel")
-        else ("HIGH", None, PASS),
-        ("MANUAL", amdsmi.AmdSmiDevPerfLevel.MANUAL, PASS)
-        if hasattr(amdsmi, "AmdSmiDevPerfLevel")
-        else ("MANUAL", None, PASS),
-        ("STABLE_STD", amdsmi.AmdSmiDevPerfLevel.STABLE_STD, PASS)
-        if hasattr(amdsmi, "AmdSmiDevPerfLevel")
-        else ("STABLE_STD", None, PASS),
-        ("STABLE_PEAK", amdsmi.AmdSmiDevPerfLevel.STABLE_PEAK, PASS)
-        if hasattr(amdsmi, "AmdSmiDevPerfLevel")
-        else ("STABLE_PEAK", None, PASS),
-        ("STABLE_MIN_MCLK", amdsmi.AmdSmiDevPerfLevel.STABLE_MIN_MCLK, PASS)
-        if hasattr(amdsmi, "AmdSmiDevPerfLevel")
-        else ("STABLE_MIN_MCLK", None, PASS),
-        ("STABLE_MIN_SCLK", amdsmi.AmdSmiDevPerfLevel.STABLE_MIN_SCLK, PASS)
-        if hasattr(amdsmi, "AmdSmiDevPerfLevel")
-        else ("STABLE_MIN_SCLK", None, PASS),
-        ("DETERMINISM", amdsmi.AmdSmiDevPerfLevel.DETERMINISM, PASS)
-        if hasattr(amdsmi, "AmdSmiDevPerfLevel")
-        else ("DETERMINISM", None, PASS),
-        ("UNKNOWN", amdsmi.AmdSmiDevPerfLevel.UNKNOWN, FAIL)
-        if hasattr(amdsmi, "AmdSmiDevPerfLevel")
-        else ("UNKNOWN", None, FAIL),
-    ]
+    @classmethod
+    def setUpClass(cls):
+        # Shared Common instance for logging parity with the unit/integration
+        # tests (print_func_name, etc.). Created once per class, as they do.
+        cls.common = common.Common(common.verbose)
+        # Detect CPU presence once. Like the regular CPU tests, the CPU perf suite
+        # is skipped on machines without a CPU instead of exercising CPU APIs, which
+        # the C library logs noisily ("No CPU sockets on machine", "Failed to get
+        # cpu family", ...) when no CPU/ESMI driver is present.
+        cls._has_cpu = False
+        try:
+            cls.common.amdsmi_smart_init()
+            cpus = amdsmi.amdsmi_get_cpu_handles()
+            # amdsmi_get_cpu_handles() returns {"cpu_count", "processor_handles"};
+            # use the handle list (an empty list means no CPU sockets present).
+            handles = cpus["processor_handles"] if isinstance(cpus, dict) else cpus
+            # Require a *working* CPU monitoring driver, not just a CPU handle (which
+            # exists on any AMD host even without the ESMI/HSMP driver). Without the
+            # driver the CPU APIs log C-library errors, so skip the suite — mirroring
+            # the regular CPU tests, which skip when the driver is absent.
+            if handles:
+                amdsmi.amdsmi_get_cpu_hsmp_driver_version(handles[0])
+                cls._has_cpu = True
+        except Exception:
+            cls._has_cpu = False
+        finally:
+            try:
+                amdsmi.amdsmi_shut_down()
+            except Exception:
+                pass
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        global has_info_printed
-        if verbose and has_info_printed is False:
-            # Execute the following to print the asic and board info once
-            # per test run
-            has_info_printed = True
-            self.setUp()
-            for i, gpu in enumerate(self.processors):
-                try:
-                    # Print asic info
-                    msg = f"asic info(gpu={i})"
-                    ret = amdsmi.amdsmi_get_gpu_asic_info(gpu)
-                    self._print(msg, ret)
-                except amdsmi.AmdSmiLibraryException as e:
-                    raise e
-            for i, gpu in enumerate(self.processors):
-                try:
-                    # Print board info
-                    msg = f"board info(gpu={i})"
-                    ret = amdsmi.amdsmi_get_gpu_board_info(gpu)
-                    self._print(msg, ret)
-                except amdsmi.AmdSmiLibraryException as e:
-                    raise e
-            self.tearDown()
+        # Do NOT initialize amdsmi or enumerate hardware here. __init__ runs at
+        # test-discovery time (including for `--list`), and hardware init must
+        # not happen during collection. setUp() performs the real amdsmi_init()
+        # before each test.
         # Performance test configuration
         self.perf_iterations = 11  # Number of iterations for each performance test
         self.perf_warmup_iterations = 3  # Number of warmup iterations
@@ -222,6 +81,9 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
 
     def setUp(self):
         """Setup for performance tests - minimal setup just for performance testing."""
+        if not self.__class__._has_cpu:
+            self.skipTest("No AMD CPU present on this machine.")
+
         self.time = time
         self.statistics = statistics
 
@@ -233,63 +95,20 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self.PASS = PASS
         self.FAIL = FAIL
 
-        # Initialize empty lists for robustness - will be populated if amdsmi is available
-        self.status_types = []
-        self.clk_types = []
-        self.io_bw_encodings = []
-        self.event_groups = []
-        self.gpu_blocks = []
-        self.memory_types = []
-        self.processor_types = []
-        self.reg_types = []
-        self.voltage_metrics = []
-        self.voltage_types = []
-        self.link_types = []
-        self.temperature_types = []
-        self.utilization_counter_types = []
-        self.event_types = []
-        self.counter_commands = []
-        self.power_profile_preset_masks = []
-        self.temperature_metrics = []
-        self.clk_limit_types = []
-        self.memory_partition_types = []
-
-        # Try to populate with actual amdsmi attributes if available
-        self._populate_amdsmi_attributes()
-
-        # Initialize AMDSMI if available
+        # Initialize AMDSMI like the unit/integration tests: smart-init auto-detects
+        # available drivers, so (unlike a forced amdsmi_init(INIT_AMD_CPUS)) it does
+        # not make the C library print "ESMI Not initialized, drivers not found" on
+        # machines without a CPU/ESMI driver.
         try:
-            if hasattr(amdsmi, "amdsmi_init"):
-                amdsmi.amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-                self.processors = (
-                    amdsmi.amdsmi_get_processor_handles()
-                    if hasattr(amdsmi, "amdsmi_get_processor_handles")
-                    else []
-                )
-            else:
-                self.processors = []
+            self.common.amdsmi_smart_init()
+            self.processors = (
+                amdsmi.amdsmi_get_processor_handles()
+                if hasattr(amdsmi, "amdsmi_get_processor_handles")
+                else []
+            )
         except Exception as e:
-            print(f"Warning: Failed to initialize AMDSMI: {e}")
+            self.common.print(f"Warning: Failed to initialize AMDSMI: {e}")
             self.processors = []
-
-    def _populate_amdsmi_attributes(self):
-        """Try to populate attribute lists with amdsmi enums if available."""
-        # This method safely tries to access amdsmi attributes and populates lists
-        # If amdsmi is not available or missing attributes, it silently continues
-
-        # Wrap all attribute access in a try-catch to handle missing amdsmi properly
-        try:
-            if hasattr(amdsmi, "AmdSmiStatus"):
-                self.status_types = [
-                    ("SUCCESS", amdsmi.AmdSmiStatus.SUCCESS, self.PASS),
-                    ("INVAL", amdsmi.AmdSmiStatus.INVAL, self.PASS),
-                    ("NOT_SUPPORTED", amdsmi.AmdSmiStatus.NOT_SUPPORTED, self.PASS),
-                    ("UNKNOWN_ERROR", amdsmi.AmdSmiStatus.UNKNOWN_ERROR, self.PASS),
-                ]
-        except (AttributeError, Exception):
-            pass
-
-        # Add more attribute populations as needed - this is a safe fallback approach
 
     def tearDown(self):
         """Cleanup after performance tests."""
@@ -299,52 +118,42 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         except Exception:
             pass  # Ignore cleanup errors
 
-    def _print_func_name(self, msg=""):
-        """Helper method to print function name for consistency with original tests."""
-        if verbose == 2:
-            print(f"{inspect.currentframe().f_back.f_code.co_name}: {msg}")
-
     def _log_test_start(self, api_name, device_type, device_id, **kwargs):
         """Helper method to log the start of a test."""
-        if verbose:
-            extra_info = " ".join([f"{k}={v}" for k, v in kwargs.items()])
-            print(f"Testing {api_name} on {device_type} {device_id} {extra_info}".strip())
+        extra_info = " ".join([f"{k}={v}" for k, v in kwargs.items()])
+        self.common.print(f"Testing {api_name} on {device_type} {device_id} {extra_info}".strip())
 
     def _log_test_end(self, api_name, device_type, device_id, stats, **kwargs):
         """Helper method to log the end of a test."""
-        if verbose and stats:
-            print(
+        if stats:
+            self.common.print(
                 f"Completed {api_name} on {device_type} {device_id}: {stats.get('mean_time_ms', 0):.3f}ms avg"
             )
 
     def _print_performance_results(self, stats):
         """Helper method to print performance results."""
-        if verbose:
-            print(
-                f"  Performance: {stats['mean_time_ms']:.3f}ms avg, {stats['min_time_ms']:.3f}ms min, {stats['max_time_ms']:.3f}ms max"
-            )
+        self.common.print(
+            f"  Performance: {stats['mean_time_ms']:.3f}ms avg, {stats['min_time_ms']:.3f}ms min, {stats['max_time_ms']:.3f}ms max"
+        )
 
     def _log_test_completion(self, device_type, device_id, extra_info=""):
         """Helper method to log test completion."""
-        if verbose:
-            extra_msg = f" - {extra_info}" if extra_info else ""
-            print(f"  {device_type} {device_id}: Test completed{extra_msg}")
+        extra_msg = f" - {extra_info}" if extra_info else ""
+        self.common.print(f"  {device_type} {device_id}: Test completed{extra_msg}")
 
     def _log_performance_summary(self, api_name, device_type_plural, test_name):
         """Helper method to log performance summary."""
-        if verbose:
-            print(f"Performance test completed for {api_name} on {device_type_plural}")
-            print()  # Add empty line for readability
+        self.common.print(f"Performance test completed for {api_name} on {device_type_plural}")
+        self.common.print("")  # Add empty line for readability
 
     def _print(self, msg, result):
         """Helper method for printing test results."""
-        if verbose:
-            if isinstance(result, dict) or isinstance(result, list):
-                if msg:
-                    print(msg)
-                print(json.dumps(result, sort_keys=False, indent=4, default=str))
-            else:
-                print(f"{msg}: {result}" if msg else result)
+        if isinstance(result, dict) or isinstance(result, list):
+            if msg:
+                self.common.print(msg)
+            self.common.print(json.dumps(result, sort_keys=False, indent=4, default=str))
+        else:
+            self.common.print(f"{msg}: {result}" if msg else result)
 
     def _print_api_result(self, api_func, processor_id, *args, label_prefix="gpu", **kwargs):
         """
@@ -357,7 +166,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
             label_prefix: Prefix for the label (default: "gpu")
             **kwargs: Keyword arguments to pass to the API
         """
-        if not verbose:
+        if self.common.verbose <= common.VERBOSITY_QUIET:
             return
 
         func_name = api_func.__name__
@@ -366,8 +175,8 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         try:
             result = api_func(*args, **kwargs)
             self._print(msg, result)
-        except Exception as e:
-            print(msg, flush=True)
+        except Exception:
+            self.common.print(msg)
             # Don't raise - let the performance test measure the errors
             pass
 
@@ -398,7 +207,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 stats["max_time_ms"], 0, f"Max time should be non-negative for {api_name}"
             )
 
-    def _measure_api_performance(self, api_func, api_name, *args, **kwargs):
+    def _measure_api_performance(self, api_func, api_name, *args, **kwargs) -> dict:
         """
         Measure the performance of an AMDSMI API function.
 
@@ -426,7 +235,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         for i in range(self.perf_iterations):
             start_time = self.time.perf_counter()
             try:
-                result = api_func(*args, **kwargs)
+                api_func(*args, **kwargs)
                 end_time = self.time.perf_counter()
                 execution_time = (end_time - start_time) * 1000  # Convert to milliseconds
                 times.append(execution_time)
@@ -459,27 +268,25 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
             # Store results
             self.perf_results[api_name] = stats
 
-            # Print results if verbose
-            if verbose:
-                print(
-                    f"Performance {api_name}: {stats['mean_time_ms']:.3f}ms avg, "
-                    f"{stats['min_time_ms']:.3f}ms min, {stats['max_time_ms']:.3f}ms max, "
-                    f"{error_count} errors"
-                )
+            self.common.print(
+                f"Performance {api_name}: {stats['mean_time_ms']:.3f}ms avg, "
+                f"{stats['min_time_ms']:.3f}ms min, {stats['max_time_ms']:.3f}ms max, "
+                f"{error_count} errors"
+            )
 
             return stats
         else:
             return {"api_name": api_name, "error": "No successful measurements"}
 
     def test_performance_cpu_apb_disable(self):
-        self._print_func_name("Starting performance test for amdsmi_cpu_apb_disable")
+        self.common.print_func_name("")
         # Use pstate=0 from original test
         pstate = 0
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_cpu_apb_disable", "cpu", i, pstate=pstate)
@@ -493,7 +300,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -502,13 +309,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_cpu_apb_disable", "Processors", "cpu_apb_disable")
 
     def test_performance_cpu_apb_enable(self):
-        self._print_func_name("Starting performance test for amdsmi_cpu_apb_enable")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_cpu_apb_enable", "cpu", i)
@@ -521,7 +328,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -533,15 +340,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_cpu_apb_enable", "Processors", "cpu_apb_enable")
 
     def test_performance_first_online_core_on_cpu_socket(self):
-        self._print_func_name(
-            "Starting performance test for amdsmi_first_online_core_on_cpu_socket"
-        )
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_first_online_core_on_cpu_socket", "Processor", i)
@@ -559,7 +364,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                         stats, "amdsmi_first_online_core_on_cpu_socket"
                     )
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -573,13 +378,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_cclk_limit(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_cclk_limit")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_cclk_limit", "Processor", i)
@@ -592,7 +397,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -606,15 +411,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_core_current_freq_limit(self):
-        self._print_func_name(
-            "Starting performance test for amdsmi_get_cpu_core_current_freq_limit"
-        )
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_core_current_freq_limit", "Processor", i)
@@ -629,7 +432,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -645,13 +448,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_core_energy(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_core_energy")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_core_energy", "Processor", i)
@@ -666,7 +469,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -680,37 +483,41 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_current_io_bandwidth(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_current_io_bandwidth")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
-                self._log_test_start(
-                    "amdsmi_get_cpu_current_io_bandwidth", "Processor", i, encoding=encoding_name
-                )
-                stats = self._measure_api_performance(
-                    amdsmi.amdsmi_get_cpu_current_io_bandwidth,
-                    f"get_cpu_current_io_bandwidth_processor_{i}_encoding_{encoding_name}",
-                    processor,
-                    encoding,
-                    encoding_name,
-                )
-
-                self.perf_results[
-                    f"get_cpu_current_io_bandwidth_processor_{i}_encoding_{encoding_name}"
-                ] = stats
-
-                if stats["successful_runs"] > 0:
-                    self._print_performance_results(stats)
-                else:
-                    print(
-                        f"  Processor {i} encoding={encoding_name}: All calls failed - "
-                        f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
+                for encoding_name, encoding, encoding_cond in common.IO_BW_ENCODINGS:
+                    self._log_test_start(
+                        "amdsmi_get_cpu_current_io_bandwidth",
+                        "Processor",
+                        i,
+                        encoding=encoding_name,
                     )
+                    stats = self._measure_api_performance(
+                        amdsmi.amdsmi_get_cpu_current_io_bandwidth,
+                        f"get_cpu_current_io_bandwidth_processor_{i}_encoding_{encoding_name}",
+                        processor,
+                        encoding,
+                        encoding_name,
+                    )
+
+                    self.perf_results[
+                        f"get_cpu_current_io_bandwidth_processor_{i}_encoding_{encoding_name}"
+                    ] = stats
+
+                    if stats["successful_runs"] > 0:
+                        self._print_performance_results(stats)
+                    else:
+                        self.common.print(
+                            f"  Processor {i} encoding={encoding_name}: All calls failed - "
+                            f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
+                        )
 
                 i = i + 1  # increment inside loop
 
@@ -721,13 +528,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_ddr_bw(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_ddr_bw")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_ddr_bw", "Processor", i)
@@ -740,7 +547,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -752,14 +559,14 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_get_cpu_ddr_bw", "Processors", "get_cpu_ddr_bw")
 
     def test_performance_get_cpu_dimm_power_consumption(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_dimm_power_consumption")
+        self.common.print_func_name("")
         i = 0
         dimm_addr = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start(
@@ -777,7 +584,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -791,16 +598,14 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_dimm_temp_range_and_refresh_rate(self):
-        self._print_func_name(
-            "Starting performance test for amdsmi_get_cpu_dimm_temp_range_and_refresh_rate"
-        )
+        self.common.print_func_name("")
         dimm_addr = 0
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start(
@@ -821,7 +626,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -837,14 +642,14 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_dimm_thermal_sensor(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_dimm_thermal_sensor")
+        self.common.print_func_name("")
         dimm_addr = 0
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start(
@@ -862,7 +667,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -876,7 +681,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_family(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_family")
+        self.common.print_func_name("")
         self._log_test_start("amdsmi_get_cpu_family", "System", "global")
 
         stats = self._measure_api_performance(amdsmi.amdsmi_get_cpu_family, "get_cpu_family_system")
@@ -885,7 +690,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         if stats["successful_runs"] > 0:
             self._print_performance_results(stats)
         else:
-            print(
+            self.common.print(
                 f"  System: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
             )
 
@@ -893,13 +698,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_get_cpu_family", "System", "get_cpu_family")
 
     def test_performance_get_cpu_fclk_mclk(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_fclk_mclk")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_fclk_mclk", "Processor", i)
@@ -912,7 +717,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -924,7 +729,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_get_cpu_fclk_mclk", "Processors", "get_cpu_fclk_mclk")
 
     def test_performance_get_cpu_handles(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_handles")
+        self.common.print_func_name("")
         self._log_test_start("amdsmi_get_cpu_handles", "System", "global")
 
         stats = self._measure_api_performance(
@@ -935,7 +740,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         if stats["successful_runs"] > 0:
             self._print_performance_results(stats)
         else:
-            print(
+            self.common.print(
                 f"  System: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
             )
 
@@ -943,13 +748,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_get_cpu_handles", "System", "get_cpu_handles")
 
     def test_performance_get_cpu_hsmp_driver_version(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_hsmp_driver_version")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_hsmp_driver_version", "Processor", i)
@@ -964,7 +769,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -978,13 +783,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_hsmp_proto_ver(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_hsmp_proto_ver")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_hsmp_proto_ver", "Processor", i)
@@ -999,7 +804,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1013,7 +818,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_model(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_model")
+        self.common.print_func_name("")
         self._log_test_start("amdsmi_get_cpu_model", "System", "global")
 
         stats = self._measure_api_performance(amdsmi.amdsmi_get_cpu_model, "get_cpu_model_system")
@@ -1022,7 +827,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         if stats["successful_runs"] > 0:
             self._print_performance_results(stats)
         else:
-            print(
+            self.common.print(
                 f"  System: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
             )
 
@@ -1030,13 +835,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_get_cpu_model", "System", "get_cpu_model")
 
     def test_performance_get_cpu_prochot_status(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_prochot_status")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_prochot_status", "Processor", i)
@@ -1051,7 +856,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1065,15 +870,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_pwr_svi_telemetry_all_rails(self):
-        self._print_func_name(
-            "Starting performance test for amdsmi_get_cpu_pwr_svi_telemetry_all_rails"
-        )
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_pwr_svi_telemetry_all_rails", "Processor", i)
@@ -1088,7 +891,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1102,13 +905,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_smu_fw_version(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_smu_fw_version")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_smu_fw_version", "Processor", i)
@@ -1123,7 +926,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1137,13 +940,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_socket_c0_residency(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_c0_residency")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_socket_c0_residency", "Processor", i)
@@ -1158,7 +961,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1172,15 +975,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_socket_current_active_freq_limit(self):
-        self._print_func_name(
-            "Starting performance test for amdsmi_get_cpu_socket_current_active_freq_limit"
-        )
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start(
@@ -1197,7 +998,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1213,13 +1014,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_socket_energy(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_energy")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_socket_energy", "Processor", i)
@@ -1234,7 +1035,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1248,13 +1049,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_socket_freq_range(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_freq_range")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_socket_freq_range", "Processor", i)
@@ -1269,7 +1070,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1283,14 +1084,14 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_socket_lclk_dpm_level(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_lclk_dpm_level")
+        self.common.print_func_name("")
         nbio_id = 0
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start(
@@ -1308,7 +1109,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1322,13 +1123,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_socket_power(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_power")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_socket_power", "Processor", i)
@@ -1342,7 +1143,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1356,13 +1157,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_socket_power_cap_max(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_power_cap_max")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_socket_power_cap_max", "Processor", i)
@@ -1376,7 +1177,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1390,13 +1191,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_cpu_socket_temperature(self):
-        self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_temperature")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_cpu_socket_temperature", "Processor", i)
@@ -1410,7 +1211,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1424,9 +1225,9 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_esmi_err_msg(self):
-        self._print_func_name("Starting performance test for amdsmi_get_esmi_err_msg")
+        self.common.print_func_name("")
 
-        for status_type_name, status_type, status_cond in self.status_types:
+        for status_type_name, status_type, status_cond in common.STATUS_TYPES:
             self._log_test_start("amdsmi_get_esmi_err_msg", "Status", status_type_name)
 
             stats = self._measure_api_performance(
@@ -1439,7 +1240,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
             if stats["successful_runs"] > 0:
                 self._print_performance_results(stats)
             else:
-                print(
+                self.common.print(
                     f"  Status {status_type_name}: All calls failed - "
                     f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                 )
@@ -1449,13 +1250,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_get_esmi_err_msg", "Status types", "get_esmi_err_msg")
 
     def test_performance_get_hsmp_metrics_table(self):
-        self._print_func_name("Starting performance test for amdsmi_get_hsmp_metrics_table")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_hsmp_metrics_table", "Processor", i)
@@ -1469,7 +1270,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1482,13 +1283,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_hsmp_metrics_table_version(self):
-        self._print_func_name("Starting performance test for amdsmi_get_hsmp_metrics_table_version")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_hsmp_metrics_table_version", "Processor", i)
@@ -1503,7 +1304,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -1516,7 +1317,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_lib_version(self):
-        self._print_func_name("Starting performance test for amdsmi_get_lib_version")
+        self.common.print_func_name("")
 
         self._log_test_start("amdsmi_get_lib_version", "System", "global")
 
@@ -1527,7 +1328,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         if stats["successful_runs"] > 0:
             self._print_performance_results(stats)
         else:
-            print(
+            self.common.print(
                 f"  All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
             )
 
@@ -1535,7 +1336,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_get_lib_version", "System", "get_lib_version")
 
     def test_performance_set_cpu_pcie_link_rate(self):
-        self._print_func_name("Starting performance test for amdsmi_set_cpu_pcie_link_rate")
+        self.common.print_func_name("")
         # Test with different rate_ctrl values
         rate_ctrls = [0]  # Starting with 0 as in original test
         i = 0
@@ -1543,7 +1344,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 for rate_ctrl in rate_ctrls:
@@ -1564,7 +1365,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                         self._print_performance_results(stats)
                         self._run_performance_assertions(stats, "amdsmi_set_cpu_pcie_link_rate")
                     else:
-                        print(
+                        self.common.print(
                             f"  CPU {i} rate_ctrl {rate_ctrl}: All calls failed - "
                             f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                         )
@@ -1576,9 +1377,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_processor_count_from_handles(self):
-        self._print_func_name(
-            "Starting performance test for amdsmi_get_processor_count_from_handles"
-        )
+        self.common.print_func_name("")
 
         self._log_test_start("amdsmi_get_processor_count_from_handles", "Processors", "all")
 
@@ -1594,7 +1393,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
             self._print_performance_results(stats)
             self._run_performance_assertions(stats, "amdsmi_get_processor_count_from_handles")
         else:
-            print(
+            self.common.print(
                 f"  All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
             )
 
@@ -1606,13 +1405,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_processor_handle_from_bdf(self):
-        self._print_func_name("Starting performance test for amdsmi_get_processor_handle_from_bdf")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_processor_handle_from_bdf", "CPU", i)
@@ -1637,16 +1436,16 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                     # Validate that the returned handle matches the original processor
                     ret = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
                     if processor.value != ret.value:
-                        print(
+                        self.common.print(
                             f"  WARNING: CPU {i} - Handle mismatch! Expected: {processor.value}, Received: {ret.value}"
                         )
                     else:
-                        print(
+                        self.common.print(
                             f"  CPU {i}: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                         )
 
                 except Exception as e:
-                    print(f"  CPU {i}: Error getting BDF - {e}")
+                    self.common.print(f"  CPU {i}: Error getting BDF - {e}")
 
                 self._log_test_completion("CPU", i)
                 i = i + 1
@@ -1656,7 +1455,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_processor_handles(self):
-        self._print_func_name("Starting performance test for amdsmi_get_processor_handles")
+        self.common.print_func_name("")
 
         self._log_test_start("amdsmi_get_processor_handles", "System", "global")
 
@@ -1670,7 +1469,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
             self._print_performance_results(stats)
             self._run_performance_assertions(stats, "amdsmi_get_processor_handles")
         else:
-            print(
+            self.common.print(
                 f"  All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
             )
 
@@ -1680,12 +1479,12 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_processor_handles_by_type(self):
-        self._print_func_name("Starting performance test for amdsmi_get_processor_handles_by_type")
+        self.common.print_func_name("")
 
         socket_handles = amdsmi.amdsmi_get_socket_handles()
 
         for index, socket_handle in enumerate(socket_handles):
-            for processor_name, processor_type, processor_cond in self.processor_types:
+            for processor_name, processor_type, processor_cond in common.PROCESSOR_TYPES:
                 self._log_test_start(
                     "amdsmi_get_processor_handles_by_type",
                     "Socket",
@@ -1708,7 +1507,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                     self._print_performance_results(stats)
                     self._run_performance_assertions(stats, "amdsmi_get_processor_handles_by_type")
                 else:
-                    print(
+                    self.common.print(
                         f"  Socket {index} type {processor_name}: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
 
@@ -1719,13 +1518,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_get_processor_info(self):
-        self._print_func_name("Starting performance test for amdsmi_get_processor_info")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_processor_info", "CPU", i)
@@ -1739,7 +1538,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                     self._print_performance_results(stats)
                     self._run_performance_assertions(stats, "amdsmi_get_processor_info")
                 else:
-                    print(
+                    self.common.print(
                         f"  CPU {i}: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
 
@@ -1749,13 +1548,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_get_processor_info", "CPUs", "get_processor_info")
 
     def test_performance_get_processor_type(self):
-        self._print_func_name("Starting performance test for amdsmi_get_processor_type")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("amdsmi_get_processor_type", "CPU", i)
@@ -1769,7 +1568,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                     self._print_performance_results(stats)
                     self._run_performance_assertions(stats, "amdsmi_get_processor_type")
                 else:
-                    print(
+                    self.common.print(
                         f"  CPU {i}: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
 
@@ -1779,7 +1578,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_get_processor_type", "CPUs", "get_processor_type")
 
     def test_performance_get_socket_handles(self):
-        self._print_func_name("Starting performance test for amdsmi_get_socket_handles")
+        self.common.print_func_name("")
 
         self._log_test_start("amdsmi_get_socket_handles", "System", "global")
 
@@ -1793,7 +1592,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
             self._print_performance_results(stats)
             self._run_performance_assertions(stats, "amdsmi_get_socket_handles")
         else:
-            print(
+            self.common.print(
                 f"  All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
             )
 
@@ -1801,7 +1600,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_get_socket_handles", "System", "get_socket_handles")
 
     def test_performance_get_socket_info(self):
-        self._print_func_name("Starting performance test for amdsmi_get_socket_info")
+        self.common.print_func_name("")
 
         sockets = amdsmi.amdsmi_get_socket_handles()
 
@@ -1818,7 +1617,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 self._print_performance_results(stats)
                 self._run_performance_assertions(stats, "amdsmi_get_socket_info")
             else:
-                print(
+                self.common.print(
                     f"  Socket {i}: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                 )
 
@@ -1827,25 +1626,25 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_get_socket_info", "Sockets", "get_socket_info")
 
     def test_performance_get_temp_metric(self):
-        self._print_func_name("Starting performance test for amdsmi_get_temp_metric")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 for (
                     temperature_type_name,
                     temperature_type,
                     temperature_type_cond,
-                ) in self.temperature_types:
+                ) in common.TEMPERATURE_TYPES:
                     for (
                         temperature_metric_name,
                         temperature_metric,
                         temperature_metric_cond,
-                    ) in self.temperature_metrics:
+                    ) in common.TEMPERATURE_METRICS:
                         self._log_test_start(
                             "amdsmi_get_temp_metric",
                             "CPU",
@@ -1869,22 +1668,22 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                             self._print_performance_results(stats)
                             self._run_performance_assertions(stats, "amdsmi_get_temp_metric")
                         else:
-                            print(
+                            self.common.print(
                                 f"  CPU {i} {temperature_type_name}/{temperature_metric_name}: All calls failed - "
                                 f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                             )
 
-                self._log_test_completion(
-                    "CPU",
-                    i,
-                    f"temperature_type={temperature_type_name}, temperature_metric={temperature_metric_name}",
-                )
+                        self._log_test_completion(
+                            "CPU",
+                            i,
+                            f"temperature_type={temperature_type_name}, temperature_metric={temperature_metric_name}",
+                        )
                 i = i + 1
 
         self._log_performance_summary("amdsmi_get_temp_metric", "CPUs", "get_temp_metric")
 
     def test_performance_get_threads_per_core(self):
-        self._print_func_name("Starting performance test for amdsmi_get_threads_per_core")
+        self.common.print_func_name("")
         self._log_test_start("amdsmi_get_threads_per_core", "System", 0)
 
         stats = self._measure_api_performance(
@@ -1897,7 +1696,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
             self._print_performance_results(stats)
             self._run_performance_assertions(stats, "amdsmi_get_threads_per_core")
         else:
-            print(
+            self.common.print(
                 f"  System: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
             )
 
@@ -1908,7 +1707,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_init(self):
-        self._print_func_name("Starting performance test for amdsmi_init")
+        self.common.print_func_name("")
 
         self._log_test_start("amdsmi_init", "System", "global")
 
@@ -1920,7 +1719,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         if stats["successful_runs"] > 0:
             self._print_performance_results(stats)
         else:
-            print(
+            self.common.print(
                 f"  All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
             )
 
@@ -1928,7 +1727,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_init", "System", "init")
 
     def test_performance_shutdown(self):
-        self._print_func_name("Starting performance test for amdsmi_shut_down")
+        self.common.print_func_name("")
 
         self._log_test_start("amdsmi_shut_down", "System", "global")
 
@@ -1940,7 +1739,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         if stats["successful_runs"] > 0:
             self._print_performance_results(stats)
         else:
-            print(
+            self.common.print(
                 f"  All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
             )
 
@@ -1948,13 +1747,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._log_performance_summary("amdsmi_shut_down", "System", "shutdown")
 
     def test_performance_cpu_core_boostlimit(self):
-        self._print_func_name("Starting performance test for CPU core boostlimit workflow")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("cpu_core_boostlimit_workflow", "Processor", i)
@@ -1985,9 +1784,11 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                         self._print_performance_results(stats_set)
 
                     except amdsmi.AmdSmiLibraryException:
-                        print(f"  Processor {i}: Could not get boost_limit for set test")
+                        self.common.print(
+                            f"  Processor {i}: Could not get boost_limit for set test"
+                        )
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: Get failed - "
                         f"{stats_get['errors'][0]['error_info'] if stats_get['errors'] else 'Unknown'}"
                     )
@@ -2003,7 +1804,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_set_cpu_df_pstate_range(self):
-        self._print_func_name("Starting performance test for amdsmi_set_cpu_df_pstate_range")
+        self.common.print_func_name("")
 
         # Use TODO placeholder values like original test
         max_pstate = 0
@@ -2013,7 +1814,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start(
@@ -2036,7 +1837,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -2049,7 +1850,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_set_cpu_gmi3_link_width_range(self):
-        self._print_func_name("Starting performance test for amdsmi_set_cpu_gmi3_link_width_range")
+        self.common.print_func_name("")
 
         # Use TODO placeholder values like original test
         min_link_width = 0
@@ -2059,7 +1860,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start(
@@ -2082,7 +1883,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -2095,7 +1896,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_set_cpu_pwr_efficiency_mode(self):
-        self._print_func_name("Starting performance test for amdsmi_set_cpu_pwr_efficiency_mode")
+        self.common.print_func_name("")
 
         # Use modes from original test
         modes = [0, 1, 2]
@@ -2104,7 +1905,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 for mode in modes:
@@ -2126,7 +1927,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                     if stats["successful_runs"] > 0:
                         self._print_performance_results(stats)
                     else:
-                        print(
+                        self.common.print(
                             f"  Processor {i} mode {mode}: All calls failed - "
                             f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                         )
@@ -2139,7 +1940,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_cpu_socket_boostlimit(self):
-        self._print_func_name("Starting performance test for amdsmi_set_cpu_socket_boostlimit")
+        self.common.print_func_name("")
 
         # Use TODO placeholder value like original test
         boost_limit = 0
@@ -2148,7 +1949,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start(
@@ -2166,7 +1967,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -2179,7 +1980,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_set_cpu_socket_lclk_dpm_level(self):
-        self._print_func_name("Starting performance test for amdsmi_set_cpu_socket_lclk_dpm_level")
+        self.common.print_func_name("")
 
         # Use TODO placeholder values like original test
         nbio_id = 0
@@ -2190,7 +1991,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start(
@@ -2215,7 +2016,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -2228,13 +2029,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_cpu_socket_power_cap(self):
-        self._print_func_name("Starting performance test for CPU socket power cap workflow")
+        self.common.print_func_name("")
         i = 0
         ret = amdsmi.amdsmi_get_cpu_handles()
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start("cpu_socket_power_cap_workflow", "Processor", i)
@@ -2264,9 +2065,9 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                         self._print_performance_results(stats_set)
 
                     except amdsmi.AmdSmiLibraryException:
-                        print(f"  Processor {i}: Could not get power_cap for set test")
+                        self.common.print(f"  Processor {i}: Could not get power_cap for set test")
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: Get failed - "
                         f"{stats_get['errors'][0]['error_info'] if stats_get['errors'] else 'Unknown'}"
                     )
@@ -2279,7 +2080,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
 
     def test_performance_set_cpu_xgmi_width(self):
-        self._print_func_name("Starting performance test for amdsmi_set_cpu_xgmi_width")
+        self.common.print_func_name("")
 
         # Use TODO placeholder values like original test
         min_width = 0
@@ -2289,7 +2090,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         processor_handles = ret["processor_handles"]
 
         if len(processor_handles) == 0:
-            print("No CPU sockets on machine")
+            self.common.print("No CPU sockets on machine")
         else:
             for processor in processor_handles:
                 self._log_test_start(
@@ -2312,7 +2113,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
                 if stats["successful_runs"] > 0:
                     self._print_performance_results(stats)
                 else:
-                    print(
+                    self.common.print(
                         f"  Processor {i}: All calls failed - "
                         f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
                     )
@@ -2328,368 +2129,3 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
 # =============================================================================
 # PERFORMANCE TEST REPORTING SYSTEM (Converted from perf_test.sh)
 # =============================================================================
-
-
-def generate_reports_from_output():
-    """
-    Generate enhanced and table reports from test output.
-    This function replicates the Python report generation from perf_test.sh.
-    """
-    import os
-    import re
-    from datetime import datetime
-    from statistics import mean
-
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # Read the captured test output
-    log_file = os.path.join(script_dir, "_perf_test.log")
-    if not os.path.exists(log_file):
-        print(f"⚠️  Warning: Performance log not found: {log_file}")
-        return False
-
-    with open(log_file, "r") as f:
-        content = f.read()
-
-    # Parse test results
-    lines = content.split("\n")
-    tests = []
-    current_test = None
-    workflow_tests = []
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        if line.startswith("Testing "):
-            parts = line.replace("Testing ", "").split(" on ")
-            api_name = parts[0]
-            current_test = {"name": api_name}
-            workflow_tests = []
-
-        elif line.startswith("Performance ") and "avg" in line and current_test:
-            avg_match = re.search(r"(\d+\.\d+)ms avg", line)
-            err_match = re.search(r"(\d+) errors", line)
-
-            if avg_match and err_match:
-                perf_line_match = re.match(
-                    r"Performance\s+(\S+?)(?:_processor_\d+|_gpu_\d+|_socket_\d+|_system)?:", line
-                )
-
-                perf_test = {"avg_ms": float(avg_match.group(1)), "errors": int(err_match.group(1))}
-
-                if perf_line_match:
-                    perf_test["name"] = perf_line_match.group(1)
-                else:
-                    perf_test["name"] = current_test["name"]
-
-                workflow_tests.append(perf_test)
-
-        elif "All calls failed" in line and current_test:
-            if workflow_tests and "avg_ms" not in workflow_tests[-1]:
-                time_match = re.search(r"(\d+\.\d+)ms avg", line)
-                if time_match:
-                    workflow_tests[-1]["avg_ms"] = float(time_match.group(1))
-                    workflow_tests[-1]["errors"] = 11
-
-        elif re.match(r"\s*\d+\s*\|\s*AMDSMI_STATUS_", line) and workflow_tests:
-            error_match = re.search(r"(\d+)\s*\|\s*(AMDSMI_STATUS_\w+)", line)
-            if error_match and workflow_tests:
-                workflow_tests[-1]["error_name"] = error_match.group(2)
-
-        elif line.startswith("Performance test completed for") and current_test:
-            for perf_test in workflow_tests:
-                if "avg_ms" in perf_test:
-                    api_name = perf_test["name"]
-
-                    if perf_test["errors"] > 0 and "error_name" not in perf_test:
-                        if "fan" in api_name.lower() or "overdrive" in api_name.lower():
-                            perf_test["error_name"] = "AMDSMI_STATUS_NOT_SUPPORTED"
-                        else:
-                            perf_test["error_name"] = "AMDSMI_STATUS_NOT_SUPPORTED"
-
-                    perf_test["category"] = (
-                        "FUNCTIONAL" if perf_test["errors"] == 0 else "ERROR_MEASUREMENT"
-                    )
-                    tests.append(perf_test)
-
-            workflow_tests = []
-            current_test = None
-
-    # Separate tests by category
-    functional_tests = sorted(
-        [t for t in tests if t["category"] == "FUNCTIONAL"], key=lambda x: x["avg_ms"]
-    )
-    error_tests = sorted(
-        [t for t in tests if t["category"] == "ERROR_MEASUREMENT"], key=lambda x: x["avg_ms"]
-    )
-
-    # Generate Enhanced Report
-    enhanced_file = os.path.join(script_dir, "_perf_test_enhanced.log")
-    with open(enhanced_file, "w") as f:
-        f.write("╔" + "═" * 78 + "╗\n")
-        f.write("║" + " AMD SMI PYTHON PERFORMANCE TEST RESULTS".center(78) + "║\n")
-        f.write(
-            "║"
-            + f" Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            + " " * (78 - len(f" Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"))
-            + "║\n"
-        )
-        f.write("╚" + "═" * 78 + "╝\n\n")
-
-        total = len(tests)
-        f.write("📊 SUMMARY STATISTICS\n")
-        f.write("─" * 50 + "\n")
-        f.write(f"Total Tests Executed: {total}\n")
-        f.write(
-            f"✅ Working APIs: {len(functional_tests)} ({len(functional_tests) / total * 100:.1f}%)\n"
-        )
-        f.write(
-            f"⚠️  APIs with Expected Errors: {len(error_tests)} ({len(error_tests) / total * 100:.1f}%)\n\n"
-        )
-
-        if functional_tests:
-            avg_times = [t["avg_ms"] for t in functional_tests]
-            f.write("⚡ PERFORMANCE METRICS (Working APIs Only)\n")
-            f.write("─" * 50 + "\n")
-            f.write(f"Fastest API: {min(avg_times):.3f}ms\n")
-            f.write(f"Slowest API: {max(avg_times):.3f}ms\n")
-            f.write(f"Average Time: {mean(avg_times):.3f}ms\n\n")
-
-            f.write("🏆 TOP 10 FASTEST APIs\n")
-            f.write("─" * 50 + "\n")
-            for i, test in enumerate(functional_tests[:10], 1):
-                f.write(f"{i:2d}. {test['name']} - {test['avg_ms']:.3f}ms\n")
-            f.write("\n")
-
-    print(f"✅ Enhanced report: {enhanced_file}")
-
-    # Generate Table Report
-    table_file = os.path.join(script_dir, "_perf_test_table.log")
-    with open(table_file, "w") as f:
-        f.write("╔" + "═" * 168 + "╗\n")
-        f.write("║" + "AMD SMI PYTHON PERFORMANCE TEST RESULTS".center(168) + "║\n")
-        f.write("║" + "TABLE FORMAT".center(168) + "║\n")
-        f.write("╠" + "═" * 168 + "╣\n")
-        gen_text = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        f.write("║ " + gen_text + " " * (166 - len(gen_text)) + " ║\n")
-        f.write("╚" + "═" * 168 + "╝\n\n")
-
-        total = len(tests)
-        f.write("📊 SUMMARY STATISTICS\n")
-        f.write("═" * 53 + "\n")
-        f.write(f"Total Tests Executed   : {total}\n")
-        f.write(
-            f"✅ Functional Tests    : {len(functional_tests)} ({len(functional_tests) / total * 100:.1f}%)\n"
-        )
-        f.write(
-            f"⚠️  Error Measurements  : {len(error_tests)} ({len(error_tests) / total * 100:.1f}%)\n\n"
-        )
-
-        if functional_tests:
-            avg_times = [t["avg_ms"] for t in functional_tests]
-            fastest = min(functional_tests, key=lambda x: x["avg_ms"])
-            slowest = max(functional_tests, key=lambda x: x["avg_ms"])
-
-            f.write(f"⚡ Fastest API          : {min(avg_times):.3f}ms ({fastest['name']})\n")
-            f.write(f"🐌 Slowest API          : {max(avg_times):.3f}ms ({slowest['name']})\n")
-            f.write(f"📈 Average Time         : {mean(avg_times):.3f}ms\n")
-        f.write("\n")
-
-        if functional_tests:
-            f.write("✅ FUNCTIONAL TESTS (APIs Returning Valid Data)\n")
-            f.write("═" * 53 + "\n")
-            f.write(
-                "┌──────┬───────────────────────────────────────────────────────────────────┬─────────────┬─────────────────────────────────────────────┐\n"
-            )
-            f.write(
-                "│ Rank │ API Name                                                          │ Time (ms)   │ Status                                      │\n"
-            )
-            f.write(
-                "├──────┼───────────────────────────────────────────────────────────────────┼─────────────┼─────────────────────────────────────────────┤\n"
-            )
-
-            for i, test in enumerate(functional_tests, 1):
-                name = test["name"][:65] + "..." if len(test["name"]) > 65 else test["name"]
-                f.write(f"│ {i:4d} │ {name:<65} │ {test['avg_ms']:>9.3f}   │ {'':<40}✅ │\n")
-
-            f.write(
-                "└──────┴───────────────────────────────────────────────────────────────────┴─────────────┴─────────────────────────────────────────────┘\n\n"
-            )
-
-        if error_tests:
-            f.write("⚠️ ERROR MEASUREMENT TESTS (APIs Correctly Returning Expected Errors)\n")
-            f.write("═" * 53 + "\n")
-            f.write(
-                "┌──────┬───────────────────────────────────────────────────────────────────┬─────────────┬──────────────────────────────────────────┐\n"
-            )
-            f.write(
-                "│ #    │ API Name                                                          │ Time (ms)   │ Error Code                               │\n"
-            )
-            f.write(
-                "├──────┼───────────────────────────────────────────────────────────────────┼─────────────┼──────────────────────────────────────────┤\n"
-            )
-
-            for i, test in enumerate(error_tests, 1):
-                name = test["name"][:65] + "..." if len(test["name"]) > 65 else test["name"]
-                error_info = test.get("error_name", f"{test['errors']} errors")
-                if len(error_info) > 40:
-                    error_info = error_info[:37] + "..."
-                f.write(f"│ {i:4d} │ {name:<65} │ {test['avg_ms']:>9.3f}   │ {error_info:<40} │\n")
-
-            f.write(
-                "└──────┴───────────────────────────────────────────────────────────────────┴─────────────┴──────────────────────────────────────────┘\n\n"
-            )
-
-        # Performance categories
-        if tests:
-            f.write("🏃 PERFORMANCE CATEGORIES\n")
-            f.write("═" * 53 + "\n")
-            ultra_fast = [t for t in tests if t["avg_ms"] < 0.01]
-            fast = [t for t in tests if 0.01 <= t["avg_ms"] < 0.1]
-            medium = [t for t in tests if 0.1 <= t["avg_ms"] < 1.0]
-            slow = [t for t in tests if t["avg_ms"] >= 1.0]
-
-            f.write(f"🚀 Ultra Fast (< 0.01ms)    : {len(ultra_fast):2d} tests\n")
-            f.write(f"⚡ Fast (0.01-0.1ms)        : {len(fast):2d} tests\n")
-            f.write(f"🚶 Medium (0.1-1.0ms)       : {len(medium):2d} tests\n")
-            f.write(f"🐌 Slow (>= 1.0ms)          : {len(slow):2d} tests\n\n")
-
-        f.write("═" * 53 + "\n")
-        f.write(f"Report generated by AMD SMI Performance Test (Python Version)\n")
-        f.write(f"For detailed logs, see: _perf_test.log and _perf_test_err.log\n\n")
-        f.write('📝 NOTE: "Error Measurement Tests" are successful performance measurements\n')
-        f.write(
-            "   of APIs that correctly return expected error codes (e.g., AMDSMI_STATUS_NOT_SUPPORTED)\n"
-        )
-        f.write("   These are NOT test failures - they are successful timing measurements.\n")
-        f.write("═" * 53 + "\n")
-
-    print(f"✅ Table report: {table_file}")
-    print(f"✅ Raw output: {log_file}")
-
-    return True
-
-
-if __name__ == "__main__":
-    import os
-    import sys
-    import subprocess
-    from datetime import datetime
-
-    # Check if user wants simple unittest mode (no report generation)
-    if "--unittest-only" in sys.argv:
-        sys.argv.remove("--unittest-only")
-        unittest.main()
-        sys.exit(0)
-
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # Print header
-    print("\n" + "═" * 80)
-    print("AMD SMI PYTHON PERFORMANCE TEST".center(80))
-    print("═" * 80 + "\n")
-
-    print(f"📍 Test directory: {script_dir}")
-    print(f"📄 Test file: {__file__}")
-    print(f"🕐 Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-    # Step 1: Clean previous results
-    print("\n[STEP 1] Cleaning previous results...")
-    log_files = [
-        "_perf_test.log",
-        "_perf_test_err.log",
-        "_perf_test_enhanced.log",
-        "_perf_test_table.log",
-    ]
-    removed = 0
-    for log_file in log_files:
-        full_path = os.path.join(script_dir, log_file)
-        if os.path.exists(full_path):
-            os.remove(full_path)
-            removed += 1
-
-    if removed > 0:
-        print(f"✅ Cleaned {removed} previous result file(s)")
-    else:
-        print("ℹ️  No previous results to clean")
-
-    # Step 2: Run performance tests with output capture
-    print("\n[STEP 2] Running performance tests...")
-    print("⏳ Executing tests...")
-
-    log_file = os.path.join(script_dir, "_perf_test.log")
-    err_file = os.path.join(script_dir, "_perf_test_err.log")
-
-    # Run tests with unittest and capture output
-    with open(log_file, "w") as f_out, open(err_file, "w") as f_err:
-        # Run the tests using unittest directly
-        loader = unittest.TestLoader()
-        suite = loader.loadTestsFromTestCase(TestAmdSmiCPUPythonPerformance)
-        runner = unittest.TextTestRunner(stream=f_err, verbosity=2)
-
-        # Redirect stdout to capture performance output
-        old_stdout = sys.stdout
-        sys.stdout = f_out
-
-        result = runner.run(suite)
-
-        sys.stdout = old_stdout
-
-    # Also display output to console
-    with open(log_file, "r") as f:
-        output_preview = f.readlines()
-        # Show last 20 lines of output
-        print("\n".join(output_preview[-20:]))
-
-    if result.wasSuccessful():
-        print("✅ Performance tests completed successfully")
-    else:
-        print("⚠️  Performance tests completed with some issues")
-
-    # Step 3: Generate reports
-    print("\n[STEP 3] Generating reports...")
-
-    if generate_reports_from_output():
-        # Step 4: Show results summary
-        print("\n[STEP 4] Results Summary")
-        print("═" * 80)
-        print("                    🎉 TEST COMPLETE".center(80))
-        print("═" * 80 + "\n")
-
-        print("📊 Generated Output Files:\n")
-        for log_file in log_files:
-            full_path = os.path.join(script_dir, log_file)
-            if os.path.exists(full_path):
-                size = os.path.getsize(full_path) / 1024
-                desc = {
-                    "_perf_test_enhanced.log": "Enhanced Summary Report",
-                    "_perf_test_table.log": "Tabular Results Report",
-                    "_perf_test_err.log": "Error Log & Test Status",
-                    "_perf_test.log": "Complete Test Output",
-                }.get(log_file, "Output File")
-
-                print(f"  {desc} ({size:.1f} KB)")
-                print(f"  → {full_path}\n")
-
-        # Show preview of enhanced report
-        print("📈 Quick Stats Preview:")
-        print("═" * 80)
-        enhanced_path = os.path.join(script_dir, "_perf_test_enhanced.log")
-        if os.path.exists(enhanced_path):
-            with open(enhanced_path, "r") as f:
-                lines = f.readlines()
-                # Show first 15 lines
-                print("".join(lines[:15]))
-        print("═" * 80 + "\n")
-
-        print(f"✅ All reports generated in: {script_dir}")
-        print(f"🕐 Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print("\n" + "═" * 80 + "\n")
-    else:
-        print("⚠️  Report generation failed")
-        sys.exit(1)
-
-    # Exit with appropriate code
-    sys.exit(0 if result.wasSuccessful() else 1)
