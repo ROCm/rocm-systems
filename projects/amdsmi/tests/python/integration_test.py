@@ -47,6 +47,6 @@ import sys
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _here)
 
-import common.common as common
+import common.common as common  # noqa: E402  (sys.path bootstrapped above)
 
 common.run_test_dir("functional", "AMD SMI Integration Tests", _here)

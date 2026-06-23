@@ -26,10 +26,6 @@ import time
 import unittest
 
 import common.common as common
-
-# common.common owns amdsmi path resolution and loading — importing it runs the
-# AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution + stale-package check (ROCM-1552 /
-# PR #6359) and exposes the shared amdsmi reference.
 from common.common import ERROR_MAP, FAIL, PASS, amdsmi
 
 # error_map is derived once from the AmdSmiStatus enum in common.common (single
@@ -153,7 +149,7 @@ class TestGpuBenchmark(unittest.TestCase):
         try:
             result = api_func(*args, **kwargs)
             self._print(msg, result)
-        except Exception as e:
+        except Exception:
             self.common.print(msg)
             # Don't raise - let the performance test measure the errors
             pass
@@ -198,7 +194,6 @@ class TestGpuBenchmark(unittest.TestCase):
         Returns:
             dict: Performance statistics including min, max, mean, median times
         """
-        times = []
         errors = []
 
         # Warmup iterations
@@ -212,7 +207,7 @@ class TestGpuBenchmark(unittest.TestCase):
         bulk_start_time = time.perf_counter()
         for i in range(self.perf_iterations):
             try:
-                result = api_func(*args, **kwargs)
+                api_func(*args, **kwargs)
             except Exception as e:
                 errors.append({"iteration": i, "error_info": str(e)})
         bulk_end_time = time.perf_counter()
@@ -2158,10 +2153,10 @@ class TestGpuBenchmark(unittest.TestCase):
         # No processor needed for library version
         try:
             ret = amdsmi.amdsmi_get_lib_version()
-            self.common.print(f"### test amdsmi_get_lib_version()")
+            self.common.print("### test amdsmi_get_lib_version()")
             self._print("", ret)
         except amdsmi.AmdSmiLibraryException as e:
-            self.common.print(f"### test amdsmi_get_lib_version()")
+            self.common.print("### test amdsmi_get_lib_version()")
             self.common.print(f"  Error: {e}")
 
         stats = self._measure_api_performance(amdsmi.amdsmi_get_lib_version, "get_lib_version")
@@ -2336,10 +2331,10 @@ class TestGpuBenchmark(unittest.TestCase):
         # Print result for all processors
         try:
             ret = amdsmi.amdsmi_get_processor_count_from_handles(self.processors)
-            self.common.print(f"### test amdsmi_get_processor_count_from_handles()")
+            self.common.print("### test amdsmi_get_processor_count_from_handles()")
             self._print("", ret)
         except amdsmi.AmdSmiLibraryException as e:
-            self.common.print(f"### test amdsmi_get_processor_count_from_handles()")
+            self.common.print("### test amdsmi_get_processor_count_from_handles()")
             self.common.print(f"  Error: {e}")
 
         stats = self._measure_api_performance(
@@ -2637,10 +2632,10 @@ class TestGpuBenchmark(unittest.TestCase):
         # No processor needed for threads per core
         try:
             ret = amdsmi.amdsmi_get_threads_per_core()
-            self.common.print(f"### test amdsmi_get_threads_per_core()")
+            self.common.print("### test amdsmi_get_threads_per_core()")
             self._print("", ret)
         except amdsmi.AmdSmiLibraryException as e:
-            self.common.print(f"### test amdsmi_get_threads_per_core()")
+            self.common.print("### test amdsmi_get_threads_per_core()")
             self.common.print(f"  Error: {e}")
 
         stats = self._measure_api_performance(

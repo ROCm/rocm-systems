@@ -23,10 +23,6 @@
 import unittest
 
 import common.common as common
-
-# common.common owns path resolution, sys.path setup, and amdsmi loading — borrow the
-# reference so AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution and the stale-package check
-# (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
 from common.common import amdsmi
 
 
@@ -37,9 +33,9 @@ class TestAmdSmiInit(unittest.TestCase):
         return
 
     def test_init_shutdown(self):
-        self.common.print(f"## test_init_shutdown()")
+        self.common.print("## test_init_shutdown()")
 
-        msg = f"\t### amdsmi_init():"
+        msg = "\t### amdsmi_init():"
         try:
             ret = self.common.amdsmi_smart_init()[0]
             self.common.print(msg, ret)
@@ -47,7 +43,7 @@ class TestAmdSmiInit(unittest.TestCase):
             self.common.print(msg, e)
             raise e
 
-        msg = f"\t### amdsmi_shut_down():"
+        msg = "\t### amdsmi_shut_down():"
         try:
             ret = amdsmi.amdsmi_shut_down()
             self.common.print(msg, ret)

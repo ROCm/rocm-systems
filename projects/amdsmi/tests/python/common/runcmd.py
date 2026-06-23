@@ -33,7 +33,6 @@ import os
 import subprocess
 import sys
 
-
 version_number = "1.0.0"
 build_date = f"{datetime.datetime.now():%b %d %Y}"
 verbose_choices = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -101,7 +100,7 @@ class Util:
 
         try:
             func_name = sys._getframe(stack_line).f_back.f_code.co_name
-        except Exception as e:
+        except Exception:
             func_name = "Unknown"
             self.Print("EXCEPTION", f"Cannot get function name at stack_line {stack_line}")
         return func_name

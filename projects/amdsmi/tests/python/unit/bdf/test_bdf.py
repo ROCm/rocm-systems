@@ -24,10 +24,6 @@ from __future__ import annotations
 
 import unittest
 
-# common.common owns path resolution, sys.path setup, and amdsmi loading — borrow the
-# reference so AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution and the stale-package check
-# (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.  Importing amdsmi
-# (even though BDF parsing itself needs no API calls) triggers that shared setup.
 from common.common import amdsmi
 
 # BDF strings that must parse to their [domain, bus, device, function] components.

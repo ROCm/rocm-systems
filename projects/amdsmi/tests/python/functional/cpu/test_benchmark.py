@@ -26,10 +26,6 @@ import time
 import unittest
 
 import common.common as common
-
-# common.common owns amdsmi path resolution and loading — importing it runs the
-# AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution + stale-package check (ROCM-1552 /
-# PR #6359) and exposes the shared amdsmi reference.
 from common.common import FAIL, PASS, amdsmi
 
 
@@ -179,7 +175,7 @@ class TestCpuBenchmark(unittest.TestCase):
         try:
             result = api_func(*args, **kwargs)
             self._print(msg, result)
-        except Exception as e:
+        except Exception:
             self.common.print(msg)
             # Don't raise - let the performance test measure the errors
             pass
@@ -239,7 +235,7 @@ class TestCpuBenchmark(unittest.TestCase):
         for i in range(self.perf_iterations):
             start_time = self.time.perf_counter()
             try:
-                result = api_func(*args, **kwargs)
+                api_func(*args, **kwargs)
                 end_time = self.time.perf_counter()
                 execution_time = (end_time - start_time) * 1000  # Convert to milliseconds
                 times.append(execution_time)

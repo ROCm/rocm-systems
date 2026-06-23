@@ -23,10 +23,6 @@
 import unittest
 
 import common.common as common
-
-# common.common owns path resolution, sys.path setup, and amdsmi loading — borrow the
-# reference so AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution and the stale-package check
-# (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
 from common.common import amdsmi
 
 
@@ -132,7 +128,7 @@ class TestSystemTopology(unittest.TestCase):
             if self.common.check_ret(msg, e, self.common.FAIL):
                 self.raise_exception = e
 
-        msg = f"\t### amdsmi_get_socket_handles():"
+        msg = "\t### amdsmi_get_socket_handles():"
         try:
             sockets = amdsmi.amdsmi_get_socket_handles()
             self.common.print(msg, [id(addr) for addr in sockets])
@@ -194,7 +190,7 @@ class TestSystemTopology(unittest.TestCase):
             if self.common.check_ret(msg, e, self.common.FAIL):
                 self.raise_exception = e
 
-        msg = f"\t### amdsmi_get_socket_handles():"
+        msg = "\t### amdsmi_get_socket_handles():"
         try:
             sockets = amdsmi.amdsmi_get_socket_handles()
             self.common.print(msg, [id(addr) for addr in sockets])
