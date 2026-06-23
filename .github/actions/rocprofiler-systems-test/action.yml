@@ -49,8 +49,9 @@ runs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        # -T Test appends to the TAG opened by configure's ctest -T Start so
-        # that Build.xml and Test.xml share the same CDash build entry.
+        # -T Test appends Test.xml to the TAG opened by configure's -T Start.
+        # -T flags persist across separate step invocations; -D ContinuousTest
+        # would restart the TAG and lose the configure/build results.
         ctest_args=(
           "--test-dir" "${{ inputs.build-dir }}"
           "-T" "Test"
@@ -88,6 +89,9 @@ runs:
       shell: bash
       run: |
         NAME="${{ inputs.cdash-build-name }}"
+        # Apply the same PR name transformation as CDashSubmit.cmake:
+        # <owner>-<PR_number>/merge-<suffix> → PR_<PR_number>_<owner>-<suffix>
+        NAME=$(echo "${NAME}" | sed 's/\(.*\)-\([0-9]*\)\/merge/PR_\2_\1/')
         URL="https://my.cdash.org/index.php?project=rocprofiler-systems&filtercount=1&showfilters=1&field1=buildname&compare1=65&value1=${NAME}"
         # Step summary: clickable markdown link visible in the job summary page.
         printf '### CDash Results\n[View build on CDash](%s)\n' "${URL}" >> "${GITHUB_STEP_SUMMARY}"

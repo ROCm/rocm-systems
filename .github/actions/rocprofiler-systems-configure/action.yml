@@ -42,10 +42,12 @@ runs:
           -DROCPROFSYS_BUILD_NUMBER=${{ inputs.build-number }} || \
           { cat "${{ inputs.build-dir }}/Testing/Temporary/LastConfigure"*.log \
               2>/dev/null; exit 1; }
-        # Open the CDash TAG and capture configure output into Configure.xml.
-        # cmake already ran above so DartConfiguration.tcl exists; -T Configure
-        # re-runs cmake via that config (cache hit, near-instant) and writes
-        # Configure.xml so CDash shows configure warnings/errors.
+        # Open the CDash TAG with -T Start and write Configure.xml with -T Configure.
+        # -T flags are model-agnostic task runners that persist the TAG file across
+        # separate step invocations, unlike -D ContinuousStart which triggers the
+        # full Continuous pipeline (including Build and Test) in one call.
+        # CDashSubmit.cmake uses ctest_start(Continuous APPEND) at submission time
+        # to place results on the Continuous CDash track.
         ctest --test-dir ${{ inputs.build-dir }} -T Start -T Configure || \
           { cat "${{ inputs.build-dir }}/Testing/Temporary/LastConfigure"*.log \
               2>/dev/null; exit 1; }

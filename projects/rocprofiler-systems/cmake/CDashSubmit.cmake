@@ -39,7 +39,19 @@ endif()
 set(CTEST_SOURCE_DIRECTORY "${_src_dir}")
 set(CTEST_BINARY_DIRECTORY "${_bin_dir}")
 set(CTEST_SITE "${SITE}")
+
+# Transform PR build names to the CDash-friendly format used historically.
+# GitHub Actions sets ref_name to "<pr_number>/merge" for pull requests, which
+# embeds a slash that CDash cannot search. Apply the same transformation that
+# run-ci.py used: <owner>-<PR>/merge-<suffix> -> PR_<PR>_<owner>-<suffix>
 set(CTEST_BUILD_NAME "${BUILD_NAME}")
+string(
+    REGEX REPLACE
+    "^(.*)-([0-9]+)/merge(.*)$"
+    "PR_\\2_\\1\\3"
+    CTEST_BUILD_NAME
+    "${CTEST_BUILD_NAME}"
+)
 
 # Load CDash connection settings from the project's CTestConfig.cmake.
 include("${_src_dir}/CTestConfig.cmake")
@@ -54,6 +66,7 @@ file(
     "${_bin_dir}/Testing/*/Build.xml"
     "${_bin_dir}/Testing/*/Test.xml"
     "${_bin_dir}/Testing/*/Configure.xml"
+    "${_bin_dir}/Testing/*/Update.xml"
 )
 foreach(_f IN LISTS _xml_files)
     file(READ "${_f}" _content)
@@ -61,9 +74,18 @@ foreach(_f IN LISTS _xml_files)
     file(WRITE "${_f}" "${_content}")
 endforeach()
 
-# APPEND: reuse the TAG opened by configure's ctest -T Start rather than
-# creating a new one, so Build and Test results share one CDash entry.
-ctest_start(Continuous APPEND)
+# CDash model: Nightly for scheduled runs, Continuous for everything else
+# (including pull_request) — matches the original run-ci.py behaviour where
+# DASHBOARD_MODE defaulted to Continuous for all non-scheduled builds.
+if("$ENV{GITHUB_EVENT_NAME}" STREQUAL "schedule")
+    set(_cdash_model "Nightly")
+else()
+    set(_cdash_model "Continuous")
+endif()
+
+# APPEND: reuse the TAG opened by configure's ctest -T <Model>Start rather
+# than creating a new one, so Update/Configure/Build/Test share one CDash entry.
+ctest_start(${_cdash_model} APPEND)
 
 macro(safe_submit)
     ctest_submit(${ARGN} RETURN_VALUE _ret CAPTURE_CMAKE_ERROR _err)
