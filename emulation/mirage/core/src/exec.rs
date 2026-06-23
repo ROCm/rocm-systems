@@ -112,9 +112,26 @@ pub struct ExecDef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker_exec: Option<ExecArgs>,
 
+    /// Number of workload processes to launch per node. Defaults to `1`.
+    /// Values greater than one give each node `nproc_per_node` processes,
+    /// each with a distinct `LOCAL_RANK` (`0..nproc_per_node`) and global
+    /// `RANK`, so `torch.distributed` runs without a launcher like
+    /// `torchrun --nproc-per-node`. The total world size is
+    /// `num_nodes * nproc_per_node`.
+    #[serde(default = "one_proc", skip_serializing_if = "is_one_proc")]
+    pub nproc_per_node: u32,
+
     /// If `false`, the host removes the exec directory after it exits.
     #[serde(default)]
     pub keep: bool,
+}
+
+fn one_proc() -> u32 {
+    1
+}
+
+fn is_one_proc(n: &u32) -> bool {
+    *n == 1
 }
 
 /// Aggregate status of an exec (all nodes).
@@ -167,6 +184,19 @@ pub struct InjectionDef {
     /// convention these target locations live under `/mnt/mirage`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mounts: Vec<FileMount>,
+
+    /// Host paths of shared libraries the workload needs available. For
+    /// a containerised session each is bind-mounted into `/mnt/mirage/lib`
+    /// (preserving its file name) and that directory is prepended to
+    /// `LD_LIBRARY_PATH`, so the dynamic loader prefers them over the
+    /// container image's own copies. Used to supply libraries that the
+    /// bind-mounted mirage binary and emulator interposers were built
+    /// against but the image's system libraries are too old to satisfy
+    /// (e.g. a newer `libc.so.6` or `libstdc++.so.6`). Ignored for
+    /// non-containerised sessions, where the workload already sees the
+    /// host's libraries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub libraries: Vec<String>,
 
     /// Whether the emulator needs the host's GPUs exposed to each node's
     /// container. When set, every node container is launched with the

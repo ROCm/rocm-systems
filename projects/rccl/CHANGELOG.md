@@ -39,6 +39,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Changed GPU Direct RDMA mode selection logic to prefer peermem over DMAbuf by default. `NCCL_DMABUF_ENABLE` now defaults to 1 (previously 0). When both peermem and DMAbuf are available, RCCL will use peermem. If peermem is unavailable, RCCL will automatically fall back to DMAbuf (if available and enabled). Setting `RCCL_FORCE_ENABLE_DMABUF=1` forces DMAbuf usage exclusively, skipping peermem even if available, and disables GPU Direct RDMA if DMAbuf is unavailable.
 * CTS offload is now controlled per-connection rather than globally, allowing P2P connections to fall back to standard RDMA writes while non-P2P traffic continues to use CTS.
 * The bootstrap AllGather now uses the bidirectional ring (N/2 steps) by default on the socket OOB path. `NCCL_BOOTSTRAP_BIDIR_ALLGATHER` now defaults to `1`; set it to `0` to fall back to the unidirectional ring. The net OOB path (`NCCL_OOB_NET_ENABLE`) and its bidirectional variant (`NCCL_BOOTSTRAP_BIDIR_NET`) remain off by default.
+* `NCCL_PXN_C2C` is kept default-off (`0`); upstream NCCL defaults it to `1` since 2.28. The C2C PXN routing path is NVIDIA-specific and is not currently applicable on AMD hardware.
 
 ### Removed
 * Removed MSCCL and MSCCL++ custom collective integration; legacy ``mscclLoadAlgo``, ``mscclRunAlgo``, and ``mscclUnloadAlgo`` APIs remain as no-ops for link compatibility.

@@ -132,7 +132,10 @@ def gen_vector_mad_64_32(dst: list[str], src: list[str], dtype: str | None) -> s
         L.append(
             f'    int64_t s2 = static_cast<int64_t>({src[2]}.read_lane64(wf, lane));'
         )
-        L.append('    uint64_t result = static_cast<uint64_t>(s0 * s1 + s2);')
+        L.append(
+            '    uint64_t result = static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1) +'
+        )
+        L.append('                      static_cast<uint64_t>(s2);')
     else:
         L.append(f'    uint64_t s0 = {src[0]}.read_lane(wf, lane);')
         L.append(f'    uint64_t s1 = {src[1]}.read_lane(wf, lane);')
@@ -164,7 +167,7 @@ def gen_vector_mad_32_16(dst: list[str], src: list[str], dtype: str | None) -> s
             f'    int32_t s2 = static_cast<int32_t>({src[2]}.read_lane(wf, lane));'
         )
         L.append(
-            f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(s0 * s1 + s2));'
+            f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1) + static_cast<uint32_t>(s2));'
         )
     else:
         L.append(f'    uint32_t s0 = {src[0]}.read_lane(wf, lane) & 0xFFFFu;')
@@ -437,12 +440,14 @@ def gen_vector_dot(
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     L.append(f'    uint32_t a = {s0}.read_lane(wf, lane);')
     L.append(f'    uint32_t b = {s1}.read_lane(wf, lane);')
-    L.append(f'    int32_t acc = static_cast<int32_t>({d}.read_lane(wf, lane));')
+    L.append(f'    uint32_t acc = {d}.read_lane(wf, lane);')
     if op == 'dot4c':
         L.append('    for (int i = 0; i < 4; ++i) {')
         L.append('      int8_t ea = static_cast<int8_t>((a >> (i * 8)) & 0xFF);')
         L.append('      int8_t eb = static_cast<int8_t>((b >> (i * 8)) & 0xFF);')
-        L.append('      acc += static_cast<int32_t>(ea) * static_cast<int32_t>(eb);')
+        L.append(
+            '      acc += static_cast<uint32_t>(static_cast<int32_t>(ea) * static_cast<int32_t>(eb));'
+        )
         L.append('    }')
     elif op == 'dot8c':
         L.append('    for (int i = 0; i < 8; ++i) {')
@@ -450,7 +455,7 @@ def gen_vector_dot(
         L.append('      if (ea & 8) ea |= ~0xF;')
         L.append('      int32_t eb = static_cast<int32_t>((b >> (i * 4)) & 0xF);')
         L.append('      if (eb & 8) eb |= ~0xF;')
-        L.append('      acc += ea * eb;')
+        L.append('      acc += static_cast<uint32_t>(ea * eb);')
         L.append('    }')
     elif op == 'dot2c' and dtype == 'f32':
         # V_DOT2C_F32_F16: D.f32 += f16_lo(A)*f16_lo(B) + f16_hi(A)*f16_hi(B)
@@ -462,9 +467,9 @@ def gen_vector_dot(
         L.append(
             '    float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));'
         )
-        L.append('    float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));')
+        L.append('    float facc = std::bit_cast<float>(acc);')
         L.append('    facc += a0 * b0 + a1 * b1;')
-        L.append('    acc = static_cast<int32_t>(std::bit_cast<uint32_t>(facc));')
+        L.append('    acc = std::bit_cast<uint32_t>(facc);')
     elif op == 'dot2c' and dtype == 'i32':
         # V_DOT2C_I32_I16: D.i32 += i16_lo(A)*i16_lo(B) + i16_hi(A)*i16_hi(B)
         L.append('    int16_t a0 = static_cast<int16_t>(a & 0xFFFF);')
@@ -472,11 +477,12 @@ def gen_vector_dot(
         L.append('    int16_t b0 = static_cast<int16_t>(b & 0xFFFF);')
         L.append('    int16_t b1 = static_cast<int16_t>((b >> 16) & 0xFFFF);')
         L.append(
-            '    acc += static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1;'
+            '    int64_t dot = static_cast<int64_t>(a0) * b0 + static_cast<int64_t>(a1) * b1;'
         )
+        L.append('    acc += static_cast<uint32_t>(dot);')
     else:
         L.append(f'    (void)a; (void)b; // unhandled dot variant: {op}/{dtype}')
-    L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(acc));')
+    L.append(f'    {d}.write_lane(wf, lane, acc);')
     L.append('  }')
     return '\n'.join(L)
 

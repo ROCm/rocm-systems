@@ -109,9 +109,9 @@ class TestROCTx(RocprofsysTest):
             "sys_run",
             pytest.param(
                 "runtime_instrument",
-                marks=pytest.mark.ci_disable(
-                    "all"
-                ),  # TODO: Remove once TheRock switches to CTest
+                marks=[
+                    pytest.mark.timeout(180),
+                ],
             ),
         ],
     )

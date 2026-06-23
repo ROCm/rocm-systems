@@ -173,12 +173,14 @@ if(BUILD_TESTS)
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasJsonTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
     RegisterTests.cpp
     ScatterTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
+    TeardownStressTests.cpp
     _RecorderTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
