@@ -11,6 +11,7 @@ import pytest
 
 from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
+from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
 from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
@@ -277,6 +278,7 @@ def test_attach_library_resolution_with_fallback():
     ) as mock_resolve:
         options = profiler.get_profiler_options()
     assert options["ROCPROF_ATTACH_LIBRARY"] == str(new_lib)
+    assert options["ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC"] == "1"
     assert mock_resolve.call_count == 1
 
     # Case 2: only old library present -> falls back to it.
@@ -287,6 +289,7 @@ def test_attach_library_resolution_with_fallback():
     ) as mock_resolve:
         options = profiler.get_profiler_options()
     assert options["ROCPROF_ATTACH_LIBRARY"] == str(old_lib)
+    assert options["ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC"] == "1"
     assert mock_resolve.call_count == 2
 
     # Case 3: neither library present -> console_error exits the process.
@@ -296,6 +299,28 @@ def test_attach_library_resolution_with_fallback():
             profiler.get_profiler_options()
 
     common.clean_output_dir(True, str(output_dir))
+
+
+def test_rocprofv3_live_attach_uses_sync_output():
+    """Unit test: rocprofv3 live attach requests synchronous output generation."""
+    args = _make_sanitize_args(
+        ["/bin/true"],
+        attach_pid="12345",
+        attach_duration_msec="500",
+        format_rocprof_output="csv",
+        kokkos_trace=False,
+    )
+    args.remaining = "-- /bin/true"
+    profiler = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
+
+    options = profiler.get_profiler_options()
+
+    assert "--attach-sync-output" in options
+    pid_idx = options.index("--pid")
+    assert options[pid_idx + 1] == "12345"
+    duration_idx = options.index("--attach-duration-msec")
+    assert options[duration_idx + 1] == "500"
+    assert "--" not in options
 
 
 # ---------------------------------------------------------------------------

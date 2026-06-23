@@ -187,6 +187,7 @@ class PCSamplingProfile:
         ]
 
         if is_live_attach(profiler_options):
+            options.append("--attach-sync-output")
             try:
                 pid_idx = profiler_options.index("--pid")
                 options += ["--pid", profiler_options[pid_idx + 1]]
