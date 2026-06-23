@@ -1097,6 +1097,14 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 void VirtualGPU::SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer) {
   gpu_queue_ = queue;
   cached_read_dispatch_id_ = 0;
+  // The cached queue-progress state belongs to the previously assigned HW queue. When the HW
+  // queue changes (released back to / reacquired from the shared dynamic-queue pool), that state
+  // is stale: the recorded completion signal may have been recycled/destroyed and the write
+  // indices refer to a different queue. Reset to the "empty queue" sentinel so IsQueueIdle() does
+  // not dereference a stale completion-signal handle.
+  last_write_index_ = kInvalidQueueIndex;
+  last_packet_with_signal_index_ = kInvalidQueueIndex;
+  last_completion_signal_.handle = 0;
   metadata_preloader_.SetQueueBase(metadata_ring_buffer,
                                    roc_device_.MetadataVersionHeader());
 }

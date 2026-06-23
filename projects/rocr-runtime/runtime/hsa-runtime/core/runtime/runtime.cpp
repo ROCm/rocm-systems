@@ -365,11 +365,14 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
 
     notifiers = std::move(it->second.notifiers);
 
-    // track the exporter BO to clear meta data via set_metadata
-    // clear the set metadata here if possible if there's an existing thunk_bo
+    // Legacy cleanup path for thunk_bo handles. In current design:
+    // - Exporter path (IPCCreate): BO handle is freed immediately after metadata
+    //   validation, so thunk_bo is not set on exporter allocations.
+    // - Importer path (IPCAttach): Uses IPCDetach for cleanup, not FreeMemory.
+    // This code remains for defensive cleanup of any unexpected thunk_bo handles.
     if (it->second.thunk_bo) {
+      debug_warning(false && "Unexpected thunk_bo handle in FreeMemory");
       if (!thunkLoader()->IsDXG()) {
-        //clear metadata
         HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
         if (status != HSAKMT_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR;
@@ -378,6 +381,24 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     }
 
     allocation_map_.erase(it);
+  }
+
+  // Remove IPC socket server bookkeeping for this allocation.
+  // This prevents stale ipc_sock_server_conns_ entries if exported memory
+  // is freed before a later import/ack cleanup path occurs.
+  {
+    std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
+    auto it = ipc_sock_server_conns_.find(reinterpret_cast<uint64_t>(ptr));
+    if (it != ipc_sock_server_conns_.end()) {
+      // Warn if freeing memory that was exported for IPC. Importers that have
+      // not yet attached will fail. This is not a bug - it's the expected IPC
+      // contract that exporters must keep memory alive until importers are done.
+      // However, this warning helps catch accidental early-free bugs.
+      debug_warning(false &&
+                    "Freeing memory with active IPC export. "
+                    "Pending importers will fail to attach.");
+      ipc_sock_server_conns_.erase(it);
+    }
   }
 
   // Notifiers can't run while holding the lock or the callback won't be able to manage memory.
@@ -1435,33 +1456,67 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     }
     // Reuse token already stored on the BO
     if (res.metadata != 0) handle->handle[7] = res.metadata;
-    allocation_map_[ptr].thunk_bo = res.buf_handle;
+    // Release the imported BO handle immediately after setting metadata.
+    // Using hsaKmtMemHandleFreePreserveMetadata instead of hsaKmtMemHandleFree
+    // to preserve metadata for later IPC attach operations.
+    HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(res.buf_handle));
   }
 
   os::DmaBufClose(dmabuf_fd);
 
-  std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
-  if (!ipc_sock_server_conns_.size()) {
+  std::unique_lock<std::mutex> lock(ipc_sock_server_lock_);
+
+  // If another thread is already shutting down the old IPC socket server,
+  // wait for that transition to complete before proceeding.
+  while (ipc_sock_server_shutdown_in_progress_) {
+    lock.unlock();
+    std::this_thread::yield();
+    lock.lock();
+  }
+
+  if (ipc_sock_server_conns_.empty()) {
+    os::Thread old_thread = nullptr;
+
+    // If all prior IPC exports were freed, the map can be empty while the
+    // old server thread is still blocked in accept(). Transition shutdown
+    // state under the lock so only one creator tears it down.
     if (ipc_sock_server_thread_) {
-      os::WaitForThread(ipc_sock_server_thread_);
-      os::CloseThread(ipc_sock_server_thread_);
-      ipc_sock_server_thread_ = nullptr;
+      old_thread = ipc_sock_server_thread_;
+      ipc_sock_server_shutdown_in_progress_ = true;
     }
 
-    char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
-    snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", handle->handle[2]);
+    if (old_thread) {
+      lock.unlock();
+      // Wake up the server thread blocked in accept() by sending close signal
+      IPCClientImport(os::GetProcessId(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
+                      0, nullptr, nullptr, nullptr, false, 0);
+      os::WaitForThread(old_thread);
+      os::CloseThread(old_thread);
+      lock.lock();
 
-    ipc_sock_server_fd_ = os::CreateIPCServer(socketName, 1);
-    assert(ipc_sock_server_fd_ != os::INVALID_SOCKET_VALUE && "DMA buffer could not"
-      "be exported for IPC!");
-    if (ipc_sock_server_fd_ == os::INVALID_SOCKET_VALUE) return HSA_STATUS_ERROR;
-
-    ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
-    if (!ipc_sock_server_thread_) {
-      ipc_sock_server_conns_.clear();
-      os::CloseIPCSocket(ipc_sock_server_fd_);
+      ipc_sock_server_thread_ = nullptr;
       ipc_sock_server_fd_ = os::INVALID_SOCKET_VALUE;
-      return HSA_STATUS_ERROR;
+      ipc_sock_server_shutdown_in_progress_ = false;
+    }
+
+    // Re-check after unlock/relock because another thread could have created
+    // the server while we were waiting for the old thread to exit.
+    if (ipc_sock_server_conns_.empty() && !ipc_sock_server_thread_) {
+      char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
+      snprintf(socketName, sizeof(socketName), "xhsa%i", handle->handle[2]);
+
+      ipc_sock_server_fd_ = os::CreateIPCServer(socketName, 1);
+      assert(ipc_sock_server_fd_ != os::INVALID_SOCKET_VALUE && "DMA buffer could not"
+        "be exported for IPC!");
+      if (ipc_sock_server_fd_ == os::INVALID_SOCKET_VALUE) return HSA_STATUS_ERROR;
+
+      ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
+      if (!ipc_sock_server_thread_) {
+        ipc_sock_server_conns_.clear();
+        os::CloseIPCSocket(ipc_sock_server_fd_);
+        ipc_sock_server_fd_ = os::INVALID_SOCKET_VALUE;
+        return HSA_STATUS_ERROR;
+      }
     }
   }
   ipc_sock_server_conns_[reinterpret_cast<uint64_t>(ptr)] = len;
@@ -1533,17 +1588,21 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
         return -1;
       }
 
-      // Store the buffer object handle in allocation map for later use.
-      // If a stale entry exists at this VA (from a previous import that was
-      // never detached), free the old BO first to avoid leaking it.
-      if (status == HSAKMT_STATUS_SUCCESS) {
+      // For system memory imports, store the BO handle for later CPU mapping.
+      // For GPU memory imports, free the handle immediately - its only used
+      // for metadata validation; the actual GPU registration is done by
+      // hsaKmtRegisterGraphicsHandleToNodesExt and is cleaned up via
+      // hsaKmtDeregisterMemory in IPCDetach.
+      if (isDmabufSysmem) {
         std::lock_guard<std::shared_mutex> lock(memory_lock_);
         auto [it, inserted] = allocation_map_.try_emplace(
-        *importAddress, nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
+            *importAddress, nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
         if (!inserted && it->second.thunk_bo) {
-          HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
+          HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(it->second.thunk_bo));
         }
         it->second.thunk_bo = res.buf_handle;
+      } else {
+        HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(res.buf_handle));
       }
       os::DmaBufClose(static_cast<int>(dmabuf_fd));
     }
@@ -1565,15 +1624,22 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   bool isFragment = false;
   uint32_t fragOffset = 0;
 
-  auto fixFragment = [&](HsaMemoryObjectHandle thunk_bo) {
+  auto fixFragment = [&](HsaMemoryObjectHandle new_thunk_bo) {
     if (isFragment) {
       importAddress = reinterpret_cast<uint8_t*>(importAddress) + fragOffset;
       len = Min(len, importSize - fragOffset);
     }
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
-    allocation_map_.try_emplace(
+    auto [it, inserted] = allocation_map_.try_emplace(
         importAddress, nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
-    allocation_map_[importAddress].thunk_bo = thunk_bo;
+    // If a new thunk_bo is provided, store it. If an entry already exists with
+    // a different thunk_bo, free the old one first to avoid leaking it.
+    if (new_thunk_bo) {
+      if (it->second.thunk_bo && it->second.thunk_bo != new_thunk_bo) {
+        HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(it->second.thunk_bo));
+      }
+      it->second.thunk_bo = new_thunk_bo;
+    }
   };
 
   auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes, bool isSysMem) {
@@ -2389,7 +2455,8 @@ Runtime::Runtime()
       thunkLoader_(nullptr),
       kfd_version{},
       ipc_sock_server_fd_(os::INVALID_SOCKET_VALUE),
-      ipc_sock_server_thread_(nullptr) {
+      ipc_sock_server_thread_(nullptr),
+      ipc_sock_server_shutdown_in_progress_(false) {
   virtual_mem_api_supported_ = false;
   ipc_dmabuf_supported_ = false;
   aqlprofile_lib_ = nullptr;
@@ -2484,15 +2551,20 @@ hsa_status_t Runtime::Load() {
 }
 
 void Runtime::Unload() {
-  // Close IPC socket server
-  if (ipc_sock_server_conns_.size())
+  // Close IPC socket server. Capture thread handle under lock to avoid race
+  // with IPCCreate which may be restarting the server concurrently.
+  os::Thread thread_to_close = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
+    thread_to_close = ipc_sock_server_thread_;
+    ipc_sock_server_thread_ = nullptr;
+  }
+
+  if (thread_to_close) {
     IPCClientImport(os::GetProcessId(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
                     0, nullptr, nullptr, nullptr, false, 0);
-
-  if (ipc_sock_server_thread_) {
-    os::WaitForThread(ipc_sock_server_thread_);
-    os::CloseThread(ipc_sock_server_thread_);
-    ipc_sock_server_thread_ = nullptr;
+    os::WaitForThread(thread_to_close);
+    os::CloseThread(thread_to_close);
   }
 
   svm_profile_.reset(nullptr);

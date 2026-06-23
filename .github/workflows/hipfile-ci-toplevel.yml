@@ -232,3 +232,25 @@ jobs:
       cxx_standard: ${{ matrix.cxx_standard }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}
+
+  # CodeQL C/C++ findings are compiler- and standard-independent, so run the
+  # analysis exactly once against a single fixed image rather than fanning out
+  # across the build matrix. Change the image key below to retarget the ROCm
+  # version (the combo must exist in Precheck's matrix). Python and Actions are
+  # covered repo-wide by codeql.yml; this closes the C/C++ gap.
+  codeql:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    uses: ./.github/workflows/hipfile-codeql.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}
