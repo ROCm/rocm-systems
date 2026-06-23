@@ -568,6 +568,18 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_roofline_profile_to_analyze
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_roofline_profile_to_analyze.xml ${COV_OPTION}
+        tests/test_roofline_profile_to_analyze.py ${WORKING_DIR_OPTION}
+)
+set_tests_properties(
+    test_roofline_profile_to_analyze
+    PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
+)
+
 # -----------------------------------
 # Data imputation tests
 # -----------------------------------
@@ -836,6 +848,7 @@ if(${ENABLE_COVERAGE})
         test_roofline_calc
         test_roofline_analyze
         test_roofline_main
+        test_roofline_profile_to_analyze
         test_data_imputation
         test_autogen_config
         test_tui_components
@@ -1101,6 +1114,7 @@ if(INSTALL_TESTS)
             tests/mat_mul_max
             tests/rocflop
             tests/memcopy
+            tests/fma_throughput
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
         COMPONENT tests
     )
