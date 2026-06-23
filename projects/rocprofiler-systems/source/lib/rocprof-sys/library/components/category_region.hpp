@@ -40,6 +40,11 @@
 #include <type_traits>
 #include <utility>
 
+namespace rocprofsys
+{
+namespace component
+{
+
 struct entry_key
 {
     std::string name;
@@ -67,313 +72,284 @@ struct pending_cache_entry
 inline thread_local std::map<entry_key, std::vector<pending_cache_entry>>
     map_name_to_args;
 
-namespace
-{
-
-void
-cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
-             std::uint64_t end_ts, const std::string& category,
-             const std::string& args_str = {})
-{
-    constexpr size_t      NO_CORRELATION_ID = 0;
-    constexpr const char* CALLSTACK         = "{}";
-    rocprofsys::trace_cache::get_buffer_storage().store(
-        rocprofsys::trace_cache::region_sample{
-            thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
-            end_ts, CALLSTACK, args_str.c_str(), category.c_str() });
-}
-
-template <typename Tp>
-std::string
-get_serialized_arg_type()
-{
-    using value_type = std::decay_t<Tp>;
-    if constexpr(std::is_convertible<value_type, std::string_view>::value)
-    {
-        return "string";
-    }
-    else
-    {
-        return rocprofsys::utility::demangle<value_type>();
-    }
-}
-
-template <typename Tp>
-std::string
-get_serialized_arg_value(Tp&& value)
-{
-    using value_type = std::decay_t<Tp>;
-    if constexpr(fmt::is_formattable<value_type>::value)
-    {
-        return fmt::format("{}", std::forward<Tp>(value));
-    }
-    else
-    {
-        // fmt rejects "{}" for arbitrary non-void pointer types
-        return fmt::format("{}", fmt::streamed(std::forward<Tp>(value)));
-    }
-}
-
-// Append one trace-cache record "idx;;type;;name;;value;;" to args_str
-template <typename KeyT, typename ValueT>
-void
-append_serialized_arg(std::string& args_str, std::uint32_t idx, KeyT&& key,
-                      ValueT&& value)
-{
-    args_str += rocprofsys::get_args_string({ rocprofsys::argument_info{
-        .arg_number = idx,
-        .arg_type   = get_serialized_arg_type<ValueT>(),
-        .arg_name   = std::string{ std::string_view{ std::forward<KeyT>(key) } },
-        .arg_value  = get_serialized_arg_value(std::forward<ValueT>(value)) } });
-}
-
-// Same record format, but type/value are pre-stringified by the caller
-inline void
-append_serialized_arg(std::string& args_str, std::uint32_t idx, std::string_view arg_type,
-                      std::string_view key, std::string_view value)
-{
-    args_str += rocprofsys::get_args_string(
-        { rocprofsys::argument_info{ .arg_number = idx,
-                                     .arg_type   = std::string{ arg_type },
-                                     .arg_name   = std::string{ key },
-                                     .arg_value  = std::string{ value } } });
-}
-
-// A type qualifies as a trace-cache argument "name" slot when it is string-like.
+// A type qualifies as a trace-cache argument "name" slot when it is string-like
 template <typename Tp>
 concept trace_cache_arg_name = std::convertible_to<std::decay_t<Tp>, std::string_view>;
 
-// Args passed to start()/stop() qualify as cacheable ("arg-name", value) pairs only when
-// they are non-empty, grouped two-by-two, and every "name" slot is string-like
-template <typename TupleT, size_t... Idx>
-constexpr bool
-has_trace_cache_arg_pairs_impl(std::index_sequence<Idx...>)
+// Base holding the category-independent trace-cache helpers
+struct category_region_base
 {
-    if constexpr(sizeof...(Idx) == 0 || sizeof...(Idx) % 2 != 0)
+    static void cache_region(std::uint64_t thread_id, const std::string& name,
+                             std::uint64_t start_ts, std::uint64_t end_ts,
+                             const std::string& category,
+                             const std::string& args_str = {})
     {
-        return false;
+        constexpr size_t      NO_CORRELATION_ID = 0;
+        constexpr const char* CALLSTACK         = "{}";
+        rocprofsys::trace_cache::get_buffer_storage().store(
+            rocprofsys::trace_cache::region_sample{
+                thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
+                end_ts, CALLSTACK, args_str.c_str(), category.c_str() });
     }
-    else
+
+    template <typename Tp>
+    static std::string get_serialized_arg_type()
     {
-        return (
-            (Idx % 2 != 0 || trace_cache_arg_name<std::tuple_element_t<Idx, TupleT>>) &&
-            ...);
+        using value_type = std::decay_t<Tp>;
+        if constexpr(std::is_convertible<value_type, std::string_view>::value)
+        {
+            return "string";
+        }
+        else
+        {
+            return rocprofsys::utility::demangle<value_type>();
+        }
     }
-}
 
-template <typename... Args>
-inline constexpr bool has_trace_cache_arg_pairs_v =
-    has_trace_cache_arg_pairs_impl<std::tuple<Args...>>(
-        std::make_index_sequence<sizeof...(Args)>{});
-
-template <typename TupleT, size_t... Idx>
-void
-append_serialized_args_impl(std::string& args_str, TupleT&& args,
-                            std::index_sequence<Idx...>)
-{
-    (append_serialized_arg(args_str, Idx, std::get<Idx * 2>(args),
-                           std::get<Idx * 2 + 1>(args)),
-     ...);
-}
-
-template <typename TupleT>
-void
-append_serialized_args(std::string& args_str, TupleT&& args)
-{
-    constexpr auto N = std::tuple_size_v<std::remove_reference_t<TupleT>>;
-    append_serialized_args_impl(args_str, std::forward<TupleT>(args),
-                                std::make_index_sequence<N / 2>{});
-}
-
-// Serialize explicit ("arg-name", value) argument pairs passed to start() into the
-// trace-cache wire format. Returns an empty string when Args are not name/value pairs.
-template <typename... Args>
-std::string
-serialize_name_value_pairs(Args&&... args)
-{
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-
-    if constexpr(has_trace_cache_arg_pairs_v<Args...>)
+    template <typename Tp>
+    static std::string get_serialized_arg_value(Tp&& value)
     {
-        auto        args_tuple = std::forward_as_tuple(args...);
-        std::string args_str;
-        append_serialized_args(args_str, args_tuple);
+        using value_type = std::decay_t<Tp>;
+        if constexpr(fmt::is_formattable<value_type>::value)
+        {
+            return fmt::format("{}", std::forward<Tp>(value));
+        }
+        else
+        {
+            // fmt rejects "{}" for arbitrary non-void pointer types
+            return fmt::format("{}", fmt::streamed(std::forward<Tp>(value)));
+        }
+    }
+
+    // Append one trace-cache record "idx;;type;;name;;value;;" to args_str
+    template <typename KeyT, typename ValueT>
+    static void append_serialized_arg(std::string& args_str, std::uint32_t idx,
+                                      KeyT&& key, ValueT&& value)
+    {
+        args_str += rocprofsys::get_args_string({ rocprofsys::argument_info{
+            .arg_number = idx,
+            .arg_type   = get_serialized_arg_type<ValueT>(),
+            .arg_name   = std::string{ std::string_view{ std::forward<KeyT>(key) } },
+            .arg_value  = get_serialized_arg_value(std::forward<ValueT>(value)) } });
+    }
+
+    // Args passed to start()/stop() qualify as cacheable ("arg-name", value) pairs only
+    // when they are non-empty, grouped two-by-two, and every "name" slot is string-like
+    template <typename... Args>
+    static constexpr bool has_trace_cache_arg_pairs_v =
+        []<size_t... Idx>(std::index_sequence<Idx...>) {
+            using tuple_t = std::tuple<Args...>;
+            if constexpr(sizeof...(Idx) == 0 || sizeof...(Idx) % 2 != 0)
+            {
+                return false;
+            }
+            else
+            {
+                return ((Idx % 2 != 0 ||
+                         trace_cache_arg_name<std::tuple_element_t<Idx, tuple_t>>) &&
+                        ...);
+            }
+        }(std::make_index_sequence<sizeof...(Args)>{});
+
+    template <typename TupleT>
+    static void append_serialized_args(std::string& args_str, TupleT&& args)
+    {
+        constexpr auto N = std::tuple_size_v<std::remove_reference_t<TupleT>>;
+        [&]<size_t... Idx>(std::index_sequence<Idx...>) {
+            (append_serialized_arg(args_str, Idx, std::get<Idx * 2>(args),
+                                   std::get<Idx * 2 + 1>(args)),
+             ...);
+        }(std::make_index_sequence<N / 2>{});
+    }
+
+    // Serialize explicit ("arg-name", value) argument pairs passed to start() into the
+    // trace-cache wire format. Returns an empty string when Args are not name/value
+    // pairs.
+    template <typename... Args>
+    static std::string serialize_name_value_pairs(Args&&... args)
+    {
+        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+
+        if constexpr(has_trace_cache_arg_pairs_v<Args...>)
+        {
+            auto        args_tuple = std::forward_as_tuple(args...);
+            std::string args_str;
+            append_serialized_args(args_str, args_tuple);
+            return args_str;
+        }
+        else
+        {
+            return {};
+        }
+    }
+
+    // Renumber the arg_number field of every record in args_str so that the first
+    // record becomes next_idx, the second next_idx+1, and so on. Returns the number
+    // of records that were renumbered
+    static std::uint32_t renumber_serialized_args(std::string&  args_str,
+                                                  std::uint32_t next_idx)
+    {
+        constexpr std::string_view delim             = rocprofsys::ARG_DELIMITER;
+        constexpr std::size_t      fields_per_record = 4;  // idx, type, name, value
+
+        std::string out;
+        out.reserve(args_str.size() + 16);
+
+        std::uint32_t count       = 0;
+        std::size_t   field_start = 0;
+        std::size_t   field_index = 0;
+        for(std::size_t delim_pos                     = args_str.find(delim, field_start);
+            delim_pos != std::string::npos; delim_pos = args_str.find(delim, field_start))
+        {
+            if(field_index % fields_per_record == 0)
+            {
+                // leading idx field: replace with the renumbered value
+                out += std::to_string(next_idx++);
+                ++count;
+            }
+            else
+            {
+                // type / name / value: copy verbatim
+                out.append(args_str, field_start, delim_pos - field_start);
+            }
+            out += delim;
+
+            field_start = delim_pos + delim.size();
+            ++field_index;
+        }
+
+        args_str = std::move(out);
+        return count;
+    }
+
+    // Index the next appended record should use, i.e. the count of records already
+    // present. Reads only the final record's idx field instead of scanning everything.
+    static std::uint32_t next_arg_index(const std::string& args_str)
+    {
+        if(args_str.empty()) return 0;
+
+        constexpr std::string_view delim = rocprofsys::ARG_DELIMITER;
+
+        // With fewer than 5 delimiters the last record is the first one and starts at
+        // offset 0.
+        std::size_t record_start = 0;
+        std::size_t search_end   = std::string::npos;
+        for(int i = 0; i < 5; ++i)
+        {
+            const std::size_t p = args_str.rfind(delim, search_end);
+            if(p == std::string::npos) break;
+            if(i == 4)
+            {
+                record_start = p + delim.size();
+                break;
+            }
+            if(p == 0) break;
+            search_end = p - 1;
+        }
+
+        std::uint32_t idx = 0;
+        std::from_chars(args_str.data() + record_start, args_str.data() + args_str.size(),
+                        idx);
+        return idx + 1;
+    }
+
+    // Serializes gotcha audit arguments into the trace-cache format. Names are
+    // synthesized as "arg{N}-{demangled-type}" to mirror add_perfetto_annotation
+    template <typename... Args>
+    static std::string serialize_annotation_args(Args&&... args)
+    {
+        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+
+        std::string   args_str = {};
+        std::uint32_t idx      = 0;
+        ((append_serialized_arg(
+              args_str, idx,
+              fmt::format("arg{}-{}", idx,
+                          rocprofsys::utility::demangle<std::remove_reference_t<Args>>()),
+              std::forward<Args>(args)),
+          ++idx),
+         ...);
         return args_str;
     }
-    else
+
+    // Outgoing audits pass at most one return value
+    template <typename T>
+    static std::string serialize_return_arg(T&& value)
     {
-        return {};
-    }
-}
+        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-// Renumber the arg_number field of every record in args_str so that the first
-// record becomes next_idx, the second next_idx+1, and so on. Returns the number
-// of records that were renumbered. The wire format is a flat sequence of
-// "idx;;type;;name;;value;;" records, so we rewrite only the leading idx field of
-// each record in a single pass instead of fully deserializing/reserializing.
-inline std::uint32_t
-renumber_serialized_args(std::string& args_str, std::uint32_t next_idx)
-{
-    constexpr std::string_view delim             = rocprofsys::ARG_DELIMITER;
-    constexpr std::size_t      fields_per_record = 4;  // idx, type, name, value
-
-    std::string out;
-    out.reserve(args_str.size() + 16);
-
-    std::uint32_t count       = 0;
-    std::size_t   field_start = 0;
-    std::size_t   field_index = 0;
-    for(std::size_t delim_pos                     = args_str.find(delim, field_start);
-        delim_pos != std::string::npos; delim_pos = args_str.find(delim, field_start))
-    {
-        if(field_index % fields_per_record == 0)
-        {
-            // leading idx field: replace with the renumbered value
-            out += std::to_string(next_idx++);
-            ++count;
-        }
-        else
-        {
-            // type / name / value: copy verbatim
-            out.append(args_str, field_start, delim_pos - field_start);
-        }
-        out += delim;
-
-        field_start = delim_pos + delim.size();
-        ++field_index;
+        std::string args_str = {};
+        append_serialized_arg(args_str, 0, "return", std::forward<T>(value));
+        return args_str;
     }
 
-    args_str = std::move(out);
-    return count;
-}
-
-// Counts the number of records (each "idx;;type;;name;;value;;") in args_str.
-inline std::uint32_t
-count_serialized_args(const std::string& args_str)
-{
-    return static_cast<std::uint32_t>(
-        rocprofsys::process_arguments_string(args_str).size());
-}
-
-// Index the next appended record should use, i.e. the count of records already present.
-// Records are numbered contiguously from 0, so this is the last record's idx + 1 (or 0
-// when empty). Reads only the final record's idx field instead of scanning everything.
-inline std::uint32_t
-next_arg_index(const std::string& args_str)
-{
-    if(args_str.empty()) return 0;
-
-    constexpr std::string_view delim = rocprofsys::ARG_DELIMITER;
-
-    // The last record owns the final 4 delimiters; its idx field begins just past the
-    // 5th delimiter from the end (the previous record's trailing delimiter). With fewer
-    // than 5 delimiters the last record is the first one and starts at offset 0.
-    std::size_t record_start = 0;
-    std::size_t search_end   = std::string::npos;
-    for(int i = 0; i < 5; ++i)
+    static void cache_start(const char* name, std::string_view category,
+                            std::string args_str = {})
     {
-        const std::size_t p = args_str.rfind(delim, search_end);
-        if(p == std::string::npos) break;
-        if(i == 4)
-        {
-            record_start = p + delim.size();
-            break;
-        }
-        if(p == 0) break;
-        search_end = p - 1;
+        const auto start_ts =
+            static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
+        map_name_to_args[entry_key{ name, std::string{ category } }].push_back(
+            pending_cache_entry{ start_ts, std::move(args_str) });
     }
 
-    std::uint32_t idx = 0;
-    std::from_chars(args_str.data() + record_start, args_str.data() + args_str.size(),
-                    idx);
-    return idx + 1;
-}
-
-// Serializes gotcha audit arguments into the trace-cache format.
-// Names are synthesized as "arg{N}-{demangled-type}" to mirror add_perfetto_annotation
-template <typename... Args>
-std::string
-serialize_annotation_args(Args&&... args)
-{
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-
-    std::string   args_str = {};
-    std::uint32_t idx      = 0;
-    ((append_serialized_arg(
-          args_str, idx,
-          fmt::format("arg{}-{}", idx,
-                      rocprofsys::utility::demangle<std::remove_reference_t<Args>>()),
-          std::forward<Args>(args)),
-      ++idx),
-     ...);
-    return args_str;
-}
-
-// Outgoing audits pass at most one return value. This matches perfetto's single "return"
-// annotation.
-template <typename T>
-std::string
-serialize_return_arg(T&& value)
-{
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-
-    std::string args_str = {};
-    append_serialized_arg(args_str, 0, "return", std::forward<T>(value));
-    return args_str;
-}
-
-template <typename CategoryT, typename... Args>
-void
-cache_start(const char* name, std::string args_str = {})
-{
-    const auto start_ts =
-        static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }].push_back(
-        pending_cache_entry{ start_ts, std::move(args_str) });
-}
-
-// Appends already-serialized args to the most recent (top-of-stack) pending entry
-// for {name, category} on this thread. Any existing args keep their numbering and the
-// appended args are renumbered to continue the sequence
-template <typename CategoryT>
-void
-append_cache_args(const char* name, std::string args_str)
-{
-    if(args_str.empty()) return;
-
-    auto key = entry_key{ name, rocprofsys::trait::name<CategoryT>::value };
-    auto itr = map_name_to_args.find(key);
-    if(itr != map_name_to_args.end() && !itr->second.empty())
+    static void append_cache_args(const char* name, std::string_view category,
+                                  std::string args_str)
     {
-        auto& entry = itr->second.back();
-        if(entry.args.empty())
+        if(args_str.empty()) return;
+
+        auto key = entry_key{ name, std::string{ category } };
+        auto itr = map_name_to_args.find(key);
+        if(itr != map_name_to_args.end() && !itr->second.empty())
         {
-            // Hot path: the first batch is already numbered from 0, so adopt it as-is
-            // without renumbering or copying.
-            entry.args = std::move(args_str);
-        }
-        else
-        {
-            // Existing args keep their numbering; renumber the new batch to continue the
-            // sequence, deriving the next index from the last record already stored.
-            renumber_serialized_args(args_str, next_arg_index(entry.args));
-            entry.args += std::move(args_str);
+            auto& entry = itr->second.back();
+            if(entry.args.empty())
+            {
+                entry.args = std::move(args_str);
+            }
+            else
+            {
+                renumber_serialized_args(args_str, next_arg_index(entry.args));
+                entry.args += std::move(args_str);
+            }
         }
     }
-}
 
-template <typename CategoryT>
-void
-cache_stop(const char* name)
-{
-    entry_key key{ name, rocprofsys::trait::name<CategoryT>::value };
-    auto      x = map_name_to_args.find(key);
-    if(x != map_name_to_args.end() && !x->second.empty())
+    static void cache_stop(const char* name, std::string_view category)
     {
-        auto entry = std::move(x->second.back());
-        x->second.pop_back();
-        if(x->second.empty()) map_name_to_args.erase(x);
+        entry_key key{ name, std::string{ category } };
+        auto      x = map_name_to_args.find(key);
+        if(x != map_name_to_args.end() && !x->second.empty())
+        {
+            auto entry = std::move(x->second.back());
+            x->second.pop_back();
+            if(x->second.empty()) map_name_to_args.erase(x);
 
+            const auto end_ts =
+                static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
+            std::uint64_t thread_id = 0;
+
+            const auto& extended_info =
+                rocprofsys::thread_info::get(std::this_thread::get_id());
+            if(extended_info.has_value() && extended_info->index_data.has_value())
+            {
+                constexpr size_t UNKNOWN_TIME = 0;
+                thread_id                     = extended_info->index_data->system_value;
+                rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
+                    { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+            }
+
+            cache_region(thread_id, name, entry.start_ts, end_ts, std::string{ category },
+                         entry.args);
+        }
+    }
+
+    /// Flush all pending cached entries for this thread.
+    /// Called during finalization to ensure entries that were started but not stopped
+    /// (e.g., main entry point) are written to the trace cache. Every pending frame
+    /// in each per-key stack is emitted, so recursive/self-nested regions that were
+    /// never popped still produce one region per outstanding push.
+    static void flush_pending_cached_entries()
+    {
         const auto end_ts =
             static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
         std::uint64_t thread_id = 0;
@@ -388,42 +364,20 @@ cache_stop(const char* name)
                 { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
         }
 
-        cache_region(thread_id, name, entry.start_ts, end_ts,
-                     rocprofsys::trait::name<CategoryT>::value, entry.args);
-    }
-}
-
-/// Flush all pending cached entries for this thread.
-/// Called during finalization to ensure entries that were started but not stopped
-/// (e.g., main entry point) are written to the trace cache. Every pending frame
-/// in each per-key stack is emitted, so recursive/self-nested regions that were
-/// never popped still produce one region per outstanding push.
-inline void
-flush_pending_cached_entries()
-{
-    const auto end_ts = static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    std::uint64_t thread_id = 0;
-
-    const auto& extended_info = rocprofsys::thread_info::get(std::this_thread::get_id());
-    if(extended_info.has_value() && extended_info->index_data.has_value())
-    {
-        constexpr size_t UNKNOWN_TIME = 0;
-        thread_id                     = extended_info->index_data->system_value;
-        rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-            { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
-    }
-
-    for(const auto& [key, entry_stack] : map_name_to_args)
-    {
-        for(const auto& entry : entry_stack)
+        for(const auto& [key, entry_stack] : map_name_to_args)
         {
-            cache_region(thread_id, key.name, entry.start_ts, end_ts, key.category,
-                         entry.args);
+            for(const auto& entry : entry_stack)
+            {
+                cache_region(thread_id, key.name, entry.start_ts, end_ts, key.category,
+                             entry.args);
+            }
         }
+        map_name_to_args.clear();
     }
-    map_name_to_args.clear();
-}
-}  // namespace
+};
+
+}  // namespace component
+}  // namespace rocprofsys
 
 namespace tim
 {
@@ -475,7 +429,9 @@ get_thread_status()
 // timemory component which calls rocprof-sys functions
 // (used in gotcha wrappers)
 template <typename CategoryT>
-struct category_region : comp::base<category_region<CategoryT>, void>
+struct category_region
+: category_region_base
+, comp::base<category_region<CategoryT>, void>
 {
     using gotcha_data_t = tim::component::gotcha_data;
 
@@ -611,7 +567,7 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
         }
     }
 
-    cache_start<CategoryT>(name.data(), std::move(cache_args));
+    cache_start(name.data(), category_name, std::move(cache_args));
 }
 
 // Starts a region and attaches the pre-serialized args to it in a single push.
@@ -638,7 +594,8 @@ category_region<CategoryT>::append_cache_args(std::string_view name,
 
     auto _hash = tim::add_hash_id(name);
     name       = tim::get_hash_identifier_fast(_hash);
-    ::append_cache_args<CategoryT>(name.data(), std::move(serialized_args));
+    category_region_base::append_cache_args(name.data(), category_name,
+                                            std::move(serialized_args));
 }
 
 template <typename CategoryT>
@@ -706,7 +663,7 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
             }
         }
 
-        cache_stop<CategoryT>(name.data());
+        cache_stop(name.data(), category_name);
     }
     else
     {
