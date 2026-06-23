@@ -774,9 +774,7 @@ def gen_dot2(
             '    int16_t b1 = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);'
         )
         L.append(f'    uint32_t result = {s2}.read_lane(wf, lane);')
-        L.append(
-            '    result += static_cast<uint32_t>(static_cast<int32_t>(a0) * b0);'
-        )
+        L.append('    result += static_cast<uint32_t>(static_cast<int32_t>(a0) * b0);')
         L.append('    result += static_cast<uint32_t>(static_cast<int32_t>(a1) * b1);')
         L.append('    if (inst_.clamp) {')
         L.append('      int32_t signed_result = static_cast<int32_t>(result);')
