@@ -63,6 +63,7 @@ rocprof-sys-run -- ./sdma-test -s 256 -n 5
 | ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy` | Trace HIP API and memory copy operations |
 | `ROCPROFSYS_ROCM_EVENTS` | `SQ_WAVES,GRBM_COUNT` | Sample GPU hardware counters |
+| `ROCPROFSYS_AMD_SMI_METRICS` | `sdma_usage` | Collect SDMA engine usage via AMD-SMI |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace for timeline analysis |
 
 To capture SDMA-specific metrics:
@@ -70,6 +71,7 @@ To capture SDMA-specific metrics:
 ```bash
 rocprof-sys-run \
     -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,memory_copy \
+    -e ROCPROFSYS_AMD_SMI_METRICS=sdma_usage \
     -e ROCPROFSYS_TRACE=true \
     -- ./sdma-test -s 512 -n 5
 ```
