@@ -13,8 +13,8 @@ import subprocess
 import re
 
 
-def get_amdsmi_version(rocm_path: Optional[Path] = None) -> Optional[tuple[int, int]]:
-    """Return (major, minor) of amd-smi if available, else None."""
+def _get_amdsmi_version_output(rocm_path: Optional[Path] = None) -> Optional[str]:
+    """Return combined stdout/stderr of ``amd-smi version`` if available, else None."""
     amdsmi_exe = None
     if rocm_path is not None:
         candidate = Path(rocm_path) / "bin" / "amd-smi"
@@ -36,13 +36,35 @@ def get_amdsmi_version(rocm_path: Optional[Path] = None) -> Optional[tuple[int, 
             text=True,
             timeout=5,
         )
-        raw = (result.stdout or "") + " " + (result.stderr or "")
-        # e.g. "AMDSMI Tool: 26.4.0+... | AMDSMI Library version: 26.4.0 | ROCm version: 7.13.0 ..."
-        m = re.search(r"AMDSMI\s+(?:Tool|Library version):\s*(\d+)\.(\d+)", raw)
-        if m:
-            return (int(m.group(1)), int(m.group(2)))
-    except (subprocess.SubprocessError, OSError, ValueError):
-        pass
+        return (result.stdout or "") + " " + (result.stderr or "")
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def get_amdsmi_version(rocm_path: Optional[Path] = None) -> Optional[tuple[int, int]]:
+    """Return (major, minor) of amd-smi if available, else None."""
+    raw = _get_amdsmi_version_output(rocm_path)
+    if raw is None:
+        return None
+    # e.g. "AMDSMI Tool: 26.4.0+... | AMDSMI Library version: 26.4.0 | ROCm version: 7.13.0 ..."
+    m = re.search(r"AMDSMI\s+(?:Tool|Library version):\s*(\d+)\.(\d+)", raw)
+    if m:
+        return (int(m.group(1)), int(m.group(2)))
+    return None
+
+
+def get_amdgpu_version(
+    rocm_path: Optional[Path] = None,
+) -> Optional[tuple[int, int, int]]:
+    """Return (major, minor, patch) of the amdgpu driver if available, else None."""
+    raw = _get_amdsmi_version_output(rocm_path)
+    if raw is None:
+        return None
+    # e.g. "... | amdgpu version: 6.19.14.31400000" (patch may be absent: "6.19.4")
+    m = re.search(r"amdgpu version:\s*(\d+)\.(\d+)(?:\.(\d+))?", raw)
+    if m:
+        patch = int(m.group(3)) if m.group(3) is not None else 0
+        return (int(m.group(1)), int(m.group(2)), patch)
     return None
 
 
@@ -448,6 +470,11 @@ class SystemCapabilities:
     def amdsmi_version(self) -> Optional[tuple[int, int]]:
         """Get (major, minor) version of amd-smi, or None if not available."""
         return get_amdsmi_version(self.rocm_path)
+
+    @cached_property
+    def amdgpu_version(self) -> Optional[tuple[int, int, int]]:
+        """Get (major, minor, patch) of the amdgpu driver, or None if not available."""
+        return get_amdgpu_version(self.rocm_path)
 
 
 _ROCPROFILER_SDK_VERSION_H_RE = re.compile(

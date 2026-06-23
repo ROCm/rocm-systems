@@ -53,6 +53,7 @@ from .gpu import (
 from .capabilities import (
     SystemCapabilities,
     get_amdsmi_version,
+    get_amdgpu_version,
 )
 
 __all__ = [
@@ -91,4 +92,5 @@ __all__ = [
     # Capabilities
     "SystemCapabilities",
     "get_amdsmi_version",
+    "get_amdgpu_version",
 ]

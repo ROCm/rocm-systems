@@ -232,6 +232,10 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
+        "amdgpu_min_version(version): mark test as requiring minimum amdgpu driver version",
+    )
+    config.addinivalue_line(
+        "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
     # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
@@ -617,6 +621,20 @@ def pytest_collection_modifyitems(config, items) -> None:
                     item.add_marker(
                         pytest.mark.skip(
                             reason=f"AMD-SMI {'.'.join(map(str, system_version))} < required {req_version}"
+                        )
+                    )
+        if "amdgpu_min_version" in item.keywords:
+            req_version = item.get_closest_marker("amdgpu_min_version").args[0]
+            system_version = rocprof_config.capabilities.amdgpu_version
+            if system_version is None:
+                item.add_marker(pytest.mark.skip(reason="amdgpu version not found"))
+            else:
+                min_parts = req_version.split(".")
+                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0", "0"])[:3])
+                if system_version < min_tuple:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason=f"amdgpu {'.'.join(map(str, system_version))} < required {req_version}"
                         )
                     )
         if "run_if_gpu_category" in item.keywords:
@@ -1091,6 +1109,7 @@ def _ctest_generate_tests(
         "oshrun_min_version",
         "rocm_min_version",
         "amdsmi_min_version",
+        "amdgpu_min_version",
         "run_if_gpu_category",
         "preserve",
         # For CTests
@@ -1326,6 +1345,13 @@ def _generate_rocprofsys_config_header() -> list[str]:
     else:
         amdsmi_version_str = "Not found"
 
+    if cap.amdgpu_version is not None:
+        amdgpu_version_str = (
+            f"{cap.amdgpu_version[0]}.{cap.amdgpu_version[1]}.{cap.amdgpu_version[2]}"
+        )
+    else:
+        amdgpu_version_str = "Not found"
+
     # Rocprofiler SDK version
     rocprofiler_sdk_version_str = (
         f"{cap.rocprofiler_sdk_version[0]}.{cap.rocprofiler_sdk_version[1]}.{cap.rocprofiler_sdk_version[2]}"
@@ -1349,6 +1375,7 @@ def _generate_rocprofsys_config_header() -> list[str]:
         _row("ROCm version:", rocm_version),
         _row("ROCprof-SDK version:", rocprofiler_sdk_version_str),
         _row("AMD-SMI version:", amdsmi_version_str),
+        _row("amdgpu version:", amdgpu_version_str),
         _row("ROCm path:", rocprof_config.rocm_path),
         _row("Is installed:", rocprof_config.is_installed),
         _row("Output dir:", rocprof_config.test_output_dir),
