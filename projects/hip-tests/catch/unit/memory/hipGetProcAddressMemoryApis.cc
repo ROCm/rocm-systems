@@ -6088,7 +6088,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
 
     REQUIRE(validateDeviceArray(dstDevPtr, N, value) == true);
 
+    HIP_CHECK(hipSetDevice(deviceId));
     HIP_CHECK(hipFree(srcDevPtr));
+    HIP_CHECK(hipSetDevice(peerDeviceId));
     HIP_CHECK(hipFree(dstDevPtr));
   }
 
