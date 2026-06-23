@@ -723,7 +723,7 @@ amdgcn_architecture_t::terminating_instruction () const
 size_t
 amdgcn_architecture_t::breakpoint_instruction_pc_adjust () const
 {
-  return breakpoint_instruction ().size ();
+  return 0;
 }
 
 bool

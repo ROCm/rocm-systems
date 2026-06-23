@@ -42,16 +42,18 @@
 10: New trap handler ABI. Except for gfx940: set status.skip_export before
    halting the wave.
 11: Remove scratch_backing_memory_byte_size from the aql_queue_t.
+12: New trap handler ABI. Halt the wave at the s_trap instruction instead of
+   the next instruction.
 */
 
 using runtime_rdebug_version_t = decltype (r_debug::r_version);
 
 constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_INVALID = 0;
 #if defined(__linux__)
-constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MIN = 8;
+constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MIN = 12;
 #elif defined(_WIN32)
-constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MIN = 10;
+constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MIN = 12;
 #endif
-constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MAX = 11;
+constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MAX = 12;
 
 #endif /* RUNTIME_RDEBUG_H */
