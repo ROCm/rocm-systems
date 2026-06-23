@@ -50,12 +50,6 @@ from .gpu import (
     get_xnack_support,
 )
 
-from .capabilities import (
-    SystemCapabilities,
-    get_amdsmi_version,
-    get_amdgpu_version,
-)
-
 __all__ = [
     # Config
     "RocprofsysConfig",
@@ -89,8 +83,4 @@ __all__ = [
     "get_target_gpu_arch",
     "get_offload_extractor",
     "get_xnack_support",
-    # Capabilities
-    "SystemCapabilities",
-    "get_amdsmi_version",
-    "get_amdgpu_version",
 ]
