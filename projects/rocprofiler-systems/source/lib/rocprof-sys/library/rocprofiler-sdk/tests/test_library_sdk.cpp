@@ -1,24 +1,173 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Include the mock before the SUT so gmock_wrapper / g_mock_wrapper are defined
-// in the same TU that instantiates library_sdk<mock_backend>.
+// SUT first: its include chain defines ROCPROFILER_VERSION, _OPENMP, and other
+// SDK/OpenMP macros that mock_wrapper.hpp uses in #ifdef guards to pick the real
+// enum types (rocprofiler_callback_tracing_kind_t etc.) when available.
+// Template instantiation of library_sdk<mock_backend> happens at end-of-TU, so
+// both headers are fully visible regardless of include order.
 #include "mock_wrapper.hpp"
 #include "rocprof-sys/library/rocprofiler-sdk.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <memory>
 
+// ─── mock_externals ───────────────────────────────────────────────────────────
+//
+// Null-object stub for the Externals policy parameter.  All boolean config
+// getters return false so that every Perfetto/timemory code path in library_sdk
+// is compiled out at template instantiation time.  The remaining methods are
+// no-op templates that satisfy the duck-typed interface without pulling in any
+// real subsystem.
+
+struct mock_externals
+{
+    // ─── Stub types matching the concrete args used in library_sdk ────────────
+    //
+    // add_thread_info and add_track are called with brace-enclosed initializers
+    // whose field count must match the struct layout (C++ cannot deduce a type
+    // from a bare brace-initializer in a template call).
+
+    struct null_thread_info
+    {
+        std::int32_t  parent_process_id = 0;
+        std::int32_t  process_id        = 0;
+        std::uint64_t thread_id         = 0;
+        std::uint32_t start             = 0;
+        std::uint32_t end               = 0;
+        std::string   extdata;
+    };
+
+    struct null_track_info
+    {
+        std::string                track_name;
+        std::optional<std::size_t> thread_id;
+        std::string                extdata;
+    };
+
+    struct null_thread_index_data
+    {
+        std::size_t sequent_value = 0;
+    };
+
+    struct null_thread_data
+    {
+        null_thread_index_data  _index{};
+        null_thread_index_data* index_data = &_index;
+    };
+
+    struct null_registry
+    {
+        void add_string(std::string_view) {}
+        void add_thread_info(const null_thread_info&) {}
+        void add_track(const null_track_info&) {}
+        void add_queue(const std::uint64_t&) {}
+        void add_stream(const std::uint64_t&) {}
+
+        template <typename T>
+        void add_code_object(T&&)
+        {}
+        template <typename T>
+        void add_kernel_symbol(T&&)
+        {}
+
+        struct null_tracing_info
+        {
+            template <typename A, typename B>
+            std::string_view at(A, B) const
+            {
+                return {};
+            }
+        };
+        [[nodiscard]] null_tracing_info get_callback_tracing_info() const { return {}; }
+    };
+
+    struct null_storage
+    {
+        template <typename... Args>
+        void store(Args&&...)
+        {}
+    };
+
+    static null_registry& get_metadata_registry()
+    {
+        static null_registry reg;
+        return reg;
+    }
+    static null_storage& get_buffer_storage()
+    {
+        static null_storage storage;
+        return storage;
+    }
+
+    static bool get_use_perfetto() { return false; }
+    static bool get_use_timemory() { return false; }
+    static bool get_perfetto_annotations() { return false; }
+    static bool get_use_rocpd() { return false; }
+    static bool get_group_by_queue() { return false; }
+
+    template <typename... Args>
+    static void push_timemory(Args&&...)
+    {}
+    template <typename... Args>
+    static void pop_timemory(Args&&...)
+    {}
+    template <typename... Args>
+    static void push_perfetto_ts(Args&&...)
+    {}
+    template <typename... Args>
+    static void pop_perfetto_ts(Args&&...)
+    {}
+    template <typename... Args>
+    static void push_perfetto(Args&&...)
+    {}
+    template <typename... Args>
+    static void pop_perfetto(Args&&...)
+    {}
+    template <typename... Args>
+    static void add_perfetto_annotation(Args&&...)
+    {}
+
+    template <typename... Args>
+    static std::nullptr_t get_perfetto_track(Args&&...)
+    {
+        return nullptr;
+    }
+
+    template <typename TidT, typename TagT>
+    static const null_thread_data* get_thread_info(TidT, TagT)
+    {
+        static null_thread_data stub{};
+        return &stub;
+    }
+
+    // ─── MarkerWriterPolicy interface (no-ops) ────────────────────────────────────
+    // Called by roctx_client/marker_writer when library_sdk uses Externals as the
+    // marker policy.  The variadic templates above (push_timemory, pop_timemory,
+    // push_perfetto_ts, pop_perfetto_ts) already cover those signatures.
+
+    static void add_string(std::string_view) {}
+    static void store_region(const ::rocprofsys::trace_cache::region_sample&) {}
+    static void add_thread_info(const ::rocprofsys::trace_cache::info::thread&) {}
+
+    // ─── PMC interface (no-ops) ───────────────────────────────────────────────────
+    static void register_gpu_perf_counter_source(
+        const std::vector<std::shared_ptr<::rocprofsys::agent>>&)
+    {}
+    static void set_pmc_state(::rocprofsys::State) {}
+};
+
 // ─── Type aliases ─────────────────────────────────────────────────────────────
 
 namespace mock_ns = ::rocprofsys::mock::rocprofiler_sdk;
 
 using mock_backend_t = mock_ns::backend;
-using sut            = ::rocprofsys::rocprofiler_sdk::library_sdk<mock_backend_t>;
-using data_t         = ::rocprofsys::rocprofiler_sdk::client_data<mock_backend_t>;
-using handle_t       = mock_backend_t::handle_t;
+using sut    = ::rocprofsys::rocprofiler_sdk::library_sdk<mock_backend_t, mock_externals>;
+using data_t = ::rocprofsys::rocprofiler_sdk::client_data<mock_backend_t>;
+using handle_t = mock_backend_t::handle_t;
 
 // Bring in gmock helpers used throughout to avoid per-test repetition.
 using ::testing::_;

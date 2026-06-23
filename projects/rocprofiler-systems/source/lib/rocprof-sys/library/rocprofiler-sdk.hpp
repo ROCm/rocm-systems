@@ -69,14 +69,155 @@
 #include <unordered_set>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 
 using hardware_counter_info = ::tim::hardware_counters::info;
 
-template <typename Wrapper>
+// Category types are tag structs (not pointers).  Used to disambiguate the
+// push/pop_perfetto_ts template overloads from the non-template marker-policy
+// overloads that take const char* as their first argument.
+template <typename T>
+concept tracing_category = !std::is_pointer_v<std::decay_t<T>>;
+
+struct sdk_external_deps
+{
+    // ─── trace_cache ──────────────────────────────────────────────────────────────
+    static auto& get_metadata_registry() { return trace_cache::get_metadata_registry(); }
+    static auto& get_buffer_storage() { return trace_cache::get_buffer_storage(); }
+
+    // ─── config ───────────────────────────────────────────────────────────────────
+    static bool get_use_perfetto() { return config::get_use_perfetto(); }
+    static bool get_use_timemory() { return config::get_use_timemory(); }
+    static bool get_perfetto_annotations() { return config::get_perfetto_annotations(); }
+    static bool get_use_rocpd() { return config::get_use_rocpd(); }
+    static bool get_group_by_queue() { return config::get_group_by_queue(); }
+
+    // ─── tracing — timemory ───────────────────────────────────────────────────────
+    template <typename CategoryT, typename NameT>
+    static void push_timemory(CategoryT cat, NameT&& name)
+    {
+        tracing::push_timemory(cat, std::forward<NameT>(name));
+    }
+
+    template <typename CategoryT, typename NameT>
+    static void pop_timemory(CategoryT cat, NameT&& name)
+    {
+        tracing::pop_timemory(cat, std::forward<NameT>(name));
+    }
+
+    // ─── tracing — perfetto ───────────────────────────────────────────────────────
+    template <tracing_category CategoryT, typename... Args>
+    static void push_perfetto_ts(CategoryT cat, Args&&... args)
+    {
+        tracing::push_perfetto_ts(cat, std::forward<Args>(args)...);
+    }
+
+    template <tracing_category CategoryT, typename... Args>
+    static void pop_perfetto_ts(CategoryT cat, Args&&... args)
+    {
+        tracing::pop_perfetto_ts(cat, std::forward<Args>(args)...);
+    }
+
+    template <typename CategoryT, typename... Args>
+    static void push_perfetto(CategoryT cat, Args&&... args)
+    {
+        tracing::push_perfetto(cat, std::forward<Args>(args)...);
+    }
+
+    template <typename CategoryT, typename... Args>
+    static void pop_perfetto(CategoryT cat, Args&&... args)
+    {
+        tracing::pop_perfetto(cat, std::forward<Args>(args)...);
+    }
+
+    template <typename CategoryT, typename... Args>
+    [[nodiscard]] static auto get_perfetto_track(CategoryT cat, Args&&... args)
+    {
+        return tracing::get_perfetto_track(cat, std::forward<Args>(args)...);
+    }
+
+    template <typename... Args>
+    static void add_perfetto_annotation(Args&&... args)
+    {
+        tracing::add_perfetto_annotation(std::forward<Args>(args)...);
+    }
+
+    // ─── thread_info ──────────────────────────────────────────────────────────────
+    template <typename TidT, typename TagT>
+    static decltype(auto) get_thread_info(TidT tid, TagT tag)
+    {
+        return thread_info::get(tid, tag);
+    }
+
+    // ─── MarkerWriterPolicy interface ─────────────────────────────────────────────
+    // Implements the same contract as default_marker_policy so that library_sdk can
+    // use Externals as the roctx_client marker policy.  In tests, mock_externals
+    // overrides these with no-ops, cutting the link dependency on the main library.
+
+    static void push_timemory(std::string_view name)
+    {
+        tracing::push_timemory(category::rocm_marker_api{}, name);
+    }
+    static void pop_timemory(std::string_view name)
+    {
+        tracing::pop_timemory(category::rocm_marker_api{}, name);
+    }
+
+    static void push_perfetto_ts(const char* name, std::uint64_t ts,
+                                 std::uint64_t                        flow_id,
+                                 const std::vector<annotation_entry>& annotations)
+    {
+        tracing::push_perfetto_ts(category::rocm_marker_api{}, name, ts,
+                                  ::perfetto::Flow::ProcessScoped(flow_id),
+                                  [&annotations](::perfetto::EventContext ctx) {
+                                      for(const auto& entry : annotations)
+                                          std::visit(
+                                              [&ctx, &entry](const auto& val) {
+                                                  tracing::add_perfetto_annotation(
+                                                      ctx, entry.key, val);
+                                              },
+                                              entry.value);
+                                  });
+    }
+    static void pop_perfetto_ts(const char* name, std::uint64_t ts,
+                                const std::vector<annotation_entry>& annotations)
+    {
+        tracing::pop_perfetto_ts(category::rocm_marker_api{}, name, ts,
+                                 [&annotations](::perfetto::EventContext ctx) {
+                                     for(const auto& entry : annotations)
+                                         std::visit(
+                                             [&ctx, &entry](const auto& val) {
+                                                 tracing::add_perfetto_annotation(
+                                                     ctx, entry.key, val);
+                                             },
+                                             entry.value);
+                                 });
+    }
+
+    static void add_string(std::string_view val)
+    {
+        get_metadata_registry().add_string(val);
+    }
+    static void store_region(const trace_cache::region_sample& sample)
+    {
+        get_buffer_storage().store(sample);
+    }
+    static void add_thread_info(const trace_cache::info::thread& info)
+    {
+        get_metadata_registry().add_thread_info(info);
+    }
+
+    // ─── PMC interface ────────────────────────────────────────────────────────────
+    static void register_gpu_perf_counter_source(
+        const std::vector<std::shared_ptr<agent>>& agents)
+    {
+        pmc::register_gpu_perf_counter_source(agents);
+    }
+    static void set_pmc_state(State state) { pmc::set_state(state); }
+};
+
+template <typename Wrapper, typename Externals>
 class library_sdk
 {
 public:
@@ -112,11 +253,11 @@ public:
 
     // ─── Static data members (formerly anon-namespace globals) ───────────────
 
-    static client_data<Wrapper>*                                         tool_data;
-    static std::shared_ptr<roctx_client<Wrapper, default_marker_policy>> g_roctx_client;
-    static std::atomic<bool>                                             tool_fini_done;
-    static std::atomic<bool>                                             tool_init_done;
-    static std::atomic<bool>                                             sdk_configured;
+    static client_data<Wrapper>*                             tool_data;
+    static std::shared_ptr<roctx_client<Wrapper, Externals>> g_roctx_client;
+    static std::atomic<bool>                                 tool_fini_done;
+    static std::atomic<bool>                                 tool_init_done;
+    static std::atomic<bool>                                 sdk_configured;
 
 private:
     // ─── Nested helper types ──────────────────────────────────────────────────
@@ -193,8 +334,7 @@ private:
 
     // ─── roctx / counter / finalization helpers ───────────────────────────────
 
-    static std::shared_ptr<roctx_client<Wrapper, default_marker_policy>>
-                get_roctx_client();
+    static std::shared_ptr<roctx_client<Wrapper, Externals>> get_roctx_client();
     static void flush_counter_storage_outputs();
     static void flush_counter_tracks_to_zero(typename Wrapper::timestamp_t ts);
     static void finalize_sdk_common();
@@ -392,7 +532,8 @@ private:
 
 // ─── Production type alias ───────────────────────────────────────────────────
 
-using library_sdk_t = library_sdk<::rocprofsys::rocprofiler_sdk::backend>;
+using library_sdk_t =
+    library_sdk<::rocprofsys::rocprofiler_sdk::backend, sdk_external_deps>;
 
 // ─── Backward-compat free functions ──────────────────────────────────────────
 
@@ -457,8 +598,7 @@ get_rocm_events_info()
     return library_sdk_t::get_rocm_events_info();
 }
 
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk
 
 // ─── Template implementations ────────────────────────────────────────────────
 
@@ -467,42 +607,46 @@ namespace rocprofsys::rocprofiler_sdk
 
 // ─── Static member definitions ───────────────────────────────────────────────
 
-template <typename Wrapper>
-client_data<Wrapper>* library_sdk<Wrapper>::tool_data = new client_data<Wrapper>{};
+template <typename Wrapper, typename Externals>
+client_data<Wrapper>* library_sdk<Wrapper, Externals>::tool_data =
+    new client_data<Wrapper>{};
 
-template <typename Wrapper>
-std::shared_ptr<roctx_client<Wrapper, default_marker_policy>>
-    library_sdk<Wrapper>::g_roctx_client = {};
+template <typename Wrapper, typename Externals>
+std::shared_ptr<roctx_client<Wrapper, Externals>>
+    library_sdk<Wrapper, Externals>::g_roctx_client = {};
 
-template <typename Wrapper>
-std::atomic<bool> library_sdk<Wrapper>::tool_fini_done{ false };
+template <typename Wrapper, typename Externals>
+std::atomic<bool> library_sdk<Wrapper, Externals>::tool_fini_done{ false };
 
-template <typename Wrapper>
-std::atomic<bool> library_sdk<Wrapper>::tool_init_done{ false };
+template <typename Wrapper, typename Externals>
+std::atomic<bool> library_sdk<Wrapper, Externals>::tool_init_done{ false };
 
-template <typename Wrapper>
-std::atomic<bool> library_sdk<Wrapper>::sdk_configured{ false };
+template <typename Wrapper, typename Externals>
+std::atomic<bool> library_sdk<Wrapper, Externals>::sdk_configured{ false };
 
 // ─── scope_destructor ────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 template <typename FuncT, typename InitT>
-library_sdk<Wrapper>::scope_destructor::scope_destructor(FuncT&& _fini, InitT&& _init)
+library_sdk<Wrapper, Externals>::scope_destructor::scope_destructor(FuncT&& _fini,
+                                                                    InitT&& _init)
 : m_functor{ std::forward<FuncT>(_fini) }
 {
     _init();
 }
 
-template <typename Wrapper>
-library_sdk<Wrapper>::scope_destructor::scope_destructor(scope_destructor&& rhs) noexcept
+template <typename Wrapper, typename Externals>
+library_sdk<Wrapper, Externals>::scope_destructor::scope_destructor(
+    scope_destructor&& rhs) noexcept
 : m_functor{ std::move(rhs.m_functor) }
 {
     rhs.m_functor = []() {};
 }
 
-template <typename Wrapper>
-typename library_sdk<Wrapper>::scope_destructor&
-library_sdk<Wrapper>::scope_destructor::operator=(scope_destructor&& rhs) noexcept
+template <typename Wrapper, typename Externals>
+typename library_sdk<Wrapper, Externals>::scope_destructor&
+library_sdk<Wrapper, Externals>::scope_destructor::operator=(
+    scope_destructor&& rhs) noexcept
 {
     if(this != &rhs)
     {
@@ -514,25 +658,25 @@ library_sdk<Wrapper>::scope_destructor::operator=(scope_destructor&& rhs) noexce
 
 // ─── Utility helpers ─────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 template <typename Tp, typename... Args>
 Tp*
-library_sdk<Wrapper>::as_pointer(Args&&... args)
+library_sdk<Wrapper, Externals>::as_pointer(Args&&... args)
 {
     return new Tp{ std::forward<Args>(args)... };
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 template <typename... Tp>
 void
-library_sdk<Wrapper>::consume_args(Tp&&...)
+library_sdk<Wrapper, Externals>::consume_args(Tp&&...)
 {}
 
 // ─── Thread-local state ───────────────────────────────────────────────────────
 
-template <typename Wrapper>
-typename library_sdk<Wrapper>::kernel_rename_stack_t*&
-library_sdk<Wrapper>::get_thread_dispatch_rename()
+template <typename Wrapper, typename Externals>
+typename library_sdk<Wrapper, Externals>::kernel_rename_stack_t*&
+library_sdk<Wrapper, Externals>::get_thread_dispatch_rename()
 {
     static thread_local auto* _v    = as_pointer<kernel_rename_stack_t>();
     static thread_local auto  _dtor = scope_destructor{ []() {
@@ -542,9 +686,9 @@ library_sdk<Wrapper>::get_thread_dispatch_rename()
     return _v;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 auto&
-library_sdk<Wrapper>::get_stream_stack()
+library_sdk<Wrapper, Externals>::get_stream_stack()
 {
     static thread_local std::vector<typename Wrapper::stream_id> _v{
         typename Wrapper::stream_id{ 0 }
@@ -554,31 +698,31 @@ library_sdk<Wrapper>::get_stream_stack()
 
 // ─── Stream helpers ───────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::stream_id_push(typename Wrapper::stream_id stream_id)
+library_sdk<Wrapper, Externals>::stream_id_push(typename Wrapper::stream_id stream_id)
 {
     get_stream_stack().emplace_back(stream_id);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 typename Wrapper::stream_id
-library_sdk<Wrapper>::stream_id_top()
+library_sdk<Wrapper, Externals>::stream_id_top()
 {
     return get_stream_stack().back();
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::stream_id_pop()
+library_sdk<Wrapper, Externals>::stream_id_pop()
 {
     get_stream_stack().pop_back();
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 template <typename Tp>
 typename Wrapper::stream_id
-library_sdk<Wrapper>::get_stream_id(Tp* record)
+library_sdk<Wrapper, Externals>::get_stream_id(Tp* record)
 {
     auto _stream_id = typename Wrapper::stream_id{ 0 };
     if(record->correlation_id.external.ptr != nullptr)
@@ -597,10 +741,10 @@ library_sdk<Wrapper>::get_stream_id(Tp* record)
 
 // ─── Parent stack ID ─────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 template <typename CorrelationIdType>
 std::uint64_t
-library_sdk<Wrapper>::get_parent_stack_id(
+library_sdk<Wrapper, Externals>::get_parent_stack_id(
     [[maybe_unused]] const CorrelationIdType& correlation_id)
 {
 #if(ROCPROFILER_VERSION >= 700)
@@ -615,53 +759,53 @@ library_sdk<Wrapper>::get_parent_stack_id(
 
 // ─── thread_precreate / thread_postcreate ────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::thread_precreate(typename Wrapper::runtime_library_t /*lib*/,
-                                       void* /*data*/)
+library_sdk<Wrapper, Externals>::thread_precreate(
+    typename Wrapper::runtime_library_t /*lib*/, void* /*data*/)
 {
     push_thread_state(ThreadState::Internal);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::thread_postcreate(typename Wrapper::runtime_library_t /*lib*/,
-                                        void* /*data*/)
+library_sdk<Wrapper, Externals>::thread_postcreate(
+    typename Wrapper::runtime_library_t /*lib*/, void* /*data*/)
 {
     pop_thread_state();
 }
 
 // ─── Context helpers ─────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 bool
-library_sdk<Wrapper>::is_initialized(typename Wrapper::context_id ctx)
+library_sdk<Wrapper, Externals>::is_initialized(typename Wrapper::context_id ctx)
 {
     typename Wrapper::context_id ctx_default;
     return ctx != ctx_default;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 bool
-library_sdk<Wrapper>::is_active(typename Wrapper::context_id ctx)
+library_sdk<Wrapper, Externals>::is_active(typename Wrapper::context_id ctx)
 {
     int  status = 0;
     auto errc   = Wrapper::context_is_active(ctx, &status);
     return (errc == Wrapper::STATUS_SUCCESS && status > 0);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 bool
-library_sdk<Wrapper>::is_valid(typename Wrapper::context_id ctx)
+library_sdk<Wrapper, Externals>::is_valid(typename Wrapper::context_id ctx)
 {
     int  status = 0;
     auto errc   = Wrapper::context_is_valid(ctx, &status);
     return (errc == Wrapper::STATUS_SUCCESS && status > 0);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::start_context(typename Wrapper::context_id ctx)
+library_sdk<Wrapper, Externals>::start_context(typename Wrapper::context_id ctx)
 {
     if(is_initialized(ctx) && !is_active(ctx))
     {
@@ -669,9 +813,9 @@ library_sdk<Wrapper>::start_context(typename Wrapper::context_id ctx)
     }
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::stop_context(typename Wrapper::context_id ctx)
+library_sdk<Wrapper, Externals>::stop_context(typename Wrapper::context_id ctx)
 {
     if(is_initialized(ctx) && is_active(ctx))
     {
@@ -679,25 +823,27 @@ library_sdk<Wrapper>::stop_context(typename Wrapper::context_id ctx)
     }
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::start_context(const client_data<Wrapper>::context_id_vec_t& ctxs)
+library_sdk<Wrapper, Externals>::start_context(
+    const client_data<Wrapper>::context_id_vec_t& ctxs)
 {
     std::for_each(std::begin(ctxs), std::end(ctxs),
                   [](const auto& ctx) { start_context(ctx); });
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::stop_context(const client_data<Wrapper>::context_id_vec_t& ctxs)
+library_sdk<Wrapper, Externals>::stop_context(
+    const client_data<Wrapper>::context_id_vec_t& ctxs)
 {
     std::for_each(std::begin(ctxs), std::end(ctxs),
                   [](const auto& ctx) { stop_context(ctx); });
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::flush()
+library_sdk<Wrapper, Externals>::flush()
 {
     if(!tool_data) return;
 
@@ -716,9 +862,9 @@ library_sdk<Wrapper>::flush()
 
 // ─── roctx helper ────────────────────────────────────────────────────────────
 
-template <typename Wrapper>
-std::shared_ptr<roctx_client<Wrapper, default_marker_policy>>
-library_sdk<Wrapper>::get_roctx_client()
+template <typename Wrapper, typename Externals>
+std::shared_ptr<roctx_client<Wrapper, Externals>>
+library_sdk<Wrapper, Externals>::get_roctx_client()
 {
     if(!g_roctx_client)
     {
@@ -741,27 +887,26 @@ library_sdk<Wrapper>::get_roctx_client()
 
         const auto roctx_config = roctx_client_config{
             has_marker_domain,  // pause_resume_enabled
-            config::get_use_perfetto(),
-            config::get_use_timemory(),
-            config::get_perfetto_annotations(),
+            Externals::get_use_perfetto(),
+            Externals::get_use_timemory(),
+            Externals::get_perfetto_annotations(),
             roctx_traced_regions,
         };
-        g_roctx_client =
-            std::make_shared<roctx_client<Wrapper, default_marker_policy>>(roctx_config);
+        g_roctx_client = std::make_shared<roctx_client<Wrapper, Externals>>(roctx_config);
     }
     return g_roctx_client;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::setup()
+library_sdk<Wrapper, Externals>::setup()
 {}
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::shutdown()
+library_sdk<Wrapper, Externals>::shutdown()
 {
     auto roctx_client = get_roctx_client();
     // Shutdown marker client (and trace_control) before rocprofiler-sdk finalization
@@ -775,75 +920,75 @@ library_sdk<Wrapper>::shutdown()
         tool_data->client_fini(*tool_data->client_id);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::config()
+library_sdk<Wrapper, Externals>::config()
 {}
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::post_process()
+library_sdk<Wrapper, Externals>::post_process()
 {}
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::sample()
+library_sdk<Wrapper, Externals>::sample()
 {}
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::start()
+library_sdk<Wrapper, Externals>::start()
 {
     if(!tool_data) return;
     start_context(tool_data->get_all_contexts());
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::stop()
+library_sdk<Wrapper, Externals>::stop()
 {
     if(!tool_data) return;
     stop_context(tool_data->get_all_contexts());
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::resume()
+library_sdk<Wrapper, Externals>::resume()
 {
     flush_counter_tracks_to_zero(0);
     if(!tool_data) return;
     start_context(tool_data->get_main_contexts());
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::pause()
+library_sdk<Wrapper, Externals>::pause()
 {
     if(!tool_data) return;
     stop_context(tool_data->get_main_contexts());
     flush_counter_tracks_to_zero(0);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::shared_ptr<control::trace_control>
-library_sdk<Wrapper>::get_trace_controller()
+library_sdk<Wrapper, Externals>::get_trace_controller()
 {
     const auto roctx_client = get_roctx_client();
     if(!roctx_client) return nullptr;
     return roctx_client->get_controller();
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::reset_sdk_session_guards()
+library_sdk<Wrapper, Externals>::reset_sdk_session_guards()
 {
     tool_fini_done.store(false);
     tool_init_done.store(false);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::vector<hardware_counter_info>
-library_sdk<Wrapper>::get_rocm_events_info()
+library_sdk<Wrapper, Externals>::get_rocm_events_info()
 {
     if(!tool_data)
     {
@@ -857,24 +1002,23 @@ library_sdk<Wrapper>::get_rocm_events_info()
 
 // ─── Argument iteration callbacks ────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 int
-library_sdk<Wrapper>::save_args(typename Wrapper::callback_tracing_kind /*kind*/,
-                                std::int32_t /*operation*/, std::uint32_t /*arg_number*/,
-                                const void* const /*arg_value_addr*/,
-                                std::int32_t /*arg_indirection_count*/,
-                                const char* /*arg_type*/, const char* arg_name,
-                                const char* arg_value_str,
-                                std::int32_t /*arg_dereference_count*/, void* data)
+library_sdk<Wrapper, Externals>::save_args(
+    typename Wrapper::callback_tracing_kind /*kind*/, std::int32_t /*operation*/,
+    std::uint32_t /*arg_number*/, const void* const /*arg_value_addr*/,
+    std::int32_t /*arg_indirection_count*/, const char* /*arg_type*/,
+    const char* arg_name, const char*             arg_value_str,
+    std::int32_t /*arg_dereference_count*/, void* data)
 {
     auto* argvec = static_cast<callback_arg_array_t*>(data);
     argvec->emplace_back(arg_name, arg_value_str);
     return 0;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 int
-library_sdk<Wrapper>::iterate_args_callback(
+library_sdk<Wrapper, Externals>::iterate_args_callback(
     typename Wrapper::callback_tracing_kind /*kind*/, std::int32_t /*operation*/,
     std::uint32_t arg_number, const void* const /*arg_value_addr*/,
     std::int32_t /*arg_indirection_count*/, const char* arg_type, const char* arg_name,
@@ -890,32 +1034,33 @@ library_sdk<Wrapper>::iterate_args_callback(
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 template <typename Category>
 void
-library_sdk<Wrapper>::cache_category()
+library_sdk<Wrapper, Externals>::cache_category()
 {
-    trace_cache::get_metadata_registry().add_string(trait::name<Category>::value);
+    Externals::get_metadata_registry().add_string(trait::name<Category>::value);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::cache_add_thread_info(std::uint64_t tid)
+library_sdk<Wrapper, Externals>::cache_add_thread_info(std::uint64_t tid)
 {
-    trace_cache::get_metadata_registry().add_thread_info(
+    Externals::get_metadata_registry().add_thread_info(
         { getppid(), getpid(), tid, 0, 0, "{}" });
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::cache_add_track(const char* track_name, std::uint64_t tid)
+library_sdk<Wrapper, Externals>::cache_add_track(const char*   track_name,
+                                                 std::uint64_t tid)
 {
-    trace_cache::get_metadata_registry().add_track({ track_name, tid, "{}" });
+    Externals::get_metadata_registry().add_track({ track_name, tid, "{}" });
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::cache_region(
+library_sdk<Wrapper, Externals>::cache_region(
     const typename Wrapper::callback_tracing_record* record,
     typename Wrapper::timestamp_t                    start_timestamp,
     typename Wrapper::timestamp_t end_timestamp, const std::string& call_stack,
@@ -925,7 +1070,7 @@ library_sdk<Wrapper>::cache_region(
     if(name.empty())
     {
         auto callback_tracing_info =
-            trace_cache::get_metadata_registry().get_callback_tracing_info();
+            Externals::get_metadata_registry().get_callback_tracing_info();
         _name = std::string{ callback_tracing_info.at(record->kind, record->operation) };
     }
     else
@@ -933,21 +1078,21 @@ library_sdk<Wrapper>::cache_region(
         _name = std::string{ name };
     }
 
-    trace_cache::get_buffer_storage().store(trace_cache::region_sample{
+    Externals::get_buffer_storage().store(trace_cache::region_sample{
         record->thread_id, _name.c_str(), record->correlation_id.internal,
         get_parent_stack_id(record->correlation_id), start_timestamp, end_timestamp,
         call_stack.c_str(), args_str.c_str(), category.c_str() });
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::cache_kernel_dispatch(
+library_sdk<Wrapper, Externals>::cache_kernel_dispatch(
     typename Wrapper::kernel_dispatch_record* record, std::uint64_t stream_handle)
 {
     auto queue_handle = record->dispatch_info.queue_id.handle;
-    trace_cache::get_metadata_registry().add_queue(queue_handle);
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(trace_cache::kernel_dispatch_sample{
+    Externals::get_metadata_registry().add_queue(queue_handle);
+    Externals::get_metadata_registry().add_stream(stream_handle);
+    Externals::get_buffer_storage().store(trace_cache::kernel_dispatch_sample{
         record->start_timestamp, record->end_timestamp, record->thread_id,
         record->dispatch_info.agent_id.handle, record->dispatch_info.kernel_id,
         record->dispatch_info.dispatch_id, record->dispatch_info.queue_id.handle,
@@ -959,13 +1104,13 @@ library_sdk<Wrapper>::cache_kernel_dispatch(
         record->dispatch_info.grid_size.z, stream_handle });
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::cache_scratch_memory(
+library_sdk<Wrapper, Externals>::cache_scratch_memory(
     typename Wrapper::scratch_memory_record* record, std::uint64_t stream_handle)
 {
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(trace_cache::scratch_memory_sample{
+    Externals::get_metadata_registry().add_stream(stream_handle);
+    Externals::get_buffer_storage().store(trace_cache::scratch_memory_sample{
         record->start_timestamp, record->end_timestamp, record->thread_id,
         record->agent_id.handle, record->queue_id.handle,
         static_cast<std::int32_t>(record->kind),
@@ -975,13 +1120,13 @@ library_sdk<Wrapper>::cache_scratch_memory(
         stream_handle });
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::cache_memory_copy(typename Wrapper::memory_copy_record* record,
-                                        std::uint64_t stream_handle)
+library_sdk<Wrapper, Externals>::cache_memory_copy(
+    typename Wrapper::memory_copy_record* record, std::uint64_t stream_handle)
 {
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(trace_cache::memory_copy_sample{
+    Externals::get_metadata_registry().add_stream(stream_handle);
+    Externals::get_buffer_storage().store(trace_cache::memory_copy_sample{
         record->start_timestamp, record->end_timestamp, record->thread_id,
         record->dst_agent_id.handle, record->src_agent_id.handle,
         static_cast<std::int32_t>(record->kind),
@@ -992,13 +1137,13 @@ library_sdk<Wrapper>::cache_memory_copy(typename Wrapper::memory_copy_record* re
 }
 
 #if ROCPROFILER_VERSION >= 600
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::cache_memory_allocation(
+library_sdk<Wrapper, Externals>::cache_memory_allocation(
     typename Wrapper::memory_alloc_record* record, std::uint64_t stream_handle)
 {
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(trace_cache::memory_allocate_sample{
+    Externals::get_metadata_registry().add_stream(stream_handle);
+    Externals::get_buffer_storage().store(trace_cache::memory_allocate_sample{
         record->start_timestamp, record->end_timestamp, record->thread_id,
         record->agent_id.handle, static_cast<std::int32_t>(record->kind),
         static_cast<std::int32_t>(record->operation), record->allocation_size,
@@ -1009,9 +1154,9 @@ library_sdk<Wrapper>::cache_memory_allocation(
 
 // ─── Address/size extractors ──────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 size_t
-library_sdk<Wrapper>::get_mem_copy_dst_address(
+library_sdk<Wrapper, Externals>::get_mem_copy_dst_address(
     [[maybe_unused]] const typename Wrapper::memory_copy_record& record)
 {
 #if(ROCPROFILER_VERSION >= 700)
@@ -1021,9 +1166,9 @@ library_sdk<Wrapper>::get_mem_copy_dst_address(
 #endif
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 size_t
-library_sdk<Wrapper>::get_mem_copy_src_address(
+library_sdk<Wrapper, Externals>::get_mem_copy_src_address(
     [[maybe_unused]] const typename Wrapper::memory_copy_record& record)
 {
 #if(ROCPROFILER_VERSION >= 700)
@@ -1034,9 +1179,9 @@ library_sdk<Wrapper>::get_mem_copy_src_address(
 }
 
 #if ROCPROFILER_VERSION >= 600
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 size_t
-library_sdk<Wrapper>::get_mem_alloc_address(
+library_sdk<Wrapper, Externals>::get_mem_alloc_address(
     [[maybe_unused]] const typename Wrapper::memory_alloc_record& record)
 {
 #    if(ROCPROFILER_VERSION >= 700)
@@ -1047,9 +1192,9 @@ library_sdk<Wrapper>::get_mem_alloc_address(
 }
 #endif
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::uint64_t
-library_sdk<Wrapper>::get_scratch_mem_alloc_size(
+library_sdk<Wrapper, Externals>::get_scratch_mem_alloc_size(
     [[maybe_unused]] const typename Wrapper::scratch_memory_record& record)
 {
 // The version of rocprofiler_buffer_tracing_scratch_memory_record_t from ROCm < 7.1 does
@@ -1064,25 +1209,25 @@ library_sdk<Wrapper>::get_scratch_mem_alloc_size(
 
 // ─── Kernel / code object info lookups ───────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 const kernel_symbol_data_t<Wrapper>*
-library_sdk<Wrapper>::get_kernel_symbol_info(std::uint64_t kernel_id)
+library_sdk<Wrapper, Externals>::get_kernel_symbol_info(std::uint64_t kernel_id)
 {
     return tool_data->get_kernel_symbol_info(kernel_id);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 const typename Wrapper::code_object_load_data*
-library_sdk<Wrapper>::get_code_object_info(std::uint64_t code_object_id)
+library_sdk<Wrapper, Externals>::get_code_object_info(std::uint64_t code_object_id)
 {
     return tool_data->get_code_object_info(code_object_id);
 }
 
 // ─── Backtrace helper ─────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 auto
-library_sdk<Wrapper>::get_backtrace(
+library_sdk<Wrapper, Externals>::get_backtrace(
     std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
 {
     auto backtrace = nlohmann::json::object();
@@ -1111,42 +1256,42 @@ library_sdk<Wrapper>::get_backtrace(
 
 // ─── Counter storage helpers ──────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 auto&
-library_sdk<Wrapper>::get_counter_dispatch_data()
+library_sdk<Wrapper, Externals>::get_counter_dispatch_data()
 {
     static auto _v = container::stable_vector<typename Wrapper::dispatch_counting_data>{};
     return _v;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 auto&
-library_sdk<Wrapper>::get_counter_dispatch_records()
+library_sdk<Wrapper, Externals>::get_counter_dispatch_records()
 {
     static auto _v = std::vector<counter_dispatch_record<Wrapper>>{};
     return _v;
 }
 
-template <typename Wrapper>
-typename library_sdk<Wrapper>::agent_counter_storage_map_t*&
-library_sdk<Wrapper>::get_counter_storage()
+template <typename Wrapper, typename Externals>
+typename library_sdk<Wrapper, Externals>::agent_counter_storage_map_t*&
+library_sdk<Wrapper, Externals>::get_counter_storage()
 {
     static auto* _v = new agent_counter_storage_map_t{};
     return _v;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 auto&
-library_sdk<Wrapper>::get_kernel_dispatch_timestamps()
+library_sdk<Wrapper, Externals>::get_kernel_dispatch_timestamps()
 {
     static auto _v =
         std::unordered_map<typename Wrapper::dispatch_id_t, timing_interval<Wrapper>>{};
     return _v;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::flush_counter_storage_outputs()
+library_sdk<Wrapper, Externals>::flush_counter_storage_outputs()
 {
     auto* _agent_counter_storage = get_counter_storage();
     if(!_agent_counter_storage) return;
@@ -1183,9 +1328,9 @@ library_sdk<Wrapper>::flush_counter_storage_outputs()
     }
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::flush_counter_tracks_to_zero(
+library_sdk<Wrapper, Externals>::flush_counter_tracks_to_zero(
     typename Wrapper::timestamp_t timestamp)
 {
     if(timestamp == 0)
@@ -1200,9 +1345,9 @@ library_sdk<Wrapper>::flush_counter_tracks_to_zero(
             cs.write_zero(timestamp);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::finalize_sdk_common()
+library_sdk<Wrapper, Externals>::finalize_sdk_common()
 {
 #if(ROCPROFILER_VERSION >= 600)
     ompt_finalize_orphan_events();
@@ -1220,9 +1365,9 @@ library_sdk<Wrapper>::finalize_sdk_common()
 
 // ─── create_agent_profile ────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::vector<typename Wrapper::counter_id>
-library_sdk<Wrapper>::create_agent_profile(
+library_sdk<Wrapper, Externals>::create_agent_profile(
     typename Wrapper::agent_id agent_id, const std::vector<std::string>& counters,
     //  const tool_agent_vec_t&         gpu_agents,
     //  const agent_counter_info_map_t& counters_info,
@@ -1354,9 +1499,9 @@ library_sdk<Wrapper>::create_agent_profile(
 
 // ─── External correlation ID callback ────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 int
-library_sdk<Wrapper>::set_kernel_rename_and_stream_correlation_id(
+library_sdk<Wrapper, Externals>::set_kernel_rename_and_stream_correlation_id(
     typename Wrapper::thread_id /*thr_id*/, typename Wrapper::context_id /*ctx_id*/,
     typename Wrapper::external_correlation_request_kind /*kind*/,
     typename Wrapper::tracing_operation /*op*/, std::uint64_t /*internal_corr_id*/,
@@ -1373,9 +1518,9 @@ library_sdk<Wrapper>::set_kernel_rename_and_stream_correlation_id(
 
 // ─── tool_code_object_callback ───────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::tool_code_object_callback(
+library_sdk<Wrapper, Externals>::tool_code_object_callback(
     typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t* /*user_data*/, void* /*callback_data*/)
 {
@@ -1395,7 +1540,7 @@ library_sdk<Wrapper>::tool_code_object_callback(
                         code_object_callback_record_t<Wrapper>{ ts, record, data_v });
                 });
                 // Insert callback trace into database
-                trace_cache::get_metadata_registry().add_code_object(data_v);
+                Externals::get_metadata_registry().add_code_object(data_v);
             }
             else if(record.operation ==
                     Wrapper::CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
@@ -1407,7 +1552,7 @@ library_sdk<Wrapper>::tool_code_object_callback(
                     _data.emplace_back(
                         kernel_symbol_callback_record_t<Wrapper>{ ts, record, data_v });
                 });
-                trace_cache::get_metadata_registry().add_kernel_symbol(data_v);
+                Externals::get_metadata_registry().add_kernel_symbol(data_v);
             }
         }
     }
@@ -1415,21 +1560,21 @@ library_sdk<Wrapper>::tool_code_object_callback(
 
 // ─── tool_tracing_callback_start / stop ──────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 template <typename CategoryT>
 void
-library_sdk<Wrapper>::tool_tracing_callback_start(
+library_sdk<Wrapper, Externals>::tool_tracing_callback_start(
     CategoryT, typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t* /*user_data*/, typename Wrapper::timestamp_t /*ts*/)
 {
     auto _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
-    if(get_use_timemory()) tracing::push_timemory(CategoryT{}, _name);
+    if(Externals::get_use_timemory()) Externals::push_timemory(CategoryT{}, _name);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 template <typename CategoryT>
 void
-library_sdk<Wrapper>::tool_tracing_callback_stop(
+library_sdk<Wrapper, Externals>::tool_tracing_callback_stop(
     CategoryT, typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t* user_data, typename Wrapper::timestamp_t ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
@@ -1437,12 +1582,12 @@ library_sdk<Wrapper>::tool_tracing_callback_stop(
     auto _name    = tool_data->callback_tracing_info.at(record.kind, record.operation);
     auto begin_ts = user_data->value;
 
-    if(get_use_timemory()) tracing::pop_timemory(CategoryT{}, _name);
+    if(Externals::get_use_timemory()) Externals::pop_timemory(CategoryT{}, _name);
 
-    if(get_use_perfetto())
+    if(Externals::get_use_perfetto())
     {
         auto args = callback_arg_array_t{};
-        if(config::get_perfetto_annotations())
+        if(Externals::get_perfetto_annotations())
         {
             Wrapper::iterate_callback_tracing_kind_operation_args(record, save_args, 2,
                                                                   &args);
@@ -1452,20 +1597,20 @@ library_sdk<Wrapper>::tool_tracing_callback_stop(
         std::uint64_t _end_ts   = ts;
         auto          stream_id = stream_id_top();
 
-        tracing::push_perfetto_ts(
+        Externals::push_perfetto_ts(
             CategoryT{}, _name.data(), _beg_ts,
             ::perfetto::Flow::ProcessScoped(record.correlation_id.internal),
             [&](::perfetto::EventContext ctx) {
-                if(config::get_perfetto_annotations())
+                if(Externals::get_perfetto_annotations())
                 {
-                    tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ts);
-                    tracing::add_perfetto_annotation(ctx, "stack_id",
-                                                     record.correlation_id.internal);
+                    Externals::add_perfetto_annotation(ctx, "begin_ns", _beg_ts);
+                    Externals::add_perfetto_annotation(ctx, "stack_id",
+                                                       record.correlation_id.internal);
                     if(stream_id.handle != 0)
-                        tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                         stream_id.handle);
+                        Externals::add_perfetto_annotation(ctx, "stream_id",
+                                                           stream_id.handle);
                     for(const auto& [key, val] : args)
-                        tracing::add_perfetto_annotation(ctx, key, val);
+                        Externals::add_perfetto_annotation(ctx, key, val);
 
                     if(_bt_data && !_bt_data->empty())
                     {
@@ -1492,22 +1637,22 @@ library_sdk<Wrapper>::tool_tracing_callback_stop(
                                 // Prepend zero for better ordering in UI. Only one
                                 // zero is ever necessary since stack depth is limited
                                 // to 16.
-                                tracing::add_perfetto_annotation(
+                                Externals::add_perfetto_annotation(
                                     ctx, fmt::format("frame#0{}", _bt_cnt++), _entry);
                             }
                             else
                             {
-                                tracing::add_perfetto_annotation(
+                                Externals::add_perfetto_annotation(
                                     ctx, fmt::format("frame#{}", _bt_cnt++), _entry);
                             }
                         }
                     }
                 }
             });
-        tracing::pop_perfetto_ts(
+        Externals::pop_perfetto_ts(
             CategoryT{}, _name.data(), _end_ts, [&](::perfetto::EventContext ctx) {
-                if(config::get_perfetto_annotations())
-                    tracing::add_perfetto_annotation(ctx, "end_ns", _end_ts);
+                if(Externals::get_perfetto_annotations())
+                    Externals::add_perfetto_annotation(ctx, "end_ns", _end_ts);
             });
     }
 
@@ -1529,9 +1674,9 @@ library_sdk<Wrapper>::tool_tracing_callback_stop(
 
 // ─── tool_tracing_callback (main dispatch) ───────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::tool_tracing_callback(
+library_sdk<Wrapper, Externals>::tool_tracing_callback(
     typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t*            user_data, void* /*callback_data*/)
 {
@@ -1542,8 +1687,8 @@ library_sdk<Wrapper>::tool_tracing_callback(
         constexpr size_t backtrace_ignore_depth      = 3;
         constexpr bool   backtrace_with_signal_frame = true;
         auto             use_perfetto =
-            (config::get_use_perfetto() && config::get_perfetto_annotations());
-        auto use_rocpd = config::get_use_rocpd();
+            (Externals::get_use_perfetto() && Externals::get_perfetto_annotations());
+        auto use_rocpd = Externals::get_use_rocpd();
 
         if((use_perfetto || use_rocpd) &&
            tool_data->backtrace_operations.at(record.kind).count(record.operation) > 0)
@@ -1864,9 +2009,9 @@ library_sdk<Wrapper>::tool_tracing_callback(
 
 // ─── OMPT helpers ────────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::string_view
-library_sdk<Wrapper>::ompt_get_unified_name(
+library_sdk<Wrapper, Externals>::ompt_get_unified_name(
     const typename Wrapper::callback_tracing_record& record)
 {
     std::string_view _name =
@@ -1880,10 +2025,10 @@ library_sdk<Wrapper>::ompt_get_unified_name(
     return _name;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 template <typename ArgsT>
 void
-library_sdk<Wrapper>::ompt_iterate_operation_args(
+library_sdk<Wrapper, Externals>::ompt_iterate_operation_args(
     const typename Wrapper::callback_tracing_record& record, ArgsT& args)
 {
     static_assert(std::is_same_v<ArgsT, callback_arg_array_t> ||
@@ -2024,9 +2169,9 @@ library_sdk<Wrapper>::ompt_iterate_operation_args(
     }
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 auto&
-library_sdk<Wrapper>::get_ompt_standard_cb_storage()
+library_sdk<Wrapper, Externals>::get_ompt_standard_cb_storage()
 {
     // std::uint64_t -> internal id from rocprofiler_correlation_id_t
     static thread_local auto _v =
@@ -2034,9 +2179,9 @@ library_sdk<Wrapper>::get_ompt_standard_cb_storage()
     return _v;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 auto&
-library_sdk<Wrapper>::get_ompt_parallel_cb_storage()
+library_sdk<Wrapper, Externals>::get_ompt_parallel_cb_storage()
 {
     // uintptr_t -> parallel_data (see callback definition)
     static thread_local auto _v =
@@ -2044,9 +2189,9 @@ library_sdk<Wrapper>::get_ompt_parallel_cb_storage()
     return _v;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::ompt_cache_instant_event(
+library_sdk<Wrapper, Externals>::ompt_cache_instant_event(
     typename Wrapper::callback_tracing_record                 record,
     typename Wrapper::timestamp_t                             instant_ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
@@ -2060,9 +2205,9 @@ library_sdk<Wrapper>::ompt_cache_instant_event(
                  get_args_string(args), trait::name<category::rocm_ompt_api>::value);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::ompt_cache_orphan_event(
+library_sdk<Wrapper, Externals>::ompt_cache_orphan_event(
     const rocprofsys_ompt_data_storage_t&                     stored_data,
     std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
 {
@@ -2074,9 +2219,9 @@ library_sdk<Wrapper>::ompt_cache_orphan_event(
                  trait::name<category::rocm_ompt_api>::value);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::ompt_push_standard_callback(
+library_sdk<Wrapper, Externals>::ompt_push_standard_callback(
     const typename Wrapper::callback_tracing_record& record,
     const typename Wrapper::timestamp_t&             beg_ts)
 {
@@ -2087,9 +2232,9 @@ library_sdk<Wrapper>::ompt_push_standard_callback(
         rocprofsys_ompt_data_storage_t{ record, beg_ts, args });
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::ompt_pop_standard_callback(
+library_sdk<Wrapper, Externals>::ompt_pop_standard_callback(
     const typename Wrapper::callback_tracing_record&          record,
     const typename Wrapper::timestamp_t&                      end_ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
@@ -2113,9 +2258,9 @@ library_sdk<Wrapper>::ompt_pop_standard_callback(
                  trait::name<category::rocm_ompt_api>::value);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::ompt_push_parallel_callback(
+library_sdk<Wrapper, Externals>::ompt_push_parallel_callback(
     const typename Wrapper::callback_tracing_record& record,
     const typename Wrapper::timestamp_t&             beg_ts)
 {
@@ -2128,9 +2273,9 @@ library_sdk<Wrapper>::ompt_push_parallel_callback(
         rocprofsys_ompt_data_storage_t{ record, beg_ts, args });
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::ompt_pop_parallel_callback(
+library_sdk<Wrapper, Externals>::ompt_pop_parallel_callback(
     const typename Wrapper::callback_tracing_record&          record,
     const typename Wrapper::timestamp_t&                      end_ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
@@ -2158,74 +2303,74 @@ library_sdk<Wrapper>::ompt_pop_parallel_callback(
                  trait::name<category::rocm_ompt_api>::value);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::ompt_tracing_callback_start(
+library_sdk<Wrapper, Externals>::ompt_tracing_callback_start(
     typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t* /*user_data*/, typename Wrapper::timestamp_t ts)
 {
     std::string_view _name = ompt_get_unified_name(record);
 
-    if(get_use_timemory())
+    if(Externals::get_use_timemory())
     {
-        tracing::push_timemory(category::rocm_ompt_api{}, _name);
+        Externals::push_timemory(category::rocm_ompt_api{}, _name);
     }
 
-    if(get_use_perfetto())
+    if(Externals::get_use_perfetto())
     {
         auto args = callback_arg_array_t{};
-        if(config::get_perfetto_annotations())
+        if(Externals::get_perfetto_annotations())
         {
             ompt_iterate_operation_args(record, args);
         }
         std::uint64_t _beg_ts   = ts;
         auto          stream_id = stream_id_top();
-        tracing::push_perfetto_ts(
+        Externals::push_perfetto_ts(
             category::rocm_ompt_api{}, _name.data(), _beg_ts,
             ::perfetto::Flow::ProcessScoped(record.correlation_id.internal),
             [&](::perfetto::EventContext ctx) {
-                if(config::get_perfetto_annotations())
+                if(Externals::get_perfetto_annotations())
                 {
-                    tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ts);
-                    tracing::add_perfetto_annotation(ctx, "stack_id",
-                                                     record.correlation_id.internal);
+                    Externals::add_perfetto_annotation(ctx, "begin_ns", _beg_ts);
+                    Externals::add_perfetto_annotation(ctx, "stack_id",
+                                                       record.correlation_id.internal);
                     if(stream_id.handle != 0)
-                        tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                         stream_id.handle);
+                        Externals::add_perfetto_annotation(ctx, "stream_id",
+                                                           stream_id.handle);
                     for(const auto& [key, val] : args)
-                        tracing::add_perfetto_annotation(ctx, key, val);
+                        Externals::add_perfetto_annotation(ctx, key, val);
                 }
             });
     }
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::ompt_tracing_callback_stop(
+library_sdk<Wrapper, Externals>::ompt_tracing_callback_stop(
     typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t* /*user_data*/, typename Wrapper::timestamp_t ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
 {
     std::string_view _name = ompt_get_unified_name(record);
 
-    if(get_use_timemory())
+    if(Externals::get_use_timemory())
     {
-        tracing::pop_timemory(category::rocm_ompt_api{}, _name);
+        Externals::pop_timemory(category::rocm_ompt_api{}, _name);
     }
 
-    if(get_use_perfetto())
+    if(Externals::get_use_perfetto())
     {
         auto args = callback_arg_array_t{};
-        if(config::get_perfetto_annotations())
+        if(Externals::get_perfetto_annotations())
         {
             ompt_iterate_operation_args(record, args);
         }
         std::uint64_t _end_ts = ts;
-        tracing::pop_perfetto_ts(
+        Externals::pop_perfetto_ts(
             category::rocm_ompt_api{}, _name.data(), _end_ts,
             [&](::perfetto::EventContext ctx) {
-                if(config::get_perfetto_annotations())
-                    tracing::add_perfetto_annotation(ctx, "end_ns", _end_ts);
+                if(Externals::get_perfetto_annotations())
+                    Externals::add_perfetto_annotation(ctx, "end_ns", _end_ts);
                 if(bt_data && !bt_data->empty())
                 {
                     size_t _bt_cnt = 0;
@@ -2250,12 +2395,12 @@ library_sdk<Wrapper>::ompt_tracing_callback_stop(
                         {
                             // Prepend zero for better ordering in UI. Only one zero
                             // is ever necessary since stack depth is limited to 16.
-                            tracing::add_perfetto_annotation(
+                            Externals::add_perfetto_annotation(
                                 ctx, fmt::format("frame#0{}", _bt_cnt++), _entry);
                         }
                         else
                         {
-                            tracing::add_perfetto_annotation(
+                            Externals::add_perfetto_annotation(
                                 ctx, fmt::format("frame#{}", _bt_cnt++), _entry);
                         }
                     }
@@ -2264,9 +2409,9 @@ library_sdk<Wrapper>::ompt_tracing_callback_stop(
     }
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::ompt_finalize_orphan_events()
+library_sdk<Wrapper, Externals>::ompt_finalize_orphan_events()
 {
     auto empty_call_stack =
         std::optional<std::vector<tim::unwind::processed_entry>>{ std::nullopt };
@@ -2283,13 +2428,12 @@ library_sdk<Wrapper>::ompt_finalize_orphan_events()
 // ─── tool_tracing_buffered ───────────────────────────────────────────────────
 // (The full body is copied verbatim from the CPP; no SDK calls here to replace.)
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*context*/,
-                                            typename Wrapper::buffer_id /*buffer_id*/,
-                                            typename Wrapper::record_header_t** headers,
-                                            size_t num_headers, void* /*user_data*/,
-                                            std::uint64_t /*drop_count*/)
+library_sdk<Wrapper, Externals>::tool_tracing_buffered(
+    typename Wrapper::context_id /*context*/, typename Wrapper::buffer_id /*buffer_id*/,
+    typename Wrapper::record_header_t** headers, size_t num_headers, void* /*user_data*/,
+    std::uint64_t /*drop_count*/)
 {
     if(num_headers == 0 || headers == nullptr) return;
 
@@ -2297,7 +2441,7 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
         return fmt::format("HIP Activity Stream {}", _stream_id);
     };
 
-    const bool _default_group_by_queue = config::get_group_by_queue();
+    const bool _default_group_by_queue = Externals::get_group_by_queue();
 
     static auto _mtx = std::mutex{};
     auto        _lk  = std::unique_lock<std::mutex>{ _mtx };
@@ -2339,11 +2483,12 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                     cache_kernel_dispatch(record, _stream_id);
                 }
 
-                if(get_use_timemory())
+                if(Externals::get_use_timemory())
                 {
-                    const auto& _tinfo  = thread_info::get(record->thread_id, SystemTID);
-                    auto        _tid    = _tinfo->index_data->sequent_value;
-                    auto        _bundle = kernel_dispatch_bundle_t{ _name };
+                    const auto& _tinfo =
+                        Externals::get_thread_info(record->thread_id, SystemTID);
+                    auto _tid    = _tinfo->index_data->sequent_value;
+                    auto _bundle = kernel_dispatch_bundle_t{ _name };
                     _bundle.push(_tid).start().stop();
                     _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
                         _wc->set_value(_end_ns - _beg_ns);
@@ -2352,36 +2497,37 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                     _bundle.pop();
                 }
 
-                if(get_use_perfetto())
+                if(Externals::get_use_perfetto())
                 {
                     // Lambda to add common perfetto annotations for kernel dispatch
                     auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
-                        if(config::get_perfetto_annotations())
+                        if(Externals::get_perfetto_annotations())
                         {
-                            tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
-                            tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
-                            tracing::add_perfetto_annotation(ctx, "stack_id", _stack_id);
-                            tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                             _stream_id);
-                            tracing::add_perfetto_annotation(ctx, "queue",
-                                                             _queue_id.handle);
-                            tracing::add_perfetto_annotation(
+                            Externals::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
+                            Externals::add_perfetto_annotation(ctx, "end_ns", _end_ns);
+                            Externals::add_perfetto_annotation(ctx, "stack_id",
+                                                               _stack_id);
+                            Externals::add_perfetto_annotation(ctx, "stream_id",
+                                                               _stream_id);
+                            Externals::add_perfetto_annotation(ctx, "queue",
+                                                               _queue_id.handle);
+                            Externals::add_perfetto_annotation(
                                 ctx, "dispatch_id", record->dispatch_info.dispatch_id);
-                            tracing::add_perfetto_annotation(
+                            Externals::add_perfetto_annotation(
                                 ctx, "kernel_id", record->dispatch_info.kernel_id);
-                            tracing::add_perfetto_annotation(
+                            Externals::add_perfetto_annotation(
                                 ctx, "private_segment_size",
                                 record->dispatch_info.private_segment_size);
-                            tracing::add_perfetto_annotation(
+                            Externals::add_perfetto_annotation(
                                 ctx, "group_segment_size",
                                 record->dispatch_info.group_segment_size);
-                            tracing::add_perfetto_annotation(
+                            Externals::add_perfetto_annotation(
                                 ctx, "workgroup_size",
                                 fmt::format("({},{},{})",
                                             record->dispatch_info.workgroup_size.x,
                                             record->dispatch_info.workgroup_size.y,
                                             record->dispatch_info.workgroup_size.z));
-                            tracing::add_perfetto_annotation(
+                            Externals::add_perfetto_annotation(
                                 ctx, "grid_size",
                                 fmt::format("({},{},{})",
                                             record->dispatch_info.grid_size.x,
@@ -2397,26 +2543,26 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                             return fmt::format("GPU Kernel Dispatch [{}] Queue {}",
                                                _device_id_v, _queue_id_v);
                         };
-                        const auto _track = tracing::get_perfetto_track(
+                        const auto _track = Externals::get_perfetto_track(
                             category::rocm_kernel_dispatch{}, _track_desc,
                             _agent->device_id, _queue_id.handle);
-                        tracing::push_perfetto(category::rocm_kernel_dispatch{},
-                                               _name.c_str(), _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_stack_id),
-                                               add_perfetto_annotations);
-                        tracing::pop_perfetto(category::rocm_kernel_dispatch{},
-                                              _name.c_str(), _track, _end_ns);
+                        Externals::push_perfetto(
+                            category::rocm_kernel_dispatch{}, _name.c_str(), _track,
+                            _beg_ns, ::perfetto::Flow::ProcessScoped(_stack_id),
+                            add_perfetto_annotations);
+                        Externals::pop_perfetto(category::rocm_kernel_dispatch{},
+                                                _name.c_str(), _track, _end_ns);
                     }
                     else
                     {
-                        const auto _track = tracing::get_perfetto_track(
+                        const auto _track = Externals::get_perfetto_track(
                             category::rocm_hip_stream{}, _track_desc_stream, _stream_id);
-                        tracing::push_perfetto(category::rocm_hip_stream{}, _name.c_str(),
-                                               _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_stack_id),
-                                               add_perfetto_annotations);
-                        tracing::pop_perfetto(category::rocm_hip_stream{}, _name.c_str(),
-                                              _track, _end_ns);
+                        Externals::push_perfetto(
+                            category::rocm_hip_stream{}, _name.c_str(), _track, _beg_ns,
+                            ::perfetto::Flow::ProcessScoped(_stack_id),
+                            add_perfetto_annotations);
+                        Externals::pop_perfetto(category::rocm_hip_stream{},
+                                                _name.c_str(), _track, _end_ns);
                     }
                 }
             }
@@ -2428,12 +2574,13 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                 bool        _group_by_queue = _default_group_by_queue;
                 const auto* agent     = tool_data->get_gpu_tool_agent(record->agent_id);
                 auto        device_id = static_cast<std::uint32_t>(agent->device_id);
-                const auto& t_info    = thread_info::get(record->thread_id, SystemTID);
-                auto        thread_id_sequent = t_info->index_data->sequent_value;
-                auto        _corr_id          = record->correlation_id.internal;
-                auto        _beg_ns           = record->start_timestamp;
-                auto        _end_ns           = record->end_timestamp;
-                auto        _name =
+                const auto& t_info =
+                    Externals::get_thread_info(record->thread_id, SystemTID);
+                auto thread_id_sequent = t_info->index_data->sequent_value;
+                auto _corr_id          = record->correlation_id.internal;
+                auto _beg_ns           = record->start_timestamp;
+                auto _end_ns           = record->end_timestamp;
+                auto _name =
                     tool_data->buffered_tracing_info.at(record->kind, record->operation);
                 auto _stream_id = get_stream_id(record).handle;
                 if(_stream_id == 0) _group_by_queue = true;
@@ -2447,7 +2594,7 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                     cache_scratch_memory(record, _stream_id);
                 }
 
-                if(get_use_timemory())
+                if(Externals::get_use_timemory())
                 {
                     auto _bundle = kernel_dispatch_bundle_t{ _name };
                     _bundle.push(thread_id_sequent).start().stop();
@@ -2458,16 +2605,16 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                     _bundle.pop();
                 }
 
-                if(get_use_perfetto())
+                if(Externals::get_use_perfetto())
                 {
                     auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
-                        if(config::get_perfetto_annotations())
+                        if(Externals::get_perfetto_annotations())
                         {
-                            tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
-                            tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
-                            tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
-                            tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                             _stream_id);
+                            Externals::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
+                            Externals::add_perfetto_annotation(ctx, "end_ns", _end_ns);
+                            Externals::add_perfetto_annotation(ctx, "corr_id", _corr_id);
+                            Externals::add_perfetto_annotation(ctx, "stream_id",
+                                                               _stream_id);
                         }
                     };
                     if(_group_by_queue)
@@ -2476,25 +2623,25 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                             return fmt::format("GPU Scratch Memory (S) Events Thread {}",
                                                thread_id_sequent);
                         };
-                        const auto _track = tracing::get_perfetto_track(
+                        const auto _track = Externals::get_perfetto_track(
                             category::rocm_scratch_memory{}, track_name_events);
-                        tracing::push_perfetto(category::rocm_scratch_memory{},
-                                               _name.data(), _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_corr_id),
-                                               add_perfetto_annotations);
-                        tracing::pop_perfetto(category::rocm_scratch_memory{}, "", _track,
-                                              _end_ns);
+                        Externals::push_perfetto(
+                            category::rocm_scratch_memory{}, _name.data(), _track,
+                            _beg_ns, ::perfetto::Flow::ProcessScoped(_corr_id),
+                            add_perfetto_annotations);
+                        Externals::pop_perfetto(category::rocm_scratch_memory{}, "",
+                                                _track, _end_ns);
                     }
                     else
                     {
-                        const auto _track = tracing::get_perfetto_track(
+                        const auto _track = Externals::get_perfetto_track(
                             category::rocm_hip_stream{}, _track_desc_stream, _stream_id);
-                        tracing::push_perfetto(category::rocm_hip_stream{}, _name.data(),
-                                               _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_corr_id),
-                                               add_perfetto_annotations);
-                        tracing::pop_perfetto(category::rocm_hip_stream{}, "", _track,
-                                              _end_ns);
+                        Externals::push_perfetto(
+                            category::rocm_hip_stream{}, _name.data(), _track, _beg_ns,
+                            ::perfetto::Flow::ProcessScoped(_corr_id),
+                            add_perfetto_annotations);
+                        Externals::pop_perfetto(category::rocm_hip_stream{}, "", _track,
+                                                _end_ns);
                     }
                 }
             }
@@ -2525,11 +2672,12 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                     cache_memory_copy(record, _stream_id);
                 }
 
-                if(get_use_timemory())
+                if(Externals::get_use_timemory())
                 {
-                    const auto& _tinfo  = thread_info::get(record->thread_id, SystemTID);
-                    auto        _tid    = _tinfo->index_data->sequent_value;
-                    auto        _bundle = kernel_dispatch_bundle_t{ _name };
+                    const auto& _tinfo =
+                        Externals::get_thread_info(record->thread_id, SystemTID);
+                    auto _tid    = _tinfo->index_data->sequent_value;
+                    auto _bundle = kernel_dispatch_bundle_t{ _name };
                     _bundle.push(_tid).start().stop();
                     _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
                         _wc->set_value(_end_ns - _beg_ns);
@@ -2538,51 +2686,53 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
                     _bundle.pop();
                 }
 
-                if(get_use_perfetto())
+                if(Externals::get_use_perfetto())
                 {
                     auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
-                        if(config::get_perfetto_annotations())
+                        if(Externals::get_perfetto_annotations())
                         {
-                            tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
-                            tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
-                            tracing::add_perfetto_annotation(ctx, "stack_id", _stack_id);
-                            tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                             _stream_id);
-                            tracing::add_perfetto_annotation(ctx, "dst_agent",
-                                                             _dst_agent->logical_node_id);
-                            tracing::add_perfetto_annotation(ctx, "src_agent",
-                                                             _src_agent->logical_node_id);
+                            Externals::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
+                            Externals::add_perfetto_annotation(ctx, "end_ns", _end_ns);
+                            Externals::add_perfetto_annotation(ctx, "stack_id",
+                                                               _stack_id);
+                            Externals::add_perfetto_annotation(ctx, "stream_id",
+                                                               _stream_id);
+                            Externals::add_perfetto_annotation(
+                                ctx, "dst_agent", _dst_agent->logical_node_id);
+                            Externals::add_perfetto_annotation(
+                                ctx, "src_agent", _src_agent->logical_node_id);
                         }
                     };
                     if(_group_by_queue)
                     {
                         auto _track_desc = [](std::int32_t                _device_id_v,
                                               typename Wrapper::thread_id _tid) {
-                            const auto& _tid_v = thread_info::get(_tid, SystemTID);
+                            const auto& _tid_v =
+                                Externals::get_thread_info(_tid, SystemTID);
                             return fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
                                                _device_id_v,
                                                _tid_v->index_data->sequent_value);
                         };
-                        const auto _track = tracing::get_perfetto_track(
+                        const auto _track = Externals::get_perfetto_track(
                             category::rocm_memory_copy{}, _track_desc,
                             _dst_agent->logical_node_id, record->thread_id);
-                        tracing::push_perfetto(category::rocm_memory_copy{}, _name.data(),
-                                               _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_stack_id),
-                                               add_perfetto_annotations);
-                        tracing::pop_perfetto(category::rocm_memory_copy{}, "", _track,
-                                              _end_ns);
+                        Externals::push_perfetto(
+                            category::rocm_memory_copy{}, _name.data(), _track, _beg_ns,
+                            ::perfetto::Flow::ProcessScoped(_stack_id),
+                            add_perfetto_annotations);
+                        Externals::pop_perfetto(category::rocm_memory_copy{}, "", _track,
+                                                _end_ns);
                     }
                     else
                     {
-                        const auto _track = tracing::get_perfetto_track(
+                        const auto _track = Externals::get_perfetto_track(
                             category::rocm_hip_stream{}, _track_desc_stream, _stream_id);
-                        tracing::push_perfetto(category::rocm_hip_stream{}, _name.data(),
-                                               _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_stack_id),
-                                               add_perfetto_annotations);
-                        tracing::pop_perfetto(category::rocm_hip_stream{}, "", _track,
-                                              _end_ns);
+                        Externals::push_perfetto(
+                            category::rocm_hip_stream{}, _name.data(), _track, _beg_ns,
+                            ::perfetto::Flow::ProcessScoped(_stack_id),
+                            add_perfetto_annotations);
+                        Externals::pop_perfetto(category::rocm_hip_stream{}, "", _track,
+                                                _end_ns);
                     }
                 }
             }
@@ -2662,9 +2812,9 @@ library_sdk<Wrapper>::tool_tracing_buffered(typename Wrapper::context_id /*conte
 
 // ─── Counter callbacks ────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::counter_record_callback(
+library_sdk<Wrapper, Externals>::counter_record_callback(
     typename Wrapper::dispatch_counting_data dispatch_data,
     typename Wrapper::counter_record* record_data, size_t record_count,
     typename Wrapper::user_data_t /*user_data*/, void* /*callback_data_arg*/)
@@ -2737,9 +2887,9 @@ library_sdk<Wrapper>::counter_record_callback(
     }
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::dispatch_counting_service_callback(
+library_sdk<Wrapper, Externals>::dispatch_counting_service_callback(
     typename Wrapper::dispatch_counting_data dispatch_data,
     typename Wrapper::counter_config_id*     config,
     typename Wrapper::user_data_t* /*user_data*/, void* callback_data_arg)
@@ -2755,9 +2905,9 @@ library_sdk<Wrapper>::dispatch_counting_service_callback(
 #if ROCPROFILER_VERSION >= 700
 // ─── tool_hip_stream_callback ────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::tool_hip_stream_callback(
+library_sdk<Wrapper, Externals>::tool_hip_stream_callback(
     typename Wrapper::callback_tracing_record record,
     typename Wrapper::user_data_t* /*user_data*/, void* /*data*/)
 {
@@ -2806,10 +2956,10 @@ library_sdk<Wrapper>::tool_hip_stream_callback(
 
 // ─── tool_init ───────────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 int
-library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
-                                void*                               user_data)
+library_sdk<Wrapper, Externals>::tool_init(typename Wrapper::client_finalize_t fini_func,
+                                           void*                               user_data)
 {
     // Only initialize once per session
     if(tool_init_done.exchange(true)) return 0;
@@ -2864,8 +3014,8 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
 
     // Insert the default stream and queue info to ensure that the default entry exists
     {
-        trace_cache::get_metadata_registry().add_stream(0);
-        trace_cache::get_metadata_registry().add_queue(0);
+        Externals::get_metadata_registry().add_stream(0);
+        Externals::get_metadata_registry().add_queue(0);
     }
 
     // MARKER_CORE_API is handled by roctx_client on control_ctx
@@ -3119,7 +3269,7 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
     const auto gpu_perf_counters_setting = get_gpu_perf_counters();
     if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
     {
-        pmc::register_gpu_perf_counter_source(
+        Externals::register_gpu_perf_counter_source(
             get_agent_manager_instance().get_agents_by_type(agent_type::GPU));
     }
 #endif
@@ -3145,7 +3295,7 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
     if(config::get_use_process_sampling())
     {
         LOG_DEBUG("Setting PMC sampler state to active...");
-        pmc::set_state(State::Active);
+        Externals::set_pmc_state(State::Active);
     }
 
     // Setup roctx client (must happen within tool_init for rocprofiler-sdk context
@@ -3179,9 +3329,9 @@ library_sdk<Wrapper>::tool_init(typename Wrapper::client_finalize_t fini_func,
 
 // ─── tool_fini ───────────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::tool_fini(void* callback_data)
+library_sdk<Wrapper, Externals>::tool_fini(void* callback_data)
 {
     if(tool_fini_done.exchange(true)) return;
 
@@ -3213,9 +3363,9 @@ library_sdk<Wrapper>::tool_fini(void* callback_data)
 
 #if ROCPROFILER_VERSION >= 10200
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-library_sdk<Wrapper>::tool_attach_fini(void* /*tool_data_ptr*/)
+library_sdk<Wrapper, Externals>::tool_attach_fini(void* /*tool_data_ptr*/)
 {
     // Stop and flush SDK contexts/buffers so that buffer callbacks
     // write their Perfetto events before Perfetto post-processing.
@@ -3227,7 +3377,7 @@ library_sdk<Wrapper>::tool_attach_fini(void* /*tool_data_ptr*/)
     rocprofsys_flush_pending_region_cache_hidden();
 
     // Write Perfetto trace output
-    if(get_use_perfetto())
+    if(Externals::get_use_perfetto())
     {
         bool                             _perfetto_output_error = false;
         rocprofsys::output_file_registry _output_registry{};
@@ -3239,13 +3389,12 @@ library_sdk<Wrapper>::tool_attach_fini(void* /*tool_data_ptr*/)
     rocprofsys_finalize_hidden();
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 int
-library_sdk<Wrapper>::tool_attach_init([[maybe_unused]]
-                                       typename Wrapper::client_detach_t detach_func,
-                                       typename Wrapper::context_id*     context_ids,
-                                       std::uint64_t          context_ids_length,
-                                       [[maybe_unused]] void* tool_attach_data)
+library_sdk<Wrapper, Externals>::tool_attach_init(
+    [[maybe_unused]] typename Wrapper::client_detach_t detach_func,
+    typename Wrapper::context_id* context_ids, std::uint64_t context_ids_length,
+    [[maybe_unused]] void* tool_attach_data)
 {
     static std::atomic<int> attach_count{ 0 };
     auto                    current_count = attach_count.fetch_add(1);
@@ -3257,9 +3406,9 @@ library_sdk<Wrapper>::tool_attach_init([[maybe_unused]]
         reset_sdk_session_guards();
 
         // Restart Perfetto for a new tracing session
-        if(get_use_perfetto()) ::rocprofsys::perfetto::start();
+        if(Externals::get_use_perfetto()) ::rocprofsys::perfetto::start();
 
-        trace_cache::get_buffer_storage().start(getpid());
+        Externals::get_buffer_storage().start(getpid());
 
         // Restart process sampler (AMD SMI, CPU freq polling thread)
         if(config::get_use_process_sampling())
@@ -3287,11 +3436,11 @@ library_sdk<Wrapper>::tool_attach_init([[maybe_unused]]
 
 // ─── sdk_tool_configure ──────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 bool
-library_sdk<Wrapper>::sdk_tool_configure(std::uint32_t                  version,
-                                         const char*                    runtime_version,
-                                         typename Wrapper::client_id_t* id)
+library_sdk<Wrapper, Externals>::sdk_tool_configure(std::uint32_t version,
+                                                    const char*   runtime_version,
+                                                    typename Wrapper::client_id_t* id)
 {
     // Only configure once per attach session
     if(sdk_configured.exchange(true)) return true;

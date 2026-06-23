@@ -8,34 +8,146 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <type_traits>
 
 namespace rocprofsys::mock::rocprofiler_sdk
 {
 
+// ─── kind_wrapper ─────────────────────────────────────────────────────────────
+//
+// Integer-valued tag type used for callback_tracing_kind and buffer_tracing_kind.
+// Design goals:
+//   1. Constructs from int literals so `= N` constant initializers keep working.
+//   2. operator int() lets it be used in switch/case (C++20 class types in case
+//      labels via "converted constant expression" — one non-explicit integral
+//      conversion is sufficient).
+//   3. template operator T() handles implicit conversion to the real SDK enum
+//      types (rocprofiler_callback_tracing_kind_t etc.) at call sites inside
+//      library_sdk<> — deferred to template instantiation, no SDK headers here.
+//      Excluded for T=int to keep operator int() unambiguous.
+
+namespace detail
+{
+// kind_wrapper is the fallback integer enum mock used when SDK headers are NOT
+// yet available.  When SDK headers are included first (see test_library_sdk.cpp),
+// callback_tracing_kind and buffer_tracing_kind are aliased to the real SDK enum
+// types directly, and kind_wrapper is NOT used for those aliases.
+//
+// kind_wrapper is still used for mock_ompt_thread_t (when _OPENMP is unavailable)
+// and is kept here for completeness.
+template <typename Tag>
+struct kind_wrapper
+{
+    int value = 0;
+
+    constexpr kind_wrapper() noexcept = default;
+    constexpr kind_wrapper(int val) noexcept
+    : value(val)
+    {}
+
+    constexpr operator int() const noexcept { return value; }
+
+    // Deferred conversion to real enum types (e.g. ompt_thread_t) at template
+    // instantiation time — no enum headers needed in this file.
+    // Safe because callback_tracing_kind and buffer_tracing_kind use the real
+    // SDK enum types directly (via #ifdef ROCPROFILER_VERSION), so kind_wrapper
+    // is only used for mock_ompt_thread_t which never appears in switch/ostream.
+    template <typename T, typename = std::enable_if_t<!std::is_same_v<T, int>>>
+    constexpr operator T() const noexcept
+    {
+        return static_cast<T>(value);
+    }
+
+    constexpr bool operator==(const kind_wrapper&) const noexcept = default;
+    constexpr bool operator!=(const kind_wrapper& rhs) const noexcept
+    {
+        return value != rhs.value;
+    }
+    constexpr bool operator<(const kind_wrapper& rhs) const noexcept
+    {
+        return value < rhs.value;
+    }
+
+    // Direct ostream support — avoids the ambiguity that would arise if the compiler
+    // has to choose among the many operator<<(integral) overloads via operator int().
+    friend std::ostream& operator<<(std::ostream& os, const kind_wrapper& k)
+    {
+        return os << k.value;
+    }
+
+    // Explicit std::uint32_t comparisons avoid -Wsign-compare when comparing against
+    // record_header_t::kind (std::uint32_t) without going through operator int().
+    friend constexpr bool operator==(std::uint32_t lhs, const kind_wrapper& rhs) noexcept
+    {
+        return lhs == static_cast<std::uint32_t>(rhs.value);
+    }
+    friend constexpr bool operator==(const kind_wrapper& lhs, std::uint32_t rhs) noexcept
+    {
+        return static_cast<std::uint32_t>(lhs.value) == rhs;
+    }
+    friend constexpr bool operator!=(std::uint32_t lhs, const kind_wrapper& rhs) noexcept
+    {
+        return !(lhs == rhs);
+    }
+    friend constexpr bool operator!=(const kind_wrapper& lhs, std::uint32_t rhs) noexcept
+    {
+        return !(lhs == rhs);
+    }
+};
+
+struct callback_tracing_kind_tag
+{};
+struct buffer_tracing_kind_tag
+{};
+struct ompt_thread_tag
+{};
+}  // namespace detail
+
 // ─── Self-contained stub types ────────────────────────────────────────────────
 //
-// All types below replace rocprofiler-sdk C types.  No SDK header is included.
-// Integer enum types carry the same integer values as the real SDK enums so
-// that code comparing against backend::SOME_CONSTANT still works correctly.
+// When SDK headers are included before this file (via ROCPROFILER_VERSION being
+// defined), the real SDK enum types are used directly for callback_tracing_kind
+// and buffer_tracing_kind.  This eliminates all switch/ostream ambiguity issues
+// that arise from custom wrapper types while keeping .at() call-site compatibility
+// with the real rocprofiler::sdk::callback_name_info_t.
+//
+// When SDK headers are not present, kind_wrapper fallbacks are used.
 
 struct handle_t
 {
-    std::uint64_t handle                            = 0;
-    bool          operator==(const handle_t&) const = default;
+    std::uint64_t handle                             = 0;
+    bool          operator==(const handle_t&) const  = default;
+    auto          operator<=>(const handle_t&) const = default;
 };
 
 // Scalar alias types (replace rocprofiler_*_t enum typedefs)
-using status_t              = std::uint64_t;
-using agent_type_t          = int;
-using agent_version_t       = int;
-using buffer_category_t     = int;
-using buffer_policy_t       = int;
-using runtime_library_t     = int;
-using callback_phase_t      = int;
-using tracing_operation     = std::int32_t;
-using callback_tracing_kind = int;
-using buffer_tracing_kind =
-    unsigned int;  // distinct from callback_tracing_kind for sdk_core overload resolution
+using status_t          = std::uint64_t;
+using agent_type_t      = int;
+using agent_version_t   = int;
+using buffer_category_t = int;
+using buffer_policy_t   = int;
+using runtime_library_t = int;
+using callback_phase_t  = int;
+using tracing_operation = std::int32_t;
+
+#ifdef ROCPROFILER_VERSION
+// SDK headers available — use real enum types for exact type compatibility
+// at call sites like callback_name_info_t::at(rocprofiler_callback_tracing_kind_t, ...).
+using callback_tracing_kind = rocprofiler_callback_tracing_kind_t;
+using buffer_tracing_kind   = rocprofiler_buffer_tracing_kind_t;
+#else
+using callback_tracing_kind = detail::kind_wrapper<detail::callback_tracing_kind_tag>;
+using buffer_tracing_kind   = detail::kind_wrapper<detail::buffer_tracing_kind_tag>;
+#endif
+
+// ompt_thread_t: use real OpenMP type when OpenMP headers are available,
+// otherwise fall back to kind_wrapper which converts to the real type at
+// template instantiation time via static_cast.
+using mock_ompt_thread_t = detail::kind_wrapper<detail::ompt_thread_tag>;
+static constexpr mock_ompt_thread_t mock_ompt_thread_initial{ 1 };
+static constexpr mock_ompt_thread_t mock_ompt_thread_worker{ 2 };
+static constexpr mock_ompt_thread_t mock_ompt_thread_other{ 3 };
+
 using external_correlation_request_kind    = int;
 using counter_info_version_id_t            = int;
 using scratch_memory_operation_t           = int;
@@ -75,6 +187,7 @@ struct correlation_id_t
     struct
     {
         std::uint64_t value = 0;
+        void*         ptr   = nullptr;
     } external;
     std::uint64_t ancestor = 0;
 };
@@ -151,14 +264,15 @@ struct counter_record_t
     std::uint64_t id            = 0;
     double        counter_value = 0.0;
     std::uint64_t dispatch_id   = 0;
+    handle_t      agent_id      = {};
 };
 
 // ─── KFD record stubs — only fields accessed by test/production code ──────────
 
 struct kfd_page_fault_record_t
 {
-    std::uint64_t              size            = 0;
-    buffer_tracing_kind        kind            = 0;
+    std::uint64_t              size = 0;
+    buffer_tracing_kind        kind{};
     kfd_page_fault_operation_t operation       = -1;
     std::uint64_t              start_timestamp = 0;
     std::uint64_t              end_timestamp   = 0;
@@ -169,8 +283,8 @@ struct kfd_page_fault_record_t
 
 struct kfd_page_migrate_record_t
 {
-    std::uint64_t                size            = 0;
-    buffer_tracing_kind          kind            = 0;
+    std::uint64_t                size = 0;
+    buffer_tracing_kind          kind{};
     kfd_page_migrate_operation_t operation       = -1;
     std::uint64_t                start_timestamp = 0;
     std::uint64_t                end_timestamp   = 0;
@@ -186,8 +300,8 @@ struct kfd_page_migrate_record_t
 
 struct kfd_queue_record_t
 {
-    std::uint64_t         size            = 0;
-    buffer_tracing_kind   kind            = 0;
+    std::uint64_t         size = 0;
+    buffer_tracing_kind   kind{};
     kfd_queue_operation_t operation       = -1;
     std::uint64_t         start_timestamp = 0;
     std::uint64_t         end_timestamp   = 0;
@@ -197,8 +311,8 @@ struct kfd_queue_record_t
 
 struct kfd_event_queue_record_t
 {
-    std::uint64_t               size      = 0;
-    buffer_tracing_kind         kind      = 0;
+    std::uint64_t               size = 0;
+    buffer_tracing_kind         kind{};
     kfd_event_queue_operation_t operation = -1;
     std::uint64_t               timestamp = 0;
     std::uint32_t               pid       = 0;
@@ -207,8 +321,8 @@ struct kfd_event_queue_record_t
 
 struct kfd_event_unmap_record_t
 {
-    std::uint64_t                        size          = 0;
-    buffer_tracing_kind                  kind          = 0;
+    std::uint64_t                        size = 0;
+    buffer_tracing_kind                  kind{};
     kfd_event_unmap_from_gpu_operation_t operation     = -1;
     std::uint64_t                        timestamp     = 0;
     std::uint32_t                        pid           = 0;
@@ -219,8 +333,8 @@ struct kfd_event_unmap_record_t
 
 struct kfd_event_dropped_record_t
 {
-    std::uint64_t       size      = 0;
-    buffer_tracing_kind kind      = 0;
+    std::uint64_t       size = 0;
+    buffer_tracing_kind kind{};
     int                 operation = -1;
     std::uint64_t       timestamp = 0;
     std::uint32_t       pid       = 0;
@@ -231,8 +345,8 @@ struct kfd_event_dropped_record_t
 // in SDK 1.x; retained for source compatibility)
 struct page_migration_record_t
 {
-    std::uint64_t                size            = 0;
-    buffer_tracing_kind          kind            = 0;
+    std::uint64_t                size = 0;
+    buffer_tracing_kind          kind{};
     kfd_page_migrate_operation_t operation       = -1;
     std::uint64_t                start_timestamp = 0;
     std::uint64_t                end_timestamp   = 0;
@@ -247,10 +361,10 @@ struct callback_tracing_record_t
     handle_t              context_id     = {};
     std::uint64_t         thread_id      = 0;
     correlation_id_t      correlation_id = {};
-    callback_tracing_kind kind           = 0;
-    tracing_operation     operation      = 0;
-    callback_phase_t      phase          = 0;
-    void*                 payload        = nullptr;
+    callback_tracing_kind kind{};
+    tracing_operation     operation = 0;
+    callback_phase_t      phase     = 0;
+    void*                 payload   = nullptr;
 };
 
 // Record stubs with all fields accessed by tool_tracing_buffered,
@@ -296,8 +410,8 @@ struct kernel_dispatch_data_t
 
 struct scratch_memory_record_t
 {
-    std::uint64_t              size            = 0;
-    buffer_tracing_kind        kind            = 0;
+    std::uint64_t              size = 0;
+    buffer_tracing_kind        kind{};
     scratch_memory_operation_t operation       = 0;
     std::uint64_t              start_timestamp = 0;
     std::uint64_t              end_timestamp   = 0;
@@ -305,13 +419,14 @@ struct scratch_memory_record_t
     handle_t                   agent_id        = {};
     handle_t                   queue_id        = {};
     int                        flags           = 0;
+    std::uint64_t              allocation_size = 0;
     correlation_id_t           correlation_id  = {};
 };
 
 struct memory_copy_record_t
 {
-    std::uint64_t       size            = 0;
-    buffer_tracing_kind kind            = 0;
+    std::uint64_t       size = 0;
+    buffer_tracing_kind kind{};
     int                 operation       = 0;
     std::uint64_t       start_timestamp = 0;
     std::uint64_t       end_timestamp   = 0;
@@ -320,6 +435,8 @@ struct memory_copy_record_t
     handle_t            src_agent_id    = {};
     std::uint64_t       bytes           = 0;
     correlation_id_t    correlation_id  = {};
+    address_t           dst_address     = {};
+    address_t           src_address     = {};
 };
 
 struct code_object_load_data_t
@@ -376,7 +493,7 @@ struct ompt_data_t
         } implicit_task;
         struct
         {
-            int thread_type = 0;
+            mock_ompt_thread_t thread_type = mock_ompt_thread_initial;
         } thread_begin;
         struct
         {
@@ -399,8 +516,69 @@ struct ompt_data_t
     } args;
 };
 
+// rccl_api_data_t uses plain int/void* so it has no forward-declaration dependency
+// on nccl_data_type_t / nccl_comm_t (both aliases are defined later in this file).
+// int matches nccl_data_type_t (= int) and void* matches nccl_comm_t (= void*).
 struct rccl_api_data_t
-{};
+{
+    struct
+    {
+        struct
+        {
+            std::size_t sendcount = 0;
+            int         datatype  = 0;
+            void*       comm      = nullptr;
+        } ncclAllGather;
+        struct
+        {
+            std::size_t count    = 0;
+            int         datatype = 0;
+            void*       comm     = nullptr;
+        } ncclAllToAll;
+        struct
+        {
+            std::size_t count    = 0;
+            int         datatype = 0;
+            void*       comm     = nullptr;
+        } ncclAllReduce;
+        struct
+        {
+            std::size_t sendcount = 0;
+            int         datatype  = 0;
+            void*       comm      = nullptr;
+        } ncclGather;
+        struct
+        {
+            std::size_t count    = 0;
+            int         datatype = 0;
+            void*       comm     = nullptr;
+        } ncclRecv;
+        struct
+        {
+            std::size_t count    = 0;
+            int         datatype = 0;
+            void*       comm     = nullptr;
+        } ncclReduce;
+        struct
+        {
+            std::size_t count    = 0;
+            int         datatype = 0;
+            void*       comm     = nullptr;
+        } ncclBroadcast;
+        struct
+        {
+            std::size_t recvcount = 0;
+            int         datatype  = 0;
+            void*       comm      = nullptr;
+        } ncclReduceScatter;
+        struct
+        {
+            std::size_t count    = 0;
+            int         datatype = 0;
+            void*       comm     = nullptr;
+        } ncclSend;
+    } args;
+};
 
 struct hip_stream_data_t
 {
@@ -409,8 +587,8 @@ struct hip_stream_data_t
 
 struct memory_alloc_record_t
 {
-    std::uint64_t       size            = 0;
-    buffer_tracing_kind kind            = 0;
+    std::uint64_t       size = 0;
+    buffer_tracing_kind kind{};
     int                 operation       = 0;
     std::uint64_t       start_timestamp = 0;
     std::uint64_t       end_timestamp   = 0;
@@ -428,6 +606,8 @@ struct dispatch_counting_data_t
     {
         handle_t      agent_id    = {};
         std::uint64_t dispatch_id = 0;
+        std::uint64_t kernel_id   = 0;
+        handle_t      queue_id    = {};
     } dispatch_info;
 };
 
@@ -440,10 +620,9 @@ struct client_id_t
 using client_finalize_t = void (*)(client_id_t*, void*);
 using client_detach_t   = void (*)(client_id_t*, void*);
 
-// Opaque NCCL communicator (replaces ncclComm_t)
-struct nccl_comm_struct
-{};
-using nccl_comm_t = nccl_comm_struct*;
+// Opaque NCCL communicator mock — void* matches the rccl_api_data_t::comm fields
+// which also use void* to avoid a forward-declaration dependency.
+using nccl_comm_t = void*;
 
 // Callback / iterator function pointer types.
 // The concrete types below match what tool_init (and related production paths)
@@ -463,10 +642,11 @@ using dispatch_counting_record_cb = void (*)(dispatch_counting_data_t, counter_r
 // Remaining callback types — made concrete where production code passes a real
 // function pointer; void* elsewhere.
 using query_available_agents_cb_t          = void*;
-using callback_tracing_operation_args_cb_t = int (*)(int, std::int32_t, std::uint32_t,
-                                                     const void* const, std::int32_t,
+using callback_tracing_operation_args_cb_t = int (*)(callback_tracing_kind, std::int32_t,
+                                                     std::uint32_t, const void* const,
+                                                     std::int32_t, const char*,
                                                      const char*, const char*,
-                                                     const char*, std::int32_t, void*);
+                                                     std::int32_t, void*);
 using available_counters_cb_t      = std::uint64_t (*)(handle_t, handle_t*, std::size_t,
                                                   void*);
 using available_dimensions_cb_t    = std::uint64_t (*)(handle_t, const dim_info_t*,
@@ -500,11 +680,8 @@ struct name_info_t
     std::size_t size() const { return 0; }
 
     name_info_value_t operator[](std::size_t) const { return {}; }
-    name_info_value_t operator[](int) const { return {}; }  // callback_tracing_kind
-    name_info_value_t operator[](unsigned int) const
-    {
-        return {};
-    }  // buffer_tracing_kind
+    name_info_value_t operator[](callback_tracing_kind) const { return {}; }
+    name_info_value_t operator[](buffer_tracing_kind) const { return {}; }
 
     // Universal conversion: allows name_info_t to be assigned to the real SDK
     // name_info types (which are default-constructible) without SDK includes here.
@@ -827,54 +1004,96 @@ struct backend
     static constexpr runtime_library_t MARKER_LIBRARY = 8;
 
     // ─── Callback tracing kind constants ──────────────────────────────────────
-    static constexpr callback_tracing_kind CALLBACK_TRACING_NONE                 = 0;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_CORE_API         = 1;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_AMD_EXT_API      = 2;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_IMAGE_EXT_API    = 3;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_FINALIZE_EXT_API = 4;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_HIP_RUNTIME_API      = 5;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_HIP_COMPILER_API     = 6;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_MARKER_CORE_API      = 7;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_MARKER_CONTROL_API   = 8;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_MARKER_NAME_API      = 9;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_CODE_OBJECT          = 10;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_SCRATCH_MEMORY       = 11;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_KERNEL_DISPATCH      = 12;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_MEMORY_COPY          = 13;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_RCCL_API             = 14;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_LAST                 = 22;
+    // static_cast<callback_tracing_kind>(N) is valid for both the real SDK C enum
+    // (C++20 allows constexpr int-to-enum cast) and kind_wrapper (uses constructor).
+    static constexpr callback_tracing_kind CALLBACK_TRACING_NONE =
+        static_cast<callback_tracing_kind>(0);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_CORE_API =
+        static_cast<callback_tracing_kind>(1);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_AMD_EXT_API =
+        static_cast<callback_tracing_kind>(2);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_IMAGE_EXT_API =
+        static_cast<callback_tracing_kind>(3);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HSA_FINALIZE_EXT_API =
+        static_cast<callback_tracing_kind>(4);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HIP_RUNTIME_API =
+        static_cast<callback_tracing_kind>(5);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HIP_COMPILER_API =
+        static_cast<callback_tracing_kind>(6);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_MARKER_CORE_API =
+        static_cast<callback_tracing_kind>(7);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_MARKER_CONTROL_API =
+        static_cast<callback_tracing_kind>(8);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_MARKER_NAME_API =
+        static_cast<callback_tracing_kind>(9);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_CODE_OBJECT =
+        static_cast<callback_tracing_kind>(10);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_SCRATCH_MEMORY =
+        static_cast<callback_tracing_kind>(11);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_KERNEL_DISPATCH =
+        static_cast<callback_tracing_kind>(12);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_MEMORY_COPY =
+        static_cast<callback_tracing_kind>(13);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_RCCL_API =
+        static_cast<callback_tracing_kind>(14);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_LAST =
+        static_cast<callback_tracing_kind>(22);
 
-    static constexpr callback_tracing_kind CALLBACK_TRACING_ROCDECODE_API          = 18;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_OMPT                   = 15;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_MEMORY_ALLOCATION      = 16;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_RUNTIME_INITIALIZATION = 17;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_ROCDECODE_API =
+        static_cast<callback_tracing_kind>(18);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_OMPT =
+        static_cast<callback_tracing_kind>(15);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_MEMORY_ALLOCATION =
+        static_cast<callback_tracing_kind>(16);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_RUNTIME_INITIALIZATION =
+        static_cast<callback_tracing_kind>(17);
 
-    static constexpr callback_tracing_kind CALLBACK_TRACING_ROCJPEG_API = 19;
-    static constexpr callback_tracing_kind CALLBACK_TRACING_HIP_STREAM  = 20;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_ROCJPEG_API =
+        static_cast<callback_tracing_kind>(19);
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HIP_STREAM =
+        static_cast<callback_tracing_kind>(20);
 
     // ─── Buffer tracing kind constants ────────────────────────────────────────
-    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API         = 1;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_AMD_EXT_API      = 2;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_IMAGE_EXT_API    = 3;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_FINALIZE_EXT_API = 4;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_HIP_RUNTIME_API      = 5;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_HIP_COMPILER_API     = 6;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_MARKER_CORE_API      = 7;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_KERNEL_DISPATCH      = 11;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_MEMORY_COPY          = 10;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_SCRATCH_MEMORY       = 12;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API =
+        static_cast<buffer_tracing_kind>(1);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_AMD_EXT_API =
+        static_cast<buffer_tracing_kind>(2);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_IMAGE_EXT_API =
+        static_cast<buffer_tracing_kind>(3);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_FINALIZE_EXT_API =
+        static_cast<buffer_tracing_kind>(4);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HIP_RUNTIME_API =
+        static_cast<buffer_tracing_kind>(5);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_HIP_COMPILER_API =
+        static_cast<buffer_tracing_kind>(6);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_MARKER_CORE_API =
+        static_cast<buffer_tracing_kind>(7);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KERNEL_DISPATCH =
+        static_cast<buffer_tracing_kind>(11);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_MEMORY_COPY =
+        static_cast<buffer_tracing_kind>(10);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_SCRATCH_MEMORY =
+        static_cast<buffer_tracing_kind>(12);
 
     // Legacy combined page-migration (removed in SDK 1.x; assigned non-conflicting value)
-    static constexpr buffer_tracing_kind BUFFER_TRACING_PAGE_MIGRATION = 50;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_PAGE_MIGRATION =
+        static_cast<buffer_tracing_kind>(50);
 
-    static constexpr buffer_tracing_kind BUFFER_TRACING_MEMORY_ALLOCATION = 16;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_MEMORY_ALLOCATION =
+        static_cast<buffer_tracing_kind>(16);
 
-    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_PAGE_FAULT           = 30;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_PAGE_MIGRATE         = 29;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_QUEUE                = 31;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_QUEUE          = 26;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU = 27;
-    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS = 28;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_PAGE_FAULT =
+        static_cast<buffer_tracing_kind>(30);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_PAGE_MIGRATE =
+        static_cast<buffer_tracing_kind>(29);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_QUEUE =
+        static_cast<buffer_tracing_kind>(31);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_QUEUE =
+        static_cast<buffer_tracing_kind>(26);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU =
+        static_cast<buffer_tracing_kind>(27);
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
+        static_cast<buffer_tracing_kind>(28);
 
     // ─── Counter flag constants ───────────────────────────────────────────────
     static constexpr counter_flag_t COUNTER_FLAG_NONE = 0;
@@ -1171,11 +1390,12 @@ struct backend
 
 }  // namespace rocprofsys::mock::rocprofiler_sdk
 
-// ─── std::hash specialization ────────────────────────────────────────────────
+// ─── std::hash specializations ───────────────────────────────────────────────
 //
 // client_data<Wrapper> uses unordered_map keyed on Wrapper::agent_id and
 // related handle types.  All of those are aliased to handle_t, so a single
 // std::hash specialization unblocks construction of client_data<mock_backend>.
+// kind_wrapper is hashed for unordered sets keyed by callback/buffer tracing kind.
 
 namespace std
 {
@@ -1186,6 +1406,17 @@ struct hash<::rocprofsys::mock::rocprofiler_sdk::handle_t>
         const ::rocprofsys::mock::rocprofiler_sdk::handle_t& h) const noexcept
     {
         return std::hash<std::uint64_t>{}(h.handle);
+    }
+};
+
+template <typename Tag>
+struct hash<::rocprofsys::mock::rocprofiler_sdk::detail::kind_wrapper<Tag>>
+{
+    std::size_t operator()(
+        const ::rocprofsys::mock::rocprofiler_sdk::detail::kind_wrapper<Tag>& k)
+        const noexcept
+    {
+        return std::hash<int>{}(k.value);
     }
 };
 }  // namespace std
