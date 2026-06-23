@@ -293,9 +293,9 @@ inline float e8m0_to_f32(uint8_t code) {
   return std::bit_cast<float>(static_cast<uint32_t>(code) << 23);
 }
 
-// ---- FP8 E4M3 (OCP E4M3FN) — 1 sign, 4 exponent, 3 mantissa, bias=7 ----
+// ---- FP8 E4M3 (OCP E4M3FN) - 1 sign, 4 exponent, 3 mantissa, bias=7 ----
 
-inline float fp8_e4m3_to_f32(uint8_t v) {
+inline float fp8_e4m3_ocp_to_f32(uint8_t v) {
   uint32_t sign = (v >> 7) & 1;
   uint32_t exp = (v >> 3) & 0xF;
   uint32_t mant = v & 0x7;
@@ -314,6 +314,27 @@ inline float fp8_e4m3_to_f32(uint8_t v) {
     return sign ? -result : result;
   }
   uint32_t f = (sign << 31) | ((exp + 127 - 7) << 23) | (mant << 20);
+  return std::bit_cast<float>(f);
+}
+
+// Legacy unqualified FP8 names are OCP by default.
+inline float fp8_e4m3_to_f32(uint8_t v) { return fp8_e4m3_ocp_to_f32(v); }
+
+// ---- FP8 E4M3FNUZ - 1 sign, 4 exponent, 3 mantissa, bias=8 ----
+
+inline float fp8_e4m3_fnuz_to_f32(uint8_t v) {
+  if (v == 0x80u)
+    return std::bit_cast<float>(0xFFC00000u);
+  uint32_t sign = (v >> 7) & 1;
+  uint32_t exp = (v >> 3) & 0xF;
+  uint32_t mant = v & 0x7;
+  if (exp == 0 && mant == 0)
+    return 0.0f;
+  if (exp == 0) {
+    float result = std::ldexp(static_cast<float>(mant), -10);
+    return sign ? -result : result;
+  }
+  uint32_t f = (sign << 31) | ((exp + 127 - 8) << 23) | (mant << 20);
   return std::bit_cast<float>(f);
 }
 
@@ -509,9 +530,9 @@ inline uint8_t f32_to_fp8_e5m3_sr(float val, uint32_t seed) {
   return static_cast<uint8_t>((static_cast<uint32_t>(exp) << 3) | mant);
 }
 
-// ---- BF8 E5M2 — 1 sign, 5 exponent, 2 mantissa, bias=15 ----
+// ---- BF8 E5M2 (OCP) - 1 sign, 5 exponent, 2 mantissa, bias=15 ----
 
-inline float bf8_e5m2_to_f32(uint8_t v) {
+inline float bf8_e5m2_ocp_to_f32(uint8_t v) {
   uint32_t sign = (v >> 7) & 1;
   uint32_t exp = (v >> 2) & 0x1F;
   uint32_t mant = v & 0x3;
@@ -527,6 +548,27 @@ inline float bf8_e5m2_to_f32(uint8_t v) {
     return sign ? -result : result;
   }
   uint32_t f = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 21);
+  return std::bit_cast<float>(f);
+}
+
+// Legacy unqualified BF8 names are OCP by default.
+inline float bf8_e5m2_to_f32(uint8_t v) { return bf8_e5m2_ocp_to_f32(v); }
+
+// ---- BF8 E5M2FNUZ - 1 sign, 5 exponent, 2 mantissa, bias=16 ----
+
+inline float bf8_e5m2_fnuz_to_f32(uint8_t v) {
+  if (v == 0x80u)
+    return std::bit_cast<float>(0xFFC00000u);
+  uint32_t sign = (v >> 7) & 1;
+  uint32_t exp = (v >> 2) & 0x1F;
+  uint32_t mant = v & 0x3;
+  if (exp == 0 && mant == 0)
+    return 0.0f;
+  if (exp == 0) {
+    float result = std::ldexp(static_cast<float>(mant), -17);
+    return sign ? -result : result;
+  }
+  uint32_t f = (sign << 31) | ((exp + 127 - 16) << 23) | (mant << 21);
   return std::bit_cast<float>(f);
 }
 
@@ -629,44 +671,88 @@ namespace detail {
 /// 256-entry fp8/bf8 -> f32 tables filled from the scalar converters, so every
 /// entry (including the NaN payloads) is bit-exact with the per-element path
 /// by construction.
-inline const float *fp8_e4m3_lut() {
+inline const float *fp8_e4m3_ocp_lut() {
   static const auto lut = [] {
     std::array<float, 256> t{};
     for (uint32_t i = 0; i < 256; ++i)
-      t[i] = fp8_e4m3_to_f32(static_cast<uint8_t>(i));
+      t[i] = fp8_e4m3_ocp_to_f32(static_cast<uint8_t>(i));
     return t;
   }();
   return lut.data();
 }
 
-inline const float *bf8_e5m2_lut() {
+inline const float *bf8_e5m2_ocp_lut() {
   static const auto lut = [] {
     std::array<float, 256> t{};
     for (uint32_t i = 0; i < 256; ++i)
-      t[i] = bf8_e5m2_to_f32(static_cast<uint8_t>(i));
+      t[i] = bf8_e5m2_ocp_to_f32(static_cast<uint8_t>(i));
     return t;
   }();
   return lut.data();
 }
+
+inline const float *fp8_e4m3_fnuz_lut() {
+  static const auto lut = [] {
+    std::array<float, 256> t{};
+    for (uint32_t i = 0; i < 256; ++i)
+      t[i] = fp8_e4m3_fnuz_to_f32(static_cast<uint8_t>(i));
+    return t;
+  }();
+  return lut.data();
+}
+
+inline const float *bf8_e5m2_fnuz_lut() {
+  static const auto lut = [] {
+    std::array<float, 256> t{};
+    for (uint32_t i = 0; i < 256; ++i)
+      t[i] = bf8_e5m2_fnuz_to_f32(static_cast<uint8_t>(i));
+    return t;
+  }();
+  return lut.data();
+}
+
+inline const float *fp8_e4m3_lut() { return fp8_e4m3_ocp_lut(); }
+
+inline const float *bf8_e5m2_lut() { return bf8_e5m2_ocp_lut(); }
 
 } // namespace detail
 
 /// @brief Convert `n` contiguous E4M3 FP8 bytes to float via the lookup table.
 ///
-/// Bit-exact with fp8_e4m3_to_f32 for every code. The scalar gather loop is
+/// Bit-exact with fp8_e4m3_ocp_to_f32 for every code. The scalar gather loop is
 /// enough to amortize the per-element converter cost on the MFMA/WMMA bulk
 /// hoists (no vector path needed; works on every target).
-inline void fp8_e4m3_to_f32_block(const uint8_t *src, float *dst, size_t n) {
-  const float *lut = detail::fp8_e4m3_lut();
+inline void fp8_e4m3_ocp_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::fp8_e4m3_ocp_lut();
   for (size_t i = 0; i < n; ++i)
     dst[i] = lut[src[i]];
 }
 
 /// @brief Convert `n` contiguous E5M2 BF8 bytes to float via the lookup table.
-inline void bf8_e5m2_to_f32_block(const uint8_t *src, float *dst, size_t n) {
-  const float *lut = detail::bf8_e5m2_lut();
+inline void bf8_e5m2_ocp_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::bf8_e5m2_ocp_lut();
   for (size_t i = 0; i < n; ++i)
     dst[i] = lut[src[i]];
+}
+
+inline void fp8_e4m3_fnuz_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::fp8_e4m3_fnuz_lut();
+  for (size_t i = 0; i < n; ++i)
+    dst[i] = lut[src[i]];
+}
+
+inline void bf8_e5m2_fnuz_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::bf8_e5m2_fnuz_lut();
+  for (size_t i = 0; i < n; ++i)
+    dst[i] = lut[src[i]];
+}
+
+inline void fp8_e4m3_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  fp8_e4m3_ocp_to_f32_block(src, dst, n);
+}
+
+inline void bf8_e5m2_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  bf8_e5m2_ocp_to_f32_block(src, dst, n);
 }
 
 // ---- Generalized SR + OCP MX helpers (used by gfx1250 WMMA) ----
