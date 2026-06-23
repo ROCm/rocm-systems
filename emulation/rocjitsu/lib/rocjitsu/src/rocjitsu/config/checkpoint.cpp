@@ -8,6 +8,7 @@
 #include "checkpoint_generated.h"
 #include "flatbuffers/flatbuffers.h"
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -95,6 +96,38 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
   return vm_config;
 }
 
+std::vector<uint8_t> serialize_vgprs(const amdgpu::ComputeUnitCore &cu,
+                                     const amdgpu::Wavefront &wf) {
+  const size_t num_vgprs = cu.vgpr_allocation_block_size();
+  const size_t saved_lanes = wf.wf_size();
+  const size_t physical_lanes = cu.vgpr_lanes_per_reg();
+  const size_t saved_stride = saved_lanes * sizeof(uint32_t);
+  const size_t physical_stride = physical_lanes * sizeof(uint32_t);
+  std::vector<uint8_t> serialized(num_vgprs * saved_stride);
+  const uint8_t *src = cu.vgpr_data(wf.vgpr_alloc().base);
+  for (size_t reg = 0; reg < num_vgprs; ++reg) {
+    std::memcpy(serialized.data() + reg * saved_stride, src + reg * physical_stride, saved_stride);
+  }
+  return serialized;
+}
+
+void restore_vgprs(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wf,
+                   const flatbuffers::Vector<uint8_t> &serialized) {
+  const size_t num_vgprs = cu.vgpr_allocation_block_size();
+  const size_t saved_lanes = wf.wf_size();
+  const size_t physical_lanes = cu.vgpr_lanes_per_reg();
+  const size_t saved_stride = saved_lanes * sizeof(uint32_t);
+  const size_t physical_stride = physical_lanes * sizeof(uint32_t);
+  uint8_t *dst = cu.vgpr_data(wf.vgpr_alloc().base);
+  for (size_t reg = 0; reg < num_vgprs; ++reg) {
+    const size_t src_offset = reg * saved_stride;
+    if (src_offset >= serialized.size())
+      break;
+    const size_t copy_size = std::min(saved_stride, serialized.size() - src_offset);
+    std::memcpy(dst + reg * physical_stride, serialized.data() + src_offset, copy_size);
+  }
+}
+
 } // namespace
 
 void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
@@ -117,9 +150,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
           auto sgprs_vec =
               builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base), w->num_sgprs());
-          size_t vgpr_bytes = static_cast<size_t>(cu->vgpr_allocation_block_size()) *
-                              static_cast<size_t>(w->wf_size()) * sizeof(uint32_t);
-          auto vgprs_vec = builder.CreateVector(cu->vgpr_data(w->vgpr_alloc().base), vgpr_bytes);
+          auto vgprs = serialize_vgprs(*cu, *w);
+          auto vgprs_vec = builder.CreateVector(vgprs);
 
           auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec(),
                                               w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
@@ -232,7 +264,19 @@ LoadedConfig restore_checkpoint(const std::string &path) {
               wf_state->sgprs() ? wf_state->sgprs()->size() : cu->config().sgprs_per_wf;
           uint32_t num_vgprs = cu->config().vgprs_per_wf;
 
-          auto *wf = cu->dispatch_wf(wf_state->wg_id(), wf_state->pc(), num_sgprs, num_vgprs);
+          uint32_t wave_size = cu->wf_size();
+          if (auto *vgprs = wf_state->vgprs()) {
+            const size_t bytes_per_wave =
+                static_cast<size_t>(cu->vgpr_allocation_block_size()) * sizeof(uint32_t);
+            if (bytes_per_wave != 0 && vgprs->size() % bytes_per_wave == 0) {
+              const size_t saved_wave_size = vgprs->size() / bytes_per_wave;
+              if (saved_wave_size == 32 || saved_wave_size == 64)
+                wave_size = static_cast<uint32_t>(saved_wave_size);
+            }
+          }
+
+          auto *wf =
+              cu->dispatch_wf(wf_state->wg_id(), wf_state->pc(), num_sgprs, num_vgprs, wave_size);
           if (!wf)
             throw std::runtime_error("Failed to dispatch wavefront during checkpoint restoration");
 
@@ -252,10 +296,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           }
 
           if (auto *vgprs = wf_state->vgprs()) {
-            size_t vgpr_bytes = static_cast<size_t>(cu->vgpr_allocation_block_size()) *
-                                static_cast<size_t>(wf->wf_size()) * sizeof(uint32_t);
-            size_t copy_size = std::min<size_t>(vgprs->size(), vgpr_bytes);
-            std::memcpy(cu->vgpr_data(wf->vgpr_alloc().base), vgprs->data(), copy_size);
+            restore_vgprs(*cu, *wf, *vgprs);
           }
         }
       }

@@ -86,6 +86,8 @@ protected:
     soc->wire_backing(engine_->topology());
     engine_->build();
     engine_->register_as_primary();
+    memory_ = soc->memory();
+    ASSERT_NE(memory_, nullptr);
 
     driver_->setup_topology(loaded_.device, num_xcds);
     int fd = driver_->open();
@@ -260,6 +262,74 @@ TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {
 
   munmap(addr, kSize);
   close(memfd);
+}
+
+TEST_F(KfdIoctlTest, ImportDmabufMapsFdBackingAtGpuVa) {
+  constexpr size_t kSize = 4096;
+  constexpr uint64_t kGpuVa = 0x1001200000ULL;
+  int memfd = static_cast<int>(syscall(SYS_memfd_create, "kfd_dmabuf_backing_test", MFD_CLOEXEC));
+  ASSERT_GE(memfd, 0);
+  ASSERT_EQ(ftruncate(memfd, kSize), 0);
+
+  auto *addr =
+      static_cast<uint8_t *>(mmap(nullptr, kSize, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0));
+  ASSERT_NE(addr, MAP_FAILED);
+  addr[0x34] = 0xAB;
+
+  kfd_ioctl_import_dmabuf_args import_args{};
+  import_args.dmabuf_fd = memfd;
+  import_args.gpu_id = kGpuId;
+  import_args.va_addr = kGpuVa;
+
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_IMPORT_DMABUF, &import_args), 0);
+  ASSERT_NE(import_args.handle, 0u);
+  EXPECT_EQ(memory_->read8(kGpuVa + 0x34, driver_->local_process_id()), 0xAB);
+
+  memory_->write8(kGpuVa + 0x80, 0x5C, driver_->local_process_id());
+  EXPECT_EQ(addr[0x80], 0x5C);
+
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = import_args.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+
+  addr[0x90] = 0x11;
+  EXPECT_EQ(memory_->read8(kGpuVa + 0x90, driver_->local_process_id()), 0u);
+  memory_->write8(kGpuVa + 0x90, 0x77, driver_->local_process_id());
+  EXPECT_EQ(addr[0x90], 0x11);
+  EXPECT_EQ(memory_->read8(kGpuVa + 0x90, driver_->local_process_id()), 0x77u);
+
+  munmap(addr, kSize);
+  close(memfd);
+}
+
+TEST_F(KfdIoctlTest, UnalignedUserptrMapsGpuVaToMatchingHostBytes) {
+  std::vector<uint8_t> backing(8192, 0);
+  uint8_t *userptr = backing.data() + 123;
+  userptr[0] = 0x3A;
+  userptr[17] = 0x4B;
+  userptr[4100] = 0x5C;
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc_args{};
+  alloc_args.va_addr = reinterpret_cast<uint64_t>(userptr);
+  alloc_args.size = 5000;
+  alloc_args.gpu_id = kGpuId;
+  alloc_args.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc_args), 0);
+  ASSERT_NE(alloc_args.handle, 0u);
+  ASSERT_EQ(alloc_args.va_addr, reinterpret_cast<uint64_t>(userptr));
+
+  const uint32_t pid = driver_->local_process_id();
+  EXPECT_EQ(memory_->read8(alloc_args.va_addr, pid), 0x3A);
+  EXPECT_EQ(memory_->read8(alloc_args.va_addr + 17, pid), 0x4B);
+  EXPECT_EQ(memory_->read8(alloc_args.va_addr + 4100, pid), 0x5C);
+
+  memory_->write8(alloc_args.va_addr + 33, 0x6D, pid);
+  EXPECT_EQ(userptr[33], 0x6D);
+
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = alloc_args.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
 }
 
 TEST_F(KfdIoctlTest, SvmSetAndGetAttributes) {

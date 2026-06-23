@@ -6746,7 +6746,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
   for (const StaticPcRelativeCallEdge &edge : static_pc_relative_calls)
     block_leaders.push_back(edge.return_offset);
-  auto blocks = BasicBlock::build(obj, *decoder, block_leaders);
+  auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders);
   add_static_pc_relative_setpc_successors(blocks, static_setpc_edges);
   add_static_pc_relative_address_successors(blocks, static_pc_relative_addresses);
   add_static_pc_relative_call_successors(blocks, static_pc_relative_addresses,

@@ -102,7 +102,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.soc()->num_xcds(), 1u);
   EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
   EXPECT_EQ(rdna4.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
-  EXPECT_FALSE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_TRUE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
   EXPECT_EQ(rdna4.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
@@ -136,7 +136,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna3.soc()->num_xcds(), 1u);
   EXPECT_EQ(rdna3.soc()->xcd(0)->num_shader_engines(), 6u);
   EXPECT_EQ(rdna3.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
-  EXPECT_FALSE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_TRUE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
   EXPECT_EQ(rdna3.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
@@ -170,7 +170,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna35.soc()->num_xcds(), 1u);
   EXPECT_EQ(rdna35.soc()->xcd(0)->num_shader_engines(), 2u);
   EXPECT_EQ(rdna35.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
-  EXPECT_FALSE(rdna35.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_TRUE(rdna35.soc()->xcd(0)->command_processor()->packed_tid());
   EXPECT_EQ(rdna35.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 }
@@ -682,6 +682,66 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
                                        cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1,
                                    0),
             0xDEADBEEFu);
+
+  std::filesystem::remove(path);
+}
+
+TEST(CheckpointTest, SaveAndRestoreWave32Vgprs) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"rdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"64"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 32, cu->config().vgprs_per_wf, 32);
+  ASSERT_NE(wf, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  cu->write_vgpr(base + 0, 31, 0x12345678u);
+  cu->write_vgpr(base + 33, 31, 0xA5A50021u);
+  cu->write_vgpr(base + 63, 0, 0xDEADBEEFu);
+
+  const char *path = "/tmp/rocjitsu_test_checkpoint_wave32_vgpr.bin";
+  config::save_checkpoint(path, *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(path));
+
+  auto restored = config::restore_checkpoint(path);
+  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
+  ASSERT_NE(restored_vm, nullptr);
+  auto *restored_cu = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(restored_cu, nullptr);
+  auto *restored_wf = restored_cu->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  const uint32_t restored_base = restored_wf->vgpr_alloc().base;
+  EXPECT_EQ(restored_wf->wf_size(), 32u);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_base + 0, 31), 0x12345678u);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_base + 33, 31), 0xA5A50021u);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_base + 63, 0), 0xDEADBEEFu);
 
   std::filesystem::remove(path);
 }

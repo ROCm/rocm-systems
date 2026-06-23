@@ -68,6 +68,7 @@ RJ_DIAGNOSTIC_POP
 #include <string_view>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -99,6 +100,18 @@ static int connect_to_daemon() {
   if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
     rocjitsu::libc_passthrough().close(sock);
     return -1;
+  }
+
+  // With Yama ptrace_scope=1, a daemon started alongside the client cannot use
+  // process_vm_readv/writev for host USERPTR memory unless the client opts in.
+  // Restrict that permission to the authenticated peer of this Unix socket.
+  ucred peer{};
+  socklen_t peer_len = sizeof(peer);
+  if (getsockopt(sock, SOL_SOCKET, SO_PEERCRED, &peer, &peer_len) == 0 &&
+      peer_len == sizeof(peer) && peer.pid > 0) {
+    if (prctl(PR_SET_PTRACER, peer.pid, 0, 0, 0) != 0)
+      util::Logger::warn("failed to authorize daemon process-memory access: pid=", peer.pid,
+                         " errno=", errno);
   }
   return sock;
 }
@@ -1199,8 +1212,12 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
   if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
     return remote->mmap(addr, length, prot, flags, offset);
 
-  if (auto *drv = InterposerContext::ctx.lookup(fd))
-    return drv->mmap(addr, length, prot, flags, offset);
+  if (auto *drv = InterposerContext::ctx.lookup(fd)) {
+    void *ret = drv->mmap(addr, length, prot, flags, offset);
+    if (ret != MAP_FAILED)
+      rocjitsu::KfdProcess::notify_host_mappings_changed();
+    return ret;
+  }
 
   if (InterposerContext::ctx.is_kfd_dup(fd)) {
     if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
@@ -1210,10 +1227,21 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
   }
 
   if (InterposerContext::ctx.is_drm(fd)) {
-    if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
-      return remote->mmap(addr, length, prot, flags, offset);
-    if (auto *drv = InterposerContext::ctx.driver())
-      return drv->mmap(addr, length, prot, flags, offset);
+    // Synthetic DRM fds in daemon mode do not have local mmap state; route them
+    // through the remote KFD driver so dma-buf imports get a real host mapping.
+    if (auto *remote =
+            InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
+      void *ret = remote->mmap(addr, length, prot, flags, offset);
+      if (ret != MAP_FAILED)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
+      return ret;
+    }
+    if (auto *drv = InterposerContext::ctx.driver()) {
+      void *ret = drv->mmap(addr, length, prot, flags, offset);
+      if (ret != MAP_FAILED)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
+      return ret;
+    }
   }
 
   if (fd < 0 && (flags & MAP_FIXED) && prot != PROT_NONE && addr) {
@@ -1230,6 +1258,7 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
 #ifdef MADV_POPULATE_WRITE
         InterposerContext::real().madvise(raw, length, MADV_POPULATE_WRITE);
 #endif
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
         return raw;
       }
     }
@@ -1262,14 +1291,20 @@ RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
   assert(InterposerContext::real().ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
     int ret = remote->munmap(addr, length);
-    if (ret != -ENOENT)
+    if (ret != -ENOENT) {
+      if (ret == 0)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
       return ret;
+    }
   }
   auto *drv = InterposerContext::ctx.driver();
   if (drv) {
     int ret = drv->munmap(addr, length);
-    if (ret != -ENOENT)
+    if (ret != -ENOENT) {
+      if (ret == 0)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
       return ret;
+    }
   }
   return InterposerContext::real().munmap(addr, length);
 }

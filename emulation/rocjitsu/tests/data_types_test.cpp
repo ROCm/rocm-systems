@@ -271,13 +271,21 @@ TEST(Fp8E4M3Fnuz, SrNarrow) {
   }
 }
 
+TEST(Fp8E4M3, PlainNarrowSpecialValues) {
+  EXPECT_EQ(util::f32_to_fp8_e4m3(std::numeric_limits<float>::quiet_NaN()), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3(std::numeric_limits<float>::infinity()), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3(256.0f), 0x78);
+  EXPECT_EQ(util::f32_to_fp8_e4m3(448.0f), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3(500.0f), 0x7F);
+}
+
 TEST(Fp8E4M3, RneNarrow) {
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(std::numeric_limits<float>::quiet_NaN()), 0x7F);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(std::numeric_limits<float>::infinity()), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(std::numeric_limits<float>::infinity()), 0x7F);
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(0.0f), 0x00);
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(1.0f), 0x38);
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(448.0f), 0x7E);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(500.0f), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(500.0f), 0x7F);
   // Denorm overflow: largest denorm (code 7 = 7*2^-9) rounds up to
   // smallest normal (code 8 = 2^-6) for values just above midpoint.
   float largest_denorm = util::fp8_e4m3_to_f32(0x07);
@@ -300,9 +308,12 @@ TEST(Fp8E4M3, RneExp15) {
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(280.0f), 0x79);
   // 304.0 is midpoint between 288 (m=1) and 320 (m=2) — RNE to even (m=2)
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(304.0f), 0x7A);
-  // Values above 448 saturate to 0x7E (max finite, not NaN 0x7F)
+  // Values up to the midpoint above 448 round to max finite. Values that round
+  // into the invalid mant=7 code become the E4M3FN NaN encoding.
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(449.0f), 0x7E);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(1000.0f), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(464.0f), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(480.0f), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne(1000.0f), 0x7F);
 }
 
 TEST(Fp8E4M3, SrExp15) {
@@ -312,16 +323,19 @@ TEST(Fp8E4M3, SrExp15) {
     uint8_t code = 0x78 | m;
     EXPECT_EQ(util::f32_to_fp8_e4m3_sr(kExp15Values[m], 0), code) << "sr m=" << m;
   }
-  // Values above max saturate to 0x7E
-  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(500.0f, 0), 0x7E);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(500.0f, 0xFFFFFFFF), 0x7E);
+  // Stochastic rounding can still choose max finite below the overflow
+  // boundary, but an invalid mant=7 result is encoded as NaN.
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(449.0f, 0), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(449.0f, 0xFFFFFFFF), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(500.0f, 0), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(500.0f, 0xFFFFFFFF), 0x7F);
 }
 
 TEST(Fp8E4M3, SrNarrow) {
   uint8_t r = util::f32_to_fp8_e4m3_sr(1.0f, 0);
   EXPECT_EQ(r, 0x38);
   EXPECT_EQ(util::f32_to_fp8_e4m3_sr(std::numeric_limits<float>::quiet_NaN(), 0), 0x7F);
-  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(std::numeric_limits<float>::infinity(), 0), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_sr(std::numeric_limits<float>::infinity(), 0), 0x7F);
 }
 
 TEST(Fp8E4M3, SrDenormRoundTrip) {

@@ -1292,6 +1292,52 @@ TEST_P(CuFactoryTest, CreatesSuccessfully) {
   EXPECT_EQ(cu->arch(), arch);
 }
 
+TEST(ComputeUnitRuntimeTest, OutOfRangeSgprReadReturnsZero) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("test_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  EXPECT_EQ(cu->read_sgpr(cfg.sgprs_per_wf), 0u);
+  EXPECT_EQ(cu->read_sgpr(cfg.sgprs_per_wf + 64), 0u);
+}
+
+TEST(ComputeUnitRuntimeTest, WaitCounterAliasesUpdateTargets) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("test_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, 104, 32, 64);
+  ASSERT_NE(wf, nullptr);
+
+  wf->wait_counters().lgkmcnt = 6;
+  wf->set_wait_counter("waitcnt_vmcnt", 3);
+  wf->set_wait_counter("waitcnt_vscnt", 4);
+  wf->set_wait_counter("waitcnt_lgkmcnt", 5);
+  wf->set_wait_counter("waitcnt_expcnt", 0x1f);
+
+  EXPECT_EQ(wf->wait_target().vmcnt, 3u);
+  EXPECT_EQ(wf->wait_target().vscnt, 4u);
+  EXPECT_EQ(wf->wait_target().lgkmcnt, 5u);
+  EXPECT_EQ(wf->wait_target().expcnt, 7u);
+  EXPECT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
+}
+
 TEST(CuFactoryTest, CdnaAccVgprsDoNotAliasNextWaveSlot) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {

@@ -86,11 +86,10 @@ void validate_cluster_shape(const DispatchEntry &dp) {
   }
 }
 
-uint32_t read_memory_u32(GpuMemory *memory, uint64_t addr, uint32_t vmid = 0) {
-  uint32_t value = 0;
-  for (uint32_t i = 0; i < sizeof(value); ++i)
-    value |= static_cast<uint32_t>(memory->read8(addr + i, vmid)) << (i * 8);
-  return value;
+uint32_t dispatch_grid_workgroups(uint32_t grid_size, uint32_t workgroup_size) {
+  if (workgroup_size == 0)
+    return 1;
+  return util::ceil_div(grid_size, workgroup_size);
 }
 
 uint32_t aligned_lds_bytes_per_workgroup(const DispatchEntry &entry) {
@@ -163,6 +162,50 @@ bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
     return false;
   default:
     return true;
+  }
+}
+
+uint32_t kernel_dispatch_wave_size(rj_code_arch_t arch, uint32_t kernel_code_properties) {
+  using namespace rocr::llvm::amdhsa;
+
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 64;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return AMDHSA_BITS_GET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32)
+               ? 32
+               : 64;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 32;
+  default:
+    // Non-AMDGPU or invalid enum values are not expected here, but keep the
+    // legacy wave64 fallback for internal tests that leave the arch unset.
+    return 64;
+  }
+}
+
+uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wave_size,
+                                                   uint32_t fallback_granularity) {
+  // This is the AMDHSA kernel descriptor encoding granularity for
+  // COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT, not the physical VGPR
+  // allocation block size. LLVM's AMDGPUBaseInfo::getVGPREncodingGranule
+  // encodes GFX10-GFX12 Wave64 descriptors in blocks of 4 VGPRs.
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return wave_size == 32 ? 8 : 4;
+  default:
+    return std::max(fallback_granularity, 1u);
   }
 }
 
@@ -245,8 +288,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
 
       uint64_t preload_addr = pkt.kernarg_addr + static_cast<uint64_t>(preload_offset) * 4;
       for (uint32_t i = 0; i < preload_length; ++i)
-        cu->write_sgpr(sbase + idx + i,
-                       read_memory_u32(memory_, preload_addr + i * 4, pkt.process_id));
+        cu->write_sgpr(sbase + idx + i, read_gpu_u32(preload_addr + i * 4, pkt.process_id));
       util::Logger::vm("CP: init_wf kernarg preload s[", idx, ":", idx + preload_length - 1,
                        "] length=", preload_length, " offset=", preload_offset, " sbase=", sbase);
       idx += preload_length;
@@ -300,20 +342,24 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   //   0 = v0 only (workitem_id_x)
   //   1 = v0 + v1 (workitem_id_x, workitem_id_y)
   //   2 = v0 + v1 + v2 (workitem_id_x, workitem_id_y, workitem_id_z)
-  // On packed-TID targets (CDNA3/4 and gfx1250): v0[9:0]=X,
-  // v0[19:10]=Y, v0[29:20]=Z. v1/v2 are not written. Kernel extracts
-  // components via bit masks.
+  // On packed-TID targets (CDNA3/4 and GFX11+): v0[9:0]=X, v0[19:10]=Y,
+  // v0[29:20]=Z. TIDIG_COMP_CNT still controls how many TID VGPRs are
+  // allocated; the one-VGPR case carries the full packed tuple in v0.
   uint32_t vbase = wf->vgpr_alloc().base;
-  uint32_t workitem_base = wf_index_in_wg * cu->wf_size();
+  uint32_t wave_size = wf->wf_size();
+  uint32_t workitem_base = wf_index_in_wg * wave_size;
   uint32_t wg_x = pkt.workgroup_size_x > 0 ? pkt.workgroup_size_x : 1;
   uint32_t wg_y = pkt.workgroup_size_y > 0 ? pkt.workgroup_size_y : 1;
   uint32_t wg_xy = wg_x * wg_y;
-  for (uint32_t lane = 0; lane < cu->wf_size(); ++lane) {
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
     uint32_t flat_id = workitem_base + lane;
     uint32_t id_x = flat_id % wg_x;
     uint32_t id_y = (flat_id / wg_x) % wg_y;
     uint32_t id_z = flat_id / wg_xy;
-    if (packed_tid_ && pkt.enable_vgpr_workitem_id > 0) {
+    if (packed_tid_) {
+      // Packed-TID targets always seed the complete X/Y/Z tuple in v0. When
+      // TID VGPRs are not enabled, TIDIG_COMP_CNT is encoded as zero, so this
+      // path does not need an extra enable_vgpr_workitem_id gate.
       uint32_t packed = (id_x & 0x3FFu) | ((id_y & 0x3FFu) << 10) | ((id_z & 0x3FFu) << 20);
       cu->write_vgpr(vbase, lane, packed);
     } else {
@@ -335,11 +381,11 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     uint64_t scratch_pool = pkt.scratch_backing_addr;
     if (scratch_pool == 0)
       scratch_pool = 0x1'0000'0000ULL;
-    uint64_t per_wave_size = static_cast<uint64_t>(pkt.private_segment_fixed_size) * cu->wf_size();
+    uint64_t per_wave_size = static_cast<uint64_t>(pkt.private_segment_fixed_size) * wave_size;
     uint32_t wg_total_size = static_cast<uint32_t>(pkt.workgroup_size_x) *
                              std::max<uint16_t>(1, pkt.workgroup_size_y) *
                              std::max<uint16_t>(1, pkt.workgroup_size_z);
-    uint32_t waves_per_wg = (wg_total_size + cu->wf_size() - 1) / cu->wf_size();
+    uint32_t waves_per_wg = util::ceil_div(wg_total_size, wave_size);
     uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
     uint64_t wave_scratch = scratch_pool + global_wave_idx * per_wave_size;
 
@@ -712,12 +758,12 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     wg_wavefronts.reserve(entry.wfs_per_workgroup);
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
-                                      entry.vgprs_per_wf);
+                                      entry.vgprs_per_wf, entry.wave_size);
       assert(wf && "dispatch_wf failed after can_accept_workgroup returned true");
       wf->set_lds_base(lds_base);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_process_id(entry.process_id);
-      wf->set_exec(initial_exec_mask_for_wave(entry, w, cu->wf_size()));
+      wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, entry.wave_size));
       wf->set_cluster_info(entry.cluster_rank_for_local_wg(local_wg_id), entry.cluster_size());
       init_wavefront_regs(cu, wf, entry, global_wg_id, w);
       wg_wavefronts.push_back(wf);
@@ -917,24 +963,24 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   uint32_t sgpr_gran =
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  uint32_t vgprs = (vgpr_gran + 1) * vgpr_granularity_;
   rj_code_arch_t arch = cus_.empty() ? ROCJITSU_CODE_ARCH_CDNA1 : cus_[0]->config().arch;
+  uint32_t wave_size = kernel_dispatch_wave_size(arch, kd.kernel_code_properties);
+  uint32_t vgprs = (vgpr_gran + 1) *
+                   descriptor_vgpr_granularity_for_wavefront(arch, wave_size, vgpr_granularity_);
   uint32_t sgprs = sgpr_count_is_descriptor_encoded(arch, sgpr_gran) ? (sgpr_gran + 1) * 8 : 0;
   uint32_t user_sgprs = AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
   uint64_t entry_pc = pkt.kernel_object + static_cast<uint64_t>(kd.kernel_code_entry_byte_offset);
 
   uint32_t wg_size =
       static_cast<uint32_t>(pkt.workgroup_size_x) * pkt.workgroup_size_y * pkt.workgroup_size_z;
-  uint32_t wave_size = cus_.empty() ? 64 : cus_[0]->wf_size();
-  uint32_t wfs_per_wg = (wg_size + wave_size - 1) / wave_size;
+  uint32_t wfs_per_wg = util::ceil_div(wg_size, wave_size);
 
   uint32_t num_dims = pkt.setup & 0x3;
-  uint32_t grid_wgs_x =
-      util::ceil_div_or_one(pkt.grid_size_x, static_cast<uint32_t>(pkt.workgroup_size_x));
+  uint32_t grid_wgs_x = dispatch_grid_workgroups(pkt.grid_size_x, pkt.workgroup_size_x);
   uint32_t grid_wgs_y =
-      util::ceil_div_or_one(pkt.grid_size_y, static_cast<uint32_t>(pkt.workgroup_size_y));
+      num_dims >= 2 ? dispatch_grid_workgroups(pkt.grid_size_y, pkt.workgroup_size_y) : 1;
   uint32_t grid_wgs_z =
-      util::ceil_div_or_one(pkt.grid_size_z, static_cast<uint32_t>(pkt.workgroup_size_z));
+      num_dims >= 3 ? dispatch_grid_workgroups(pkt.grid_size_z, pkt.workgroup_size_z) : 1;
   uint32_t total_wgs = grid_wgs_x * grid_wgs_y * grid_wgs_z;
 
   DispatchEntry dp{};
@@ -943,6 +989,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.queue_id = queue.queue_id;
   dp.process_id = queue.process_id;
   dp.kernel_entry_pc = entry_pc;
+  dp.wave_size = wave_size;
   dp.total_wgs = total_wgs;
   dp.dispatched_wgs = 0;
   dp.completed_wgs = 0;
@@ -974,6 +1021,9 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   }
 
   dp.workgroup_id_offset = workgroup_id_offset_;
+  dp.grid_size_x = pkt.grid_size_x;
+  dp.grid_size_y = (num_dims >= 2) ? pkt.grid_size_y : 1;
+  dp.grid_size_z = (num_dims >= 3) ? pkt.grid_size_z : 1;
   // For WG ID decomposition, use the dispatch dimensionality (setup field).
   // A 1D dispatch flattens the entire grid into workgroup_id_x.
   dp.grid_wgs_x = (num_dims <= 1) ? total_wgs : grid_wgs_x;
@@ -1516,6 +1566,8 @@ constexpr uint32_t POLL_REGMEM_SIZE = 6;
 constexpr uint32_t ATOMIC_SIZE = 8;
 constexpr uint32_t CONST_FILL_SIZE = 5;
 constexpr uint32_t TIMESTAMP_SIZE = 3;
+// Source of truth: ROCR's sdma_registers.h defines SDMA_PKT_GCR as
+// 5 dwords and SDMA_PKT_GCR_GFX1250 as 6 dwords.
 constexpr uint32_t GCR_SIZE = 5;
 constexpr uint32_t GCR_GFX1250_SIZE = 6;
 

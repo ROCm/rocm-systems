@@ -40,7 +40,7 @@ public:
            uint64_t ring_addr = DEFAULT_RING_ADDR, uint32_t ring_size = DEFAULT_RING_SIZE,
            uint64_t read_ptr_addr = DEFAULT_READ_PTR_ADDR,
            uint64_t write_ptr_addr = DEFAULT_WRITE_PTR_ADDR,
-           uint64_t doorbell_addr = DEFAULT_DOORBELL_ADDR)
+           uint64_t doorbell_addr = DEFAULT_DOORBELL_ADDR, uint32_t process_id = 0)
       : memory_(memory), cp_(cp), ring_addr_(ring_addr), ring_size_(ring_size),
         read_ptr_addr_(read_ptr_addr), write_ptr_addr_(write_ptr_addr),
         doorbell_addr_(doorbell_addr) {
@@ -50,6 +50,7 @@ public:
     memory_->load_image(reinterpret_cast<const uint8_t *>(&zero), 8, doorbell_addr_);
 
     amdgpu::HwQueue hw{};
+    hw.process_id = process_id;
     hw.queue_id = 1;
     hw.ring_base_va = ring_addr_;
     hw.ring_size = ring_size_;

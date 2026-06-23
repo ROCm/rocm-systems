@@ -101,9 +101,12 @@ public:
   /// @param pc Kernel entry point (byte address).
   /// @param sgprs Number of scalar registers to allocate.
   /// @param vgprs Number of vector registers to allocate.
+  /// @param wave_size Lanes in the dispatched wavefront. Zero selects the
+  ///                  compute unit's default wave size.
   /// @returns Pointer to the activated wavefront, or nullptr if no free slot
   ///          or insufficient register space.
-  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs, uint32_t vgprs);
+  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs, uint32_t vgprs,
+                         uint32_t wave_size = 0);
 
   /// @brief Execute one instruction on the next active wavefront.
   /// @retval true An instruction was executed.
@@ -364,9 +367,10 @@ public:
   // TODO(newling) consider cmake flag to build without plugins, this call
   // overhead might be non-negligible.
   uint32_t read_sgpr(uint32_t reg_idx) const {
-    if (auto *wf = sgpr_to_wave_[reg_idx]) {
+    if (reg_idx >= sgpr_to_wave_.size())
+      return 0;
+    if (auto *wf = sgpr_to_wave_[reg_idx])
       plugin_group_->onAmdgpuReadSgpr(wf, reg_idx);
-    }
     return sgpr_file_[reg_idx];
   }
 
@@ -410,6 +414,13 @@ public:
 
   /// @brief Number of physical VGPR registers in one allocation block.
   virtual uint32_t vgpr_allocation_block_size() const = 0;
+
+  /// @brief Number of lane elements physically stored for each VGPR slot.
+  ///
+  /// Wave32 dispatches use only the low active lanes, but the backing register
+  /// file can still reserve a wider physical slot so wave32 and wave64 share
+  /// the same SIMD storage layout.
+  virtual uint32_t vgpr_lanes_per_reg() const = 0;
 
   /// @brief Typed view of a single VGPR as the file's @c simdojo::VectorReg.
   /// @details The abstract CU exposes the VGPR file only as a byte pointer
@@ -584,8 +595,9 @@ private:
 
 /// @brief ISA-parameterized compute unit owning the typed VGPR register file.
 ///
-/// @details The Isa trait provides WF_SIZE which sets the VectorReg element
-/// count, so each VGPR holds one uint32_t lane per wavefront thread.
+/// @details VGPR storage reserves one 64-lane physical slot per register. The
+/// active lanes for a dispatch still come from the kernel descriptor and are
+/// stored on each Wavefront, so wave32 uses the low half of the slot.
 /// Pre-allocates all wavefront slots as IsaWavefront<Isa> instances.
 ///
 /// @tparam Mode Execution mode (FUNCTIONAL or CLOCKED).
@@ -593,7 +605,7 @@ private:
 template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
-  using Vgpr = simdojo::VectorReg<Isa::WF_SIZE, uint32_t>;
+  using Vgpr = simdojo::VectorReg<64, uint32_t>;
 
   /// @brief Construct an ISA-parameterized compute unit.
   /// @param name Human-readable name (e.g., "cu0").
@@ -664,6 +676,7 @@ protected:
 
 public:
   uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
+  uint32_t vgpr_lanes_per_reg() const override { return 64; }
 
 protected:
   /// @brief Execute one instruction on the given wavefront.

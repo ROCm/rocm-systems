@@ -2400,6 +2400,69 @@ TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {
   }
 }
 
+TEST(Gfx1250ExecutionTest, TensorDmaUsesWaveProcessForGlobalMemory) {
+  Gfx1250Sim sim;
+  sim.memory->set_passthrough(true);
+
+  constexpr uint32_t kProcessId = 1250;
+  constexpr uint32_t kElements = 4;
+  constexpr uint64_t kLoadGlobal = 0x1000;
+  constexpr uint64_t kStoreGlobal = 0x2000;
+  alignas(4096) std::array<uint8_t, 4096> load_page{};
+  alignas(4096) std::array<uint8_t, 4096> store_page{};
+  KfdProcess process(kProcessId);
+  sim.memory->register_process(kProcessId, &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(kLoadGlobal, load_page.data(), load_page.size());
+  process.map_pages(kStoreGlobal, store_page.data(), store_page.size());
+
+  auto write_host_u32 = [](std::array<uint8_t, 4096> &page, uint32_t offset, uint32_t value) {
+    for (uint32_t byte = 0; byte < 4; ++byte)
+      page[offset + byte] = static_cast<uint8_t>(value >> (byte * 8));
+  };
+  auto read_host_u32 = [](const std::array<uint8_t, 4096> &page, uint32_t offset) {
+    uint32_t value = 0;
+    for (uint32_t byte = 0; byte < 4; ++byte)
+      value |= static_cast<uint32_t>(page[offset + byte]) << (byte * 8);
+    return value;
+  };
+  for (uint32_t i = 0; i < kElements; ++i)
+    write_host_u32(load_page, i * 4, 0x81000000u + i);
+
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(kProcessId);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  write_tensor_dma_d0(*cu, *wf, 0, kLoadGlobal);
+  write_tensor_dma_d0(*cu, *wf, 8, kStoreGlobal);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);        // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, kElements << 16); // Tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 0);
+  write_wave_sgpr(*cu, *wf, 15, kElements << 16); // Tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 0);
+  write_wave_sgpr(*cu, *wf, 17, 0);
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  gfx1250::TensorLoadToLdsVimage load_inst(load_words.data());
+  load_inst.execute_impl(*wf);
+  for (uint32_t i = 0; i < kElements; ++i)
+    EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * 4), 0x81000000u + i);
+
+  for (uint32_t i = 0; i < kElements; ++i)
+    cu->lds().write32(wf->lds_base() + i * 4, 0x82000000u + i);
+
+  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c7c0c08u};
+  gfx1250::TensorStoreFromLdsVimage store_inst(store_words.data());
+  store_inst.execute_impl(*wf);
+  for (uint32_t i = 0; i < kElements; ++i)
+    EXPECT_EQ(read_host_u32(store_page, i * 4), 0x82000000u + i);
+
+  sim.memory->unregister_process(kProcessId);
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaDecodeExecuteCoversLoadStoreD2D4Forms) {
   constexpr uint32_t kNullSgpr = 124;
   constexpr std::array<uint32_t, 3> kLoadD2 = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
@@ -3393,11 +3456,11 @@ TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
   EXPECT_TRUE(sim.cu()->wf(0)->is_halted());
 }
 
-TEST(Gfx1250SimulationTest, MultiWaveDispatchPacksWorkitemIdsInV0) {
+TEST(Gfx1250SimulationTest, MultiWaveDispatchPacksWorkitemIdsInV0WithOneTidVgpr) {
   Gfx1250Sim sim;
   const uint32_t code[] = {S_ENDPGM_GFX12};
-  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false,
-                                            false, false, 0, 0, 0, 0, 1);
+  uint64_t kernel_object =
+      sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false, false, false);
 
   test::AqlQueue queue(sim.memory, sim.cp());
   hsa_kernel_dispatch_packet_t pkt{};
@@ -3524,6 +3587,70 @@ TEST(Gfx1250SimulationTest, PartialFinalWorkgroupRoundsUpDispatchCount2D) {
   EXPECT_EQ(count_dispatched_workgroups(sim), 9u);
 }
 
+TEST(Gfx1250SimulationTest, PartialGridTailMasksFinalWorkgroupExec) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 33, 32);
+  step_until_xcd_halted(sim);
+
+  std::vector<uint64_t> exec_masks;
+  for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
+    auto *se = sim.xcd()->shader_engine(se_idx);
+    for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx) {
+      auto *cu = se->compute_unit(cu_idx);
+      for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
+        auto *wf = cu->wf(wf_idx);
+        if (wf && wf->sgpr_alloc().count > 0)
+          exec_masks.push_back(wf->exec());
+      }
+    }
+  }
+
+  std::sort(exec_masks.begin(), exec_masks.end());
+  const std::vector<uint64_t> expected{1ULL, 0xFFFFFFFFULL};
+  EXPECT_EQ(exec_masks, expected);
+}
+
+TEST(Gfx1250SimulationTest, Partial2DGridTailMasksNonContiguousExecLanes) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 2;
+  pkt.workgroup_size_x = 8;
+  pkt.workgroup_size_y = 2;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 13;
+  pkt.grid_size_y = 2;
+  pkt.grid_size_z = 1;
+  pkt.kernel_object = kernel_object;
+  queue.submit(pkt);
+  step_until_xcd_halted(sim);
+
+  std::vector<uint64_t> exec_masks;
+  for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
+    auto *se = sim.xcd()->shader_engine(se_idx);
+    for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx) {
+      auto *cu = se->compute_unit(cu_idx);
+      for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
+        auto *wf = cu->wf(wf_idx);
+        if (wf && wf->sgpr_alloc().count > 0)
+          exec_masks.push_back(wf->exec());
+      }
+    }
+  }
+
+  std::sort(exec_masks.begin(), exec_masks.end());
+  const std::vector<uint64_t> expected{0x1F1FULL, 0xFFFFULL};
+  EXPECT_EQ(exec_masks, expected);
+}
+
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
   using namespace rocr::llvm::amdhsa;
 
@@ -3556,6 +3683,54 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
   EXPECT_EQ(read_wave_sgpr64(*sim.cu(), *wf, 0), kKernargAddr);
   EXPECT_EQ(sim.cu()->read_sgpr(sbase + 2), args.first);
   EXPECT_EQ(sim.cu()->read_sgpr(sbase + 3), args.second);
+}
+
+TEST(Gfx1250SimulationTest, DispatchPreloadsKernargThroughProcessPageTable) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kProcessId = 1252;
+  constexpr uint64_t kKernelAddr = 0x10000;
+  constexpr uint64_t kKernargAddr = 0x400000;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  struct Args {
+    uint32_t skip;
+    uint32_t first;
+    uint32_t second;
+  } args{0x11111111u, 0x22222222u, 0x33333333u};
+  const Args sparse_sentinel{0xaaaaaaaau, 0xbbbbbbbbu, 0xccccccccu};
+  alignas(4096) std::array<uint8_t, 4096> kernarg_page{};
+  std::memcpy(kernarg_page.data(), &args, sizeof(args));
+
+  uint32_t kernel_code_properties = 0;
+  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+
+  Gfx1250Sim sim;
+  KfdProcess process(kProcessId);
+  sim.memory->register_process(kProcessId, &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(kKernargAddr, kernarg_page.data(), kernarg_page.size());
+  sim.memory->load_image(reinterpret_cast<const uint8_t *>(&sparse_sentinel),
+                         sizeof(sparse_sentinel), kKernargAddr);
+  uint64_t kernel_object =
+      sim.write_kernel(kKernelAddr, code, std::size(code), 104, 32, 4, false, false, false,
+                       kernel_code_properties, sizeof(args), 2, 1);
+
+  test::AqlQueue queue(sim.memory, sim.cp(), test::AqlQueue::DEFAULT_RING_ADDR,
+                       test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                       test::AqlQueue::DEFAULT_DOORBELL_ADDR, kProcessId);
+  queue.dispatch(kernel_object, 32, 32, kKernargAddr);
+  step_until_halted(*sim.engine, *sim.cu());
+
+  ASSERT_EQ(sim.cu()->num_wfs(), 1u);
+  auto *wf = sim.cu()->wf(0);
+  ASSERT_NE(wf, nullptr);
+  uint32_t sbase = wf->sgpr_alloc().base;
+  EXPECT_EQ(wf->process_id(), kProcessId);
+  EXPECT_EQ(read_wave_sgpr64(*sim.cu(), *wf, 0), kKernargAddr);
+  EXPECT_EQ(sim.cu()->read_sgpr(sbase + 2), args.first);
+  EXPECT_EQ(sim.cu()->read_sgpr(sbase + 3), args.second);
+
+  sim.memory->unregister_process(kProcessId);
 }
 
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) {

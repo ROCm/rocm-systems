@@ -224,12 +224,13 @@ inline void copy_bytes(const TensorDmaDescriptor &desc, Wavefront &wf, uint64_t 
   }
 
   const uint32_t lds_addr = wf.lds_base() + desc.lds_base + static_cast<uint32_t>(lds_byte);
+  const uint32_t vmid = wf.process_id();
   for (uint32_t byte = 0; byte < desc.elem_size; ++byte) {
     if (store_from_lds) {
       if (in_bounds)
-        memory->write8(global_addr + byte, wf.cu().lds().read8(lds_addr + byte));
+        memory->write8(global_addr + byte, wf.cu().lds().read8(lds_addr + byte), vmid);
     } else {
-      const uint8_t value = in_bounds ? memory->read8(global_addr + byte) : 0;
+      const uint8_t value = in_bounds ? memory->read8(global_addr + byte, vmid) : 0;
       wf.cu().lds().write8(lds_addr + byte, value);
     }
   }

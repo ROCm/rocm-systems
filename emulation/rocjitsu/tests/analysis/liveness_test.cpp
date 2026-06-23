@@ -286,7 +286,7 @@ TEST(BasicBlockBuild, SkipsInvalidZeroPaddingBetweenAlignedKernels) {
   TestCodeObject co({1, 0, 0, 1});
   ZeroInvalidDecoder decoder;
 
-  auto blocks = BasicBlock::build(co, decoder);
+  auto blocks = BasicBlock::build(co, decoder, ROCJITSU_CODE_ARCH_CDNA3);
 
   ASSERT_EQ(blocks.size(), 2u);
   EXPECT_EQ(blocks[0]->start_offset(), 0u);

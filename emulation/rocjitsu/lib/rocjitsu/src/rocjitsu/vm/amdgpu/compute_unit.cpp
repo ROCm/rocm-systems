@@ -25,6 +25,7 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <string_view>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -92,9 +93,14 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
   throw std::runtime_error("Unsupported architecture for ComputeUnit");
 }
 
-Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs,
-                                        uint32_t vgprs) {
+Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs, uint32_t vgprs,
+                                        uint32_t wave_size) {
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
+  if (wave_size == 0)
+    wave_size = wf_size_;
+  if (wave_size == 0 || wave_size > vgpr_lanes_per_reg())
+    return nullptr;
+
   // Free register allocations from previously halted wavefronts before claiming
   // a new slot. This is needed so SGPR/VGPR blocks can be reused. However, we
   // must NOT reset the LDS allocator here — that would zero next_lds_alloc_
@@ -126,7 +132,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   // values from previous kernel runs.
   std::fill(&sgpr_file_[sgpr_base], &sgpr_file_[sgpr_base] + config_.sgprs_per_wf, 0u);
   std::memset(vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
-              vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
+              vgpr_allocation_block_size() * vgpr_lanes_per_reg() * sizeof(uint32_t));
 
   // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
   // arguments from L2/memory rather than stale lines from a prior kernel.
@@ -134,13 +140,14 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   l1_scalar_.invalidate_all();
 
   auto *wf = wfs_[slot].get();
+  wf->wf_size_ = wave_size;
   wf->wg_id_ = wg_id;
   wf->pc = pc;
   wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), sgprs};
   wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), vgprs};
   wf->num_sgprs_ = sgprs;
   wf->num_vgprs_ = vgprs;
-  wf->exec_ = wf_size_ == 64 ? ~0ULL : (1ULL << wf_size_) - 1;
+  wf->exec_ = wave_size == 64 ? ~0ULL : (1ULL << wave_size) - 1;
   wf->vcc_ = 0;
   wf->m0_ = 0;
   wf->set_apertures(shared_aperture_base_, shared_aperture_limit_, private_aperture_base_,
@@ -315,6 +322,7 @@ void ComputeUnitCore::update_wf_states() {
       continue;
     uint32_t did = w->dispatch_id();
     uint32_t wg = w->wg_id();
+
     bool all_at_barrier = true;
     for (auto &w2 : wfs_) {
       if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() != WfState::HALTED &&

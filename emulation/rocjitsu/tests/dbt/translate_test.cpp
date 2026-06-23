@@ -1044,7 +1044,8 @@ bool src_reads_vgpr_for_test(uint16_t src, uint8_t vgpr) {
   return src >= 256u && src < 512u && static_cast<uint8_t>(src - 256u) == vgpr;
 }
 
-bool section_contains_low_first_overlapping_v_mul_u64_pair(const Section *section) {
+[[maybe_unused]] bool
+section_contains_low_first_overlapping_v_mul_u64_pair(const Section *section) {
   if (section == nullptr)
     return false;
   const auto *words = reinterpret_cast<const uint32_t *>(section->data());
@@ -3802,7 +3803,7 @@ TEST(BinaryTranslator, Gfx1250B64RawBufferDescriptorPairScansThroughBranchSucces
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint64_t, 1> entry_offsets = {0};
-  auto blocks = BasicBlock::build(co, *decoder, entry_offsets);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, entry_offsets);
   ASSERT_GE(blocks.size(), 3u);
   ASSERT_EQ(blocks[0]->start_offset(), 0u);
   ASSERT_EQ(blocks[0]->successors().size(), 2u);
@@ -11487,7 +11488,7 @@ TEST(BinaryTranslator, Gfx1250ExpandedCopyPreservesOffsetDsLoadB128SecondWord) {
   ASSERT_TRUE(co.is_valid());
 
   const std::array<uint64_t, 1> entry_offsets = {0};
-  auto blocks = BasicBlock::build(co, *decoder, entry_offsets);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, entry_offsets);
   ASSERT_FALSE(blocks.empty());
   auto inst_it = blocks[0]->instructions().begin();
   ASSERT_NE(inst_it, blocks[0]->instructions().end());

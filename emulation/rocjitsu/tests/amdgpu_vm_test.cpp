@@ -24,12 +24,15 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <sys/mman.h>
 #include <vector>
 
 namespace {
@@ -46,7 +49,7 @@ struct VmFixture {
   amdgpu::GpuMemory *gpu_mem = nullptr;
 
   VmFixture(const std::string &arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
-            uint32_t lds_size_kb = 64) {
+            uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104) {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
@@ -72,7 +75,9 @@ struct VmFixture {
                        R"({"key":"num_wf_slots","value":")" +
                        std::to_string(num_wf_slots) +
                        R"("},)"
-                       R"({"key":"sgprs_per_wf","value":"104"},)"
+                       R"({"key":"sgprs_per_wf","value":")" +
+                       std::to_string(sgprs_per_wf) +
+                       R"("},)"
                        R"({"key":"vgprs_per_wf","value":"256"},)"
                        R"({"key":"lds_size_kb","value":")" +
                        std::to_string(lds_size_kb) +
@@ -97,15 +102,20 @@ struct VmFixture {
   /// Write a kernel descriptor + instructions to GPU memory per AMDHSA ABI.
   /// Returns the kernel_object address.
   uint64_t write_kernel(uint64_t addr, const void *code, size_t code_size, uint32_t sgprs = 104,
-                        uint32_t vgprs = 256, uint32_t user_sgprs = 2) {
+                        uint32_t vgprs = 256, uint32_t user_sgprs = 2,
+                        uint32_t kernel_code_properties = 0, uint32_t vgpr_encoding_granule = 8,
+                        uint32_t enable_vgpr_workitem_id = 0) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((vgprs / 8) - 1));
+                    ((vgprs / vgpr_encoding_granule) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((sgprs / 8) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
+                    enable_vgpr_workitem_id);
+    kd.kernel_code_properties = kernel_code_properties;
 
     mem()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem()->load_image(static_cast<const uint8_t *>(code), code_size,
@@ -171,6 +181,164 @@ TEST(GpuMemoryTest, SparsePages) {
   EXPECT_EQ(mem->read32(0x0), 42u);
   EXPECT_EQ(mem->read32(0x100000), 99u);
   EXPECT_EQ(mem->read32(0x50000), 0u);
+}
+
+TEST(GpuMemoryTest, LowPassthroughPointersFallBackToSparseMemory) {
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint64_t kNullGuardGpuVa = 0x1000;
+  constexpr uint64_t kMmapMinAddrGpuVa = 0x10000;
+  constexpr uint64_t kHighGpuVa = 0x20000;
+
+  amdgpu::GpuMemory mem("test_mem");
+  mem.set_passthrough(true);
+  KfdProcess process(kProcessId);
+  mem.register_process(kProcessId, &process.page_table_, &process.page_table_mutex_);
+
+  process.map_pages(kNullGuardGpuVa, reinterpret_cast<void *>(kNullGuardGpuVa),
+                    KfdProcess::kPageSize);
+  EXPECT_EQ(mem.resolve_host_ptr(kNullGuardGpuVa + 0x980, kProcessId), nullptr);
+  mem.write8(kNullGuardGpuVa + 0x980, 0x5a, kProcessId);
+  EXPECT_EQ(mem.read8(kNullGuardGpuVa + 0x980, kProcessId), 0x5au);
+
+  if (!KfdProcess::host_page_readable(reinterpret_cast<void *>(kMmapMinAddrGpuVa))) {
+    process.map_pages(kMmapMinAddrGpuVa, reinterpret_cast<void *>(kMmapMinAddrGpuVa),
+                      KfdProcess::kPageSize);
+    EXPECT_EQ(mem.resolve_host_ptr(kMmapMinAddrGpuVa + 0xe80, kProcessId), nullptr);
+    mem.write8(kMmapMinAddrGpuVa + 0xe80, 0xc3, kProcessId);
+    EXPECT_EQ(mem.read8(kMmapMinAddrGpuVa + 0xe80, kProcessId), 0xc3u);
+  }
+
+  alignas(4096) std::array<uint8_t, 4096> host_page{};
+  process.map_pages(kHighGpuVa, host_page.data(), host_page.size());
+  EXPECT_EQ(mem.resolve_host_ptr(kHighGpuVa + 4, kProcessId), host_page.data());
+  mem.write8(kHighGpuVa + 4, 0xa5, kProcessId);
+  EXPECT_EQ(host_page[4], 0xa5u);
+
+  mem.unregister_process(kProcessId);
+}
+
+TEST(GpuMemoryTest, InaccessibleHostMappingsFallBackToSparseMemory) {
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint64_t kGpuVa = 0x40000;
+
+  void *reserved =
+      mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(reserved, MAP_FAILED);
+
+  amdgpu::GpuMemory mem("test_mem");
+  mem.set_passthrough(true);
+  KfdProcess process(kProcessId);
+  mem.register_process(kProcessId, &process.page_table_, &process.page_table_mutex_);
+
+  process.map_pages(kGpuVa, reserved, KfdProcess::kPageSize);
+  EXPECT_EQ(mem.resolve_host_ptr(kGpuVa + 0x680, kProcessId), nullptr);
+  mem.write8(kGpuVa + 0x680, 0x7b, kProcessId);
+  EXPECT_EQ(mem.read8(kGpuVa + 0x680, kProcessId), 0x7bu);
+
+  mem.unregister_process(kProcessId);
+  EXPECT_EQ(munmap(reserved, KfdProcess::kPageSize), 0);
+}
+
+TEST(GpuMemoryTest, HostPageAccessReflectsProtectionChanges) {
+  void *page = mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(page, MAP_FAILED);
+
+  auto access = KfdProcess::host_page_access(page);
+  EXPECT_TRUE(access.readable);
+  EXPECT_TRUE(access.writable);
+
+  ASSERT_EQ(mprotect(page, KfdProcess::kPageSize, PROT_NONE), 0);
+  access = KfdProcess::host_page_access(page);
+  EXPECT_FALSE(access.readable);
+  EXPECT_FALSE(access.writable);
+
+  EXPECT_EQ(munmap(page, KfdProcess::kPageSize), 0);
+}
+
+TEST(GpuMemoryTest, PageTableTranslationReflectsProtectionChanges) {
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint64_t kGpuVa = 0x50000;
+  constexpr uint32_t kOffset = 0x120;
+
+  auto *page = static_cast<uint8_t *>(mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(page, MAP_FAILED);
+  page[kOffset] = 0x5a;
+
+  amdgpu::GpuMemory mem("test_mem");
+  mem.set_passthrough(true);
+  KfdProcess process(kProcessId);
+  mem.register_process(kProcessId, &process.page_table_, &process.page_table_mutex_);
+  process.map_pages(kGpuVa, page, KfdProcess::kPageSize);
+
+  EXPECT_EQ(mem.read8(kGpuVa + kOffset, kProcessId), 0x5au);
+
+  ASSERT_EQ(mprotect(page, KfdProcess::kPageSize, PROT_READ), 0);
+  KfdProcess::notify_host_mappings_changed();
+  mem.write8(kGpuVa + kOffset, 0x7b, kProcessId);
+  EXPECT_EQ(page[kOffset], 0x5au);
+
+  ASSERT_EQ(mprotect(page, KfdProcess::kPageSize, PROT_NONE), 0);
+  KfdProcess::notify_host_mappings_changed();
+  EXPECT_EQ(mem.read8(kGpuVa + kOffset, kProcessId), 0x7bu);
+
+  mem.unregister_process(kProcessId);
+  EXPECT_EQ(munmap(page, KfdProcess::kPageSize), 0);
+  KfdProcess::notify_host_mappings_changed();
+}
+
+TEST(GpuMemoryTest, ReadWriteBytesSpanMappedAndSparsePages) {
+  constexpr size_t kPageSize = static_cast<size_t>(KfdProcess::kPageSize);
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint64_t kShortGpuVa = 0x80000;
+  constexpr uint64_t kLongGpuVa = 0x90000;
+
+  amdgpu::GpuMemory mem("test_mem");
+  mem.set_passthrough(true);
+  KfdProcess process(kProcessId);
+  mem.register_process(kProcessId, &process.page_table_, &process.page_table_mutex_);
+
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, kPageSize> host_page{};
+  process.map_pages(kShortGpuVa, host_page.data(), host_page.size());
+
+  std::array<uint8_t, 16> short_src{};
+  for (size_t i = 0; i < short_src.size(); ++i)
+    short_src[i] = static_cast<uint8_t>(0x20 + i);
+  mem.write_bytes(kShortGpuVa + kPageSize - 8, short_src.data(),
+                  static_cast<uint32_t>(short_src.size()), kProcessId);
+
+  EXPECT_TRUE(std::equal(short_src.begin(), short_src.begin() + 8, host_page.end() - 8));
+  for (size_t i = 0; i < 8; ++i)
+    EXPECT_EQ(mem.read8(kShortGpuVa + kPageSize + i, kProcessId), short_src[8 + i]);
+
+  std::array<uint8_t, 16> short_out{};
+  mem.read_bytes(kShortGpuVa + kPageSize - 8, short_out.data(),
+                 static_cast<uint32_t>(short_out.size()), kProcessId);
+  EXPECT_EQ(short_out, short_src);
+
+  alignas(KfdProcess::kPageSize) std::array<uint8_t, kPageSize> middle_page{};
+  process.map_pages(kLongGpuVa + kPageSize, middle_page.data(), middle_page.size());
+
+  std::array<uint8_t, kPageSize + 16> long_src{};
+  for (size_t i = 0; i < long_src.size(); ++i)
+    long_src[i] = static_cast<uint8_t>((i * 17) & 0xff);
+  mem.write_bytes(kLongGpuVa + kPageSize - 8, long_src.data(),
+                  static_cast<uint32_t>(long_src.size()), kProcessId);
+
+  for (size_t i = 0; i < 8; ++i)
+    EXPECT_EQ(mem.read8(kLongGpuVa + kPageSize - 8 + i, kProcessId), long_src[i]);
+  EXPECT_TRUE(
+      std::equal(long_src.begin() + 8, long_src.begin() + 8 + kPageSize, middle_page.begin()));
+  for (size_t i = 0; i < 8; ++i)
+    EXPECT_EQ(mem.read8(kLongGpuVa + 2 * kPageSize + i, kProcessId), long_src[8 + kPageSize + i]);
+
+  std::array<uint8_t, kPageSize + 16> long_out{};
+  mem.read_bytes(kLongGpuVa + kPageSize - 8, long_out.data(),
+                 static_cast<uint32_t>(long_out.size()), kProcessId);
+  EXPECT_EQ(long_out, long_src);
+
+  mem.unregister_process(kProcessId);
 }
 
 TEST(VmLifecycleTest, CreateAndDestroy) {
@@ -275,6 +443,72 @@ TEST_P(IsaTest, RegisterAccess) {
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 100u);
   EXPECT_EQ(cu->read_vgpr(vb + 1, 63), 200u);
   EXPECT_EQ(cu->read_vgpr(vb + 1, 1), 0u);
+}
+
+TEST(RdnaDispatchTest, DescriptorControlsWaveSizeAndVgprGranularity) {
+  using namespace rocr::llvm::amdhsa;
+
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  uint32_t wave32_props = 0;
+  AMDHSA_BITS_SET(wave32_props, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+
+  {
+    VmFixture f("rdna4", 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, wave32_props, 8);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 32, 32);
+    step_until_halted(*f.engine, {f.cu()});
+
+    auto *wf = f.cu()->wf(0);
+    ASSERT_NE(wf, nullptr);
+    EXPECT_EQ(wf->wf_size(), 32u);
+    EXPECT_EQ(wf->num_vgprs(), 64u);
+  }
+
+  {
+    VmFixture f("rdna4", 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    uint64_t ko = f.write_kernel(0x2000, code, sizeof(code), 104, 64, 2, 0, 4);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(ko, 64, 64);
+    step_until_halted(*f.engine, {f.cu()});
+
+    auto *wf = f.cu()->wf(0);
+    ASSERT_NE(wf, nullptr);
+    EXPECT_EQ(wf->wf_size(), 64u);
+    EXPECT_EQ(wf->num_vgprs(), 64u);
+  }
+}
+
+TEST(RdnaDispatchTest, PackedTidInitializesV0WithWorkitemTuple) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+
+  for (const std::string &arch : {std::string("rdna3"), std::string("rdna4")}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch, 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 32, 2, 0, 4, 2);
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    hsa_kernel_dispatch_packet_t pkt{};
+    pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    pkt.setup = 3;
+    pkt.workgroup_size_x = 8;
+    pkt.workgroup_size_y = 4;
+    pkt.workgroup_size_z = 2;
+    pkt.grid_size_x = 8;
+    pkt.grid_size_y = 4;
+    pkt.grid_size_z = 2;
+    pkt.kernel_object = ko;
+    queue.submit(pkt);
+    step_until_halted(*f.engine, {f.cu()});
+
+    auto *wf = f.cu()->wf(0);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t vbase = wf->vgpr_alloc().base;
+    EXPECT_EQ(f.cu()->read_vgpr(vbase, 0), 0u);
+    EXPECT_EQ(f.cu()->read_vgpr(vbase, 9), 1u | (1u << 10));
+    EXPECT_EQ(f.cu()->read_vgpr(vbase, 40), (1u << 10) | (1u << 20));
+    EXPECT_EQ(f.cu()->read_vgpr(vbase, 63), 7u | (3u << 10) | (1u << 20));
+  }
 }
 
 TEST_P(IsaTest, RegisterFileIsolation) {

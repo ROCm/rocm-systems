@@ -442,10 +442,11 @@ int SimulatedKfd::close(uint32_t process_id) {
       leaked_bytes += alloc.size;
       if (trace_enabled)
         leaked_handles.push_back(handle);
-      if (alloc.host_ptr && !(alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)) {
+      if (alloc.host_ptr && alloc.host_ptr_owned) {
         unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
         syscall(SYS_munmap, alloc.host_ptr, alloc.size);
         alloc.host_ptr = nullptr;
+        alloc.host_ptr_owned = false;
       }
       if (alloc.memfd >= 0) {
         {
@@ -751,6 +752,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     return alloc.host_ptr;
 
   void *host_ptr;
+  bool host_ptr_owned = true;
 
   if (alloc.memfd >= 0) {
     if (length > alloc.size) {
@@ -799,6 +801,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     }
     if (reuse_pages) {
       host_ptr = addr;
+      host_ptr_owned = false;
     } else {
       int mflags = MAP_ANONYMOUS;
       mflags |= (flags & MAP_SHARED) ? MAP_SHARED : MAP_PRIVATE;
@@ -811,6 +814,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
   }
 
   alloc.host_ptr = host_ptr;
+  alloc.host_ptr_owned = host_ptr_owned;
 
   util::Logger::vm([&](auto &os) {
     os << std::format("mmap: gpu_va={:#x} host_ptr={:#x} size={} flags={:#x}"
@@ -863,6 +867,7 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
       syscall(SYS_munmap, addr, length);
       alloc.host_ptr = nullptr;
+      alloc.host_ptr_owned = false;
       return 0;
     }
   }
@@ -1022,6 +1027,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
               safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
           if (mapped != MAP_FAILED) {
             alloc.host_ptr = mapped;
+            alloc.host_ptr_owned = true;
             map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype);
           }
         }
@@ -1140,8 +1146,11 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
         proc.imported_dmabufs_.erase(dmabuf_it);
       }
     }
-    if (alloc.host_ptr && !alloc.user_va)
+    if (alloc.host_ptr)
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+    if (alloc.host_ptr && alloc.host_ptr_owned) {
+      syscall(SYS_munmap, alloc.host_ptr, alloc.size);
+    }
     if (alloc.memfd >= 0) {
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
@@ -1344,6 +1353,13 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   if (dupfd < 0)
     return -errno;
 
+  auto *host_ptr = safe_mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, dupfd, 0);
+  if (host_ptr == MAP_FAILED) {
+    const int saved_errno = errno;
+    syscall(SYS_close, dupfd);
+    return -saved_errno;
+  }
+
   uint64_t handle;
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
@@ -1353,16 +1369,15 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
     alloc.size = size;
     alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
     alloc.handle = handle;
-    alloc.user_va = true;
     alloc.imported = true;
     alloc.dmabuf_fd = dupfd;
-    alloc.host_ptr = reinterpret_cast<void *>(args->va_addr);
+    alloc.host_ptr = host_ptr;
+    alloc.host_ptr_owned = true;
     proc.allocations_[handle] = alloc;
   }
 
   if (args->va_addr)
-    map_to_gpu(proc, args->va_addr, reinterpret_cast<void *>(args->va_addr), size,
-               amdgpu::Mtype::UC);
+    map_to_gpu(proc, args->va_addr, host_ptr, size, amdgpu::Mtype::UC);
 
   KfdProcess::ImportedDmabuf info{};
   info.handle = handle;
@@ -1431,22 +1446,16 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
                          "true sharing)");
       }
 
-      {
-        std::unique_lock ptlk(proc.page_table_mutex_);
-        auto *old_base = static_cast<uint8_t *>(alloc.host_ptr);
-        auto *new_base = static_cast<uint8_t *>(new_host_ptr);
-        for (size_t off = 0; off < alloc.size; off += KfdProcess::kPageSize) {
-          uint64_t page_num = (alloc.gpu_va + off) >> KfdProcess::kPageShift;
-          auto pt_it = proc.page_table_.find(page_num);
-          if (pt_it != proc.page_table_.end() && pt_it->second.host_ptr == old_base + off)
-            pt_it->second.host_ptr = new_base + off;
-        }
+      if (alloc.gpu_va != 0) {
+        proc.unmap_pages(alloc.gpu_va, alloc.size);
+        map_to_gpu(proc, alloc.gpu_va, new_host_ptr, alloc.size, pte_mtype_for_flags(alloc.flags));
       }
 
-      if (!(alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR))
+      if (alloc.host_ptr_owned)
         syscall(SYS_munmap, alloc.host_ptr, alloc.size);
 
       alloc.host_ptr = new_host_ptr;
+      alloc.host_ptr_owned = true;
       alloc.memfd = promoted_fd;
       {
         std::lock_guard<std::mutex> flk(owned_fds_mutex_);
@@ -1581,6 +1590,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     alloc.flags = alloc_flags;
     alloc.handle = handle;
     alloc.host_ptr = host_ptr;
+    alloc.host_ptr_owned = true;
     alloc.memfd = dup_fd;
     alloc.gpu_id = source_gpu_id;
     alloc.imported = true;
