@@ -123,7 +123,7 @@ namespace
 bool
 is_spm_supported_arch(const hsa::AgentCache& agent)
 {
-    return common::regex::regex_match(agent.name(), "gfx9[45][0-9a-fA-F]");
+    return common::regex::regex_match(agent.name(), "gfx9(4[012]|50)");
 }
 
 auto
@@ -160,13 +160,6 @@ getSPMMetrics(const hsa::AgentCache& agent)
     auto metrics = findSPMDeviceMetrics(agent, {});
     EXPECT_FALSE(metrics.empty()) << "SPM metrics should not be empty for " << agent.name();
     return metrics;
-}
-
-bool
-check_spm_agent_found(bool any_spm_agent)
-{
-    if(!any_spm_agent) ROCP_ERROR << "SPM unavailable";
-    return any_spm_agent;
 }
 
 void
@@ -283,7 +276,7 @@ TEST(spm_core, check_packet_generation)
             }
         }
     }
-    if(!check_spm_agent_found(any_spm_agent)) return;
+    if(!any_spm_agent) ROCP_ERROR << "SPM unavailable";
 }
 
 namespace rocprofiler
@@ -494,7 +487,7 @@ TEST(spm_core, check_callbacks)
     registration::finalize();
     context::pop_client(1);
     set_client_ctx(get_client_ctx());
-    if(!check_spm_agent_found(any_spm_agent)) return;
+    if(!any_spm_agent) ROCP_ERROR << "SPM unavailable";
 }
 
 TEST(spm_core, destroy_counter_profile)
@@ -554,7 +547,7 @@ TEST(spm_core, destroy_counter_profile)
     registration::finalize();
     context::pop_client(1);
     set_client_ctx(get_client_ctx());
-    if(!check_spm_agent_found(any_spm_agent)) return;
+    if(!any_spm_agent) ROCP_ERROR << "SPM unavailable";
 }
 
 TEST(spm_core, start_stop_callback_ctx)
@@ -777,7 +770,7 @@ TEST(spm_core, test_profile_incremental)
     }
 
     set_client_ctx(get_client_ctx());
-    if(!check_spm_agent_found(any_spm_agent)) return;
+    if(!any_spm_agent) ROCP_ERROR << "SPM unavailable";
 }
 
 TEST(spm_core, public_api_iterate_agents)
@@ -842,7 +835,7 @@ TEST(spm_core, public_api_iterate_agents)
     registration::set_init_status(1);
     registration::finalize();
     context::pop_client(1);
-    if(!check_spm_agent_found(any_spm_agent)) return;
+    if(!any_spm_agent) ROCP_ERROR << "SPM unavailable";
 }
 
 TEST(spm_core, query_agent_configurations)
@@ -914,7 +907,7 @@ TEST(spm_core, query_agent_configurations)
     registration::finalize();
     context::pop_client(1);
     set_client_ctx(get_client_ctx());
-    if(!check_spm_agent_found(any_spm_agent)) return;
+    if(!any_spm_agent) ROCP_ERROR << "SPM unavailable";
 }
 
 TEST(spm_core, stop_context_removes_callbacks)
