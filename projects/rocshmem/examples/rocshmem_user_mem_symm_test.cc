@@ -25,19 +25,16 @@
 /*
  * Symmetric user-buffer registration example.
  *
- * This mirrors rocshmem_user_mem_test.cc but exercises the *symmetric*
- * registration APIs:
+ * This example exercises the symmetric user-buffer registration APIs:
  *
- *   rocshmem_buffer_register_symmetric(addr, length)  -> rocSHMEM alias
- *   rocshmem_buffer_unregister_symmetric(alias)
+ *   rocshmem_buffer_register_symmetric(addr, length)
+ *   rocshmem_buffer_unregister_symmetric(addr)
  *
- * Unlike rocshmem_buffer_register() (which registers a node-local buffer for
- * use as the *local* side of an RMA), the symmetric variant registers a buffer
- * so it can act as the *remote symmetric target* of RMA/collectives. The call
- * is collective, must be passed the same length on every PE, and returns a
- * rocSHMEM-managed virtual address (the "alias"). That returned address
- * -- not the original buffer pointer -- is what you use as the symmetric
- * object and what you must pass to rocshmem_buffer_unregister_symmetric().
+ * Registering a user buffer symmetrically lets it be used as the remote target
+ * of RMA and collective operations. The call is collective and must be passed
+ * the same length on every PE. It returns the address to use as the symmetric
+ * object for subsequent operations, which is also the address passed back to
+ * rocshmem_buffer_unregister_symmetric().
  *
  * The buffer handed to the symmetric API must be HIP VMM device memory, so the
  * example skips cleanly when either prerequisite is not met:
@@ -61,6 +58,8 @@
 
 #include <rocshmem/rocshmem.hpp>
 #include <mpi.h>
+
+#include <vector>
 
 #include "util.h"
 
@@ -100,7 +99,8 @@ static bool check_recvbuf(int *dest, int nelem, int my_pe, int npes) {
       if (dest[idx] != result) {
         res = false;
 #ifdef VERBOSE
-        printf("recvbuf[%d] = %d expected %d \n", i, dest[i], result);
+        std::cout << "recvbuf[" << i << "] = " << dest[i] << " expected "
+                  << result << std::endl;
 #endif
       }
     }
@@ -191,6 +191,55 @@ static void vmm_free(void *ptr, hipMemGenericAllocationHandle_t handle,
   (void)hipMemRelease(handle);
 }
 
+/*
+ * Register dest_buf symmetrically, run an all-to-all into the returned address,
+ * verify the result, and unregister. If registration is not supported for the
+ * given memory, the case is reported and skipped so the example stays portable
+ * across backends.
+ */
+static bool run_symm_variant(const char *label, void *dest_buf,
+                             size_t dest_size, int *source, int nelem,
+                             int my_pe, int npes, rocshmem_team_t team,
+                             const char *prog) {
+  int *dest = reinterpret_cast<int *>(
+      rocshmem_buffer_register_symmetric(dest_buf, dest_size));
+  if (dest == nullptr) {
+    if (my_pe == 0) {
+      std::cout << label
+                << ": rocshmem_buffer_register_symmetric is not supported for "
+                   "this memory in the current configuration; skipping"
+                << std::endl;
+    }
+    return true;
+  }
+
+  size_t nbytes = static_cast<size_t>(nelem) * npes * sizeof(int);
+
+  /* Initialize the destination to -1 (0xff bytes) before any remote writes. */
+  CHECK_HIP(hipMemset(dest, 0xff, nbytes));
+  rocshmem_barrier_all();
+
+  user_mem_symm_test<<<dim3(1), dim3(256), 0, 0>>>(source, dest, nelem, team);
+  CHECK_HIP(hipDeviceSynchronize());
+
+  std::vector<int> host(static_cast<size_t>(nelem) * npes);
+  CHECK_HIP(hipMemcpy(host.data(), dest, nbytes, hipMemcpyDeviceToHost));
+  bool pass = check_recvbuf(host.data(), nelem, my_pe, npes);
+
+  std::cout << "[" << my_pe << "] Test " << prog << " (" << label
+            << ") \t nelem " << nelem << " " << (pass ? "[PASS]" : "[FAIL]")
+            << std::endl;
+
+  int ret = rocshmem_buffer_unregister_symmetric(dest);
+  if (ROCSHMEM_SUCCESS != ret) {
+    std::cout << label << ": Error unregistering symmetric user buffer"
+              << std::endl;
+    rocshmem_global_exit(1);
+  }
+
+  return pass;
+}
+
 #define MAX_ELEM 256
 
 int main(int argc, char **argv) {
@@ -245,91 +294,48 @@ int main(int argc, char **argv) {
   int device_id = 0;
   CHECK_HIP(hipGetDevice(&device_id));
 
-  /* Skip cleanly if the GPU does not support HIP virtual memory management. */
-  if (!device_supports_vmm(device_id)) {
-    if (my_pe == 0) {
-      std::cout << "GPU does not support HIP virtual memory management; "
-                   "skipping"
-                << std::endl;
-    }
-    rocshmem_finalize();
-    MPI_Finalize();
-    return 0;
-  }
-
   size_t buffer_size = nelem * sizeof(int) * npes;
 
-  /*
-   * Allocate the destination as HIP VMM memory and register it symmetrically.
-   * The returned alias -- not the original VMM pointer -- is the symmetric
-   * address used by the collective and passed to the unregister call.
-   */
-  void *dest_vmm = nullptr;
-  hipMemGenericAllocationHandle_t dest_handle{};
-  size_t dest_size = 0;
-  if (!vmm_alloc(&dest_vmm, &dest_handle, buffer_size, &dest_size, device_id)) {
-    if (my_pe == 0) {
-      std::cout << "HIP VMM allocation unavailable; skipping" << std::endl;
-    }
-    rocshmem_finalize();
-    MPI_Finalize();
-    return 0;
-  }
-
-  int *dest = reinterpret_cast<int *>(
-      rocshmem_buffer_register_symmetric(dest_vmm, dest_size));
-  if (dest == nullptr) {
-    /*
-     * A null return means symmetric registration is unavailable in the current
-     * backend/build. Skip instead of failing so this example remains a valid
-     * demonstration of the API regardless of where it is run.
-     */
-    if (my_pe == 0) {
-      std::cout << "rocshmem_buffer_register_symmetric is not supported in "
-                   "this configuration; skipping"
-                << std::endl;
-    }
-    vmm_free(dest_vmm, dest_handle, dest_size);
-    rocshmem_finalize();
-    MPI_Finalize();
-    return 0;
-  }
-
+  /* Shared all-to-all source, used by every variant. */
   int *source = reinterpret_cast<int *>(rocshmem_malloc(buffer_size));
   if (source == nullptr) {
     std::cout << "Error allocating source from symmetric heap" << std::endl;
     rocshmem_global_exit(1);
   }
-
   init_sendbuf(source, nelem, my_pe, npes);
-  for (int i = 0; i < nelem * npes; i++) {
-    dest[i] = -1;
-  }
 
-  rocshmem_team_t team_reduce_world_dup;
-  team_reduce_world_dup = ROCSHMEM_TEAM_INVALID;
+  rocshmem_team_t team_reduce_world_dup = ROCSHMEM_TEAM_INVALID;
   rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, npes, nullptr, 0,
                               &team_reduce_world_dup);
 
-  CHECK_HIP(hipDeviceSynchronize());
+  /* Variant 1: plain hipMalloc device memory. */
+  int *dest_hip = nullptr;
+  CHECK_HIP(hipMalloc(&dest_hip, buffer_size));
+  run_symm_variant("hipMalloc", dest_hip, buffer_size, source, nelem, my_pe,
+                   npes, team_reduce_world_dup, argv[0]);
+  CHECK_HIP(hipFree(dest_hip));
 
-  int threadsPerBlock = 256;
-  user_mem_symm_test<<<dim3(1), dim3(threadsPerBlock), 0, 0>>>(
-      source, dest, nelem, team_reduce_world_dup);
-  CHECK_HIP(hipDeviceSynchronize());
+  rocshmem_barrier_all();
 
-  bool pass = check_recvbuf(dest, nelem, my_pe, npes);
-
-  printf("[%d] Test %s \t nelem %d %s\n", my_pe, argv[0], nelem,
-         pass ? "[PASS]" : "[FAIL]");
-
-  ret = rocshmem_buffer_unregister_symmetric(dest);
-  if (ROCSHMEM_SUCCESS != ret) {
-    std::cout << "Error unregistering symmetric user buffer" << std::endl;
-    rocshmem_global_exit(1);
+  /* Variant 2: HIP VMM device memory (only attempted if the GPU supports it). */
+  if (device_supports_vmm(device_id)) {
+    void *dest_vmm = nullptr;
+    hipMemGenericAllocationHandle_t dest_handle{};
+    size_t dest_size = 0;
+    if (vmm_alloc(&dest_vmm, &dest_handle, buffer_size, &dest_size,
+                  device_id)) {
+      run_symm_variant("VMM", dest_vmm, dest_size, source, nelem, my_pe, npes,
+                       team_reduce_world_dup, argv[0]);
+      vmm_free(dest_vmm, dest_handle, dest_size);
+    } else if (my_pe == 0) {
+      std::cout << "VMM: HIP VMM allocation unavailable; skipping" << std::endl;
+    }
+  } else if (my_pe == 0) {
+    std::cout << "VMM: GPU does not support HIP virtual memory management; "
+                 "skipping"
+              << std::endl;
   }
 
-  vmm_free(dest_vmm, dest_handle, dest_size);
   rocshmem_free(source);
 
   rocshmem_finalize();
