@@ -225,7 +225,7 @@ publish_submitted_packets(QueueState* state, uint64_t submit_pos)
         << "publish_submitted_packets: submit_pos (" << submit_pos
         << ") regressed below last_published_submit_pos (" << tls.last_published_submit_pos << ")";
 
-    const auto debug = debug_qi_hang();
+    const auto debug     = debug_qi_hang();
     auto       real_rdid = uint64_t{0};
     if(debug)
     {
@@ -407,8 +407,8 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     constexpr auto timeout_hint =
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::microseconds{10});
 
-    auto signal_value = starting_value;
-    auto niterations  = uint64_t{0};
+    auto       signal_value  = starting_value;
+    auto       niterations   = uint64_t{0};
     const auto debug         = debug_qi_hang();
     auto       wait_start    = std::chrono::steady_clock::time_point{};
     auto       next_stall_ms = int64_t{1000};
@@ -421,10 +421,10 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     if(debug && !session->packet_data.empty())
     {
         const auto& last_packet = session->packet_data.back();
-        last_dispatch_id       = last_packet.callback_record.dispatch_info.dispatch_id;
-        last_kernel_id         = last_packet.callback_record.dispatch_info.kernel_id;
-        last_signal_pooled     = (last_packet.pooled_signal != nullptr);
-        queue_id               = last_packet.callback_record.dispatch_info.queue_id;
+        last_dispatch_id        = last_packet.callback_record.dispatch_info.dispatch_id;
+        last_kernel_id          = last_packet.callback_record.dispatch_info.kernel_id;
+        last_signal_pooled      = (last_packet.pooled_signal != nullptr);
+        queue_id                = last_packet.callback_record.dispatch_info.queue_id;
     }
 
     if(debug)
@@ -499,9 +499,11 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                     std::chrono::steady_clock::now() - wait_start)
                                     .count();
-        const auto* reason = (signal_value < starting_value)          ? "completed"
-                             : (registration::get_fini_status() != 0) ? "fini"
-                                                                      : "unknown";
+        const char* reason = "unknown";
+        if(signal_value < starting_value)
+            reason = "completed";
+        else if(registration::get_fini_status() != 0)
+            reason = "fini";
         ROCP_WARNING << fmt::format(
             "QI_WAIT_DONE reason={} elapsed_ms={} iterations={} signal={} final_value={} "
             "starting_value={} packet_count={} fini_status={}",
@@ -529,10 +531,10 @@ async_signal_handler(hsa_signal_t                            completion_signal,
 
     for(auto& packet : session->packet_data)
     {
-        const auto dispatch_id = packet.callback_record.dispatch_info.dispatch_id;
-        const auto kernel_id   = packet.callback_record.dispatch_info.kernel_id;
+        const auto dispatch_id     = packet.callback_record.dispatch_info.dispatch_id;
+        const auto kernel_id       = packet.callback_record.dispatch_info.kernel_id;
         const auto packet_queue_id = packet.callback_record.dispatch_info.queue_id;
-        const auto pooled     = (packet.pooled_signal != nullptr);
+        const auto pooled          = (packet.pooled_signal != nullptr);
 
         if(debug)
         {
@@ -769,15 +771,15 @@ write_interceptor(Queue*                                queue,
             if(!existing_completion_signal)
                 _packet_data.pooled_signal = create_signal(&completion_signal);
 
-            const auto value_before_sigadd = (debug_qi_hang())
-                                                 ? get_core_table()->hsa_signal_load_scacquire_fn(
-                                                       completion_signal)
-                                                 : hsa_signal_value_t{0};
+            const auto value_before_sigadd =
+                (debug_qi_hang())
+                    ? get_core_table()->hsa_signal_load_scacquire_fn(completion_signal)
+                    : hsa_signal_value_t{0};
             get_core_table()->hsa_signal_add_scacq_screl_fn(completion_signal, 1);
-            const auto value_after_sigadd = (debug_qi_hang())
-                                                ? get_core_table()->hsa_signal_load_scacquire_fn(
-                                                      completion_signal)
-                                                : hsa_signal_value_t{0};
+            const auto value_after_sigadd =
+                (debug_qi_hang())
+                    ? get_core_table()->hsa_signal_load_scacquire_fn(completion_signal)
+                    : hsa_signal_value_t{0};
 
             // set the completion signal to the kernel packet
             _packet_data.completion_signal = completion_signal;

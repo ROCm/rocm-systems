@@ -980,8 +980,8 @@ Queue::release_signal(pooled_signal_t* signal)
     {
         if(debug_qi_hang())
         {
-            const auto value_before_release = get_core_table()->hsa_signal_load_scacquire_fn(
-                signal->get().value);
+            const auto value_before_release =
+                get_core_table()->hsa_signal_load_scacquire_fn(signal->get().value);
             ROCP_WARNING << fmt::format("QI_RELEASE signal={} pool_index={} "
                                         "value_before_release={} in_use={}",
                                         signal->get().value.handle,

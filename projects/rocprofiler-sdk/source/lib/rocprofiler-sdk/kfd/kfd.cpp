@@ -1636,7 +1636,7 @@ poll_events(small_vector<pollfd> file_handles)
             // We have data to read, perhaps multiple events
             if((fd.revents & POLLIN) != 0)
             {
-                size_t status_size   = read(fd.fd, scratch_buffer.data(), scratch_buffer.size());
+                size_t status_size = read(fd.fd, scratch_buffer.data(), scratch_buffer.size());
                 if(debug_qi_hang())
                 {
                     ROCP_WARNING << fmt::format("KFD_READ fd={} index={} status_size={} revents={}",
@@ -1645,7 +1645,7 @@ poll_events(small_vector<pollfd> file_handles)
                                                 status_size,
                                                 fd.revents);
                 }
-                auto   event_strings = std::string_view{scratch_buffer.data(), status_size};
+                auto event_strings = std::string_view{scratch_buffer.data(), status_size};
                 kfd_readlines(event_strings, handle_reporting);
             }
             fd.revents = 0;
