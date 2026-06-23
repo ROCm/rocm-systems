@@ -283,6 +283,19 @@ class SystemCapabilities:
             return False
 
     @cached_property
+    def perf_events_usable(self) -> bool:
+        """Whether perf_event_open-based features can actually be used.
+
+        This gates anything that opens Linux perf events, including PAPI
+        hardware/software counters and overflow sampling. It mirrors the
+        runtime gate in ``source/lib/core/config.cpp``, which disables PAPI
+        when ``/proc/sys/kernel/perf_event_paranoid`` is greater than 2 unless
+        ``CAP_SYS_ADMIN`` is held. Note the runtime does not consult
+        ``CAP_PERFMON``, so it is intentionally not checked here.
+        """
+        return self.perf_event_paranoid <= 2 or self.cap_sys_admin
+
+    @cached_property
     def papi_availability(self) -> bool:
         """Check if PAPI is built into rocprofiler-systems.
 

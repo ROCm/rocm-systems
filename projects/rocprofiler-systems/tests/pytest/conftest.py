@@ -772,10 +772,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    caps = rocprof_config.capabilities
-    if caps.perf_event_paranoid <= 3 or caps.cap_sys_admin or caps.cap_perfmon:
+    if rocprof_config.capabilities.perf_events_usable:
         return None
-    return "Requires either perf_event_paranoid <= 3, CAP_SYS_ADMIN, or CAP_PERFMON to be available"
+    return "Requires either perf_event_paranoid <= 2 or CAP_SYS_ADMIN to be available"
 
 
 def gpu_unavailable_reason() -> Optional[str]:
@@ -805,9 +804,9 @@ def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]
 
 def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     caps = rocprof_config.capabilities
-    if caps.papi_nic_events is not None and caps.perf_event_paranoid <= 2:
+    if caps.papi_nic_events is not None and caps.perf_events_usable:
         return None
-    return "Requires PAPI network events and perf_event_paranoid <= 2 to be available"
+    return "Requires PAPI network events and perf_event_paranoid <= 2 (or CAP_SYS_ADMIN) to be available"
 
 
 def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
