@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_INT_NET_H_
 #define NCCL_INT_NET_H_
@@ -29,18 +30,12 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport);
 
 extern ncclNet_t ncclNetIb;
 extern ncclNet_t ncclNetSocket;
-#if !defined(__HIP_PLATFORM_AMD__)
-extern ncclGin_t ncclGinIbGdaki;
-#endif
-extern ncclGin_t ncclGinIbProxy;
 
 extern ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p);
 extern int64_t ncclParamDmaBufEnable();
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-extern ncclNet_t rocmNetIb;
 extern ncclNet_t netIbCast;
-extern ncclResult_t rcclRocmNetP2pPolicy(void* handle, int isP2p);
 extern ncclResult_t rcclCastNetP2pPolicy(void* handle, int isP2p);
 
 enum rcclIBNicType {

@@ -1,14 +1,14 @@
 /*************************************************************************
- * Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_TIMER_H_
 #define NCCL_TIMER_H_
 #if ENABLE_TIMER
-#include <unistd.h>
-#include <sys/time.h>
+#include "os.h"
 #include <x86intrin.h>
 static double freq = -1;
 static void calibrate() {

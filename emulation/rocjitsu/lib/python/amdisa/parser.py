@@ -306,7 +306,7 @@ class Parser:
         arch_parts = arch_name_raw.split()
         arch_family = arch_parts[1].lower()
         arch_version = arch_parts[2].replace('.', '_')
-        arch_name = f'{arch_family}{arch_version}'
+        arch_name = profile.generated_arch_name or f'{arch_family}{arch_version}'
         self.isa_spec = IsaSpec(arch_name, version, profile)
 
         self.encodings_node = xs.get_node(isa_node, xs.ENCODINGS)
@@ -324,8 +324,63 @@ class Parser:
         self.parse_operand_types()
         return self.isa_spec
 
+    def _parse_compact_expr(self, expr_node: elem_tree.Element) -> str:
+        """Parse the compact expression AST used by newer MR ISA XML."""
+        if expr_node.tag == 'id':
+            return expr_node.attrib['val'].lower()
+        if expr_node.tag == 'lit':
+            literal = expr_node.attrib.get('val', '0')
+            ty_node = expr_node.find('ty/t')
+            if ty_node is not None and ty_node.attrib.get('size') == '1':
+                return 'true' if literal == '1' else 'false'
+            return literal
+        if expr_node.tag != 'op':
+            raise ValueError(f"Unrecognized compact expression node '{expr_node.tag}'")
+
+        operator = expr_node.attrib['type']
+        operands = [
+            self._parse_compact_expr(child)
+            for child in list(expr_node)
+            if child.tag != 'ty'
+        ]
+
+        if operator == '.fieldderef':
+            if len(operands) != 2:
+                raise ValueError(
+                    f'Expected 2 operands for {operator}, got {len(operands)}'
+                )
+            if '.' in operands[0]:
+                return f"{operands[0].split('.')[0]}_.{operands[1]}"
+            return f'{operands[0]}.{operands[1]}'
+
+        if operator in ('.within', '.notwithin'):
+            if len(operands) != 2:
+                raise ValueError(
+                    f'Expected 2 operands for {operator}, got {len(operands)}'
+                )
+            values = [v.strip() for v in operands[1].split(',') if v.strip()]
+            if not values:
+                return 'false' if operator == '.within' else 'true'
+            joiner = ' || ' if operator == '.within' else ' && '
+            cmp_op = '==' if operator == '.within' else '!='
+            return (
+                '(' + joiner.join(f'{operands[0]} {cmp_op} {v}' for v in values) + ')'
+            )
+
+        if operator == '.cons_array':
+            return ', '.join(operands)
+
+        if len(operands) < 2:
+            raise ValueError(
+                f"Expected at least 2 operands for operator '{operator}', got {len(operands)}"
+            )
+        return f'({operands[0]} {operator} {operands[1]})'
+
     def parse_expr(self, expr_node: elem_tree.Element) -> str:
         """Recursively parse an expression AST into a C++ expression string."""
+        if xs.EXPR_ATTR_TYPE not in expr_node.attrib:
+            return self._parse_compact_expr(expr_node)
+
         expr_type = expr_node.attrib[xs.EXPR_ATTR_TYPE]
 
         if expr_type == xs.EXPR_TYPE_VAL_OPERATOR:
@@ -360,7 +415,9 @@ class Parser:
             f"Unrecognized expression type '{expr_type}' in encoding " f"condition AST"
         )
 
-    def parse_condition(self, cond_node: elem_tree.Element) -> tuple[str, str]:
+    def parse_condition(
+        self, cond_node: elem_tree.Element, enc_name: str
+    ) -> tuple[str, str]:
         """Parse an encoding condition into a (name, expression) pair."""
         cond_name = xs.get_node_text(cond_node.find(f'.//{xs.COND_NAME}'))
         cond_expr_node = cond_node.find(xs.COND_EXPR)
@@ -373,18 +430,43 @@ class Parser:
             )
         expr_node = cond_expr_node.find(xs.EXPR)
         if expr_node is None:
+            expr_node = next(iter(cond_expr_node), None)
+        if expr_node is None:
             raise xs.SchemaValueError(
                 f'{xs.EXPR} not found in condition expression for {cond_name!r}'
             )
         expr = self.parse_expr(expr_node)
 
+        cond_name = self.profile.normalize_encoding_condition(enc_name, cond_name)
         if cond_name == 'default':
             cond_name += '_encoding'
+        else:
+            cond_name = self._sanitize_condition_name(cond_name)
 
         return (cond_name, expr)
 
+    @staticmethod
+    def _sanitize_condition_name(cond_name: str) -> str:
+        """Return a C++ identifier for an XML encoding condition name.
+
+        The mapping is intentionally best-effort rather than injective. XML
+        profiles may repeat equivalent condition names; parse_encoding_conditions
+        keeps the first generated identifier in those cases.
+        """
+        name = cond_name.strip()
+        name = name.replace('!', 'not_')
+        name = name.replace('&', '_and_')
+        name = name.replace('|', '_or_')
+        name = re.sub(r'[^0-9A-Za-z_]', '_', name)
+        name = re.sub(r'_+', '_', name).strip('_')
+        if not name:
+            name = 'condition'
+        if name[0].isdigit():
+            name = f'cond_{name}'
+        return name
+
     def parse_encoding_conditions(
-        self, conds_node: elem_tree.Element
+        self, conds_node: elem_tree.Element, enc_name: str
     ) -> list[tuple[str, str]]:
         """Parse all encoding conditions under the given node.
 
@@ -396,7 +478,7 @@ class Parser:
         seen: set[str] = set()
         result: list[tuple[str, str]] = []
         for cond_node in conds_node.findall(xs.ENCODING_COND):
-            name, expr = self.parse_condition(cond_node)
+            name, expr = self.parse_condition(cond_node, enc_name)
             if name not in seen:
                 seen.add(name)
                 result.append((name, expr))
@@ -639,11 +721,14 @@ class Parser:
             order = int(enc_node.attrib[xs.ENC_ATTR_ORDER])
             bit_cnt = int(xs.get_node_text(bit_cnt_node))
 
-            ucode_fields, enc_field_bit_cnt, op_field_bit_cnt, opm_field_bit_cnt = (
-                self.parse_ucode_bitmap(enc_node, bit_cnt)
-            )
+            (
+                ucode_fields,
+                enc_field_bit_cnt,
+                op_field_bit_cnt,
+                opm_field_bit_cnt,
+            ) = self.parse_ucode_bitmap(enc_node, bit_cnt)
             enc_conds_node = enc_node.find(xs.ENCODING_CONDS)
-            enc_conds = self.parse_encoding_conditions(enc_conds_node)
+            enc_conds = self.parse_encoding_conditions(enc_conds_node, enc_name)
 
             ucode_fields.sort(key=lambda x: x.bit_offset)
             inst_enc = InstEncoding(

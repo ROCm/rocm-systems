@@ -717,14 +717,24 @@ class MetricCommands:
                     frequency_dict = amdsmi_interface.amdsmi_get_clk_freq(
                         args.gpu, amdsmi_interface.AmdSmiClkType.DF
                     )
-                    current_fclk_clock = frequency_dict["frequency"][frequency_dict["current"]]
+                    # The C library reports current = (uint32_t)-1 when the
+                    # kernel exposes pp_dpm_fclk without a '*' current-level
+                    # marker (e.g. SMU power-gated DF on gfx1151 APUs at idle).
+                    # Treat that as "no current frequency" so we don't index
+                    # out of range.
+                    current_fclk_index = frequency_dict["current"]
+                    if current_fclk_index == 0xFFFFFFFF or current_fclk_index >= len(
+                        frequency_dict["frequency"]
+                    ):
+                        raise IndexError("no current fclk level reported by kernel")
+                    current_fclk_clock = frequency_dict["frequency"][current_fclk_index]
                     current_fclk_clock = self.helpers.convert_SI_unit(
                         current_fclk_clock, self.helpers.SI_Unit.MICRO
                     )
                     clocks["fclk_0"]["clk"] = self.helpers.unit_format(
                         self.logger, current_fclk_clock, clock_unit
                     )
-                except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
+                except (KeyError, IndexError, amdsmi_exception.AmdSmiLibraryException) as e:
                     logging.debug("Failed to get fclk info for gpu %s | %s", gpu_id, e)
 
                 # Populate SOCCLK clock value
@@ -2019,7 +2029,7 @@ class MetricCommands:
                 logging.debug(
                     "Failed to get C0 residency for cpu %s | %s", cpu_id, e.get_error_info()
                 )
-        if args.cpu_lclk_dpm_level:
+        if isinstance(args.cpu_lclk_dpm_level, list) and args.cpu_lclk_dpm_level:
             static_dict["socket_dpm"] = {}
             try:
                 dpm_val = amdsmi_interface.amdsmi_get_cpu_socket_lclk_dpm_level(
@@ -2045,7 +2055,7 @@ class MetricCommands:
                     cpu_id,
                     e.get_error_info(),
                 )
-        if args.cpu_io_bandwidth:
+        if isinstance(args.cpu_io_bandwidth, list) and args.cpu_io_bandwidth:
             static_dict["io_bandwidth"] = {}
             try:
                 bandwidth = amdsmi_interface.amdsmi_get_cpu_current_io_bandwidth(
@@ -2057,7 +2067,7 @@ class MetricCommands:
                 logging.debug(
                     "Failed to get io bandwidth for cpu %s | %s", cpu_id, e.get_error_info()
                 )
-        if args.cpu_xgmi_bandwidth:
+        if isinstance(args.cpu_xgmi_bandwidth, list) and args.cpu_xgmi_bandwidth:
             static_dict["xgmi_bandwidth"] = {}
             try:
                 bandwidth = amdsmi_interface.amdsmi_get_cpu_current_xgmi_bw(
@@ -2165,7 +2175,7 @@ class MetricCommands:
                 logging.debug(
                     "Failed to get cpu temperature for cpu %s | %s", cpu_id, e.get_error_info()
                 )
-        if args.cpu_dimm_temp_range_rate:
+        if isinstance(args.cpu_dimm_temp_range_rate, list) and args.cpu_dimm_temp_range_rate:
             static_dict["dimm_temp_range_rate"] = {}
             try:
                 resp = amdsmi_interface.amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(
@@ -2179,7 +2189,7 @@ class MetricCommands:
                     cpu_id,
                     e.get_error_info(),
                 )
-        if args.cpu_dimm_pow_consumption:
+        if isinstance(args.cpu_dimm_pow_consumption, list) and args.cpu_dimm_pow_consumption:
             static_dict["dimm_pow_consumption"] = {}
             try:
                 resp = amdsmi_interface.amdsmi_get_cpu_dimm_power_consumption(
@@ -2193,7 +2203,7 @@ class MetricCommands:
                     cpu_id,
                     e.get_error_info(),
                 )
-        if args.cpu_dimm_thermal_sensor:
+        if isinstance(args.cpu_dimm_thermal_sensor, list) and args.cpu_dimm_thermal_sensor:
             static_dict["dimm_thermal_sensor"] = {}
             try:
                 resp = amdsmi_interface.amdsmi_get_cpu_dimm_thermal_sensor(
@@ -2265,7 +2275,7 @@ class MetricCommands:
                 logging.debug(
                     "Failed to get CC6 enable status for cpu %s | %s", cpu_id, e.get_error_info()
                 )
-        if args.cpu_dimm_sb_reg:
+        if isinstance(args.cpu_dimm_sb_reg, list) and args.cpu_dimm_sb_reg:
             static_dict["dimm_sb_reg"] = {}
             try:
                 dimm_addr = args.cpu_dimm_sb_reg[0][0]
@@ -2303,7 +2313,7 @@ class MetricCommands:
                     cpu_id,
                     e.get_error_info(),
                 )
-        if args.cpu_svi3_vr_controller_temp:
+        if isinstance(args.cpu_svi3_vr_controller_temp, list) and args.cpu_svi3_vr_controller_temp:
             static_dict["svi3_vr_controller_temp"] = {}
             try:
                 rail_type = args.cpu_svi3_vr_controller_temp[0][0]
@@ -3132,7 +3142,9 @@ class MetricCommands:
             args.cpu = cpu
         if core:
             args.core = core
-        if self.helpers.is_brcm_nic_initialized() and (args.brcm_nic or brcm_nic):
+        if self.helpers.is_brcm_nic_initialized() and (
+            getattr(args, "brcm_nic", False) or brcm_nic
+        ):
             args.nic_power = args.power
             args.nic_temperature = args.temperature
             args.nic_errors = args.ecc
@@ -3152,7 +3164,9 @@ class MetricCommands:
             )
             return
 
-        if self.helpers.is_brcm_switch_initialized() and (args.brcm_switch or brcm_switch):
+        if self.helpers.is_brcm_switch_initialized() and (
+            getattr(args, "brcm_switch", False) or brcm_switch
+        ):
             args.switch_power = args.power
             args.switch_errors = args.ecc
             self.logger.output = {}

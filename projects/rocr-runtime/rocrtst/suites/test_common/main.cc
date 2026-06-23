@@ -56,6 +56,7 @@
 #include "suites/functional/memory_alignment.h"
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
+#include "suites/functional/memory_fill.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
@@ -81,6 +82,7 @@
 #include "suites/functional/concurrent_shutdown.h"
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
+#include "suites/functional/signal_allocation_validation.h"
 #include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
@@ -90,6 +92,7 @@
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
+#include "suites/functional/queue_create.h"
 #include "suites/functional/cuid.h"
 #include "common/os.h"
 #include "common/platform_filter.h"
@@ -200,6 +203,13 @@ TEST(rocrtstFunc, MemoryAllocateContiguousTest) {
   RunCustomTestEpilog(&ma);
 }
 
+TEST(rocrtstFunc, MemoryFillTest) {
+  MemoryFill mf;
+  if (!RunCustomTestProlog(&mf)) return;
+  mf.MemoryFillTest();
+  RunCustomTestEpilog(&mf);
+}
+
 TEST(rocrtstFunc, Concurrent_Init_Test) {
   ConcurrentInitTest ci;
   if (!RunCustomTestProlog(&ci)) return;
@@ -253,6 +263,13 @@ TEST(rocrtstFunc, Signal_Create_Concurrently) {
   if (!RunCustomTestProlog(&sd)) return;
   sd.TestSignalCreateConcurrent();
   RunCustomTestEpilog(&sd);
+}
+
+TEST(rocrtstFunc, Signal_Allocation_Validation) {
+  SignalAllocationValidationTest sav;
+  RunCustomTestProlog(&sav);
+  sav.TestSignalAllocationValidation();
+  RunCustomTestEpilog(&sav);
 }
 
 /* Temporary: Disable CU Masking until it is fixed */
@@ -329,6 +346,13 @@ TEST(rocrtstFunc, Time_Stamp) {
   if (!RunCustomTestProlog(&ts)) return;
   ts.TimeStampTest();
   RunCustomTestEpilog(&ts);
+}
+
+TEST(rocrtstFunc, BarrierPkt_TimeStamp) {
+    TimeStamp ts;
+    RunCustomTestProlog(&ts);
+    ts.BarrierPacketTimestampValidationTest();
+    RunCustomTestEpilog(&ts);
 }
 
 TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
@@ -605,6 +629,41 @@ TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
   if (!RunCustomTestProlog(&cq)) return;
   cq.CountedQueuesOverflowWrapAroundTest();
   RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Queue_Create_SystemMem_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.SystemMemQueueTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_DeviceMem_RingBuf_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.DeviceMemRingBufQueueTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_Batch_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.BatchQueueCreateTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_SDMA_Create_Destroy_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.SdmaQueueCreateDestroyTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_Invalid_Args_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.InvalidArgsTest();
+  RunCustomTestEpilog(&qt);
 }
 
 #ifdef HSA_ENABLE_AMDCUID_SUPPORT

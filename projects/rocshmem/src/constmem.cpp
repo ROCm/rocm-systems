@@ -1,6 +1,9 @@
 #include "constmem.hpp"
 #include "backend_bc.hpp"
 #include "envvar.hpp"
+#if defined(USE_GDA)
+#include "gda/backend_gda.hpp"
+#endif
 
 namespace rocshmem {
 
@@ -29,6 +32,13 @@ void init_constant_memory(void) {
   // Non-zero when IPC is available, regardless of stride pattern.
   constmem_values.ipc_shm_size = (backend->ipcImpl.pes_with_ipc_avail != nullptr)
                                  ? backend->ipcImpl.shm_size : 0;
+
+  constmem_values.backend_type = backend->get_type();
+#if defined(USE_GDA)
+  if (constmem_values.backend_type == BackendType::GDA_BACKEND) {
+    constmem_values.gda_provider = static_cast<GDABackend*>(backend)->get_gda_provider();
+  }
+#endif
 
   CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &constmem_values, sizeof(constmem_t)));
 }

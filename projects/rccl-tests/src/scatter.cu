@@ -78,6 +78,7 @@ struct testColl scatterTest = {
   ScatterInitData,
   ScatterGetBw,
   ScatterRunColl,
+  NULL,
   NULL
 };
 

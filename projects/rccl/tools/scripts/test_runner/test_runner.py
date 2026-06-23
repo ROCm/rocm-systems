@@ -64,6 +64,13 @@ def main():
                 if args.verbose:
                     print("Exiting: RCCL build failed")
                 sys.exit(1)
+            # Build rccl-tests (perf binaries) if the config provides a
+            # rccl_tests_build_configuration section; no-op otherwise.
+            if not executor.build_rccl_tests():
+                print("ERROR: rccl-tests build failed")
+                if args.verbose:
+                    print("Exiting: rccl-tests build failed")
+                sys.exit(1)
         else:
                 print("SKIP: Build step skipped (--no-build)")
 

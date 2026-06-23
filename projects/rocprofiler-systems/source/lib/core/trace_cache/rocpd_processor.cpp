@@ -13,6 +13,8 @@
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
+
+#include "common/units.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
@@ -369,8 +371,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     insert_scalar(trait::name<category::amd_smi_power>::value,
                   info::format_track_name<category::amd_smi_power>(),
                   enabled.bits.current_socket_power || enabled.bits.average_socket_power,
-                  enabled.bits.current_socket_power ? m.current_socket_power
-                                                    : m.average_socket_power);
+                  pmc::collectors::gpu::select_socket_power(enabled, m));
     insert_scalar(trait::name<category::amd_smi_memory_usage>::value,
                   info::format_track_name<category::amd_smi_memory_usage>(),
                   enabled.bits.memory_usage, m.memory_usage / units::megabyte);
@@ -420,8 +421,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
         {
             if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16) continue;
 
-            auto suffix     = "_" + std::to_string(i);
-            auto pmc_name   = std::string(base_name) + suffix;
+            auto pmc_name   = fmt::format("{}_{}", base_name, i);
             auto track_name = pmc_name;
 
             LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}",

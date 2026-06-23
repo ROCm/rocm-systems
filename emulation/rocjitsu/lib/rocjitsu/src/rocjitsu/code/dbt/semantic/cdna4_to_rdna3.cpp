@@ -6,9 +6,11 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
+#include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include <string>
 #include <vector>
 
 namespace rocjitsu {
@@ -26,15 +28,16 @@ constexpr uint16_t kCdna4Op_v_lshl_add_u64 = 520;
 /// @details The counter-bit layouts differ, so opcode substitution alone can
 /// create a weaker wait. Until we add precise GFX11 re-encoding, emit a
 /// conservative full-drain wait, which is slower but preserves correctness.
-std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uint64_t,
-                                                   const LivenessAnalysis &, const LaneLayout *,
-                                                   const LaneLayout *) {
+ExpandResult expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uint64_t,
+                                          const LivenessAnalysis &, TranslationContext &,
+                                          const LaneLayout *, const LaneLayout *) {
   constexpr uint16_t kEncSoppValue = 0x17F;
   if (inst.encoding_id() != kEncSoppValue)
-    return {};
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " matched the waitcnt expansion rule with an unexpected encoding");
 
   constexpr uint32_t kRdna3SoppOp_s_waitcnt = 9;
-  return {pack_sopp(kRdna3SoppOp_s_waitcnt, 0)};
+  return ExpandResult::success({pack_sopp(kRdna3SoppOp_s_waitcnt, 0)});
 }
 
 // Table MUST be sorted by (src_encoding_id, src_opcode) for binary search.
