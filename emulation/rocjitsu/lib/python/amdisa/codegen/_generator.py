@@ -140,17 +140,15 @@ def _exec_mask_flag_stmts(sem) -> list[str]:
 
 def _result_combinator_flag_stmts(sem) -> list[str]:
     """Return ``flags_ |= ...;`` for how the instruction forms its result value.
+    Only returns flags for scalar operations.
 
-    EXEC-state analysis uses this to prove an all-ones EXEC write:
 
     * ``RESULT_COPY`` - result is a plain copy of a single source (s_mov).
     * ``RESULT_OR``   - result is the bitwise OR of its sources (s_or,
-      s_or_saveexec); OR with an all-ones operand is all-ones regardless of the
-      rest.
+      s_or_saveexec)
 
-    Derived from the per-opcode semantic class/operation. Other operations
-    (and, xor, not, cmov, ...) get no flag, so the analysis cannot prove
-    all-ones and stays conservative.
+    Derived from the per-opcode semantic class/operation.
+    EXEC-state analysis uses this to prove an all-ones EXEC write:
     """
     if sem is None:
         return []
@@ -7451,7 +7449,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  }',
                 '  if (is_immediate_type(opr_type_))',
                 '    return static_cast<uint32_t>(ev);',
-                '  return resolve_src_scalar(wf, ev);',
+                '  return resolve_src_scalar_statically(wf, ev);',
                 '}',
             ]
         )
@@ -7538,7 +7536,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         resolve_code = cgen.Line(
             'namespace {\n'
             '\n'
-            '// Wavefront-free subset of resolve_src_scalar: the value of an inline\n'
+            '// Wavefront-free subset of resolve_src_scalar_statically: the value of an inline\n'
             '// constant (small integers 0..64 / -1..-16 and the inline float\n'
             '// constants), or nullopt for any other encoding value. Negative inline\n'
             '// integers are sign-extended to 64 bits so 64-bit consumers see all-ones.\n'
@@ -7568,7 +7566,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  return std::nullopt;\n'
             '}\n'
             '\n'
-            'uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {\n'
+            'uint32_t resolve_src_scalar_statically(const amdgpu::Wavefront &wf, int ev) {\n'
             '  if (ev == 102)\n'
             '    return static_cast<uint32_t>(wf.scratch_base());\n'
             '  if (ev == 103)\n'
@@ -7640,8 +7638,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));\n'
             '}\n'
             '\n'
-            '// Must stay in sync with resolve_src_scalar above — returns true for\n'
-            '// exactly the encoding values that resolve_src_scalar handles without\n'
+            '// Must stay in sync with resolve_src_scalar_statically above — returns true for\n'
+            '// exactly the encoding values that resolve_src_scalar_statically handles without\n'
             '// throwing. Used by Isa::simd_capable_value() to keep the SIMD fast\n'
             '// path off operands whose scalar broadcast would throw at runtime.\n'
             'bool can_resolve_src_scalar(int ev) {\n'
@@ -7819,7 +7817,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             'uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type,\n'
             '                                   int ev) {\n'
             '  return is_immediate_type(opr_type) ? static_cast<uint32_t>(ev)\n'
-            '                                     : resolve_src_scalar(wf, ev);\n'
+            '                                     : resolve_src_scalar_statically(wf, ev);\n'
             '}\n'
             '\n'
             + simd_methods
@@ -7829,7 +7827,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return static_cast<uint32_t>(literal64_value_);\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint32_t>(encoding_value_);\n'
-            '  return resolve_src_scalar(wf, encoding_value_);\n'
+            '  return resolve_src_scalar_statically(wf, encoding_value_);\n'
             '}\n'
             '\n'
             # Wavefront-free constant value: the register-state-free subset of
