@@ -638,8 +638,8 @@ class Graph {
     }
     graphUserObj_.clear();
     memAllocNodePtrs_.clear();
-    if (instantiateDeviceId_ != -1) {
-      static_cast<amd::ReferenceCountedObject*>(g_devices[instantiateDeviceId_])->release();
+    if (captureDeviceId_ != -1) {
+      static_cast<amd::ReferenceCountedObject*>(g_devices[captureDeviceId_])->release();
     }
   }
 
@@ -917,7 +917,7 @@ class Graph {
   //!< Used to track which devices are accessed by each parallel stream
   //!< during multi-device graph execution scheduling.
   std::unordered_map<int, std::set<int>> streams_dev_ids_;
-  int instantiateDeviceId_ = -1;
+  int captureDeviceId_ = -1;
     //! Topological order of the graph doesn't include nodes embedded as part of the child graph
   std::vector<Node> topoOrder_;
 
