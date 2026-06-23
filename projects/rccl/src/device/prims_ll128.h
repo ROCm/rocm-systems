@@ -64,7 +64,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (nthreads != WARP_SIZE)
-    #if defined(__gfx942__) || defined(__gfx950__)
+    #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
       barrier_generic(__threadfence_block(), nthreads, barrier_next, barriers);
     #else
       barrier_generic(__threadfence(), nthreads, barrier_next, barriers);
@@ -127,10 +127,17 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   template<int WordPerThread>
   __device__ __forceinline__ void loadRegsBegin(uint64_t(&regs)[WordPerThread], T const *src, int eltN) {
     constexpr int EltPer16B = 16/sizeof(T);
+    // Parametrize the warp-local addressing on the LL128 line geometry.
+    // The literals "16" and "4" originally hard-coded 2*LINEELEMS and
+    // LINEELEMS/2 for the 64-byte-line case; gfx1250 doubles LINEELEMS
+    // (128-byte non-tearing line) so the stride and flag-subgroup width
+    // both double accordingly.
+    constexpr int LineElems = NCCL_LL128_LINEELEMS;
+    constexpr int LineSkip = 2*WARP_SIZE/LineElems;
     int ix[WordPerThread/2];
     #pragma unroll
     for(int g=0; g < WordPerThread/2; g++) {
-      ix[g] = g*WARP_SIZE - 16*(g/2) + wid - (g%2)*(wid/4);
+      ix[g] = g*WARP_SIZE - LineSkip*(g/2) + wid - (g%2)*(wid/(LineElems/2));
     }
     if(reinterpret_cast<uintptr_t>(src)%16 == 0) {
       /* We are aligned to 16 bytes, so load directly to registers no shmem.
@@ -198,9 +205,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     // Write to dst if 4-byte aligned, shmem otherwise.
     int misalignment = reinterpret_cast<uintptr_t>(dst)%16;
     uint64_t *shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
+    constexpr int LineElems = NCCL_LL128_LINEELEMS;
+    constexpr int LineSkip = 2*WARP_SIZE/LineElems;
     #pragma unroll
     for(int g=0; g < WordPerThread/2; g++) {
-      int ix = g*WARP_SIZE - 16*(g/2) + wid - (g%2)*(wid/4);
+      int ix = g*WARP_SIZE - LineSkip*(g/2) + wid - (g%2)*(wid/(LineElems/2));
       if (!flagThread || g%2==0) {
         if(misalignment == 0 && (ix+1)*EltPer16B <= eltN)
           store128((uint64_t*)(dst + ix*EltPer16B), regs[2*g+0], regs[2*g+1]);

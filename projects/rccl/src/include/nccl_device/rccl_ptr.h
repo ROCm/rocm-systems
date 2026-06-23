@@ -36,12 +36,15 @@ using u16_gptr = __attribute__((address_space(1))) uint16_t*;
 using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 
 #ifdef __HIP_DEVICE_COMPILE__
-#if (defined(__gfx942__) || defined(__gfx950__)) && __has_builtin(__builtin_amdgcn_global_load_b128) && __has_builtin(__builtin_amdgcn_global_store_b128) && !defined(DWORDX4_INTRINSICS_FORCE_OFF)
+#if (defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && \
+    __has_builtin(__builtin_amdgcn_global_load_b128) && \
+    __has_builtin(__builtin_amdgcn_global_store_b128) && \
+    !defined(DWORDX4_INTRINSICS_FORCE_OFF)
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 1
-//#pragma message "RCCL DWORDX4 Builtins Enabled on GFX942/GFX950"
+//#pragma message "RCCL DWORDX4 Builtins Enabled on GFX942/GFX950/GFX1250"
 #else
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0
-//#pragma message "RCCL DWORDX4 Builtins Disabled on GFX942/GFX950"
+//#pragma message "RCCL DWORDX4 Builtins Disabled"
 #endif
 #else
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0

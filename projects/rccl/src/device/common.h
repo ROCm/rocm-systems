@@ -419,7 +419,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   int tn = blockDim.x;
   int x = tid;
   int total = 0, y;
-  int num = MAXCHANNELS/64 > 0 ? MAXCHANNELS/64 : 1;
+  int num = MAXCHANNELS/CHANNELS_PER_MASK_WORD > 0 ? MAXCHANNELS/CHANNELS_PER_MASK_WORD : 1;
 #ifdef ENABLE_WARP_SPEED
   int warpCount    = tn / WARP_SIZE;
   int localWarpId  = tid / WARP_SIZE;
@@ -440,11 +440,20 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   case 0:
   //ncclShmem.channelId = blockIdx.x;
     for (int i = 0; i < num; i++) {
+      // WARP_SIZE<64 path leaves `x` set to (WARP_SIZE+tid) from the
+      // previous iteration, so the first check of masks[i] for i>=1 was reading
+      // the upper 32 bits twice and never the lower 32 bits. Reset to tid here.
+      x = tid;
       if (args->channelMask.masks[i] & (1ull<<x)) {
         y = __popcll(args->channelMask.masks[i] & ((1ull<<x)-1));
         y = total + y;
         if (blockIdx.x == y) {
-          ncclShmem.channelId = x + total;
+          // channelId is the absolute bit position in the global mask:
+          // i*CHANNELS_PER_MASK_WORD + x. Using `x + total` was only correct
+          // when prior mask words were densely packed (which broke for sparse
+          // channel sets, e.g. SATURATE_P2P_NCHANNELS with small messages or
+          // non-pow2 tilings, causing the wrong channel to be loaded -> IMA).
+          ncclShmem.channelId = x + i*CHANNELS_PER_MASK_WORD;
           break;
         }
       }
@@ -454,7 +463,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
           y = __popcll(args->channelMask.masks[i] & ((1ull<<x)-1));
           y = y + total;
           if (blockIdx.x == y) {
-            ncclShmem.channelId = x + total;
+            ncclShmem.channelId = x + i*CHANNELS_PER_MASK_WORD;
             break;
           }
         }
@@ -532,7 +541,10 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         y = __popcll(args->channelMask.masks[i] & ((1ull<<laneId)-1));
         y = total + y;
         if (globalWarpId == y) {
-          ncclShmem.warpChannelId[localWarpId] = laneId + total;
+          // Same fix as the non-WS path: channelId is the absolute bit
+          // position (i*CHANNELS_PER_MASK_WORD + laneId), not total bits
+          // seen so far.
+          ncclShmem.warpChannelId[localWarpId] = laneId + i*CHANNELS_PER_MASK_WORD;
           break;
         }
       }
@@ -566,15 +578,27 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         ncclDevFuncTable_1[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2)
         ncclDevFuncTable_2[ncclShmem.funcId]();
-      else
+      else if (COLL_UNROLL == 4)
         ncclDevFuncTable_4[ncclShmem.funcId]();
+      else if (COLL_UNROLL == 8)
+        ncclDevFuncTable_8[ncclShmem.funcId]();
+      else if (COLL_UNROLL == 16)
+        ncclDevFuncTable_16[ncclShmem.funcId]();
+      else
+        ncclDevFuncTable_32[ncclShmem.funcId]();
 #else
       if (COLL_UNROLL == 1)
         NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
       else if (COLL_UNROLL == 2)
         NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
-      else
+      else if (COLL_UNROLL == 4)
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
+      else if (COLL_UNROLL == 8)
+        NCCL_CALL_FUNCTIONS_8(ncclShmem.funcId);
+      else if (COLL_UNROLL == 16)
+        NCCL_CALL_FUNCTIONS_16(ncclShmem.funcId);
+      else
+        NCCL_CALL_FUNCTIONS_32(ncclShmem.funcId);
 #endif
 #endif
     }
@@ -602,6 +626,9 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
 __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Generic_16(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \
   __global__ void ncclDevKernel_##suffix(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {}

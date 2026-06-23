@@ -70,8 +70,10 @@ class Primitives<
     if (nthreads == WARP_SIZE)
       __syncwarp();
     else
+      // gfx942/gfx950/gfx1250 all use intra-block fence; __threadfence() is
+      // device-wide and doesn't add system-scope ordering here.
       // To be revisited for correctness on gfx1250
-      #if defined(__gfx942__) || defined(__gfx950__)
+      #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
         barrier_generic(__threadfence_block(), nworkers, barrier_next, barriers);
       #else
         barrier_generic(__threadfence(), nworkers, barrier_next, barriers);
@@ -85,7 +87,7 @@ class Primitives<
 
   inline __device__ void patBarrier() {
     // To be revisited for correctness on gfx1250
-    #if defined(__gfx942__) || defined(__gfx950__)
+    #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
       barrier_generic(__threadfence_block(), NCCL_PAT_NWORKERS, barrier_next_pat, barriers_pat);
     #else
       barrier_generic(__threadfence(), NCCL_PAT_NWORKERS, barrier_next_pat, barriers_pat);
@@ -116,7 +118,7 @@ class Primitives<
     // NET no-GDR can publish host-staged payloads from the CPU proxy.
     // Acquire the tail before GPU workers consume the payload.
     return ld_acquire_sys_global(ptr);
-#elif defined(__gfx1200__) || defined(__gfx1201__)
+#elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1250__)
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #else
     return __atomic_load_n(ptr, __ATOMIC_RELAXED);
@@ -773,16 +775,16 @@ public:
       patBarrier();
     }
     if(collWork){
-      skip_fence = !collWork -> gfx9CheapFenceOff;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
-      // DWORDX4 builtins use system-scope cache-bypassing stores, so the
-      // cheap s_waitcnt fence is sufficient when UBR is active.
+      skip_fence = !collWork -> cheapPostSendFenceOff;
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+      // DWORDX4 builtins use system-scope cache-bypassing stores (sc0+sc1),
+      // so the cheap s_waitcnt fence is sufficient when UBR/IPC-reg is active.
       if (collWork->regUsed || collWork->netRegUsed) {
         skip_fence = true;
       }
 #endif
     }
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     else if(p2pWork) {
       // the postPeer fence is gated by RolePostSend and protects
       // send-side stores only.

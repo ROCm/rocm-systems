@@ -348,7 +348,7 @@ DEFINE_ld_st__size(8, uint64_t, b64, l)
 
 __device__ __forceinline__ void store16global(uintptr_t addr, BytePack<16> value){  
   #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    // System scope store that bypasses the hardware caches, should generate global_store_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950. 
+    // System scope store that bypasses the hardware caches, should generate global_store_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950/gfx1250.
     __builtin_amdgcn_global_store_b128((v4u_gptr) addr, value.v4u, RCCL_SYSTEM_SYNCSCOPE); 
   #elif defined(__gfx950__)
     *(v4u_gptr) addr = value.v4u;
@@ -361,7 +361,7 @@ __device__ __forceinline__ void store16global(uintptr_t addr, BytePack<16> value
 __device__ __forceinline__ BytePack<16> load16global(uintptr_t addr){
   BytePack<16> ans;
   #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    // System scope load that bypasses the hardware caches, should generate global_load_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950.
+    // System scope load that bypasses the hardware caches, should generate global_load_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950/gfx1250.
     ans.v4u = __builtin_amdgcn_global_load_b128((v4u_gptr) addr, RCCL_SYSTEM_SYNCSCOPE);
   #else
     *(u64_gptr) ans.u64 = __builtin_nontemporal_load((u64_gptr)addr); 

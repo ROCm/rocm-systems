@@ -143,8 +143,15 @@ union ncclLLFifoLine {
 #ifdef ENABLE_WARP_SPEED
 #define MAXCHANNELS 512
 #else
-#define MAXCHANNELS 128
+// Raised from 128 -> 256 to let single- and multi-node configurations request
+// up to 256 channels via NCCL_MAX_NCHANNELS / NCCL_MIN_NCHANNELS. The actual
+// per-call channel count is still picked by the existing tuner; this only
+// lifts the upper bound.
+#define MAXCHANNELS 256
 #endif
+// Number of channel bits packed into one uint64_t word of channelMasks. The
+// global channelId for bit `x` in word `i` is `i*CHANNELS_PER_MASK_WORD + x`.
+#define CHANNELS_PER_MASK_WORD 64
 #define CHANNEL_LIMIT 16 // this is used to limit channels for pre MI3xx GPUs
 #define NCCL_MAX_LOCAL_RANKS 72
 #define NCCL_MIN_NTHREADS (4*WARP_SIZE)
@@ -182,7 +189,13 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS-1)
 
 #define NCCL_LL128_MAX_NTHREADS 256
-#define NCCL_LL128_ELEMS_PER_THREAD 28
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+// Upstream NCCL value (120 = 8 lines * 15 dataElems for 128-byte lines).
+// On RCCL/HIP the host derives the per-channel LL128 buffer size from
+// rcclLL128ElemsPerThreadFromArch() (see rcclSetDefaultBuffSizes), so this
+// macro is unused on HIP and intentionally left undefined to prevent drift.
+#define NCCL_LL128_ELEMS_PER_THREAD 120
+#endif
 
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
 #define NCCL_LL128_SHMEM_SIZE (NCCL_LL128_SHMEM_ELEMS_PER_THREAD*NCCL_LL128_MAX_NTHREADS)
@@ -404,7 +417,7 @@ struct alignas(16) ncclDevWorkColl {
   uint32_t channelLo:8, channelHi:8;
 #endif
   uint32_t nWarps:8;
-  uint32_t redOpArgIsPtr:1, regUsed:1, netRegUsed:1, oneNode:1, direct:2, isOneRPN:1, rcclUseOneSlice:1, gfx9CheapFenceOff:1;
+  uint32_t redOpArgIsPtr:1, regUsed:1, netRegUsed:1, oneNode:1, direct:2, isOneRPN:1, rcclUseOneSlice:1, cheapPostSendFenceOff:1;
   uint32_t root:30, connIndex:2;
   uint16_t pivotA2ANumBiRings:15, profilerEnabled:1;
   void* recvbuff;
@@ -626,8 +639,10 @@ enum ncclDevWorkStorageType: uint8_t {
 };
 
 struct channelMasks {
-  uint64_t masks[MAXCHANNELS/64];
+  uint64_t masks[MAXCHANNELS/CHANNELS_PER_MASK_WORD];
 };
+static_assert(MAXCHANNELS % CHANNELS_PER_MASK_WORD == 0,
+              "MAXCHANNELS must be a multiple of CHANNELS_PER_MASK_WORD");
 
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
@@ -660,7 +675,9 @@ typedef ncclDevKernelArgsStorage<(4<<10)> ncclDevKernelArgs4K;
 // 5KB should be sufficient for now
 typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
 #else
-typedef ncclDevKernelArgs4K ncclDevKernelArgsDefaultStorage;
+// 5KB needed so 256-channel non-WarpSpeed builds can fit one batch per channel
+// in the kernel-args buffer (4KB only fits ~252 batches).
+typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
 #endif
 __host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */int cudaArch=NCCL_CUDA_ARCH) {
   //return (cudaArch < 700 || cudaDriver < 12010) ? 4<<10 : (32<<10)-4;

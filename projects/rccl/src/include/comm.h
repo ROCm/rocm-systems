@@ -225,7 +225,9 @@ struct ncclTaskColl {
   int32_t nMaxChannels:16;
   bool useWarpSpeed;
 #else
-  int32_t nMaxChannels:8;
+  // 16-bit so MAXCHANNELS=256 fits without sign-bit truncation
+  // (an 8-bit signed field caps at 127).
+  int32_t nMaxChannels:16;
 #endif
 #ifdef ENABLE_ROCSHMEM
   size_t* sizes;
@@ -258,7 +260,8 @@ struct ncclTaskColl {
   void* groupApiEventHandle;
   void* collApiEventHandle;
   void* eventHandle;
-  uint8_t nChannels;
+  // 16-bit so MAXCHANNELS=256 fits without wrap-to-zero.
+  uint16_t nChannels;
 };
 
 
@@ -655,7 +658,7 @@ struct ncclComm {
   int node;
   int nNodes;
   int rcclUseOneSlice; // RCCL: true if this comm is using one slice per primitive
-  int gfx9CheapFenceOff; // RCCL: true if gfx9 cheap fence is disabled
+  int cheapPostSendFenceOff; // RCCL: true if cheap post-send fence is disabled
   int localRank;
   int localRanks;
   int maxLocalRanks;
