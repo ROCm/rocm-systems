@@ -160,7 +160,7 @@ later be passed to :ref:`rocshmem_buffer_unregister_symmetric`.
 
 Notes:
 
-* This routine is currently restricted to memory allocated through the HIP
+* This routine is restricted to memory allocated through the HIP
   Virtual Memory Management (VMM) APIs (ROCm 7.0 or newer). Passing a non-VMM
   pointer returns ``NULL``.
 * Each PE may supply a different underlying buffer, but all PEs must agree on
