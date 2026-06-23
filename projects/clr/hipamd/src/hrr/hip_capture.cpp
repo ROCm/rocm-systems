@@ -250,6 +250,15 @@ static void scan_embedded_ptr_offsets(const void* func_key, uint32_t arg_idx,
     // Null/small word: never a device VA. Skip without caching a verdict — a
     // pointer field that is merely null on this launch must stay re-checkable.
     if (cand < 0x10000ULL) { j += 1; continue; }
+    // Packed-integer false positive: two adjacent uint32 struct fields {lo, hi}
+    // — e.g. an ATen OffsetCalculator's per-arg stride/size and IntDivider magic
+    // constants embedded in an elementwise functor — can form an 8-byte value
+    // where `hi` carries the device-VA prefix (0x7e../0x7f..) and `lo` is a small
+    // scalar. That value lands inside a real allocation and would be mis-flagged
+    // as an embedded pointer; translating it at replay corrupts the calculator
+    // and faults. A genuine 48-bit device pointer never has such tiny low 32
+    // bits, so skip these (stay re-checkable; do not cache a sticky verdict).
+    if ((cand & 0xFFFFFFFFULL) < 0x10000ULL) { j += 1; continue; }
     hipPointerAttribute_t attr{};
     const bool is_ptr =
         g_real_table.hipPointerGetAttributes_fn(

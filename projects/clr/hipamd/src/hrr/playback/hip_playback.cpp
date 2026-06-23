@@ -314,8 +314,13 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
         } else {
             std::unique_lock lk(map_mutex);
             replacement_modules.push_back(mod);
-            fprintf(stderr, "[HRR] Replacing kernel '%s' with %s (symbol %s)\n",
-                    kernel_name.c_str(), path->c_str(), kernel_name.c_str());
+            // Announce the successful replacement on stdout: it is a deliberate,
+            // user-requested replay action (a result of --replace-kernel), not a
+            // diagnostic. stdout is also what carries the replay summary callers
+            // parse; the fallback warnings above stay on stderr.
+            printf("[HRR] Replacing kernel '%s' with %s (symbol %s)\n",
+                   kernel_name.c_str(), path->c_str(), kernel_name.c_str());
+            fflush(stdout);
         }
     }
 
@@ -536,24 +541,48 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             // may be a genuine scalar (a large count, a double, a packed value)
             // that was mis-flagged — overwriting it with null would silently
             // corrupt it. Only rewrite the word when it actually resolves.
-            auto try_translate_word = [&](size_t off) -> bool {
+            // Reject packed-integer false positives. The capture-side detector
+            // flags any 8-byte word that resolves to a device VA, but two adjacent
+            // 32-bit struct fields {uint32 lo, uint32 hi} can coincidentally form
+            // such a value: ATen elementwise kernels embed an OffsetCalculator
+            // (per-arg uint32 strides/sizes + IntDivider magic constants) in the
+            // functor. When `hi` happens to hold a value whose top bits match the
+            // device-VA prefix (0x7e../0x7f..) and `lo` holds a small integer (a
+            // stride/size/dim), the combined 64-bit word lands inside a real
+            // allocation and gets "translated" — corrupting the OffsetCalculator
+            // and producing an out-of-bounds VM fault (e.g. the recurring
+            // elementwise_kernel_manual_unroll<...MulFunctor> crash).
+            //
+            // A genuine 64-bit device pointer carries a full 48-bit address, so its
+            // low 32 bits are part of that address and are effectively never this
+            // small. The FP, by construction, needs its HIGH word to be the VA
+            // prefix and its LOW word to be a small scalar — so a tiny low-32 value
+            // is the reliable FP signature. (Set HIP_HRR_PTR_RELAX=1 to disable.)
+            static const bool ptr_relax =
+                (std::getenv("HIP_HRR_PTR_RELAX") != nullptr);
+            auto pointer_like = [&](uint64_t v) -> bool {
+                if (ptr_relax) return true;
+                return (v & 0xFFFFFFFFULL) >= 0x10000ULL;
+            };
+            auto try_translate_word = [&](size_t off, const char* src) -> bool {
                 if (off + 8 > arg_size) return false;
                 uint64_t rec_ptr; memcpy(&rec_ptr, data + off, 8);
                 if (rec_ptr < 0x10000ULL) return false;  // null/small — never a VA
+                if (!pointer_like(rec_ptr)) return false;  // packed-int false positive
                 void* live = ctx.translate_ptr(rec_ptr);
                 if (!live) return false;
                 memcpy(storage.data() + off, &live, sizeof(void*));
                 if (dbg_dump_ptrs) dbg_ptrs.emplace_back(i, rec_ptr, live);
                 if (ctx.verbose)
-                    fprintf(stderr, "[HRR]   arg[%u]: embedded ptr @+%zu 0x%llx -> %p\n",
-                            i, off, (unsigned long long)rec_ptr, live);
+                    fprintf(stderr, "[HRR]   arg[%u]: embedded ptr @+%zu 0x%llx -> %p [%s]\n",
+                            i, off, (unsigned long long)rec_ptr, live, src);
                 return true;
             };
 
             // First honor the capture-recorded offsets (these may be unaligned).
             std::vector<char> handled(arg_size, 0);
             for (uint16_t off : ptr_offsets) {
-                if (try_translate_word(off))
+                if (try_translate_word(off, "captured"))
                     for (int b = 0; b < 8 && static_cast<size_t>(off) + b < arg_size; b++)
                         handled[off + b] = 1;
                 else if (ctx.verbose)
@@ -572,9 +601,11 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             // allocation map, so we re-scan every word and translate any that
             // resolves. Genuine scalars (small counts/shapes) never fall inside a
             // recorded device VA, so this does not corrupt them.
-            for (size_t off = 0; off + 8 <= arg_size; ) {
+            static const bool no_rescan =
+                (std::getenv("HIP_HRR_REPLAY_NO_RESCAN") != nullptr);
+            for (size_t off = 0; !no_rescan && off + 8 <= arg_size; ) {
                 if (handled[off]) { off += 1; continue; }
-                if (try_translate_word(off)) off += 8;
+                if (try_translate_word(off, "rescan")) off += 8;
                 else off += 1;
             }
         } else {
