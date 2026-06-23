@@ -32,7 +32,6 @@ DsAddU32Ds::DsAddU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsAddU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -68,7 +67,6 @@ DsSubU32Ds::DsSubU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -104,7 +102,6 @@ DsRsubU32Ds::DsRsubU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -140,7 +137,6 @@ DsIncU32Ds::DsIncU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -176,7 +172,6 @@ DsDecU32Ds::DsDecU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -212,7 +207,6 @@ DsMinI32Ds::DsMinI32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -248,7 +242,6 @@ DsMaxI32Ds::DsMaxI32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -284,7 +277,6 @@ DsMinU32Ds::DsMinU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -320,7 +312,6 @@ DsMaxU32Ds::DsMaxU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -356,7 +347,6 @@ DsAndB32Ds::DsAndB32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -392,7 +382,6 @@ DsOrB32Ds::DsOrB32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -428,7 +417,6 @@ DsXorB32Ds::DsXorB32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -503,7 +491,6 @@ DsWriteB32Ds::DsWriteB32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWriteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -540,7 +527,6 @@ DsWrite2B32Ds::DsWrite2B32Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWrite2B32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -587,7 +573,6 @@ DsWrite2st64B32Ds::DsWrite2st64B32Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWrite2st64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -633,7 +618,6 @@ DsCmpstB32Ds::DsCmpstB32Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -674,7 +658,6 @@ DsCmpstF32Ds::DsCmpstF32Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -713,7 +696,6 @@ DsMinF32Ds::DsMinF32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -749,7 +731,6 @@ DsMaxF32Ds::DsMaxF32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -793,7 +774,6 @@ DsAddF32Ds::DsAddF32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -828,7 +808,6 @@ DsWriteAddtidB32Ds::DsWriteAddtidB32Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWriteAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -862,7 +841,6 @@ DsWriteB8Ds::DsWriteB8Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWriteB8Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -896,7 +874,6 @@ DsWriteB16Ds::DsWriteB16Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWriteB16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -933,7 +910,6 @@ DsAddRtnU32Ds::DsAddRtnU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsAddRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -972,7 +948,6 @@ DsSubRtnU32Ds::DsSubRtnU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsSubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1011,7 +986,6 @@ DsRsubRtnU32Ds::DsRsubRtnU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1050,7 +1024,6 @@ DsIncRtnU32Ds::DsIncRtnU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsIncRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1089,7 +1062,6 @@ DsDecRtnU32Ds::DsDecRtnU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsDecRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1128,7 +1100,6 @@ DsMinRtnI32Ds::DsMinRtnI32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1167,7 +1138,6 @@ DsMaxRtnI32Ds::DsMaxRtnI32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1206,7 +1176,6 @@ DsMinRtnU32Ds::DsMinRtnU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1245,7 +1214,6 @@ DsMaxRtnU32Ds::DsMaxRtnU32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1284,7 +1252,6 @@ DsAndRtnB32Ds::DsAndRtnB32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsAndRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1322,7 +1289,6 @@ DsOrRtnB32Ds::DsOrRtnB32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsOrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1361,7 +1327,6 @@ DsXorRtnB32Ds::DsXorRtnB32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsXorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1443,7 +1408,6 @@ DsWrxchgRtnB32Ds::DsWrxchgRtnB32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWrxchgRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1484,7 +1448,6 @@ DsWrxchg2RtnB32Ds::DsWrxchg2RtnB32Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWrxchg2RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1525,7 +1488,6 @@ DsWrxchg2st64RtnB32Ds::DsWrxchg2st64RtnB32Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWrxchg2st64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1566,7 +1528,6 @@ DsCmpstRtnB32Ds::DsCmpstRtnB32Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1610,7 +1571,6 @@ DsCmpstRtnF32Ds::DsCmpstRtnF32Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1652,7 +1612,6 @@ DsMinRtnF32Ds::DsMinRtnF32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1691,7 +1650,6 @@ DsMaxRtnF32Ds::DsMaxRtnF32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1750,7 +1708,6 @@ DsAddRtnF32Ds::DsAddRtnF32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1786,7 +1743,6 @@ DsReadB32Ds::DsReadB32Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1811,7 +1767,6 @@ DsRead2B32Ds::DsRead2B32Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsRead2B32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1850,7 +1805,6 @@ DsRead2st64B32Ds::DsRead2st64B32Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsRead2st64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1888,7 +1842,6 @@ DsReadI8Ds::DsReadI8Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1914,7 +1867,6 @@ DsReadU8Ds::DsReadU8Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1939,7 +1891,6 @@ DsReadI16Ds::DsReadI16Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1965,7 +1916,6 @@ DsReadU16Ds::DsReadU16Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1990,7 +1940,6 @@ DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
   src_operands_[0] = &addr;
   num_src_ = 1;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsSwizzleB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2008,7 +1957,6 @@ DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
   src_operands_[1] = &data0;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsPermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2026,7 +1974,6 @@ DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
   src_operands_[1] = &data0;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsBpermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2042,7 +1989,6 @@ DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2080,7 +2026,6 @@ DsSubU64Ds::DsSubU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2118,7 +2063,6 @@ DsRsubU64Ds::DsRsubU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2156,7 +2100,6 @@ DsIncU64Ds::DsIncU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2194,7 +2137,6 @@ DsDecU64Ds::DsDecU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2232,7 +2174,6 @@ DsMinI64Ds::DsMinI64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2270,7 +2211,6 @@ DsMaxI64Ds::DsMaxI64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2308,7 +2248,6 @@ DsMinU64Ds::DsMinU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2346,7 +2285,6 @@ DsMaxU64Ds::DsMaxU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2384,7 +2322,6 @@ DsAndB64Ds::DsAndB64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2422,7 +2359,6 @@ DsOrB64Ds::DsOrB64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2460,7 +2396,6 @@ DsXorB64Ds::DsXorB64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2541,7 +2476,6 @@ DsWriteB64Ds::DsWriteB64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWriteB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2580,7 +2514,6 @@ DsWrite2B64Ds::DsWrite2B64Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWrite2B64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2631,7 +2564,6 @@ DsWrite2st64B64Ds::DsWrite2st64B64Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWrite2st64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2681,7 +2613,6 @@ DsCmpstB64Ds::DsCmpstB64Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2726,7 +2657,6 @@ DsCmpstF64Ds::DsCmpstF64Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2769,7 +2699,6 @@ DsMinF64Ds::DsMinF64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2807,7 +2736,6 @@ DsMaxF64Ds::DsMaxF64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2846,7 +2774,6 @@ DsWriteB8D16HiDs::DsWriteB8D16HiDs(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWriteB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -2882,7 +2809,6 @@ DsWriteB16D16HiDs::DsWriteB16D16HiDs(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWriteB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -2918,7 +2844,6 @@ DsReadU8D16Ds::DsReadU8D16Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2945,7 +2870,6 @@ DsReadU8D16HiDs::DsReadU8D16HiDs(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -2972,7 +2896,6 @@ DsReadI8D16Ds::DsReadI8D16Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3000,7 +2923,6 @@ DsReadI8D16HiDs::DsReadI8D16HiDs(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -3028,7 +2950,6 @@ DsReadU16D16Ds::DsReadU16D16Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3055,7 +2976,6 @@ DsReadU16D16HiDs::DsReadU16D16HiDs(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -3084,7 +3004,6 @@ DsAddRtnU64Ds::DsAddRtnU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3125,7 +3044,6 @@ DsSubRtnU64Ds::DsSubRtnU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3166,7 +3084,6 @@ DsRsubRtnU64Ds::DsRsubRtnU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3207,7 +3124,6 @@ DsIncRtnU64Ds::DsIncRtnU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3248,7 +3164,6 @@ DsDecRtnU64Ds::DsDecRtnU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3289,7 +3204,6 @@ DsMinRtnI64Ds::DsMinRtnI64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3330,7 +3244,6 @@ DsMaxRtnI64Ds::DsMaxRtnI64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3371,7 +3284,6 @@ DsMinRtnU64Ds::DsMinRtnU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3412,7 +3324,6 @@ DsMaxRtnU64Ds::DsMaxRtnU64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3453,7 +3364,6 @@ DsAndRtnB64Ds::DsAndRtnB64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3493,7 +3403,6 @@ DsOrRtnB64Ds::DsOrRtnB64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3534,7 +3443,6 @@ DsXorRtnB64Ds::DsXorRtnB64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3622,7 +3530,6 @@ DsWrxchgRtnB64Ds::DsWrxchgRtnB64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWrxchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3665,7 +3572,6 @@ DsWrxchg2RtnB64Ds::DsWrxchg2RtnB64Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWrxchg2RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3708,7 +3614,6 @@ DsWrxchg2st64RtnB64Ds::DsWrxchg2st64RtnB64Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWrxchg2st64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3751,7 +3656,6 @@ DsCmpstRtnB64Ds::DsCmpstRtnB64Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3799,7 +3703,6 @@ DsCmpstRtnF64Ds::DsCmpstRtnF64Ds(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsCmpstRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3845,7 +3748,6 @@ DsMinRtnF64Ds::DsMinRtnF64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3886,7 +3788,6 @@ DsMaxRtnF64Ds::DsMaxRtnF64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3924,7 +3825,6 @@ DsReadB64Ds::DsReadB64Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3949,7 +3849,6 @@ DsRead2B64Ds::DsRead2B64Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsRead2B64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3988,7 +3887,6 @@ DsRead2st64B64Ds::DsRead2st64B64Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsRead2st64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4029,7 +3927,6 @@ DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4148,7 +4045,6 @@ DsReadAddtidB32Ds::DsReadAddtidB32Ds(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4248,7 +4144,6 @@ DsWriteB96Ds::DsWriteB96Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWriteB96Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4287,7 +4182,6 @@ DsWriteB128Ds::DsWriteB128Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsWriteB128Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4327,7 +4221,6 @@ DsReadB96Ds::DsReadB96Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4352,7 +4245,6 @@ DsReadB128Ds::DsReadB128Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void DsReadB128Ds::execute_impl(amdgpu::Wavefront &wf) {

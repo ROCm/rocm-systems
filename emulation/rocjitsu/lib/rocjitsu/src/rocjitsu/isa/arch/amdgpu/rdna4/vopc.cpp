@@ -40,7 +40,6 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -142,7 +141,6 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -244,7 +242,6 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -346,7 +343,6 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -448,7 +444,6 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -550,7 +545,6 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -652,7 +646,6 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -754,7 +747,6 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -856,7 +848,6 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -958,7 +949,6 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1060,7 +1050,6 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1162,7 +1151,6 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1264,7 +1252,6 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1366,7 +1353,6 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1468,7 +1454,6 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1570,7 +1555,6 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1672,7 +1656,6 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1774,7 +1757,6 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1876,7 +1858,6 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1978,7 +1959,6 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2080,7 +2060,6 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2182,7 +2161,6 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2284,7 +2262,6 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2386,7 +2363,6 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2488,7 +2464,6 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2590,7 +2565,6 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2692,7 +2666,6 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2794,7 +2767,6 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2896,7 +2868,6 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2998,7 +2969,6 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3100,7 +3070,6 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3202,7 +3171,6 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3304,7 +3272,6 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3406,7 +3373,6 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3508,7 +3474,6 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3610,7 +3575,6 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3712,7 +3676,6 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3814,7 +3777,6 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3916,7 +3878,6 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4018,7 +3979,6 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4120,7 +4080,6 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4222,7 +4181,6 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4324,7 +4282,6 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4426,7 +4383,6 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4528,7 +4484,6 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4630,7 +4585,6 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4732,7 +4686,6 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4834,7 +4787,6 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4936,7 +4888,6 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5038,7 +4989,6 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5140,7 +5090,6 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5242,7 +5191,6 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5344,7 +5292,6 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5446,7 +5393,6 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5548,7 +5494,6 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5650,7 +5595,6 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5752,7 +5696,6 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5854,7 +5797,6 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5956,7 +5898,6 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6058,7 +5999,6 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6160,7 +6100,6 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6262,7 +6201,6 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6364,7 +6302,6 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6466,7 +6403,6 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6568,7 +6504,6 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6670,7 +6605,6 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6772,7 +6706,6 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6874,7 +6807,6 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6976,7 +6908,6 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7078,7 +7009,6 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7180,7 +7110,6 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7282,7 +7211,6 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7384,7 +7312,6 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7486,7 +7413,6 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7588,7 +7514,6 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7690,7 +7615,6 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7792,7 +7716,6 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7894,7 +7817,6 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7996,7 +7918,6 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8098,7 +8019,6 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8200,7 +8120,6 @@ VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8302,9 +8221,7 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8416,9 +8333,7 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8530,9 +8445,7 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8644,9 +8557,7 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8758,9 +8669,7 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8872,9 +8781,7 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8986,9 +8893,7 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9100,9 +9005,7 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9214,9 +9117,7 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9328,9 +9229,7 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9442,9 +9341,7 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9556,9 +9453,7 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9670,9 +9565,7 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9784,9 +9677,7 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9898,9 +9789,7 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -10012,9 +9901,7 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -10126,9 +10013,7 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -10240,9 +10125,7 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -10354,9 +10237,7 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -10468,9 +10349,7 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -10582,9 +10461,7 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -10696,9 +10573,7 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -10810,9 +10685,7 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -10924,9 +10797,7 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -11038,9 +10909,7 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -11152,9 +11021,7 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -11266,9 +11133,7 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -11380,9 +11245,7 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -11494,9 +11357,7 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -11608,9 +11469,7 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -11722,9 +11581,7 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -11836,9 +11693,7 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -11950,9 +11805,7 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -12064,9 +11917,7 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -12178,9 +12029,7 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -12292,9 +12141,7 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -12406,9 +12253,7 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -12520,9 +12365,7 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -12634,9 +12477,7 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -12748,9 +12589,7 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -12862,9 +12701,7 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -12976,9 +12813,7 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -13090,9 +12925,7 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -13204,9 +13037,7 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -13318,9 +13149,7 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -13432,9 +13261,7 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -13546,9 +13373,7 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -13660,9 +13485,7 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -13774,9 +13597,7 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -13888,9 +13709,7 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -14002,9 +13821,7 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -14116,9 +13933,7 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -14230,9 +14045,7 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -14344,9 +14157,7 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -14458,9 +14269,7 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -14572,9 +14381,7 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -14686,9 +14493,7 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -14800,9 +14605,7 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -14914,9 +14717,7 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -15028,9 +14829,7 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -15142,9 +14941,7 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -15256,9 +15053,7 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -15370,9 +15165,7 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -15484,9 +15277,7 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -15598,9 +15389,7 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -15712,9 +15501,7 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -15826,9 +15613,7 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -15940,9 +15725,7 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -16054,9 +15837,7 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -16168,9 +15949,7 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -16282,9 +16061,7 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -16396,9 +16173,7 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -16510,9 +16285,7 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -16624,9 +16397,7 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -16738,9 +16509,7 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -16852,9 +16621,7 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -16966,9 +16733,7 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -17080,9 +16845,7 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxGeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -17194,9 +16957,7 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -17337,9 +17098,7 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -17474,9 +17233,7 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  flags_ |= EXEC_MASKED;
   flags_ |= WRITES_EXEC;
-  flags_ |= READS_EXEC;
 }
 
 void VCmpxClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {

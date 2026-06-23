@@ -26,7 +26,6 @@ LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
   src_operands_[0] = &attr;
   num_src_ = 1;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void LdsParamLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
@@ -40,7 +39,6 @@ LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   num_src_ = 0;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void LdsDirectLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {

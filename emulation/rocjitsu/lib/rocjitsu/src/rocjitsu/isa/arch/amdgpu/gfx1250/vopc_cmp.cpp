@@ -58,7 +58,6 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -180,7 +179,6 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -302,7 +300,6 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -424,7 +421,6 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -546,7 +542,6 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -668,7 +663,6 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -790,7 +784,6 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -912,7 +905,6 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1034,7 +1026,6 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1156,7 +1147,6 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1278,7 +1268,6 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1400,7 +1389,6 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1522,7 +1510,6 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1644,7 +1631,6 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1764,7 +1750,6 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -1884,7 +1869,6 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2004,7 +1988,6 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2124,7 +2107,6 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2244,7 +2226,6 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2364,7 +2345,6 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2484,7 +2464,6 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2604,7 +2583,6 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2724,7 +2702,6 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2844,7 +2821,6 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -2964,7 +2940,6 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3084,7 +3059,6 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3204,7 +3178,6 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3324,7 +3297,6 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3444,7 +3416,6 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3564,7 +3535,6 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3684,7 +3654,6 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3804,7 +3773,6 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -3924,7 +3892,6 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4044,7 +4011,6 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4164,7 +4130,6 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4284,7 +4249,6 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4404,7 +4368,6 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4524,7 +4487,6 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4644,7 +4606,6 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4764,7 +4725,6 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -4884,7 +4844,6 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5004,7 +4963,6 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5126,7 +5084,6 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5248,7 +5205,6 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5370,7 +5326,6 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5492,7 +5447,6 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5614,7 +5568,6 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5736,7 +5689,6 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5858,7 +5810,6 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -5980,7 +5931,6 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6102,7 +6052,6 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6224,7 +6173,6 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6346,7 +6294,6 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6468,7 +6415,6 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6588,7 +6534,6 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6708,7 +6653,6 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6828,7 +6772,6 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6948,7 +6891,6 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7068,7 +7010,6 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7188,7 +7129,6 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7308,7 +7248,6 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7428,7 +7367,6 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7548,7 +7486,6 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7668,7 +7605,6 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7788,7 +7724,6 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -7908,7 +7843,6 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8028,7 +7962,6 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8148,7 +8081,6 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8268,7 +8200,6 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8388,7 +8319,6 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8508,7 +8438,6 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8628,7 +8557,6 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8748,7 +8676,6 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8868,7 +8795,6 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -8988,7 +8914,6 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9108,7 +9033,6 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9228,7 +9152,6 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9348,7 +9271,6 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpGeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9470,7 +9392,6 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9590,7 +9511,6 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -9710,7 +9630,6 @@ VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= EXEC_MASKED;
 }
 
 void VCmpClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {

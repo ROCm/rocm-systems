@@ -49,7 +49,6 @@ BufferLoadU8Vbuffer::BufferLoadU8Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadU8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -84,7 +83,6 @@ BufferLoadI8Vbuffer::BufferLoadI8Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadI8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -120,7 +118,6 @@ BufferLoadU16Vbuffer::BufferLoadU16Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadU16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -155,7 +152,6 @@ BufferLoadI16Vbuffer::BufferLoadI16Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadI16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -191,7 +187,6 @@ BufferLoadB32Vbuffer::BufferLoadB32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -226,7 +221,6 @@ BufferLoadB64Vbuffer::BufferLoadB64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -261,7 +255,6 @@ BufferLoadB96Vbuffer::BufferLoadB96Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadB96Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -296,7 +289,6 @@ BufferLoadB128Vbuffer::BufferLoadB128Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadB128Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -331,7 +323,6 @@ BufferStoreB8Vbuffer::BufferStoreB8Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreB8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -375,7 +366,6 @@ BufferStoreB16Vbuffer::BufferStoreB16Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -419,7 +409,6 @@ BufferStoreB32Vbuffer::BufferStoreB32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -463,7 +452,6 @@ BufferStoreB64Vbuffer::BufferStoreB64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -509,7 +497,6 @@ BufferStoreB96Vbuffer::BufferStoreB96Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreB96Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -557,7 +544,6 @@ BufferStoreB128Vbuffer::BufferStoreB128Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreB128Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -607,7 +593,6 @@ BufferLoadD16U8Vbuffer::BufferLoadD16U8Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadD16U8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -643,7 +628,6 @@ BufferLoadD16I8Vbuffer::BufferLoadD16I8Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadD16I8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -680,7 +664,6 @@ BufferLoadD16B16Vbuffer::BufferLoadD16B16Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadD16B16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -716,7 +699,6 @@ BufferLoadD16HiU8Vbuffer::BufferLoadD16HiU8Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadD16HiU8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -752,7 +734,6 @@ BufferLoadD16HiI8Vbuffer::BufferLoadD16HiI8Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadD16HiI8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -789,7 +770,6 @@ BufferLoadD16HiB16Vbuffer::BufferLoadD16HiB16Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferLoadD16HiB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -825,7 +805,6 @@ BufferStoreD16HiB8Vbuffer::BufferStoreD16HiB8Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreD16HiB8Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -870,7 +849,6 @@ BufferStoreD16HiB16Vbuffer::BufferStoreD16HiB16Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferStoreD16HiB16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -915,7 +893,6 @@ BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSwapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -962,7 +939,6 @@ BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicCmpswapB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1011,7 +987,6 @@ BufferAtomicAddU32Vbuffer::BufferAtomicAddU32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicAddU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1058,7 +1033,6 @@ BufferAtomicSubU32Vbuffer::BufferAtomicSubU32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1105,7 +1079,6 @@ BufferAtomicSubClampU32Vbuffer::BufferAtomicSubClampU32Vbuffer(const MachineInst
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSubClampU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1152,7 +1125,6 @@ BufferAtomicMinI32Vbuffer::BufferAtomicMinI32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMinI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1199,7 +1171,6 @@ BufferAtomicMinU32Vbuffer::BufferAtomicMinU32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMinU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1246,7 +1217,6 @@ BufferAtomicMaxI32Vbuffer::BufferAtomicMaxI32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMaxI32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1293,7 +1263,6 @@ BufferAtomicMaxU32Vbuffer::BufferAtomicMaxU32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMaxU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1340,7 +1309,6 @@ BufferAtomicAndB32Vbuffer::BufferAtomicAndB32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicAndB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1387,7 +1355,6 @@ BufferAtomicOrB32Vbuffer::BufferAtomicOrB32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicOrB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1434,7 +1401,6 @@ BufferAtomicXorB32Vbuffer::BufferAtomicXorB32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicXorB32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1481,7 +1447,6 @@ BufferAtomicIncU32Vbuffer::BufferAtomicIncU32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicIncU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1528,7 +1493,6 @@ BufferAtomicDecU32Vbuffer::BufferAtomicDecU32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicDecU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1575,7 +1539,6 @@ BufferAtomicSwapB64Vbuffer::BufferAtomicSwapB64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSwapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1624,7 +1587,6 @@ BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicCmpswapB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1677,7 +1639,6 @@ BufferAtomicAddU64Vbuffer::BufferAtomicAddU64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicAddU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1726,7 +1687,6 @@ BufferAtomicSubU64Vbuffer::BufferAtomicSubU64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicSubU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1775,7 +1735,6 @@ BufferAtomicMinI64Vbuffer::BufferAtomicMinI64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMinI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1824,7 +1783,6 @@ BufferAtomicMinU64Vbuffer::BufferAtomicMinU64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMinU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1873,7 +1831,6 @@ BufferAtomicMaxI64Vbuffer::BufferAtomicMaxI64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMaxI64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1922,7 +1879,6 @@ BufferAtomicMaxU64Vbuffer::BufferAtomicMaxU64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMaxU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -1971,7 +1927,6 @@ BufferAtomicAndB64Vbuffer::BufferAtomicAndB64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicAndB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2020,7 +1975,6 @@ BufferAtomicOrB64Vbuffer::BufferAtomicOrB64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicOrB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2069,7 +2023,6 @@ BufferAtomicXorB64Vbuffer::BufferAtomicXorB64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicXorB64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2118,7 +2071,6 @@ BufferAtomicIncU64Vbuffer::BufferAtomicIncU64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicIncU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2167,7 +2119,6 @@ BufferAtomicDecU64Vbuffer::BufferAtomicDecU64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicDecU64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2216,7 +2167,6 @@ BufferAtomicCondSubU32Vbuffer::BufferAtomicCondSubU32Vbuffer(const MachineInst *
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicCondSubU32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2263,7 +2213,6 @@ BufferAtomicMinNumF32Vbuffer::BufferAtomicMinNumF32Vbuffer(const MachineInst *in
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMinNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2310,7 +2259,6 @@ BufferAtomicMaxNumF32Vbuffer::BufferAtomicMaxNumF32Vbuffer(const MachineInst *in
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMaxNumF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2357,7 +2305,6 @@ BufferAtomicAddF64Vbuffer::BufferAtomicAddF64Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicAddF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2406,7 +2353,6 @@ BufferAtomicAddF32Vbuffer::BufferAtomicAddF32Vbuffer(const MachineInst *inst)
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicAddF32Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2453,7 +2399,6 @@ BufferAtomicPkAddF16Vbuffer::BufferAtomicPkAddF16Vbuffer(const MachineInst *inst
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicPkAddF16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2500,7 +2445,6 @@ BufferAtomicPkAddBf16Vbuffer::BufferAtomicPkAddBf16Vbuffer(const MachineInst *in
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicPkAddBf16Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2547,7 +2491,6 @@ BufferAtomicMinNumF64Vbuffer::BufferAtomicMinNumF64Vbuffer(const MachineInst *in
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMinNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {
@@ -2596,7 +2539,6 @@ BufferAtomicMaxNumF64Vbuffer::BufferAtomicMaxNumF64Vbuffer(const MachineInst *in
   vdata.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
-  flags_ |= EXEC_MASKED;
 }
 
 void BufferAtomicMaxNumF64Vbuffer::execute_impl(amdgpu::Wavefront &wf) {

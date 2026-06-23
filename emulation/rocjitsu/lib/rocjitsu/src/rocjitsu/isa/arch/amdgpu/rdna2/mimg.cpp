@@ -26,7 +26,6 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -45,7 +44,6 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -64,7 +62,6 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadPckMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -83,7 +80,6 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -102,7 +98,6 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -121,7 +116,6 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadMipPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -140,7 +134,6 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -159,7 +152,6 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStoreMipMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -178,7 +170,6 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStorePckMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -197,7 +188,6 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStoreMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -216,7 +206,6 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGetResinfoMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -235,7 +224,6 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -254,7 +242,6 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicCmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -273,7 +260,6 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicAddMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -292,7 +278,6 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicSubMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -311,7 +296,6 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicSminMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -330,7 +314,6 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicUminMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -349,7 +332,6 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicSmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -368,7 +350,6 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicUmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -387,7 +368,6 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicAndMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -406,7 +386,6 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicOrMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -425,7 +404,6 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicXorMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -444,7 +422,6 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicIncMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -463,7 +440,6 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicDecMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -482,7 +458,6 @@ ImageAtomicFcmpswapMimg::ImageAtomicFcmpswapMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicFcmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -501,7 +476,6 @@ ImageAtomicFminMimg::ImageAtomicFminMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicFminMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -520,7 +494,6 @@ ImageAtomicFmaxMimg::ImageAtomicFmaxMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageAtomicFmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -540,7 +513,6 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -560,7 +532,6 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -580,7 +551,6 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleDMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -600,7 +570,6 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleDClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -620,7 +589,6 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleLMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -640,7 +608,6 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleBMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -660,7 +627,6 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleBClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -680,7 +646,6 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleLzMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -700,7 +665,6 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -720,7 +684,6 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -740,7 +703,6 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCDMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -760,7 +722,6 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCDClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -780,7 +741,6 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCLMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -800,7 +760,6 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCBMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -820,7 +779,6 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCBClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -840,7 +798,6 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCLzMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -860,7 +817,6 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -880,7 +836,6 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -900,7 +855,6 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleDOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -920,7 +874,6 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleDClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -940,7 +893,6 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleLOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -960,7 +912,6 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleBOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -980,7 +931,6 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleBClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1000,7 +950,6 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1020,7 +969,6 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1040,7 +988,6 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1060,7 +1007,6 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCDOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1080,7 +1026,6 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCDClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1100,7 +1045,6 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCLOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1120,7 +1064,6 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCBOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1140,7 +1083,6 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCBClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1160,7 +1102,6 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1180,7 +1121,6 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1200,7 +1140,6 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4ClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1218,7 +1157,6 @@ ImageLoadBy2Mimg::ImageLoadBy2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadBy2Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1237,7 +1175,6 @@ ImageLoadBy4Mimg::ImageLoadBy4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadBy4Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1258,7 +1195,6 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4LMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1278,7 +1214,6 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4BMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1298,7 +1233,6 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4BClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1318,7 +1252,6 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4LzMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1338,7 +1271,6 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4CMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1358,7 +1290,6 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4CClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1376,7 +1307,6 @@ ImageLoadMipBy2Mimg::ImageLoadMipBy2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadMipBy2Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1395,7 +1325,6 @@ ImageLoadMipBy4Mimg::ImageLoadMipBy4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadMipBy4Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1416,7 +1345,6 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4CLMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1436,7 +1364,6 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4CBMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1456,7 +1383,6 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4CBClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1476,7 +1402,6 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4CLzMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1496,7 +1421,6 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4OMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1516,7 +1440,6 @@ ImageGather4ClOMimg::ImageGather4ClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4ClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1534,7 +1457,6 @@ ImageStoreBy2Mimg::ImageStoreBy2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStoreBy2Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1553,7 +1475,6 @@ ImageStoreBy4Mimg::ImageStoreBy4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStoreBy4Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1574,7 +1495,6 @@ ImageGather4LOMimg::ImageGather4LOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4LOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1594,7 +1514,6 @@ ImageGather4BOMimg::ImageGather4BOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4BOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1614,7 +1533,6 @@ ImageGather4BClOMimg::ImageGather4BClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4BClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1634,7 +1552,6 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4LzOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1654,7 +1571,6 @@ ImageGather4COMimg::ImageGather4COMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4COMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1674,7 +1590,6 @@ ImageGather4CClOMimg::ImageGather4CClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4CClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1692,7 +1607,6 @@ ImageStoreMipBy2Mimg::ImageStoreMipBy2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStoreMipBy2Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1711,7 +1625,6 @@ ImageStoreMipBy4Mimg::ImageStoreMipBy4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStoreMipBy4Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1732,7 +1645,6 @@ ImageGather4CLOMimg::ImageGather4CLOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4CLOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1752,7 +1664,6 @@ ImageGather4CBOMimg::ImageGather4CBOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4CBOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1772,7 +1683,6 @@ ImageGather4CBClOMimg::ImageGather4CBClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4CBClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1792,7 +1702,6 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4CLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1812,7 +1721,6 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGetLodMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1832,7 +1740,6 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4hMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1852,7 +1759,6 @@ ImageGather4hPckMimg::ImageGather4hPckMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather4hPckMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1872,7 +1778,6 @@ ImageGather8hPckMimg::ImageGather8hPckMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageGather8hPckMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1892,7 +1797,6 @@ ImageSampleCdMimg::ImageSampleCdMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCdMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1912,7 +1816,6 @@ ImageSampleCdClMimg::ImageSampleCdClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCdClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1932,7 +1835,6 @@ ImageSampleCCdMimg::ImageSampleCCdMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCCdMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1952,7 +1854,6 @@ ImageSampleCCdClMimg::ImageSampleCCdClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCCdClMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1972,7 +1873,6 @@ ImageSampleCdOMimg::ImageSampleCdOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCdOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -1992,7 +1892,6 @@ ImageSampleCdClOMimg::ImageSampleCdClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCdClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2012,7 +1911,6 @@ ImageSampleCCdOMimg::ImageSampleCCdOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCCdOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2032,7 +1930,6 @@ ImageSampleCCdClOMimg::ImageSampleCCdClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCCdClOMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2050,7 +1947,6 @@ ImageLoadPck2Mimg::ImageLoadPck2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadPck2Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2069,7 +1965,6 @@ ImageLoadPck4Mimg::ImageLoadPck4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadPck4Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2088,7 +1983,6 @@ ImageLoadMipPck2Mimg::ImageLoadMipPck2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadMipPck2Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2107,7 +2001,6 @@ ImageLoadMipPck4Mimg::ImageLoadMipPck4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageLoadMipPck4Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2126,7 +2019,6 @@ ImageStorePck2Mimg::ImageStorePck2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStorePck2Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2145,7 +2037,6 @@ ImageStorePck4Mimg::ImageStorePck4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStorePck4Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2164,7 +2055,6 @@ ImageStoreMipPck2Mimg::ImageStoreMipPck2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStoreMipPck2Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2183,7 +2073,6 @@ ImageStoreMipPck4Mimg::ImageStoreMipPck4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageStoreMipPck4Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2202,7 +2091,6 @@ ImageMsaaLoadMimg::ImageMsaaLoadMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageMsaaLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2223,7 +2111,6 @@ ImageSampleDG16Mimg::ImageSampleDG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleDG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2243,7 +2130,6 @@ ImageSampleDClG16Mimg::ImageSampleDClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleDClG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2263,7 +2149,6 @@ ImageSampleCDG16Mimg::ImageSampleCDG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCDG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2283,7 +2168,6 @@ ImageSampleCDClG16Mimg::ImageSampleCDClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCDClG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2303,7 +2187,6 @@ ImageSampleDOG16Mimg::ImageSampleDOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleDOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2323,7 +2206,6 @@ ImageSampleDClOG16Mimg::ImageSampleDClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleDClOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2343,7 +2225,6 @@ ImageSampleCDOG16Mimg::ImageSampleCDOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCDOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2363,7 +2244,6 @@ ImageSampleCDClOG16Mimg::ImageSampleCDClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCDClOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2381,7 +2261,6 @@ ImageBvhIntersectRayMimg::ImageBvhIntersectRayMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageBvhIntersectRayMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2419,7 +2298,6 @@ ImageSampleCdG16Mimg::ImageSampleCdG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCdG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2439,7 +2317,6 @@ ImageSampleCdClG16Mimg::ImageSampleCdClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCdClG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2459,7 +2336,6 @@ ImageSampleCCdG16Mimg::ImageSampleCCdG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCCdG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2479,7 +2355,6 @@ ImageSampleCCdClG16Mimg::ImageSampleCCdClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCCdClG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2499,7 +2374,6 @@ ImageSampleCdOG16Mimg::ImageSampleCdOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCdOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2519,7 +2393,6 @@ ImageSampleCdClOG16Mimg::ImageSampleCdClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCdClOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2539,7 +2412,6 @@ ImageSampleCCdOG16Mimg::ImageSampleCCdOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCCdOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -2559,7 +2431,6 @@ ImageSampleCCdClOG16Mimg::ImageSampleCCdClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
-  flags_ |= EXEC_MASKED;
 }
 
 void ImageSampleCCdClOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {

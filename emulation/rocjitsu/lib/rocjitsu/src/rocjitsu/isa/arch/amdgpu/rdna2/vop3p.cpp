@@ -43,7 +43,6 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VPkMadI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -275,7 +274,6 @@ VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VPkMadU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -407,7 +405,6 @@ VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -539,7 +536,6 @@ VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VDot2F32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -571,7 +567,6 @@ VDot2I32I16Vop3p::VDot2I32I16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VDot2I32I16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -603,7 +598,6 @@ VDot2U32U16Vop3p::VDot2U32U16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VDot2U32U16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -635,7 +629,6 @@ VDot4I32I8Vop3p::VDot4I32I8Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VDot4I32I8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -667,7 +660,6 @@ VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VDot4U32U8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -699,7 +691,6 @@ VDot8I32I4Vop3p::VDot8I32I4Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VDot8I32I4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -731,7 +722,6 @@ VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VDot8U32U4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -763,7 +753,6 @@ VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VFmaMixF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -796,7 +785,6 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VFmaMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -829,7 +817,6 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= EXEC_MASKED;
 }
 
 void VFmaMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
