@@ -20,7 +20,6 @@
 
 #include <concepts>
 #include <map>
-#include <span>
 #include <thread>
 #include <timemory/components/gotcha/backends.hpp>
 #include <timemory/hash/types.hpp>
@@ -209,78 +208,6 @@ count_serialized_args(const std::string& args_str)
 {
     return static_cast<std::uint32_t>(
         rocprofsys::process_arguments_string(args_str).size());
-}
-
-// Decode a single rocprofsys_annotation_t into a trace-cache argument record.
-// Returns false (leaving out untouched) when the annotation is empty/short-circuited.
-// or its type is out of range.
-template <size_t Idx, size_t... Tail>
-bool
-annotation_to_argument(const rocprofsys_annotation_t& annotation,
-                       rocprofsys::argument_info& out, std::index_sequence<Idx, Tail...>)
-{
-    if(annotation.name == nullptr || annotation.type == ROCPROFSYS_VALUE_NONE ||
-       annotation.value == nullptr)
-        return false;
-
-    if(annotation.type == Idx)
-    {
-        using type = rocprofsys::tracing::annotation_value_type_t<Idx>;
-
-        out.arg_name = annotation.name;
-        if constexpr(rocprofsys::concepts::is_string_type<type>::value)
-        {
-            // ROCPROFSYS_VALUE_CSTR: value is the C-string itself
-            out.arg_type  = "string";
-            out.arg_value = reinterpret_cast<const char*>(annotation.value);
-        }
-        else
-        {
-            out.arg_type = rocprofsys::utility::demangle<type>();
-            // pointers are passed by value; everything else is dereferenced
-            if constexpr(std::is_pointer<type>::value)
-                out.arg_value =
-                    fmt::format("{}", reinterpret_cast<type>(annotation.value));
-            else
-                out.arg_value =
-                    fmt::format("{}", *reinterpret_cast<const type*>(annotation.value));
-        }
-        return true;
-    }
-
-    if constexpr(sizeof...(Tail) > 0)
-        return annotation_to_argument(annotation, out, std::index_sequence<Tail...>{});
-    else
-        return false;
-}
-
-// Transforms rocprofsys_annotation_t records into the trace-cache wire format,
-// skipping entries that are empty or have an out-of-range type.
-inline std::string
-serialize_annotation_args(std::span<const rocprofsys_annotation_t> annotations)
-{
-    if(annotations.empty()) return {};
-
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-
-    rocprofsys::function_args_t args;
-    args.reserve(annotations.size());
-
-    std::uint32_t idx = 0;
-    for(const auto& annotation : annotations)
-    {
-        rocprofsys::argument_info info{};
-        if(annotation_to_argument(
-               annotation, info,
-               rocprofsys::utility::make_index_sequence_range<1,
-                                                              ROCPROFSYS_VALUE_LAST>{}))
-        {
-            info.arg_number = idx++;
-            args.push_back(std::move(info));
-        }
-    }
-
-    return rocprofsys::get_args_string(args);
 }
 
 // Serializes gotcha audit arguments into the trace-cache format.
