@@ -250,8 +250,11 @@ public:
             hsa_amd_memory_pool_allocate(mem.pool, size, hsa_amd_memory_pool_executable_flag, &ret);
         RET_IF_HSA_ERR(err);
 
-        err = hsa_amd_agents_allow_access(
-            Device::all_devices.size(), Device::all_devices.data(), nullptr, ret);
+        // Grant access to the GPU agent only. On APUs (for example, gfx1151) the CPU
+        // agent is rejected by hsa_amd_agents_allow_access with
+        // HSA_STATUS_ERROR_INVALID_AGENT, so passing the full agent list fails.
+        hsa_agent_t ag_list[1] = {gpu[0].agent};
+        err                    = hsa_amd_agents_allow_access(1, ag_list, nullptr, ret);
         RET_IF_HSA_ERR(err);
         return ret;
     }
