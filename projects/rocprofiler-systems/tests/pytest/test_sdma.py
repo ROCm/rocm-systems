@@ -8,8 +8,9 @@ Validates that running sdma-test with ROCPROFSYS_AMD_SMI_METRICS=sdma_usage
 produces expected SDMA usage tracks and values in Perfetto and ROCPD output,
 as implemented in the amd_smi component.
 
-SDMA usage requires AMD-SMI >= 26.3 (see source/lib/core/sdma_feature.hpp)
-and amdgpu driver >= 6.19.14; tests are skipped otherwise.
+SDMA usage requires an Instinct GPU, AMD-SMI >= 26.3
+(see source/lib/core/sdma_feature.hpp), and amdgpu driver >= 6.19.14;
+tests are skipped otherwise.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ def sdma_rules(validation_rules_dir: Path) -> list[Path]:
     ]
 
 
+@pytest.mark.run_if_gpu_category("instinct")
 @pytest.mark.amdsmi_min_version("26.3")
 @pytest.mark.amdgpu_min_version("6.19.14")
 class TestSDMA(RocprofsysTest):
