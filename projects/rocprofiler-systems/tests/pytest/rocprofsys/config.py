@@ -96,7 +96,9 @@ class RocprofsysConfig:
                     [str(clang_path), "--print-target-triple"], text=True
                 ).strip()
                 if host_triple:
-                    candidates.append(self.rocm_path / "lib" / "llvm" / "lib" / host_triple)
+                    candidates.append(
+                        self.rocm_path / "lib" / "llvm" / "lib" / host_triple
+                    )
             for candidate in candidates:
                 if candidate.exists():
                     found_paths.append(candidate)
