@@ -15,16 +15,22 @@ name: RCCL device-API CI
 # ROCm/OpenMPI are version-keyed and cached on the shared /apps/rccl-ci NFS mount;
 # RCCL and rccl-tests are rebuilt every run so breakage is caught.
 
+# Reusable (called by rccl-ci.yml; also runnable via workflow_dispatch).
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      rocm_release:
-        description: 'ROCm nightly/dev version to fetch (e.g. 7.13.0a20260515). Empty = latest nightly for the family.'
+      rocm_release_channel:
+        description: 'TheRock tarball channel (release|nightly|dev|prerelease).'
         type: string
         required: false
-        default: '7.13.0a20260515'
+        default: 'release'
+      rocm_release:
+        description: 'ROCm version to fetch. Empty = latest for the channel.'
+        type: string
+        required: false
+        default: '7.13.0'
       rocm_amdgpu_family:
-        description: 'TheRock artifact group / GPU family for the ROCm nightly tarball.'
+        description: 'TheRock artifact group / GPU family for the ROCm tarball.'
         type: string
         required: false
         default: 'gfx950-dcgpu'
@@ -33,20 +39,36 @@ on:
         type: string
         required: false
         default: 'gfx950'
-  pull_request:
-    paths:
-      - 'projects/rccl/**'
-      - 'projects/rccl-tests/**'
-      - '.github/workflows/rccl-device-api.yml'
+  workflow_dispatch:
+    inputs:
+      rocm_release_channel:
+        description: 'TheRock tarball channel to fetch ROCm from. "release" = durable GA builds (e.g. 7.13.0); "nightly" is retention-limited.'
+        type: choice
+        required: false
+        options:
+          - release
+          - nightly
+          - dev
+          - prerelease
+        default: release
+      rocm_release:
+        description: 'ROCm version to fetch. Empty = latest for the channel. Format depends on channel (release/prerelease 7.13.0, nightly 7.13.0aYYYYMMDD).'
+        type: string
+        required: false
+        default: '7.13.0'
+      rocm_amdgpu_family:
+        description: 'TheRock artifact group / GPU family for the ROCm tarball.'
+        type: string
+        required: false
+        default: 'gfx950-dcgpu'
+      amdgpu_targets:
+        description: 'RCCL --amdgpu_targets value (must match the ROCm family ARCH).'
+        type: string
+        required: false
+        default: 'gfx950'
 
 permissions:
   contents: read
-
-concurrency:
-  # PR number for presubmit, commit SHA for postsubmit. Cancels superseded
-  # in-flight runs to keep the ruby cluster from queueing up stale jobs.
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: true
 
 jobs:
   device-api:
@@ -59,14 +81,14 @@ jobs:
     env:
       RCCL_AMDGPU_TARGETS: ${{ inputs.amdgpu_targets || 'gfx950' }}
       ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
-      # Pinned ROCm nightly. Bump this (or pass the rocm_release input) to move
-      # ROCm; empty would resolve the latest nightly for the family instead.
-      ROCM_RELEASE: ${{ inputs.rocm_release || '7.13.0a20260515' }}
+      # empty ROCM_RELEASE => latest for the channel
+      ROCM_RELEASE: ${{ inputs.rocm_release }}
+      ROCM_RELEASE_CHANNEL: ${{ inputs.rocm_release_channel || 'release' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      - name: Provision ROCm (TheRock nightly) on the head node
+      - name: Provision ROCm (TheRock ${{ inputs.rocm_release_channel || 'release' }}) on the head node
         env:
           RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
         run: |
@@ -105,7 +127,7 @@ jobs:
           # `--wait` blocks until terminal; `--parsable` makes stdout just the job id.
           set +e
           job_id="$(sbatch --parsable --wait \
-            --export=ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS \
+            --export=ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_RELEASE_CHANNEL,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS \
             "${{ github.workspace }}/projects/rccl/tools/ci/lib/device-api.sbatch")"
           rc=$?
           set -e

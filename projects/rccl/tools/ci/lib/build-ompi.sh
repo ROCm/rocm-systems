@@ -61,14 +61,16 @@ desired_stamp="ompi=${OMPI_VERSION}
 with_rocm:
 ${rocm_fingerprint}"
 
-if [[ -f "${OMPI_INSTALL_DIR}/lib/libmpi.so" ]] \
-   && [[ "$(cat "${OMPI_INSTALL_DIR}/.stamp" 2>/dev/null || true)" == "${desired_stamp}" ]]; then
-  echo "==> Reusing cached OpenMPI ${OMPI_VERSION} at ${OMPI_INSTALL_DIR}"
-else
+ompi_cached() {
+  [[ -f "${OMPI_INSTALL_DIR}/lib/libmpi.so" ]] \
+    && [[ "$(cat "${OMPI_INSTALL_DIR}/.stamp" 2>/dev/null || true)" == "${desired_stamp}" ]]
+}
+
+do_build_ompi() {
   echo "==> Building OpenMPI ${OMPI_VERSION} into ${OMPI_INSTALL_DIR} (--with-rocm=${ROCM_PATH})"
   rm -rf "${OMPI_INSTALL_DIR}"
   mkdir -p "${OMPI_INSTALL_DIR}"
-  ompi_src="${CACHE_DIR}/ompi/src-${OMPI_VERSION}"
+  ompi_src="${CACHE_DIR}/ompi/src-${OMPI_VERSION}.$$"
   rm -rf "${ompi_src}"; mkdir -p "${ompi_src}"
   ompi_tar="${downloads}/openmpi-${OMPI_VERSION}.tar.gz"
   [[ -f "${ompi_tar}" ]] || wget -q -O "${ompi_tar}" \
@@ -86,6 +88,22 @@ else
   )
   rm -rf "${ompi_src}"
   printf '%s\n' "${desired_stamp}" > "${OMPI_INSTALL_DIR}/.stamp"
+}
+
+# Build on cache miss only. A per-version lock serializes parallel jobs so they
+# can't build/install into the same path at once; the inner re-check lets the
+# loser reuse what the winner produced.
+if ompi_cached; then
+  echo "==> Reusing cached OpenMPI ${OMPI_VERSION} at ${OMPI_INSTALL_DIR}"
+else
+  exec {lock_fd}>"${downloads}/.lock-ompi-${OMPI_VERSION}"
+  flock "${lock_fd}"
+  if ompi_cached; then
+    echo "==> Reusing cached OpenMPI ${OMPI_VERSION} at ${OMPI_INSTALL_DIR}"
+  else
+    do_build_ompi
+  fi
+  flock -u "${lock_fd}"
 fi
 
 printf 'export MPI_HOME=%q\n' "${OMPI_INSTALL_DIR}" > "${env_out}"

@@ -1,0 +1,191 @@
+name: RCCL cluster CI
+
+# Fans out the RCCL cluster suites (GIN, device-API) to the reusable child
+# workflows, one leg per ROCm channel. Each leg needs an exclusive 8-GPU node;
+# nightly legs are commented out until we have the capacity.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ga_release:
+        description: 'GA (release-channel) ROCm version. Empty = latest GA for the family.'
+        type: string
+        required: false
+        default: '7.13.0'
+      nightly_release:
+        description: 'Nightly ROCm version. Empty = latest nightly for the family.'
+        type: string
+        required: false
+        default: ''
+      rocm_amdgpu_family:
+        description: 'TheRock artifact group / GPU family for the ROCm tarball.'
+        type: string
+        required: false
+        default: 'gfx950-dcgpu'
+      amdgpu_targets:
+        description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
+        type: string
+        required: false
+        default: 'gfx950'
+  pull_request:
+    paths:
+      - 'projects/rocshmem/**'
+      - 'projects/rccl/**'
+      - 'projects/rccl-tests/**'
+      - 'projects/rccl/tools/ci/**'
+      - '.github/workflows/rccl-ci.yml'
+      - '.github/workflows/rccl-gin.yml'
+      - '.github/workflows/rccl-device-api.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # Download/extract ROCm once per channel, before the test legs run. This both
+  # avoids two legs racing on the same cache path and pins the legs to one
+  # resolved version (important when the version is "latest").
+  provision-rocm-ga:
+    name: Provision ROCm (GA)
+    runs-on: ruby-linux-slurm-scale-runner
+    outputs:
+      rocm_release: ${{ steps.fetch.outputs.rocm_release }}
+    env:
+      ROCM_RELEASE: ${{ inputs.ga_release || '7.13.0' }}
+      ROCM_RELEASE_CHANNEL: release
+      ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Fetch ROCm
+        id: fetch
+        env:
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+          # shellcheck disable=SC1091
+          source "${{ github.workspace }}/.ci-out/rocm.env"
+          echo "rocm_release=${ROCM_RELEASE}" >> "$GITHUB_OUTPUT"
+
+  # Build OpenMPI once on a compute node (after ROCm), so both GA legs share a
+  # warm cache instead of each rebuilding it / racing on the install path.
+  provision-ompi-ga:
+    name: Provision OpenMPI (GA)
+    needs: provision-rocm-ga
+    runs-on: ruby-linux-slurm-scale-runner
+    env:
+      ROCM_RELEASE: ${{ needs.provision-rocm-ga.outputs.rocm_release }}
+      ROCM_RELEASE_CHANNEL: release
+      ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Resolve ROCm from cache
+        env:
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+      - name: Build OpenMPI on a compute node
+        env:
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
+          python3 "${{ github.workspace }}/projects/rccl/tools/ci/lib/submit_slurm_job.py" \
+            --script "${{ github.workspace }}/projects/rccl/tools/ci/lib/build-ompi.sbatch" \
+            --chdir "${{ github.workspace }}/.ci-out/ompi-logs" \
+            --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_RELEASE_CHANNEL,ROCM_AMDGPU_FAMILY"
+
+  gin-ga:
+    name: GIN (GA)
+    needs: [provision-rocm-ga, provision-ompi-ga]
+    uses: ./.github/workflows/rccl-gin.yml
+    with:
+      rocm_release_channel: release
+      rocm_release: ${{ needs.provision-rocm-ga.outputs.rocm_release }}
+      rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+      amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
+
+  device-api-ga:
+    name: device-API (GA)
+    needs: [provision-rocm-ga, provision-ompi-ga]
+    uses: ./.github/workflows/rccl-device-api.yml
+    with:
+      rocm_release_channel: release
+      rocm_release: ${{ needs.provision-rocm-ga.outputs.rocm_release }}
+      rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+      amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
+
+  # Nightly legs (disabled until we have capacity):
+  # provision-rocm-nightly:
+  #   name: Provision ROCm (nightly)
+  #   runs-on: ruby-linux-slurm-scale-runner
+  #   outputs:
+  #     rocm_release: ${{ steps.fetch.outputs.rocm_release }}
+  #   env:
+  #     ROCM_RELEASE: ${{ inputs.nightly_release || '' }}
+  #     ROCM_RELEASE_CHANNEL: nightly
+  #     ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+  #     - name: Fetch ROCm
+  #       id: fetch
+  #       env:
+  #         RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+  #       run: |
+  #         set -euo pipefail
+  #         "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+  #         # shellcheck disable=SC1091
+  #         source "${{ github.workspace }}/.ci-out/rocm.env"
+  #         echo "rocm_release=${ROCM_RELEASE}" >> "$GITHUB_OUTPUT"
+  #
+  # provision-ompi-nightly:
+  #   name: Provision OpenMPI (nightly)
+  #   needs: provision-rocm-nightly
+  #   runs-on: ruby-linux-slurm-scale-runner
+  #   env:
+  #     ROCM_RELEASE: ${{ needs.provision-rocm-nightly.outputs.rocm_release }}
+  #     ROCM_RELEASE_CHANNEL: nightly
+  #     ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+  #     - name: Resolve ROCm from cache
+  #       env:
+  #         RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+  #       run: "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+  #     - name: Build OpenMPI on a compute node
+  #       env:
+  #         RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+  #       run: |
+  #         export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
+  #         python3 "${{ github.workspace }}/projects/rccl/tools/ci/lib/submit_slurm_job.py" \
+  #           --script "${{ github.workspace }}/projects/rccl/tools/ci/lib/build-ompi.sbatch" \
+  #           --chdir "${{ github.workspace }}/.ci-out/ompi-logs" \
+  #           --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_RELEASE_CHANNEL,ROCM_AMDGPU_FAMILY"
+  #
+  # gin-nightly:
+  #   name: GIN (nightly)
+  #   needs: [provision-rocm-nightly, provision-ompi-nightly]
+  #   uses: ./.github/workflows/rccl-gin.yml
+  #   with:
+  #     rocm_release_channel: nightly
+  #     rocm_release: ${{ needs.provision-rocm-nightly.outputs.rocm_release }}
+  #     rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+  #     amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
+  #
+  # device-api-nightly:
+  #   name: device-API (nightly)
+  #   needs: [provision-rocm-nightly, provision-ompi-nightly]
+  #   uses: ./.github/workflows/rccl-device-api.yml
+  #   with:
+  #     rocm_release_channel: nightly
+  #     rocm_release: ${{ needs.provision-rocm-nightly.outputs.rocm_release }}
+  #     rocm_amdgpu_family: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+  #     amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}

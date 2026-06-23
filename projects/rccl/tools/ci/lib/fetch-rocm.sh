@@ -1,23 +1,35 @@
 #!/usr/bin/env bash
-# Download + extract a ROCm tree from TheRock's flattened nightly dist tarball
-# (curl + tar). We avoid install_rocm_from_artifacts.py because it needs Python
-# >= 3.10, which the cluster only provides inside conda envs. Writes
-# .ci-out/rocm.env (ROCM_PATH, ROCM_RELEASE) for the later build/run stages.
+# Download + extract a ROCm dist tarball (curl + tar) from a TheRock channel and
+# write .ci-out/rocm.env (ROCM_PATH, ROCM_RELEASE) for later stages. Bash (not
+# install_rocm_from_artifacts.py) because the head node only has Python 3.9.
 #
 # Environment:
-#   RCCL_DEVICE_API_CACHE     Persistent cache root (default: /apps/rccl-ci)
-#   ROCM_RELEASE              Version, e.g. 7.13.0a20260515 (empty => latest)
+#   RCCL_DEVICE_API_CACHE     Cache root (default: /apps/rccl-ci)
+#   ROCM_RELEASE_CHANNEL      nightly|dev|prerelease|release (default: nightly)
+#   ROCM_RELEASE              Version, empty => latest for the channel
 #   ROCM_AMDGPU_FAMILY        Artifact family (default: gfx950-dcgpu)
-#   ROCM_PATH_OVERRIDE        Use this existing ROCm tree; skips the download.
-#                             Ambient ROCM_PATH is ignored on purpose, so a stray
-#                             `module load rocm` can't substitute /opt/rocm.
-#   THEROCK_TARBALL_BASE_URL  Tarball base URL (default: the nightly S3 bucket)
+#   ROCM_PATH_OVERRIDE        Use this existing ROCm tree; skips the download
+#   THEROCK_TARBALL_BASE_URL  Override the per-channel base URL
 #   RCCL_DEVICE_API_WORKDIR / WORKDIR   Workspace root (for .ci-out output)
 
 set -euxo pipefail
 
 rocm_family="${ROCM_AMDGPU_FAMILY:-gfx950-dcgpu}"
-base_url="${THEROCK_TARBALL_BASE_URL:-https://therock-nightly-tarball.s3.amazonaws.com}"
+rocm_channel="${ROCM_RELEASE_CHANNEL:-nightly}"
+
+# Per-channel base URL (overridable via THEROCK_TARBALL_BASE_URL). list_style
+# picks how "latest" is resolved: S3 XML (nightly/dev) vs HTML index (CDNs).
+case "${rocm_channel}" in
+  nightly)    default_base_url="https://therock-nightly-tarball.s3.amazonaws.com"; list_style="s3"  ;;
+  dev)        default_base_url="https://therock-dev-tarball.s3.amazonaws.com";     list_style="s3"  ;;
+  prerelease) default_base_url="https://rocm.prereleases.amd.com/tarball";         list_style="cdn" ;;
+  release)    default_base_url="https://repo.amd.com/rocm/tarball";                list_style="cdn" ;;
+  *)
+    echo "ERROR: unknown ROCM_RELEASE_CHANNEL='${rocm_channel}'" >&2
+    echo "       expected one of: nightly, dev, prerelease, release" >&2
+    exit 1 ;;
+esac
+base_url="${THEROCK_TARBALL_BASE_URL:-${default_base_url}}"
 
 WORKDIR="${RCCL_DEVICE_API_WORKDIR:-${WORKDIR:-}}"
 if [[ -z "${WORKDIR}" ]]; then
@@ -51,56 +63,81 @@ fi
 
 unset ROCM_PATH
 
-# Resolve a concrete version (empty ROCM_RELEASE => latest in the bucket).
+# Resolve a concrete version (empty ROCM_RELEASE => latest for the channel).
 if [[ -z "${ROCM_RELEASE:-}" ]]; then
-  echo "==> ROCM_RELEASE unset; resolving latest nightly for ${rocm_family}"
+  echo "==> ROCM_RELEASE unset; resolving latest '${rocm_channel}' for ${rocm_family}"
   prefix="therock-dist-linux-${rocm_family}-"
-  listing="$(curl -fsSL "${base_url}/?list-type=2&prefix=${prefix}")" || {
-    echo "ERROR: failed to list ${base_url} for ${prefix}*" >&2
+  if [[ "${list_style}" == "s3" ]]; then
+    list_url="${base_url}/?list-type=2&prefix=${prefix}"
+  else
+    list_url="${base_url}/"
+  fi
+  listing="$(curl -fsSL "${list_url}")" || {
+    echo "ERROR: failed to list ${list_url}" >&2
     exit 1
   }
-  ROCM_RELEASE="$(printf '%s' "${listing}" \
-    | grep -oE "${prefix}[0-9][^<]*\.tar\.gz" \
-    | sed -E "s/^${prefix}(.+)\.tar\.gz$/\1/" \
-    | sort -V | tail -n1 || true)"
+  # Version strings from the tarball names ([^"<]* stops at HTML quote / XML tag).
+  versions="$(printf '%s' "${listing}" \
+    | grep -oE "${prefix}[0-9][^\"<]*\.tar\.gz" \
+    | sed -E "s/^${prefix}(.+)\.tar\.gz$/\1/")"
+  # Stable channel: keep only X.Y.Z (drop rc/alpha).
+  if [[ "${rocm_channel}" == "release" ]]; then
+    versions="$(printf '%s\n' "${versions}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+  fi
+  ROCM_RELEASE="$(printf '%s\n' "${versions}" | sort -V | tail -n1 || true)"
   if [[ -z "${ROCM_RELEASE}" ]]; then
-    echo "ERROR: could not find any ${prefix}*.tar.gz in the bucket listing" >&2
+    echo "ERROR: could not find any ${prefix}*.tar.gz at ${base_url}" >&2
     exit 1
   fi
-  echo "==> Latest nightly: ${ROCM_RELEASE}"
+  echo "==> Latest ${rocm_channel}: ${ROCM_RELEASE}"
 fi
 
 ROCM_PATH="${CACHE_DIR}/rocm/rocm-${ROCM_RELEASE}"
 tarball="therock-dist-linux-${rocm_family}-${ROCM_RELEASE}.tar.gz"
 url="${base_url}/${tarball}"
 
-# Download on cache miss only.
-if [[ -x "${ROCM_PATH}/bin/hipcc" ]] \
-   && grep -qx "family=${rocm_family}" "${ROCM_PATH}/.stamp" 2>/dev/null; then
-  echo "==> Reusing cached ROCm ${ROCM_RELEASE} at ${ROCM_PATH}"
-else
-  echo "==> Fetching ROCm ${ROCM_RELEASE} (${rocm_family})"
-  echo "    from ${url}"
-  dl="${CACHE_DIR}/downloads/${tarball}.part"
+cache_hit() {
+  [[ -x "${ROCM_PATH}/bin/hipcc" ]] \
+    && grep -qx "family=${rocm_family}" "${ROCM_PATH}/.stamp" 2>/dev/null \
+    && grep -qx "channel=${rocm_channel}" "${ROCM_PATH}/.stamp" 2>/dev/null
+}
+
+do_fetch() {
+  echo "==> Fetching ROCm ${ROCM_RELEASE} (${rocm_family}) from ${url}"
+  # Unique .part so concurrent fetchers never share a temp file.
+  dl="${CACHE_DIR}/downloads/${tarball}.$$.part"
   rm -f "${dl}"
   # -f makes HTTP errors fail (instead of saving an XML error body as the tarball).
-  curl -fL --retry 5 --retry-delay 5 --retry-connrefused \
-       -o "${dl}" "${url}"
-
-  # The dist tarball is flattened (./bin, ./lib, ...), so extract straight into
-  # the version-keyed dir to get ${ROCM_PATH}/bin/hipcc.
+  curl -fL --retry 5 --retry-delay 5 --retry-connrefused -o "${dl}" "${url}"
+  # The dist tarball is flattened (./bin, ./lib, ...); extract into the
+  # version-keyed dir to get ${ROCM_PATH}/bin/hipcc.
   rm -rf "${ROCM_PATH}"
   mkdir -p "${ROCM_PATH}"
   tar -xzf "${dl}" -C "${ROCM_PATH}"
   rm -f "${dl}"
-
   if [[ ! -x "${ROCM_PATH}/bin/hipcc" ]]; then
     echo "ERROR: extracted ROCm at ${ROCM_PATH} has no bin/hipcc" >&2
     ls -la "${ROCM_PATH}" >&2 || true
     exit 1
   fi
-  printf 'release=%s\nfamily=%s\n' "${ROCM_RELEASE}" "${rocm_family}" \
-    > "${ROCM_PATH}/.stamp"
+  printf 'release=%s\nfamily=%s\nchannel=%s\n' \
+    "${ROCM_RELEASE}" "${rocm_family}" "${rocm_channel}" > "${ROCM_PATH}/.stamp"
+}
+
+# Download on cache miss only. A per-version lock serializes parallel jobs so
+# they can't download/extract into the same path at once; the inner re-check
+# lets the loser reuse what the winner produced.
+if cache_hit; then
+  echo "==> Reusing cached ROCm ${ROCM_RELEASE} at ${ROCM_PATH}"
+else
+  exec {lock_fd}>"${CACHE_DIR}/downloads/.lock-${rocm_family}-${rocm_channel}-${ROCM_RELEASE}"
+  flock "${lock_fd}"
+  if cache_hit; then
+    echo "==> Reusing cached ROCm ${ROCM_RELEASE} at ${ROCM_PATH}"
+  else
+    do_fetch
+  fi
+  flock -u "${lock_fd}"
 fi
 
 {

@@ -90,8 +90,9 @@ if [[ -n "${ROCM_RELEASE:-}" ]] \
 fi
 echo "    hipcc: $("${ROCM_PATH}/bin/hipcc" --version 2>/dev/null | head -n1)"
 
-# 2) OpenMPI (cached, --with-rocm) -> .ci-out/ompi.env (MPI_HOME)
-echo "==> [2/5] build OpenMPI"
+# 2) OpenMPI: prebuilt by the OpenMPI provision job; this is a cache hit that
+# just writes ompi.env (MPI_HOME). Falls back to building if run standalone.
+echo "==> [2/5] use OpenMPI"
 "${ci_dir}/lib/build-ompi.sh"
 set -a
 # shellcheck source=/dev/null  # runtime fragment written by build-ompi.sh

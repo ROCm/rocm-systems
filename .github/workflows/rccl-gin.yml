@@ -1,0 +1,114 @@
+name: RCCL GIN CI
+
+# Builds rocSHMEM + RCCL (GIN) + rccl-tests and runs the GIN/rocSHMEM suite on a
+# single 8-GPU ruby slurm node. Reusable (called by rccl-ci.yml; also runnable
+# via workflow_dispatch). Non-gating: continue-on-error and run-gin-ci.sh exits 0
+# (set GIN_GATE_TESTS=1 to gate tests).
+on:
+  workflow_call:
+    inputs:
+      rocm_release_channel:
+        description: 'TheRock tarball channel (release|nightly|dev|prerelease).'
+        type: string
+        required: false
+        default: 'release'
+      rocm_release:
+        description: 'ROCm version to fetch. Empty = latest for the channel.'
+        type: string
+        required: false
+        default: '7.13.0'
+      rocm_amdgpu_family:
+        description: 'TheRock artifact group / GPU family for the ROCm tarball.'
+        type: string
+        required: false
+        default: 'gfx950-dcgpu'
+      amdgpu_targets:
+        description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
+        type: string
+        required: false
+        default: 'gfx950'
+  workflow_dispatch:
+    inputs:
+      rocm_release_channel:
+        description: 'TheRock tarball channel to fetch ROCm from. "release" = durable GA builds (e.g. 7.13.0); "nightly" is retention-limited.'
+        type: choice
+        required: false
+        options:
+          - release
+          - nightly
+          - dev
+          - prerelease
+        default: release
+      rocm_release:
+        description: 'ROCm version to fetch. Empty = latest for the channel. Format depends on channel (release/prerelease 7.13.0, nightly 7.13.0aYYYYMMDD).'
+        type: string
+        required: false
+        default: '7.13.0'
+      rocm_amdgpu_family:
+        description: 'TheRock artifact group / GPU family for the ROCm tarball.'
+        type: string
+        required: false
+        default: 'gfx950-dcgpu'
+      amdgpu_targets:
+        description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
+        type: string
+        required: false
+        default: 'gfx950'
+
+permissions:
+  contents: read
+
+jobs:
+  gin:
+    name: Single node GIN / rocSHMEM testing
+    runs-on: ruby-linux-slurm-scale-runner
+    timeout-minutes: 300
+    continue-on-error: true  # non-gating
+    defaults:
+      run:
+        shell: bash
+    env:
+      RCCL_AMDGPU_TARGETS: ${{ inputs.amdgpu_targets || 'gfx950' }}
+      ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+      # empty ROCM_RELEASE => latest for the channel
+      ROCM_RELEASE: ${{ inputs.rocm_release }}
+      ROCM_RELEASE_CHANNEL: ${{ inputs.rocm_release_channel || 'release' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Provision ROCm (TheRock ${{ inputs.rocm_release_channel || 'release' }}) on the head node
+        env:
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
+          echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
+          if ! mkdir -p "${RCCL_DEVICE_API_CACHE}"/{rocm,ompi,downloads}; then
+            echo "ERROR: cannot create ${RCCL_DEVICE_API_CACHE} (is /apps writable by $(id -un)?)" >&2
+            exit 1
+          fi
+          "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+
+      - name: Submit GIN build+test to SLURM
+        env:
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
+          echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
+          python3 "${{ github.workspace }}/projects/rccl/tools/ci/lib/submit_slurm_job.py" \
+            --script "${{ github.workspace }}/projects/rccl/tools/ci/lib/gin.sbatch" \
+            --chdir "${{ github.workspace }}/.ci-out/gin-logs" \
+            --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_RELEASE_CHANNEL,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS"
+
+      - name: Dump compute-node logs
+        if: always()
+        run: |
+          logs_dir="${{ github.workspace }}/.ci-out/gin-logs"
+          shopt -s nullglob
+          for f in "${logs_dir}"/rccl-gin-*.err "${logs_dir}"/rccl-gin-*.out; do
+            echo "::group::${f}"
+            cat "${f}" || true
+            echo "::endgroup::"
+          done
