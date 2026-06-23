@@ -96,23 +96,17 @@ TEST(category_region_serialization, append_serialized_arg_prestringified)
 TEST(category_region_serialization, has_trace_cache_arg_pairs)
 {
     // even count with string-like name slots -> true
-    EXPECT_TRUE((has_trace_cache_arg_pairs<std::tuple<const char*, int>>(
-        std::make_index_sequence<2>{})));
-    EXPECT_TRUE(
-        (has_trace_cache_arg_pairs<std::tuple<const char*, int, std::string, double>>(
-            std::make_index_sequence<4>{})));
+    EXPECT_TRUE((has_trace_cache_arg_pairs_v<const char*, int>) );
+    EXPECT_TRUE((has_trace_cache_arg_pairs_v<const char*, int, std::string, double>) );
 
     // empty -> false
-    EXPECT_FALSE(
-        (has_trace_cache_arg_pairs<std::tuple<>>(std::make_index_sequence<0>{})));
+    EXPECT_FALSE((has_trace_cache_arg_pairs_v<>) );
 
     // odd count -> false
-    EXPECT_FALSE((has_trace_cache_arg_pairs<std::tuple<const char*, int, const char*>>(
-        std::make_index_sequence<3>{})));
+    EXPECT_FALSE((has_trace_cache_arg_pairs_v<const char*, int, const char*>) );
 
     // even count but a non-string name slot -> false
-    EXPECT_FALSE(
-        (has_trace_cache_arg_pairs<std::tuple<int, int>>(std::make_index_sequence<2>{})));
+    EXPECT_FALSE((has_trace_cache_arg_pairs_v<int, int>) );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -172,6 +166,22 @@ TEST(category_region_serialization, renumber_serialized_args)
     EXPECT_EQ(args[0].arg_value, "1");
     EXPECT_EQ(args[1].arg_name, "b");
     EXPECT_EQ(args[1].arg_value, "2");
+}
+
+TEST(category_region_serialization, next_arg_index)
+{
+    // empty -> 0
+    EXPECT_EQ(next_arg_index(""), 0u);
+    // records numbered contiguously from 0 -> last idx + 1 == record count
+    EXPECT_EQ(next_arg_index(serialize_name_value_pairs("a", 1)), 1u);
+    EXPECT_EQ(next_arg_index(serialize_name_value_pairs("a", 1, "b", 2)), 2u);
+    EXPECT_EQ(next_arg_index(serialize_name_value_pairs("a", 1, "b", 2, "c", 3)), 3u);
+
+    // reads the last record's idx field, not the record count: a string already
+    // renumbered to a non-zero base returns last idx + 1
+    auto renumbered = serialize_name_value_pairs("a", 1, "b", 2);
+    renumber_serialized_args(renumbered, 5);  // -> indices 5, 6
+    EXPECT_EQ(next_arg_index(renumbered), 7u);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -248,7 +258,7 @@ TEST(category_region_cache, cache_start_pushes_pending_entry)
     ASSERT_EQ(itr->second.size(), 1u);
 
     const auto& entry = itr->second.back();
-    EXPECT_EQ(entry.arg_count, 2u);
+    EXPECT_EQ(count_serialized_args(entry.args), 2u);
     EXPECT_GT(entry.start_ts, 0u);
 
     auto args = parse(entry.args);
@@ -260,7 +270,7 @@ TEST(category_region_cache, cache_start_pushes_pending_entry)
     // overload records zero args
     cache_start<category_t>(name);
     ASSERT_EQ(map_name_to_args[key].size(), 2u);
-    EXPECT_EQ(map_name_to_args[key].back().arg_count, 0u);
+    EXPECT_EQ(count_serialized_args(map_name_to_args[key].back().args), 0u);
     EXPECT_TRUE(map_name_to_args[key].back().args.empty());
 
     map_name_to_args.clear();
@@ -279,14 +289,14 @@ TEST(category_region_cache, append_cache_args_appends_and_renumbers)
     map_name_to_args.clear();
     // seed an open entry with one already-serialized arg (numbered 0)
     map_name_to_args[key].push_back(
-        pending_cache_entry{ 0, serialize_name_value_pairs("a", 1), 1 });
+        pending_cache_entry{ 0, serialize_name_value_pairs("a", 1) });
 
     // append two more args; their local numbering (0,1) must continue from 1 -> (1,2)
     append_cache_args<category_t>(name, serialize_name_value_pairs("b", 2, "c", 3));
 
     ASSERT_FALSE(map_name_to_args[key].empty());
     const auto& entry = map_name_to_args[key].back();
-    EXPECT_EQ(entry.arg_count, 3u);
+    EXPECT_EQ(count_serialized_args(entry.args), 3u);
 
     auto args = parse(entry.args);
     ASSERT_EQ(args.size(), 3u);
@@ -312,10 +322,10 @@ TEST(category_region_cache, append_cache_args_noop_without_open_entry)
     EXPECT_TRUE(map_name_to_args.find(key) == map_name_to_args.end());
 
     // empty args -> no-op even when an entry exists
-    map_name_to_args[key].push_back(pending_cache_entry{ 0, {}, 0 });
+    map_name_to_args[key].push_back(pending_cache_entry{ 0, {} });
     append_cache_args<category_t>(name, std::string{});
     EXPECT_TRUE(map_name_to_args[key].back().args.empty());
-    EXPECT_EQ(map_name_to_args[key].back().arg_count, 0u);
+    EXPECT_EQ(count_serialized_args(map_name_to_args[key].back().args), 0u);
 
     map_name_to_args.clear();
 }

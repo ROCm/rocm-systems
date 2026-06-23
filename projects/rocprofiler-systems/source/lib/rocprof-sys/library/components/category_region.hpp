@@ -18,6 +18,7 @@
 #include "library/tracing/annotation.hpp"
 #include <cstdint>
 
+#include <charconv>
 #include <concepts>
 #include <map>
 #include <thread>
@@ -31,9 +32,9 @@
 
 #include "logger/debug.hpp"
 
+#include <spdlog/fmt/ostr.h>
 #include <spdlog/fmt/ranges.h>
 
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -59,9 +60,8 @@ using timestamp_t = std::uint64_t;
 
 struct pending_cache_entry
 {
-    timestamp_t   start_ts  = 0;
-    std::string   args      = {};
-    std::uint32_t arg_count = 0;
+    timestamp_t start_ts = 0;
+    std::string args     = {};
 };
 
 inline thread_local std::map<entry_key, std::vector<pending_cache_entry>>
@@ -102,9 +102,16 @@ template <typename Tp>
 std::string
 get_serialized_arg_value(Tp&& value)
 {
-    std::stringstream ss;
-    ss << std::forward<Tp>(value);
-    return ss.str();
+    using value_type = std::decay_t<Tp>;
+    if constexpr(fmt::is_formattable<value_type>::value)
+    {
+        return fmt::format("{}", std::forward<Tp>(value));
+    }
+    else
+    {
+        // fmt rejects "{}" for arbitrary non-void pointer types
+        return fmt::format("{}", fmt::streamed(std::forward<Tp>(value)));
+    }
 }
 
 // Append one trace-cache record "idx;;type;;name;;value;;" to args_str
@@ -140,7 +147,7 @@ concept trace_cache_arg_name = std::convertible_to<std::decay_t<Tp>, std::string
 // they are non-empty, grouped two-by-two, and every "name" slot is string-like
 template <typename TupleT, size_t... Idx>
 constexpr bool
-has_trace_cache_arg_pairs(std::index_sequence<Idx...>)
+has_trace_cache_arg_pairs_impl(std::index_sequence<Idx...>)
 {
     if constexpr(sizeof...(Idx) == 0 || sizeof...(Idx) % 2 != 0)
     {
@@ -154,16 +161,28 @@ has_trace_cache_arg_pairs(std::index_sequence<Idx...>)
     }
 }
 
-template <size_t Idx = 0, typename TupleT>
+template <typename... Args>
+inline constexpr bool has_trace_cache_arg_pairs_v =
+    has_trace_cache_arg_pairs_impl<std::tuple<Args...>>(
+        std::make_index_sequence<sizeof...(Args)>{});
+
+template <typename TupleT, size_t... Idx>
+void
+append_serialized_args_impl(std::string& args_str, TupleT&& args,
+                            std::index_sequence<Idx...>)
+{
+    (append_serialized_arg(args_str, Idx, std::get<Idx * 2>(args),
+                           std::get<Idx * 2 + 1>(args)),
+     ...);
+}
+
+template <typename TupleT>
 void
 append_serialized_args(std::string& args_str, TupleT&& args)
 {
-    if constexpr(Idx < std::tuple_size<std::remove_reference_t<TupleT>>::value)
-    {
-        append_serialized_arg(args_str, Idx / 2, std::get<Idx>(args),
-                              std::get<Idx + 1>(args));
-        append_serialized_args<Idx + 2>(args_str, std::forward<TupleT>(args));
-    }
+    constexpr auto N = std::tuple_size_v<std::remove_reference_t<TupleT>>;
+    append_serialized_args_impl(args_str, std::forward<TupleT>(args),
+                                std::make_index_sequence<N / 2>{});
 }
 
 // Serialize explicit ("arg-name", value) argument pairs passed to start() into the
@@ -174,9 +193,7 @@ serialize_name_value_pairs(Args&&... args)
 {
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-    using tuple_type = std::tuple<Args...>;
-    if constexpr(has_trace_cache_arg_pairs<tuple_type>(
-                     std::make_index_sequence<sizeof...(Args)>{}))
+    if constexpr(has_trace_cache_arg_pairs_v<Args...>)
     {
         auto        args_tuple = std::forward_as_tuple(args...);
         std::string args_str;
@@ -191,15 +208,43 @@ serialize_name_value_pairs(Args&&... args)
 
 // Renumber the arg_number field of every record in args_str so that the first
 // record becomes next_idx, the second next_idx+1, and so on. Returns the number
-// of records that were renumbered.
+// of records that were renumbered. The wire format is a flat sequence of
+// "idx;;type;;name;;value;;" records, so we rewrite only the leading idx field of
+// each record in a single pass instead of fully deserializing/reserializing.
 inline std::uint32_t
 renumber_serialized_args(std::string& args_str, std::uint32_t next_idx)
 {
-    auto args = rocprofsys::process_arguments_string(args_str);
-    for(auto& arg : args)
-        arg.arg_number = next_idx++;
-    args_str = rocprofsys::get_args_string(args);
-    return static_cast<std::uint32_t>(args.size());
+    constexpr std::string_view delim             = rocprofsys::ARG_DELIMITER;
+    constexpr std::size_t      fields_per_record = 4;  // idx, type, name, value
+
+    std::string out;
+    out.reserve(args_str.size() + 16);
+
+    std::uint32_t count       = 0;
+    std::size_t   field_start = 0;
+    std::size_t   field_index = 0;
+    for(std::size_t delim_pos                     = args_str.find(delim, field_start);
+        delim_pos != std::string::npos; delim_pos = args_str.find(delim, field_start))
+    {
+        if(field_index % fields_per_record == 0)
+        {
+            // leading idx field: replace with the renumbered value
+            out += std::to_string(next_idx++);
+            ++count;
+        }
+        else
+        {
+            // type / name / value: copy verbatim
+            out.append(args_str, field_start, delim_pos - field_start);
+        }
+        out += delim;
+
+        field_start = delim_pos + delim.size();
+        ++field_index;
+    }
+
+    args_str = std::move(out);
+    return count;
 }
 
 // Counts the number of records (each "idx;;type;;name;;value;;") in args_str.
@@ -208,6 +253,40 @@ count_serialized_args(const std::string& args_str)
 {
     return static_cast<std::uint32_t>(
         rocprofsys::process_arguments_string(args_str).size());
+}
+
+// Index the next appended record should use, i.e. the count of records already present.
+// Records are numbered contiguously from 0, so this is the last record's idx + 1 (or 0
+// when empty). Reads only the final record's idx field instead of scanning everything.
+inline std::uint32_t
+next_arg_index(const std::string& args_str)
+{
+    if(args_str.empty()) return 0;
+
+    constexpr std::string_view delim = rocprofsys::ARG_DELIMITER;
+
+    // The last record owns the final 4 delimiters; its idx field begins just past the
+    // 5th delimiter from the end (the previous record's trailing delimiter). With fewer
+    // than 5 delimiters the last record is the first one and starts at offset 0.
+    std::size_t record_start = 0;
+    std::size_t search_end   = std::string::npos;
+    for(int i = 0; i < 5; ++i)
+    {
+        const std::size_t p = args_str.rfind(delim, search_end);
+        if(p == std::string::npos) break;
+        if(i == 4)
+        {
+            record_start = p + delim.size();
+            break;
+        }
+        if(p == 0) break;
+        search_end = p - 1;
+    }
+
+    std::uint32_t idx = 0;
+    std::from_chars(args_str.data() + record_start, args_str.data() + args_str.size(),
+                    idx);
+    return idx + 1;
 }
 
 // Serializes gotcha audit arguments into the trace-cache format.
@@ -220,13 +299,13 @@ serialize_annotation_args(Args&&... args)
 
     std::string   args_str = {};
     std::uint32_t idx      = 0;
-    ROCPROFSYS_FOLD_EXPRESSION(
-        (append_serialized_arg(
-             args_str, idx,
-             fmt::format("arg{}-{}", idx,
-                         rocprofsys::utility::demangle<std::remove_reference_t<Args>>()),
-             std::forward<Args>(args)),
-         ++idx));
+    ((append_serialized_arg(
+          args_str, idx,
+          fmt::format("arg{}-{}", idx,
+                      rocprofsys::utility::demangle<std::remove_reference_t<Args>>()),
+          std::forward<Args>(args)),
+      ++idx),
+     ...);
     return args_str;
 }
 
@@ -249,9 +328,8 @@ cache_start(const char* name, std::string args_str = {})
 {
     const auto start_ts =
         static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    const auto arg_count = count_serialized_args(args_str);
     map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }].push_back(
-        pending_cache_entry{ start_ts, std::move(args_str), arg_count });
+        pending_cache_entry{ start_ts, std::move(args_str) });
 }
 
 // Appends already-serialized args to the most recent (top-of-stack) pending entry
@@ -268,12 +346,19 @@ append_cache_args(const char* name, std::string args_str)
     if(itr != map_name_to_args.end() && !itr->second.empty())
     {
         auto& entry = itr->second.back();
-        // If args were previously stored, the new ones must be renumbered to accommodate
-        auto appended_arg_count = renumber_serialized_args(args_str, entry.arg_count);
-
-        // Update the entry with the new args
-        entry.arg_count += appended_arg_count;
-        entry.args += std::move(args_str);
+        if(entry.args.empty())
+        {
+            // Hot path: the first batch is already numbered from 0, so adopt it as-is
+            // without renumbering or copying.
+            entry.args = std::move(args_str);
+        }
+        else
+        {
+            // Existing args keep their numbering; renumber the new batch to continue the
+            // sequence, deriving the next index from the last record already stored.
+            renumber_serialized_args(args_str, next_arg_index(entry.args));
+            entry.args += std::move(args_str);
+        }
     }
 }
 
@@ -472,8 +557,7 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
     // Gotcha starts pass the region name followed by ("arg-name", value) pairs.
     // Serialize those pairs into the trace-cache wire format
     // (Perfetto annotations are handled separately)
-    constexpr bool _has_cache_args = has_trace_cache_arg_pairs<std::tuple<Args...>>(
-        std::make_index_sequence<sizeof...(Args)>{});
+    constexpr bool _has_cache_args = has_trace_cache_arg_pairs_v<Args...>;
     if constexpr(_has_cache_args)
     {
         cache_args = serialize_name_value_pairs(args...);
@@ -677,9 +761,10 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
         if(config::get_perfetto_annotations())
         {
             std::int64_t _n = 0;
-            ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-                ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
-                _args, _n++));
+            (tracing::add_perfetto_annotation(
+                 ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
+                 _args, _n++),
+             ...);
         }
     });
 
@@ -718,9 +803,10 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
         if(config::get_perfetto_annotations())
         {
             std::int64_t _n = 0;
-            ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-                ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
-                _args, _n++));
+            (tracing::add_perfetto_annotation(
+                 ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
+                 _args, _n++),
+             ...);
         }
     });
 
