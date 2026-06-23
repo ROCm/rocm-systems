@@ -426,16 +426,37 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     if (!ctx.kernel_replacements.empty())
         func = ctx.resolve_replacement(kernel_name);
 
+    // Resolve by (co_hash, name). Kernel symbol names are NOT globally unique:
+    // Triton/inductor emits the generic entry symbol "triton_" from many distinct
+    // code objects, so caching/searching by name alone binds every "triton_"
+    // launch to one arbitrary kernel and faults (HIP 719 / VM fault). The recorded
+    // code-object hash disambiguates which code object this launch came from.
+    std::string cache_key = kernel_name;
+    if (co_hash_lo || co_hash_hi) {
+        char hpfx[34];
+        snprintf(hpfx, sizeof(hpfx), "%016llx%016llx:",
+                 (unsigned long long)co_hash_hi, (unsigned long long)co_hash_lo);
+        cache_key.assign(hpfx);
+        cache_key += kernel_name;
+    }
+
     if (!func) {
         std::shared_lock lk(ctx.map_mutex);
-        auto it = ctx.func_cache.find(kernel_name);
+        auto it = ctx.func_cache.find(cache_key);
         if (it != ctx.func_cache.end())
             func = it->second;
     }
 
     if (!func) {
-        // Cache miss: search module_map then co_modules.
-        {
+        // Cache miss. Prefer the exact code object identified by the recorded
+        // co_hash so non-unique names ("triton_") bind to the correct kernel;
+        // only fall back to a name-only search across all loaded modules when no
+        // hash was recorded (older recordings) or the hashed module lacks it.
+        if (co_hash_lo || co_hash_hi) {
+            hipModule_t mod = ctx.load_module(co_hash_lo, co_hash_hi);
+            if (mod) (void)hipModuleGetFunction(&func, mod, kernel_name.c_str());
+        }
+        if (!func) {
             std::shared_lock lk(ctx.map_mutex);
             for (auto& [rec_mod, live_mod] : ctx.module_map) {
                 if (hipModuleGetFunction(&func, live_mod, kernel_name.c_str()) == hipSuccess
@@ -450,17 +471,13 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                 }
             }
         }
-        if (!func && (co_hash_lo || co_hash_hi)) {
-            hipModule_t mod = ctx.load_module(co_hash_lo, co_hash_hi);
-            if (mod) (void)hipModuleGetFunction(&func, mod, kernel_name.c_str());
-        }
         if (!func) {
             fprintf(stderr, "[HRR] Kernel '%s' not found in any loaded module\n",
                     kernel_name.c_str());
             return hipErrorNotFound;
         }
         std::unique_lock lk(ctx.map_mutex);
-        ctx.func_cache.emplace(kernel_name, func);
+        ctx.func_cache.emplace(cache_key, func);
     }
 
     // Build kernelParams[] from captured args, translating GPU pointers.
