@@ -11,11 +11,15 @@
 
 namespace rocr::hotswap {
 
-/// Rewrite a code object from source_isa to target_isa via COMGR.
+/// Retarget a code object from its own ISA to the running GPU's ISA via COMGR.
 ///
-/// Called by the hotswap tools lib when the code object's ISA differs from
-/// the agent's ISA, or when stepping patches are needed (e.g., B0-to-A0).
-/// Delegates to COMGR's amd_comgr_hotswap_rewrite (linked directly).
+/// The source ISA is read from the code object via COMGR
+/// (amd_comgr_get_data_isa_name); the target ISA is the running GPU's ISA,
+/// supplied by the caller (e.g. from the HSA agent). COMGR's
+/// amd_comgr_hotswap_rewrite (linked directly) applies whatever transformation
+/// the source/target pair calls for -- same-ISA stepping patches (e.g. gfx1250
+/// B0 to A0) or cross-family transpilation -- and returns the rewritten code
+/// object. If no transformation is needed, the output is a copy of the input.
 ///
 /// On success, *out_data and *out_size describe the rewritten code object.
 /// If *out_data differs from elf_data, it was allocated by this function
@@ -27,8 +31,8 @@ namespace rocr::hotswap {
 ///
 /// Returns 0 on success, non-zero on failure.
 int RetargetCodeObject(const void *elf_data, size_t elf_size,
-                       const char *source_isa, const char *target_isa,
-                       void **out_data, size_t *out_size);
+                       const char *target_isa, void **out_data,
+                       size_t *out_size);
 
 } // namespace rocr::hotswap
 

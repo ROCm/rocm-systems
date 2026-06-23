@@ -21,14 +21,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <elf.h>
 #include <hsa.h>
 #include <hsa_api_trace.h>
 #include <hsa_ext_amd.h>
 #include <memory>
 #include <mutex>
-#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -83,22 +80,6 @@ void stash_bytes(uint64_t handle, const uint8_t *data, size_t size) {
   g_reader_map[handle] = ReaderEntry{std::move(vec), false, false};
 }
 
-bool checked_add(size_t lhs, size_t rhs, size_t *out) {
-  if (lhs > std::numeric_limits<size_t>::max() - rhs) {
-    return false;
-  }
-  *out = lhs + rhs;
-  return true;
-}
-
-bool checked_mul(size_t lhs, size_t rhs, size_t *out) {
-  if (lhs != 0 && rhs > std::numeric_limits<size_t>::max() / lhs) {
-    return false;
-  }
-  *out = lhs * rhs;
-  return true;
-}
-
 bool try_get_reader_entry(uint64_t handle, ByteVec *bytes, bool *from_file) {
   std::scoped_lock lock(g_reader_map_mutex);
   const auto it = g_reader_map.find(handle);
@@ -127,145 +108,6 @@ void mark_reader_keepalive(uint64_t handle) {
   if (it != g_reader_map.end()) {
     it->second.keepalive_after_load = true;
   }
-}
-
-// Validate ELF64 header and return pointer, or nullptr on failure.
-const Elf64_Ehdr *validate_elf64(const uint8_t *elf, size_t size) {
-  if (size < sizeof(Elf64_Ehdr)) {
-    return nullptr;
-  }
-  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(elf);
-  if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0) {
-    return nullptr;
-  }
-  if (ehdr->e_ident[EI_CLASS] != ELFCLASS64) {
-    return nullptr;
-  }
-  return ehdr;
-}
-
-bool validate_program_header_table(const Elf64_Ehdr *ehdr, size_t size) {
-  return ehdr->e_phoff != 0 && ehdr->e_phoff <= size && ehdr->e_phnum != 0 &&
-         ehdr->e_phentsize >= sizeof(Elf64_Phdr);
-}
-
-bool compute_program_header_offset(const Elf64_Ehdr *ehdr, size_t size,
-                                   uint16_t index, size_t *hdr_offset) {
-  size_t hdr_index_offset = 0;
-  if (!checked_mul(static_cast<size_t>(index),
-                   static_cast<size_t>(ehdr->e_phentsize),
-                   &hdr_index_offset) ||
-      !checked_add(ehdr->e_phoff, hdr_index_offset, hdr_offset) ||
-      *hdr_offset > size || sizeof(Elf64_Phdr) > size - *hdr_offset) {
-    return false;
-  }
-  return true;
-}
-
-bool compute_note_segment_bounds(const Elf64_Phdr *phdr, size_t size,
-                                 size_t *note_offset, size_t *note_end) {
-  *note_offset = phdr->p_offset;
-  return *note_offset <= size && phdr->p_filesz <= size - *note_offset &&
-         checked_add(*note_offset, phdr->p_filesz, note_end);
-}
-
-bool compute_note_layout(size_t note_offset, size_t note_end,
-                         const Elf64_Nhdr *nhdr, size_t *desc_off,
-                         size_t *next_note) {
-  size_t raw_name_size = 0;
-  size_t raw_desc_size = 0;
-  size_t name_sz_aligned = 0;
-  size_t desc_sz_aligned = 0;
-  if (!checked_add(static_cast<size_t>(nhdr->n_namesz), 3, &raw_name_size) ||
-      !checked_add(static_cast<size_t>(nhdr->n_descsz), 3, &raw_desc_size)) {
-    return false;
-  }
-
-  name_sz_aligned = raw_name_size & ~size_t{3};
-  desc_sz_aligned = raw_desc_size & ~size_t{3};
-  return checked_add(note_offset, sizeof(Elf64_Nhdr), desc_off) &&
-         checked_add(*desc_off, name_sz_aligned, desc_off) &&
-         checked_add(*desc_off, desc_sz_aligned, next_note) &&
-         *next_note <= note_end;
-}
-
-// Search a single NT_AMDGPU_METADATA note descriptor for the ISA triple.
-std::string find_isa_in_metadata(const char *desc, size_t desc_size) {
-  const char prefix[] = "amdgcn-amd-amdhsa--";
-  const size_t prefix_len = sizeof(prefix) - 1;
-  for (size_t j = 0; j + prefix_len <= desc_size; ++j) {
-    if (memcmp(desc + j, prefix, prefix_len) == 0) {
-      size_t len = 0;
-      while (j + len < desc_size && desc[j + len] != '\0' &&
-             desc[j + len] != '\n' && desc[j + len] != '\'' &&
-             desc[j + len] != '"' && desc[j + len] != ' ') {
-        ++len;
-      }
-      return std::string(desc + j, len);
-    }
-  }
-  return {};
-}
-
-std::string read_elf_isa_from_note_segment(const uint8_t *elf, size_t note_offset,
-                                           size_t note_end) {
-  while (note_offset <= note_end &&
-         sizeof(Elf64_Nhdr) <= note_end - note_offset) {
-    const auto *nhdr = reinterpret_cast<const Elf64_Nhdr *>(elf + note_offset);
-    size_t desc_off = 0;
-    size_t next_note = 0;
-    if (!compute_note_layout(note_offset, note_end, nhdr, &desc_off,
-                             &next_note)) {
-      break;
-    }
-
-    constexpr uint32_t NT_AMDGPU_METADATA = 32;
-    if (nhdr->n_type == NT_AMDGPU_METADATA && nhdr->n_descsz > 0 &&
-        desc_off + nhdr->n_descsz <= note_end) {
-      const char *desc = reinterpret_cast<const char *>(elf + desc_off);
-      std::string result = find_isa_in_metadata(desc, nhdr->n_descsz);
-      if (!result.empty()) {
-        return result;
-      }
-    }
-
-    note_offset = next_note;
-  }
-  return {};
-}
-
-// Parse ELF PT_NOTE segments to find the AMDGPU ISA name from
-// NT_AMDGPU_METADATA (type 32) notes in v3+ code objects.
-std::string read_elf_isa_note(const uint8_t *elf, size_t size) {
-  const Elf64_Ehdr *ehdr = validate_elf64(elf, size);
-  if (!ehdr || !validate_program_header_table(ehdr, size)) {
-    return {};
-  }
-
-  for (uint16_t i = 0; i < ehdr->e_phnum; ++i) {
-    size_t hdr_offset = 0;
-    if (!compute_program_header_offset(ehdr, size, i, &hdr_offset)) {
-      break;
-    }
-    const auto *phdr =
-        reinterpret_cast<const Elf64_Phdr *>(elf + hdr_offset);
-    if (phdr->p_type != PT_NOTE) {
-      continue;
-    }
-
-    size_t note_offset = 0;
-    size_t note_end = 0;
-    if (!compute_note_segment_bounds(phdr, size, &note_offset, &note_end)) {
-      continue;
-    }
-
-    std::string result = read_elf_isa_from_note_segment(elf, note_offset,
-                                                        note_end);
-    if (!result.empty()) {
-      return result;
-    }
-  }
-  return {};
 }
 
 hsa_status_t HSA_API hotswap_reader_create_from_memory(
@@ -384,22 +226,18 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agen
                                    const char *options,
                                    hsa_loaded_code_object_t *loaded_code_object,
                                    const ByteVec &local_bytes) {
-  const std::string source_isa =
-      read_elf_isa_note(local_bytes->data(), local_bytes->size());
+  // Source ISA is derived from the code object inside RetargetCodeObject; the
+  // target ISA is the running GPU.
   const std::string target_isa = get_agent_isa_name(agent);
-
-  if (source_isa.empty() || target_isa.empty()) {
+  if (target_isa.empty()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
-  // Route through RetargetCodeObject for unified logging, validation,
-  // and COMGR interaction. Do NOT skip when source == target: B0-to-A0
-  // patching uses the same ISA name on both sides.
   void *out_elf = nullptr;
   size_t out_elf_size = 0;
   const int rc = rocr::hotswap::RetargetCodeObject(
-      local_bytes->data(), local_bytes->size(), source_isa.c_str(),
-      target_isa.c_str(), &out_elf, &out_elf_size);
+      local_bytes->data(), local_bytes->size(), target_isa.c_str(), &out_elf,
+      &out_elf_size);
 
   if (rc != 0 || out_elf == local_bytes->data()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;

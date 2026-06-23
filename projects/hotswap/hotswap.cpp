@@ -10,12 +10,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 
 namespace rocr::hotswap {
 
 int RetargetCodeObject(const void *elf_data, size_t elf_size,
-                       const char *source_isa, const char *target_isa,
-                       void **out_data, size_t *out_size) {
+                       const char *target_isa, void **out_data,
+                       size_t *out_size) {
   using OwnedElf = std::unique_ptr<void, decltype(&std::free)>;
 
   if (!out_data || !out_size) {
@@ -26,7 +27,7 @@ int RetargetCodeObject(const void *elf_data, size_t elf_size,
   *out_data = const_cast<void *>(elf_data);
   *out_size = elf_size;
 
-  if (!elf_data || elf_size == 0 || !source_isa || !target_isa) {
+  if (!elf_data || elf_size == 0 || !target_isa) {
     fprintf(stderr, "hotswap: invalid null input argument(s)\n");
     return -1;
   }
@@ -47,14 +48,37 @@ int RetargetCodeObject(const void *elf_data, size_t elf_size,
     return static_cast<int>(status);
   }
 
-  // Call the hotswap rewrite API.
+  // Source ISA from the code object via COMGR (LLVM-canonical, tracks triple
+  // normalization); the target ISA is the running GPU, supplied by the caller.
+  size_t isa_len = 0;
+  status = amd_comgr_get_data_isa_name(input, &isa_len, nullptr);
+  if (status != AMD_COMGR_STATUS_SUCCESS || isa_len == 0) {
+    fprintf(stderr, "hotswap: failed to query COMGR ISA name (rc=%d)\n",
+            static_cast<int>(status));
+    amd_comgr_release_data(input);
+    return static_cast<int>(status);
+  }
+  std::string source_isa(isa_len, '\0');
+  status = amd_comgr_get_data_isa_name(input, &isa_len, source_isa.data());
+  if (status != AMD_COMGR_STATUS_SUCCESS) {
+    fprintf(stderr, "hotswap: failed to read COMGR ISA name (rc=%d)\n",
+            static_cast<int>(status));
+    amd_comgr_release_data(input);
+    return static_cast<int>(status);
+  }
+  // Reported size includes the terminating NUL.
+  if (!source_isa.empty() && source_isa.back() == '\0') {
+    source_isa.pop_back();
+  }
+
   amd_comgr_data_t output = {0};
-  status = amd_comgr_hotswap_rewrite(input, source_isa, target_isa, &output);
+  status = amd_comgr_hotswap_rewrite(input, source_isa.c_str(), target_isa,
+                                     &output);
   amd_comgr_release_data(input);
 
   if (status != AMD_COMGR_STATUS_SUCCESS) {
     fprintf(stderr, "hotswap: COMGR rewrite failed for %s -> %s (rc=%d)\n",
-            source_isa, target_isa, static_cast<int>(status));
+            source_isa.c_str(), target_isa, static_cast<int>(status));
     return static_cast<int>(status);
   }
 
