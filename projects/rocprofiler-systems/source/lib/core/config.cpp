@@ -47,6 +47,7 @@
 #include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <charconv>
 #include <cmath>
 #include <csignal>
 #include <cstdint>
@@ -190,8 +191,10 @@ has_config_value_reference(std::string_view raw_value)
 }
 
 [[nodiscard]] bool
-is_unsigned_integer_config_value(std::string_view value)
+is_integer_config_value(std::string_view value)
 {
+    if(value.empty()) return false;
+    if(value.front() == '+' || value.front() == '-') value.remove_prefix(1);
     return !value.empty() && value.find_first_not_of("0123456789") == std::string::npos;
 }
 
@@ -209,9 +212,9 @@ is_recognized_boolean_text_value(std::string_view value)
 is_valid_boolean_config_value(std::string_view raw_value)
 {
     auto value = lower_config_value(trim_config_value(raw_value));
-    if(value.empty()) return true;
+    if(value.empty()) return false;
 
-    if(is_unsigned_integer_config_value(value)) return true;
+    if(is_integer_config_value(value)) return true;
 
     return is_recognized_boolean_text_value(value);
 }
@@ -359,19 +362,31 @@ validate_config_file_values(const std::string& config_file, const std::string& t
                 trim_config_value(std::string_view{ trimmed_line }.substr(split_pos + 1));
         }
 
-        if(raw_value.empty()) continue;
+        if(raw_value.empty())
+        {
+            validate_config_setting_value(key, raw_value,
+                                          get_setting_choices(_config, key));
+            continue;
+        }
 
         if(auto comment_pos = raw_value.find('#'); comment_pos != std::string::npos)
             raw_value =
                 trim_config_value(std::string_view{ raw_value }.substr(0, comment_pos));
 
-        if(raw_value.empty() || has_config_value_reference(raw_value)) continue;
+        if(raw_value.empty())
+        {
+            validate_config_setting_value(key, raw_value,
+                                          get_setting_choices(_config, key));
+            continue;
+        }
+
+        if(has_config_value_reference(raw_value)) continue;
 
         try
         {
             validate_config_setting_value(key, raw_value,
                                           get_setting_choices(_config, key));
-        } catch(std::runtime_error& exc)
+        } catch(const std::runtime_error& exc)
         {
             throw std::runtime_error(
                 fmt::format("{} in {}:{}", exc.what(), filepath, line_number));

@@ -42,6 +42,16 @@ INVALID_TYPED_VALUE_CASES = [
         id="boolean",
     ),
     pytest.param(
+        {"ROCPROFSYS_TRACE": ""},
+        r"[Ii]nvalid value.*ROCPROFSYS_TRACE",
+        id="boolean-empty",
+    ),
+    pytest.param(
+        {"ROCPROFSYS_TRACE": "   "},
+        r"[Ii]nvalid value.*ROCPROFSYS_TRACE",
+        id="boolean-whitespace",
+    ),
+    pytest.param(
         {"ROCPROFSYS_TRACE_DURATION": "abc"},
         r"[Ii]nvalid value.*ROCPROFSYS_TRACE_DURATION",
         id="numeric-parse",
@@ -56,6 +66,8 @@ INVALID_TYPED_VALUE_CASES = [
 VALID_BOOLEAN_VALUES = [
     pytest.param("on", id="on"),
     pytest.param("1", id="one"),
+    pytest.param("+1", id="plus-one"),
+    pytest.param("-1", id="minus-one"),
     pytest.param("true", id="true"),
     pytest.param("Y", id="Y"),
 ]
