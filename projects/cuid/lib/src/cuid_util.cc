@@ -21,6 +21,7 @@
  */
 
 #include "cuid_util.h"
+#include "smbios_util.h"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -385,15 +386,23 @@ amdcuid_status_t
 CuidUtilities::make_fallback_fingerprint(const std::string &id,
                                          uint64_t &fingerprint) {
   std::string system_id;
+  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
 
-  std::ifstream machine_id_file("/etc/machine-id");
-  if (machine_id_file.is_open())
-    std::getline(machine_id_file, system_id);
+  if (geteuid() != 0) {
+    std::ifstream machine_id_file("/etc/machine-id");
+    if (machine_id_file.is_open())
+      std::getline(machine_id_file, system_id);
 
-  if (system_id.empty()) {
-    std::ifstream hostname_file("/etc/hostname");
-    if (hostname_file.is_open())
-      std::getline(hostname_file, system_id);
+    if (system_id.empty()) {
+      std::ifstream hostname_file("/etc/hostname");
+      if (hostname_file.is_open())
+        std::getline(hostname_file, system_id);
+    }
+  } else {
+    // If running as root, get platform serial number
+    status = SmbiosUtil::get_system_serial(system_id);
+    if (status != AMDCUID_STATUS_SUCCESS)
+      return status;
   }
 
   std::string id_hex;
@@ -402,9 +411,8 @@ CuidUtilities::make_fallback_fingerprint(const std::string &id,
 
   std::string combined = id_hex + system_id;
   uint8_t digest[32];
-  amdcuid_status_t status =
-      sha256_unkeyed(reinterpret_cast<const uint8_t *>(combined.data()),
-                     combined.size(), digest);
+  status = sha256_unkeyed(reinterpret_cast<const uint8_t *>(combined.data()),
+                          combined.size(), digest);
   if (status != AMDCUID_STATUS_SUCCESS)
     return status;
 
