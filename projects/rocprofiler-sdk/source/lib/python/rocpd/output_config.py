@@ -153,9 +153,7 @@ def add_args(parser):
         for itr in valid_args:
             if hasattr(args, itr):
                 val = getattr(args, itr)
-                if itr == "output_format":
-                    ret[itr] = val
-                elif itr == "output_path" and val is not None:
+                if itr == "output_path" and val is not None:
                     ret[itr] = format_path(val)
                 elif val is not None:
                     ret[itr] = val

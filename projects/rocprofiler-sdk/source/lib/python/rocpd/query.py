@@ -76,8 +76,8 @@ def export_sqlite_query(
 
         _pandas_available = True
     except ModuleNotFoundError as e:
-            if e.name != "pandas":
-                raise e
+        if e.name != "pandas":
+            raise e
         _pandas_available = False
 
     try:
@@ -618,13 +618,33 @@ def add_args(parser):
     )
 
     def process_args(input, args):
+        valid_args = [
+            "query",
+            "script",
+            "format",
+            "email_to",
+            "email_from",
+            "email_subject",
+            "smtp_server",
+            "smtp_port",
+            "smtp_user",
+            "smtp_password",
+            "zip_attachments",
+            "inline_preview",
+            "template_path",
+        ]
         ret = {}
+        for itr in valid_args:
+            if hasattr(args, itr):
+                val = getattr(args, itr)
+                if val is not None:
+                    ret[itr] = val
         return ret
 
     return process_args
 
 
-def execute(input, args, config=None, **kwargs):
+def execute(input, config=None, **kwargs):
 
     config = (
         output_config.output_config(**kwargs)
@@ -632,20 +652,20 @@ def execute(input, args, config=None, **kwargs):
         else config.update(**kwargs)
     )
 
-    if args.script:
+    if kwargs.get("script", None):
         # read script and execute statements
-        with open(args.script, "r") as ifs:
+        with open(kwargs.get("script", None), "r") as ifs:
             for itr in ifs.read().split(";"):
                 input.execute(f"{itr}")
 
     # Prepare parameters for export
-    query = args.query
+    query = kwargs.pop("query", None)
     db = input
-    export_format = args.format
+    export_format = kwargs.pop("format", None)
     export_path = os.path.join(config.output_path, config.output_file)
 
     # Dashboard-only extra
-    dashboard_template = kwargs.get("template_path", None)
+    dashboard_template = kwargs.pop("template_path", None)
 
     # 1) Run and export
     exported_file = export_sqlite_query(
@@ -659,25 +679,25 @@ def execute(input, args, config=None, **kwargs):
     )
 
     # 2) If --email-to was provided and we have a file, send it
-    if args.email_to:
-        if not args.email_from:
+    if kwargs.get("email_to", None):
+        if not kwargs.get("email_from", None):
             raise ValueError("--email-from is required when --email-to is used.")
         if not exported_file:
             print("No file was exported; skipping email.")
             return
 
-        recipients = [addr.strip() for addr in args.email_to.split(",")]
+        recipients = [addr.strip() for addr in kwargs.get("email_to", None).split(",")]
         send_report_email(
             file_paths=[exported_file],
             to=recipients,
-            sender=args.email_from,
-            subject=args.email_subject,
-            inline_preview=args.inline_preview,
-            smtp_server=args.smtp_server,
-            smtp_port=args.smtp_port,
-            smtp_user=args.smtp_user,
-            smtp_password=args.smtp_password,
-            zip_attachments=args.zip_attachments,
+            sender=kwargs.get("email_from", None),
+            subject=kwargs.get("email_subject", None),
+            inline_preview=kwargs.get("inline_preview", None),
+            smtp_server=kwargs.get("smtp_server", None),
+            smtp_port=kwargs.get("smtp_port", None),
+            smtp_user=kwargs.get("smtp_user", None),
+            smtp_password=kwargs.get("smtp_password", None),
+            zip_attachments=kwargs.get("zip_attachments", None),
         )
 
 
@@ -725,7 +745,6 @@ def main(argv=None):
 
     execute(
         input,
-        args,
         **all_args,
     )
 

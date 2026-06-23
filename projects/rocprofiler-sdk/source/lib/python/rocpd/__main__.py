@@ -276,24 +276,17 @@ Example usage:
         for pitr in process_converter_args:
             all_args.update(pitr(input, args))
 
-        # setup the config args
-        config = (
-            output_config.output_config(**all_args)
-            if config is None
-            else config.update(**all_args)
-        )
-
         # process each requested output format
         format_handlers = {
-            "pftrace": pftrace.write_pftrace,
-            "csv": csv.write_csv,
-            "otf2": otf2.write_otf2,
+            "pftrace": pftrace.execute,
+            "csv": csv.execute,
+            "otf2": otf2.execute,
         }
 
         for out_format in args.output_format:
             if out_format in format_handlers:
                 print(f"Converting database(s) to {out_format} format:")
-                format_handlers[out_format](input, config)
+                format_handlers[out_format](input, **all_args)
             else:
                 print(f"Warning: Unsupported output format '{out_format}'")
 
@@ -338,7 +331,6 @@ Example usage:
 
         query.execute(
             input,
-            args,
             **query_args,
         )
 

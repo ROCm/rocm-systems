@@ -33,11 +33,7 @@ from . import libpyrocpd
 
 
 def write_sql_query_to_csv(
-    connection: RocpdImportData,
-    config,
-    query,
-    filename="",
-    postfix="trace",
+    connection: RocpdImportData, config, query, filename="", postfix="trace", **kwargs
 ) -> None:
     """Write the contents of a SQL query to a CSV file in the specified output path."""
 
@@ -58,13 +54,13 @@ def write_sql_query_to_csv(
         config.output_path, f"{file_prefix}{filename}{file_postfix}.csv"
     )
 
-    kwargs = {"title_columns": True}
+    kwargs["title_columns"] = True
     export_sqlite_query(
         connection, query, export_format="csv", export_path=export_path, **kwargs
     )
 
 
-def write_agent_info_csv(importData, config) -> None:
+def write_agent_info_csv(importData, config, **kwargs) -> None:
 
     # Define mapping of output column name to JSON key
     json_keys = [
@@ -192,7 +188,7 @@ def write_agent_info_csv(importData, config) -> None:
         FROM "rocpd_info_agent"
     """
 
-    write_sql_query_to_csv(importData, config, query, "agent_info", "")
+    write_sql_query_to_csv(importData, config, query, "agent_info", "", **kwargs)
 
 
 def build_agent_id_string(agent_index_value, prefix=""):
@@ -265,12 +261,12 @@ def get_kernel_csv_query(importData, config) -> str:
     """
 
 
-def write_kernel_csv(importData, config) -> None:
+def write_kernel_csv(importData, config, **kwargs) -> None:
     query = get_kernel_csv_query(importData, config)
-    write_sql_query_to_csv(importData, config, query, "kernel")
+    write_sql_query_to_csv(importData, config, query, "kernel", **kwargs)
 
 
-def write_memory_copy_csv(importData, config) -> None:
+def write_memory_copy_csv(importData, config, **kwargs) -> None:
 
     src_agent_id = build_agent_id_string(config.agent_index_value, "src")
     dst_agent_id = build_agent_id_string(config.agent_index_value, "dst")
@@ -299,10 +295,10 @@ def write_memory_copy_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, config, query, "memory_copy")
+    write_sql_query_to_csv(importData, config, query, "memory_copy", **kwargs)
 
 
-def write_graph_launch_csv(importData, config) -> None:
+def write_graph_launch_csv(importData, config, **kwargs) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
@@ -323,10 +319,10 @@ def write_graph_launch_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, config, query, "graph_launch")
+    write_sql_query_to_csv(importData, config, query, "graph_launch", **kwargs)
 
 
-def write_memory_allocation_csv(importData, config) -> None:
+def write_memory_allocation_csv(importData, config, **kwargs) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
@@ -362,10 +358,10 @@ def write_memory_allocation_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, config, query, "memory_allocation")
+    write_sql_query_to_csv(importData, config, query, "memory_allocation", **kwargs)
 
 
-def write_counters_csv(importData, config) -> None:
+def write_counters_csv(importData, config, **kwargs) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
@@ -405,10 +401,10 @@ def write_counters_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, config, query, "counter_collection")
+    write_sql_query_to_csv(importData, config, query, "counter_collection", **kwargs)
 
 
-def write_spm_counters_csv(importData, config) -> None:
+def write_spm_counters_csv(importData, config, **kwargs) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
@@ -447,10 +443,10 @@ def write_spm_counters_csv(importData, config) -> None:
         ORDER BY
             guid ASC, timestamp ASC
     """
-    write_sql_query_to_csv(importData, config, query, "spm_counter_collection")
+    write_sql_query_to_csv(importData, config, query, "spm_counter_collection", **kwargs)
 
 
-def write_scratch_memory_csv(importData, config) -> None:
+def write_scratch_memory_csv(importData, config, **kwargs) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
@@ -469,10 +465,10 @@ def write_scratch_memory_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, config, query, "scratch_memory")
+    write_sql_query_to_csv(importData, config, query, "scratch_memory", **kwargs)
 
 
-def write_region_csv(importData, config) -> None:
+def write_region_csv(importData, config, **kwargs) -> None:
 
     query = """
         SELECT
@@ -488,25 +484,25 @@ def write_region_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, config, query, "regions")
+    write_sql_query_to_csv(importData, config, query, "regions", **kwargs)
 
 
-def write_csv(importData, config):
+def write_csv(importData, config, **kwargs):
 
-    write_agent_info_csv(importData, config)
-    write_counters_csv(importData, config)
-    write_kernel_csv(importData, config)
-    write_memory_allocation_csv(importData, config)
-    write_memory_copy_csv(importData, config)
-    write_region_csv(importData, config)
-    write_scratch_memory_csv(importData, config)
+    write_agent_info_csv(importData, config, **kwargs)
+    write_counters_csv(importData, config, **kwargs)
+    write_kernel_csv(importData, config, **kwargs)
+    write_memory_allocation_csv(importData, config, **kwargs)
+    write_memory_copy_csv(importData, config, **kwargs)
+    write_region_csv(importData, config, **kwargs)
+    write_scratch_memory_csv(importData, config, **kwargs)
 
     # graph launch was not introduced until schema version 3.0.2
     if "graph_launch" in importData.supported_features:
-        write_graph_launch_csv(importData, config)
+        write_graph_launch_csv(importData, config, **kwargs)
 
     if "spm_counters" in importData.supported_features:
-        write_spm_counters_csv(importData, config)
+        write_spm_counters_csv(importData, config, **kwargs)
 
 
 def execute(input, config=None, **kwargs):
@@ -517,7 +513,7 @@ def execute(input, config=None, **kwargs):
         else config.update(**kwargs)
     )
 
-    write_csv(input, config)
+    write_csv(input, config, **kwargs)
 
 
 def add_args(parser):
