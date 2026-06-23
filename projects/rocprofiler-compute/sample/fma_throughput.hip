@@ -16,9 +16,7 @@
 //     arch(es) that support the type and compiles to an empty no-op elsewhere.
 //     This keeps the file building for every --offload-arch.
 //   - Run time: the host resolves the live GPU arch to the supported-datatype
-//     set (mirroring SUPPORTED_DATATYPES in src/utils/roofline_calc.py) and only
-//     launches + reports the precisions that arch supports. Builds are native
-//     (no --offload-arch override), so the runtime arch equals the compiled one.
+//     set and only launches + reports the precisions that arch supports.
 //
 // The base precisions (FP16/BF16/FP32/FP64/I8/I32/I64) are supported on every
 // roofline arch and need no gating. FP8/FP6/FP4 are best-effort: HIP exposes
@@ -155,7 +153,6 @@ static std::string detect_arch(int device)
     return arch;
 }
 
-// Mirrors SUPPORTED_DATATYPES in src/utils/roofline_calc.py.
 static std::vector<std::string> supported_dtypes(const std::string& arch)
 {
     std::vector<std::string> base = {"FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"};
