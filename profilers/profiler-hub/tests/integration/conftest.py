@@ -28,6 +28,81 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE_BIN_DIR = REPO_ROOT / "build" / "bin" / "examples"
 
 
+def pytest_addoption(parser):
+    group = parser.getgroup("profiler-hub ctest")
+    group.addoption(
+        "--ctest-mode",
+        action="store",
+        default="off",
+        choices=("off", "generate"),
+        help="Generate CTest definitions from collected pytest tests.",
+    )
+    group.addoption(
+        "--ctest-output-path",
+        action="store",
+        default=None,
+        help="Path to write generated CTest definitions.",
+    )
+
+
+def pytest_collection_finish(session):
+    if session.config.getoption("--ctest-mode", default="off") != "generate":
+        return
+
+    output_path = session.config.getoption("--ctest-output-path", default=None)
+    if not output_path:
+        raise pytest.UsageError("--ctest-output-path is required in generate mode")
+
+    _write_ctest_file(session.items, Path(output_path))
+    pytest.exit("CTest definitions generated", returncode=0)
+
+
+def _cmake_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace(";", "\\;")
+
+
+def _module_ctest_name(path: Path) -> str:
+    return f"integration.{path.stem}"
+
+
+def _write_ctest_file(items: list[pytest.Item], output_path: Path) -> None:
+    python_exe = os.environ.get("PHUB_CTEST_PYTHON_EXECUTABLE", "python3")
+    source_dir = os.environ.get("PHUB_CTEST_SOURCE_DIR", str(REPO_ROOT))
+    example_bin_dir = os.environ.get("PHUB_CTEST_EXAMPLE_BIN_DIR", str(EXAMPLE_BIN_DIR))
+
+    lines = [
+        "# Auto-generated CTest definitions from profiler-hub pytest suite",
+        "# DO NOT EDIT - regenerate by building the generate-profiler-hub-pytest-ctests target",
+        "",
+        f'set(_PHUB_PYTHON_EXECUTABLE "{_cmake_escape(python_exe)}")',
+        f'set(_PHUB_SOURCE_DIR "{_cmake_escape(source_dir)}")',
+        f'set(_PHUB_EXAMPLE_BIN_DIR "{_cmake_escape(example_bin_dir)}")',
+        "",
+    ]
+
+    test_modules = sorted({Path(str(item.path)) for item in items})
+    for path in test_modules:
+        test_name = _cmake_escape(_module_ctest_name(path))
+        rel_path = _cmake_escape(path.relative_to(REPO_ROOT).as_posix())
+        lines.extend(
+            [
+                f'add_test("{test_name}" "${{_PHUB_PYTHON_EXECUTABLE}}"',
+                '    "-m" "pytest" "-q" "-p" "no:cacheprovider"',
+                f'    "${{_PHUB_SOURCE_DIR}}/{rel_path}")',
+                f'set_tests_properties("{test_name}" PROPERTIES',
+                f'    WORKING_DIRECTORY "${{_PHUB_SOURCE_DIR}}"',
+                f'    ENVIRONMENT "PHUB_EXAMPLE_BIN_DIR=${{_PHUB_EXAMPLE_BIN_DIR}}"',
+                '    LABELS "integration;pytest"',
+                "    TIMEOUT 120",
+                ")",
+                "",
+            ]
+        )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def _find_launcher(name: str) -> Path | None:
     binary_name = f"profiler-hub_{name}"
 

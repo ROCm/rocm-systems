@@ -60,8 +60,6 @@ def recovered(run_launcher) -> dict[str, str]:
     return run_launcher("kernel_dispatch_writer_reader")
 
 
-# One assertion per field, parametrized so each field shows up as its own
-# pass/fail case in the pytest report.
 @pytest.mark.parametrize("field,expected", list(EXPECTED.items()))
 def test_field_matches(recovered, field, expected):
     assert field in recovered, f"missing field '{field}' in example output"
