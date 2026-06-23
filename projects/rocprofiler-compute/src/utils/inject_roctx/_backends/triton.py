@@ -26,11 +26,18 @@ from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "triton"
 
-CompiledKernel: Any = None
-JITFunction: Any = None
 
-# Per-thread flag set while a launch marker is open, so nested launch calls
-# emit a single marker.
+class _TritonState:
+    """Resolved Triton launch entry-point handles, populated by _resolve_triton()."""
+
+    def __init__(self) -> None:
+        self.compiled_kernel: Any = None
+        self.jit_function: Any = None
+
+
+_STATE = _TritonState()
+
+# Per-thread guard so nested launches emit a single marker.
 _thread_local = threading.local()
 
 
@@ -39,28 +46,27 @@ def _in_launch() -> bool:
 
 
 def _resolve_triton() -> bool:
-    """Bind the triton handles. Returns True if triton is importable."""
-    global CompiledKernel, JITFunction
+    """Bind the triton handles on _STATE. Returns True if triton is importable."""
     if importlib.util.find_spec("triton") is None:
         return False
     try:
         from triton.compiler import CompiledKernel as _CK
 
-        CompiledKernel = _CK
+        _STATE.compiled_kernel = _CK
     except Exception:
-        CompiledKernel = None
+        _STATE.compiled_kernel = None
     try:
         from triton.runtime.jit import JITFunction as _JIT
 
-        JITFunction = _JIT
+        _STATE.jit_function = _JIT
     except Exception:
-        JITFunction = None
-    return CompiledKernel is not None or JITFunction is not None
+        _STATE.jit_function = None
+    return _STATE.compiled_kernel is not None or _STATE.jit_function is not None
 
 
 def _register_framework_root() -> None:
-    """Register triton's package directory so caller-location resolution
-    reports the user's call site rather than triton's internals."""
+    """Register triton's package directory as a framework root for
+    caller-location resolution."""
     try:
         import triton
 
@@ -225,15 +231,17 @@ def _wrap_launch(
 def patch_triton_launcher() -> None:
     """Wrap every available Triton launch entry point."""
     wrapped_any = False
-    if JITFunction is not None:
-        wrapped_any |= _wrap_launch(JITFunction, "run", "triton.JITFunction")
-    if CompiledKernel is not None:
+    jit_function = _STATE.jit_function
+    compiled_kernel = _STATE.compiled_kernel
+    if jit_function is not None:
+        wrapped_any |= _wrap_launch(jit_function, "run", "triton.JITFunction")
+    if compiled_kernel is not None:
         # Prefer run(); fall back to __call__.
-        if hasattr(CompiledKernel, "run"):
-            wrapped_any |= _wrap_launch(CompiledKernel, "run", "triton.CompiledKernel")
+        if hasattr(compiled_kernel, "run"):
+            wrapped_any |= _wrap_launch(compiled_kernel, "run", "triton.CompiledKernel")
         else:
             wrapped_any |= _wrap_launch(
-                CompiledKernel, "__call__", "triton.CompiledKernel"
+                compiled_kernel, "__call__", "triton.CompiledKernel"
             )
     if not wrapped_any:
         console_warning(

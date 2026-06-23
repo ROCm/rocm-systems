@@ -291,21 +291,21 @@ class cli_analysis(OmniAnalyze_Base):
         label = _BACKEND_CLI[backend]["label"]
         consolidated_df, ml_api_trace_path = process_ml_api_trace_output(workload_path)
         if consolidated_df.empty:
-            tty.list_torch_operators(workload_path, {}, framework_label=label)
+            tty.list_ml_operators(workload_path, {}, framework_label=label)
             return
 
         # Write the full consolidated trace before narrowing to the backend.
         write_ml_api_trace_consolidated_csv(consolidated_df, ml_api_trace_path)
         backend_df = self._filter_by_backend(consolidated_df, backend)
         if backend_df.empty:
-            tty.list_torch_operators(workload_path, {}, framework_label=label)
+            tty.list_ml_operators(workload_path, {}, framework_label=label)
             return
 
         call_trees = build_call_trees_with_kernel_ids(
             consolidated_df=backend_df,
             kernel_top_df=kernel_top_df,
         )
-        tty.list_torch_operators(workload_path, call_trees, framework_label=label)
+        tty.list_ml_operators(workload_path, call_trees, framework_label=label)
 
     def apply_operator_filter(
         self,
@@ -316,10 +316,8 @@ class cli_analysis(OmniAnalyze_Base):
     ) -> None:
         """Set workload.filter_kernel_ids from the backend's operator filter.
 
-        Runs in pre_processing before load_table_data so metric evaluation
-        uses the kernel filter. Operator matches are intersected with the
-        -k/--kernel filter when set, and matched rows are stored in
-        workload.matched_ml_api_trace_dfs[backend].
+        Operator matches are intersected with the -k/--kernel filter when set;
+        matched rows are stored in workload.matched_ml_api_trace_dfs[backend].
         """
         cli = _BACKEND_CLI[backend]
         label = cli["label"]

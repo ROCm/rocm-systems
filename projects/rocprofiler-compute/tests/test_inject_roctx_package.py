@@ -209,7 +209,7 @@ def test_triton_backend_wraps_compiled_kernel_run(monkeypatch):
         lambda marker, ctx, backend="": pushes.append((marker, backend)),
     )
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
-    monkeypatch.setattr(triton_backend, "JITFunction", None)
+    monkeypatch.setattr(triton_backend._STATE, "jit_function", None)
 
     class FakeCompiledKernel:
         name = "rk"
@@ -217,7 +217,7 @@ def test_triton_backend_wraps_compiled_kernel_run(monkeypatch):
         def run(self, *a, **kw):
             return "ran"
 
-    monkeypatch.setattr(triton_backend, "CompiledKernel", FakeCompiledKernel)
+    monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", FakeCompiledKernel)
     triton_backend.patch_triton_launcher()
 
     assert FakeCompiledKernel().run() == "ran"
@@ -235,7 +235,7 @@ def test_triton_backend_wraps_jitfunction_run(monkeypatch):
         lambda marker, ctx, backend="": pushes.append(marker),
     )
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
-    monkeypatch.setattr(triton_backend, "CompiledKernel", None)
+    monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", None)
 
     class FakeJIT:
         def __init__(self):
@@ -244,7 +244,7 @@ def test_triton_backend_wraps_jitfunction_run(monkeypatch):
         def run(self, *a, **kw):
             return "launched"
 
-    monkeypatch.setattr(triton_backend, "JITFunction", FakeJIT)
+    monkeypatch.setattr(triton_backend._STATE, "jit_function", FakeJIT)
     triton_backend.patch_triton_launcher()
 
     assert FakeJIT().run() == "launched"
@@ -281,8 +281,8 @@ def test_triton_backend_reentrancy_dedups_nested_launch(monkeypatch):
         def run(self, *a, **kw):
             return self._compiled.run()
 
-    monkeypatch.setattr(triton_backend, "CompiledKernel", FakeCompiledKernel)
-    monkeypatch.setattr(triton_backend, "JITFunction", FakeJIT)
+    monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", FakeCompiledKernel)
+    monkeypatch.setattr(triton_backend._STATE, "jit_function", FakeJIT)
     triton_backend.patch_triton_launcher()
 
     compiled = FakeCompiledKernel()

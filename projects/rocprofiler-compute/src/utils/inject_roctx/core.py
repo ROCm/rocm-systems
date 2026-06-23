@@ -144,13 +144,21 @@ def resolve_user_caller_location() -> str:
 # "|<backend>" suffix attributes the scope to its backend.
 
 
+def encode_marker_name(name: str) -> str:
+    """Percent-encode a marker segment so an embedded '/' is not read as the
+    frame separator.
+    """
+    return name.replace("%", "%25").replace("/", "%2F")
+
+
 def compose_marker(marker: str, context: str, backend: str = "") -> str:
     """Return the wire-format string for a scope nested under the current
-    marker and context stacks.
+    marker and context stacks. Marker segments are percent-encoded.
     """
     marker_stack = get_marker_stack()
     context_stack = get_context_stack()
-    full = "/".join([*marker_stack, marker]) + ":" + "/".join([*context_stack, context])
+    op_path = "/".join(encode_marker_name(name) for name in [*marker_stack, marker])
+    full = op_path + ":" + "/".join([*context_stack, context])
     if backend:
         full = f"{full}|{backend}"
     return full

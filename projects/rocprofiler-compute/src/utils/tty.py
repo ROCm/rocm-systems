@@ -299,7 +299,7 @@ def is_roofline_shown(
     return True
 
 
-def list_torch_operators(
+def list_ml_operators(
     workload_path: str,
     call_trees: dict[str, CallTreeNode],
     framework_label: str = "PyTorch",
