@@ -2925,10 +2925,15 @@ class GraphMemAllocNode final : public GraphNode {
           relaunch ? *phys_ptr_ref_ : nullptr);
       if (dptr == nullptr) {
         LogError("Graph MemAlloc node failed to allocate device memory");
-        setStatus(CL_INVALID_OPERATION);
+        // CL_MEM_OBJECT_ALLOCATION_FAILURE is the most accurate error (device
+        // memory allocation failed), but ConvertCLErrorIntoHIPError maps it to
+        // hipErrorIllegalAddress (a GPU page fault), which is wrong. Use
+        // CL_OUT_OF_RESOURCES instead; it surfaces as the more appropriate
+        // hipErrorLaunchOutOfResources.
+        setStatus(CL_OUT_OF_RESOURCES);
         // Graph commands are fire-and-forget; latch the device error (as the HSA
         // async-error handler does) so hipGraphLaunch/sync surface it.
-        queue()->device().gpu_error_ = CL_INVALID_OPERATION;
+        queue()->device().gpu_error_ = CL_OUT_OF_RESOURCES;
         if (!AMD_DIRECT_DISPATCH) {
           WorkerThreadLock_.unlock();
         }
