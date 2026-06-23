@@ -738,6 +738,9 @@ construct_agent_cache(::HsaApiTable* table)
                        HSA_STATUS_SUCCESS &&
                    hsa_name[0] != '\0')
                 {
+                    // Defensive: HSA_AGENT_INFO_NAME has no documented length bound,
+                    // so force NUL-termination before treating the buffer as a string.
+                    hsa_name[sizeof(hsa_name) - 1] = '\0';
                     if(auto _ver = parse_gfx_target_version(hsa_name))
                     {
                         mut.name = common::get_string_entry(std::string{hsa_name})->c_str();
@@ -766,8 +769,12 @@ construct_agent_cache(::HsaApiTable* table)
 
             // Derive composite fields the same way the gnulinux/KFD path does. The
             // operands are non-zero (HSA values or the enumerator defaults), so the
-            // results stay self-consistent even if some HSA query failed.
-            if(mut.simd_per_cu > 0) mut.max_waves_per_simd = mut.max_waves_per_cu / mut.simd_per_cu;
+            // results stay self-consistent even if some HSA query failed. Guard the
+            // ratio against the partial-success case where the divisor was updated
+            // by HSA but the dividend is still the placeholder (e.g. 1/4 -> 0), which
+            // would otherwise clobber the sane placeholder with 0.
+            if(mut.simd_per_cu > 0 && mut.max_waves_per_cu >= mut.simd_per_cu)
+                mut.max_waves_per_simd = mut.max_waves_per_cu / mut.simd_per_cu;
             if(mut.simd_per_cu > 0) mut.simd_count = mut.cu_count * mut.simd_per_cu;
             if(mut.simd_arrays_per_engine > 0)
                 mut.array_count = mut.num_shader_banks * mut.simd_arrays_per_engine;

@@ -53,6 +53,7 @@ function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIO
              ${NUM_ITERATIONS}
         TIMEOUT ${TIMEOUT_SECS}
         LABELS "integration-tests"
+        SKIP_REGULAR_EXPRESSION "SKIPPED"
         FIXTURES_REQUIRED ${TEST_NAME})
 endfunction()
 

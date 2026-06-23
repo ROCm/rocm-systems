@@ -22,8 +22,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import os
 import sys
 import pytest
+
+# WSL/DXG does not expose /dev/kfd, so kernel dispatches are scheduled through the
+# host /dev/dxg path. The resulting inter-dispatch gaps reflect host scheduler
+# delays (hundreds of microseconds to tens of milliseconds), not a profiler
+# regression, so the bubble-timing check below is only meaningful on real KFD HW.
+KFD_AVAILABLE = os.path.exists("/dev/kfd")
 
 
 def test_kernel_trace_row_count(
@@ -111,6 +118,12 @@ def test_kernel_trace_no_bubbles(
     one hipGraphLaunch call), then checks that kernels within the same graph
     execution launch back-to-back without large scheduling gaps.
     """
+    if not KFD_AVAILABLE:
+        pytest.skip(
+            "Skipping bubble-timing check on WSL/no-kfd: inter-dispatch gaps "
+            "reflect host scheduler delays (/dev/dxg), not a profiler regression."
+        )
+
     from collections import defaultdict
 
     # Filter to only simpleKernel dispatches (exclude BLIT kernels, etc.)
