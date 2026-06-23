@@ -2,15 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 //
-// Region round-trip launcher for the pytest-driven integration suite.
+// Region launcher for the pytest-driven integration suite.
 //
-// This binary performs NO comparison. It writes one region to a local rocpd
-// database, reads it back, and prints every reader-recoverable field as
-// "key=value" lines on stdout.
+// This binary performs NO comparison. It writes one region to the Python-provided
+// SQLite DB path, prints that path, and leaves DB validation and deletion to
+// Python.
 //
 
-#include <profiler-hub/reader.hpp>
-#include <profiler-hub/reader_types.hpp>
 #include <profiler-hub/storage.hpp>
 #include <profiler-hub/writer.hpp>
 #include <profiler-hub/writer_types.hpp>
@@ -19,21 +17,13 @@
 #include <exception>
 #include <iostream>
 #include <memory>
-#include <optional>
 #include <string>
-
-#ifndef PHUB_INTEGRATION_TMP_DIR
-#    define PHUB_INTEGRATION_TMP_DIR "."
-#endif
 
 namespace
 {
 namespace wt = profiler_hub::writer_types;
-namespace rt = profiler_hub::reader_types;
 
 const std::string g_uuid = "integration";
-const std::string g_db_path =
-    std::string{ PHUB_INTEGRATION_TMP_DIR } + "/phub_region_writer_reader.db";
 
 wt::node_info_t
 make_node()
@@ -143,15 +133,15 @@ const wt::region_data_t       g_region = make_region();
 const wt::trace_environment_t g_env    = make_env();
 
 void
-remove_db()
+remove_db(const std::string& db_path)
 {
-    std::remove(g_db_path.c_str());
+    std::remove(db_path.c_str());
 }
 
 void
-writer()
+writer(const std::string& db_path)
 {
-    auto storage = std::make_unique<profiler_hub::storage_t>(g_db_path, g_uuid);
+    auto storage = std::make_unique<profiler_hub::storage_t>(db_path, g_uuid);
     profiler_hub::writer_t writer(std::move(storage));
 
     writer.register_node_info(g_node);
@@ -169,76 +159,29 @@ print(const char* key, const T& value)
     std::cout << key << "=" << value << "\n";
 }
 
-void
-reader()
-{
-    auto storage = std::make_unique<profiler_hub::storage_t>(g_db_path, g_uuid);
-    profiler_hub::reader_t reader(std::move(storage));
-
-    std::optional<rt::region_data_t> detail;
-    rt::timeline_event_t             timeline_event;
-    rt::arg_data_list_t              args;
-    for(const auto& event : reader.get_events())
-    {
-        if(event.unique_identifier.type != rt::event_type_t::region) continue;
-        detail         = reader.get_region_details(event);
-        timeline_event = event;
-        args           = reader.get_arguments(event);
-        if(detail.has_value()) break;
-    }
-
-    const auto& d = *detail;
-
-    print("start_timestamp", d.start_timestamp);
-    print("end_timestamp", d.end_timestamp);
-    print("name", d.name);
-    print("extdata", d.extdata);
-
-    print("event.stack_id", d.event->stack_id);
-    print("event.parent_stack_id", d.event->parent_stack_id);
-    print("event.correlation_id", d.event->correlation_id);
-    print("event.event_category", d.event->event_category);
-    print("event.extdata", d.event->extdata);
-
-    if(timeline_event.track)
-    {
-        print("sample.track.name", timeline_event.track->name);
-        print("sample.track.extdata", timeline_event.track->extdata);
-        if(timeline_event.track->thread_info)
-        {
-            print("sample.track.thread_id", timeline_event.track->thread_info->thread_id);
-        }
-    }
-
-    print("arg_count", args.size());
-    if(!args.empty())
-    {
-        print("arg.0.position", args.front()->position);
-        print("arg.0.type", args.front()->type);
-        print("arg.0.name", args.front()->name);
-        print("arg.0.value", args.front()->value);
-        print("arg.0.extdata", args.front()->extdata);
-    }
-}
-
 }  // namespace
 
 int
-main()
+main(int argc, char** argv)
 {
-    remove_db();
+    if(argc != 2)
+    {
+        std::cerr << "usage: " << argv[0] << " <db_path>\n";
+        return 2;
+    }
+
+    const std::string db_path = argv[1];
+    remove_db(db_path);
 
     try
     {
-        writer();
-        reader();
+        writer(db_path);
+        print("db_path", db_path);
     } catch(const std::exception& e)
     {
         std::cerr << "[error] exception: " << e.what() << "\n";
-        remove_db();
         return 1;
     }
 
-    remove_db();
     return 0;
 }

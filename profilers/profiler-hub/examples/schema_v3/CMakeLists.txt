@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: MIT
 
 set(PROFILER_HUB_SCHEMA_V3_EXAMPLES
-    memory_alloc_writer_reader
-    kernel_dispatch_writer_reader
-    memory_copy_writer_reader
-    region_writer_reader
+    memory_alloc_writer
+    kernel_dispatch_writer
+    memory_copy_writer
+    pmc_event_writer
+    region_writer
 )
 set(PROFILER_HUB_SCHEMA_V3_EXAMPLE_TARGETS)
 
@@ -17,12 +18,6 @@ foreach(_example IN LISTS PROFILER_HUB_SCHEMA_V3_EXAMPLES)
 
     target_link_libraries(${_target} PRIVATE ${PROFILER_HUB_EXAMPLE_LIBRARY})
     target_compile_features(${_target} PRIVATE cxx_std_17)
-
-    # Scratch directory for the rocpd database created during the round-trip.
-    target_compile_definitions(
-        ${_target}
-        PRIVATE PHUB_INTEGRATION_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
-    )
 
     # Keep the executables under the profiler-hub build tree at
     # <build>/bin/examples.

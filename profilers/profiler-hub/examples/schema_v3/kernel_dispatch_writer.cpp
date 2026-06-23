@@ -2,18 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 //
-// Kernel-dispatch round-trip launcher for the pytest-driven integration suite.
+// Kernel-dispatch launcher for the pytest-driven integration suite.
 //
-// Unlike the self-validating examples, this binary performs NO comparison. It:
-//   * writer() - registers the full dependency set and writes one kernel
-//                dispatch to a local rocpd database, then flushes it.
-//   * reader() - re-opens that database, reads the row back, and prints every
-//                reader-recoverable field as a "key=value" line on stdout.
-//
+// This binary performs NO comparison. It writes one kernel dispatch to the
+// Python-provided SQLite DB path, prints that path, and leaves DB validation and
+// deletion to Python.
 //
 
-#include <profiler-hub/reader.hpp>
-#include <profiler-hub/reader_types.hpp>
 #include <profiler-hub/storage.hpp>
 #include <profiler-hub/writer.hpp>
 #include <profiler-hub/writer_types.hpp>
@@ -22,23 +17,13 @@
 #include <exception>
 #include <iostream>
 #include <memory>
-#include <optional>
 #include <string>
-
-// Scratch directory for the database. Injected by CMake; falls back to the cwd
-// so the file also builds standalone.
-#ifndef PHUB_INTEGRATION_TMP_DIR
-#    define PHUB_INTEGRATION_TMP_DIR "."
-#endif
 
 namespace
 {
 namespace wt = profiler_hub::writer_types;
-namespace rt = profiler_hub::reader_types;
 
 const std::string g_uuid = "integration";
-const std::string g_db_path =
-    std::string{ PHUB_INTEGRATION_TMP_DIR } + "/phub_kernel_dispatch_writer_reader.db";
 
 // The agent identity is shared by the agent, code object and trace environment.
 const wt::agent_unique_id_t g_agent_uid{ "GPU", 0 };
@@ -220,7 +205,7 @@ make_env()
     return env;
 }
 
-// Global records: Shared by writer() and reader().
+// Global records shared by writer().
 const wt::node_info_t            g_node    = make_node();
 const wt::process_info_t         g_proc    = make_process();
 const wt::thread_info_t          g_thread  = make_thread();
@@ -233,18 +218,18 @@ const wt::kernel_dispatch_data_t g_kernel  = make_kernel();
 const wt::trace_environment_t    g_env     = make_env();
 
 void
-remove_db()
+remove_db(const std::string& db_path)
 {
-    std::remove(g_db_path.c_str());
+    std::remove(db_path.c_str());
 }
 
 // ----------------------------------------------------------------------------
 // Writer method: register the full dependency set, insert, and flush to disk.
 // ----------------------------------------------------------------------------
 void
-writer()
+writer(const std::string& db_path)
 {
-    auto storage = std::make_unique<profiler_hub::storage_t>(g_db_path, g_uuid);
+    auto storage = std::make_unique<profiler_hub::storage_t>(db_path, g_uuid);
     profiler_hub::writer_t writer(std::move(storage));
 
     writer.register_node_info(g_node);
@@ -259,10 +244,6 @@ writer()
     writer.flush_in_memory_data_to_disk();
 }
 
-// ----------------------------------------------------------------------------
-// Reader: re-open the database, read the row back, and print every
-// reader-recoverable field as a "key=value" line on stdout.
-// ----------------------------------------------------------------------------
 template <typename T>
 void
 print(const char* key, const T& value)
@@ -270,103 +251,29 @@ print(const char* key, const T& value)
     std::cout << key << "=" << value << "\n";
 }
 
-void
-reader()
-{
-    auto storage = std::make_unique<profiler_hub::storage_t>(g_db_path, g_uuid);
-    profiler_hub::reader_t reader(std::move(storage));
-
-    std::optional<rt::kernel_dispatch_data_t> detail;
-    for(const auto& event : reader.get_events())
-    {
-        if(event.unique_identifier.type != rt::event_type_t::kernel_dispatch) continue;
-        detail = reader.get_kernel_dispatch_details(event);
-        if(detail.has_value()) break;
-    }
-
-    const auto& d = *detail;
-
-    // kernel_dispatch_data fields
-    print("dispatch_id", d.dispatch_id);
-    print("start_timestamp", d.start_timestamp);
-    print("end_timestamp", d.end_timestamp);
-    // reader-side segment sizes are std::optional<size_t>.
-    print("private_segment_size",
-          d.private_segment_size.has_value()
-              ? std::to_string(d.private_segment_size.value())
-              : "null");
-    print("group_segment_size",
-          d.group_segment_size.has_value() ? std::to_string(d.group_segment_size.value())
-                                           : "null");
-    print("workgroup_size_x", d.workgroup_size_x);
-    print("workgroup_size_y", d.workgroup_size_y);
-    print("workgroup_size_z", d.workgroup_size_z);
-    print("grid_size_x", d.grid_size_x);
-    print("grid_size_y", d.grid_size_y);
-    print("grid_size_z", d.grid_size_z);
-    print("name", d.name);
-    print("extdata", d.extdata);
-
-    // event fields
-    print("event.stack_id", d.event->stack_id);
-    print("event.parent_stack_id", d.event->parent_stack_id);
-    print("event.correlation_id", d.event->correlation_id);
-    print("event.event_category", d.event->event_category);
-    print("event.extdata", d.event->extdata);
-
-    // node_info fields
-    print("node_info.node_id", d.node_info->node_id);
-    print("node_info.hash", d.node_info->hash);
-    print("node_info.machine_id", d.node_info->machine_id);
-    print("node_info.system_name", d.node_info->system_name);
-    print("node_info.hostname", d.node_info->hostname);
-    print("node_info.release", d.node_info->release);
-    print("node_info.version", d.node_info->version);
-    print("node_info.hardware_name", d.node_info->hardware_name);
-    print("node_info.domain_name", d.node_info->domain_name);
-
-    // process_info fields
-    print("process_info.pid", d.process_info->pid);
-    print("process_info.ppid",
-          d.process_info->ppid.has_value() ? std::to_string(d.process_info->ppid.value())
-                                           : "null");
-    print("process_info.node_info.node_id", d.process_info->node_info->node_id);
-
-    // thread_info fields
-    print("thread_info.thread_id", d.thread_info->thread_id);
-    print("thread_info.name", d.thread_info->name);
-
-    // code_object_info fields
-    print("code_object_info.id", d.code_object_info->id);
-    print("code_object_info.uri", d.code_object_info->uri);
-
-    // kernel_symbol_info fields
-    print("kernel_symbol_info.id", d.kernel_symbol_info->id);
-    print("kernel_symbol_info.name", d.kernel_symbol_info->name);
-    print("kernel_symbol_info.display_name", d.kernel_symbol_info->display_name);
-
-    return;
-}
-
 }  // namespace
 
 int
-main()
+main(int argc, char** argv)
 {
-    remove_db();
+    if(argc != 2)
+    {
+        std::cerr << "usage: " << argv[0] << " <db_path>\n";
+        return 2;
+    }
+
+    const std::string db_path = argv[1];
+    remove_db(db_path);
 
     try
     {
-        writer();
-        reader();
+        writer(db_path);
+        print("db_path", db_path);
     } catch(const std::exception& e)
     {
         std::cerr << "[error] exception: " << e.what() << "\n";
-        remove_db();
         return 1;
     }
-
-    remove_db();
 
     return 0;
 }
