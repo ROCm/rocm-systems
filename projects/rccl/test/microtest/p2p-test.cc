@@ -58,7 +58,10 @@
 // and ncclLoadParam.
 #undef ncclCudaCallocAsync
 #undef ncclCudaMemcpyAsync
-#define ncclCudaCallocAsync(ptr, nelem, stream) \
+// ncclCudaCallocAsync is a variadic macro in alloc.h: (ptr, nelem, stream, ...)
+// where the optional trailing arg is a memManager pointer added by RCCL. We
+// absorb it with __VA_ARGS__ so both 3-arg and 4-arg call sites compile.
+#define ncclCudaCallocAsync(ptr, nelem, stream, ...) \
     g_fakeCudaCallocAsync(reinterpret_cast<void**>(ptr), \
                           (nelem) * sizeof(**(ptr)), (stream))
 #define ncclCudaMemcpyAsync(dst, src, nelem, stream) \
@@ -207,6 +210,16 @@ struct ReusableIpcInfo {
 
     void InstallInto(ncclReg& regRecord)
     {
+        // ipcInfos is now a dynamically-allocated pointer in ncclReg (not a
+        // fixed array). Allocate it calloc-style so the function's
+        // "ipcInfos == NULL" guard treats it as already-sized and skips
+        // ncclRealloc. Size to NCCL_MAX_LOCAL_RANKS to match
+        // comm.localRanks = NCCL_MAX_LOCAL_RANKS set in the test.
+        if (regRecord.ipcInfos == nullptr) {
+            regRecord.ipcInfos = static_cast<ncclIpcRegInfo**>(
+                std::calloc(NCCL_MAX_LOCAL_RANKS, sizeof(ncclIpcRegInfo*)));
+            regRecord.ipcInfosSize = NCCL_MAX_LOCAL_RANKS;
+        }
         regRecord.ipcInfos[peerLocalRank]      = &info;
         regRecord.regIpcAddrs.hostPeerRmtAddrs = hostPeerRmtAddrs.data();
     }
