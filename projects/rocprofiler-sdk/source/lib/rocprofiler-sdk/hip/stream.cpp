@@ -83,8 +83,8 @@ add_stream(hipStream_t stream, bool reindex_existing = true)
             static uint64_t next_stream_idx = 1;
 
             auto make_stream_id = [&_stream]() {
-                return rocprofiler_stream_id_t{
-                    .handle = (_stream == nullptr) ? 0 : next_stream_idx++};
+                return rocprofiler_stream_id_t{.handle =
+                                                   (_stream == nullptr) ? 0 : next_stream_idx++};
             };
 
             auto itr = _data.find(_stream);
