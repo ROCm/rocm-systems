@@ -307,6 +307,11 @@ else()
       target_link_libraries(${HSAKMT_TARGET} PUBLIC
         $<BUILD_INTERFACE:${WKMI_LIB_PATH}>
         $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/wkmi.lib>)
+
+      # Export wkmi.lib path for downstream static linking
+      set_property(TARGET ${HSAKMT_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        $<BUILD_INTERFACE:${WKMI_LIB_PATH}>
+        $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/wkmi.lib>)
       
     endif()
   endif()
@@ -434,7 +439,7 @@ else()
         target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC
           $<BUILD_INTERFACE:${WKMI_INCLUDE_DIR}>
           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hsakmt/wkmi>)
-        target_link_libraries(${HSAKMT_STATIC_DRM_TARGET} PUBLIC
+        set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES
           $<BUILD_INTERFACE:${WKMI_LIB_PATH}>
           $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/wkmi.lib>)
       endif()
