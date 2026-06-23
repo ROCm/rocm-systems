@@ -12,6 +12,55 @@ import shutil
 import subprocess
 import re
 
+# AMD-SMI >= 26.3 required for SDMA usage (see source/lib/core/sdma_feature.hpp)
+AMDSMI_SDMA_MIN_MAJOR = 26
+AMDSMI_SDMA_MIN_MINOR = 3
+
+
+def get_amdsmi_version(rocm_path: Optional[Path] = None) -> Optional[tuple[int, int]]:
+    """Return (major, minor) of amd-smi if available, else None."""
+    amdsmi_exe = None
+    if rocm_path is not None:
+        candidate = Path(rocm_path) / "bin" / "amd-smi"
+        if candidate.exists():
+            amdsmi_exe = str(candidate)
+    if not amdsmi_exe:
+        amdsmi_exe = shutil.which("amd-smi")
+    if not amdsmi_exe:
+        rocm_env = os.environ.get("ROCM_PATH", "/opt/rocm")
+        candidate = Path(rocm_env) / "bin" / "amd-smi"
+        if candidate.exists():
+            amdsmi_exe = str(candidate)
+    if not amdsmi_exe:
+        return None
+    try:
+        result = subprocess.run(
+            [amdsmi_exe, "version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        raw = (result.stdout or "") + " " + (result.stderr or "")
+        m = re.search(r"Version:\s*(\d+)\.(\d+)", raw)
+        if m:
+            return (int(m.group(1)), int(m.group(2)))
+    except (subprocess.SubprocessError, OSError, ValueError):
+        pass
+    return None
+
+
+def amdsmi_sdma_supported(
+    rocm_path: Optional[Path] = None,
+    min_major: int = AMDSMI_SDMA_MIN_MAJOR,
+    min_minor: int = AMDSMI_SDMA_MIN_MINOR,
+) -> bool:
+    """Return True if AMD-SMI version supports SDMA usage (>= 26.3 by default)."""
+    ver = get_amdsmi_version(rocm_path)
+    if ver is None:
+        return False
+    major, minor = ver
+    return major > min_major or (major == min_major and minor >= min_minor)
+
 
 @dataclass
 class SystemCapabilities:
@@ -410,6 +459,16 @@ class SystemCapabilities:
             return "mpi" in result.stdout.lower()
         except (subprocess.SubprocessError, OSError):
             return False
+
+    @cached_property
+    def amdsmi_version(self) -> Optional[tuple[int, int]]:
+        """Get (major, minor) version of amd-smi, or None if not available."""
+        return get_amdsmi_version(self.rocm_path)
+
+    @cached_property
+    def amdsmi_sdma_supported(self) -> bool:
+        """True if AMD-SMI supports SDMA usage (>= 26.3)."""
+        return amdsmi_sdma_supported(self.rocm_path)
 
 
 _ROCPROFILER_SDK_VERSION_H_RE = re.compile(
