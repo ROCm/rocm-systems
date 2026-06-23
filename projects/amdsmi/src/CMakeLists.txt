@@ -265,7 +265,16 @@ if(BUILD_PYTHON_WHEEL)
     set_property(TARGET ${AMD_SMI}_python PROPERTY SOVERSION "${MAJOR}")
     set_property(TARGET ${AMD_SMI}_python PROPERTY VERSION "${SO_VERSION_STRING}")
     set_target_properties(${AMD_SMI}_python PROPERTIES OUTPUT_NAME "amd_smi_python")
-    target_link_options(${AMD_SMI}_python PRIVATE "LINKER:--version-script=${VERSION_SCRIPT}")
+    # -Bsymbolic-functions binds this library's own amdsmi_* calls internally at
+    # link time. Without it, when another loaded module already exports the same
+    # amdsmi_*@AMDSMI_1 symbols (e.g. PyTorch's bundled libamd_smi.so), the
+    # dynamic linker interposes our internal calls onto that other, separately
+    # initialized copy -- so amdsmi_init() runs against our state while
+    # enumeration reads the other lib's, returning 0 sockets/processors.
+    target_link_options(
+        ${AMD_SMI}_python
+        PRIVATE "LINKER:--version-script=${VERSION_SCRIPT}" "LINKER:-Bsymbolic-functions"
+    )
     set_property(TARGET ${AMD_SMI}_python APPEND PROPERTY LINK_DEPENDS "${VERSION_SCRIPT}")
 endif()
 ## Add the install directives for the runtime library.
