@@ -1,6 +1,6 @@
 # Changelog for hipFile
 
-## hipFile 0.2.0 for ROCm 7.14.0
+## hipFile 0.3.0 for ROCm 7.14.0
 
 ### Added
 
