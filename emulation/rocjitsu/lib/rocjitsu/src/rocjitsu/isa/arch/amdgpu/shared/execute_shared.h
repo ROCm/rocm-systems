@@ -822,7 +822,7 @@ inline void execute_s_bfe_u64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_s_bfm_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint32_t result =
-      (((1u << (inst.ssrc0.read_scalar(wf) & 31u)) - 1u) << (inst.ssrc1.read_scalar(wf) & 31u));
+      ::rocjitsu::amdgpu::bfm_b32(inst.ssrc0.read_scalar(wf), inst.ssrc1.read_scalar(wf));
   inst.sdst.write_scalar(wf, result);
 }
 
@@ -1967,8 +1967,8 @@ inline void execute_s_mul_hi_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_s_mul_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t result = (static_cast<uint32_t>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf))) *
-                    static_cast<uint32_t>(static_cast<int32_t>(inst.ssrc1.read_scalar(wf))));
+  uint32_t result = (static_cast<uint32_t>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf))) *
+                     static_cast<uint32_t>(static_cast<int32_t>(inst.ssrc1.read_scalar(wf))));
   inst.sdst.write_scalar(wf, result);
 }
 
@@ -1981,9 +1981,10 @@ inline void execute_s_mul_u64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_s_mulk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(inst.simm16.encoding_value_);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(s0 * imm));
+  uint32_t s0 = inst.sdst.read_scalar(wf);
+  uint32_t imm = static_cast<uint32_t>(
+      static_cast<int32_t>(static_cast<int16_t>(inst.simm16.encoding_value_)));
+  inst.sdst.write_scalar(wf, s0 * imm);
 }
 
 template <typename Inst>
@@ -3003,15 +3004,16 @@ inline void execute_v_add_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_add_lshl_u32_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t,
-                                     [](auto a, auto b, auto c) { return (a + b) << (c & 31u); });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_lshl_u32(a + b, c); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         ((inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane))
-                          << inst.src2.read_lane(wf, lane)));
+                         ::rocjitsu::amdgpu::lshl_masked(
+                             (inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane)),
+                             inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -3365,11 +3367,8 @@ inline void execute_v_ashrrev_i32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_ashrrev_i64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_SHIFT64_VOP3([](auto v, auto sh) {
-    return util::stdx::static_simd_cast<util::native<uint64_t>>(
-        util::stdx::static_simd_cast<util::native<int64_t>>(v) >>
-        util::stdx::static_simd_cast<util::native<int64_t>>(sh));
-  });
+  ROCJITSU_TRY_SIMD_SHIFT64_VOP3(
+      [](auto v, auto sh) { return ::rocjitsu::amdgpu::simd_ashr_i64(v, sh); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3398,43 +3397,31 @@ inline void execute_v_bcnt_u32_b32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_bfe_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    using I = util::native<int32_t>;
-    auto off = b & 31u;
-    auto w = c & 31u;
-    auto mask = (util::native<uint32_t>(1u) << w) - 1u;
-    auto ext = util::stdx::static_simd_cast<util::native<uint32_t>>(
-                   util::stdx::static_simd_cast<I>(a) >> util::stdx::static_simd_cast<I>(off)) &
-               mask;
-    auto signbit = (mask + 1u) >> 1;
-    return (ext ^ signbit) - signbit;
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_bfe_i32(a, b, c); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
-      int32_t src = static_cast<int32_t>(static_cast<int32_t>(inst.src0.read_lane(wf, lane)));
-      uint32_t off = static_cast<int32_t>(inst.src1.read_lane(wf, lane)) & 31u;
-      uint32_t w = static_cast<int32_t>(inst.src2.read_lane(wf, lane)) & 31u;
+      uint32_t src = static_cast<uint32_t>(static_cast<int32_t>(inst.src0.read_lane(wf, lane)));
+      uint32_t off =
+          static_cast<uint32_t>(static_cast<int32_t>(inst.src1.read_lane(wf, lane))) & 31u;
+      uint32_t w = static_cast<uint32_t>(static_cast<int32_t>(inst.src2.read_lane(wf, lane))) & 31u;
       if (w == 0)
         return 0u;
-      int32_t val = (src >> off) & ((1 << w) - 1);
-      if (val & (1 << (w - 1)))
-        val |= -(1 << w);
-      return static_cast<uint32_t>(val);
+      uint32_t mask = (uint32_t{1} << w) - 1u;
+      uint32_t extracted = static_cast<uint32_t>(static_cast<int32_t>(src) >> off) & mask;
+      uint32_t signbit = uint32_t{1} << (w - 1u);
+      return (extracted ^ signbit) - signbit;
     }());
   }
 }
 
 template <typename Inst>
 inline void execute_v_bfe_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    auto off = b & 31u;
-    auto w = c & 31u;
-    auto mask = (util::native<uint32_t>(1u) << w) - 1u;
-    return (a >> off) & mask;
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_bfe_u32(a, b, c); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3470,16 +3457,15 @@ inline void execute_v_bfi_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_bfm_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
-    return ((util::native<uint32_t>(1u) << (a & 31u)) - 1u) << (b & 31u);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(
+      uint32_t, [](auto a, auto b) { return ::rocjitsu::amdgpu::simd_bfm_b32(a, b); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         (((1u << (inst.src0.read_lane(wf, lane) & 31u)) - 1u)
-                          << (inst.src1.read_lane(wf, lane) & 31u)));
+    inst.vdst.write_lane(
+        wf, lane,
+        ::rocjitsu::amdgpu::bfm_b32(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -9030,11 +9016,7 @@ inline void execute_v_cvt_floor_i32_f32_vop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
     auto r = util::stdx::floor(s);
-    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
-    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
-    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
-    return out;
+    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9059,11 +9041,7 @@ inline void execute_v_cvt_floor_i32_f32_vop3([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
     auto r = util::stdx::floor(s);
-    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
-    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
-    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
-    return out;
+    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9088,11 +9066,7 @@ inline void execute_v_cvt_flr_i32_f32_vop1([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
     auto r = util::stdx::floor(s);
-    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
-    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
-    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
-    return out;
+    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9117,11 +9091,7 @@ inline void execute_v_cvt_flr_i32_f32_vop3([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
     auto r = util::stdx::floor(s);
-    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
-    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
-    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
-    return out;
+    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9146,11 +9116,7 @@ inline void execute_v_cvt_i16_f16_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
     auto s = util::f16_to_f32_simd(a);
-    util::native<int32_t> o = util::stdx::static_simd_cast<util::native<int32_t>>(s);
-    util::stdx::where(simd_mask_as<int32_t>(s >= 32768.0f), o) = 32767;
-    util::stdx::where(simd_mask_as<int32_t>(s < -32768.0f), o) = -32768;
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(s)), o) = 0;
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(o) & 0xFFFFu;
+    return ::rocjitsu::amdgpu::simd_cvt_i16_f32_to_u32(s);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9174,11 +9140,7 @@ inline void execute_v_cvt_i16_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
     auto s = util::f16_to_f32_simd(a);
-    util::native<int32_t> o = util::stdx::static_simd_cast<util::native<int32_t>>(s);
-    util::stdx::where(simd_mask_as<int32_t>(s >= 32768.0f), o) = 32767;
-    util::stdx::where(simd_mask_as<int32_t>(s < -32768.0f), o) = -32768;
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(s)), o) = 0;
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(o) & 0xFFFFu;
+    return ::rocjitsu::amdgpu::simd_cvt_i16_f32_to_u32(s);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9200,13 +9162,8 @@ inline void execute_v_cvt_i16_f16_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_i32_f32_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
-    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(s);
-    util::stdx::where(simd_mask_as<int32_t>(s >= 2147483648.0f), out) = 2147483647;
-    util::stdx::where(simd_mask_as<int32_t>(s < -2147483648.0f), out) = (-2147483647 - 1);
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(s)), out) = 0;
-    return out;
-  });
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t,
+                               [](auto s) { return ::rocjitsu::amdgpu::simd_cvt_i32_f32(s); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -9227,13 +9184,8 @@ inline void execute_v_cvt_i32_f32_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_i32_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
-    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(s);
-    util::stdx::where(simd_mask_as<int32_t>(s >= 2147483648.0f), out) = 2147483647;
-    util::stdx::where(simd_mask_as<int32_t>(s < -2147483648.0f), out) = (-2147483647 - 1);
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(s)), out) = 0;
-    return out;
-  });
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t,
+                               [](auto s) { return ::rocjitsu::amdgpu::simd_cvt_i32_f32(s); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -9338,11 +9290,7 @@ inline void execute_v_cvt_nearest_i32_f32_vop1([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
     auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));
-    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
-    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
-    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
-    return out;
+    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9367,11 +9315,7 @@ inline void execute_v_cvt_nearest_i32_f32_vop3([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
     auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));
-    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
-    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
-    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
-    return out;
+    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9835,11 +9779,7 @@ inline void execute_v_cvt_rpi_i32_f32_vop1([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
     auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));
-    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
-    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
-    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
-    return out;
+    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9864,11 +9804,7 @@ inline void execute_v_cvt_rpi_i32_f32_vop3([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, int32_t, [](auto s) {
     auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));
-    util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);
-    util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;
-    util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);
-    util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;
-    return out;
+    return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9893,10 +9829,7 @@ inline void execute_v_cvt_u16_f16_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
     auto s = util::f16_to_f32_simd(a);
-    util::native<uint32_t> o = util::stdx::static_simd_cast<util::native<uint32_t>>(s);
-    util::stdx::where(simd_mask_as<uint32_t>(s >= 65536.0f), o) = 65535u;
-    util::stdx::where(simd_mask_as<uint32_t>(util::stdx::isnan(s) || s < 0.0f), o) = 0u;
-    return o & 0xFFFFu;
+    return ::rocjitsu::amdgpu::simd_cvt_u16_f32_to_u32(s);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9918,10 +9851,7 @@ inline void execute_v_cvt_u16_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
     auto s = util::f16_to_f32_simd(a);
-    util::native<uint32_t> o = util::stdx::static_simd_cast<util::native<uint32_t>>(s);
-    util::stdx::where(simd_mask_as<uint32_t>(s >= 65536.0f), o) = 65535u;
-    util::stdx::where(simd_mask_as<uint32_t>(util::stdx::isnan(s) || s < 0.0f), o) = 0u;
-    return o & 0xFFFFu;
+    return ::rocjitsu::amdgpu::simd_cvt_u16_f32_to_u32(s);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9941,12 +9871,8 @@ inline void execute_v_cvt_u16_f16_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_u32_f32_vop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, uint32_t, [](auto s) {
-    util::native<uint32_t> out = util::stdx::static_simd_cast<util::native<uint32_t>>(s);
-    util::stdx::where(simd_mask_as<uint32_t>(s >= 4294967296.0f), out) = 4294967295u;
-    util::stdx::where(simd_mask_as<uint32_t>(util::stdx::isnan(s) || s < 0.0f), out) = 0u;
-    return out;
-  });
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, uint32_t,
+                               [](auto s) { return ::rocjitsu::amdgpu::simd_cvt_u32_f32(s); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -9965,12 +9891,8 @@ inline void execute_v_cvt_u32_f32_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_u32_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, uint32_t, [](auto s) {
-    util::native<uint32_t> out = util::stdx::static_simd_cast<util::native<uint32_t>>(s);
-    util::stdx::where(simd_mask_as<uint32_t>(s >= 4294967296.0f), out) = 4294967295u;
-    util::stdx::where(simd_mask_as<uint32_t>(util::stdx::isnan(s) || s < 0.0f), out) = 0u;
-    return out;
-  });
+  ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, uint32_t,
+                               [](auto s) { return ::rocjitsu::amdgpu::simd_cvt_u32_f32(s); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -10570,11 +10492,15 @@ inline void execute_v_dot2_i32_i16_vop3p([[maybe_unused]] Inst &inst,
     int16_t a1 = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     int16_t b0 = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
     int16_t b1 = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    int32_t acc = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    int32_t result = static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1 + acc;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(result));
+    uint32_t result = inst.src2.read_lane(wf, lane);
+    result += static_cast<uint32_t>(static_cast<int32_t>(a0) * b0);
+    result += static_cast<uint32_t>(static_cast<int32_t>(a1) * b1);
+    if (inst.inst_.clamp) {
+      int32_t signed_result = static_cast<int32_t>(result);
+      if (signed_result < 0)
+        result = 0u;
+    }
+    inst.vdst.write_lane(wf, lane, result);
   }
 }
 
@@ -10612,15 +10538,15 @@ inline void execute_v_dot2c_f32_f16_vop2([[maybe_unused]] Inst &inst,
       continue;
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.vsrc1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
+    uint32_t acc = inst.vdst.read_lane(wf, lane);
     float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
     float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
     float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
     float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));
-    float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));
+    float facc = std::bit_cast<float>(acc);
     facc += a0 * b0 + a1 * b1;
-    acc = static_cast<int32_t>(std::bit_cast<uint32_t>(facc));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
+    acc = std::bit_cast<uint32_t>(facc);
+    inst.vdst.write_lane(wf, lane, acc);
   }
 }
 
@@ -10634,15 +10560,15 @@ inline void execute_v_dot2c_f32_f16_vop3([[maybe_unused]] Inst &inst,
       continue;
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
+    uint32_t acc = inst.vdst.read_lane(wf, lane);
     float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
     float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
     float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
     float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));
-    float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));
+    float facc = std::bit_cast<float>(acc);
     facc += a0 * b0 + a1 * b1;
-    acc = static_cast<int32_t>(std::bit_cast<uint32_t>(facc));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
+    acc = std::bit_cast<uint32_t>(facc);
+    inst.vdst.write_lane(wf, lane, acc);
   }
 }
 
@@ -10656,13 +10582,14 @@ inline void execute_v_dot2c_i32_i16_vop2([[maybe_unused]] Inst &inst,
       continue;
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.vsrc1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
+    uint32_t acc = inst.vdst.read_lane(wf, lane);
     int16_t a0 = static_cast<int16_t>(a & 0xFFFF);
     int16_t a1 = static_cast<int16_t>((a >> 16) & 0xFFFF);
     int16_t b0 = static_cast<int16_t>(b & 0xFFFF);
     int16_t b1 = static_cast<int16_t>((b >> 16) & 0xFFFF);
-    acc += static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
+    int64_t dot = static_cast<int64_t>(a0) * b0 + static_cast<int64_t>(a1) * b1;
+    acc += static_cast<uint32_t>(dot);
+    inst.vdst.write_lane(wf, lane, acc);
   }
 }
 
@@ -10676,13 +10603,14 @@ inline void execute_v_dot2c_i32_i16_vop3([[maybe_unused]] Inst &inst,
       continue;
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
+    uint32_t acc = inst.vdst.read_lane(wf, lane);
     int16_t a0 = static_cast<int16_t>(a & 0xFFFF);
     int16_t a1 = static_cast<int16_t>((a >> 16) & 0xFFFF);
     int16_t b0 = static_cast<int16_t>(b & 0xFFFF);
     int16_t b1 = static_cast<int16_t>((b >> 16) & 0xFFFF);
-    acc += static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
+    int64_t dot = static_cast<int64_t>(a0) * b0 + static_cast<int64_t>(a1) * b1;
+    acc += static_cast<uint32_t>(dot);
+    inst.vdst.write_lane(wf, lane, acc);
   }
 }
 
@@ -10696,16 +10624,18 @@ inline void execute_v_dot4_i32_i8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    int32_t sum = acc;
+    uint32_t sum = inst.src2.read_lane(wf, lane);
     for (int i = 0; i < 4; ++i) {
       int8_t a = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);
       int8_t b = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);
-      sum += static_cast<int32_t>(a) * b;
+      sum += static_cast<uint32_t>(static_cast<int32_t>(a) * b);
     }
-    if (inst.inst_.clamp)
-      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
+    if (inst.inst_.clamp) {
+      int32_t signed_sum = static_cast<int32_t>(sum);
+      if (signed_sum < 0)
+        sum = 0u;
+    }
+    inst.vdst.write_lane(wf, lane, sum);
   }
 }
 
@@ -10719,8 +10649,7 @@ inline void execute_v_dot4_i32_iu8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    int32_t sum = acc;
+    uint32_t sum = inst.src2.read_lane(wf, lane);
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 4; ++i) {
@@ -10730,11 +10659,14 @@ inline void execute_v_dot4_i32_iu8_vop3p([[maybe_unused]] Inst &inst,
                               : static_cast<int32_t>(raw_a);
       int32_t b = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_b))
                               : static_cast<int32_t>(raw_b);
-      sum += a * b;
+      sum += static_cast<uint32_t>(a * b);
     }
-    if (inst.inst_.clamp)
-      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
+    if (inst.inst_.clamp) {
+      int32_t signed_sum = static_cast<int32_t>(sum);
+      if (signed_sum < 0)
+        sum = 0u;
+    }
+    inst.vdst.write_lane(wf, lane, sum);
   }
 }
 
@@ -10769,13 +10701,13 @@ inline void execute_v_dot4c_i32_i8_vop2([[maybe_unused]] Inst &inst,
       continue;
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.vsrc1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
+    uint32_t acc = inst.vdst.read_lane(wf, lane);
     for (int i = 0; i < 4; ++i) {
       int8_t ea = static_cast<int8_t>((a >> (i * 8)) & 0xFF);
       int8_t eb = static_cast<int8_t>((b >> (i * 8)) & 0xFF);
-      acc += static_cast<int32_t>(ea) * static_cast<int32_t>(eb);
+      acc += static_cast<uint32_t>(static_cast<int32_t>(ea) * static_cast<int32_t>(eb));
     }
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
+    inst.vdst.write_lane(wf, lane, acc);
   }
 }
 
@@ -10789,13 +10721,13 @@ inline void execute_v_dot4c_i32_i8_vop3([[maybe_unused]] Inst &inst,
       continue;
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
+    uint32_t acc = inst.vdst.read_lane(wf, lane);
     for (int i = 0; i < 4; ++i) {
       int8_t ea = static_cast<int8_t>((a >> (i * 8)) & 0xFF);
       int8_t eb = static_cast<int8_t>((b >> (i * 8)) & 0xFF);
-      acc += static_cast<int32_t>(ea) * static_cast<int32_t>(eb);
+      acc += static_cast<uint32_t>(static_cast<int32_t>(ea) * static_cast<int32_t>(eb));
     }
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
+    inst.vdst.write_lane(wf, lane, acc);
   }
 }
 
@@ -10809,8 +10741,7 @@ inline void execute_v_dot8_i32_i4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    int32_t sum = acc;
+    uint32_t sum = inst.src2.read_lane(wf, lane);
     for (int i = 0; i < 8; ++i) {
       int32_t a = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);
       if (a & 0x8)
@@ -10818,11 +10749,14 @@ inline void execute_v_dot8_i32_i4_vop3p([[maybe_unused]] Inst &inst,
       int32_t b = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);
       if (b & 0x8)
         b |= ~0xF;
-      sum += a * b;
+      sum += static_cast<uint32_t>(a * b);
     }
-    if (inst.inst_.clamp)
-      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
+    if (inst.inst_.clamp) {
+      int32_t signed_sum = static_cast<int32_t>(sum);
+      if (signed_sum < 0)
+        sum = 0u;
+    }
+    inst.vdst.write_lane(wf, lane, sum);
   }
 }
 
@@ -10836,8 +10770,7 @@ inline void execute_v_dot8_i32_iu4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = inst.src0.read_lane(wf, lane);
     uint32_t raw1 = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    int32_t sum = acc;
+    uint32_t sum = inst.src2.read_lane(wf, lane);
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 8; ++i) {
@@ -10847,11 +10780,14 @@ inline void execute_v_dot8_i32_iu4_vop3p([[maybe_unused]] Inst &inst,
                               : static_cast<int32_t>(raw_a);
       int32_t b = src1_signed ? static_cast<int32_t>((raw_b & 0x8) ? (raw_b | ~0xF) : raw_b)
                               : static_cast<int32_t>(raw_b);
-      sum += a * b;
+      sum += static_cast<uint32_t>(a * b);
     }
-    if (inst.inst_.clamp)
-      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
+    if (inst.inst_.clamp) {
+      int32_t signed_sum = static_cast<int32_t>(sum);
+      if (signed_sum < 0)
+        sum = 0u;
+    }
+    inst.vdst.write_lane(wf, lane, sum);
   }
 }
 
@@ -10886,7 +10822,7 @@ inline void execute_v_dot8c_i32_i4_vop2([[maybe_unused]] Inst &inst,
       continue;
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.vsrc1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
+    uint32_t acc = inst.vdst.read_lane(wf, lane);
     for (int i = 0; i < 8; ++i) {
       int32_t ea = static_cast<int32_t>((a >> (i * 4)) & 0xF);
       if (ea & 8)
@@ -10894,9 +10830,9 @@ inline void execute_v_dot8c_i32_i4_vop2([[maybe_unused]] Inst &inst,
       int32_t eb = static_cast<int32_t>((b >> (i * 4)) & 0xF);
       if (eb & 8)
         eb |= ~0xF;
-      acc += ea * eb;
+      acc += static_cast<uint32_t>(ea * eb);
     }
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
+    inst.vdst.write_lane(wf, lane, acc);
   }
 }
 
@@ -10910,7 +10846,7 @@ inline void execute_v_dot8c_i32_i4_vop3([[maybe_unused]] Inst &inst,
       continue;
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
+    uint32_t acc = inst.vdst.read_lane(wf, lane);
     for (int i = 0; i < 8; ++i) {
       int32_t ea = static_cast<int32_t>((a >> (i * 4)) & 0xF);
       if (ea & 8)
@@ -10918,9 +10854,9 @@ inline void execute_v_dot8c_i32_i4_vop3([[maybe_unused]] Inst &inst,
       int32_t eb = static_cast<int32_t>((b >> (i * 4)) & 0xF);
       if (eb & 8)
         eb |= ~0xF;
-      acc += ea * eb;
+      acc += static_cast<uint32_t>(ea * eb);
     }
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
+    inst.vdst.write_lane(wf, lane, acc);
   }
 }
 
@@ -12723,14 +12659,15 @@ inline void execute_v_log_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_lshl_add_u32_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t,
-                                     [](auto a, auto b, auto c) { return (a << (b & 31u)) + c; });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_lshl_u32(a, b) + c; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         ((inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)) +
+                         (::rocjitsu::amdgpu::lshl_masked(inst.src0.read_lane(wf, lane),
+                                                          inst.src1.read_lane(wf, lane)) +
                           inst.src2.read_lane(wf, lane)));
   }
 }
@@ -12743,24 +12680,26 @@ inline void execute_v_lshl_add_u64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane64(wf, lane,
-                           ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane))
-                             << static_cast<uint64_t>(inst.src1.read_lane(wf, lane))) +
-                            static_cast<uint64_t>(inst.src2.read_lane64(wf, lane))));
+    inst.vdst.write_lane64(
+        wf, lane,
+        (::rocjitsu::amdgpu::lshl_masked(static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)),
+                                         static_cast<uint64_t>(inst.src1.read_lane(wf, lane))) +
+         static_cast<uint64_t>(inst.src2.read_lane64(wf, lane))));
   }
 }
 
 template <typename Inst>
 inline void execute_v_lshl_or_b32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t,
-                                     [](auto a, auto b, auto c) { return (a << (b & 31u)) | c; });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_lshl_u32(a, b) | c; });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         ((inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)) |
+                         (::rocjitsu::amdgpu::lshl_masked(inst.src0.read_lane(wf, lane),
+                                                          inst.src1.read_lane(wf, lane)) |
                           inst.src2.read_lane(wf, lane)));
   }
 }
@@ -12801,7 +12740,8 @@ inline void execute_v_lshlrev_b16_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_lshlrev_b32_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) { return b << (a & 31u); });
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(
+      uint32_t, [](auto a, auto b) { return ::rocjitsu::amdgpu::simd_lshl_u32(b, a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -12814,7 +12754,8 @@ inline void execute_v_lshlrev_b32_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_lshlrev_b32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return b << (a & 31u); });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(
+      uint32_t, [](auto a, auto b) { return ::rocjitsu::amdgpu::simd_lshl_u32(b, a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -12840,7 +12781,8 @@ inline void execute_v_lshlrev_b64_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_lshlrev_b64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_SHIFT64_VOP3([](auto v, auto sh) { return v << sh; });
+  ROCJITSU_TRY_SIMD_SHIFT64_VOP3(
+      [](auto v, auto sh) { return ::rocjitsu::amdgpu::simd_lshl_u64(v, sh); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -12887,7 +12829,8 @@ inline void execute_v_lshrrev_b16_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_lshrrev_b32_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) { return b >> (a & 31u); });
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(
+      uint32_t, [](auto a, auto b) { return ::rocjitsu::amdgpu::simd_lshr_u32(b, a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -12900,7 +12843,8 @@ inline void execute_v_lshrrev_b32_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_lshrrev_b32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) { return b >> (a & 31u); });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(
+      uint32_t, [](auto a, auto b) { return ::rocjitsu::amdgpu::simd_lshr_u32(b, a); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -12913,7 +12857,8 @@ inline void execute_v_lshrrev_b32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_lshrrev_b64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_SHIFT64_VOP3([](auto v, auto sh) { return v >> sh; });
+  ROCJITSU_TRY_SIMD_SHIFT64_VOP3(
+      [](auto v, auto sh) { return ::rocjitsu::amdgpu::simd_lshr_u64(v, sh); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -13054,7 +12999,8 @@ inline void execute_v_mad_co_i64_i32_vop3([[maybe_unused]] Inst &inst,
     int64_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
     int64_t s1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
     int64_t s2 = static_cast<int64_t>(inst.src2.read_lane64(wf, lane));
-    uint64_t result = static_cast<uint64_t>(s0 * s1 + s2);
+    uint64_t result =
+        static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1) + static_cast<uint64_t>(s2);
     inst.vdst.write_lane64(wf, lane, result);
   }
 }
@@ -13197,11 +13143,9 @@ template <typename Inst>
 inline void execute_v_mad_i32_i16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    using I = util::native<int32_t>;
-    auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;
-    auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;
-    auto sc = util::stdx::static_simd_cast<I>(c);
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb + sc);
+    auto sa = ::rocjitsu::amdgpu::simd_sign_extend_u32(a, 16);
+    auto sb = ::rocjitsu::amdgpu::simd_sign_extend_u32(b, 16);
+    return sa * sb + c;
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -13210,7 +13154,9 @@ inline void execute_v_mad_i32_i16_vop3([[maybe_unused]] Inst &inst,
     int32_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
     int32_t s1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
     int32_t s2 = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(s0 * s1 + s2));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1) +
+                             static_cast<uint32_t>(s2));
   }
 }
 
@@ -13218,20 +13164,16 @@ template <typename Inst>
 inline void execute_v_mad_i32_i24_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 8) >> 8;
-    auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 8) >> 8;
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(
-        sa * sb + util::stdx::static_simd_cast<util::native<int32_t>>(c));
+    return ::rocjitsu::amdgpu::simd_mad_i24_u32(a, b, c);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane, [&]() {
-      auto a = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
-      auto b = static_cast<int32_t>(inst.src1.read_lane(wf, lane) << 8) >> 8;
-      return static_cast<uint32_t>(a * b + static_cast<int32_t>(inst.src2.read_lane(wf, lane)));
-    }());
+    inst.vdst.write_lane(wf, lane,
+                         ::rocjitsu::amdgpu::mad_i24_u32(inst.src0.read_lane(wf, lane),
+                                                         inst.src1.read_lane(wf, lane),
+                                                         inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -13254,7 +13196,8 @@ inline void execute_v_mad_i64_i32_vop3([[maybe_unused]] Inst &inst,
     int64_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
     int64_t s1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
     int64_t s2 = static_cast<int64_t>(inst.src2.read_lane64(wf, lane));
-    uint64_t result = static_cast<uint64_t>(s0 * s1 + s2);
+    uint64_t result =
+        static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1) + static_cast<uint64_t>(s2);
     inst.vdst.write_lane64(wf, lane, result);
   }
 }
@@ -17139,40 +17082,30 @@ inline void execute_v_mul_hi_u32_u24_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_mul_i32_i24_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, [](auto a, auto b) {
-    auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 8) >> 8;
-    auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 8) >> 8;
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb);
-  });
+  ROCJITSU_TRY_SIMD_VOP2_BINARY(
+      uint32_t, [](auto a, auto b) { return ::rocjitsu::amdgpu::simd_mul_i24_u32(a, b); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane, [&]() {
-      auto a = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
-      auto b = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane) << 8) >> 8;
-      return static_cast<uint32_t>(a * b);
-    }());
+    inst.vdst.write_lane(wf, lane,
+                         ::rocjitsu::amdgpu::mul_i24_u32(inst.src0.read_lane(wf, lane),
+                                                         inst.vsrc1.read_lane(wf, lane)));
   }
 }
 
 template <typename Inst>
 inline void execute_v_mul_i32_i24_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
-    auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 8) >> 8;
-    auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 8) >> 8;
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(
+      uint32_t, [](auto a, auto b) { return ::rocjitsu::amdgpu::simd_mul_i24_u32(a, b); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane, [&]() {
-      auto a = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
-      auto b = static_cast<int32_t>(inst.src1.read_lane(wf, lane) << 8) >> 8;
-      return static_cast<uint32_t>(a * b);
-    }());
+    inst.vdst.write_lane(wf, lane,
+                         ::rocjitsu::amdgpu::mul_i24_u32(inst.src0.read_lane(wf, lane),
+                                                         inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -17255,8 +17188,10 @@ inline void execute_v_mul_lo_u16_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
     inst.vdst.write_lane(
         wf, lane,
         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-            static_cast<uint16_t>(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) *
-            static_cast<uint16_t>(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))))));
+            static_cast<uint32_t>(
+                static_cast<uint16_t>(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))) *
+            static_cast<uint32_t>(
+                static_cast<uint16_t>(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)))))))));
   }
 }
 
@@ -17269,8 +17204,10 @@ inline void execute_v_mul_lo_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     inst.vdst.write_lane(
         wf, lane,
         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-            static_cast<uint16_t>(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) *
-            static_cast<uint16_t>(static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))))));
+            static_cast<uint32_t>(
+                static_cast<uint16_t>(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))) *
+            static_cast<uint32_t>(
+                static_cast<uint16_t>(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)))))))));
   }
 }
 

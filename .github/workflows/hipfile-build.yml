@@ -9,7 +9,6 @@ env:
   AIS_INPUT_CXX_STANDARD: ${{ inputs.cxx_standard }}
   AIS_INPUT_JOB_DESIGNATOR: ${{ inputs.job_designator }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
-  AIS_INPUT_UPLOAD_ARTIFACTS: ${{ inputs.upload_artifacts }}
   AIS_MOUNT_PATH: /mnt/ais/ext4
   AIS_PKG_MGR: >-
     ${{
@@ -68,9 +67,6 @@ on:
       ais_hipfile_pkg_filename:
         description: "Filename for the hipFile runtime DEB/RPM package"
         value: ${{ jobs.compile_on_AMD.outputs.ais_hipfile_pkg_filename }}
-      ais_hipfile_pkg_tests_filename:
-        description: "Filename for the hipFile tests DEB/RPM package"
-        value: ${{ jobs.compile_on_AMD.outputs.ais_hipfile_pkg_tests_filename }}
       ais_hipfile_pkg_version:
         description: "Version for the hipFile DEB/RPM packages"
         value: ${{ jobs.compile_on_AMD.outputs.ais_hipfile_pkg_version }}
@@ -88,7 +84,6 @@ jobs:
     outputs:
       ais_hipfile_pkg_dev_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
       ais_hipfile_pkg_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
-      ais_hipfile_pkg_tests_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_TESTS_FILENAME }}
       ais_hipfile_pkg_version: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_VERSION }}
     runs-on: [ubuntu-24.04]
     steps:
@@ -103,14 +98,14 @@ jobs:
         run: |
           echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
           echo "AIS_GHA_CMD_FILES_DIR=${GITHUB_ENV%/*}" >> "${GITHUB_ENV}"
-          echo "AIS_SAFE_COMPILER_NAME=$(echo ${AIS_INPUT_CXX_COMPILER} | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
+          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
         # We should expect that there are multiple instances of this job with different cxx_compilers.
         # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
         run: |
           echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
       - name: Fetching code repository...
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           path: rocm-systems
@@ -239,10 +234,8 @@ jobs:
               shopt -s nullglob
               AIS_HIPFILE_PKG_DEV_FILENAME="$(echo hipfile-de{v,vel}{-,_}[0-9]*.{deb,rpm})"
               AIS_HIPFILE_PKG_FILENAME="$(echo hipfile{-,_}[0-9]*.{deb,rpm})"
-              AIS_HIPFILE_PKG_TESTS_FILENAME="$(echo hipfile-tests{-,_}[0-9]*.{deb,rpm})"
               echo "AIS_HIPFILE_PKG_DEV_FILENAME=${AIS_HIPFILE_PKG_DEV_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
               echo "AIS_HIPFILE_PKG_FILENAME=${AIS_HIPFILE_PKG_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
-              echo "AIS_HIPFILE_PKG_TESTS_FILENAME=${AIS_HIPFILE_PKG_TESTS_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
               echo "AIS_HIPFILE_PKG_VERSION=$(
                 ${{
                   env.AIS_PKG_TYPE == 'DEB' &&
@@ -277,24 +270,13 @@ jobs:
                   steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME
                 )
               }}
-              echo -e "\n\nTests Package:"
-              ${{
-                format(
-                  env.AIS_PKG_TYPE == 'DEB' &&
-                    'dpkg-deb -I "{0}" && dpkg-deb -c "{0}"' ||
-                    'rpm -qpil --requires "{0}"',
-                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_TESTS_FILENAME
-                )
-              }}
             '
       - name: Validate metadata was stored correctly
         run: |
           echo "hipFile package dev filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}"
           echo "hipFile package filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}"
-          echo "hipFile tests package filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_TESTS_FILENAME }}"
           echo "hipFile package version: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_VERSION }}"
           if [[ -z "${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_VERSION }}" ]]; then exit 1; fi
-          if [[ -z "${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_TESTS_FILENAME }}" ]]; then exit 1; fi
       - name: Test installing the hipFile package.
         run: |
           docker exec \
@@ -304,24 +286,14 @@ jobs:
             /bin/bash -c '
               ${{
                 format(
-                  env.AIS_PKG_MGR == 'apt' && 'apt install -y "./{0}" "./{1}" "./{2}"' ||
-                    env.AIS_PKG_MGR == 'dnf' && 'dnf install -y --cacheonly "./{0}" "./{1}" "./{2}"' ||
-                    env.AIS_PKG_MGR == 'zypper' && 'zypper --no-refresh install -y --allow-unsigned-rpm "./{0}" "./{1}" "./{2}"' ||
+                  env.AIS_PKG_MGR == 'apt' && 'apt install -y "./{0}" "./{1}"' ||
+                    env.AIS_PKG_MGR == 'dnf' && 'dnf install -y --cacheonly "./{0}" "./{1}"' ||
+                    env.AIS_PKG_MGR == 'zypper' && 'zypper --no-refresh install -y --allow-unsigned-rpm "./{0}" "./{1}"' ||
                     'echo "Unknown platform."; exit 1',
                   steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME,
-                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME,
-                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_TESTS_FILENAME
+                  steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME
                 )
               }}
-            '
-      - name: Re-run unit tests from the installed package (${{ inputs.cxx_compiler }})
-        run: |
-          docker exec \
-            -t \
-            "${AIS_CONTAINER_NAME}" \
-            /bin/bash -c '
-              cd "${ROCM_PATH}/share/hipfile/test"
-              ctest -V -L "unit" --parallel
             '
       - name: Copy hipFile packages out of the container
         if: ${{ inputs.upload_artifacts }}
@@ -331,9 +303,6 @@ jobs:
             ${GITHUB_WORKSPACE}
           docker cp \
             "${AIS_CONTAINER_NAME}:/ais/build/hipfile/${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}" \
-            ${GITHUB_WORKSPACE}
-          docker cp \
-            "${AIS_CONTAINER_NAME}:/ais/build/hipfile/${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_TESTS_FILENAME }}" \
             ${GITHUB_WORKSPACE}
       - name: Upload development hipFile Package as an Artifact
         if: ${{ inputs.upload_artifacts }}
@@ -353,25 +322,28 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
-      - name: Upload tests hipFile Package as an Artifact
-        if: ${{ inputs.upload_artifacts }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_TESTS_FILENAME }}
-          path: ${{ format('{0}/{1}', github.workspace, steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_TESTS_FILENAME) }}
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-      # The relocatable unit-test package (hipfile-tests) is now uploaded separately;
-      # the build directory is still shipped because the system and stress tests run
-      # from the build tree and are not part of that package.
+      # CTestTestfiles.cmake hardcodes the absolute path of the GTest executables
+      # in the build directory. CTest relies on this metadata for execution. It is not
+      # trivial to modify this metadata, otherwise an installable test package could be
+      # used. For now, reuse the build directory.
       - name: Copy hipFile build directory out of the container
         if: ${{ inputs.upload_artifacts }}
         run: |
           docker cp \
             "${AIS_CONTAINER_NAME}:/ais/build/hipfile" \
             ${GITHUB_WORKSPACE}/hipfile-build-dir
-      - name: Upload runtime hipFile package as an artifact
+      # Trim build intermediates the self-hosted system-test job doesn't need
+      # before uploading. ctest only needs the test executables, runtime *.so's
+      # and the CTestTestfile.cmake chain -- not the *.o (CMakeFiles/), the
+      # FetchContent source/subbuild trees, or the coverage data the build job
+      # already consumed.
+      - name: Prune build directory before upload
+        if: ${{ inputs.upload_artifacts }}
+        run: |
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type d -name CMakeFiles -prune -exec rm -rf {} +
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type d -path '*/_deps/*' \( -name '*-src' -o -name '*-subbuild' \) -prune -exec rm -rf {} +
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type f \( -name '*.profraw' -o -name '*.profdata' -o -name '*.gcno' -o -name '*.gcda' -o -name 'coverage-*.txt' \) -delete
+      - name: Upload hipFile build directory as an artifact
         if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -379,6 +351,7 @@ jobs:
           path: ${{ github.workspace }}/hipfile-build-dir
           if-no-files-found: error
           retention-days: 1
+          compression-level: 9
       - name: Clean CMake build directories
         run: |
           docker exec \

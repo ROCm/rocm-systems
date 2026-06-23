@@ -441,6 +441,7 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, uint32_t 
   }
 
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
   auto* const e = reinterpret_cast<hip::Event*>(event);
   auto* const hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
