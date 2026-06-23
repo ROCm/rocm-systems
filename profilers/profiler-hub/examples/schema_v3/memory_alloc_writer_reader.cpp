@@ -40,6 +40,8 @@ const std::string g_uuid = "integration";
 const std::string g_db_path =
     std::string{ PHUB_INTEGRATION_TMP_DIR } + "/phub_memory_alloc_launcher.db";
 
+const wt::agent_unique_id_t g_agent_uid{ "GPU", 0 };
+
 // ----------------------------------------------------------------------------
 // Fixture records. These are the values written to the database. The expected
 // values asserted in Python (test_memory_alloc.py) must mirror them.
@@ -68,6 +70,60 @@ make_process()
     proc.pid     = 1000;
     proc.node_id = 1;
     return proc;
+}
+
+wt::thread_info_t
+make_thread()
+{
+    wt::thread_info_t thread{};
+    thread.parent_process_id = 1000;
+    thread.thread_id         = 100;
+    thread.name              = "integration-thread";
+    thread.start             = 900000;
+    thread.end               = 1200000;
+    thread.node_id           = 1;
+    thread.process_id        = 1000;
+    return thread;
+}
+
+wt::agent_info_t
+make_agent()
+{
+    wt::agent_info_t agent{};
+    agent.unique_id      = g_agent_uid;
+    agent.absolute_index = 0;
+    agent.logical_index  = 0;
+    agent.uuid           = 42;
+    agent.name           = "integration-gpu";
+    agent.model_name     = "gfx-integration";
+    agent.vendor_name    = "AMD";
+    agent.product_name   = "Integration GPU";
+    agent.user_name      = "gpu0";
+    agent.node_id        = 1;
+    agent.process_id     = 1000;
+    return agent;
+}
+
+wt::queue_info_t
+make_queue()
+{
+    wt::queue_info_t queue{};
+    queue.queue_id   = 1;
+    queue.name       = "integration-queue";
+    queue.node_id    = 1;
+    queue.process_id = 1000;
+    return queue;
+}
+
+wt::stream_info_t
+make_stream()
+{
+    wt::stream_info_t stream{};
+    stream.stream_id  = 1;
+    stream.name       = "integration-stream";
+    stream.node_id    = 1;
+    stream.process_id = 1000;
+    return stream;
 }
 
 wt::event_data_t
@@ -103,14 +159,22 @@ make_env()
     wt::trace_environment_t env{};
     env.node_id    = 1;
     env.process_id = 1000;
+    env.thread_id  = 100;
+    env.agent_id   = g_agent_uid;
+    env.queue_id   = 1;
+    env.stream_id  = 1;
     return env;
 }
 
-const wt::node_info_t         g_node  = make_node();
-const wt::process_info_t      g_proc  = make_process();
-const wt::event_data_t        g_event = make_event();
-const wt::memory_alloc_data_t g_alloc = make_alloc();
-const wt::trace_environment_t g_env   = make_env();
+const wt::node_info_t         g_node   = make_node();
+const wt::process_info_t      g_proc   = make_process();
+const wt::thread_info_t       g_thread = make_thread();
+const wt::agent_info_t        g_agent  = make_agent();
+const wt::queue_info_t        g_queue  = make_queue();
+const wt::stream_info_t       g_stream = make_stream();
+const wt::event_data_t        g_event  = make_event();
+const wt::memory_alloc_data_t g_alloc  = make_alloc();
+const wt::trace_environment_t g_env    = make_env();
 
 void
 remove_db()
@@ -129,6 +193,10 @@ writer()
 
     writer.register_node_info(g_node);
     writer.register_process_info(g_proc);
+    writer.register_thread_info(g_thread);
+    writer.register_agent_info(g_agent);
+    writer.register_queue_info(g_queue);
+    writer.register_stream_info(g_stream);
 
     writer.insert_memory_alloc_data(g_alloc, g_env);
     writer.flush_in_memory_data_to_disk();
@@ -195,7 +263,9 @@ reader()
                                            : "null");
     print("process_info.node_info.node_id", d.process_info->node_info->node_id);
 
-    return;
+    // thread_info fields
+    print("thread_info.thread_id", d.thread_info->thread_id);
+    print("thread_info.name", d.thread_info->name);
 }
 
 }  // namespace

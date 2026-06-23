@@ -39,6 +39,8 @@ EXPECTED = {
     "process_info.pid": "1000",
     "process_info.ppid": "1",
     "process_info.node_info.node_id": "1",
+    "thread_info.thread_id": "100",
+    "thread_info.name": "integration-thread",
 }
 
 
