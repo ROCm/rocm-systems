@@ -435,6 +435,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_MaxBlockDims) {
   HIP_CHECK(hipModuleUnload(module));
   CTX_DESTROY();
 }
+#if !defined(_WIN32)
 /**
  * Test Description
  * ------------------------
@@ -600,6 +601,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim) {
   HIP_CHECK(hipFree(d_out));
   HIP_CHECK(hipModuleUnload(mod));
 }
+#endif  // !defined(_WIN32)
 
 /**
  * End doxygen group ModuleTest.
