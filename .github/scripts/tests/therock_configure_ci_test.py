@@ -122,6 +122,9 @@ class ConfigureCITest(unittest.TestCase):
         self.assertTrue(
             therock_configure_ci.is_path_skippable(".github/workflows/labeler.yml")
         )
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(".github/workflows/rdc-ci.yml")
+        )
 
         # Workflow/script files unrelated to TheRock CI are skippable without
         # needing to be enumerated (issue #7849).
