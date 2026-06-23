@@ -1,4 +1,8 @@
+#if defined(__HIP_PLATFORM_AMD__)
+#include "symmetric/primitives.h"
+#else
 #include "primitives.cuh"
+#endif
 
 struct SMemTag {}; // Shared memory
 struct GMemTag {}; // Global memory
@@ -25,6 +29,20 @@ static __device__ __forceinline__ T ldcs(GMemTag, T *p) {
     uint64_t u64[(sizeof(T)+8-1)/8];
     uint4 u32v4[(sizeof(T)+16-1)/16];
   };
+#if defined(__HIP_PLATFORM_AMD__)
+  // HIP has no __ldcs(); use clang non-temporal loads, dispatched on alignof(T).
+  if constexpr (alignof(T) == 1) {
+    for (int i=0; i < sizeof(T)/1; i++) u8[i] = __builtin_nontemporal_load((uint8_t*)p + i);
+  } else if constexpr (alignof(T) == 2) {
+    for (int i=0; i < sizeof(T)/2; i++) u16[i] = __builtin_nontemporal_load((uint16_t*)p + i);
+  } else if constexpr (alignof(T) == 4) {
+    for (int i=0; i < sizeof(T)/4; i++) u32[i] = __builtin_nontemporal_load((uint32_t*)p + i);
+  } else if constexpr (alignof(T) == 8 || alignof(T) == 16) {
+    for (int i=0; i < sizeof(T)/8; i++) u64[i] = __builtin_nontemporal_load((uint64_t*)p + i);
+  } else {
+    __builtin_unreachable();
+  }
+#else
   switch (alignof(T)) {
   case 1: for (int i=0; i < sizeof(T)/1; i++) u8[i] = __ldcs((uint8_t*)p + i); break;
   case 2: for (int i=0; i < sizeof(T)/2; i++) u16[i] = __ldcs((uint16_t*)p + i); break;
@@ -33,6 +51,7 @@ static __device__ __forceinline__ T ldcs(GMemTag, T *p) {
   case 16: for (int i=0; i < sizeof(T)/16; i++) u32v4[i] = __ldcs((uint4*)p + i); break;
   default: __builtin_unreachable();
   }
+#endif
   return x;
 }
 
@@ -58,6 +77,20 @@ static __device__ __forceinline__ void stcs(GMemTag, T *p, T val) {
     uint4 u32v4[(sizeof(T)+16-1)/16];
   };
   x = val;
+#if defined(__HIP_PLATFORM_AMD__)
+  // HIP has no __stcs(); use clang non-temporal stores (value, ptr), dispatched on alignof(T).
+  if constexpr (alignof(T) == 1) {
+    for (int i=0; i < sizeof(T)/1; i++) __builtin_nontemporal_store(u8[i], (uint8_t*)p + i);
+  } else if constexpr (alignof(T) == 2) {
+    for (int i=0; i < sizeof(T)/2; i++) __builtin_nontemporal_store(u16[i], (uint16_t*)p + i);
+  } else if constexpr (alignof(T) == 4) {
+    for (int i=0; i < sizeof(T)/4; i++) __builtin_nontemporal_store(u32[i], (uint32_t*)p + i);
+  } else if constexpr (alignof(T) == 8 || alignof(T) == 16) {
+    for (int i=0; i < sizeof(T)/8; i++) __builtin_nontemporal_store(u64[i], (uint64_t*)p + i);
+  } else {
+    __builtin_unreachable();
+  }
+#else
   switch (alignof(T)) {
   case 1: for (int i=0; i < sizeof(T)/1; i++) __stcs((uint8_t*)p + i, u8[i]); break;
   case 2: for (int i=0; i < sizeof(T)/2; i++) __stcs((uint16_t*)p + i, u16[i]); break;
@@ -66,6 +99,7 @@ static __device__ __forceinline__ void stcs(GMemTag, T *p, T val) {
   case 16: for (int i=0; i < sizeof(T)/16; i++) __stcs((uint4*)p + i, u32v4[i]); break;
   default: __builtin_unreachable();
   }
+#endif
 }
 
 // Load packs from element buffer. Pack index=0 is loaded from the buffer rounded

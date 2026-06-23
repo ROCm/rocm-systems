@@ -131,6 +131,19 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
           result, ignore1);
       ignore1:;
       }
+#ifdef GENERATE_SYM_KERNELS
+      if (sym == 1) {
+        // Symmetric kernels get max dynamic LDS, recorded in ncclSymkKernelMaxDynamicSmem[]
+        // so device (args->maxDynamicSmem) and launch (plan->kernelDynSmem) agree; matches upstream.
+        int dynSmem = maxSharedMem - attr.sharedSizeBytes;
+        if (dynSmem < 0) dynSmem = 0;
+        CUDACHECKGOTO(cudaFuncSetAttribute(fn,
+          cudaFuncAttributeMaxDynamicSharedMemorySize, dynSmem),
+          result, next_kernel);
+        ncclSymkKernelMaxDynamicSmem[k] = dynSmem;
+        continue; // sym kernels skip the non-symmetric ncclMaxSharedMem path
+      }
+#endif
       if (ncclMaxSharedMem != 0) {
         int sharedMemSize = ncclMaxSharedMem;
         if (sharedMemSize > (maxSharedMem-attr.sharedSizeBytes)) {
@@ -375,13 +388,6 @@ bool ncclTestBudget(
   return ok;
 }
 
-// Returns whether this should be disabled at the device level.  Should be called after devWork fields have been set for what
-// it depends on.
-bool gfx9CheapFenceOff(const ncclDevWorkColl& devWork, bool disabledByPrecheck){
-    bool fenceOk = devWork.regUsed == 0 && devWork.netRegUsed == 0 && !disabledByPrecheck;
-    return !fenceOk;
-}
-
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
   struct ncclKernelPlanner* planner = &comm->planner;
   struct ncclTaskColl *task;
@@ -463,7 +469,6 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.netRegUsed = 1;
     if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER))
       devWork.regUsed = 1;
-    devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
       struct ncclDevWorkCollReg workReg = {};
@@ -2318,8 +2323,17 @@ static ncclResult_t updateCollCostTable(
         if (!inRange) continue;
       }
     }
+    // Cache NCCL_PROTO env once: when the user explicitly asks for LL128
+    // (e.g. NCCL_PROTO=LL128 cross-node), bypass the XGMI-only gate below.
+    static bool userProtoInputCached = false;
+    static int userProtoInput = 0;
+    if (!userProtoInputCached) {
+      const char* protoEnv = ncclGetEnv("NCCL_PROTO");
+      userProtoInput = !protoEnv ? 0 : 1;
+      userProtoInputCached = true;
+    }
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
-      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL)) {
+      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL) && !userProtoInput) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         continue;
       }

@@ -139,6 +139,7 @@ SKIPPABLE_PATH_PATTERNS = [
     ".github/label*.yml",
     ".github/workflows/labeler.yml",
     ".github/workflows/amdsmi-manylinux-build.yml",
+    ".github/workflows/rocjitsu-corpus-tests.yml",
 ]
 
 
@@ -169,7 +170,7 @@ def is_rccl_path(path: str) -> bool:
 def get_matched_subtree(path: str) -> Optional[str]:
     """Returns the subtree that matches the path, or None if no match."""
     for subtree in subtree_to_project_map:
-        if path.startswith(subtree):
+        if path.startswith(subtree + "/") or path == subtree:
             return subtree
     return None
 
@@ -249,7 +250,7 @@ def retrieve_projects(args):
         matched_subtrees = set()
         for path in modified_paths:
             for subtree in subtree_to_project_map:
-                if path.startswith(subtree):
+                if path.startswith(subtree + "/") or path == subtree:
                     matched_subtrees.add(subtree)
 
         # Change in CI workflow triggers full subtree evaluation

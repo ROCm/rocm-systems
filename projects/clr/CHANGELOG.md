@@ -30,6 +30,31 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipDrvMemDiscardBatchAsync` driver API variant of `hipMemDiscardBatchAsync`, using `hipDeviceptr_t` pointers. Mirrors `cuMemDiscardBatchAsync`.
       * `hipMemDiscardAndPrefetchBatchAsync` combines discard and prefetch in a single call, enabling the runtime to optimize data movement. Mirrors `cudaMemDiscardAndPrefetchBatchAsync`.
       * `hipDrvMemDiscardAndPrefetchBatchAsync` driver API variant of `hipMemDiscardAndPrefetchBatchAsync`, using `hipDeviceptr_t` pointers. Mirrors `cuMemDiscardAndPrefetchBatchAsync`.
+* Support for non-Host Transparent (nHT) fabric handles in HIP Virtual Memory Management (VMM) APIs, enabling efficient cross-device memory sharing over IFoE (Infinity Fabric over Ethernet).
+This allows peer devices to directly access shared memory without host staging, reducing data movement overhead and improving performance for multi-GPU and distributed workloads.
+
+### Resolved issues
+
+* Resolved an issue where graph allocations that escape their originating graph (i.e., allocation nodes without a corresponding free node) failed to remain valid after the graph and its executable
+instance were destroyed. Allocations created via stream capture were not properly tracked and were incorrectly classified as reusable, leading to premature unmapping during `hipGraphExecDestroy` and resulting in memory faults on subsequent access.
+* Resolved an issue where an error propagated from the `hipModuleGetFunction` API, causing behavior inconsistent with the corresponding CUDA API. The HIP runtime now suppresses this propagated error to align with expected behavior.
+* Resolved an issue where a stream entering an invalid state during capture could not recover, even after calling `hipStreamEndCapture`. The stream failed to return to a clean (None) state,
+and subsequent calls to `hipStreamIsCapturing` continued to report an invalidated state, preventing reuse. This behavior is now aligned with CUDA semantics.
+* Resolved a race condition in HIP graph nodes. The HIP runtime now correctly manages graph node IDs within each `GraphNode` constructor to ensure thread safety.
+This prevents duplicate ID assignment when multiple threads concurrently construct graph nodes (for example, during XLA command-buffer fusion).
+As a result, nodes are no longer silently dropped from dispatched packets, eliminating uninitialized output buffers and preventing out-of-bounds or corrupted values.
+* Fixed a segmentation fault in the `hipMemRetainAllocationHandle` API when a pointer allocated with `hipMalloc` was passed. The HIP runtime now validates non-VMM allocations and returns an appropriate error instead.
+* Resolved an issue where `__managed__` global variables were misclassified by the `hipPointerGetAttributes` API both before and after kernel access. This behavior has been corrected to align with CUDA semantics.
+* Resolved an issue in the classic graph execution path (RunOneNode / RunNodes) where missing synchronization for child graph nodes caused data races and incorrect results when executing graphs with child nodes under multi-stream parallelism.
+The HIP runtime now properly synchronizes child graph nodes within the execution path.
+* Fixed an issue in `hipGraphMemsetNode` that caused incorrect validation for flat allocations. For 2D `memsets`, the `userData` `width/height/depth` extents are only initialized by `hipMallocPitch` and `hipMalloc3D`;
+allocations from `hipMalloc` leave these fields unset, leading to spurious validation failures. The HIP runtime now skips `userData`-based checks when extents are zero and relies on `ihipMemset3D_validate`
+for accurate size validation. Additionally, the exec flag is propagated through `ihipGraphNodeSetParams` to ensure executable graph updates use the correct validation path.
+
+### Optimized
+
+* Enhanced debug information for illegal memory access errors. In multi-node and multi-GPU environments, it can be difficult to identify the source of a fault.
+The HIP runtime now includes the hostname, GPU index, and kernel name in GPU fault error messages, improving issue identification and debugging.
 
 ## HIP 7.13 for ROCm 7.13
 

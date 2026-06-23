@@ -626,7 +626,7 @@ class Runtime {
     void Shutdown();
 
     hsa_signal_t wake;
-    bool exit;
+    std::atomic<bool> exit;
 
     private:
     AsyncEventsInfo* info_;
@@ -985,6 +985,7 @@ class Runtime {
   std::map<uint64_t, size_t> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
   os::Thread ipc_sock_server_thread_;
+  bool ipc_sock_server_shutdown_in_progress_;
 
   lazy_ptr<AsyncEventsInfo> asyncSignals_;
   lazy_ptr<AsyncEventsInfo> asyncExceptions_;

@@ -988,7 +988,7 @@ static inline IPCSocket FdToIPCSock(int fd) {
 }
 
 IPCSocket CreateIPCServer(const char* name, int backlog) {
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd == -1) return INVALID_SOCKET_VALUE;
 
   struct sockaddr_un address;
@@ -1016,7 +1016,7 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
 
 IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
                              std::chrono::milliseconds retryInterval) {
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd == -1) return INVALID_SOCKET_VALUE;
 
   struct sockaddr_un address;

@@ -14,13 +14,14 @@ from amdisa.codegen.execute.vop3_modifiers import (
 )
 
 
-def _write_mask_to_explicit_dst(lines: list[str], dst: str, value: str) -> None:
-    # Keep this wave32/wave64 mask-width rule in sync with simd_glue.h and
-    # sema_lower.py.
-    lines.append('  if (wf.wf_size() <= 32)')
-    lines.append(f'    {dst}.write_scalar(wf, static_cast<uint32_t>({value}));')
-    lines.append('  else')
-    lines.append(f'    {dst}.write_scalar64(wf, {value});')
+def _write_explicit_lane_mask(dst: str, value: str) -> list[str]:
+    """Emit a write to an explicit SGPR lane-mask destination."""
+    return [
+        '  if (wf.wf_size() <= 32)',
+        f'    {dst}.write_scalar(wf, static_cast<uint32_t>({value}));',
+        '  else',
+        f'    {dst}.write_scalar64(wf, {value});',
+    ]
 
 
 def gen_vector_cmp_class(
@@ -150,7 +151,7 @@ def gen_vector_cmp_class(
             L.append('  wf.set_vcc(result);')
         L.append('  wf.set_exec(result);')
     elif dst:
-        _write_mask_to_explicit_dst(L, dst[0], 'vcc')
+        L.extend(_write_explicit_lane_mask(dst[0], 'vcc'))
     else:
         L.append('  wf.set_vcc(vcc);')
     return '\n'.join(L)
@@ -235,19 +236,39 @@ def _cmp_condition(
         L.append(f'    uint64_t s0 = {src[0]}.read_lane64(wf, lane);')
         L.append(f'    uint64_t s1 = {src[1]}.read_lane64(wf, lane);')
     elif dtype in ('i16',):
-        L.append(
-            f'    int16_t s0 = static_cast<int16_t>({src[0]}.read_lane(wf, lane) & 0xFFFF);'
-        )
-        L.append(
-            f'    int16_t s1 = static_cast<int16_t>({src[1]}.read_lane(wf, lane) & 0xFFFF);'
-        )
+        if is_vop3:
+            L.append(f'    uint32_t s0_raw = {src[0]}.read_lane(wf, lane);')
+            L.append(f'    uint32_t s1_raw = {src[1]}.read_lane(wf, lane);')
+            L.append('    if (opsel & (1u << 0)) s0_raw >>= 16;')
+            L.append('    if (opsel & (1u << 1)) s1_raw >>= 16;')
+            L.append(
+                '    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));'
+            )
+            L.append(
+                '    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));'
+            )
+        else:
+            L.append(
+                f'    int16_t s0 = static_cast<int16_t>({src[0]}.read_lane(wf, lane) & 0xFFFF);'
+            )
+            L.append(
+                f'    int16_t s1 = static_cast<int16_t>({src[1]}.read_lane(wf, lane) & 0xFFFF);'
+            )
     elif dtype in ('u16',):
-        L.append(
-            f'    uint16_t s0 = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));'
-        )
-        L.append(
-            f'    uint16_t s1 = static_cast<uint16_t>({src[1]}.read_lane(wf, lane));'
-        )
+        if is_vop3:
+            L.append(f'    uint32_t s0_raw = {src[0]}.read_lane(wf, lane);')
+            L.append(f'    uint32_t s1_raw = {src[1]}.read_lane(wf, lane);')
+            L.append('    if (opsel & (1u << 0)) s0_raw >>= 16;')
+            L.append('    if (opsel & (1u << 1)) s1_raw >>= 16;')
+            L.append('    uint16_t s0 = static_cast<uint16_t>(s0_raw);')
+            L.append('    uint16_t s1 = static_cast<uint16_t>(s1_raw);')
+        else:
+            L.append(
+                f'    uint16_t s0 = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));'
+            )
+            L.append(
+                f'    uint16_t s1 = static_cast<uint16_t>({src[1]}.read_lane(wf, lane));'
+            )
     elif dtype in ('i32',):
         L.append(
             f'    int32_t s0 = static_cast<int32_t>({src[0]}.read_lane(wf, lane));'
@@ -271,6 +292,10 @@ def _cmp_condition(
     return f's0 {cmp_op} s1'
 
 
+def _uses_vop3_i16_opsel(op: str | None, dtype: str | None, is_vop3: bool) -> bool:
+    return is_vop3 and dtype in ('i16', 'u16') and op not in ('f', 't')
+
+
 def gen_vector_cmp(
     dst: list[str],
     src: list[str],
@@ -289,19 +314,23 @@ def gen_vector_cmp(
     L.append('  uint64_t exec = wf.exec();')
     # All v_cmp variants zero inactive lanes regardless of encoding.
     L.append('  uint64_t vcc = 0;')
+    if _uses_vop3_i16_opsel(op, dtype, is_vop3):
+        L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
     if op == 't':
         L.append('    vcc |= (1ULL << lane);')
     elif op != 'f':
+        # vcc starts as the cleared mask, so false lanes can leave their bit
+        # clear instead of emitting a redundant clear operation.
         cond = _cmp_condition(src, op, dtype, is_vop3, L, has_abs)
         L.append(f'    if ({cond})')
         L.append('      vcc |= (1ULL << lane);')
     L.append('  }')
     if dst:
         # VOP3: write to explicit destination (sdst/vdst SGPR pair).
-        _write_mask_to_explicit_dst(L, dst[0], 'vcc')
+        L.extend(_write_explicit_lane_mask(dst[0], 'vcc'))
     else:
         # VOPC: write to VCC.
         L.append('  wf.set_vcc(vcc);')
@@ -326,6 +355,8 @@ def gen_vector_cmpx(
     L = []
     L.append('  uint64_t exec = wf.exec();')
     L.append('  uint64_t result = 0;')
+    if _uses_vop3_i16_opsel(op, dtype, is_vop3):
+        L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
@@ -340,7 +371,7 @@ def gen_vector_cmpx(
     L.append('  }')
     if cmpx_writes_vcc:
         if dst and is_vop3:
-            L.append(f'  {dst[0]}.write_scalar64(wf, result);')
+            L.extend(_write_explicit_lane_mask(dst[0], 'result'))
         else:
             L.append('  wf.set_vcc(result);')
     L.append('  wf.set_exec(result);')
@@ -422,7 +453,7 @@ def gen_vector_add_co(
     L.append('  }')
     if len(dst) > 1:
         # VOP3_SDST_ENC: carry-out goes to sdst (any SGPR pair).
-        L.append(f'  {dst[1]}.write_scalar64(wf, vcc);')
+        L.extend(_write_explicit_lane_mask(dst[1], 'vcc'))
     else:
         L.append('  wf.set_vcc(vcc);')
     return '\n'.join(L)

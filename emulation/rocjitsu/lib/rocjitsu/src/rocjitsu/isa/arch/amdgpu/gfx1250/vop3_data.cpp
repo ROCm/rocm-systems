@@ -112,10 +112,7 @@ void VMovB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
               static_cast<uint16_t>(((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
                                                                : src0.read_lane(wf, lane)))))));
-      uint32_t old_dst = vdst.read_lane(wf, lane);
-      uint32_t merged = ((inst_.opsel & 0x8u) != 0) ? ((old_dst & 0x0000ffffu) | (src_half << 16))
-                                                    : ((old_dst & 0xffff0000u) | src_half);
-      vdst.write_lane(wf, lane, merged);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);
     }
   }
 }
@@ -996,10 +993,7 @@ void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                                     : static_cast<uint16_t>(((inst_.opsel & 0x1u) != 0
                                                                  ? (src0.read_lane(wf, lane) >> 16)
                                                                  : src0.read_lane(wf, lane)))))));
-      uint32_t old_dst = vdst.read_lane(wf, lane);
-      uint32_t merged = ((inst_.opsel & 0x8u) != 0) ? ((old_dst & 0x0000ffffu) | (src_half << 16))
-                                                    : ((old_dst & 0xffff0000u) | src_half);
-      vdst.write_lane(wf, lane, merged);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);
     }
   }
 }
@@ -1055,8 +1049,27 @@ VPermlaneBcastB32Vop3::VPermlaneBcastB32Vop3(const MachineInst *inst)
 }
 
 void VPermlaneBcastB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  uint32_t snap[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    snap[i] = src0.read_lane(wf, i);
+  uint32_t selector = src1.read_scalar(wf);
+  uint32_t lane_group_width = src2.read_scalar(wf);
+  if (lane_group_width == 0 || (lane_group_width & (lane_group_width - 1)) != 0)
+    lane_group_width = wf.wf_size();
+  lane_group_width = std::min(lane_group_width, wf.wf_size());
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t group_base = (lane / lane_group_width) * lane_group_width;
+    uint32_t src_offset = selector % lane_group_width;
+    uint32_t src_lane = group_base + src_offset;
+    if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
+      vdst.write_lane(wf, lane, 0);
+      continue;
+    }
+    vdst.write_lane(wf, lane, snap[src_lane]);
+  }
 }
 
 VPermlaneUpB32Vop3::VPermlaneUpB32Vop3(const MachineInst *inst)
@@ -1110,8 +1123,28 @@ VPermlaneUpB32Vop3::VPermlaneUpB32Vop3(const MachineInst *inst)
 }
 
 void VPermlaneUpB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  uint32_t snap[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    snap[i] = src0.read_lane(wf, i);
+  uint32_t selector = src1.read_scalar(wf);
+  uint32_t lane_group_width = src2.read_scalar(wf);
+  if (lane_group_width == 0 || (lane_group_width & (lane_group_width - 1)) != 0)
+    lane_group_width = wf.wf_size();
+  lane_group_width = std::min(lane_group_width, wf.wf_size());
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t group_base = (lane / lane_group_width) * lane_group_width;
+    uint32_t offset = lane - group_base;
+    uint32_t src_offset = (selector <= offset) ? (offset - selector) : lane_group_width;
+    uint32_t src_lane = group_base + src_offset;
+    if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
+      vdst.write_lane(wf, lane, 0);
+      continue;
+    }
+    vdst.write_lane(wf, lane, snap[src_lane]);
+  }
 }
 
 VPermlaneDownB32Vop3::VPermlaneDownB32Vop3(const MachineInst *inst)
@@ -1165,8 +1198,28 @@ VPermlaneDownB32Vop3::VPermlaneDownB32Vop3(const MachineInst *inst)
 }
 
 void VPermlaneDownB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  uint32_t snap[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    snap[i] = src0.read_lane(wf, i);
+  uint32_t selector = src1.read_scalar(wf);
+  uint32_t lane_group_width = src2.read_scalar(wf);
+  if (lane_group_width == 0 || (lane_group_width & (lane_group_width - 1)) != 0)
+    lane_group_width = wf.wf_size();
+  lane_group_width = std::min(lane_group_width, wf.wf_size());
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t group_base = (lane / lane_group_width) * lane_group_width;
+    uint32_t offset = lane - group_base;
+    uint32_t src_offset = offset + selector;
+    uint32_t src_lane = group_base + src_offset;
+    if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
+      vdst.write_lane(wf, lane, 0);
+      continue;
+    }
+    vdst.write_lane(wf, lane, snap[src_lane]);
+  }
 }
 
 VPermlaneXorB32Vop3::VPermlaneXorB32Vop3(const MachineInst *inst)
@@ -1220,8 +1273,28 @@ VPermlaneXorB32Vop3::VPermlaneXorB32Vop3(const MachineInst *inst)
 }
 
 void VPermlaneXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  uint32_t snap[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    snap[i] = src0.read_lane(wf, i);
+  uint32_t selector = src1.read_scalar(wf);
+  uint32_t lane_group_width = src2.read_scalar(wf);
+  if (lane_group_width == 0 || (lane_group_width & (lane_group_width - 1)) != 0)
+    lane_group_width = wf.wf_size();
+  lane_group_width = std::min(lane_group_width, wf.wf_size());
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t group_base = (lane / lane_group_width) * lane_group_width;
+    uint32_t offset = lane - group_base;
+    uint32_t src_offset = offset ^ selector;
+    uint32_t src_lane = group_base + src_offset;
+    if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
+      vdst.write_lane(wf, lane, 0);
+      continue;
+    }
+    vdst.write_lane(wf, lane, snap[src_lane]);
+  }
 }
 
 VPermlane16VarB32Vop3::VPermlane16VarB32Vop3(const MachineInst *inst)
@@ -1388,8 +1461,14 @@ VPermlaneIdxGenB32Vop3::VPermlaneIdxGenB32Vop3(const MachineInst *inst)
 }
 
 void VPermlaneIdxGenB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  uint32_t selector = src1.read_scalar(wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t value = src0.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, value ^ selector);
+  }
 }
 
 VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
