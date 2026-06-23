@@ -60,7 +60,9 @@ def get_amdgpu_version(
     raw = _get_amdsmi_version_output(rocm_path)
     if raw is None:
         return None
-    # e.g. "... | amdgpu version: 6.19.14.31400000" (patch may be absent: "6.19.4")
+    # amdgpu version is "major.minor[.patch[.build]]"; e.g. "6.19.14.31400000"
+    # or "6.19.4". Compare on (major, minor, patch) only — the build suffix is
+    # ignored, and an absent patch is treated as .0.
     m = re.search(r"amdgpu version:\s*(\d+)\.(\d+)(?:\.(\d+))?", raw)
     if m:
         patch = int(m.group(3)) if m.group(3) is not None else 0
