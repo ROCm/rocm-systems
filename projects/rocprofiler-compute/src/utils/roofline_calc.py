@@ -86,7 +86,25 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
         "I32",
         "I64",
     ],
+    "gfx1150": [
+        "FP16",
+        "BF16",
+        "FP32",
+        "FP64",
+        "I8",
+        "I32",
+        "I64",
+    ],  # Unsupported: F4, F6, F8
     "gfx1151": [
+        "FP16",
+        "BF16",
+        "FP32",
+        "FP64",
+        "I8",
+        "I32",
+        "I64",
+    ],  # Unsupported: F4, F6, F8
+    "gfx1152": [
         "FP16",
         "BF16",
         "FP32",
