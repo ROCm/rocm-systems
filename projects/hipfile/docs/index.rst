@@ -45,6 +45,11 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
       * :doc:`cuFile compatibility <reference/hipFile-cuFile-compatibility>`
       * :doc:`hipFile API reference <reference/hipFile-api-reference>`
 
+   .. grid-item-card:: Troubleshooting
+
+      * :doc:`Troubleshooting <troubleshooting/troubleshooting>`
+      * :doc:`Known issues <troubleshooting/known-issues>`
+
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 

@@ -15,11 +15,39 @@ from rocm_kpack.artifact_splitter import (
     ArtifactSplitter,
     FileClassificationVisitor,
     ExtractedKernel,
+    base_arch,
 )
 from rocm_kpack.artifact_utils import read_artifact_manifest, write_artifact_manifest
 from rocm_kpack.database_handlers import MIOpenHandler, RocBLASHandler
 from rocm_kpack.tools.split_artifacts import batch_split, parse_artifact_name
 from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
+
+
+class TestBaseArch:
+    """Unit tests for base_arch() feature-suffix normalization."""
+
+    @pytest.mark.parametrize(
+        "arch,expected",
+        [
+            # Bare base arch is unchanged.
+            ("gfx90a", "gfx90a"),
+            ("gfx942", "gfx942"),
+            # Tensile hyphen form (kernel-database filenames).
+            ("gfx90a-xnack-", "gfx90a"),
+            ("gfx90a-xnack+", "gfx90a"),
+            # ELF colon form (--gpu-targets / bundle ids).
+            ("gfx942:xnack+", "gfx942"),
+            ("gfx942:sramecc+:xnack-", "gfx942"),
+            # sramecc must also collapse, in both forms (review request: do not
+            # assume xnack is the only feature).
+            ("gfx90a-sramecc-", "gfx90a"),
+            ("gfx90a-sramecc+", "gfx90a"),
+            # Multiple hyphen-form features in one id.
+            ("gfx90a-sramecc+-xnack-", "gfx90a"),
+        ],
+    )
+    def test_strips_known_features(self, arch, expected):
+        assert base_arch(arch) == expected
 
 
 class TestArtifactSplitterIntegration:
@@ -997,6 +1025,73 @@ class TestArtifactSplitterIntegration:
         assert not (output_dir / "miopen_lib_gfx90a").exists(), (
             "gfx90a per-arch directory should not exist when filtered out"
         )
+
+    def test_gpu_targets_keeps_xnack_variant_database_files(self, toolchain, tmp_path):
+        """
+        Regression test for ROCM-25535.
+
+        Tensile encodes xnack variants with a hyphen (gfx90a-xnack-), but
+        gpu_targets and the shard key are the bare base arch (gfx90a). The
+        variants must collapse onto the base shard instead of being dropped.
+        """
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+
+        prefix = "math-libs/BLAS/rocBLAS/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        lib_dir = input_dir / prefix / "lib" / "rocblas" / "library"
+        lib_dir.mkdir(parents=True)
+
+        # In-scope base arch: a bare .dat plus both xnack feature variants.
+        (lib_dir / "TensileLibrary_lazy_gfx90a.dat").write_text("mock gfx90a dat")
+        (lib_dir / "TensileLibrary_lazy_gfx90a-xnack-.hsaco").write_text(
+            "mock gfx90a xnack- kernels"
+        )
+        (lib_dir / "TensileLibrary_lazy_gfx90a-xnack+.hsaco").write_text(
+            "mock gfx90a xnack+ kernels"
+        )
+        # Out-of-scope arch, also with an xnack variant.
+        (lib_dir / "TensileLibrary_lazy_gfx1100.dat").write_text("mock gfx1100 dat")
+        (lib_dir / "TensileLibrary_lazy_gfx1100-xnack-.hsaco").write_text(
+            "mock gfx1100 xnack- kernels"
+        )
+
+        output_dir = tmp_path / "output"
+
+        splitter = ArtifactSplitter(
+            artifact_prefix="rocblas_lib",
+            toolchain=toolchain,
+            database_handlers=[RocBLASHandler()],
+            verbose=True,
+            gpu_targets=["gfx90a"],
+        )
+        splitter.split(input_dir, output_dir)
+
+        gfx90a_dir = output_dir / "rocblas_lib_gfx90a"
+        assert gfx90a_dir.exists(), "gfx90a per-arch directory should exist"
+
+        rel = prefix + "/lib/rocblas/library"
+        # The bare .dat AND both xnack-variant kernels collapse onto gfx90a.
+        dat = gfx90a_dir / rel / "TensileLibrary_lazy_gfx90a.dat"
+        xnack_minus = gfx90a_dir / rel / "TensileLibrary_lazy_gfx90a-xnack-.hsaco"
+        xnack_plus = gfx90a_dir / rel / "TensileLibrary_lazy_gfx90a-xnack+.hsaco"
+        assert dat.exists(), "bare gfx90a .dat should be in the gfx90a shard"
+        assert xnack_minus.exists(), "gfx90a-xnack- kernel must collapse onto gfx90a"
+        assert xnack_plus.exists(), "gfx90a-xnack+ kernel must collapse onto gfx90a"
+
+        # No spurious 'gfx90a-xnack-' shard should be created.
+        assert not (output_dir / "rocblas_lib_gfx90a-xnack-").exists()
+
+        # xnack variants must not leak into the generic artifact.
+        generic_dir = output_dir / "rocblas_lib_generic"
+        generic_xnack = generic_dir / rel / "TensileLibrary_lazy_gfx90a-xnack-.hsaco"
+        assert not generic_xnack.exists(), "per-arch kernels should not be in generic"
+
+        # Out-of-scope arch (and its xnack variant) is filtered out entirely.
+        assert not (output_dir / "rocblas_lib_gfx1100").exists()
+        generic_1100 = generic_dir / rel / "TensileLibrary_lazy_gfx1100-xnack-.hsaco"
+        assert not generic_1100.exists(), "filtered gfx1100 kernels should not be kept"
 
     def test_gpu_targets_filters_fat_binary_kernels(self, toolchain, tmp_path):
         """

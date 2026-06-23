@@ -281,9 +281,12 @@ static std::string find_interposer_lib() {
   self[n] = '\0';
   auto bin_dir = std::filesystem::path(self).parent_path();
   // Installed layout: <prefix>/bin/rocjitsu → <prefix>/lib/librocjitsu_kmd.so
+  //                   or <prefix>/bin/rocjitsu → <prefix>/lib64/librocjitsu_kmd.so
   // Build layout: build/tools/rocjitsu/rocjitsu → build/lib/.../librocjitsu_kmd.so
+  //               or build/tools/rocjitsu/rocjitsu → build/lib64/.../librocjitsu_kmd.so
   for (auto &candidate : {
            bin_dir / ".." / "lib" / "librocjitsu_kmd.so",
+           bin_dir / ".." / "lib64" / "librocjitsu_kmd.so",
            bin_dir / ".." / ".." / "lib" / "rocjitsu" / "src" / "rocjitsu" / "kmd" / "linux" /
                "librocjitsu_kmd.so",
        }) {
