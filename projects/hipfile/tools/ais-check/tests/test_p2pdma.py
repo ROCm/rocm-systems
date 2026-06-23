@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
 """Tests for kernel_supports_p2pdma()."""
 
 # Test functions are self-documenting by name; docstrings add noise.
