@@ -8,7 +8,8 @@ Validates that running sdma-test with ROCPROFSYS_AMD_SMI_METRICS=sdma_usage
 produces expected SDMA usage tracks and values in Perfetto and ROCPD output,
 as implemented in the amd_smi component.
 
-SDMA usage requires AMD-SMI >= 26.3 (see source/lib/core/sdma_feature.hpp).
+SDMA usage requires AMD-SMI >= 26.3 (see source/lib/core/sdma_feature.hpp)
+and amdgpu driver >= 6.19.14; tests are skipped otherwise.
 """
 
 from __future__ import annotations
