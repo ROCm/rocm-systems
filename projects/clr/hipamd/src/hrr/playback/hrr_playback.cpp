@@ -27,6 +27,10 @@
 //                         one (repeatable). Recorded args/grid/block are reused;
 //                         the archive is untouched.
 //   --sync-after-launch   hipDeviceSynchronize() after every kernel (debug)
+//   --trace-kernels       Print one compact line before every kernel launch
+//   --trace-sync          Print sync begin/done markers around launched kernels
+//   --progress-kernels N  Print heartbeat every N launched kernels
+//   --progress-seconds S  Print heartbeat at most every S seconds
 //   --help                Show this message
 //
 // Exit code: 0 = all D2H checks passed (or none present), 1 = any failure.
@@ -57,6 +61,27 @@
       return 1;                                                                \
     }                                                                         \
   } while (0)
+
+static bool env_flag_enabled(const char* name) {
+  const char* v = std::getenv(name);
+  return v && v[0] != '\0' && !(v[0] == '0' && v[1] == '\0');
+}
+
+static size_t env_size_or(const char* name, size_t fallback) {
+  const char* v = std::getenv(name);
+  if (!v || v[0] == '\0') return fallback;
+  char* end = nullptr;
+  unsigned long long n = std::strtoull(v, &end, 10);
+  return (end && *end == '\0') ? static_cast<size_t>(n) : fallback;
+}
+
+static double env_double_or(const char* name, double fallback) {
+  const char* v = std::getenv(name);
+  if (!v || v[0] == '\0') return fallback;
+  char* end = nullptr;
+  double n = std::strtod(v, &end);
+  return (end && *end == '\0') ? n : fallback;
+}
 
 // ---------------------------------------------------------------------------
 // --info mode: print archive summary without touching the GPU
@@ -235,7 +260,7 @@ static hipError_t handle_special(PlaybackContext& ctx, const hrr::Event& ev) {
 
     case HRR_API_HIPDEVICESYNCHRONIZE:
       if (!ctx.skip_device_sync) {
-        hipError_t r = hipDeviceSynchronize();
+        hipError_t r = hrr_watchdog_device_sync(ctx, "recorded hipDeviceSynchronize event");
         if (r != hipSuccess) {
           fprintf(stderr, "[HRR] hipDeviceSynchronize error %d (%s)\n",
                   r, hipGetErrorString(r));
@@ -453,7 +478,7 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // for async errors. This makes GPU faults show up at the exact causal event
   // rather than surfacing later on a sync or the next API call.
   if (ctx.sync_after_event) {
-    hipError_t se = hipDeviceSynchronize();
+    hipError_t se = hrr_watchdog_device_sync(ctx, "sync-after-event");
     if (se == hipSuccess) se = hipGetLastError();
     if (se != hipSuccess) {
       ctx.fatal_error.store(true, std::memory_order_release);
@@ -596,7 +621,7 @@ static bool run_pass(PlaybackContext& ctx,
   if (ctx.fatal_error.load(std::memory_order_acquire))
     return false;
 
-  hipError_t r = hipDeviceSynchronize();
+  hipError_t r = hrr_watchdog_device_sync(ctx, "end-of-pass device synchronize");
   if (r != hipSuccess) {
     fprintf(stderr, "[HRR] Fatal: hipDeviceSynchronize after pass failed: %d (%s)\n",
             r, hipGetErrorString(r));
@@ -719,12 +744,26 @@ static void print_usage(const char* argv0) {
     "                        the archive is not modified.\n"
     "  --sync-after-launch   hipDeviceSynchronize after every kernel launch\n"
     "  --sync-after-event    hipDeviceSynchronize after EVERY event (slowest, most precise)\n"
+    "  --sync-watchdog-ms N  Abort with a diagnostic if any device synchronize does\n"
+    "                        not complete within N ms (catches hung/deadlocked\n"
+    "                        kernels, e.g. StreamK flag spin-waits). 0 = disabled.\n"
+    "  --trace-kernels       Print one compact line before every kernel launch\n"
+    "  --trace-sync          Print sync begin/done markers around kernel syncs\n"
+    "  --progress-kernels N  Print heartbeat every N launched kernels\n"
+    "  --progress-seconds S  Print heartbeat at most every S seconds\n"
     "  --help                Show this message\n"
     "\n"
     "Environment (replay device allocation padding — see hip_playback.cpp):\n"
     "  HIP_HRR_REPLAY_ALLOC_PAD_FACTOR   unsigned, default 1 (exact recorded sizes).\n"
     "                                    Use 256 for legacy pool-style headroom (more VRAM).\n"
     "  HIP_HRR_REPLAY_ALLOC_PAD_MAX      bytes, default 1073741824 (1 GiB cap per alloc).\n"
+    "\n"
+    "Environment (lightweight replay tracing):\n"
+    "  HIP_HRR_REPLAY_TRACE_KERNELS=1       same as --trace-kernels\n"
+    "  HIP_HRR_REPLAY_TRACE_SYNC=1          same as --trace-sync\n"
+    "  HIP_HRR_REPLAY_PROGRESS_KERNELS=N    same as --progress-kernels N\n"
+    "  HIP_HRR_REPLAY_PROGRESS_SECONDS=S    same as --progress-seconds S\n"
+    "  HIP_HRR_REPLAY_SYNC_WATCHDOG_MS=N    same as --sync-watchdog-ms N\n"
     "\n"
     "Default mode: single-threaded, serialize GPU after pass, abort on first error.\n"
     "Use --sync-after-event to pinpoint the exact event causing a GPU fault or hang.\n",
@@ -752,6 +791,35 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--timing"))            ctx.timing             = true;
     else if (!strcmp(argv[i], "--sync-after-launch")) ctx.sync_after_launch  = true;
     else if (!strcmp(argv[i], "--sync-after-event"))  ctx.sync_after_event   = true;
+    else if (!strcmp(argv[i], "--sync-watchdog-ms") && i + 1 < argc) {
+      char* end = nullptr;
+      unsigned long long n = std::strtoull(argv[++i], &end, 10);
+      if (!end || *end != '\0') {
+        fprintf(stderr, "[HRR] --sync-watchdog-ms expects an integer (milliseconds)\n");
+        return 1;
+      }
+      ctx.sync_watchdog_ms = static_cast<unsigned>(n);
+    }
+    else if (!strcmp(argv[i], "--trace-kernels"))     ctx.trace_kernels      = true;
+    else if (!strcmp(argv[i], "--trace-sync"))        ctx.trace_sync         = true;
+    else if (!strcmp(argv[i], "--progress-kernels") && i + 1 < argc) {
+      char* end = nullptr;
+      unsigned long long n = std::strtoull(argv[++i], &end, 10);
+      if (!end || *end != '\0') {
+        fprintf(stderr, "[HRR] --progress-kernels expects an integer\n");
+        return 1;
+      }
+      ctx.progress_kernel_interval = static_cast<size_t>(n);
+    }
+    else if (!strcmp(argv[i], "--progress-seconds") && i + 1 < argc) {
+      char* end = nullptr;
+      double n = std::strtod(argv[++i], &end);
+      if (!end || *end != '\0') {
+        fprintf(stderr, "[HRR] --progress-seconds expects a number\n");
+        return 1;
+      }
+      ctx.progress_seconds_interval = n;
+    }
     else if (!strcmp(argv[i], "--kernel-filter") && i + 1 < argc)
       ctx.kernel_filter = argv[++i];
     else if (!strcmp(argv[i], "--replace-kernel") && i + 1 < argc) {
@@ -770,6 +838,17 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--help")) { print_usage(argv[0]); return 0; }
     else if (argv[i][0] != '-') archive_path = argv[i];
   }
+
+  ctx.trace_kernels |= env_flag_enabled("HIP_HRR_REPLAY_TRACE_KERNELS");
+  ctx.trace_sync |= env_flag_enabled("HIP_HRR_REPLAY_TRACE_SYNC");
+  ctx.progress_kernel_interval =
+      env_size_or("HIP_HRR_REPLAY_PROGRESS_KERNELS", ctx.progress_kernel_interval);
+  ctx.progress_seconds_interval =
+      env_double_or("HIP_HRR_REPLAY_PROGRESS_SECONDS", ctx.progress_seconds_interval);
+  ctx.sync_watchdog_ms = static_cast<unsigned>(
+      env_size_or("HIP_HRR_REPLAY_SYNC_WATCHDOG_MS", ctx.sync_watchdog_ms));
+  ctx.dump_ptrs_ordinal =
+      env_size_or("HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL", ctx.dump_ptrs_ordinal);
 
   if (archive_path.empty()) {
     fprintf(stderr, "[HRR] No archive path specified\n");

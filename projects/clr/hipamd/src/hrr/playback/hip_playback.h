@@ -15,6 +15,7 @@
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
+#include <chrono>
 
 #include "hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 
@@ -75,9 +76,28 @@ struct PlaybackContext {
     bool skip_device_sync  = false;
     bool sync_after_launch = false;  // hipDeviceSynchronize after every kernel launch
     bool sync_after_event  = false;  // hipDeviceSynchronize after EVERY dispatched event
+    // Sync watchdog: max wall-clock ms to wait for a device synchronize before
+    // declaring the GPU wedged (0 = disabled / wait forever). Surfaces hung
+    // kernels (e.g. a StreamK producer/consumer flag spin-wait) as a diagnostic
+    // + hard exit instead of an indefinite hang. See hrr_watchdog_device_sync.
+    unsigned sync_watchdog_ms = 0;
+    // When non-zero, dump each pointer argument's recorded->translated(live)
+    // value for the kernel launch with this 1-based ordinal. Used to diff the
+    // captured vs replay pointer contract (e.g. a StreamK synchronizer base).
+    size_t dump_ptrs_ordinal = 0;
     bool verbose           = false;
     bool validate_d2h      = false;  // perform D2H validation against captured expected data
     std::string kernel_filter;
+
+    // Lightweight replay tracing. These are intentionally separate from
+    // verbose mode, which dumps every event and every kernel argument.
+    bool trace_kernels         = false;  // one compact line before every kernel launch
+    bool trace_sync            = false;  // mark sync begin/done around each launched kernel
+    size_t progress_kernel_interval = 0; // print progress every N launched kernels
+    double progress_seconds_interval = 0.0; // also print progress at most every N seconds
+    std::chrono::steady_clock::time_point progress_start_time{};
+    std::chrono::steady_clock::time_point progress_last_time{};
+    std::mutex progress_mutex;
 
     // ---- Kernel replacement (playback-time override) ----
     // Parsed "NAME=path" pairs from --replace-kernel. The recorded kernel whose
@@ -343,6 +363,14 @@ private:
 // Kernel-launch handlers read this to wait for their submission turn at the
 // exact point of the HIP call, allowing preparation work to run in parallel.
 extern thread_local uint64_t hrr_dispatch_seq;
+
+// Device synchronize with an optional watchdog. When ctx.sync_watchdog_ms == 0
+// this is a plain hipDeviceSynchronize(). Otherwise the (potentially blocking)
+// sync runs on a helper thread and is bounded by the timeout; on timeout it
+// prints a hung-kernel diagnostic (using `what` as context) and hard-exits so a
+// deadlocked kernel surfaces instead of hanging the replay forever. Normal
+// completion — including a genuine GPU fault — is returned to the caller.
+hipError_t hrr_watchdog_device_sync(PlaybackContext& ctx, const char* what);
 
 // ---------------------------------------------------------------------------
 // Playback function signature and dispatch table

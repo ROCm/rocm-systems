@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <string>
 #include <thread>
 #include <vector>
@@ -47,10 +48,51 @@ static inline hipError_t hrr_hip_check(hipError_t e, const char* call,
 #define HRR_HIP_CHECK(call) hrr_hip_check((call), #call, __FILE__, __LINE__)
 
 // ---------------------------------------------------------------------------
+// Sync watchdog
+// ---------------------------------------------------------------------------
+// hipDeviceSynchronize() blocks forever if a kernel is deadlocked (e.g. a
+// StreamK producer/consumer flag spin-wait where the producer's flag store and
+// the consumer's poll resolve to different addresses). When a watchdog timeout
+// is configured, run the sync on a helper thread and bound the wait; on timeout
+// the GPU is wedged, so we print an actionable diagnostic and hard-exit rather
+// than hang the whole replay. A normally-completing sync — including one that
+// reports a genuine GPU fault — is returned to the caller unchanged.
+hipError_t hrr_watchdog_device_sync(PlaybackContext& ctx, const char* what) {
+    const unsigned timeout_ms = ctx.sync_watchdog_ms;
+    if (timeout_ms == 0)
+        return hipDeviceSynchronize();
+
+    auto fut = std::async(std::launch::async, [] { return hipDeviceSynchronize(); });
+    if (fut.wait_for(std::chrono::milliseconds(timeout_ms)) ==
+        std::future_status::ready) {
+        return fut.get();
+    }
+
+    // Timed out. The async sync thread is stuck in the driver and cannot be
+    // joined; abandon it and exit hard (_exit skips destructors, so the
+    // detached future does not block trying to join the wedged thread).
+    fflush(stdout);
+    fprintf(stderr,
+            "\n[HRR][WATCHDOG] GPU sync did not complete within %u ms at: %s\n"
+            "[HRR][WATCHDOG] Treating this as a hung/deadlocked kernel (e.g. a StreamK\n"
+            "[HRR][WATCHDOG] producer/consumer flag spin-wait). Re-run with --trace-kernels\n"
+            "[HRR][WATCHDOG] to see the last launch, or attach rocgdb to inspect wavefronts.\n",
+            timeout_ms, (what && *what) ? what : "device synchronize");
+    fflush(stderr);
+    _exit(124);
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
 namespace {
+
+static std::string compact_kernel_name(const std::string& name) {
+    constexpr size_t kMax = 120;
+    if (name.size() <= kMax) return name;
+    return name.substr(0, 96) + "..." + name.substr(name.size() - 21);
+}
 
 // Build path: archive_dir/blobs/<2-char-prefix>/<hex>.blob
 static std::string blob_path(const std::string& archive_dir,
@@ -76,6 +118,51 @@ static std::vector<uint8_t> read_file(const std::string& path) {
     if (fread(buf.data(), 1, buf.size(), f) != buf.size()) { fclose(f); return {}; }
     fclose(f);
     return buf;
+}
+
+static void maybe_trace_progress(PlaybackContext& ctx, size_t kernel_ordinal,
+                                 const std::string& kernel_name) {
+    const bool by_count = ctx.progress_kernel_interval != 0 &&
+                          (kernel_ordinal == 1 ||
+                           kernel_ordinal % ctx.progress_kernel_interval == 0);
+    const bool by_time_enabled = ctx.progress_seconds_interval > 0.0;
+    if (!by_count && !by_time_enabled) return;
+
+    auto now = std::chrono::steady_clock::now();
+    bool by_time = false;
+    double elapsed_s = 0.0;
+    {
+        std::lock_guard<std::mutex> lk(ctx.progress_mutex);
+        if (ctx.progress_start_time.time_since_epoch().count() == 0) {
+            ctx.progress_start_time = now;
+            ctx.progress_last_time = now;
+            by_time = true;
+        } else {
+            elapsed_s = std::chrono::duration<double>(
+                now - ctx.progress_start_time).count();
+            if (by_time_enabled) {
+                double since_last = std::chrono::duration<double>(
+                    now - ctx.progress_last_time).count();
+                if (since_last >= ctx.progress_seconds_interval) {
+                    ctx.progress_last_time = now;
+                    by_time = true;
+                }
+            }
+        }
+    }
+
+    if (!by_count && !by_time) return;
+    fprintf(stderr,
+            "[HRR progress] elapsed_s=%.1f seq=%llu kernels=%zu d2h_pass=%zu "
+            "d2h_fail=%zu d2h_attempted=%zu last=\"%s\"\n",
+            elapsed_s,
+            (unsigned long long)hrr_dispatch_seq,
+            kernel_ordinal,
+            ctx.d2h_pass.load(std::memory_order_relaxed),
+            ctx.d2h_fail.load(std::memory_order_relaxed),
+            ctx.d2h_attempted.load(std::memory_order_relaxed),
+            compact_kernel_name(kernel_name).c_str());
+    fflush(stderr);
 }
 
 }  // namespace
@@ -345,6 +432,9 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
     // Build kernelParams[] from captured args, translating GPU pointers.
     std::vector<void*>                arg_ptrs;
     std::vector<std::vector<uint8_t>> arg_storage;
+    // Optional recorded->live pointer dump for one target kernel (diff tooling).
+    const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0);
+    std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_ptrs;  // (arg_idx, recorded, live)
     for (uint16_t i = 0; i < num_args; i++) {
         if (p + 3 > end) break;
         uint8_t  value_kind = *p++;
@@ -375,6 +465,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
         if (value_kind == 1 && arg_size >= 8) {  // whole-arg GPU pointer
             uint64_t rec_ptr; memcpy(&rec_ptr, data, 8);
             void* live = ctx.translate_ptr(rec_ptr);
+            if (dbg_dump_ptrs) dbg_ptrs.emplace_back(i, rec_ptr, live);
             storage.resize(sizeof(void*));
             memcpy(storage.data(), &live, sizeof(void*));
             if (ctx.verbose)
@@ -401,6 +492,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
                     continue;
                 }
                 memcpy(storage.data() + off, &live, sizeof(void*));
+                if (dbg_dump_ptrs) dbg_ptrs.emplace_back(i, rec_ptr, live);
                 if (ctx.verbose)
                     fprintf(stderr, "[HRR]   arg[%u]: embedded ptr @+%u 0x%llx -> %p\n",
                             i, off, (unsigned long long)rec_ptr, live);
@@ -423,6 +515,18 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
     }
 
     hipStream_t stream = ctx.translate_stream(stream_rec);
+    const size_t kernel_ordinal =
+        ctx.kernels_launched.load(std::memory_order_relaxed) + 1;
+
+    if (dbg_dump_ptrs && kernel_ordinal == ctx.dump_ptrs_ordinal) {
+        fprintf(stderr,
+                "[HRR ptr-dump] kernel #%zu \"%s\" recorded->live pointer args:\n",
+                kernel_ordinal, compact_kernel_name(kernel_name).c_str());
+        for (auto& [idx, rec, live] : dbg_ptrs)
+            fprintf(stderr, "[HRR ptr-dump]   arg[%u] recorded=0x%llx -> live=%p\n",
+                    idx, (unsigned long long)rec, live);
+        fflush(stderr);
+    }
 
 
     // Skip HIP event timing during graph capture: recording events on a
@@ -451,6 +555,21 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
 
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_start, stream)) == hipSuccess);
+
+    if (ctx.trace_kernels) {
+        fprintf(stderr,
+                "[HRR launch] seq=%llu kernel=%zu grid=[%u,%u,%u] "
+                "block=[%u,%u,%u] shared=%u args=%u snapshots=%u name=\"%s\"\n",
+                (unsigned long long)hrr_dispatch_seq,
+                kernel_ordinal,
+                grid[0], grid[1], grid[2],
+                block[0], block[1], block[2],
+                shared_mem,
+                num_args,
+                num_snapshots,
+                compact_kernel_name(kernel_name).c_str());
+        fflush(stderr);
+    }
 
     // Launch the kernel.
     //
@@ -537,18 +656,43 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
     if (ctx.sync_after_launch) {
         // Clear any pre-existing error before sync so we get a clean error code.
         (void)hipGetLastError();
-        r = hipDeviceSynchronize();
+        if (ctx.trace_sync) {
+            fprintf(stderr, "[HRR sync begin] seq=%llu kernel=%zu name=\"%s\"\n",
+                    (unsigned long long)hrr_dispatch_seq,
+                    kernel_ordinal,
+                    compact_kernel_name(kernel_name).c_str());
+            fflush(stderr);
+        }
+        if (ctx.sync_watchdog_ms) {
+            char wd_what[512];
+            snprintf(wd_what, sizeof(wd_what),
+                     "kernel #%zu \"%s\" (seq=%llu, grid=[%u,%u,%u] block=[%u,%u,%u])",
+                     kernel_ordinal, compact_kernel_name(kernel_name).c_str(),
+                     (unsigned long long)hrr_dispatch_seq,
+                     grid[0], grid[1], grid[2], block[0], block[1], block[2]);
+            r = hrr_watchdog_device_sync(ctx, wd_what);
+        } else {
+            r = hipDeviceSynchronize();
+        }
         hipError_t last_r = hipGetLastError();
         if (r == hipSuccess && last_r != hipSuccess) r = last_r;
         if (r != hipSuccess)
             fprintf(stderr, "[HRR] GPU error after '%s': %d (%s) last=%d (%s)\n",
                     kernel_name.c_str(), r, hipGetErrorString(r),
                     (int)last_r, hipGetErrorString(last_r));
+        else if (ctx.trace_sync) {
+            fprintf(stderr, "[HRR sync done] seq=%llu kernel=%zu status=success\n",
+                    (unsigned long long)hrr_dispatch_seq,
+                    kernel_ordinal);
+            fflush(stderr);
+        }
         else if (ctx.verbose)
             fprintf(stderr, "[HRR] Kernel '%s' OK\n", kernel_name.c_str());
     }
 
-    ctx.kernels_launched++;
+    const size_t completed_kernel =
+        ctx.kernels_launched.fetch_add(1, std::memory_order_relaxed) + 1;
+    maybe_trace_progress(ctx, completed_kernel, kernel_name);
     return r;
 }
 
