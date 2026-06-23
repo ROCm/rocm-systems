@@ -3340,9 +3340,10 @@ static hipError_t playback_hipTexRefSetMipmappedArray(PlaybackContext& ctx, cons
 }
 
 static hipError_t playback_hipThreadExchangeStreamCaptureMode(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx;
   const auto* a = reinterpret_cast<const hrr_args_hipThreadExchangeStreamCaptureMode*>(payload);
-  hipStreamCaptureMode _out_mode{};
-  hipError_t _r = (hipError_t)hipThreadExchangeStreamCaptureMode(&_out_mode);
+  hipStreamCaptureMode mode = static_cast<hipStreamCaptureMode>(a->mode);
+  hipError_t _r = (hipError_t)hipThreadExchangeStreamCaptureMode(&mode);
   return _r;
 }
 

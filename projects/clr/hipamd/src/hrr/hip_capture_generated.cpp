@@ -5383,12 +5383,14 @@ static hipError_t capture_hipTexRefSetMipmappedArray(textureReference* texRef, s
 }
 
 // Generated shim
+// Generated shim (custom: record input capture-mode VALUE, not the pointer)
 static hipError_t capture_hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
+  hipStreamCaptureMode desired = mode ? *mode : hipStreamCaptureModeGlobal;
   hipError_t r = g_real_table.hipThreadExchangeStreamCaptureMode_fn(mode);
   if (r == hipSuccess) {
     hrr_args_hipThreadExchangeStreamCaptureMode a{};
     a.ret         = static_cast<int32_t>(r);
-    a.mode = reinterpret_cast<uint64_t>(mode);
+    a.mode = static_cast<uint64_t>(desired);
     hrr_cap::writer::write_event_raw(HRR_API_HIPTHREADEXCHANGESTREAMCAPTUREMODE, &a.hdr, sizeof(a));
   }
   return r;

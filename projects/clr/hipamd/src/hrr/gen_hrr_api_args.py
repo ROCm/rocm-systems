@@ -1484,10 +1484,54 @@ def _fill_output_param_post(lines: List[str], p: Param, name: str) -> None:
         lines.append(f"    if ({name}) a.{name} = reinterpret_cast<uint64_t>(*{name});")
 
 
+# Per-API custom shim/handler bodies that the default emitter cannot express.
+# Used when an API needs special in/out value handling that the generic
+# pointer-vs-value heuristics get wrong. Kept here (not in the MANUAL_* sets) so
+# the function still lives in the generated files and the dispatch tables wire it
+# automatically.
+CUSTOM_CAPTURE_SHIMS: Dict[str, str] = {
+    # hipThreadExchangeStreamCaptureMode is an in/out swap: input *mode is the
+    # desired thread capture mode, output *mode is the previous one. The generic
+    # emitter records the POINTER; replay then can't restore the mode and a
+    # hipMalloc bracketed by these calls during a graph capture fails with 900.
+    # Record the input enum VALUE instead.
+    "hipThreadExchangeStreamCaptureMode": (
+        "// Generated shim (custom: record input capture-mode VALUE, not the pointer)\n"
+        "static hipError_t capture_hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {\n"
+        "  hipStreamCaptureMode desired = mode ? *mode : hipStreamCaptureModeGlobal;\n"
+        "  hipError_t r = g_real_table.hipThreadExchangeStreamCaptureMode_fn(mode);\n"
+        "  if (r == hipSuccess) {\n"
+        "    hrr_args_hipThreadExchangeStreamCaptureMode a{};\n"
+        "    a.ret         = static_cast<int32_t>(r);\n"
+        "    a.mode = static_cast<uint64_t>(desired);\n"
+        "    hrr_cap::writer::write_event_raw(HRR_API_HIPTHREADEXCHANGESTREAMCAPTUREMODE, &a.hdr, sizeof(a));\n"
+        "  }\n"
+        "  return r;\n"
+        "}\n"
+    ),
+}
+
+CUSTOM_PLAYBACK_BODIES: Dict[str, str] = {
+    # Restore the recorded desired thread capture mode (stored as enum VALUE) so
+    # allocations bracketed by these calls during a graph capture are permitted.
+    "hipThreadExchangeStreamCaptureMode": (
+        "static hipError_t playback_hipThreadExchangeStreamCaptureMode(PlaybackContext& ctx, const uint8_t* payload) {\n"
+        "  (void)ctx;\n"
+        "  const auto* a = reinterpret_cast<const hrr_args_hipThreadExchangeStreamCaptureMode*>(payload);\n"
+        "  hipStreamCaptureMode mode = static_cast<hipStreamCaptureMode>(a->mode);\n"
+        "  hipError_t _r = (hipError_t)hipThreadExchangeStreamCaptureMode(&mode);\n"
+        "  return _r;\n"
+        "}\n"
+    ),
+}
+
+
 def generate_shim(entry: ApiEntry) -> str:
     """Generate a single capture shim function.
     MANUAL_CAPTURE_APIS: returns empty string — hand-written in hip_capture.cpp.
     """
+    if entry.name in CUSTOM_CAPTURE_SHIMS:
+        return CUSTOM_CAPTURE_SHIMS[entry.name]
     is_manual   = entry.name in MANUAL_CAPTURE_APIS
     is_passonly = entry.name in PASSTHROUGH_ONLY
     is_compiler = entry.table == "compiler"
@@ -1872,6 +1916,10 @@ def generate_playback_shim(entry: ApiEntry) -> str:
                 f"  }}\n"
                 f"  return hipSuccess;\n"
                 f"}}\n")
+
+    # Per-API custom handler body (special in/out value handling).
+    if entry.name in CUSTOM_PLAYBACK_BODIES:
+        return CUSTOM_PLAYBACK_BODIES[entry.name]
 
     # Manual playback APIs: emit an extern declaration only, body in hip_playback.cpp
     if entry.name in MANUAL_PLAYBACK_APIS:
