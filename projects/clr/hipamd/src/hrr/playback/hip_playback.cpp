@@ -757,7 +757,10 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         }
     }
 
-    if (ctx.sync_after_launch) {
+    // Skip the debug sync while a graph capture is active: hipDeviceSynchronize
+    // is illegal during stream capture and invalidates it (HIP 901). The original
+    // run never synced here either; syncs resume once capture ends.
+    if (ctx.sync_after_launch && !ctx.in_graph_capture) {
         // Clear any pre-existing error before sync so we get a clean error code.
         (void)hipGetLastError();
         if (ctx.trace_sync) {
@@ -1157,7 +1160,11 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
         // scrubbed; reused allocations carry stale bytes). Zero so replay is
         // deterministic and matches first-touch-zeroed assumptions. See
         // hrr_replay_zero_init().
-        if (hrr_replay_zero_init())
+        // Skip the zero-init memset while a graph capture is active: the original
+        // run never issued it, and an injected synchronous device memset during
+        // capture is illegal and invalidates the capture (HIP 901) for every
+        // subsequent op in the graph.
+        if (hrr_replay_zero_init() && !ctx.in_graph_capture)
             (void)hipMemset(live, 0, pad_sz);
         ctx.record_alloc(a->ptr, live, pad_sz);
         if (ctx.verbose && pad_sz > orig_sz)
@@ -1190,7 +1197,7 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     hipError_t r = hipMallocAsync(&live, pad_sz, stream);
     if (r == hipSuccess) {
-        if (hrr_replay_zero_init())
+        if (hrr_replay_zero_init() && !ctx.in_graph_capture)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
         ctx.record_alloc(a->dev_ptr, live, pad_sz);
     }
@@ -1207,7 +1214,7 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     hipError_t r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     if (r == hipSuccess) {
-        if (hrr_replay_zero_init())
+        if (hrr_replay_zero_init() && !ctx.in_graph_capture)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
         ctx.record_alloc(a->dev_ptr, live, pad_sz);
     }
