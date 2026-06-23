@@ -10446,15 +10446,15 @@ inline void execute_v_dot2acc_f32_f16_vop2([[maybe_unused]] Inst &inst,
       continue;
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.vsrc1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
+    uint32_t acc = inst.vdst.read_lane(wf, lane);
     float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
     float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
     float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
     float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));
-    float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));
+    float facc = std::bit_cast<float>(acc);
     facc += a0 * b0 + a1 * b1;
-    acc = static_cast<int32_t>(std::bit_cast<uint32_t>(facc));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
+    acc = std::bit_cast<uint32_t>(facc);
+    inst.vdst.write_lane(wf, lane, acc);
   }
 }
 

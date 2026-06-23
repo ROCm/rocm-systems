@@ -15532,7 +15532,9 @@ void VMadI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     int32_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
     int32_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     int32_t s2 = static_cast<int32_t>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(s0 * s1 + s2));
+    vdst.write_lane(wf, lane,
+                    static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1) +
+                        static_cast<uint32_t>(s2));
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
@@ -18363,12 +18365,12 @@ void VMulLoU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
-              static_cast<uint16_t>(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x1u) != 0
-                                                               ? (src0.read_lane(wf, lane) >> 16)
-                                                               : src0.read_lane(wf, lane)))) *
-              static_cast<uint16_t>(static_cast<uint16_t>(((amdgpu::vop3_opsel(inst_) & 0x2u) != 0
-                                                               ? (src1.read_lane(wf, lane) >> 16)
-                                                               : src1.read_lane(wf, lane))))))))));
+              static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint16_t>(
+                  ((amdgpu::vop3_opsel(inst_) & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)
+                                                           : src0.read_lane(wf, lane))))) *
+              static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint16_t>(
+                  ((amdgpu::vop3_opsel(inst_) & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)
+                                                           : src1.read_lane(wf, lane)))))))))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_) & 0x8u,
                                                 src_half);
     }

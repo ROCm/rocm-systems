@@ -79,7 +79,6 @@ from amdisa.codegen.execute.packed import (
     gen_mad_mix_f32,
     gen_mad_mix_lo_hi,
     gen_dot2,
-    gen_dot2_true16,
     gen_dot4,
     gen_dot8,
 )
@@ -3210,9 +3209,6 @@ class CodeGenerator:
             )
 
         # ----- VOP3P: packed / dot / mix / MFMA -----
-        if cls in ('dot2_f16_f16', 'dot2_bf16_bf16'):
-            return gen_dot2_true16(dst_ops, src_ops, cls)
-
         if cls.startswith('dot2_'):
             return gen_dot2(
                 dst_ops, src_ops, cls, opsel_exprs=self._vop3p_opsel_exprs()
