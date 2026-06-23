@@ -12,7 +12,7 @@
 
 * `hipFileOpStatusError()` has been renamed to `hipFileGetOpErrorString()`.
 * The `hipfile-doc` CMake target has been replaced with `doc`. The `AIS_BUILD_DOCS` CMake option must be enabled to build with this target.
-* `hipFileRead()` and `hipFileWrite()` transfer at most 0x7ffff000 (2,147,479,552) bytes. Both functions return the number of bytes actually transferred.
+* If a transfer is more than 0x7ffff000 (2,147,479,552) bytes, `hipFileRead()` and `hipFileWrite()` will now return once the transfer gets to x7ffff000 (2,147,479,552) bytes. 
 * The CMake namespace has changed from `roc::` to `hip::`
 * `AIS_BUILD_EXAMPLES` has been renamed to `AIS_INSTALL_EXAMPLES`
 * `AIS_USE_SANITIZERS` now also enables the following sanitizers: integer, float-divide-by-zero, local-bounds, vptr, nullability (in addition to address, leak, and undefined). Sanitizers should also now emit usable stack trace info.
