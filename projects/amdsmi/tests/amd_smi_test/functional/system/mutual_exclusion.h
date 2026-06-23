@@ -1,0 +1,64 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_
+#define TESTS_AMD_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_
+
+#include <string>
+
+#include "test_base.h"
+
+class TestMutualExclusion : public TestBase {
+ public:
+  TestMutualExclusion();
+
+  // @Brief: Destructor for test case of TestMutualExclusion
+  virtual ~TestMutualExclusion();
+
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
+
+  // @Brief: Core measurement execution
+  virtual void Run();
+
+  // @Brief: Clean up and retrieve the resource
+  virtual void Close();
+
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
+
+ private:
+  bool sleeper_process_;
+  int child_;
+  std::string orig_cross_process_env_;
+  bool orig_cross_process_env_was_set_;
+  // Pipe-based init handshake (replaces sleep-based ordering):
+  //   init_pipe_:         sleeper → tester  (sleeper amdsmi_init complete)
+  //   tester_ready_pipe_: tester → sleeper  (tester amdsmi_init complete)
+  int init_pipe_[2];
+  int tester_ready_pipe_[2];
+};
+
+#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_

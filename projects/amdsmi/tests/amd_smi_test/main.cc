@@ -24,47 +24,48 @@
 #include <cstdlib>
 
 #include "amd_smi/impl/amd_smi_utils.h"
-#include "functional/api_support_read.h"
-#include "functional/computepartition_memallocmode_read_write.h"
-#include "functional/computepartition_read_write.h"
-#include "functional/cross_process_serialization.h"
-#include "functional/err_cnt_read.h"
-#include "functional/evt_notif_read_write.h"
-#include "functional/fabric_read.h"
-#include "functional/fan_read.h"
-#include "functional/fan_read_write.h"
-#include "functional/frequencies_read.h"
-#include "functional/frequencies_read_write.h"
-#include "functional/gpu_busy_read.h"
-#include "functional/gpu_cache_read.h"
-#include "functional/gpu_metrics_read.h"
-#include "functional/gpu_partition_metrics_read.h"
-#include "functional/hw_topology_read.h"
-#include "functional/id_info_read.h"
-#include "functional/kfd_atfork_read.h"
-#include "functional/mem_page_info_read.h"
-#include "functional/mem_util_read.h"
-#include "functional/memory_read_write.h"
-#include "functional/memorypartition_read_write.h"
-#include "functional/metrics_counter_read.h"
-#include "functional/mutual_exclusion.h"
-#include "functional/overdrive_read.h"
-#include "functional/overdrive_read_write.h"
-#include "functional/pci_read_write.h"
-#include "functional/perf_cntr_read_write.h"
-#include "functional/perf_determinism.h"
-#include "functional/perf_level_read.h"
-#include "functional/perf_level_read_write.h"
-#include "functional/power_cap_read_write.h"
-#include "functional/power_read.h"
-#include "functional/power_read_write.h"
-#include "functional/process_info_read.h"
-#include "functional/sys_info_read.h"
-#include "functional/temp_read.h"
-#include "functional/version_read.h"
-#include "functional/volt_freq_curv_read.h"
-#include "functional/volt_read.h"
-#include "functional/xgmi_read_write.h"
+#include "functional/gpu/clock/frequencies_read.h"
+#include "functional/gpu/clock/frequencies_read_write.h"
+#include "functional/gpu/events/evt_notif_read_write.h"
+#include "functional/gpu/identity/id_info_read.h"
+#include "functional/gpu/identity/version_read.h"
+#include "functional/gpu/memory/mem_page_info_read.h"
+#include "functional/gpu/memory/mem_util_read.h"
+#include "functional/gpu/memory/memory_read_write.h"
+#include "functional/gpu/metrics/gpu_busy_read.h"
+#include "functional/gpu/metrics/gpu_cache_read.h"
+#include "functional/gpu/metrics/gpu_metrics_read.h"
+#include "functional/gpu/metrics/gpu_partition_metrics_read.h"
+#include "functional/gpu/metrics/metrics_counter_read.h"
+#include "functional/gpu/metrics/process_info_read.h"
+#include "functional/gpu/partition/computepartition_memallocmode_read_write.h"
+#include "functional/gpu/partition/computepartition_read_write.h"
+#include "functional/gpu/partition/memorypartition_read_write.h"
+#include "functional/gpu/pci/pci_read_write.h"
+#include "functional/gpu/perf/overdrive_read.h"
+#include "functional/gpu/perf/overdrive_read_write.h"
+#include "functional/gpu/perf/perf_cntr_read_write.h"
+#include "functional/gpu/perf/perf_determinism.h"
+#include "functional/gpu/perf/perf_level_read.h"
+#include "functional/gpu/perf/perf_level_read_write.h"
+#include "functional/gpu/perf/volt_freq_curv_read.h"
+#include "functional/gpu/perf/volt_read.h"
+#include "functional/gpu/power/power_cap_read_write.h"
+#include "functional/gpu/power/power_read.h"
+#include "functional/gpu/power/power_read_write.h"
+#include "functional/gpu/ras/err_cnt_read.h"
+#include "functional/gpu/thermal/fan_read.h"
+#include "functional/gpu/thermal/fan_read_write.h"
+#include "functional/gpu/thermal/temp_read.h"
+#include "functional/gpu/xgmi/xgmi_read_write.h"
+#include "functional/ifoe/fabric/fabric_read.h"
+#include "functional/ifoe/identity/ifoe_info_read.h"
+#include "functional/system/cross_process_serialization.h"
+#include "functional/system/hw_topology_read.h"
+#include "functional/system/init_shutdown_refcount.h"
+#include "functional/system/kfd_atfork_read.h"
+#include "functional/system/mutual_exclusion.h"
+#include "functional/system/sys_info_read.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "test_base.h"
 #include "test_common.h"
@@ -115,194 +116,156 @@ static void RunGenericTest(TestBase* test) {
 //  // from the standard pattern implemented there.
 //  RunGenericTest(&<test_obj>);
 // }
-
-TEST(amdsmitstReadOnly, TestVersionRead) {
+TEST(GpuFunctionalReadOnly, TestVersionRead) {
   TestVersionRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, FanRead) {
+TEST(GpuFunctionalReadOnly, FanRead) {
   TestFanRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadWrite, FanReadWrite) {
+TEST(GpuFunctionalReadWrite, FanReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestFanReadWrite tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TempRead) {
+TEST(GpuFunctionalReadOnly, TempRead) {
   TestTempRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, VoltRead) {
+TEST(GpuFunctionalReadOnly, VoltRead) {
   TestVoltRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestVoltCurvRead) {
+TEST(GpuFunctionalReadOnly, TestVoltCurvRead) {
   TestVoltCurvRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestPerfLevelRead) {
+TEST(GpuFunctionalReadOnly, TestPerfLevelRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPerfLevelRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadWrite, TestPerfLevelReadWrite) {
+TEST(GpuFunctionalReadWrite, TestPerfLevelReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPerfLevelReadWrite tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestOverdriveRead) {
+TEST(GpuFunctionalReadOnly, TestOverdriveRead) {
   TestOverdriveRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadWrite, TestOverdriveReadWrite) {
+TEST(GpuFunctionalReadWrite, TestOverdriveReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestOverdriveReadWrite tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestFrequenciesRead) {
+TEST(GpuFunctionalReadOnly, TestFrequenciesRead) {
   TestFrequenciesRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadWrite, TestFrequenciesReadWrite) {
+TEST(GpuFunctionalReadWrite, TestFrequenciesReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestFrequenciesReadWrite tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadWrite, TestPciReadWrite) {
+TEST(GpuFunctionalReadWrite, TestPciReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPciReadWrite tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestSysInfoRead) {
+TEST(GpuFunctionalReadOnly, TestSysInfoRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestSysInfoRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestGPUBusyRead) {
+TEST(GpuFunctionalReadOnly, TestGPUBusyRead) {
   TestGPUBusyRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestPowerRead) {
+TEST(GpuFunctionalReadOnly, TestPowerRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPowerRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadWrite, TestPowerReadWrite) {
+TEST(GpuFunctionalReadWrite, TestPowerReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerReadWrite tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadWrite, TestPowerCapReadWrite) {
+TEST(GpuFunctionalReadWrite, TestPowerCapReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerCapReadWrite tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestErrCntRead) {
+TEST(GpuFunctionalReadOnly, TestErrCntRead) {
   TestErrCntRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestMemUtilRead) {
+TEST(GpuFunctionalReadOnly, TestMemUtilRead) {
   TestMemUtilRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestKfdAtforkRead) {
-  TestKfdAtforkRead tst;
-  RunGenericTest(&tst);
-}
-
-TEST(amdsmitstReadOnly, TestIdInfoRead) {
+TEST(GpuFunctionalReadOnly, TestIdInfoRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestIdInfoRead tst;
   RunGenericTest(&tst);
 }
-TEST(amdsmitstReadWrite, TestPerfCntrReadWrite) {
+TEST(GpuFunctionalReadWrite, TestPerfCntrReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPerfCntrReadWrite tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestProcInfoRead) {
+TEST(GpuFunctionalReadOnly, TestProcInfoRead) {
   TestProcInfoRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestHWTopologyRead) {
+TEST(GpuFunctionalReadOnly, TestHWTopologyRead) {
   TestHWTopologyRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestGpuMetricsRead) {
+TEST(GpuFunctionalReadOnly, TestGpuMetricsRead) {
   TestGpuMetricsRead tst;
   RunGenericTest(&tst);
 }
-TEST(amdsmitstReadOnly, TestGpuPartitionMetricsRead) {
+TEST(GpuFunctionalReadOnly, TestGpuPartitionMetricsRead) {
   TestGpuPartitionMetricsRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestMetricsCounterRead) {
+TEST(GpuFunctionalReadOnly, TestMetricsCounterRead) {
   TestMetricsCounterRead tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadWrite, TestPerfDeterminism) {
+TEST(GpuFunctionalReadWrite, TestPerfDeterminism) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPerfDeterminism tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadWrite, TestXGMIReadWrite) {
+TEST(GpuFunctionalReadWrite, TestXGMIReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestXGMIReadWrite tst;
   RunGenericTest(&tst);
 }
-
-TEST(amdsmitstReadOnly, TestMemPageInfoRead) {
+TEST(GpuFunctionalReadOnly, TestMemPageInfoRead) {
   TestMemPageInfoRead tst;
   RunGenericTest(&tst);
 }
 
-TEST(amdsmitstReadOnly, TestAPISupportRead) {
-  TestAPISupportRead tst;
-  RunGenericTest(&tst);
-}
-
-TEST(amdsmitstReadOnly, TestMutualExclusion) {
+TEST(GpuFunctionalReadOnly, TestMutualExclusion) {
   TestMutualExclusion tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
@@ -311,7 +274,60 @@ TEST(amdsmitstReadOnly, TestMutualExclusion) {
   RunCustomTestEpilog(&tst);
 }
 
-TEST(amdsmitstReadOnly, TestCrossProcessSerialization) {
+TEST(GpuFunctionalReadWrite, TestComputePartitionReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestComputePartitionReadWrite tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadWrite, TestComputePartitionMemAllocModeReadWrite) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestComputePartitionMemAllocModeReadWrite tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadWrite, TestMemoryPartitionReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestMemoryPartitionReadWrite tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadWrite, TestEvtNotifReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestEvtNotifReadWrite tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadOnly, TestGPUCacheRead) {
+  TestGPUCacheRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadWrite, TestMemoryReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  TestMemoryReadWrite tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadOnly, TestKfdAtforkRead) {
+  TestKfdAtforkRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadOnly, TestFabricRead) {
+  TestFabricRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadOnly, TestIfoeInfoRead) {
+  TestIfoeInfoRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadOnly, TestCrossProcessSerialization) {
   TestCrossProcessSerialization tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
@@ -319,54 +335,8 @@ TEST(amdsmitstReadOnly, TestCrossProcessSerialization) {
   tst.Run();
   RunCustomTestEpilog(&tst);
 }
-
-TEST(amdsmitstReadWrite, TestComputePartitionReadWrite) {
-  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
-  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
-  TestComputePartitionReadWrite tst;
-  RunGenericTest(&tst);
-}
-
-TEST(amdsmitstReadWrite, TestComputePartitionMemAllocModeReadWrite) {
-  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
-  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
-  TestComputePartitionMemAllocModeReadWrite tst;
-  RunGenericTest(&tst);
-}
-
-TEST(amdsmitstReadWrite, TestMemoryPartitionReadWrite) {
-  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
-  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
-  TestMemoryPartitionReadWrite tst;
-  RunGenericTest(&tst);
-}
-
-TEST(amdsmitstReadWrite, TestEvtNotifReadWrite) {
-  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
-  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
-  TestEvtNotifReadWrite tst;
-  RunGenericTest(&tst);
-}
-
-TEST(amdsmitstReadOnly, TestGPUCacheRead) {
-  TestGPUCacheRead tst;
-  RunGenericTest(&tst);
-}
-
-TEST(amdsmitstReadWrite, TestMemoryReadWrite) {
-  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
-  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
-  TestMemoryReadWrite tst;
-  RunGenericTest(&tst);
-}
-
-TEST(amdsmitstReadOnly, TestFabricRead) {
-  TestFabricRead tst;
-  RunGenericTest(&tst);
-}
-
 /*
-TEST(amdsmitstReadOnly, TestConcurrentInit) {
+TEST(GpuFunctionalReadOnly, TestConcurrentInit) {
   TestConcurrentInit tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
