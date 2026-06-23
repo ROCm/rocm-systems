@@ -228,6 +228,10 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
+        "amdsmi_min_version(version): mark test as requiring minimum AMD-SMI version",
+    )
+    config.addinivalue_line(
+        "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
     # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
@@ -599,6 +603,20 @@ def pytest_collection_modifyitems(config, items) -> None:
                     item.add_marker(
                         pytest.mark.skip(
                             reason=f"oshrun version {'.'.join(map(str, system_version))} < required {req_version}"
+                        )
+                    )
+        if "amdsmi_min_version" in item.keywords:
+            req_version = item.get_closest_marker("amdsmi_min_version").args[0]
+            system_version = rocprof_config.capabilities.amdsmi_version
+            if system_version is None:
+                item.add_marker(pytest.mark.skip(reason="AMD-SMI version not found"))
+            else:
+                min_parts = req_version.split(".")
+                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:2])
+                if system_version < min_tuple:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason=f"AMD-SMI {'.'.join(map(str, system_version))} < required {req_version}"
                         )
                     )
         if "run_if_gpu_category" in item.keywords:
@@ -1072,6 +1090,7 @@ def _ctest_generate_tests(
         "no_docker",
         "oshrun_min_version",
         "rocm_min_version",
+        "amdsmi_min_version",
         "run_if_gpu_category",
         "preserve",
         # For CTests

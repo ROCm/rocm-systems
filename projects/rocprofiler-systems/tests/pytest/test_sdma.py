@@ -17,9 +17,8 @@ import pytest
 from pathlib import Path
 
 from conftest import RocprofsysTest
-from rocprofsys import amdsmi_sdma_supported
 
-pytestmark = [pytest.mark.gpu, pytest.mark.ci_enable]
+pytestmark = [pytest.mark.gpu]
 
 
 @pytest.fixture
@@ -41,13 +40,11 @@ def sdma_rules(validation_rules_dir: Path) -> list[Path]:
     ]
 
 
-@pytest.mark.skipif(
-    not amdsmi_sdma_supported(),
-    reason="SDMA tests require AMD-SMI >= 26.3",
-)
+@pytest.mark.amdsmi_min_version("26.3")
 class TestSDMA(RocprofsysTest):
     """Tests for SDMA usage metrics (Perfetto and ROCPD)."""
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "mode", [pytest.param("sys_run", marks=pytest.mark.rocpd("sdma_env"))]
     )
@@ -58,7 +55,6 @@ class TestSDMA(RocprofsysTest):
             "sdma-test",
             env=sdma_env,
             check_target_arch=True,
-            timeout=120,
             run_args=["-n", "2", "-s", "64"],
         )
         self.assert_regex(result)
