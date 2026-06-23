@@ -4,11 +4,11 @@
    :description: hipFile documentation.
    :keywords: hipFile, AMD, ROCm, GPU
 
-*********************
+**********************
 hipFile documentation
-*********************
+**********************
 
-hipFile is AMD's Infinity Storage library that provides direct-to-GPU I/O for the ROCm platform. It bypasses the CPU for data transfers between storage and GPU memory. The library exposes a C API and Python bindings for registering files and GPU buffers, then performing synchronous, asynchronous, and batch read/write operations directly into device memory. hipFile uses a fastpath through HIP runtime extensions, with automatic fallback to POSIX I/O.
+hipFile is AMD's Infinity Storage library that provides direct-to-GPU I/O for the ROCm platform. The library provides C and Python APIs for synchronous, asynchronous, and batch I/O operations. hipFile automatically falls back to POSIX I/O when operations are unable to use the direct-to-GPU path.
 
 The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile>`_.
 
@@ -24,13 +24,12 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
    .. grid-item-card:: How to
 
       * :doc:`Register a file and GPU buffer for GPU I/O <how-to/register-file-and-buffer>`
-      * :doc:`Exercise hipFile with fio <how-to/use-with-fio>`
+      * :doc:`Benchmark hipFile with fio <how-to/use-with-fio>`
       * :doc:`Use the hipFile Python API <how-to/use-python-api>`
 
    .. grid-item-card:: Tutorials
 
       * :doc:`Copy a file via GPU memory using hipFile <tutorials/copy-a-file>`
-      * :doc:`Synchronous file copy walkthrough <tutorials/synchronous-file-copy>`
       * :doc:`Async multistream I/O <tutorials/async-multistream-io>`
       * :doc:`Query the hipFile version <tutorials/get-version>`
       * :doc:`Perform GPU I/O with the Python bindings <tutorials/python-gpu-io>`
@@ -45,7 +44,7 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
       * :doc:`hipFile environment variables <reference/hipFile-environment-variables>`
       * :doc:`cuFile compatibility <reference/hipFile-cuFile-compatibility>`
       * :doc:`hipFile API reference <reference/hipFile-api-reference>`
-      
+
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
