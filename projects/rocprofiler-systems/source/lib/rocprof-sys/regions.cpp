@@ -108,7 +108,7 @@ rocprofsys_pop_trace_hidden(const char* name)
 extern "C" void
 rocprofsys_flush_pending_region_cache_hidden()
 {
-    flush_pending_cached_entries();
+    rocprofsys::component::category_region_base::flush_pending_cached_entries();
 }
 
 //======================================================================================//
