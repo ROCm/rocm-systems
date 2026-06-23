@@ -25,7 +25,12 @@ RUN apt update --yes \
         && rm -rf /var/cache/apt/ /var/lib/apt/lists/*
 
 # install Rust toolchain
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+RUN curl -sSf -o /tmp/rustup-init https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init \
+    && curl -sSf -o /tmp/rustup-init.sha256 https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256 \
+    && sha256sum -c /tmp/rustup-init.sha256 \
+    && chmod +x /tmp/rustup-init \
+    && /tmp/rustup-init -y --default-toolchain stable \
+    && rm /tmp/rustup-init /tmp/rustup-init.sha256
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /src
