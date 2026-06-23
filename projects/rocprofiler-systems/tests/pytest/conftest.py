@@ -85,6 +85,9 @@ ROCPROFSYS_RUNNER_NAMES = list(ROCPROFSYS_RUNNER_CLASSES.keys())
 # rocprofiler-sdk < 1.2.2 can abort on undefined KFD node IDs; product disables KFD domains.
 KFD_MIN_SDK_VERSION: tuple[int, int, int] = (1, 2, 2)
 
+# rocprofiler-sdk < 1.3.3 does not expose the hipFILE callback tracing domain.
+HIPFILE_MIN_SDK_VERSION: tuple[int, int, int] = (1, 3, 3)
+
 # ============================================================================
 #
 # Pytest Hooks (Placed in the general order they are called)
@@ -574,6 +577,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = kfd_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
+        if "hipfile" in item.keywords:
+            _msg = hipfile_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
         if "rocm_min_version" in item.keywords:
             req_version = item.get_closest_marker("rocm_min_version").args[0]
             system_version = rocprof_config.rocm_version
@@ -808,6 +815,18 @@ def kfd_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     _found = ".".join(map(str, sdk)) if sdk is not None else "not found"
     return (
         f"Requires rocprofiler-sdk minimum {_req}, but system detected version {_found}"
+    )
+
+
+def hipfile_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    sdk = rocprof_config.capabilities.rocprofiler_sdk_version
+    if sdk is not None and sdk >= HIPFILE_MIN_SDK_VERSION:
+        return None
+    _req = ".".join(map(str, HIPFILE_MIN_SDK_VERSION))
+    _found = ".".join(map(str, sdk)) if sdk is not None else "not found"
+    return (
+        f"Requires rocprofiler-sdk minimum {_req} for hipFILE tracing, "
+        f"but system detected version {_found}"
     )
 
 
