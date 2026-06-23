@@ -24,6 +24,7 @@
 #include <nlohmann/json.hpp>
 #include "outputfile.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <fstream>
 #include <iostream>
@@ -41,23 +42,110 @@ std::map<pcinfo_t, int> kernel_ids{{pcinfo_t{0, 0}, 0}};
 std::atomic<int>        current_id{1};
 
 int
-get_kernel_id(pcinfo_t pc)
+get_kernel_id(const pcinfo_t& pc)
 {
     if(kernel_ids.find(pc) != kernel_ids.end()) return kernel_ids.at(pc);
 
     return kernel_ids.emplace(pc, current_id.fetch_add(1)).first->second;
+}
+
+std::string
+get_kernel_name(const std::shared_ptr<OccupancyFile::AddressTable>& table, const pcinfo_t& pc)
+{
+    std::stringstream ss;
+    try
+    {
+        ss << table->getSymbolMap(pc.code_object_id).at(pc.address).name;
+    } catch(std::exception& e)
+    {
+        ss << pc.code_object_id << " / 0x" << std::hex << pc.address << std::dec;
+    }
+    return ss.str();
+}
+
+nlohmann::json
+pc_to_json(const pcinfo_t& pc)
+{
+    return nlohmann::json{{"address", pc.address}, {"code_object_id", pc.code_object_id}};
+}
+
+nlohmann::json
+dispatch_to_json(const dispatch_t&                                   dispatch,
+                 const std::shared_ptr<OccupancyFile::AddressTable>& table)
+{
+    const auto kernel_id = get_kernel_id(dispatch.entry_point);
+    return nlohmann::json{
+        {"kind", "dispatch"},
+        {"time", dispatch.time},
+        {"me_id", static_cast<uint32_t>(dispatch.me_id)},
+        {"pipe_id", static_cast<uint32_t>(dispatch.pipe_id)},
+        {"kernel_id", kernel_id},
+        {"kernel_name", get_kernel_name(table, dispatch.entry_point)},
+        {"entry_point", pc_to_json(dispatch.entry_point)},
+        {"user_sgprs", dispatch.user_sgprs},
+        {"vgprs", dispatch.vgprs},
+        {"sgprs", dispatch.sgprs},
+        {"lds_size", dispatch.lds_size},
+        {"thread_dim_x", dispatch.thread_dim_x},
+        {"thread_dim_y", dispatch.thread_dim_y},
+        {"thread_dim_z", dispatch.thread_dim_z},
+        {"dispatch_pkt_addr", dispatch.dispatch_pkt_addr},
+        {"byte_offset", dispatch.byte_offset},
+        {"flags", dispatch.flags},
+    };
+}
+
+nlohmann::json
+event_to_json(const trace_event_t& event)
+{
+    auto json_event = nlohmann::json{
+        {"kind", "event"},
+        {"time", event.time},
+        {"type", static_cast<int>(event.type)},
+        {"me_id", static_cast<uint32_t>(event.me_id)},
+        {"pipe_id", static_cast<uint32_t>(event.pipe_id)},
+        {"flags", event.flags},
+        {"payload", event.payload.raw},
+        {"byte_offset", event.byte_offset},
+    };
+
+    if(event.type == ROCPROFILER_THREAD_TRACE_DECODER_EVENT_CODE_OBJECT_LOAD ||
+       event.type == ROCPROFILER_THREAD_TRACE_DECODER_EVENT_CODE_OBJECT_UNLOAD)
+        json_event["code_object_id"] = event.payload.code_object_id;
+
+    if(event.type == ROCPROFILER_THREAD_TRACE_DECODER_EVENT_CLUSTER_BARRIER)
+    {
+        json_event["cluster_id"] = event.payload.cluster_barrier.cluster_id;
+        json_event["barrier_id"] = event.payload.cluster_barrier.barrier_id;
+    }
+
+    return json_event;
 }
 }  // namespace
 
 namespace OccupancyFile
 {
 void
-OccupancyFile(const Fspath&                                     dir,
-              std::shared_ptr<AddressTable>&                    table,
-              const std::map<size_t, std::vector<occupancy_t>>& occ)
+OccupancyFile(const Fspath&                                       dir,
+              std::shared_ptr<AddressTable>&                      table,
+              const std::map<size_t, std::vector<occupancy_t>>&   occ,
+              const std::map<size_t, std::vector<trace_event_t>>& events,
+              const std::map<size_t, std::vector<dispatch_t>>&    dispatches)
 {
     if(!GlobalDefs::get().has_format("json")) return;
     nlohmann::json jocc;
+
+    jocc["occupancy_fields"] = {"time",
+                                "cu",
+                                "simd",
+                                "wave_id",
+                                "start",
+                                "kernel_id",
+                                "me_id",
+                                "pipe_id",
+                                "is_ext",
+                                "workgroup_id",
+                                "cluster_id"};
 
     for(const auto& [se, eventlist] : occ)
     {
@@ -71,25 +159,48 @@ OccupancyFile(const Fspath&                                     dir,
             json_event.push_back(event.wave_id);
             json_event.push_back(event.start);
             json_event.push_back(get_kernel_id(event.pc));
+            json_event.push_back(event.me_id);
+            json_event.push_back(event.pipe_id);
+            json_event.push_back(event.is_ext);
+            json_event.push_back(event.workgroup_id);
+            json_event.push_back(event.cluster_id);
             list.push_back(json_event);
         }
         jocc[std::to_string(se)] = list;
     }
 
-    for(auto& [pc, id] : kernel_ids)
+    std::map<size_t, std::vector<std::pair<int64_t, nlohmann::json>>> event_timelines;
+    for(const auto& [se, dispatchlist] : dispatches)
     {
-        std::stringstream ss;
-        try
-        {
-            ss << table->getSymbolMap(pc.code_object_id).at(pc.address).name;
-        } catch(std::exception& e)
-        {
-            ss << pc.code_object_id << " / 0x" << std::hex << pc.address << std::dec;
-        }
-        jocc["dispatches"][std::to_string(id)] = ss.str();
+        auto& timeline = event_timelines[se];
+        for(const auto& dispatch : dispatchlist)
+            timeline.emplace_back(dispatch.time, dispatch_to_json(dispatch, table));
     }
 
-    jocc["version"] = "3.0.0";
+    for(const auto& [se, eventlist] : events)
+    {
+        auto& timeline = event_timelines[se];
+        for(const auto& event : eventlist)
+            timeline.emplace_back(event.time, event_to_json(event));
+    }
+
+    jocc["events"] = nlohmann::json::object();
+    for(auto& [se, timeline] : event_timelines)
+    {
+        std::stable_sort(timeline.begin(), timeline.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.first < rhs.first;
+        });
+
+        nlohmann::json json_timeline = nlohmann::json::array();
+        for(auto& entry : timeline)
+            json_timeline.push_back(std::move(entry.second));
+        jocc["events"][std::to_string(se)] = std::move(json_timeline);
+    }
+
+    for(auto& [pc, id] : kernel_ids)
+        jocc["dispatches"][std::to_string(id)] = get_kernel_name(table, pc);
+
+    jocc["version"] = TOOL_VERSION;
 
     OutputFile(dir / "occupancy.json") << jocc;
 }

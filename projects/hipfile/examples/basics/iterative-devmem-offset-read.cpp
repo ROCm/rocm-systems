@@ -135,6 +135,13 @@ main(int argc, char *argv[])
         goto free_devbuf;
     }
 
+    /* hipMemset is async w.r.t. the host; block until it completes (testing). */
+    hip_err = hipDeviceSynchronize();
+    if (hipSuccess != hip_err) {
+        fprintf(stderr, "Could not synchronize after memset (%d)\n", hip_err);
+        goto free_devbuf;
+    }
+
     hipfile_err = hipFileBufRegister(devbuf, alloc_size, 0);
     if (hipFileSuccess != hipfile_err.err) {
         fprintf(stderr, "Buffer register failed (%s)\n", hipFileGetOpErrorString(hipfile_err.err));

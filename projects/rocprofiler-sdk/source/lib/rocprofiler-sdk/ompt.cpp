@@ -176,7 +176,7 @@ initialize(ompt_function_lookup_t lookup, int /*initial_device_num*/, ompt_data_
     set_ompt_callbacks();
     init_status.store(1);
 
-    return 1;  // bizarre abberation in the OMPT spec, not 0
+    return 1;  // bizarre aberration in the OMPT spec, not 0
 }
 #undef SETCB
 

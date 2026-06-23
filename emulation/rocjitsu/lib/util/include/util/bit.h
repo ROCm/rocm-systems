@@ -249,6 +249,23 @@ constexpr inline T align_up(T val, T alignment) {
   return (val + alignment - 1) & ~(alignment - 1);
 }
 
+/// @brief Divide @p numerator by @p denominator, rounding up.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr T ceil_div(T numerator, T denominator) {
+  assert(denominator != 0);
+  return numerator / denominator + (numerator % denominator != 0 ? T{1} : T{0});
+}
+
+/// @brief Return true when @p val is aligned to @p alignment.
+/// @param alignment Must be a power of 2.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline bool is_aligned(T val, T alignment) {
+  assert(std::has_single_bit(alignment));
+  return (val & (alignment - 1)) == 0;
+}
+
 } // namespace util
 
 #endif // UTIL_BIT_H_

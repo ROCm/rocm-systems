@@ -414,7 +414,7 @@ TEST_CASE("Unit_hipLaunchParmFunctor_kernel_arg_prefetch") {
     HIP_SKIP_TEST("Kernel arg prefetch is not supported on the device. Skipped.");
   }
 #else
-TEST_CASE("Unit_hipLaunchParmFunctor") {
+HIP_TEST_CASE(Unit_hipLaunchParmFunctor) {
 #endif  // KERNEL_ARG_PREFETCH
   HipFunctorTests FunctorTests;
 

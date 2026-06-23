@@ -21,38 +21,23 @@
 struct unknown
 {};
 
-template <typename T, typename U = typename T::value_type>
-constexpr bool
-available_value_type_alias(int)
-{
-    return true;
-}
-
-template <typename T, typename U = unknown>
-constexpr bool
-available_value_type_alias(long)
-{
-    return false;
-}
-
-template <typename Type, bool>
-struct component_value_type;
+template <typename T>
+concept has_value_type = requires { typename T::value_type; };
 
 template <typename Type>
-struct component_value_type<Type, true>
+struct component_value_type
+{
+    using type = unknown;
+};
+
+template <has_value_type Type>
+struct component_value_type<Type>
 {
     using type = typename Type::value_type;
 };
 
 template <typename Type>
-struct component_value_type<Type, false>
-{
-    using type = unknown;
-};
-
-template <typename Type>
-using component_value_type_t =
-    typename component_value_type<Type, available_value_type_alias<Type>(0)>::type;
+using component_value_type_t = typename component_value_type<Type>::type;
 
 //--------------------------------------------------------------------------------------//
 
