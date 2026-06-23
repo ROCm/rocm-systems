@@ -102,7 +102,37 @@ static bool run_single_test(int model_id, int num_nodes) {
     bool algo_time_ok = (agTimeResult == TOPO_EXPL_SUCCESS && agTime >= 0.0f &&
                          arTimeResult == TOPO_EXPL_SUCCESS && arTime >= 0.0f);
 
-    test_result.success = rank_info_ok && algo_info_ok && algo_time_ok;
+    // Regression check for the NCCL 2.29.2 "hang on GB200/300 + CX8 when the user
+    // disables GDR" fix.
+    //
+    // On C2C platforms (coherent GPU<->CPU link), ncclTopoComputePaths() promotes a
+    // GPU->NIC path to PATH_P2C when the merged GPU/NIC->CPU path is P2C (the GPU is
+    // C2C to the CPU and the NIC is PHB on that CPU). The original code applied this
+    // promotion to EVERY NIC, including non-local ones that should instead be reached
+    // via PXN. That false "P2C closeness" broke PXN preference / GDR routing and caused
+    // a hang when GDR was disabled. The fix (ncclTopoGetLocal()-gated loop) only
+    // promotes a GPU's local (highest-bandwidth) NIC(s) to P2C.
+    //
+    // Invariant locked in here: a NIC may only carry PATH_P2C to a GPU if it is one of
+    // that GPU's local NICs. For non-C2C models no path is ever P2C, so this is vacuous;
+    // for the topo_2p_c2c_2nic model the pre-fix code promotes the slow, non-local NIC
+    // to P2C and trips this check.
+    bool p2c_locality_ok = true;
+    const int p2cType = topoExplGetPathTypeP2C();
+    for (int r = 0; r < expected_nranks && p2c_locality_ok; r++) {
+        int netCount = 0;
+        if (topoExplGetNetCount(context, r, &netCount) != TOPO_EXPL_SUCCESS) continue;
+        for (int n = 0; n < netCount && p2c_locality_ok; n++) {
+            int pathType = -1, isLocal = 0;
+            if (topoExplGetNetPathInfo(context, r, n, &pathType, &isLocal) != TOPO_EXPL_SUCCESS)
+                continue;
+            if (pathType == p2cType && !isLocal) {
+                p2c_locality_ok = false;
+            }
+        }
+    }
+
+    test_result.success = rank_info_ok && algo_info_ok && algo_time_ok && p2c_locality_ok;
     test_result.nranks = expected_nranks;
     test_result.nnodes = expected_nnodes;
 
@@ -111,8 +141,10 @@ static bool run_single_test(int model_id, int num_nodes) {
             test_result.error_msg = "Failed to get rank info";
         } else if (!algo_info_ok) {
             test_result.error_msg = "Failed to get algorithm info";
-        } else {
+        } else if (!algo_time_ok) {
             test_result.error_msg = "No valid algo/proto time (tuning may be broken)";
+        } else {
+            test_result.error_msg = "Non-local NIC promoted to PATH_P2C on C2C platform - see NCCL 2.29.2 GDR/CX8 hang fix";
         }
     }
     

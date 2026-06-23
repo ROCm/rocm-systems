@@ -389,3 +389,72 @@ TopoExplResult topoExplGetAlgoTime(
   
   return TOPO_EXPL_SUCCESS;
 }
+
+TopoExplResult topoExplGetNetCount(
+    TopoExplContext* context,
+    int rank,
+    int* netCount) {
+
+  if (!context || !netCount) {
+    return TOPO_EXPL_INVALID_ARG;
+  }
+  if (rank < 0 || rank >= context->nRanks) {
+    return TOPO_EXPL_INVALID_ARG;
+  }
+
+  struct ncclTopoSystem* system = context->comms[rank].topo;
+  if (!system) {
+    return TOPO_EXPL_INTERNAL_ERROR;
+  }
+
+  *netCount = system->nodes[NET].count;
+  return TOPO_EXPL_SUCCESS;
+}
+
+TopoExplResult topoExplGetNetPathInfo(
+    TopoExplContext* context,
+    int rank,
+    int netIndex,
+    int* pathType,
+    int* isLocal) {
+
+  if (!context || !pathType || !isLocal) {
+    return TOPO_EXPL_INVALID_ARG;
+  }
+  if (rank < 0 || rank >= context->nRanks) {
+    return TOPO_EXPL_INVALID_ARG;
+  }
+
+  struct ncclTopoSystem* system = context->comms[rank].topo;
+  if (!system) {
+    return TOPO_EXPL_INTERNAL_ERROR;
+  }
+  if (netIndex < 0 || netIndex >= system->nodes[NET].count) {
+    return TOPO_EXPL_INVALID_ARG;
+  }
+
+  int g = -1;
+  TOPO_NCCLCHECK(ncclTopoRankToIndex(system, rank, &g, /*showWarn=*/true));
+
+  struct ncclTopoLinkList* netPaths = system->nodes[GPU].nodes[g].paths[NET];
+  if (netPaths == NULL) {
+    // No physical NIC path from this GPU (e.g. MNNVL remote GPU).
+    return TOPO_EXPL_INTERNAL_ERROR;
+  }
+  *pathType = netPaths[netIndex].type;
+
+  // Determine whether netIndex is one of the GPU's local (highest-bandwidth) NICs.
+  int locals[NCCL_TOPO_MAX_NODES];
+  int localCount = 0;
+  TOPO_NCCLCHECK(ncclTopoGetLocal(system, GPU, g, NET, locals, &localCount, NULL));
+  *isLocal = 0;
+  for (int i = 0; i < localCount; i++) {
+    if (locals[i] == netIndex) { *isLocal = 1; break; }
+  }
+
+  return TOPO_EXPL_SUCCESS;
+}
+
+int topoExplGetPathTypeP2C(void) {
+  return PATH_P2C;
+}

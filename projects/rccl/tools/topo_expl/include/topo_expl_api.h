@@ -137,6 +137,27 @@ TopoExplResult topoExplGetAlgoTime(
     uint64_t count,
     float* time);
 
+// Number of NET (NIC) nodes in the topology visible to a given rank's GPU.
+TopoExplResult topoExplGetNetCount(
+    TopoExplContext* context,
+    int rank,
+    int* netCount);
+
+// For a given rank's GPU, query the computed topology path to NET node `netIndex`:
+//   *pathType -> RCCL PATH_* value (PATH_LOC=0 .. PATH_DIS=11). See
+//                topoExplGetPathTypeP2C() for the P2C sentinel.
+//   *isLocal  -> 1 if `netIndex` is one of the GPU's "local" (highest-bandwidth)
+//                NICs as selected by ncclTopoGetLocal(), else 0.
+TopoExplResult topoExplGetNetPathInfo(
+    TopoExplContext* context,
+    int rank,
+    int netIndex,
+    int* pathType,
+    int* isLocal);
+
+// Returns RCCL's PATH_P2C constant so tests stay bound to the library enum.
+int topoExplGetPathTypeP2C(void);
+
 #ifdef __cplusplus
 }
 #endif

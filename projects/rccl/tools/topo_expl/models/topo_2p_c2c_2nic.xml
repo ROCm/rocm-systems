@@ -1,0 +1,53 @@
+<!--
+ - Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ - See LICENSE.txt for license information
+ -
+ - Synthetic C2C (GPU<->CPU coherent link) topology used to regression-test the
+ - NCCL 2.29.2 "hang on GB200/300 + CX8 when GDR is disabled" fix.
+ -
+ - Two GPUs are attached to a single CPU/NUMA node through a coherent C2C link
+ - (mimicking a Grace/MI300A-style superchip). Two NICs hang off the same CPU
+ - root complex (both PHB to the CPU) but at different bandwidths:
+ -   * mlx5_0 (fast, 400 Gb/s) -> highest-bandwidth NIC => "local" to the GPUs
+ -   * mlx5_1 (slow, 100 Gb/s) -> NOT the closest NIC => must be reached via PXN
+ -
+ - The fix restricts the C2C+PHB "P2C" path promotion in ncclTopoComputePaths()
+ - to a GPU's local NIC(s). Before the fix, every NIC whose merged GPU/NIC->CPU
+ - path was P2C (including the slow, non-local mlx5_1) was promoted to PATH_P2C,
+ - which broke PXN preference / GDR routing and caused the hang. This model makes
+ - that divergence observable offline.
+ -->
+<system version="2">
+  <cpu numaid="0" affinity="ffffffff,ffffffff" arch="x86_64" vendor="GenuineIntel" familyid="6" modelid="143">
+    <!-- Fast NIC: 400 Gb/s, directly under the CPU root complex (PHB) -->
+    <pci busid="0000:03:00.0" class="0x020000" vendor="0x15b3" device="0x1023" link_speed="32.0 GT/s PCIe" link_width="16">
+      <nic>
+        <net name="mlx5_0" dev="0" latency="0" speed="400000" port="1" guid="0x0000000000000001" maxconn="131072" gdr="1"/>
+      </nic>
+    </pci>
+    <!-- Slow NIC: 100 Gb/s, directly under the CPU root complex (PHB) -->
+    <pci busid="0000:04:00.0" class="0x020000" vendor="0x15b3" device="0x1023" link_speed="8.0 GT/s PCIe" link_width="16">
+      <nic>
+        <net name="mlx5_1" dev="1" latency="0" speed="100000" port="1" guid="0x0000000000000002" maxconn="131072" gdr="1"/>
+      </nic>
+    </pci>
+    <!-- GPU 0: attached to the CPU via a coherent C2C link -->
+    <pci busid="0000:08:00.0" class="0x060400" link_speed="32.0 GT/s PCIe" link_width="16">
+      <pci busid="0000:09:00.0" class="0x120000" vendor="0x1002" device="0x74a0" link_speed="32.0 GT/s PCIe" link_width="16">
+        <gpu dev="0" sm="304" gcn="gfx942" arch="38911" rank="0" gdr="1">
+          <c2c count="8" bw="50000"/>
+          <xgmi target="0000:0b:00.0" count="8" tclass="0x120000"/>
+        </gpu>
+      </pci>
+    </pci>
+    <!-- GPU 1: attached to the CPU via a coherent C2C link -->
+    <pci busid="0000:0a:00.0" class="0x060400" link_speed="32.0 GT/s PCIe" link_width="16">
+      <pci busid="0000:0b:00.0" class="0x120000" vendor="0x1002" device="0x74a0" link_speed="32.0 GT/s PCIe" link_width="16">
+        <gpu dev="1" sm="304" gcn="gfx942" arch="38911" rank="1" gdr="1">
+          <c2c count="8" bw="50000"/>
+          <xgmi target="0000:09:00.0" count="8" tclass="0x120000"/>
+        </gpu>
+      </pci>
+    </pci>
+  </cpu>
+</system>

@@ -350,7 +350,11 @@ ncclResult_t ncclTopoXmlLoadC2c(FILE* file, struct ncclXml* xml, struct ncclXmlN
 }
 ncclResult_t ncclTopoXmlLoadGpu(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  struct xmlHandler handlers[] = { { "xgmi", ncclTopoXmlLoadNvlink } };
+  // Accept <c2c> on AMD too: coherent GPU<->CPU links (e.g. MI300A-class APUs, or
+  // when ingesting NCCL-format topology files) must be parsed so the C2C+PHB path
+  // logic in ncclTopoComputePaths()/ncclTopoCheckGdr() is exercised. This also fixes
+  // the handler-count mismatch below (nHandlers was 2 with a single entry).
+  struct xmlHandler handlers[] = { { "xgmi", ncclTopoXmlLoadNvlink }, { "c2c", ncclTopoXmlLoadC2c } };
 #else
   struct xmlHandler handlers[] = { { "nvlink", ncclTopoXmlLoadNvlink }, { "c2c", ncclTopoXmlLoadC2c } };
 #endif
