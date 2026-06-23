@@ -43,7 +43,7 @@ class DefaultContextProxy {
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  explicit DefaultContextProxy(ROBackend* backend, TeamInfo *tinfo,
+  explicit DefaultContextProxy(ROBackend* backend, [[maybe_unused]] TeamInfo *tinfo,
                                [[maybe_unused]] const HIPAllocator& alloc = HIPAllocator(),
                                size_t num_elems = 1)
   : proxy_{num_elems}, constructed_{true} {
