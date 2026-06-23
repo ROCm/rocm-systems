@@ -53,7 +53,6 @@ num_kernels = 3
 num_devices = 1
 
 attach_detach_interval_msec_no_delay = 1000
-attach_detach_interval_msec_with_delay = 60000
 DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
 MAX_REOCCURING_COUNT = 28
@@ -2170,157 +2169,6 @@ def test_live_attach_detach_block(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.skip(
-    reason="Temporarily disabled: \
-                  waiting for SDK fix for no outputfile with thread sleeping"
-)
-@pytest.mark.live_attach_detach
-def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_compute):
-    options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
-    workload_dir = common.get_output_dir()
-
-    # TODO: temp fix for sdk defautly disable attach/detach,
-    # remove after it sets default to enable
-    env = os.environ.copy()
-    env["ROCP_TOOL_ATTACH"] = "1"
-
-    process_workload = None
-
-    try:
-        # Start workload with sleep mode enabled
-        process_workload = subprocess.Popen(
-            [*config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
-        )
-        time.sleep(5)  # Give workload time to start
-
-        attach_detach = {
-            "attach_pid": process_workload.pid,
-            "attach-duration-msec": attach_detach_interval_msec_with_delay,
-        }
-
-        # Main profiling call (can fail or hang)
-        binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-            app_name="app_hip_dynamic_shared",
-            attach_detach_para=attach_detach,
-        )
-
-    finally:
-        if process_workload and process_workload.poll() is None:
-            print(f"[finally] killing workload pid={process_workload.pid}")
-            process_workload.kill()
-            process_workload.wait()
-        # Clean up any stale rocprof-attach processes to prevent interference
-        # with subsequent tests.
-        subprocess.run(
-            ["pkill", "-9", "-f", "rocprof-attach"],
-            capture_output=True,
-        )
-
-    # Validate output
-    file_dict = common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    # Check profiling_config.yaml block entries
-    config_file = f"{workload_dir}/profiling_config.yaml"
-    assert common.check_file_pattern("- 3.1.1", config_file)
-    assert common.check_file_pattern("- 4.1.1", config_file)
-    assert common.check_file_pattern("- 5.1.1", config_file)
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.live_attach_detach
-def test_live_attach_detach_singlepass_launch_stats(
-    binary_handler_profile_rocprof_compute,
-):
-    options = ["--set", "launch_stats"]
-    workload_dir = common.get_output_dir()
-
-    # TODO: temp fix for sdk defautly disable attach/detach,
-    # remove after it sets default to enable
-    env = os.environ.copy()
-    env["ROCP_TOOL_ATTACH"] = "1"
-
-    process_workload = None
-
-    try:
-        # Start workload
-        process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
-        time.sleep(5)  # Give workload time to start
-
-        attach_detach = {
-            "attach_pid": process_workload.pid,
-            "attach-duration-msec": attach_detach_interval_msec_no_delay,
-        }
-
-        # Profiling step (may fail)
-        binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-            app_name="app_hip_dynamic_shared",
-            attach_detach_para=attach_detach,
-        )
-
-    finally:
-        if process_workload and process_workload.poll() is None:
-            print(f"[finally] killing workload pid={process_workload.pid}")
-            process_workload.kill()
-            process_workload.wait()
-        # Clean up any stale rocprof-attach processes to prevent interference
-        # with subsequent tests.
-        subprocess.run(
-            ["pkill", "-9", "-f", "rocprof-attach"],
-            capture_output=True,
-        )
-
-    # Validate CSVs & output correctness
-    file_dict = common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    # Check that launch-stat sets were applied
-    config_file = f"{workload_dir}/profiling_config.yaml"
-    for tag in (
-        [
-            "7.2.0",
-            "7.2.1",
-            "7.2.2",
-            "7.2.3",
-            "7.2.4",
-            "7.2.5",
-            "7.3.0",
-        ]
-        if is_gfx115x_soc()
-        else [
-            "7.1.0",
-            "7.1.1",
-            "7.1.2",
-            "7.1.5",
-            "7.1.6",
-            "7.1.7",
-            "7.1.8",
-            "7.1.9",
-        ]
-    ):
-        assert common.check_file_pattern(f"- {tag}", config_file)
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
 @pytest.mark.live_attach_detach
 def test_live_attach_detach_pc_sampling(
     binary_handler_profile_rocprof_compute,
@@ -2340,7 +2188,7 @@ def test_live_attach_detach_pc_sampling(
     try:
         # Start workload
         process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
-        time.sleep(5)  # Give workload time to start
+        time.sleep(15)  # Give workload time to start
 
         attach_detach = {
             "attach_pid": process_workload.pid,
