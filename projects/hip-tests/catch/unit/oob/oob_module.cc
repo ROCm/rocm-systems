@@ -1,8 +1,8 @@
 #include <hip_test_common.hh>
 #include <string_view>
 
-#define DECL_MODULE_PATH(input_name)                                                               \
-  constexpr std::string_view input_name = OOB_FIXTURES_DIR "/" #input_name ".co"
+// Fixtures are installed flat alongside the test binary; load by basename (cwd-relative).
+#define DECL_MODULE_PATH(input_name) constexpr std::string_view input_name = #input_name ".co"
 
 HIP_TEST_CASE(OOB_hip_module_load_over) {
   DECL_MODULE_PATH(oob_kernel);

@@ -22,7 +22,9 @@ add_custom_command(
             ${CMAKE_CURRENT_BINARY_DIR}
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/oob_kernel.co
             ${CMAKE_CURRENT_SOURCE_DIR}/gen_evil_elfs.py)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${ELF_FIXTURES})
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+    ${CMAKE_CURRENT_BINARY_DIR}/oob_kernel.co
+    ${ELF_FIXTURES})
 
 add_custom_target(gen_oob_kernel DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/oob_kernel.co)
 add_custom_target(gen_elf_fixtures DEPENDS ${ELF_FIXTURES})
@@ -31,4 +33,3 @@ hip_add_exe_to_target(NAME oob_module
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 add_dependencies(oob_module gen_oob_kernel gen_elf_fixtures)
-target_compile_definitions(oob_module PRIVATE OOB_FIXTURES_DIR="${CMAKE_CURRENT_BINARY_DIR}")
