@@ -48,7 +48,7 @@ class TestSDMA(RocprofsysTest):
     @pytest.mark.parametrize(
         "mode", [pytest.param("sys_run", marks=pytest.mark.rocpd("sdma_env"))]
     )
-    def test_sdma_usage_tracks(self, mode, sdma_env, sdma_rules):
+    def test_usage(self, mode, sdma_env, sdma_rules):
         """Run sdma-test with sdma_usage and validate Perfetto + ROCPD for SDMA tracks/values."""
         result = self.run_test(
             mode,
