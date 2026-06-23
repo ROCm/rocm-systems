@@ -315,8 +315,6 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   ) {
     assert(stream_id_ != -1 && "Stream ID wasn't initialized");
     stream_ = streams[stream_id_];
-    // Reset the launch ID after the stream assignment
-    launch_id_ = -1;
   }
   /// Create amd::command for the graph node
   virtual hipError_t CreateCommand(hip::Stream* stream) {
@@ -501,7 +499,6 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int32_t stream_id_ = -1;  //! Stream ID on which this node will be executed
   int hw_queue_id_ = -1; //! Hardware queue ID on which this node will be executed
   int32_t segment_id_ = -1;  //! Segment ID on which this node will be executed
-  int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
   static std::atomic<int> nextID;
   Graph* parentGraph_;
   static std::unordered_set<GraphNode*> nodeSet_;
@@ -610,9 +607,6 @@ class Graph {
     graphSet_.insert(this);
     mem_pool_ = device->GetGraphMemoryPool();
     graphInstantiated_ = false;
-    roots_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
-    leafs_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
-    wait_order_.resize(DEBUG_HIP_FORCE_GRAPH_QUEUES);
     streams_dev_.reserve(g_devices.size());
   }
   void RemoveUserObjectFromOwingGraphs(UserObject* uObj) {
@@ -648,8 +642,8 @@ class Graph {
     }
     graphUserObj_.clear();
     memAllocNodePtrs_.clear();
-    if (instantiateDeviceId_ != -1) {
-      static_cast<amd::ReferenceCountedObject*>(g_devices[instantiateDeviceId_])->release();
+    if (captureDeviceId_ != -1) {
+      static_cast<amd::ReferenceCountedObject*>(g_devices[captureDeviceId_])->release();
     }
   }
 
@@ -690,7 +684,6 @@ class Graph {
   size_t GetNodeCount() const { return vertices_.size(); }
   /// returns all the nodes in the graph
   const std::vector<Node>& GetNodes() const { return vertices_; }
-  const std::vector<Node>& GetTopoOrder() const { return topoOrder_; }
   /// returns all the edges in the graph
   std::vector<std::pair<Node, Node>> GetEdges() const;
   // returns the original graph ptr if cloned
@@ -760,16 +753,6 @@ class Graph {
 
   //! Calculate dependency levels for segments using topological sort
   void CalculateSegmentTopoDependencyLevels();
-
-  //! Runs one node on the assigned stream
-  bool RunOneNode(Node node);  //!< Node for the execution on GPU
-
-  //! Runs all nodes from the execution graph on the assigned streams
-  bool RunNodes(
-      int32_t base_stream = 0,                             //!< The base stream to run the graph on
-      const std::vector<hip::Stream*>* streams = nullptr,  //!< Streams to run the graph
-      const amd::Command::EventWaitList* parent_waitlist = nullptr  //!< Parent Graph waitlist
-  );
 
   bool TopologicalOrder(std::vector<Node>& TopoOrder);
 
@@ -910,11 +893,7 @@ class Graph {
 
  protected:
   int max_streams_ = 0;  //!< Maximum number of streams used in the graph launch
-  //!< Maps stream ID to the set of device IDs that use that stream.
-  //!< Used to track which devices are accessed by each parallel stream
-  //!< during multi-device graph execution scheduling.
-  std::unordered_map<int, std::set<int>> streams_dev_ids_;
-  int instantiateDeviceId_ = -1;
+  int captureDeviceId_ = -1;
     //! Topological order of the graph doesn't include nodes embedded as part of the child graph
   std::vector<Node> topoOrder_;
 
@@ -956,13 +935,7 @@ class Graph {
   unsigned int id_;
   static std::atomic<int> nextID;
   uint32_t memalloc_nodes_ = 0;  //!< Count of unreleased Memalloc nodes
-  std::vector<Node> roots_;      //!< Root nodes, used in parallel launches
-  std::vector<Node> leafs_;      //!< The list of leaf nodes on every parallel stream
-  //!< Used as a temporary storage for the waiting nodes
-  //!< to reduce the stack pressure in recursion
-  std::vector<Node> wait_order_;
   std::vector<hip::Stream*> streams_;  //!< The list of streams, used in the execution
-  int32_t current_id_ = 0;             //!< The current node ID in the graph execution sequence
   hip::Device* device_;                //!< HIP device object
   hip::MemoryPool* mem_pool_;          //!< Memory pool, associated with this graph
   std::unordered_set<GraphNode*> capturedNodes_;
@@ -1084,16 +1057,12 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
   //! Update streams for the graph execution with launch stream from application
   void UpdateStreams(hip::Stream* launch_stream);
-  //! Find the number of streams required per device for multi-device graph execution
-  //! This method analyzes the stream-to-device mappings and recursively processes
-  //! child graphs to determine the maximum concurrent streams needed per device
-  void FindStreamsReqPerDev();
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
   void FindStreamsReqPerDevForSegments();
   //! Round-robin stream assignment: spreads parallel segments evenly per dependency level
   void RoundRobinStreamAssignment();
-  //! DFS stream assignment: preserves chain continuity, same algorithm as classic ScheduleOneNode
+  //! DFS stream assignment: preserves chain continuity for linear chains of segments
   void DFSStreamAssignment();
   //! Select stream assignment algorithm based on graph complexity
   void SelectStreamAssignment();
@@ -2279,8 +2248,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     hip::MemcpyType type = hipHostToHost;
 
     size_t dOffset, sOffset;
-    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
+    amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst_, dOffset);
+    amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
 
     // hipCopyBuffer is only valid for device to device copies.
     if (dstMemory != nullptr && srcMemory != nullptr) {
@@ -2917,12 +2886,7 @@ class GraphEmptyNode : public GraphNode {
   // Empty nodes participate in AQL capture as zero-packet dependency points.
   // The capture loop registers them as zero-packet nodeRanges so dependency
   // tracking works without emitting any GPU commands.
-  bool GraphCaptureEnabled() override {
-    if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
-      return true;
-    }
-    return false;
-  }
+  bool GraphCaptureEnabled() override { return true; }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     hipError_t status = GraphNode::CreateCommand(stream);
