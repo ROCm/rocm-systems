@@ -162,6 +162,13 @@ getSPMMetrics(const hsa::AgentCache& agent)
     return metrics;
 }
 
+bool
+check_spm_agent_found(bool any_spm_agent)
+{
+    if(!any_spm_agent) ROCP_ERROR << "SPM unavailable";
+    return any_spm_agent;
+}
+
 void
 test_init()
 {
@@ -276,11 +283,7 @@ TEST(spm_core, check_packet_generation)
             }
         }
     }
-    if(!any_spm_agent)
-    {
-        ROCP_ERROR << "SPM unavailable";
-        return;
-    }
+    if(!check_spm_agent_found(any_spm_agent)) return;
 }
 
 namespace rocprofiler
@@ -486,17 +489,12 @@ TEST(spm_core, check_callbacks)
             }
         }
     }
-    if(!any_spm_agent)
-    {
-        ROCP_ERROR << "SPM unavailable";
-        return;
-    }
-
     registration::set_init_status(1);
 
     registration::finalize();
     context::pop_client(1);
     set_client_ctx(get_client_ctx());
+    if(!check_spm_agent_found(any_spm_agent)) return;
 }
 
 TEST(spm_core, destroy_counter_profile)
@@ -550,16 +548,13 @@ TEST(spm_core, destroy_counter_profile)
             }
         }
     }
-    if(!any_spm_agent)
-    {
-        ROCP_ERROR << "SPM unavailable";
-        return;
-    }
+
     registration::set_init_status(1);
 
     registration::finalize();
     context::pop_client(1);
     set_client_ctx(get_client_ctx());
+    if(!check_spm_agent_found(any_spm_agent)) return;
 }
 
 TEST(spm_core, start_stop_callback_ctx)
@@ -780,13 +775,9 @@ TEST(spm_core, test_profile_incremental)
             EXPECT_EQ(status, ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT);
         }
     }
-    if(!any_spm_agent)
-    {
-        ROCP_ERROR << "SPM unavailable";
-        return;
-    }
 
     set_client_ctx(get_client_ctx());
+    if(!check_spm_agent_found(any_spm_agent)) return;
 }
 
 TEST(spm_core, public_api_iterate_agents)
@@ -847,14 +838,11 @@ TEST(spm_core, public_api_iterate_agents)
             EXPECT_TRUE(from_api.empty());
         }
     }
-    if(!any_spm_agent)
-    {
-        ROCP_ERROR << "SPM unavailable";
-        return;
-    }
+
     registration::set_init_status(1);
     registration::finalize();
     context::pop_client(1);
+    if(!check_spm_agent_found(any_spm_agent)) return;
 }
 
 TEST(spm_core, query_agent_configurations)
@@ -921,16 +909,12 @@ TEST(spm_core, query_agent_configurations)
             EXPECT_TRUE(found_interval) << "Expected a sample interval configuration";
         }
     }
-    if(!any_spm_agent)
-    {
-        ROCP_ERROR << "SPM unavailable";
-        return;
-    }
 
     registration::set_init_status(1);
     registration::finalize();
     context::pop_client(1);
     set_client_ctx(get_client_ctx());
+    if(!check_spm_agent_found(any_spm_agent)) return;
 }
 
 TEST(spm_core, stop_context_removes_callbacks)
