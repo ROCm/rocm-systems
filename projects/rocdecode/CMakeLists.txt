@@ -93,15 +93,16 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "${DEFAULT_BUILD_TYPE}" CACHE STRING "rocdecode Default Build Type" FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -g  -- generate debugging information, generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
-else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+if(NOT WIN32)
+  if(CMAKE_BUILD_TYPE MATCHES Debug)
+    # -O0 -- Don't Optimize output file
+    # -g  -- generate debugging information, dwarf-4 for making valgrind work
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+  else()
+    # -O3   -- Optimize output file
+    # -fPIC -- Generate position-independent code if possible
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  endif()
 endif()
 message("-- ${BoldBlue}${PROJECT_NAME} Build Type -- ${CMAKE_BUILD_TYPE}${ColourReset}")
 
@@ -193,7 +194,14 @@ if(_deps_met)
 
   if(WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
-    target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    # Suppress warnings from pre-existing code and external headers:
+    # C4200: zero-sized array in va.h (vaon12 external header)
+    # C4018: signed/unsigned mismatch in parser files (pre-existing, also on Linux)
+    # C4267: size_t conversion in parser files (pre-existing, also on Linux)
+    # C4244: narrowing conversion in parser files (pre-existing, also on Linux)
+    # C4146: unary minus on unsigned in parser files (pre-existing, also on Linux)
+    target_compile_options(${PROJECT_NAME} PRIVATE /wd4200 /wd4018 /wd4267 /wd4244 /wd4146)
   else()
     # --all-warnings/-Wall       -- Enable most warning messages
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")

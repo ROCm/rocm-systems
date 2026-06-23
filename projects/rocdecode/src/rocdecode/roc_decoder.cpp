@@ -378,7 +378,7 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
     }
 #endif
 
-    for (int i = 0; i < hip_interop_[pic_idx].num_layers; i++) {
+    for (uint32_t i = 0; i < hip_interop_[pic_idx].num_layers; i++) {
         dev_mem_ptr[i] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[i];
         horizontal_pitch[i] = hip_interop_[pic_idx].pitch[i];
     }

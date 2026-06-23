@@ -43,7 +43,7 @@ VaapiVideoDecoder::~VaapiVideoDecoder() {
             CriticalLog(g_rocdec_logger, "DestroyDataBuffers failed");
         }
         VAStatus va_status = VA_STATUS_SUCCESS;
-        va_status = vaDestroySurfaces(va_display_, va_surface_ids_.data(), va_surface_ids_.size());
+        va_status = vaDestroySurfaces(va_display_, va_surface_ids_.data(), static_cast<int>(va_surface_ids_.size()));
         if (va_status != VA_STATUS_SUCCESS) {
             CriticalLog(g_rocdec_logger, "vaDestroySurfaces failed");
         }
@@ -366,7 +366,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
     if (num_slices_ > slice_params_buf_id_.size()) {
         slice_params_buf_id_.resize(num_slices_, {0});
     }
-    for (int i = 0; i < num_slices_; i++) {
+    for (uint32_t i = 0; i < num_slices_; i++) {
         CHECK_VAAPI(vaCreateBuffer(va_display_, va_context_id_, VASliceParameterBufferType, slice_params_size, 1, slice_params_ptr, &slice_params_buf_id_[i]));
         slice_params_ptr = (void*)((uint8_t*)slice_params_ptr + slice_params_size);
     }
@@ -717,7 +717,7 @@ rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo 
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_NOT_SUPPORTED;
     }
-    CHECK_VAAPI(vaDestroySurfaces(va_display_, va_surface_ids_.data(), va_surface_ids_.size()));
+    CHECK_VAAPI(vaDestroySurfaces(va_display_, va_surface_ids_.data(), static_cast<int>(va_surface_ids_.size())));
     if (va_context_id_) {
         CHECK_VAAPI(vaDestroyContext(va_display_, va_context_id_));
         va_context_id_ = 0;
@@ -1041,7 +1041,7 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
     surf_attribs.push_back(ext_buf_attrib);
 
     CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format, decoder_create_info_.width,
-        decoder_create_info_.height, va_surface_ids_.data(), va_surface_ids_.size(), surf_attribs.data(), surf_attribs.size()));
+        decoder_create_info_.height, va_surface_ids_.data(), static_cast<int>(va_surface_ids_.size()), surf_attribs.data(), static_cast<int>(surf_attribs.size())));
 
     // Log the actual D3D12 resource properties to confirm tiling mode.
     {
@@ -1131,7 +1131,7 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
         surf_attribs.push_back(surf_attrib);
     }
     CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format, decoder_create_info_.width,
-        decoder_create_info_.height, va_surface_ids_.data(), va_surface_ids_.size(), surf_attribs.data(), surf_attribs.size()));
+        decoder_create_info_.height, va_surface_ids_.data(), static_cast<int>(va_surface_ids_.size()), surf_attribs.data(), static_cast<int>(surf_attribs.size())));
 #endif
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
@@ -1140,7 +1140,7 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
 rocDecStatus VaapiVideoDecoder::CreateContext() {
     FunctionEntryLogWithArgs(g_rocdec_logger, "");
     CHECK_VAAPI(vaCreateContext(va_display_, va_config_id_, decoder_create_info_.width, decoder_create_info_.height,
-        VA_PROGRESSIVE, va_surface_ids_.data(), va_surface_ids_.size(), &va_context_id_));
+        VA_PROGRESSIVE, va_surface_ids_.data(), static_cast<int>(va_surface_ids_.size()), &va_context_id_));
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
@@ -1155,7 +1155,7 @@ rocDecStatus VaapiVideoDecoder::DestroyDataBuffers() {
         CHECK_VAAPI(vaDestroyBuffer(va_display_, iq_matrix_buf_id_));
         iq_matrix_buf_id_ = 0;
     }
-    for (int i = 0; i < num_slices_; i++) {
+    for (uint32_t i = 0; i < num_slices_; i++) {
         if (slice_params_buf_id_[i]) {
             CHECK_VAAPI(vaDestroyBuffer(va_display_, slice_params_buf_id_[i]));
             slice_params_buf_id_[i] = 0;
@@ -1219,7 +1219,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         return ROCDEC_SUCCESS;
     } else {
         va_contexts_.resize(va_contexts_.size() + 1);
-        va_ctx_idx = va_contexts_.size() - 1;
+        va_ctx_idx = static_cast<uint32_t>(va_contexts_.size() - 1);
 
         va_contexts_[va_ctx_idx].device_id = device_id;
         va_contexts_[va_ctx_idx].gpu_uuid.assign(gpu_uuid);
@@ -1435,7 +1435,7 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
         CHECK_VAAPI(vaQuerySurfaceAttributes(va_contexts_[va_ctx_id].va_display, va_contexts_[va_ctx_id].va_config_id, attr_list.data(), &attr_count));
         va_contexts_[va_ctx_id].output_format_mask = 0;
         CHECK_VAAPI(vaDestroyConfig(va_contexts_[va_ctx_id].va_display, va_contexts_[va_ctx_id].va_config_id));
-        for (int k = 0; k < attr_count; k++) {
+        for (unsigned int k = 0; k < attr_count; k++) {
             switch (attr_list[k].type) {
             case VASurfaceAttribPixelFormat: {
                 switch (attr_list[k].value.value.i) {
