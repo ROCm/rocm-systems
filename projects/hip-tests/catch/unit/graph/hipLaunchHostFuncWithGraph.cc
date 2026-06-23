@@ -250,8 +250,8 @@ __global__ void spin_then_set(int* flag, long long spin_ticks) {
   long long start = clock64();
   while ((clock64() - start) < spin_ticks) { /* spin */ }
 #else
-  long long start = wall_clock64();
-  while ((wall_clock64() - start) < spin_ticks) {
+  unsigned long long start = wall_clock64();
+  while ((wall_clock64() - start) < static_cast<unsigned long long>(spin_ticks)) {
     __builtin_amdgcn_s_sleep(10);
   }
 #endif
