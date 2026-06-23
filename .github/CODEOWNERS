@@ -2,6 +2,7 @@
 /.azuredevops/                                                        @ROCm/external-ci
 /.github/                                                             @ROCm/rocm-systems-reviewers
 /.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
+/.github/workflows/rocjitsu-*.yml                                     @ROCm/rocjitsu-core-team
 
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
