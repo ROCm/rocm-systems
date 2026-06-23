@@ -113,7 +113,7 @@ When running large-scale MPI jobs, you might not always want to collect profilin
 ROCm Systems Profiler provides two independent rank-filtering options:
 
 - ``--rank-filter-output``: Only the specified MPI ranks produce profile and trace output files. Other ranks run normally but don't generate output files. The corresponding configuration setting is ``ROCPROFSYS_RANK_FILTER_OUTPUT``.
-- ``--rank-filter-logs``: Only the listed MPI ranks emit console output. Other ranks run normally but don't generate output files. The corresponding configuration setting is ``ROCPROFSYS_RANK_FILTER_LOGS``.
+- ``--rank-filter-logs``: Only the listed MPI ranks emit console output. Other ranks run normally but don't generate console output. The corresponding configuration setting is ``ROCPROFSYS_RANK_FILTER_LOGS``.
 
 The ``--rank-filter-output`` option allows you to specify which MPI ranks should provide profile and trace output files.
 Below are some examples using ``rocprof-sys-sample`` to profile an application using a variety of rank selection syntaxes.
@@ -177,7 +177,7 @@ Similarly, if the detected rank itself is out of the range ``[0, world_size - 1]
 
 .. note::
 
-   For complete console output suppression, use the ``ROCPROFSYS_RANK_FILTER_LOGS`` environment variable instead of the ``--rank-filter-logs`` CLI option. The command-line option may still show some log messages during startup. Also note that errors and critical messages are emitted for all ranks regardless of rank-based filtering option.
+   For maximum console output suppression, use the ``ROCPROFSYS_RANK_FILTER_LOGS`` configuration setting instead of the ``--rank-filter-logs`` CLI option. The command-line option may show more log messages during startup. Also note that errors and critical messages are emitted for all ranks regardless of rank-based filtering option.
 
    .. code-block:: bash
 
