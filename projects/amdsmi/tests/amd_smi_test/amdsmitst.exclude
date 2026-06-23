@@ -32,44 +32,44 @@ $BLACKLIST_ALL_ASICS\
 FILTER[vega20]=\
 $BLACKLIST_ALL_ASICS\
 "CperEntriesTest.*:"\
-"GpuFunctionalReadOnly.TestFrequenciesRead:"\
-"GpuFunctionalReadOnly.TestProcInfoRead"
+"amdsmitstReadOnly.TestFrequenciesRead:"\
+"amdsmitstReadOnly.TestProcInfoRead"
 
 # SWDEV-207510
 FILTER[arcturus]=\
 $BLACKLIST_ALL_ASICS\
 "CperEntriesTest.*:"\
-"GpuFunctionalReadOnly.TestFrequenciesRead:"\
-"GpuFunctionalReadWrite.TestFrequenciesReadWrite:"\
-"GpuFunctionalReadOnly.TestProcInfoRead"
+"amdsmitstReadOnly.TestFrequenciesRead:"\
+"amdsmitstReadWrite.TestFrequenciesReadWrite:"\
+"amdsmitstReadOnly.TestProcInfoRead"
 
 # SWDEV-306889
 FILTER[aldebaran]=\
 $BLACKLIST_ALL_ASICS\
 "CperEntriesTest.*:"\
-"GpuFunctionalReadOnly.FanRead:"\
-"GpuFunctionalReadOnly.TestVoltCurvRead:"\
-"GpuFunctionalReadOnly.TestFrequenciesRead:"\
-"GpuFunctionalReadWrite.FanReadWrite:"\
-"GpuFunctionalReadWrite.TestFrequenciesReadWrite:"\
-"GpuFunctionalReadWrite.TestPciReadWrite:"\
-"GpuFunctionalReadWrite.TestPowerReadWrite"
+"amdsmitstReadOnly.FanRead:"\
+"amdsmitstReadOnly.TestVoltCurvRead:"\
+"amdsmitstReadOnly.TestFrequenciesRead:"\
+"amdsmitstReadWrite.FanReadWrite:"\
+"amdsmitstReadWrite.TestFrequenciesReadWrite:"\
+"amdsmitstReadWrite.TestPciReadWrite:"\
+"amdsmitstReadWrite.TestPowerReadWrite"
 
 # SWDEV-319795
 FILTER[sienna_cichlid]=\
 $BLACKLIST_ALL_ASICS\
 "CperEntriesTest.*:"\
-"GpuFunctionalReadWrite.TestPerfLevelReadWrite"
+"amdsmitstReadWrite.TestPerfLevelReadWrite"
 
 # SWDEV-321166
 FILTER[virtualization]=\
 $BLACKLIST_ALL_ASICS\
-"GpuFunctionalReadOnly.TestOverdriveRead:"\
-"GpuFunctionalReadOnly.TestGPUBusyRead:"\
-"GpuFunctionalReadWrite.FanReadWrite:"\
-"GpuFunctionalReadWrite.TestOverdriveReadWrite:"\
-"GpuFunctionalReadWrite.TestPowerReadWrite:"\
-"GpuFunctionalReadWrite.TestPowerCapReadWrite"
+"amdsmitstReadOnly.TestOverdriveRead:"\
+"amdsmitstReadOnly.TestGPUBusyRead:"\
+"amdsmitstReadWrite.FanReadWrite:"\
+"amdsmitstReadWrite.TestOverdriveReadWrite:"\
+"amdsmitstReadWrite.TestPowerReadWrite:"\
+"amdsmitstReadWrite.TestPowerCapReadWrite"
 
 # SWDEV-391407 and PLAT-156250
 # aqua_vanjaram and later systems show 'ip discovery' in
@@ -79,7 +79,7 @@ $BLACKLIST_ALL_ASICS\
 # /sys/class/kfd/kfd/topology/nodes/*/properties
 FILTER[90400]=\
 $BLACKLIST_ALL_ASICS\
-"GpuFunctionalReadOnly.TestVoltCurvRead:"
+"amdsmitstReadOnly.TestVoltCurvRead:"
 FILTER[90401]=${FILTER[90400]}
 FILTER[90402]=${FILTER[90400]}
 
@@ -90,9 +90,9 @@ FILTER[90402]=${FILTER[90400]}
 # SWDEV-571576
 FILTER[strix_point]=\
 $BLACKLIST_ALL_ASICS\
-"GpuFunctionalReadOnly.TempRead:"\
-"GpuFunctionalReadOnly.TestFrequenciesRead:"\
-"GpuFunctionalReadWrite.TestFrequenciesReadWrite"
+"amdsmitstReadOnly.TempRead:"\
+"amdsmitstReadOnly.TestFrequenciesRead:"\
+"amdsmitstReadWrite.TestFrequenciesReadWrite"
 FILTER[veo]=${FILTER[strix_point]}
 FILTER[gfx1150]=${FILTER[strix_point]}
 FILTER[gfx1151]=${FILTER[strix_point]}
