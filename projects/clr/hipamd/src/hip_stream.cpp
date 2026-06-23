@@ -78,8 +78,13 @@ void Stream::Detach() {
   if (captureStatus_ == hipStreamCaptureStatusActive) {
     captureStatus_ = hipStreamCaptureStatusInvalidated;
     for (auto s : parallelCaptureStreams_) {
-      reinterpret_cast<hip::Stream*>(s)->SetCaptureStatus(
-          hipStreamCaptureStatusInvalidated);
+      auto* fork = reinterpret_cast<hip::Stream*>(s);
+      fork->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      fork->ClearCaptureGraph();  // fork only aliases origin's graph; avoid double free
+    }
+    // EndCapture's cleanup is now unreachable (detached), so free the graph here.
+    if (originStream_) {
+      ReleaseCaptureGraph();
     }
   }
   detached_.store(true, std::memory_order_release);

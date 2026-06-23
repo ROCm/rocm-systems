@@ -400,6 +400,8 @@ namespace hip {
     }
     /// Release graph when capture is invalidated
     void ReleaseCaptureGraph();
+    /// Drop the capture-graph pointer without freeing it (forks alias the origin's graph).
+    void ClearCaptureGraph() { pCaptureGraph_ = nullptr; }
     /// Generate and assign a new capture ID (used at BeginCapture)
     void SetCaptureID() { captureID_ = GenerateCaptureID(); }
     /// Inherit capture ID from the parent stream
