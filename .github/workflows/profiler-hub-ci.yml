@@ -56,8 +56,10 @@ jobs:
           sudo apt-get install -y \
             cmake \
             ${{ matrix.compiler.pkg }} \
+            python3-pip \
             libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
             libgtest-dev libgmock-dev
+          python3 -m pip install -r profilers/profiler-hub/tests/integration/requirements.txt
           # libbenchmark-dev on ubuntu-22.04 ships LTO bytecode from gcc 11.2,
           # incompatible with the current runner's gcc 11.4 (lto1: bytecode
           # stream ... version 11.2 instead of the expected 11.3). The runner

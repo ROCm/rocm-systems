@@ -50,8 +50,10 @@ jobs:
             cmake \
             gcc g++ \
             lcov gcovr \
+            python3-pip \
             libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
             libgtest-dev libgmock-dev libbenchmark-dev
+          python3 -m pip install -r profilers/profiler-hub/tests/integration/requirements.txt
 
       - name: Configure
         working-directory: profilers/profiler-hub
