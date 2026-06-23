@@ -279,7 +279,8 @@ static void serialize_kernel_launch(
     const amd::KernelSignature& sig,
     void**                      kernel_params,
     const void*                 kbuf,
-    size_t                      ksz)
+    size_t                      ksz,
+    hrr_cap::Hash128            co_hash)
 {
   // Reserve space for hrr_event_header at front; payload body follows.
   std::vector<uint8_t> payload(sizeof(hrr_event_header), 0);
@@ -306,7 +307,7 @@ static void serialize_kernel_launch(
   uint16_t name_len = static_cast<uint16_t>(std::strlen(kernel_name));
   push_u16(name_len);
   push_bytes(kernel_name, name_len);
-  push_u64(0); push_u64(0);  // co_hash (unknown at capture time)
+  push_u64(co_hash.lo); push_u64(co_hash.hi);  // code object identity (0 = unknown)
   push_u32(gx); push_u32(gy); push_u32(gz);
   push_u32(bx); push_u32(by); push_u32(bz);
   push_u32(shared_mem);
@@ -416,6 +417,8 @@ static void serialize_kernel_launch(
                                    static_cast<uint16_t>(payload.size()));
 }
 
+static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel);
+
 static void record_launch(
     hipFunction_t f,
     unsigned gx, unsigned gy, unsigned gz,
@@ -440,7 +443,8 @@ static void record_launch(
       kernel,  // stable per-kernel key for the embedded-ptr offset cache
       gx, gy, gz, bx, by, bz,
       static_cast<uint32_t>(shared_mem),
-      stream, sig, kernel_params, kbuf, ksz);
+      stream, sig, kernel_params, kbuf, ksz,
+      kernel_code_object_hash(kernel));
 }
 
 // ---------------------------------------------------------------------------
@@ -643,6 +647,41 @@ static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
   const size_t   size = std::get<1>(bin).first;
   if (!data || !size) return {0, 0};
   return hrr_cap::writer::write_code_object(data, size);
+}
+
+// Code-object hash for a launched kernel, derived from its owning amd::Program's
+// device binary — the SAME bytes hashed by write_module_code_object() at module
+// load — so replay can resolve the launch to the exact recorded code object.
+//
+// This is the fix for non-unique kernel names: Triton/inductor emits the generic
+// entry symbol "triton_" from dozens of distinct code objects, so name-only
+// resolution at replay binds every "triton_" launch to one arbitrary kernel and
+// faults (HIP error 719). Recording the hash disambiguates them.
+//
+// Hashing is per-program (cached), so we pay it once per code object rather than
+// on every one of millions of launches.
+static std::mutex g_prog_hash_mu;
+static std::unordered_map<const amd::Program*, hrr_cap::Hash128> g_prog_hash;
+
+static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
+  if (!kernel) return {0, 0};
+  amd::Program* prog = &kernel->program();
+  if (!prog) return {0, 0};
+  {
+    std::lock_guard<std::mutex> lk(g_prog_hash_mu);
+    auto it = g_prog_hash.find(prog);
+    if (it != g_prog_hash.end()) return it->second;
+  }
+  hrr_cap::Hash128 h{0, 0};
+  const int dev = hip::ihipGetDevice();
+  const amd::Device* device = hip::g_devices[dev]->devices()[0];
+  const auto& bin = prog->binary(*device);
+  const uint8_t* data = std::get<0>(bin);
+  const size_t   size = std::get<1>(bin).first;
+  if (data && size) h = hrr_cap::writer::write_code_object(data, size);
+  std::lock_guard<std::mutex> lk(g_prog_hash_mu);
+  g_prog_hash[prog] = h;
+  return h;
 }
 
 hipError_t capture_hipModuleLoadData(hipModule_t* module, const void* image) {
@@ -865,7 +904,8 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
             grid.x, grid.y, grid.z,
             block.x, block.y, block.z,
             static_cast<uint32_t>(shared), stream,
-            sig, nullptr, kbuf, ksz);
+            sig, nullptr, kbuf, ksz,
+            kernel_code_object_hash(kernel));
       }
     }
   }
