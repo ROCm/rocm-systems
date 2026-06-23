@@ -3945,15 +3945,16 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
       HSA_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
-  // Allocate staging buffer for combined callback delivery (size = buffer_size)
-  // Data from all XCCs is copied here before making a single callback to profiler
+  // Allocate staging buffer for combined callback delivery
+  // Size = buffer_size (threshold for delivery). Data from all XCCs is copied here
+  // before making a single callback to profiler. Protected by delivery_mutex.
   pcs_data->staging_buffer_size = session.buffer_size();
   pcs_data->staging_buffer = (uint8_t*)system_allocator()(pcs_data->staging_buffer_size, 0x1000, 0);
   if (!pcs_data->staging_buffer) {
     // Let freeResources scope guard handle cleanup of host_buffer
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
-  pcs_data->staging_offset.store(0, std::memory_order_relaxed);
+  pcs_data->staging_offset = 0;
 
   // Cache per-XCC host buffer pointers (avoids calculation in hot path)
   for (uint32_t i = 0; i < pcs_data->num_xcc; i++) {
@@ -4828,8 +4829,9 @@ void GpuAgent::PcSamplingDeliverAggregatedSamples(pcs_data_t& pcs_data,
   std::lock_guard<std::mutex> delivery_lock(pcs_data.delivery_mutex);
 
   // Get current staging offset (accumulates across calls until threshold reached)
+  // Protected by delivery_mutex
   uint8_t* staging_buffer = pcs_data.staging_buffer;
-  size_t staging_offset = pcs_data.staging_offset.load(std::memory_order_acquire);
+  size_t staging_offset = pcs_data.staging_offset;
 
   // Drain all available data from per-XCC host buffers into staging buffer.
   // This immediately frees space in per-XCC buffers, reducing overflow risk.
@@ -4870,7 +4872,7 @@ void GpuAgent::PcSamplingDeliverAggregatedSamples(pcs_data_t& pcs_data,
   }
 
   // Update staging offset (persists accumulated data for next call)
-  pcs_data.staging_offset.store(staging_offset, std::memory_order_release);
+  pcs_data.staging_offset = staging_offset;
 
   // Only deliver if we've reached the threshold
   if (staging_offset < buffer_size) {
@@ -4887,7 +4889,7 @@ void GpuAgent::PcSamplingDeliverAggregatedSamples(pcs_data_t& pcs_data,
   session.HandleSampleData(staging_buffer, staging_offset, nullptr, 0, total_lost_samples);
 
   // Reset staging offset after delivery
-  pcs_data.staging_offset.store(0, std::memory_order_release);
+  pcs_data.staging_offset = 0;
 }
 
 void GpuAgent::PcSamplingConsumerThread(pcs_data_t& pcs_data) {
@@ -4971,9 +4973,10 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
   // Deliver all remaining samples using staging buffer for combined callbacks
   // Loop until all XCCs are drained.
   // Start with any data already accumulated in staging buffer from normal operation.
+  // Protected by delivery_mutex - no atomic needed
   uint8_t* staging_buffer = pcs_data->staging_buffer;
   bool more_data = true;
-  size_t staging_offset = pcs_data->staging_offset.load(std::memory_order_acquire);
+  size_t staging_offset = pcs_data->staging_offset;
 
   while (more_data) {
     more_data = false;
@@ -5027,7 +5030,7 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
   }
 
   // Reset staging offset after flush completes
-  pcs_data->staging_offset.store(0, std::memory_order_release);
+  pcs_data->staging_offset = 0;
 
   return first_error;
 }

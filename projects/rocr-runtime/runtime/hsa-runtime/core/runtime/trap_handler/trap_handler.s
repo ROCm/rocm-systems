@@ -251,12 +251,12 @@
 
 trap_entry:
   // Clear only PC sampling routing bits in ttmp13, preserving ABI fields.
-  // Per gfx94x ABI (lines 227-232): bit 23 = DebugEnabled (set by 1TH), bits 31:26 = IB_STS.
+  // Per gfx94x ABI: bit 23 = DebugEnabled (set by 1TH), bits 31:26 = IB_STS.
   // Only bits 22:0 are "free" on 2TH entry, but bit 23 (DebugEnabled) must be preserved
-  // for correct debugtrap handling at line 349.
+  // for correct debugtrap handling at .no_skip_debugtrap label.
 .if .amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4
-  s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC  // clear bit 21
-  s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP    // clear bit 22
+  // Clear bits 21 (stochastic) and 22 (hosttrap) in a single instruction
+  s_andn2_b32                           ttmp13, ttmp13, ((1 << TTMP13_PCS_IS_STOCHASTIC) | (1 << TTMP13_PCS_IS_HOSTTRAP))
 .else
   // For pre-gfx94x, ttmp13 is not used by ABI - safe to clear entirely
   s_mov_b32                             ttmp13, 0
@@ -363,8 +363,7 @@ trap_entry:
 
 .not_s_trap:
 .if .amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4
-  // GFX9.4+ (multi-XCC): Separate entry point for checking stochastic trap.
-  // This is jumped to from hosttrap NULL check or from .not_s_trap.
+  // GFX9.4+ (multi-XCC): Check for stochastic trap when trap_id is 0 (not s_trap).
 .check_stochastic_gfx94:
   s_getreg_b32                          ttmp7, hwreg(HW_REG_TRAPSTS)                 // On gfx94x, TRAPSTS bit 26 ...
   s_bitcmp1_b32                         ttmp7, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT   // is stochastic_sample_trap
