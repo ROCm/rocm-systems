@@ -50,8 +50,6 @@
 #include <cstdint>
 #include <sstream>
 
-#include "lib/common/regex.hpp"
-
 using namespace rocprofiler::counters;
 using namespace rocprofiler;
 
@@ -123,7 +121,10 @@ namespace
 bool
 is_spm_supported_arch(const hsa::AgentCache& agent)
 {
-    return common::regex::regex_match(agent.name(), "gfx9(4[012]|50)");
+    auto rocp_agent = agent.get_rocp_agent();
+    if(!rocp_agent) return false;
+    auto v = rocp_agent->gfx_target_version;
+    return (v >= 90400 && v <= 90402) || v == 90500;
 }
 
 auto
