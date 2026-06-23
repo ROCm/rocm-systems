@@ -48,7 +48,8 @@ flowchart TD
 
 ## profiler-hub intro
 
-profiler-hub is a standalone library for writing rocpd (SQLite) databases. Its public API
+[profiler-hub](https://github.com/ROCm/rocm-systems/tree/develop/profilers/profiler-hub)
+is a standalone library for writing rocpd (SQLite) databases. Its public API
 is `storage_t` plus `writer_t` (register/insert calls for the rocpd tables).
 
 Key behavior: `writer_t` mints a fresh `rocpd_event` per insert, so a pmc event and a
