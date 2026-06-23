@@ -380,11 +380,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     cursor += layout.translation->prologue_words.size() * sizeof(uint32_t);
 
     const auto branch_dwords = compute_sopp_branch_simm16(cursor, target_offset);
-    if (!branch_dwords)
-      return false;
+    assert(branch_dwords && "kernarg preload launch-window branch must fit in s_branch simm16");
     const uint32_t branch = build_s_branch(*branch_dwords, host_arch_);
     write_words_at(translated_text, cursor, std::span<const uint32_t>(&branch, 1));
-    return true;
   };
 
   // Phase 3: fail shared reachable text up front. The plan deliberately keeps
@@ -531,15 +529,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                      source_preload_entry);
         return leave_unchanged();
       }
-      if (!write_launch_stub(layout, layout.target_entry, layout.target_body_entry) ||
-          !write_launch_stub(layout, layout.target_entry + kKernargPreloadSkipBytes,
-                             *preload_body_entry)) {
-        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
-                     "kernel descriptor preload launch-window branch range exceeds s_branch "
-                     "simm16; leaving code object unchanged",
-                     layout.source_entry);
-        return leave_unchanged();
-      }
+      write_launch_stub(layout, layout.target_entry, layout.target_body_entry);
+      write_launch_stub(layout, layout.target_entry + kKernargPreloadSkipBytes,
+                        *preload_body_entry);
     } else if (!scope.translation->prologue_words.empty()) {
       // Descriptor prologues are hardware entry points. Align the cave prologue
       // to the original entry residue, then branch into the relocated body.
