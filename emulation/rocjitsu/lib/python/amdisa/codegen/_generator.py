@@ -5216,11 +5216,14 @@ class CodeGenerator:
                         ),
                         None,
                     )
-                    if (
-                        inst_sem
-                        and inst_sem.semantic_class in ('branch', 'cbranch')
-                        and label_operand
+                    branch_offset_operand = None
+                    if inst_sem and inst_sem.semantic_class in (
+                        'branch',
+                        'cbranch',
+                        'scalar_call',
                     ):
+                        branch_offset_operand = label_operand
+                    if branch_offset_operand:
                         public_members.append(
                             cgen.Statement(
                                 'std::optional<int64_t> branch_offset_bytes() const override'
@@ -5905,19 +5908,15 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                    if (
-                        inst_sem
-                        and inst_sem.semantic_class in ('branch', 'cbranch')
-                        and label_operand
-                    ):
+                    if branch_offset_operand:
                         inst_impls.append(
                             cgen.Line(
                                 f'std::optional<int64_t> '
                                 f'{inst.fmt_name}::branch_offset_bytes() const {{\n'
-                                f'  // AMDGPU direct branch labels are signed '
+                                f'  // AMDGPU PC-relative branch immediates are signed '
                                 f'instruction-count deltas.\n'
                                 f'  return static_cast<int64_t>('
-                                f'static_cast<int16_t>({label_operand}.encoding_value_)) * 4;\n'
+                                f'static_cast<int16_t>({branch_offset_operand}.encoding_value_)) * 4;\n'
                                 f'}}'
                             )
                         )

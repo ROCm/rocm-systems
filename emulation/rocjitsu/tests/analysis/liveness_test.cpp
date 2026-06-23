@@ -5,6 +5,7 @@
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -177,7 +178,7 @@ build_test_blocks(std::vector<TestOpcode> ops, std::span<const uint64_t> extra_l
 
   TestCodeObject co(std::move(words));
   TestDecoder decoder;
-  return BasicBlock::build(co, decoder, extra_leaders);
+  return BasicBlock::build(co, decoder, ROCJITSU_CODE_ARCH_CDNA3, extra_leaders);
 }
 
 bool has_predecessor(const BasicBlock &block, const BasicBlock *pred) {
@@ -306,6 +307,50 @@ TEST(CfgAnalysis, IndirectBranchHasNoStaticSuccessor) {
   ASSERT_EQ(blocks.size(), 2u);
   EXPECT_TRUE(blocks[0]->successors().empty());
   EXPECT_TRUE(blocks[1]->predecessors().empty());
+}
+
+TEST(CfgAnalysis, RecoveredIndirectBranchEdgeStartsAtConsumerBlock) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // The PC builder and setpc consumer are deliberately separated by an extra
+  // leader. The recovered CFG edge belongs to the setpc block, because that is
+  // where control flow actually leaves the straight-line path.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
+      20,                                                  // 0x08: target delta.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x10: s_setpc_b64.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x14: not a successor.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: recovered target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> extra_leaders{16};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+  auto *builder = block_starting_at(blocks, 0);
+  auto *consumer = block_starting_at(blocks, 16);
+  auto *fallthrough = block_starting_at(blocks, 20);
+  auto *target = block_starting_at(blocks, 24);
+  ASSERT_NE(builder, nullptr);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(fallthrough, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  EXPECT_TRUE(builder->static_indirect_call_fixups().empty());
+  ASSERT_EQ(builder->successors().size(), 1u);
+  EXPECT_EQ(builder->successors()[0], consumer);
+
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_call_offset, 16u);
+  ASSERT_EQ(consumer->successors().size(), 1u);
+  EXPECT_EQ(consumer->successors()[0], target);
+  EXPECT_FALSE(has_predecessor(*fallthrough, consumer));
 }
 
 TEST(CfgAnalysis, ReversePostOrderStraightLine) {

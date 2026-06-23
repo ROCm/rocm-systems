@@ -209,7 +209,7 @@ SBranchSopp::SBranchSopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SBranchSopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
@@ -229,7 +229,7 @@ SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchScc0Sopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
@@ -251,7 +251,7 @@ SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchScc1Sopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
@@ -273,7 +273,7 @@ SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchVcczSopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
@@ -297,7 +297,7 @@ SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchVccnzSopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
@@ -321,7 +321,7 @@ SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchExeczSopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
@@ -343,7 +343,7 @@ SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
 }
 
 std::optional<int64_t> SCbranchExecnzSopp::branch_offset_bytes() const {
-  // AMDGPU direct branch labels are signed instruction-count deltas.
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
   return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 

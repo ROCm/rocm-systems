@@ -19,6 +19,7 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
+#include "rocjitsu/code/static_pc_recovery.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -29,6 +30,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -68,13 +70,31 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   return nullptr;
 }
 
-[[nodiscard]] BasicBlock *block_for_offset(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                                           uint64_t offset) {
-  for (const auto &block : blocks) {
-    if (block && block->start_offset() <= offset && offset < block->end_offset())
-      return block.get();
-  }
-  return nullptr;
+[[nodiscard]] bool compute_sopp_branch_offset(uint64_t branch_pc, uint64_t target,
+                                              int16_t &offset_dwords) {
+  // SOPP branches encode a signed dword offset from the next instruction. Keep
+  // the range check shared so both cave entry and return branches fail closed.
+  constexpr int64_t kBranchPcBiasBytes = static_cast<int64_t>(sizeof(uint32_t));
+  constexpr uint64_t kMaxSignedTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr uint64_t kMaxSignedBranchPc =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
+  // The PCs are unsigned until this check passes. Compare against the casted
+  // signed int64_t limits so the later signed conversion, and branch_pc + 4,
+  // cannot overflow.
+  if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)
+    return false;
+
+  const int64_t delta_bytes = static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + 4);
+  if (delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
+    return false;
+
+  const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
+  if (delta_dwords < std::numeric_limits<int16_t>::min() ||
+      delta_dwords > std::numeric_limits<int16_t>::max())
+    return false;
+
+  offset_dwords = static_cast<int16_t>(delta_dwords);
+  return true;
 }
 
 [[nodiscard]] std::vector<uint32_t> raw_words_for_inst(const Instruction &inst) {
@@ -82,6 +102,13 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   if (!raw)
     return {};
   return {raw, raw + inst.size() / sizeof(uint32_t)};
+}
+
+[[nodiscard]] uint32_t text_word_at(std::span<const uint8_t> text, uint64_t offset) {
+  uint32_t word = 0;
+  if (offset + sizeof(word) <= text.size())
+    std::memcpy(&word, text.data() + offset, sizeof(word));
+  return word;
 }
 
 [[nodiscard]] bool words_changed(std::span<const uint32_t> before,
@@ -166,8 +193,44 @@ struct KernelTranslationScope {
   std::vector<BasicBlock *> blocks;
 };
 
+/// @brief Sorted index from source .text byte offsets to decoded blocks.
+///
+/// @details DBT relocation repeatedly maps descriptor entries, branch targets,
+/// and recovered indirect targets back to the BasicBlock that owns a source
+/// offset. Keeping this compact sorted index avoids rebuilding that lookup while
+/// preserving BasicBlock ownership in the vector returned by BasicBlock::build().
+struct BlockOffsetIndex {
+  std::vector<std::pair<uint64_t, BasicBlock *>> starts;
+};
+
+[[nodiscard]] BlockOffsetIndex
+build_block_offset_index(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+  BlockOffsetIndex index;
+  index.starts.reserve(blocks.size());
+  for (const auto &block : blocks) {
+    if (block != nullptr)
+      index.starts.emplace_back(block->start_offset(), block.get());
+  }
+  std::ranges::sort(index.starts, {}, &std::pair<uint64_t, BasicBlock *>::first);
+  return index;
+}
+
+[[nodiscard]] BasicBlock *block_for_offset(const BlockOffsetIndex &index, uint64_t offset) {
+  auto it = std::ranges::upper_bound(index.starts, offset, std::less<>{},
+                                     &std::pair<uint64_t, BasicBlock *>::first);
+  if (it == index.starts.begin())
+    return nullptr;
+  --it;
+
+  BasicBlock *block = it->second;
+  if (block == nullptr || offset >= block->end_offset())
+    return nullptr;
+  return block;
+}
+
 [[nodiscard]] std::vector<BasicBlock *>
-reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, BasicBlock &entry,
+reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                        const BlockOffsetIndex &block_index, BasicBlock &entry,
                         const std::unordered_set<uint64_t> &kernel_entries,
                         const std::unordered_set<uint64_t> &own_entries) {
   std::unordered_set<const BasicBlock *> reachable;
@@ -175,7 +238,7 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
   for (const uint64_t own_entry : own_entries) {
     if (own_entry == entry.start_offset())
       continue;
-    if (BasicBlock *extra_entry = block_for_offset(blocks, own_entry);
+    if (BasicBlock *extra_entry = block_for_offset(block_index, own_entry);
         extra_entry != nullptr && extra_entry != &entry) {
       stack.push_back(extra_entry);
     }
@@ -208,7 +271,7 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
 
 [[nodiscard]] std::vector<KernelTranslationScope>
 kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                          std::span<KdTranslation> kernels) {
+                          const BlockOffsetIndex &block_index, std::span<KdTranslation> kernels) {
   std::vector<KernelTranslationScope> scopes;
   const auto entries = kernel_entry_offsets(kernels);
   if (entries.empty())
@@ -230,18 +293,19 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
 
   scopes.reserve(ordered_kernels.size());
   for (KdTranslation *kernel : ordered_kernels) {
-    BasicBlock *entry = block_for_offset(blocks, kernel->entry_text_offset);
+    BasicBlock *entry = block_for_offset(block_index, kernel->entry_text_offset);
     if (entry == nullptr)
       continue;
     std::unordered_set<uint64_t> own_entries{kernel->entry_text_offset};
     if (kernel->has_kernarg_preload) {
-      if (block_for_offset(blocks, kernel->kernarg_preload_entry_text_offset) == nullptr)
+      if (block_for_offset(block_index, kernel->kernarg_preload_entry_text_offset) == nullptr)
         continue;
       own_entries.insert(kernel->kernarg_preload_entry_text_offset);
     }
 
     scopes.push_back(
-        {kernel, entry, reachable_kernel_blocks(blocks, *entry, entry_set, own_entries)});
+        {kernel, entry,
+         reachable_kernel_blocks(blocks, block_index, *entry, entry_set, own_entries)});
   }
   return scopes;
 }
@@ -276,19 +340,28 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   };
   auto text = patcher.text_bytes();
   if (text.empty()) {
+    append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                 "code object does not expose a non-empty .text section for translation");
     return leave_unchanged();
   }
 
   // Per-kernel text relocation strategy:
   // 1. Decode kernel descriptors and use their entry offsets as translation roots.
-  // 2. Decode .text into basic blocks and compute the blocks reachable from each root.
-  // 3. Reject shared reachable blocks for this first implementation instead of
-  //    guessing how to preserve public kernel references.
+  // 2. Decode .text into basic blocks and recover static indirect-branch targets.
+  // 3. Compute each kernel's reachable block set, including recovered indirect
+  //    targets. Shared source blocks stay in each kernel-local set and are
+  //    emitted once per kernel that reaches them.
   // 4. Emit each kernel's reachable blocks into a compact, source-ordered body.
   // 5. Translate instructions in that relocated body and append oversized
   //    expansions or descriptor ABI prologues into the kernel-local cave.
   // 6. Patch direct PC-relative branches through the kernel-local placement map.
-  // 7. Replace the ELF .text payload and redirect descriptors to their new entries.
+  // 7. Rewrite recovered indirect-branch address builders in place. Static PC
+  //    recovery identifies the original getpc-relative instructions that built
+  //    the branch target, records only ranges large enough for the canonical
+  //    relocated PC-delta builder, and turns the recovered destination into a
+  //    normal CFG edge. After relocation, DBT overwrites that old builder range
+  //    with the canonical sequence and pads any leftover words with s_nop.
+  // 8. Replace the ELF .text payload and redirect descriptors to their new entries.
   auto decoder = Decoder::create(guest_arch_);
   if (!decoder) {
     append_error(result.diagnostics, DiagnosticKind::UnsupportedGuestArch,
@@ -321,11 +394,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
 
   const auto entry_offsets = kernel_entry_offsets(descriptor_translations);
-  const auto block_leaders = kernel_block_leaders(descriptor_translations, text);
-  // Phase 2: build a CFG over .text and reduce each descriptor root to the
-  // source blocks that this kernel owns in the initial relocation strategy.
-  auto blocks = BasicBlock::build(obj, *decoder, block_leaders);
-  auto scopes = kernel_translation_scopes(blocks, descriptor_translations);
+  auto block_leaders = kernel_block_leaders(descriptor_translations, text);
+
+  // Phase 2: build a CFG over .text, including recovered indirect targets as
+  // block leaders, then compute one source-reachable block set per descriptor
+  // root. These sets are intentionally kernel-local: if two roots reach the same
+  // helper block, Phase 3 emits that helper into both relocated bodies so every
+  // branch target can be resolved through the current kernel's placement map.
+  auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders);
+  const BlockOffsetIndex block_index = build_block_offset_index(blocks);
+  auto scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations);
 
   if (scopes.size() != entry_offsets.size()) {
     append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
@@ -379,39 +457,22 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     write_words_at(translated_text, cursor, layout.translation->prologue_words);
     cursor += layout.translation->prologue_words.size() * sizeof(uint32_t);
 
-    const auto branch_dwords = compute_sopp_branch_simm16(cursor, target_offset);
-    assert(branch_dwords && "kernarg preload launch-window branch must fit in s_branch simm16");
-    const uint32_t branch = build_s_branch(*branch_dwords, host_arch_);
+    int16_t branch_dwords = 0;
+    if (!compute_sopp_branch_offset(cursor, target_offset, branch_dwords))
+      return false;
+    const uint32_t branch = build_s_branch(branch_dwords, host_arch_);
     write_words_at(translated_text, cursor, std::span<const uint32_t>(&branch, 1));
+    return true;
   };
 
-  // Phase 3: fail shared reachable text up front. The plan deliberately keeps
-  // duplication/removal of public references out of this first implementation.
-  std::unordered_set<const BasicBlock *> translated_blocks;
-  for (const KernelTranslationScope &scope : scopes) {
-    if (scope.blocks.empty())
-      continue;
-    for (BasicBlock *block : scope.blocks) {
-      if (block == nullptr)
-        continue;
-      if (!translated_blocks.insert(block).second) {
-        // Reject shared source blocks to avoid generating an invalid layout when
-        // one block is used by multiple kernel entry points.
-        append_error(result.diagnostics, DiagnosticKind::Legalization,
-                     "basic block is reachable from multiple kernel entries; shared kernel text "
-                     "translation is not implemented");
-        return leave_unchanged();
-      }
-    }
-  }
-
   for (const KernelTranslationScope &scope : scopes) {
     if (scope.blocks.empty())
       continue;
 
-    // Phase 4: assign compact target offsets for this kernel before translating
-    // instructions. Local cave writes may append bytes, so body placement must be
-    // fixed first.
+    // Phase 3: assign compact target offsets for this kernel before translating
+    // instructions. The layout is per-kernel, so source blocks shared by multiple
+    // kernels are deliberately duplicated with distinct target offsets. Local
+    // cave writes may append bytes, so body placement must be fixed first.
     KernelTextLayout layout;
     layout.translation = scope.translation;
     layout.source_entry = scope.translation->entry_text_offset;
@@ -529,9 +590,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                      source_preload_entry);
         return leave_unchanged();
       }
-      write_launch_stub(layout, layout.target_entry, layout.target_body_entry);
-      write_launch_stub(layout, layout.target_entry + kKernargPreloadSkipBytes,
-                        *preload_body_entry);
+      if (!write_launch_stub(layout, layout.target_entry, layout.target_body_entry) ||
+          !write_launch_stub(layout, layout.target_entry + kKernargPreloadSkipBytes,
+                             *preload_body_entry)) {
+        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                     "kernarg preload launch-window branch range exceeds s_branch simm16; leaving "
+                     "code object unchanged",
+                     layout.source_entry);
+        return leave_unchanged();
+      }
     } else if (!scope.translation->prologue_words.empty()) {
       // Descriptor prologues are hardware entry points. Align the cave prologue
       // to the original entry residue, then branch into the relocated body.
@@ -568,17 +635,49 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
     LivenessAnalysis liveness(KernelBlockScope(scope.blocks), liveness_options);
 
-    // Phase 5: translate each relocated body instruction. Oversized semantic
+    // Phase 4: translate each relocated body instruction. Oversized semantic
     // expansions branch into this kernel's private cave immediately after the body.
+    std::unordered_set<uint64_t> recovered_indirect_call_offsets;
     for (const BlockPlacement &placement : layout.blocks) {
       BasicBlock *block = placement.block;
+      for (const IndirectCallFixup &source_fixup : block->static_indirect_call_fixups()) {
+        IndirectCallFixup fixup = source_fixup;
+        auto getpc_target = target_for_source_offset(layout, fixup.source_getpc_offset);
+        auto recovery_begin_target =
+            target_for_source_offset(layout, fixup.source_recovery_begin_offset);
+        auto recovery_end_target =
+            target_for_source_offset(layout, fixup.source_recovery_end_offset);
+        if (getpc_target && recovery_begin_target && recovery_end_target) {
+          fixup.target_getpc_offset = *getpc_target;
+          fixup.target_recovery_begin_offset = *recovery_begin_target;
+          fixup.target_recovery_end_offset = *recovery_end_target;
+          layout.indirect_call_fixups.push_back(fixup);
+          recovered_indirect_call_offsets.insert(fixup.source_call_offset);
+        }
+      }
+
       uint64_t offset = block->start_offset();
       uint64_t target_offset = placement.target_start;
       for (auto it = block->instructions().begin(); it != block->instructions().end(); ++it) {
         const auto &inst = *it;
         const uint32_t inst_size = inst.size();
 
-        if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0) {
+        if (!recovered_indirect_call_offsets.contains(offset)) {
+          auto carried = recover_carried_indirect_call_target(
+              layout, inst, text_word_at(text, offset), offset, guest_arch_);
+          if (carried) {
+            layout.indirect_call_fixups.push_back(*carried);
+            recovered_indirect_call_offsets.insert(carried->source_call_offset);
+          }
+        }
+        const bool has_recovered_indirect_call = recovered_indirect_call_offsets.contains(offset);
+        const uint32_t word = text_word_at(text, offset);
+        const bool recovered_indirect_return =
+            s_setpc_from_sreg(guest_arch_, inst, word, 30) ||
+            recovered_direct_call_return(layout, inst, word, offset, guest_arch_);
+        const auto direct_branch_delta = inst.branch_offset_bytes();
+        if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
+            !has_recovered_indirect_call && !recovered_indirect_return && !direct_branch_delta) {
           append_error(result.diagnostics, DiagnosticKind::Legalization,
                        "indirect branch or call target recovery is not implemented for relocated "
                        "kernel text",
@@ -591,12 +690,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           return leave_unchanged();
         }
 
-        if (auto branch_delta = inst.branch_offset_bytes()) {
+        if (direct_branch_delta) {
+          if (auto sdst = s_call_sdst(inst, word))
+            layout.direct_call_returns.push_back(
+                {.source_call_offset = offset, .return_sreg = *sdst});
+
           // Record direct branches while emitting the body, but patch only after
           // every block has a final target placement. This keeps fallthrough
           // implicit and limits fixups to explicit PC-relative edges.
           const int64_t source_target =
-              static_cast<int64_t>(offset + inst_size) + static_cast<int64_t>(*branch_delta);
+              static_cast<int64_t>(offset + inst_size) + static_cast<int64_t>(*direct_branch_delta);
           if (source_target < 0) {
             append_error(result.diagnostics, DiagnosticKind::Legalization,
                          "direct branch target is outside the source .text range", offset,
@@ -724,7 +827,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     if (continue_after_failure && has_error_diagnostic(result.diagnostics))
       continue;
 
-    // Phase 6: now that the local body and cave have final offsets, rewrite only
+    // Phase 5: now that the local body and cave have final offsets, rewrite only
     // the direct branch immediate bits using the kernel-local source placement.
     for (const BranchFixup &fixup : layout.branch_fixups) {
       auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
@@ -754,6 +857,50 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                   fixup.inst->size());
     }
 
+    std::unordered_set<uint64_t> rewritten_indirect_recovery_regions;
+    for (const IndirectCallFixup &fixup : layout.indirect_call_fixups) {
+      auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
+      if (!target_target) {
+        append_error(result.diagnostics, DiagnosticKind::Legalization,
+                     "recovered indirect call target is not present in the kernel-local relocated "
+                     "body",
+                     fixup.source_call_offset, "indirect branch");
+        return leave_unchanged();
+      }
+
+      // One recovered getpc/address-recovery region may feed multiple later
+      // s_setpc/s_swappc consumers. All consumers are marked as recovered, but
+      // the original builder must only be rewritten once.
+      if (!rewritten_indirect_recovery_regions.insert(fixup.target_recovery_begin_offset).second)
+        continue;
+
+      const int64_t base = static_cast<int64_t>(fixup.target_getpc_offset + sizeof(uint32_t));
+      const int64_t delta = static_cast<int64_t>(*target_target) - base;
+
+      std::vector<uint32_t> replacement_words;
+      if (!append_pc_delta_builder(replacement_words, host_arch_, fixup.source_call_sreg, delta)) {
+        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                     "target ISA cannot encode canonical recovered indirect branch builder",
+                     fixup.source_call_offset, "indirect branch");
+        return leave_unchanged();
+      }
+
+      [[maybe_unused]] const uint64_t recovery_size =
+          fixup.target_recovery_end_offset - fixup.target_recovery_begin_offset;
+      [[maybe_unused]] const uint64_t replacement_size =
+          replacement_words.size() * sizeof(uint32_t);
+      assert(replacement_size <= recovery_size &&
+             "static PC recovery must only record in-place replaceable builder ranges");
+
+      std::memcpy(translated_text.data() + fixup.target_recovery_begin_offset,
+                  replacement_words.data(), replacement_size);
+      for (uint64_t off = fixup.target_recovery_begin_offset + replacement_size;
+           off < fixup.target_recovery_end_offset; off += sizeof(uint32_t)) {
+        const uint32_t nop = build_s_nop(0, host_arch_);
+        std::memcpy(translated_text.data() + off, &nop, sizeof(nop));
+      }
+    }
+
     if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)
       scope.translation->target_vgpr_count = kernel_context.required_vgpr_count;
     if (kernel_context.required_sgpr_count > kernel_context.num_sgprs)
@@ -770,8 +917,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
       // Descriptor growth is intentionally done after instruction lowering so
       // each kernel is translated once. Only descriptors that enter this code
-      // scope need the larger floor; rescanning the whole image would also
-      // recompute unrelated kernels and risks mixing diagnostics across scopes.
+      // scope need the larger register counts; rescanning the whole image would
+      // also recompute unrelated kernels and risks mixing diagnostics across
+      // scopes.
       bool recomputed_descriptor = false;
       for (KdTranslation &translation : descriptor_translations) {
         if (translation.entry_text_offset != scope.translation->entry_text_offset)
@@ -827,7 +975,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   if (continue_after_failure && has_error_diagnostic(result.diagnostics))
     return leave_unchanged();
 
-  // Phase 7: write the relocated .text and descriptor entry offsets into the ELF.
+  // Phase 6: write the relocated .text and descriptor entry offsets into the ELF.
   // Reachability-driven emission intentionally drops source padding and other
   // unreachable bytes. Keep the first implementation's ELF mutation one-sided
   // by padding the relocated .text back to at least the original size; local

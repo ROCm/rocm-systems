@@ -8,6 +8,8 @@
 #define ROCJITSU_CODE_BASIC_BLOCK_H_
 
 #include "rocjitsu/code/instruction_list.h"
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/code/static_pc_recovery.h"
 #include "util/intrusive_list.h"
 
 #include <cstdint>
@@ -63,6 +65,18 @@ public:
   /// @brief CFG predecessor blocks, inverse of successors().
   [[nodiscard]] const std::vector<BasicBlock *> &predecessors() const { return predecessors_; }
 
+  /// @brief Static indirect branch fixup metadata rooted in this block.
+  ///
+  /// @details BasicBlock::build() computes these while all decoded instructions
+  /// and source offsets are still adjacent. The fixups are grouped on the block
+  /// that contains the recovered setpc/swappc consumer. Recovered targets are
+  /// ordinary CFG successor edges from that control-transfer block; this
+  /// metadata exists only so DBT can later rewrite the original address-builder
+  /// words after relocation.
+  [[nodiscard]] const std::vector<IndirectCallFixup> &static_indirect_call_fixups() const {
+    return static_indirect_call_fixups_;
+  }
+
   /// @brief Mutable access to the intrusive list of instructions.
   /// @returns Reference to the instruction list.
   InstructionList &instructions() { return instructions_; }
@@ -72,23 +86,23 @@ public:
   const InstructionList &instructions() const { return instructions_; }
 
   /// @brief Build basic blocks from a code object's .text sections.
-  /// @param[in] co Code object to analyze.
-  /// @param[in] decoder Decoder for the target ISA.
-  /// @returns Ordered list of basic blocks with their decoded instructions.
-  static std::vector<std::unique_ptr<BasicBlock>> build(const CodeObject &co, Decoder &decoder);
-
-  /// @brief Build basic blocks with additional externally-known entry leaders.
   ///
+  /// @details Recovered indirect branch targets are added as block leaders before
+  /// the block objects are finalized, so users never see a recovered edge whose
+  /// destination points into the middle of a larger block.
   /// @param[in] co Code object to analyze.
   /// @param[in] decoder Decoder for the target ISA.
+  /// @param[in] arch ISA architecture used to match static PC builders.
   /// @param[in] extra_leaders Byte offsets that must start a basic block.
   /// @returns Ordered list of basic blocks with their decoded instructions.
-  static std::vector<std::unique_ptr<BasicBlock>> build(const CodeObject &co, Decoder &decoder,
-                                                        std::span<const uint64_t> extra_leaders);
+  static std::vector<std::unique_ptr<BasicBlock>>
+  build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+        std::span<const uint64_t> extra_leaders = {});
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
   void add_successor(BasicBlock &successor);
+  void add_static_indirect_call_fixup(IndirectCallFixup fixup);
 
   uint64_t start_offset_;
   uint32_t size_ = 0;
@@ -98,6 +112,7 @@ private:
   std::vector<std::unique_ptr<Instruction>> storage_;
   std::vector<BasicBlock *> successors_;
   std::vector<BasicBlock *> predecessors_;
+  std::vector<IndirectCallFixup> static_indirect_call_fixups_;
 };
 
 } // namespace rocjitsu

@@ -60,12 +60,13 @@ void BasicBlock::add_successor(BasicBlock &successor) {
   successor.predecessors_.push_back(this);
 }
 
-std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co, Decoder &decoder) {
-  return build(co, decoder, {});
+void BasicBlock::add_static_indirect_call_fixup(IndirectCallFixup fixup) {
+  static_indirect_call_fixups_.push_back(fixup);
 }
 
 std::vector<std::unique_ptr<BasicBlock>>
-BasicBlock::build(const CodeObject &co, Decoder &decoder, std::span<const uint64_t> extra_leaders) {
+BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+                  std::span<const uint64_t> extra_leaders) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
@@ -94,12 +95,36 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, std::span<const uint64
     if (decoded.empty())
       continue;
 
+    std::vector<const Instruction *> decoded_insts;
+    std::vector<uint64_t> decoded_offsets;
+    decoded_insts.reserve(decoded.size());
+    decoded_offsets.reserve(decoded.size());
+    for (const auto &entry : decoded) {
+      decoded_insts.push_back(entry.inst.get());
+      decoded_offsets.push_back(entry.offset);
+    }
+
     const uint64_t section_end = byte_offset;
+    // Static PC recovery belongs with block construction because recovered
+    // branch targets must become leaders before instructions are moved into
+    // final BasicBlock storage. Keeping the scan here avoids a second decode
+    // pass in DBT and prevents CFG clients from seeing stale block boundaries.
+    const auto text =
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(sec->data()), sec->size());
+    std::vector<IndirectCallFixup> recovered_indirect_targets =
+        recover_static_indirect_call_targets(
+            std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size()),
+            decoded_offsets, text, arch);
+
     std::set<uint64_t> leaders;
     leaders.insert(decoded.front().offset);
     for (uint64_t leader : extra_leaders) {
       if (leader < section_end)
         leaders.insert(leader);
+    }
+    for (const IndirectCallFixup &fixup : recovered_indirect_targets) {
+      if (fixup.source_target_offset < section_end)
+        leaders.insert(fixup.source_target_offset);
     }
 
     // A block has one entry. In addition to splitting after terminators, split
@@ -147,6 +172,36 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, std::span<const uint64
     block_by_offset.reserve(section_blocks.size());
     for (auto &block : section_blocks)
       block_by_offset.emplace(block->start_offset(), block.get());
+
+    auto containing_block = [&](uint64_t offset) -> BasicBlock * {
+      // Recovered indirect branches can be inside a block rather than at its
+      // first byte. Store the fixup on the block that contains the setpc/swappc
+      // consumer so CFG clients see the edge at the actual control transfer.
+      auto containing = std::ranges::upper_bound(
+          section_blocks, offset, std::less<>{},
+          [](const std::unique_ptr<BasicBlock> &block) { return block->start_offset(); });
+      if (containing == section_blocks.begin())
+        return nullptr;
+      --containing;
+      if (*containing && offset < (*containing)->end_offset())
+        return containing->get();
+      return nullptr;
+    };
+
+    for (const IndirectCallFixup &fixup : recovered_indirect_targets) {
+      BasicBlock *source = containing_block(fixup.source_call_offset);
+      if (source == nullptr)
+        continue;
+
+      source->add_static_indirect_call_fixup(fixup);
+      if (auto target_it = block_by_offset.find(fixup.source_target_offset);
+          target_it != block_by_offset.end()) {
+        // The recovered static target is a real CFG edge. DBT still keeps the
+        // fixup metadata above for later relocation of the original getpc
+        // builder, but ordinary BasicBlock clients can follow successors().
+        source->add_successor(*target_it->second);
+      }
+    }
 
     for (size_t i = 0; i < section_blocks.size(); ++i) {
       auto &block = *section_blocks[i];
