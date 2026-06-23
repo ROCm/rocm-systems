@@ -24,6 +24,9 @@ namespace RcclUnitTesting
     if (dataTypes.empty()) {
       GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
     }
+    if (testBed.ev.maxGpus < 2) {
+      GTEST_SKIP() << "Skipping... SendRecv.SinglePairs requires at least 2 GPUs (detected " << testBed.ev.maxGpus << ")";
+    }
 
     bool isCorrect = true;
     int numGpus = testBed.ev.maxGpus;

@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-sdk-codeql.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - 'projects/rocprofiler-sdk/**'
       - '!**/*.md'
       - '!**/*.rtf'
@@ -21,6 +22,7 @@ on:
       - develop
     paths:
       - '.github/workflows/rocprofiler-sdk-codeql.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - 'projects/rocprofiler-sdk/**'
       - '!**/*.md'
       - '!**/*.rtf'
@@ -43,7 +45,6 @@ env:
   ENABLE_HIP_CLR_BUILD: "false"
   ENABLE_ROCPROFILER_REGISTER_BUILD: "false"
   ENABLE_AQLPROFILE_BUILD: "false"
-  INSTALL_NIGHTLY_ROCM: "false"
 
 jobs:
   analyze:
@@ -137,7 +138,6 @@ jobs:
         enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
         enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
-        install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
         build-jobs: '8'
         ccache-key: ccache-codeql-ubuntu-22.04-gfx94X
         ccache-variant: ccache

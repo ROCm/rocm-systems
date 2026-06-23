@@ -23,6 +23,7 @@ test_categories:
       - "NetSocketTests.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
+      - "TopoTest.*"
     exclude_windows:
       - "*"
     labels:

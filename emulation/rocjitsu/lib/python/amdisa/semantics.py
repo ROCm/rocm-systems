@@ -725,7 +725,7 @@ _VOP1_OP_MAP = {
     # RDNA4 renamed bit-counting ops:
     'V_CLZ_I32_U32': ('vector_unary', 'ffbh_u32'),
     'V_CTZ_I32_B32': ('vector_unary', 'ffbl'),
-    'V_CLS_I32': ('vector_unary', 'ffbh_i32'),
+    'V_CLS_I32': ('vector_unary', 'cls_i32'),
     # Pipeline / system (nop in simulation):
     'V_PIPEFLUSH': ('true_nop', None),
     # Relative addressing through M0.
@@ -1126,6 +1126,10 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'vector_cvt_sr_f16_f32')
     if name == 'V_CVT_SR_BF16_F32':
         return InstructionSemantics(name, 'vector_cvt_sr_bf16_f32')
+    if name == 'V_CVT_SR_PK_F16_F32':
+        return InstructionSemantics(name, 'vector_cvt_sr_pk_f16_f32')
+    if name == 'V_CVT_SR_PK_BF16_F32':
+        return InstructionSemantics(name, 'vector_cvt_sr_pk_bf16_f32')
     if name == 'V_DOT2C_F32_BF16':
         return InstructionSemantics(name, 'vector_dot2c_bf16')
     if name == 'V_MINIMUM3_F32':
@@ -1244,6 +1248,16 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'vector_permlane16', operation='var')
     if name == 'V_PERMLANEX16_VAR_B32':
         return InstructionSemantics(name, 'vector_permlanex16', operation='var')
+    if name == 'V_PERMLANE_BCAST_B32':
+        return InstructionSemantics(name, 'vector_permlane_family', operation='bcast')
+    if name == 'V_PERMLANE_DOWN_B32':
+        return InstructionSemantics(name, 'vector_permlane_family', operation='down')
+    if name == 'V_PERMLANE_UP_B32':
+        return InstructionSemantics(name, 'vector_permlane_family', operation='up')
+    if name == 'V_PERMLANE_XOR_B32':
+        return InstructionSemantics(name, 'vector_permlane_family', operation='xor')
+    if name == 'V_PERMLANE_IDX_GEN_B32':
+        return InstructionSemantics(name, 'vector_permlane_idx_gen')
 
     if name == 'V_PACK_B32_F16':
         sem = InstructionSemantics(name, 'vector_pack_b32_f16')
@@ -1260,6 +1274,10 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'vector_cvt_pk', operation=packed_fp8_bf8_outputs[name]
         )
+    if name == 'V_CVT_SR_FP8_F16':
+        return InstructionSemantics(name, 'vector_cvt_sr_fp8_f16')
+    if name == 'V_CVT_SR_BF8_F16':
+        return InstructionSemantics(name, 'vector_cvt_sr_bf8_f16')
 
     scaled_unpack_conversions = {
         'V_CVT_SCALE_PK8_F16_FP4': 'unpack_pk8_f16_fp4',
@@ -1771,6 +1789,55 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
 }
 
 
+_ATOMIC_TYPE_SUFFIXES = (
+    '_B32',
+    '_U32',
+    '_I32',
+    '_F32',
+    '_B64',
+    '_U64',
+    '_I64',
+    '_F64',
+)
+
+
+def _derive_flat_atomic_info(suffix: str, is_x2: bool) -> tuple[str, int, int] | None:
+    """Return operation, memory element bytes, and source-data dwords.
+
+    Compare-swap carries two memory elements in its source operand payload.
+    Keep that payload width separate from the memory element width so B32
+    compare-swap remains a 4-byte memory operation, while B64 compare-swap
+    copies four source dwords.
+    """
+
+    original_suffix = suffix
+    type_suffix = ''
+    info = _FLAT_ATOMIC_OPS.get(suffix)
+    if not info:
+        for tsuf in _ATOMIC_TYPE_SUFFIXES:
+            if suffix.endswith(tsuf):
+                info = _FLAT_ATOMIC_OPS.get(suffix[: len(suffix) - len(tsuf)])
+                type_suffix = tsuf
+                break
+    if not info:
+        return None
+
+    op, data_dw = info
+    is_64bit = (
+        is_x2
+        or '64' in type_suffix
+        or original_suffix.endswith(('_B64', '_U64', '_I64', '_F64'))
+    )
+    elem_size = 8 if is_64bit else 4
+    if op in ('cmpswap', 'mskor'):
+        data_dw_actual = 2 * (elem_size // 4)
+    elif data_dw == 1:
+        data_dw_actual = elem_size // 4
+    else:
+        data_dw_actual = data_dw
+    return op, elem_size, data_dw_actual
+
+
 def _derive_flat(name: str) -> InstructionSemantics | None:
     """Derive semantics for a FLAT (Flat/Global/Scratch memory) instruction."""
     upper = name.upper()
@@ -1791,31 +1858,9 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                 is_x2 = suffix.endswith('_X2')
                 if is_x2:
                     suffix = suffix[:-3]
-                # Try exact match first (handles ADD_F32, PK_ADD_F16, etc.).
-                info = _FLAT_ATOMIC_OPS.get(suffix)
-                is_64bit = False
-                if not info:
-                    # Strip type suffix (_B32, _U32, _I32, _F32, _B64, etc.).
-                    for tsuf in (
-                        '_B32',
-                        '_U32',
-                        '_I32',
-                        '_F32',
-                        '_B64',
-                        '_U64',
-                        '_I64',
-                        '_F64',
-                    ):
-                        if suffix.endswith(tsuf):
-                            info = _FLAT_ATOMIC_OPS.get(
-                                suffix[: len(suffix) - len(tsuf)]
-                            )
-                            is_64bit = '64' in tsuf
-                            break
+                info = _derive_flat_atomic_info(suffix, is_x2)
                 if info:
-                    op, data_dw = info
-                    elem_size = 8 if (is_x2 or is_64bit or data_dw >= 2) else 4
-                    data_dw_actual = data_dw * (2 if is_x2 else 1)
+                    op, elem_size, data_dw_actual = info
                     return InstructionSemantics(
                         name,
                         'flat_atomic',
@@ -1946,29 +1991,9 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
                 is_x2 = suffix.endswith('_X2')
                 if is_x2:
                     suffix = suffix[:-3]
-                info = _FLAT_ATOMIC_OPS.get(suffix)
-                is_64bit = False
-                if not info:
-                    for tsuf in (
-                        '_B32',
-                        '_U32',
-                        '_I32',
-                        '_F32',
-                        '_B64',
-                        '_U64',
-                        '_I64',
-                        '_F64',
-                    ):
-                        if suffix.endswith(tsuf):
-                            info = _FLAT_ATOMIC_OPS.get(
-                                suffix[: len(suffix) - len(tsuf)]
-                            )
-                            is_64bit = '64' in tsuf
-                            break
+                info = _derive_flat_atomic_info(suffix, is_x2)
                 if info:
-                    op, data_dw = info
-                    elem_size = 8 if (is_x2 or is_64bit or data_dw >= 2) else 4
-                    data_dw_actual = data_dw * (2 if is_x2 else 1)
+                    op, elem_size, data_dw_actual = info
                     return InstructionSemantics(
                         name,
                         'buffer_atomic',

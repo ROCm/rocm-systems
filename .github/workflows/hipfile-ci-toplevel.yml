@@ -9,6 +9,9 @@ on:
       - '.github/workflows/hipfile-*.yml'
       - '!**/*.md'
       - '!**/*.rst'
+      # ais-check is a self-contained Python tool with no dependency on the C++
+      # library, so its changes shouldn't trigger the full C++ build/test.
+      - '!projects/hipfile/tools/ais-check/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -24,11 +27,25 @@ jobs:
     outputs:
       changed_dockerfile: ${{ steps.ci-flags.outputs.changed_dockerfile }}
       ci_matrix: ${{ steps.matrices.outputs.ci_matrix }}
-      build_ci_image_matrix: ${{ steps.matrices.outputs.build_ci_image_matrix }}
+      build_CI_images_matrix: ${{ steps.build-ci-images-matrix.outputs.build_CI_images_matrix }}
       ci_images: ${{ steps.ci-images.outputs.ci_images }}
+      nightly_build: ${{ steps.nightly.outputs.nightly_build }}
+      nightly_rocm_version: ${{ steps.nightly.outputs.nightly_rocm_version }}
     env:
       # Matrix variables go here in JSON notation.
       # '>-' strips newlines
+      CXX_COMPILER: >-
+        [
+          "amdclang++",
+          "clang++",
+          "g++"
+        ]
+      CXX_STANDARD: >-
+        [
+          20,
+          23
+        ]
+      # Note: If adding distros or ROCm versions, ensure they have been properly excluded.
       SUPPORTED_PLATFORMS: >-
         [
           "rocky",
@@ -38,27 +55,44 @@ jobs:
         ]
       ROCM_VERSIONS: >-
         [
-          "7.2.2"
+          "7.2.2",
+          "7.13.0",
+          "nightly"
         ]
-      # MATRIX_INCLUDE / MATRIX_EXCLUDE: extra/removed matrix entries,
-      # passed through to GHA's strategy.matrix include/exclude keys
-      # so non-rectangular combinations (e.g. ubuntu x 7.13.0 only) can
-      # be expressed without abandoning the base cross-product.
+      # MATRIX_INCLUDE / MATRIX_EXCLUDE: extra/removed matrix entries, passed
+      # through to GHA's strategy.matrix include/exclude keys so non-rectangular
+      # combinations can be expressed without abandoning the base cross-product.
       MATRIX_INCLUDE: >-
-        [
-          {"supported_platforms": "ubuntu", "rocm_versions": "7.13.0"}
-        ]
-      MATRIX_EXCLUDE: >-
         []
+      # 7.13.0 and nightly are ubuntu-only targets. They live in the base
+      # ROCM_VERSIONS axis and are removed from every other distro via
+      # MATRIX_EXCLUDE below. This is cleaner than specifying the full
+      # combination of CI parameters in include as the matrix axes grow.
+      MATRIX_EXCLUDE: >-
+        [
+          {"supported_platforms": "rocky8", "cxx_standard": 23},
+          {"supported_platforms": "rocky", "rocm_versions": "7.13.0"},
+          {"supported_platforms": "rocky", "rocm_versions": "nightly"},
+          {"supported_platforms": "rocky8", "rocm_versions": "7.13.0"},
+          {"supported_platforms": "rocky8", "rocm_versions": "nightly"},
+          {"supported_platforms": "suse", "rocm_versions": "7.13.0"},
+          {"supported_platforms": "suse", "rocm_versions": "nightly"}
+        ]
     steps:
       - name: Fetching code repository...
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           path: rocm-systems
           sparse-checkout: |
             projects/hipfile
             .github/workflows
+      - name: Authenticating to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Git fetch base ref
         working-directory: rocm-systems
         run: git fetch origin "${GITHUB_BASE_REF}"
@@ -67,36 +101,56 @@ jobs:
         id: ci-flags
         run: |
           echo "changed_dockerfile=$(./util/files-changed.sh "origin/${GITHUB_BASE_REF}" HEAD 'projects/hipfile/util/docker/DOCKERFILE.*')" >> "${GITHUB_OUTPUT}"
-      - name: Sanity-check jq commands
-        # Ensure that the jq commands work as expected before using them.
+      - name: Sanity-check util script test suites
+        # Ensure the util scripts work as expected before using them.
         working-directory: rocm-systems/projects/hipfile
         run: |
           util/ci-matrices.sh --test
           util/ci-images.sh --test
+          util/resolve-rocm-nightly.sh --test
+          util/build-ci-images-matrix.sh --test
       - name: Compute matrix configurations
         id: matrices
         working-directory: rocm-systems/projects/hipfile
-        # ci_matrix (the full strategy.matrix handed to the Linux test job)
-        # and build_ci_image_matrix (which drives the image-build job) are both
-        # computed by util/ci-matrices.sh. Sourcing it sets both shell vars from
-        # the job-level matrix env vars.
+        # ci_matrix (the full strategy.matrix handed to the Linux test job) and
+        # full_CI_images_matrix (the deduped catalog of every CI image this run
+        # references) are both computed by util/ci-matrices.sh. Sourcing it sets
+        # both shell vars from the job-level matrix env vars. The
+        # build-ci-images-matrix step below derives what to actually build.
         run: |
           source ./util/ci-matrices.sh
           echo "hipFile CI Matrix: "
           echo "${ci_matrix}" | jq .
-          echo "hipFile Build CI Image Matrix: "
-          echo "${build_ci_image_matrix}" | jq .
+          echo "hipFile Full CI Image Matrix: "
+          echo "${full_CI_images_matrix}" | jq .
           echo "ci_matrix=${ci_matrix}" >> "${GITHUB_OUTPUT}"
-          echo "build_ci_image_matrix=${build_ci_image_matrix}" >> "${GITHUB_OUTPUT}"
+          echo "full_CI_images_matrix=${full_CI_images_matrix}" >> "${GITHUB_OUTPUT}"
+      - name: Resolve ROCm nightly metadata
+        id: nightly
+        working-directory: rocm-systems/projects/hipfile
+        env:
+          FULL_CI_IMAGES_MATRIX: ${{ steps.matrices.outputs.full_CI_images_matrix }}
+        # Only resolves when a nightly row is present; otherwise emit empty values
+        # so the downstream image-name step stays wired up unconditionally.
+        run: |
+          if printf '%s' "${FULL_CI_IMAGES_MATRIX}" \
+              | jq -e '.include[]? | select(.rocm_versions == "nightly")' >/dev/null; then
+            ./util/resolve-rocm-nightly.sh | tee -a "${GITHUB_OUTPUT}"
+          else
+            echo "nightly_build=" >> "${GITHUB_OUTPUT}"
+            echo "nightly_rocm_version=" >> "${GITHUB_OUTPUT}"
+          fi
       - name: Compute CI image names
         id: ci-images
         working-directory: rocm-systems/projects/hipfile
         env:
           REGISTRY_URL: ghcr.io/${{ github.repository_owner }}
           CHANGED_DOCKERFILE: ${{ steps.ci-flags.outputs.changed_dockerfile }}
-          BUILD_CI_IMAGE_MATRIX: ${{ steps.matrices.outputs.build_ci_image_matrix }}
+          FULL_CI_IMAGES_MATRIX: ${{ steps.matrices.outputs.full_CI_images_matrix }}
+          NIGHTLY_BUILD: ${{ steps.nightly.outputs.nightly_build }}
         # ci_images is computed by util/ci-images.sh. Sourcing it sets ci_images
-        # from REGISTRY_URL, tag, and BUILD_CI_IMAGE_MATRIX in the environment.
+        # from REGISTRY_URL, tag, FULL_CI_IMAGES_MATRIX, and NIGHTLY_BUILD in
+        # the environment.
         run: |
           if [ "${CHANGED_DOCKERFILE}" = "1" ]; then
             # sanitize ref for tag
@@ -109,16 +163,37 @@ jobs:
           echo "List of CI Images: "
           echo "${ci_images}" | jq .
           echo "ci_images=${ci_images}" >> "${GITHUB_OUTPUT}"
+      - name: Compute images to build
+        id: build-ci-images-matrix
+        working-directory: rocm-systems/projects/hipfile
+        env:
+          CHANGED_DOCKERFILE: ${{ steps.ci-flags.outputs.changed_dockerfile }}
+          FULL_CI_IMAGES_MATRIX: ${{ steps.matrices.outputs.full_CI_images_matrix }}
+          CI_IMAGES: ${{ steps.ci-images.outputs.ci_images }}
+        # build_CI_images_matrix is computed by util/build-ci-images-matrix.sh.
+        # Sourcing it sets the shell var from CHANGED_DOCKERFILE,
+        # FULL_CI_IMAGES_MATRIX and CI_IMAGES: a Dockerfile change rebuilds the
+        # whole catalog, otherwise only nightly rows whose base/nvidia images
+        # aren't already published in GHCR (querying the registry) are kept -- so
+        # in the common case the set is empty and build_CI_image is skipped.
+        run: |
+          source ./util/build-ci-images-matrix.sh
+          echo "hipFile Build CI Images Matrix: "
+          echo "${build_CI_images_matrix}" | jq .
+          echo "build_CI_images_matrix=${build_CI_images_matrix}" >> "${GITHUB_OUTPUT}"
 
   build_CI_image:
-    if: ${{ needs.Precheck.outputs.changed_dockerfile == '1' }}
+    # build_CI_images_matrix is empty when there's nothing to (re)build (no
+    # Dockerfile change and every nightly image already published). An empty
+    # include yields zero matrix jobs, so this job is skipped.
+    if: ${{ fromJSON(needs.Precheck.outputs.build_CI_images_matrix).include[0] != null }}
     needs: Precheck
     permissions:
       contents: read
       packages: write
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.Precheck.outputs.build_ci_image_matrix) }}
+      matrix: ${{ fromJSON(needs.Precheck.outputs.build_CI_images_matrix) }}
     uses: ./.github/workflows/hipfile-image-build.yml
     with:
       ci_image_name: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
@@ -126,7 +201,13 @@ jobs:
       ci_image_name_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia }}
       ci_image_cache_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia_cache }}
       platform: ${{ matrix.supported_platforms }}
-      rocm_version: ${{ matrix.rocm_versions }}
+      # Nightly passes the resolved clean version (e.g. 7.14.0) as ROCM_VERSION
+      # and the build id separately; other versions pass the matrix value.
+      rocm_version: ${{ matrix.rocm_versions == 'nightly' && needs.Precheck.outputs.nightly_rocm_version || matrix.rocm_versions }}
+      rocm_nightly_build: ${{ matrix.rocm_versions == 'nightly' && needs.Precheck.outputs.nightly_build || '' }}
+      # Only a steady-state nightly fallback build refreshes the shared floating
+      # cache; a Dockerfile-change PR builds a PR-namespaced image and must not.
+      publish_cache: ${{ matrix.rocm_versions == 'nightly' && needs.Precheck.outputs.changed_dockerfile != '1' }}
 
   # Due to GHA matrix limitations, we cannot inspect the result of individual jobs
   # in the matrix. To avoid confusing errors, our only option is that if a single
@@ -147,5 +228,29 @@ jobs:
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
       ci_image_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia }}
+      cxx_compiler: ${{ matrix.cxx_compiler }}
+      cxx_standard: ${{ matrix.cxx_standard }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}
+
+  # CodeQL C/C++ findings are compiler- and standard-independent, so run the
+  # analysis exactly once against a single fixed image rather than fanning out
+  # across the build matrix. Change the image key below to retarget the ROCm
+  # version (the combo must exist in Precheck's matrix). Python and Actions are
+  # covered repo-wide by codeql.yml; this closes the C/C++ gap.
+  codeql:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    uses: ./.github/workflows/hipfile-codeql.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.2.2'].ci_image }}

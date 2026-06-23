@@ -72,7 +72,8 @@ TEST(Gfx12WaveStartTest, GetReturnsCommonType)
     ws.simd = 1;
     ws.wgp = 8;
     ws.wid = 10;
-    ws.dispatcher = 0b10101; // 5 bits: pipe=01, me=1, upper bits ignored
+    ws.pipe = 0b01;
+    ws.me = 1;
     ws.count = 50;
 
     wstart_type_common common = ws.get();
@@ -81,8 +82,8 @@ TEST(Gfx12WaveStartTest, GetReturnsCommonType)
     EXPECT_EQ(common.simd, 1);
     EXPECT_EQ(common.wgp, 8);
     EXPECT_EQ(common.wid, 10);
-    EXPECT_EQ(common.pipe, 0b01);             // dispatcher & 0x3
-    EXPECT_EQ(common.me, (0b10101 >> 2) & 1); // (dispatcher >> 2) & 1
+    EXPECT_EQ(common.pipe, 0b01);
+    EXPECT_EQ(common.me, 1);
     EXPECT_EQ(common.count, 50);
 }
 
@@ -301,12 +302,13 @@ TEST(Gfx12WaveStartEdgeCaseTest, MaxFieldValues)
 {
     gfx12::wstart_type ws{};
     ws.raw = 0;
-    ws.sa = 1;          // Max for 1-bit
-    ws.simd = 3;        // Max for 2-bit
-    ws.wgp = 15;        // Max for 4-bit
-    ws.wid = 31;        // Max for 5-bit
-    ws.dispatcher = 31; // Max for 5-bit
-    ws.count = 127;     // Max for 7-bit
+    ws.sa = 1;      // Max for 1-bit
+    ws.simd = 3;    // Max for 2-bit
+    ws.wgp = 15;    // Max for 4-bit
+    ws.wid = 31;    // Max for 5-bit
+    ws.pipe = 3;    // Max for 2-bit
+    ws.me = 1;      // Max for 1-bit
+    ws.count = 127; // Max for 7-bit
 
     wstart_type_common common = ws.get();
 

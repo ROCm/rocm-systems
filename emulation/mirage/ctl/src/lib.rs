@@ -17,12 +17,13 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use clap::{Args, Subcommand};
-use mirage_core::common::MaybeRef;
+use clap::{Args, Subcommand, ValueEnum};
+use mirage_core::common::{MaybeRef, SimpleValue};
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
-use mirage_core::emulator::EmulatorDescription;
+use mirage_core::emulator::ExecMode;
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
-use mirage_core::profile::{ContainerizedDef, FileMount, ProfileDef};
+use mirage_core::profile::{ContainerizedDef, FileMount, Hack, PortMapping, ProfileDef};
+use mirage_core::registry::EmulatorInfo;
 use mirage_core::session::SessionId;
 use tokio_stream::StreamExt;
 
@@ -62,30 +63,24 @@ pub fn init_logging(verbose: u8) {
         .try_init();
 }
 
-/// The full emulator registry: the generic pass-through
-/// ([`mirage_core::registry::noop`]) plus the emulator-specific
-/// backends, each of which is owned by its own crate. Assembled here
-/// because `mirage_ctl` is the lowest crate that depends on every
-/// emulator integration. Each entry reports its current install state
-/// and resolved runtime path, so building the registry probes the
-/// machine.
-pub fn registry() -> Vec<EmulatorDescription> {
-    use mirage_core::emulator::Emulator;
-    vec![
-        mirage_core::emulator::Noop::description(),
-        mirage_rocjitsu::Rocjitsu::description(),
-        mirage_hotswap::Hotswap::description(),
-    ]
+/// The full emulator registry: every backend crate compiled into this
+/// binary registers itself via [`inventory`], and
+/// [`mirage_core::registry::registry`] probes each one for its identity
+/// and live install / support status. No backend is named here, so
+/// enabling or disabling a backend's feature simply adds or removes it
+/// from this list.
+pub fn registry() -> Vec<EmulatorInfo> {
+    mirage_core::registry::registry()
 }
 
 /// Lookup an emulator by its canonical name in the full [`registry`].
-pub fn find_emulator(name: &str) -> Option<EmulatorDescription> {
+pub fn find_emulator(name: &str) -> Option<EmulatorInfo> {
     registry().into_iter().find(|e| e.name == name)
 }
 
 /// The default emulator for new profiles: the first installed,
 /// non-noop entry, falling back to `noop`.
-pub fn default_emulator() -> EmulatorDescription {
+pub fn default_emulator() -> EmulatorInfo {
     let specs = registry();
     mirage_core::registry::default_emulator(&specs).clone()
 }
@@ -94,7 +89,7 @@ pub fn default_emulator() -> EmulatorDescription {
 /// each backend with whether its runtime is installed and whether this
 /// host's hardware supports it. With `json` the full descriptions are
 /// emitted as-is; otherwise a compact table (or, with `long`, a
-/// detailed block including the support reason and runtime path).
+/// detailed block including the support reason).
 fn emulators_cmd(long: bool, json: bool) {
     let specs = registry();
     if json {
@@ -122,16 +117,13 @@ fn emulators_cmd(long: bool, json: bool) {
                 if spec.support.supported { "yes" } else { "no" },
                 spec.support.reason
             );
-            if let Some(path) = &spec.path {
-                println!("  runtime:   {}", path.display());
-            }
             println!();
         }
         return;
     }
 
     println!(
-        "{:<10} {:<10} {:<10} DESCRIPTION",
+        "{:<13} {:<10} {:<10} DESCRIPTION",
         "NAME", "INSTALLED", "SUPPORTED"
     );
     for spec in &specs {
@@ -141,7 +133,7 @@ fn emulators_cmd(long: bool, json: bool) {
             spec.name.clone()
         };
         println!(
-            "{:<10} {:<10} {:<10} {}",
+            "{:<13} {:<10} {:<10} {}",
             name,
             if spec.installed { "yes" } else { "no" },
             if spec.support.supported { "yes" } else { "no" },
@@ -152,9 +144,9 @@ fn emulators_cmd(long: bool, json: bool) {
 }
 
 /// Best-effort: materialise all builtin state on disk — agents,
-/// topologies, profiles, and the rocjitsu runtime assets — writing only
-/// what's missing. Errors are logged, never fatal; the user can always
-/// force a full rewrite with `mirage state builtins`.
+/// topologies, and profiles — writing only what's missing. Errors are
+/// logged, never fatal; the user can always force a full rewrite with
+/// `mirage state builtins`.
 ///
 /// Shared by the CLI ([`dispatch`]) and the daemon so both surfaces
 /// auto-unpack the builtins the first time they run, instead of
@@ -169,9 +161,6 @@ pub fn ensure_builtins_present() {
     if let Err(e) = mirage_builtin::ensure_profiles(false) {
         tracing::warn!("failed to preload builtin profiles: {e:#}");
     }
-    if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
-        tracing::warn!("failed to extract rocjitsu assets: {e:#}");
-    }
 }
 
 /// Validate a profile against its target emulator before it is
@@ -184,11 +173,10 @@ pub fn ensure_builtins_present() {
 /// Shared by the CLI profile commands and the daemon's profile
 /// endpoint so both validate identically.
 pub fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
-    use mirage_core::emulator::{Emulator, EmulatorKind, Noop};
-    match def.emulator.emulator {
-        EmulatorKind::Rocjitsu => mirage_rocjitsu::Rocjitsu::validate_profile(def),
-        EmulatorKind::Hotswap => mirage_hotswap::Hotswap::validate_profile(def),
-        EmulatorKind::Noop => Noop::validate_profile(def),
+    let kind = &def.emulator.emulator;
+    match mirage_core::emulator::get_emulator_backend(kind) {
+        Some(backend) => backend.validate_profile(def),
+        None => Err(format!("unknown emulator `{kind}`")),
     }
 }
 
@@ -285,7 +273,7 @@ pub enum ProfileCmd {
         #[arg(long)]
         description: Option<String>,
         /// Containerise the profile: run every node inside a container
-        /// built from this image. Enables `--mount`/`--provider`.
+        /// built from this image. Enables `--mount`/`--container-provider`.
         #[arg(long)]
         image: Option<String>,
         /// Bind mount applied to every node container, as
@@ -293,10 +281,15 @@ pub enum ProfileCmd {
         /// `--image`.
         #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
         mounts: Vec<String>,
+        /// Port published from every node container to the host, as
+        /// `HOST_PORT[:CONTAINER_PORT][/tcp|/udp]` (like docker `-p`).
+        /// May be repeated. Requires `--image`.
+        #[arg(long = "port", value_name = "HOST_PORT[:CONTAINER_PORT][/tcp|/udp]")]
+        ports: Vec<String>,
         /// Container provider to use (`podman`, `docker`, or a path).
         /// Autodetected (podman, then docker) when omitted. Requires
         /// `--image`.
-        #[arg(long)]
+        #[arg(long = "container-provider")]
         provider: Option<String>,
         /// Never prompt; use defaults for any unspecified field even on
         /// a terminal.
@@ -421,8 +414,30 @@ pub struct StartArgs {
     pub mounts: Vec<String>,
     /// Container provider (`podman`, `docker`, or a path). Autodetected
     /// when omitted.
-    #[arg(long)]
+    #[arg(long = "container-provider")]
     pub provider: Option<String>,
+    /// Override the emulator execution mode (`functional` or `clocked`).
+    #[arg(long)]
+    pub exec_mode: Option<ExecModeArg>,
+    /// Override an emulator option directly (`KEY=VALUE`). May be
+    /// repeated.
+    #[arg(long = "option", short = 'o', value_name = "KEY=VALUE")]
+    pub options: Vec<String>,
+    /// Use an explicit emulator config file instead of synthesising one
+    /// from the profile (the upstream `rocjitsu --config`).
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<String>,
+    /// Run the emulator in out-of-process daemon mode. This is the
+    /// default; the flag is accepted for explicitness and for the
+    /// `rocjitsu --daemon/--attach` drop-in alias.
+    #[arg(long, conflicts_with = "in_process")]
+    pub daemon: bool,
+    /// Run the emulator in-process (local mode) instead of the default
+    /// out-of-process daemon. In-process mode cannot share GPU memory
+    /// across processes, so multi-GPU RCCL collectives require the
+    /// daemon (the default).
+    #[arg(long = "in-process")]
+    pub in_process: bool,
     /// Never prompt; require every field on the command line even on a
     /// terminal.
     #[arg(long)]
@@ -485,7 +500,7 @@ pub enum StateCmd {
     /// Completely stop and purge all mirage processes and state.
     ///
     /// Stops every running session and then removes the mirage
-    /// runtime, state, and cache directories. The config directory
+    /// runtime and state directories. The config directory
     /// (profiles, topologies) is left alone unless `--all` is passed.
     Purge {
         /// Don't prompt for confirmation.
@@ -503,9 +518,29 @@ pub enum StateCmd {
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
-    /// Profile to use.
-    #[arg(long)]
+    /// Profile to use. Defaults to the `mi350x` builtin.
+    #[arg(long, default_value = "mi350x")]
     profile: String,
+    /// Override the profile's emulator backend (e.g. `rocjitsu`,
+    /// `rocjitsu-dbt`, `hotswap`, `noop`). See `mirage emulators` for
+    /// the available backends.
+    #[arg(long)]
+    emulator: Option<String>,
+    /// Override the profile topology's node count for this run.
+    #[arg(long)]
+    num_nodes: Option<u32>,
+    /// Override the profile topology's per-node GPU count for this run.
+    #[arg(long)]
+    gpus_per_node: Option<u32>,
+    /// Number of workload processes to launch per node (like
+    /// `torchrun --nproc-per-node`). Defaults to `1`. Each process gets a
+    /// distinct `LOCAL_RANK` (`0..nproc_per_node`) and global `RANK`, and
+    /// the job's `WORLD_SIZE` becomes `num_nodes * nproc_per_node`, so
+    /// `torch.distributed` runs without a separate launcher. Give each
+    /// node at least this many GPUs (`--gpus-per-node`) so every process
+    /// can pin its own device.
+    #[arg(long, visible_alias = "nproc_per_node")]
+    nproc_per_node: Option<u32>,
     /// Reuse an existing session by id.
     #[arg(long, conflicts_with_all = ["keep_session"])]
     session: Option<SessionId>,
@@ -526,10 +561,43 @@ pub struct RunArgs {
     /// Extra bind mount (`HOST[:CONTAINER[:ro|rw]]`). May be repeated.
     #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
     mounts: Vec<String>,
+    /// Publish a container port on the host
+    /// (`HOST_PORT[:CONTAINER_PORT][/tcp|/udp]`, like docker `-p`). May
+    /// be repeated. Requires a containerised profile or `--image`.
+    #[arg(long = "port", value_name = "HOST_PORT[:CONTAINER_PORT][/tcp|/udp]")]
+    ports: Vec<String>,
     /// Container provider (`podman`, `docker`, or a path). Autodetected
-    /// when omitted.
+    /// when omitted. The `MIRAGE_CONTAINER_PROVIDER` environment variable
+    /// has the same effect.
+    #[arg(long = "container-provider")]
+    container_provider: Option<String>,
+    /// Apply an opt-in image hack by building a derivative image from the
+    /// base image before launching containers. May be repeated. Requires
+    /// a containerised profile or `--image`.
+    #[arg(long = "hack", value_name = "HACK")]
+    hacks: Vec<HackArg>,
+    /// Override the emulator execution mode (`functional` or `clocked`).
     #[arg(long)]
-    provider: Option<String>,
+    exec_mode: Option<ExecModeArg>,
+    /// Override an emulator option directly (`KEY=VALUE`). May be
+    /// repeated.
+    #[arg(long = "option", short = 'o', value_name = "KEY=VALUE")]
+    options: Vec<String>,
+    /// Use an explicit emulator config file instead of synthesising one
+    /// from the profile (the upstream `rocjitsu --config`).
+    #[arg(long, value_name = "PATH")]
+    config: Option<String>,
+    /// Run the emulator in out-of-process daemon mode. This is the
+    /// default; the flag is accepted for explicitness and for the
+    /// `rocjitsu --daemon/--attach` drop-in alias.
+    #[arg(long, conflicts_with = "in_process")]
+    daemon: bool,
+    /// Run the emulator in-process (local mode) instead of the default
+    /// out-of-process daemon. In-process mode cannot share GPU memory
+    /// across processes, so multi-GPU RCCL collectives require the
+    /// daemon (the default).
+    #[arg(long = "in-process")]
+    in_process: bool,
     /// The command and its arguments.
     #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
     argv: Vec<String>,
@@ -563,10 +631,10 @@ pub async fn dispatch<C: MirageCtl + 'static>(
     ctl: C,
     json: bool,
 ) -> anyhow::Result<ExitCode> {
-    // Best-effort: write any missing builtin agents/topologies and
-    // extract the rocjitsu runtime assets on startup so they're always
-    // available under <MIRAGE_CONFIG>/ and <MIRAGE_CACHE>/. Errors here
-    // are non-fatal; the user can recover via `mirage state builtins`.
+    // Best-effort: write any missing builtin agents/topologies on
+    // startup so they're always available under <MIRAGE_CONFIG>/. Errors
+    // here are non-fatal; the user can recover via `mirage state
+    // builtins`.
     ensure_builtins_present();
     let ctl = Arc::new(ctl);
     match cmd {
@@ -633,6 +701,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             description,
             image,
             mounts,
+            ports,
             provider,
             no_input,
         } => {
@@ -646,6 +715,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 description,
                 image,
                 mounts,
+                ports,
                 provider,
                 interactive,
             )?;
@@ -869,11 +939,12 @@ async fn session_cmd<C: MirageCtl>(
 /// Build a [`ContainerizedDef`] from CLI container flags.
 ///
 /// Returns `None` when no container flags were given. `--mount` and
-/// `--provider` require `--image` (there is no base image to attach
-/// them to otherwise).
+/// `--container-provider` require `--image` (there is no base image to
+/// attach them to otherwise).
 fn build_containerize(
     image: Option<String>,
     mounts: &[String],
+    ports: &[String],
     provider: Option<String>,
 ) -> anyhow::Result<Option<ContainerizedDef>> {
     match image {
@@ -881,12 +952,14 @@ fn build_containerize(
             provider,
             image,
             mounts: parse_mounts(mounts)?,
+            ports: parse_ports(ports)?,
             devices: Vec::new(),
             groups: Vec::new(),
+            hacks: Vec::new(),
         })),
         None => {
-            if !mounts.is_empty() || provider.is_some() {
-                anyhow::bail!("--mount/--provider require --image");
+            if !mounts.is_empty() || !ports.is_empty() || provider.is_some() {
+                anyhow::bail!("--mount/--port/--container-provider require --image");
             }
             Ok(None)
         }
@@ -910,6 +983,7 @@ fn build_profile_create(
     description: Option<String>,
     image: Option<String>,
     mounts: Vec<String>,
+    ports: Vec<String>,
     provider: Option<String>,
     interactive: bool,
 ) -> anyhow::Result<ProfileDef> {
@@ -990,7 +1064,10 @@ fn build_profile_create(
             if known.is_empty() {
                 "MI350X".to_string()
             } else {
-                let default_idx = known.iter().position(|n| n == "MI350X").unwrap_or(0);
+                let default_idx = known
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case("MI350X"))
+                    .unwrap_or(0);
                 let pick = Select::with_theme(&theme)
                     .with_prompt("Agent")
                     .items(&known)
@@ -1016,51 +1093,53 @@ fn build_profile_create(
     };
 
     // ----- containerisation -----
-    let containerize = if image.is_some() || !mounts.is_empty() || provider.is_some() {
-        // Any explicit container flag: build directly (errors if mounts
-        // or provider were given without an image).
-        build_containerize(image, &mounts, provider)?
-    } else if interactive
-        && Confirm::with_theme(&theme)
-            .with_prompt("Run each node inside a container?")
-            .default(false)
-            .interact()?
-    {
-        let img: String = Input::with_theme(&theme)
-            .with_prompt("Image")
-            .validate_with(|s: &String| -> Result<(), &str> {
-                if s.trim().is_empty() {
-                    Err("image required")
-                } else {
-                    Ok(())
-                }
-            })
-            .interact_text()?;
-        let prov: String = Input::with_theme(&theme)
-            .with_prompt("Provider (blank to auto-detect)")
-            .allow_empty(true)
-            .interact_text()?;
-        let mut specs: Vec<String> = Vec::new();
-        while Confirm::with_theme(&theme)
-            .with_prompt("Add a bind mount?")
-            .default(false)
-            .interact()?
+    let containerize =
+        if image.is_some() || !mounts.is_empty() || !ports.is_empty() || provider.is_some() {
+            // Any explicit container flag: build directly (errors if mounts
+            // or provider were given without an image).
+            build_containerize(image, &mounts, &ports, provider)?
+        } else if interactive
+            && Confirm::with_theme(&theme)
+                .with_prompt("Run each node inside a container?")
+                .default(false)
+                .interact()?
         {
-            let m: String = Input::with_theme(&theme)
-                .with_prompt("Mount (HOST[:CONTAINER[:ro|rw]])")
+            let img: String = Input::with_theme(&theme)
+                .with_prompt("Image")
+                .validate_with(|s: &String| -> Result<(), &str> {
+                    if s.trim().is_empty() {
+                        Err("image required")
+                    } else {
+                        Ok(())
+                    }
+                })
                 .interact_text()?;
-            if !m.trim().is_empty() {
-                specs.push(m);
+            let prov: String = Input::with_theme(&theme)
+                .with_prompt("Provider (blank to auto-detect)")
+                .allow_empty(true)
+                .interact_text()?;
+            let mut specs: Vec<String> = Vec::new();
+            while Confirm::with_theme(&theme)
+                .with_prompt("Add a bind mount?")
+                .default(false)
+                .interact()?
+            {
+                let m: String = Input::with_theme(&theme)
+                    .with_prompt("Mount (HOST[:CONTAINER[:ro|rw]])")
+                    .interact_text()?;
+                if !m.trim().is_empty() {
+                    specs.push(m);
+                }
             }
-        }
-        build_containerize(
-            Some(img),
-            &specs,
-            if prov.is_empty() { None } else { Some(prov) },
-        )?
-    } else {
-        None
-    };
+            build_containerize(
+                Some(img),
+                &specs,
+                &ports,
+                if prov.is_empty() { None } else { Some(prov) },
+            )?
+        } else {
+            None
+        };
 
     let topo = mirage_core::topology::TopologyDef {
         num_nodes,
@@ -1100,6 +1179,14 @@ fn parse_mounts(mounts: &[String]) -> anyhow::Result<Vec<FileMount>> {
         .collect()
 }
 
+/// Parse CLI `--port` specs into [`PortMapping`]s.
+fn parse_ports(ports: &[String]) -> anyhow::Result<Vec<PortMapping>> {
+    ports
+        .iter()
+        .map(|p| PortMapping::parse(p).map_err(|e| anyhow::anyhow!(e)))
+        .collect()
+}
+
 /// Apply container override flags to a freshly-loaded profile.
 ///
 /// When no container flags are present and the profile is referenced by
@@ -1107,41 +1194,197 @@ fn parse_mounts(mounts: &[String]) -> anyhow::Result<Vec<FileMount>> {
 /// itself (the common, cheap path). When flags are present, they enable
 /// or extend the profile's containerisation and the (now modified)
 /// profile is returned inline via [`MaybeRef::Owned`].
-fn apply_container_overrides(
+/// Emulator execution mode, exposed on the CLI as `--exec-mode`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum ExecModeArg {
+    /// Functional emulation (default): correct results, no timing model.
+    Functional,
+    /// Clocked emulation: model device timing.
+    Clocked,
+}
+
+impl From<ExecModeArg> for ExecMode {
+    fn from(m: ExecModeArg) -> Self {
+        match m {
+            ExecModeArg::Functional => ExecMode::Functional,
+            ExecModeArg::Clocked => ExecMode::Clocked,
+        }
+    }
+}
+
+/// Opt-in image hack, exposed on the CLI as `--hack` (repeatable).
+/// Mirrors [`mirage_core::profile::Hack`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum HackArg {
+    /// Build a derivative image that updates `libstdc++6`/`libgcc-s1`
+    /// from the `ubuntu-toolchain-r/test` PPA, fixing `GLIBCXX_*`/`GCC_*`
+    /// "version not found" errors from binaries built against a newer
+    /// toolchain than the base image ships.
+    UpdateGccViaPpa,
+}
+
+impl From<HackArg> for Hack {
+    fn from(h: HackArg) -> Self {
+        match h {
+            HackArg::UpdateGccViaPpa => Hack::UpdateGccViaPpa,
+        }
+    }
+}
+
+/// Parse a `KEY=VALUE` emulator option into a typed [`SimpleValue`].
+///
+/// Values that look like booleans or integers are stored as such so the
+/// override matches what a hand-written profile would carry; everything
+/// else is kept as a string.
+fn parse_option(spec: &str) -> anyhow::Result<(String, SimpleValue)> {
+    let (key, value) = spec
+        .split_once('=')
+        .ok_or_else(|| anyhow::anyhow!("invalid option {spec:?} (expected KEY=VALUE)"))?;
+    if key.is_empty() {
+        anyhow::bail!("invalid option {spec:?} (empty key)");
+    }
+    let parsed = match value {
+        "true" => SimpleValue::Boolean(true),
+        "false" => SimpleValue::Boolean(false),
+        _ => match value.parse::<i64>() {
+            Ok(n) => SimpleValue::Number(n),
+            Err(_) => SimpleValue::String(value.to_string()),
+        },
+    };
+    Ok((key.to_string(), parsed))
+}
+
+/// Apply direct CLI overrides (containerisation + emulator settings) to
+/// a profile fetched by name.
+///
+/// When no override is supplied the cheap by-name [`MaybeRef::Ref`] is
+/// returned so the session keeps tracking the on-disk profile. As soon
+/// as any field is overridden the whole (mutated) profile is inlined as
+/// [`MaybeRef::Owned`].
+#[allow(clippy::too_many_arguments)]
+fn apply_profile_overrides(
     profile: &mut ProfileDef,
     image: Option<String>,
     mounts: &[String],
+    ports: &[String],
     provider: Option<String>,
+    emulator: Option<String>,
+    exec_mode: Option<ExecModeArg>,
+    options: &[String],
+    config: Option<String>,
+    num_nodes: Option<u32>,
+    gpus_per_node: Option<u32>,
+    hacks: &[HackArg],
     profile_name: &str,
 ) -> anyhow::Result<MaybeRef<ProfileDef>> {
-    if image.is_none() && mounts.is_empty() && provider.is_none() {
+    if image.is_none()
+        && mounts.is_empty()
+        && ports.is_empty()
+        && provider.is_none()
+        && emulator.is_none()
+        && exec_mode.is_none()
+        && options.is_empty()
+        && config.is_none()
+        && num_nodes.is_none()
+        && gpus_per_node.is_none()
+        && hacks.is_empty()
+    {
         // No overrides: keep the cheap by-name reference.
         return Ok(MaybeRef::Ref(profile_name.to_string()));
     }
-    let parsed = parse_mounts(mounts)?;
-    match &mut profile.containerize {
-        Some(c) => {
-            if let Some(img) = image {
-                c.image = img;
+
+    // Container overrides.
+    if image.is_some()
+        || !mounts.is_empty()
+        || !ports.is_empty()
+        || provider.is_some()
+        || !hacks.is_empty()
+    {
+        let parsed = parse_mounts(mounts)?;
+        let parsed_ports = parse_ports(ports)?;
+        let parsed_hacks: Vec<Hack> = hacks.iter().copied().map(Hack::from).collect();
+        match &mut profile.containerize {
+            Some(c) => {
+                if let Some(img) = image {
+                    c.image = img;
+                }
+                if let Some(p) = provider {
+                    c.provider = Some(p);
+                }
+                c.mounts.extend(parsed);
+                c.ports.extend(parsed_ports);
+                for hack in parsed_hacks {
+                    if !c.hacks.contains(&hack) {
+                        c.hacks.push(hack);
+                    }
+                }
             }
-            if let Some(p) = provider {
-                c.provider = Some(p);
+            None => {
+                let image = image.ok_or_else(|| {
+                    anyhow::anyhow!("--mount/--port/--container-provider/--hack require a containerised profile or --image")
+                })?;
+                profile.containerize = Some(ContainerizedDef {
+                    provider,
+                    image,
+                    mounts: parsed,
+                    ports: parsed_ports,
+                    devices: Vec::new(),
+                    groups: Vec::new(),
+                    hacks: parsed_hacks,
+                });
             }
-            c.mounts.extend(parsed);
-        }
-        None => {
-            let image = image.ok_or_else(|| {
-                anyhow::anyhow!("--mount/--provider require a containerised profile or --image")
-            })?;
-            profile.containerize = Some(ContainerizedDef {
-                provider,
-                image,
-                mounts: parsed,
-                devices: Vec::new(),
-                groups: Vec::new(),
-            });
         }
     }
+
+    // Emulator overrides.
+    if let Some(name) = emulator {
+        if find_emulator(&name).is_none() {
+            let available = registry()
+                .into_iter()
+                .map(|e| e.name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            anyhow::bail!("unknown emulator `{name}`; available backends: {available}");
+        }
+        profile.emulator.emulator = name;
+    }
+    if let Some(mode) = exec_mode {
+        profile.emulator.exec_mode = mode.into();
+    }
+    for opt in options {
+        let (key, value) = parse_option(opt)?;
+        profile.emulator.options.insert(key, value);
+    }
+    // Drop-in `--config <path>`: an explicit emulator config file
+    // (the upstream `rocjitsu --config`). Stored as the `config`
+    // emulator option (absolute, so it resolves regardless of the
+    // workload's working directory) for the backend to use verbatim.
+    if let Some(cfg) = config {
+        let abs =
+            std::fs::canonicalize(&cfg).map_err(|e| anyhow::anyhow!("--config {cfg:?}: {e}"))?;
+        profile.emulator.options.insert(
+            "config".to_string(),
+            SimpleValue::String(abs.display().to_string()),
+        );
+    }
+
+    // Topology overrides: per-run node and per-node GPU counts. Resolve
+    // the emulator's topology (following a by-name reference) so the
+    // counts can be mutated, then inline the modified topology.
+    if num_nodes.is_some() || gpus_per_node.is_some() {
+        let mut topo = match &profile.emulator.topology {
+            MaybeRef::Owned(t) => t.clone(),
+            MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
+        };
+        if let Some(n) = num_nodes {
+            topo.num_nodes = n;
+        }
+        if let Some(g) = gpus_per_node {
+            topo.gpus_per_node = g;
+        }
+        profile.emulator.topology = MaybeRef::Owned(topo);
+    }
+
     Ok(MaybeRef::Owned(profile.clone()))
 }
 
@@ -1191,17 +1434,26 @@ async fn session_start<C: MirageCtl>(
     // Validate profile exists and resolve it so container overrides can
     // be applied.
     let mut profile = ctl.profile_get(&profile_name)?;
-    let profile_ref = apply_container_overrides(
+    let profile_ref = apply_profile_overrides(
         &mut profile,
         args.image,
         &args.mounts,
+        &[],
         args.provider,
+        None,
+        args.exec_mode,
+        &args.options,
+        args.config,
+        None,
+        None,
+        &[],
         &profile_name,
     )?;
     let def = ctl.session_create(CreateSessionRequest {
         id,
         profile: profile_ref,
         workdir,
+        daemon: !args.in_process,
     })?;
     if !args.no_host {
         spawn_host_for(&def.id)?;
@@ -1244,10 +1496,7 @@ fn resolve_start_profile<C: MirageCtl>(
 
 /// Resolve the session id: the `--id` flag, an interactive prompt (blank
 /// for auto), or `None` (auto-generated).
-fn resolve_start_id(
-    id: Option<SessionId>,
-    interactive: bool,
-) -> anyhow::Result<Option<SessionId>> {
+fn resolve_start_id(id: Option<SessionId>, interactive: bool) -> anyhow::Result<Option<SessionId>> {
     if id.is_some() || !interactive {
         return Ok(id);
     }
@@ -1463,6 +1712,7 @@ async fn exec_start<C: MirageCtl + 'static>(
         // when attaching, we always keep the exec until after attach
         // completes; otherwise the host might remove the dir before we
         // finish tailing.
+        nproc_per_node: 1,
         keep: a.keep || !a.detach,
     };
     let r = ctl.session_exec(&def)?;
@@ -1470,7 +1720,7 @@ async fn exec_start<C: MirageCtl + 'static>(
         println!("{}", r.exec);
         return Ok(ExitCode::from(0));
     }
-    let code = follow_attach(ctl.as_ref(), &r).await?;
+    let code = follow_attach(ctl.clone(), &r).await?;
     if !a.keep {
         let _ = ctl.exec_remove(&r);
     }
@@ -1519,16 +1769,110 @@ fn parse_signal(s: &str) -> anyhow::Result<i32> {
 
 // ----- attach/logs/run -------------------------------------------------------
 
-async fn attach_cmd<C: MirageCtl>(ctl: Arc<C>, a: AttachArgs) -> anyhow::Result<ExitCode> {
+async fn attach_cmd<C: MirageCtl + 'static>(
+    ctl: Arc<C>,
+    a: AttachArgs,
+) -> anyhow::Result<ExitCode> {
     let r = ExecRef {
         session: a.session,
         exec: a.exec,
     };
-    follow_attach(ctl.as_ref(), &r).await
+    follow_attach(ctl, &r).await
 }
 
-async fn follow_attach<C: MirageCtl>(ctl: &C, r: &ExecRef) -> anyhow::Result<ExitCode> {
+/// Put the controlling terminal into raw mode for the duration of an
+/// interactive attach, restoring the original settings on drop.
+///
+/// When attached to an interactive workload (e.g. `bash`) the remote
+/// PTY owns echo and line editing, so the local terminal must forward
+/// every keystroke verbatim instead of cooking/echoing it. Returns
+/// `None` (a no-op) when stdin isn't a TTY, e.g. piped or redirected.
+struct RawModeGuard {
+    fd: i32,
+    original: libc::termios,
+}
+
+impl RawModeGuard {
+    fn enable_if_tty() -> Option<Self> {
+        use std::os::fd::AsRawFd as _;
+        let fd = std::io::stdin().as_raw_fd();
+        // SAFETY: `fd` is the process stdin; the termios calls only read
+        // and write a stack-allocated `termios` we own.
+        unsafe {
+            if libc::isatty(fd) != 1 {
+                return None;
+            }
+            let mut original: libc::termios = std::mem::zeroed();
+            if libc::tcgetattr(fd, &mut original) != 0 {
+                return None;
+            }
+            let mut raw = original;
+            libc::cfmakeraw(&mut raw);
+            if libc::tcsetattr(fd, libc::TCSANOW, &raw) != 0 {
+                return None;
+            }
+            Some(RawModeGuard { fd, original })
+        }
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        // SAFETY: restoring the saved termios on the same fd.
+        unsafe {
+            libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
+        }
+    }
+}
+
+async fn follow_attach<C: MirageCtl + 'static>(
+    ctl: Arc<C>,
+    r: &ExecRef,
+) -> anyhow::Result<ExitCode> {
     let mut s = ctl.session_attach(r)?;
+
+    // Forward this process's stdin to the workload's stdin (node 0).
+    // Without this an interactive workload such as `bash` blocks forever
+    // waiting for input that never arrives. The host exposes node 0's
+    // stdin as a FIFO that a bridge task pumps into the workload's PTY;
+    // `session_stdin` writes there. Reads are blocking, so they run on a
+    // dedicated thread that exits on EOF or the first write error (the
+    // workload went away). The thread is detached: the attach loop below
+    // owns the lifetime and the process exits shortly after it returns.
+    let _raw = RawModeGuard::enable_if_tty();
+    let stdin_ctl = ctl.clone();
+    let stdin_ref = r.clone();
+    std::thread::spawn(move || {
+        use std::io::Read as _;
+        let mut stdin = std::io::stdin().lock();
+        let mut buf = [0u8; 4096];
+        loop {
+            match stdin.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    // The exec's stdin FIFO is created asynchronously by
+                    // the host just after the exec is submitted, so the
+                    // first write can briefly race ahead of it. Retry
+                    // transient failures so opening keystrokes aren't
+                    // dropped; give up if it never appears (the workload
+                    // is gone) so the thread can't spin forever.
+                    let mut attempts = 0;
+                    loop {
+                        match stdin_ctl.session_stdin(&stdin_ref, &buf[..n]) {
+                            Ok(()) => break,
+                            Err(_) if attempts < 250 => {
+                                attempts += 1;
+                                std::thread::sleep(Duration::from_millis(20));
+                            }
+                            Err(_) => return,
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
     let mut stdout = std::io::stdout().lock();
     let mut stderr = std::io::stderr().lock();
     let mut exit: i32 = 0;
@@ -1555,7 +1899,7 @@ async fn follow_attach<C: MirageCtl>(ctl: &C, r: &ExecRef) -> anyhow::Result<Exi
     Ok(ExitCode::from((exit & 0xff) as u8))
 }
 
-async fn logs_cmd<C: MirageCtl>(ctl: Arc<C>, a: LogsArgs) -> anyhow::Result<ExitCode> {
+async fn logs_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: LogsArgs) -> anyhow::Result<ExitCode> {
     let layout = mirage_core::paths::SessionLayout::for_id(&a.session).exec(&a.exec);
     if !layout.root.exists() {
         anyhow::bail!("exec not found: {}", a.exec);
@@ -1584,7 +1928,7 @@ async fn logs_cmd<C: MirageCtl>(ctl: Arc<C>, a: LogsArgs) -> anyhow::Result<Exit
         session: a.session,
         exec: a.exec,
     };
-    follow_attach(ctl.as_ref(), &r).await?;
+    follow_attach(ctl, &r).await?;
     Ok(ExitCode::from(0))
 }
 
@@ -1595,11 +1939,19 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
         None => {
             // create transient session
             let mut profile = ctl.profile_get(&a.profile)?;
-            let profile_ref = apply_container_overrides(
+            let profile_ref = apply_profile_overrides(
                 &mut profile,
                 a.image.clone(),
                 &a.mounts,
-                a.provider.clone(),
+                &a.ports,
+                a.container_provider.clone(),
+                a.emulator.clone(),
+                a.exec_mode,
+                &a.options,
+                a.config.clone(),
+                a.num_nodes,
+                a.gpus_per_node,
+                &a.hacks,
                 &a.profile,
             )?;
             tracing::info!(profile = %a.profile, "creating transient session");
@@ -1611,12 +1963,11 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                         .map(|p| p.display().to_string())
                         .unwrap_or("/".to_string())
                 }),
+                daemon: !a.in_process,
             })?;
             tracing::info!(session = %def.id, "session created; spawning host");
             spawn_host_for(&def.id)?;
-            if let Err(e) =
-                wait_ready_or_bail(ctl.as_ref(), &def.id, Duration::from_secs(10))
-            {
+            if let Err(e) = wait_ready_or_bail(ctl.as_ref(), &def.id, Duration::from_secs(10)) {
                 // The transient session we just created never came up
                 // (e.g. a container image that couldn't be pulled or a
                 // node that wouldn't start). Tear it down so we don't
@@ -1641,13 +1992,14 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
             workdir: a.workdir.clone(),
         },
         worker_exec: None,
+        nproc_per_node: a.nproc_per_node.unwrap_or(1).max(1),
         // keep until after attach drains; we may still destroy the
         // whole session below.
         keep: true,
     };
     let r = ctl.session_exec(&def)?;
     tracing::info!(session = %sid, exec = %r.exec, "exec submitted; attaching");
-    let code = follow_attach(ctl.as_ref(), &r).await?;
+    let code = follow_attach(ctl.clone(), &r).await?;
     if created && !a.keep_session {
         let _ = ctl.session_destroy(&sid);
     }
@@ -1655,14 +2007,6 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
 }
 
 // ----- state dispatch --------------------------------------------------------
-
-fn rocjitsu_asset_path(name: &str) -> std::path::PathBuf {
-    match name {
-        n if n == mirage_rocjitsu::KMD_LIB_NAME => mirage_rocjitsu::kmd_lib_path(),
-        n if n == mirage_rocjitsu::LIB_NAME => mirage_rocjitsu::lib_path(),
-        _ => mirage_rocjitsu::schema_fbs_path(),
-    }
-}
 
 async fn state_cmd<C: MirageCtl + 'static>(
     ctl: Arc<C>,
@@ -1674,7 +2018,6 @@ async fn state_cmd<C: MirageCtl + 'static>(
             let agents = mirage_builtin::ensure_agents(true)?;
             let topologies = mirage_builtin::ensure_topologies(true)?;
             let profiles = mirage_builtin::ensure_profiles(true)?;
-            let assets = mirage_rocjitsu::ensure_assets(true)?;
             if json {
                 let entries: Vec<_> = agents
                     .iter()
@@ -1702,15 +2045,6 @@ async fn state_cmd<C: MirageCtl + 'static>(
                             "written": w,
                         })
                     }))
-                    .chain(assets.iter().map(|(n, w)| {
-                        let p = rocjitsu_asset_path(n);
-                        serde_json::json!({
-                            "kind": "asset",
-                            "name": n,
-                            "path": p,
-                            "written": w,
-                        })
-                    }))
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&entries)?);
             } else {
@@ -1729,18 +2063,13 @@ async fn state_cmd<C: MirageCtl + 'static>(
                     let tag = if *w { "wrote" } else { "kept" };
                     println!("{tag} profile   {} -> {}", name, p.display());
                 }
-                for (name, w) in &assets {
-                    let p = rocjitsu_asset_path(name);
-                    let tag = if *w { "wrote" } else { "kept" };
-                    println!("{tag} asset     {} -> {}", name, p.display());
-                }
             }
         }
         StateCmd::Purge { force, all } => {
             let prompt = if all {
                 "purge ALL mirage state, including profiles and topologies?"
             } else {
-                "purge all mirage runtime/state/cache and stop all sessions?"
+                "purge all mirage runtime/state and stop all sessions?"
             };
             if !force && !confirm(prompt)? {
                 return Ok(ExitCode::from(0));
@@ -1767,7 +2096,6 @@ fn purge<C: MirageCtl + ?Sized>(ctl: &C, all: bool) -> anyhow::Result<()> {
     let mut targets = vec![
         mirage_core::paths::mirage_runtime_dir(),
         mirage_core::paths::mirage_state_dir(),
-        mirage_core::paths::mirage_cache_dir(),
     ];
     if all {
         targets.push(mirage_core::paths::mirage_config_dir());
@@ -1802,7 +2130,6 @@ fn print_paths(json: bool) {
         "config": mirage_core::paths::mirage_config_dir(),
         "runtime": mirage_core::paths::mirage_runtime_dir(),
         "state": mirage_core::paths::mirage_state_dir(),
-        "cache": mirage_core::paths::mirage_cache_dir(),
         "profiles": mirage_core::paths::profile_root(),
         "sessions": mirage_core::paths::session_root(),
     });
@@ -1821,11 +2148,144 @@ fn print_paths(json: bool) {
             "state:    {}",
             mirage_core::paths::mirage_state_dir().display()
         );
-        println!(
-            "cache:    {}",
-            mirage_core::paths::mirage_cache_dir().display()
-        );
         println!("profiles: {}", mirage_core::paths::profile_root().display());
         println!("sessions: {}", mirage_core::paths::session_root().display());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mirage_core::common::SimpleMap;
+    use mirage_core::emulator::{EmulatorDef, EmulatorKind};
+    use mirage_core::topology::TopologyDef;
+
+    fn sample_profile() -> ProfileDef {
+        ProfileDef {
+            name: "mi450x".to_string(),
+            description: None,
+            emulator: EmulatorDef {
+                emulator: EmulatorKind::from("rocjitsu"),
+                plugins: Default::default(),
+                exec_mode: ExecMode::Functional,
+                options: SimpleMap::default(),
+                topology: MaybeRef::Owned(TopologyDef {
+                    num_nodes: 1,
+                    gpus_per_node: 1,
+                    agent: MaybeRef::Ref("MI450X".to_string()),
+                }),
+            },
+            containerize: None,
+        }
+    }
+
+    #[test]
+    fn parse_option_infers_types() {
+        assert_eq!(
+            parse_option("gpu_model=cdna3").unwrap(),
+            ("gpu_model".to_string(), SimpleValue::String("cdna3".into()))
+        );
+        assert_eq!(
+            parse_option("queues=4").unwrap(),
+            ("queues".to_string(), SimpleValue::Number(4))
+        );
+        assert_eq!(
+            parse_option("trace=true").unwrap(),
+            ("trace".to_string(), SimpleValue::Boolean(true))
+        );
+    }
+
+    #[test]
+    fn parse_option_rejects_malformed() {
+        assert!(parse_option("nope").is_err());
+        assert!(parse_option("=value").is_err());
+    }
+
+    #[test]
+    fn no_overrides_keeps_by_name_ref() {
+        let mut p = sample_profile();
+        let r = apply_profile_overrides(
+            &mut p,
+            None,
+            &[],
+            &[],
+            None,
+            None,
+            None,
+            &[],
+            None,
+            None,
+            None,
+            &[],
+            "mi450x",
+        )
+        .unwrap();
+        assert_eq!(r, MaybeRef::Ref("mi450x".to_string()));
+    }
+
+    #[test]
+    fn exec_mode_and_options_inline_owned_profile() {
+        let mut p = sample_profile();
+        let r = apply_profile_overrides(
+            &mut p,
+            None,
+            &[],
+            &[],
+            None,
+            None,
+            Some(ExecModeArg::Clocked),
+            &["gpu_model=cdna4".to_string(), "queues=8".to_string()],
+            None,
+            None,
+            None,
+            &[],
+            "mi450x",
+        )
+        .unwrap();
+        match r {
+            MaybeRef::Owned(owned) => {
+                assert_eq!(owned.emulator.exec_mode, ExecMode::Clocked);
+                assert_eq!(
+                    owned.emulator.options.get("gpu_model"),
+                    Some(&SimpleValue::String("cdna4".into()))
+                );
+                assert_eq!(
+                    owned.emulator.options.get("queues"),
+                    Some(&SimpleValue::Number(8))
+                );
+            }
+            MaybeRef::Ref(_) => panic!("expected an inlined (owned) profile"),
+        }
+    }
+
+    #[test]
+    fn topology_counts_override_inline_owned_profile() {
+        let mut p = sample_profile();
+        let r = apply_profile_overrides(
+            &mut p,
+            None,
+            &[],
+            &[],
+            None,
+            None,
+            None,
+            &[],
+            None,
+            Some(2),
+            Some(4),
+            &[],
+            "mi450x",
+        )
+        .unwrap();
+        match r {
+            MaybeRef::Owned(owned) => match owned.emulator.topology {
+                MaybeRef::Owned(topo) => {
+                    assert_eq!(topo.num_nodes, 2);
+                    assert_eq!(topo.gpus_per_node, 4);
+                }
+                MaybeRef::Ref(_) => panic!("expected an inlined (owned) topology"),
+            },
+            MaybeRef::Ref(_) => panic!("expected an inlined (owned) profile"),
+        }
     }
 }

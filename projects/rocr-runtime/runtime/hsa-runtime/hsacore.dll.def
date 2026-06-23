@@ -190,6 +190,7 @@ EXPORTS
   hsa_amd_ipc_signal_attach
   hsa_amd_register_system_event_handler
   hsa_amd_queue_set_priority
+  hsa_amd_queue_create
   hsa_amd_register_deallocation_callback
   hsa_amd_deregister_deallocation_callback
   hsa_amd_signal_value_pointer

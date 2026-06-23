@@ -527,11 +527,37 @@ __host__ void rocshmem_quiet_on_stream(hipStream_t stream);
 __host__ void rocshmem_barrier_all();
 
 /**
+ * @brief perform a collective barrier across all PEs in \p team.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * Passing ROCSHMEM_TEAM_INVALID is a no-op.
+ *
+ * @param[in] team Team participating in the barrier.
+ *
+ * @return void
+ */
+__host__ void rocshmem_barrier(rocshmem_team_t team);
+
+/**
  * @brief enqueues a collective barrier on given stream.
  *
  * @return void
  */
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream);
+
+/**
+ * @brief enqueues a collective barrier across all PEs in \p team on given
+ * stream.
+ *
+ * Passing ROCSHMEM_TEAM_INVALID is a no-op.
+ *
+ * @param[in] team    Team participating in the barrier.
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_barrier_on_stream(rocshmem_team_t team,
+                                         hipStream_t stream);
 
 /**
  * @brief enqueues a sync_all operation on given stream.
@@ -541,6 +567,23 @@ __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream);
  * @return void
  */
 __host__ void rocshmem_sync_all_on_stream(hipStream_t stream);
+
+/**
+ * @brief enqueues a team-scoped sync across all PEs in \p team on given stream.
+ *
+ * In contrast with rocshmem_barrier_on_stream, rocshmem_team_sync_on_stream
+ * only ensures completion and visibility of previously issued memory stores and
+ * does not ensure completion of remote memory updates issued via OpenSHMEM
+ * routines. The sync is stream-ordered. Passing ROCSHMEM_TEAM_INVALID is a
+ * no-op (nothing is enqueued).
+ *
+ * @param[in] team    Team participating in the sync.
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
+                                           hipStream_t stream);
 
 /**
  * @brief enqueues an alltoall collective operation on given stream.
@@ -665,6 +708,22 @@ __host__ void rocshmem_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
  * @return void
  */
 __host__ void rocshmem_sync_all();
+
+/**
+ * @brief registers the arrival of a PE at a team-scoped sync.
+ * The caller is blocked until synchronization is resolved across \p team.
+ *
+ * In contrast with rocshmem_barrier, rocshmem_team_sync only ensures
+ * completion and visibility of previously issued memory stores and does not
+ * ensure completion of remote memory updates issued via OpenSHMEM routines.
+ *
+ * Passing ROCSHMEM_TEAM_INVALID is a no-op.
+ *
+ * @param[in] team Team participating in the sync.
+ *
+ * @return void
+ */
+__host__ void rocshmem_team_sync(rocshmem_team_t team);
 
 /**
  * @brief allows any PE to force the termination of an entire program.
