@@ -545,11 +545,27 @@ add_test(
 )
 
 add_test(
-    NAME test_roofline_calc_ai_analyze
+    NAME test_roofline_calc
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_roofline_calc_ai_analyze.xml ${COV_OPTION}
-        tests/test_roofline_calc_ai_analyze.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_roofline_calc.xml ${COV_OPTION} tests/test_roofline_calc.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_roofline_analyze
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_roofline_analyze.xml ${COV_OPTION}
+        tests/test_roofline_analyze.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_roofline_main
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_roofline_main.xml ${COV_OPTION} tests/test_roofline_main.py
+        ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -817,7 +833,9 @@ if(${ENABLE_COVERAGE})
         test_mi_gpu_spec
         test_utils
         test_mem_chart
-        test_roofline_calc_ai_analyze
+        test_roofline_calc
+        test_roofline_analyze
+        test_roofline_main
         test_data_imputation
         test_autogen_config
         test_tui_components
