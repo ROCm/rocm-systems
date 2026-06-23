@@ -36,7 +36,7 @@ add_custom_target(check COMMAND ${PROJECT_BINARY_DIR}/run.sh DEPENDS mytest)
 ## Build MatrixTranspose
 set_source_files_properties(hip/MatrixTranspose.cpp PROPERTIES LANGUAGE HIP)
 add_executable(MatrixTranspose hip/MatrixTranspose.cpp)
-## Adding generated build-id as hip_add_executable doesn't generate automatically
+## Adding generated build-id as add_executable doesn't generate automatically
 target_link_options(MatrixTranspose PRIVATE "-Wl,--build-id=md5")
 target_include_directories(MatrixTranspose PRIVATE ${PROJECT_SOURCE_DIR}/inc)
 target_link_libraries(MatrixTranspose PRIVATE roctracer roctx)
@@ -46,7 +46,7 @@ add_dependencies(mytest MatrixTranspose)
 set_source_files_properties(app/MatrixTranspose_test.cpp PROPERTIES LANGUAGE HIP)
 function(build_matrix_transpose_test OUTPUT_FILE DEFINITIONS)
   add_executable(${OUTPUT_FILE} app/MatrixTranspose_test.cpp)
-  ## Adding generated build-id as hip_add_executable doesn't generate automatically
+  ## Adding generated build-id as add_executable doesn't generate automatically
   target_link_options(${OUTPUT_FILE} PRIVATE "-Wl,--build-id=md5")
   target_compile_definitions(${OUTPUT_FILE} PRIVATE ITERATIONS=100 HIP_TEST=1 ${DEFINITIONS})
   target_include_directories(${OUTPUT_FILE} PRIVATE ${PROJECT_SOURCE_DIR}/inc)
@@ -63,7 +63,7 @@ add_custom_command(OUTPUT MatrixTranspose.c
   COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/app/MatrixTranspose_test.cpp MatrixTranspose.c)
 add_executable(MatrixTranspose_ctest MatrixTranspose.c)
 set_source_files_properties(MatrixTranspose.c PROPERTIES LANGUAGE HIP)
-## Adding generated build-id as hip_add_executable doesn't generate automatically
+## Adding generated build-id as add_executable doesn't generate automatically
 target_link_options(MatrixTranspose_ctest PRIVATE "-Wl,--build-id=md5")
 target_compile_definitions(MatrixTranspose_ctest PRIVATE HIP_TEST=0 __HIP_PLATFORM_AMD__)
 target_include_directories(MatrixTranspose_ctest PRIVATE ${PROJECT_SOURCE_DIR}/inc)
@@ -115,7 +115,7 @@ add_dependencies(mytest copy)
 ## Build the ROCTX test
 set_source_files_properties(app/roctx_test.cpp PROPERTIES LANGUAGE HIP)
 add_executable(roctx_test app/roctx_test.cpp)
-## Adding generated build-id as hip_add_executable doesn't generate automatically
+## Adding generated build-id as add_executable doesn't generate automatically
 target_link_options(roctx_test PRIVATE "-Wl,--build-id=md5")
 target_link_libraries(roctx_test Threads::Threads roctx)
 add_dependencies(mytest roctx_test)
@@ -144,7 +144,7 @@ add_dependencies(mytest memory_pool)
 ## Build the activity_and_callback test
 set_source_files_properties(directed/activity_and_callback.cpp PROPERTIES LANGUAGE HIP)
 add_executable(activity_and_callback directed/activity_and_callback.cpp)
-## Adding generated build-id as hip_add_executable doesn't generate automatically
+## Adding generated build-id as add_executable doesn't generate automatically
 target_link_options(activity_and_callback PRIVATE "-Wl,--build-id=md5")
 target_link_libraries(activity_and_callback roctracer)
 add_dependencies(mytest activity_and_callback)
@@ -152,7 +152,7 @@ add_dependencies(mytest activity_and_callback)
 ## Build the multi_pool_activities test
 set_source_files_properties(directed/multi_pool_activities.cpp PROPERTIES LANGUAGE HIP)
 add_executable(multi_pool_activities directed/multi_pool_activities.cpp)
-## Adding generated build-id as hip_add_executable doesn't generate automatically
+## Adding generated build-id as add_executable doesn't generate automatically
 target_link_options(multi_pool_activities PRIVATE "-Wl,--build-id=md5")
 target_link_libraries(multi_pool_activities roctracer)
 add_dependencies(mytest multi_pool_activities)
