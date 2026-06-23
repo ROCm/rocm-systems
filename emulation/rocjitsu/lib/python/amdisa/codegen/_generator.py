@@ -7086,9 +7086,7 @@ class CodeGenerator:
             '\n'
             'namespace rocjitsu {\n'
             'namespace amdgpu {\n'
-            '\n'
-            + _SHARED_SCALAR_RESOLVE_FUNCS
-            + '\n'
+            '\n' + _SHARED_SCALAR_RESOLVE_FUNCS + '\n'
             '} // namespace amdgpu\n'
             '} // namespace rocjitsu\n'
             '\n'
