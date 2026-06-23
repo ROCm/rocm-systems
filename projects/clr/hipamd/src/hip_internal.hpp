@@ -48,6 +48,10 @@
 #define KCYN "\x1B[36m"
 #define KWHT "\x1B[37m"
 
+namespace amd::device {
+class Signal;
+}
+
 template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr : nullptr; }
 
 namespace hip{
@@ -604,6 +608,16 @@ public:
       isActive_ = true;
     }
 
+    // Destroying a recorded IPC event must wait for the GPU barrier that decrements the
+    // event's IPC signal before the signal can be freed (otherwise the GPU could write to
+    // freed memory).
+
+    /// Transfer an IPC signal (and its record marker's event, may be null) to this device's
+    /// deferred-cleanup queue. Frees inline if the queue grows past its bound.
+    void EnqueueDeferredIpcSignal(amd::device::Signal* signal, amd::Event* event);
+    /// Wait for the pending barriers of all deferred IPC signals on this device and free them.
+    void DrainDeferredIpcSignals();
+
     bool GetActiveStatus() {
       amd::ScopedLock lock(lock_);
       /// Either stream is active or device is active
@@ -678,6 +692,19 @@ public:
       registeredGraphicsResources_.clear();
       mappedGraphicsResources_.clear();
     }
+
+    struct DeferredIpcSignal {
+      amd::device::Signal* signal;  //!< IPC signal to free once its barrier completes
+      amd::Event* event;            //!< record marker's event (non-null => signal was armed)
+    };
+    /// Wait for an armed signal's in-flight barrier, then free the signal and release its event.
+    static void CleanupDeferredIpcSignal(const DeferredIpcSignal& item);
+
+    std::mutex deferredIpcLock_;                        //!< Guards deferredIpcSignals_
+    std::vector<DeferredIpcSignal> deferredIpcSignals_; //!< Signals awaiting deferred cleanup
+    /// Drain inline once the queue reaches this many entries, bounding memory if an app
+    /// destroys many IPC events without an intervening device sync.
+    static constexpr size_t kDeferredIpcDrainThreshold = 256;
   };
 
   /// Thread Local Storage Variables Aggregator Class
