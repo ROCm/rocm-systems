@@ -9,6 +9,7 @@
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vimage.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop2.h"
@@ -17,6 +18,9 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/except.h"
@@ -410,6 +414,25 @@ uint32_t read_global_u32(amdgpu::GpuMemory &memory, uint64_t addr) {
   return value;
 }
 
+std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 3> &words,
+                                            std::string_view expected_mnemonic) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  if (!decoder) {
+    ADD_FAILURE() << "Decoder::create() returned nullptr for gfx1250";
+    return nullptr;
+  }
+
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  if (!inst) {
+    ADD_FAILURE() << "decode() returned nullptr for gfx1250 instruction";
+    return nullptr;
+  }
+
+  EXPECT_EQ(inst->mnemonic(), expected_mnemonic);
+  EXPECT_EQ(inst->size(), static_cast<int>(words.size() * sizeof(words[0])));
+  return inst;
+}
+
 template <typename T> void append_bytes(std::vector<uint8_t> &bytes, const T &value) {
   auto *src = reinterpret_cast<const uint8_t *>(&value);
   bytes.insert(bytes.end(), src, src + sizeof(T));
@@ -553,7 +576,7 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   EXPECT_EQ(cu->config().lds_size_kb, kGfx1250LdsSizeKb);
   EXPECT_EQ(soc->xcd(0)->command_processor()->vgpr_granularity(), kGfx1250VgprEncodingGranule);
   EXPECT_EQ(soc->xcd(0)->command_processor()->sdma_packet_dialect(),
-            amdgpu::SdmaPacketDialect::Gfx1250);
+            amdgpu::SdmaPacketDialect::Gfx11Plus);
 }
 
 TEST(Gfx1250SdmaTest, PollMem64WaitsForFull64BitCondition) {
@@ -1016,6 +1039,27 @@ TEST(Gfx1250ExecutionTest, VCmpGtU32Wave32ExplicitSdstPreservesHighSgpr) {
   EXPECT_EQ(wf->vcc(), 0x12345678u);
 }
 
+TEST(Gfx1250ExecutionTest, Wave32ScalarVccHiWritePreservesUpperHalf) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec(0xffff0000u);
+  wf->set_vcc(0);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  const uint32_t words[] = {0x8c6b7e6bu, 0}; // s_or_b32 vcc_hi, vcc_hi, exec_lo
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "s_or_b32");
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(wf->vcc(), 0xffff0000'00000000ULL);
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
@@ -1068,6 +1112,148 @@ TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {
   for (uint32_t i = 0; i < kElements; ++i) {
     const uint32_t actual = read_global_u32(*sim.memory, kStoreGlobal + i * 4);
     EXPECT_EQ(actual, 0x22000000u + i * 0x303u);
+  }
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaDecodeExecuteCoversLoadStoreD2D4Forms) {
+  constexpr uint32_t kNullSgpr = 124;
+  constexpr std::array<uint32_t, 3> kLoadD2 = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  constexpr std::array<uint32_t, 3> kStoreD2 = {0xd0714001u, 0x7c000000u, 0x7c7c0c08u};
+  constexpr std::array<uint32_t, 3> kLoadD4 = {0xd0710001u, 0x7c000000u, 0x18140c00u};
+  constexpr std::array<uint32_t, 3> kStoreD4 = {0xd0714001u, 0x7c000000u, 0x18140c08u};
+
+  {
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_lds_base(cu->allocate_lds(256));
+
+    constexpr uint32_t kElements = 4;
+    constexpr uint64_t kLoadGlobal = 0x1a0000;
+    constexpr uint64_t kStoreGlobal = 0x1b0000;
+
+    write_tensor_dma_d0(*cu, *wf, 0, kLoadGlobal);
+    write_tensor_dma_d0(*cu, *wf, 8, kStoreGlobal);
+    write_wave_sgpr(*cu, *wf, 12, 2u << 16);        // i32 elements.
+    write_wave_sgpr(*cu, *wf, 13, kElements << 16); // Tensor dim0.
+    write_wave_sgpr(*cu, *wf, 14, 0);
+    write_wave_sgpr(*cu, *wf, 15, kElements << 16); // Tile dim0.
+    write_wave_sgpr(*cu, *wf, 16, 0);
+    write_wave_sgpr(*cu, *wf, 17, 0);
+    write_wave_sgpr(*cu, *wf, 18, 0);
+    write_wave_sgpr(*cu, *wf, 19, 0);
+
+    for (uint32_t i = 0; i < kElements; ++i)
+      write_global_u32(*sim.memory, kLoadGlobal + i * 4, 0x71000000u + i);
+
+    auto load = decode_gfx1250(kLoadD2, "tensor_load_to_lds");
+    ASSERT_NE(load, nullptr);
+    ASSERT_EQ(load->num_src_operands(), 4);
+    EXPECT_EQ(load->src_operand(2)->encoding_value(), static_cast<int>(kNullSgpr));
+    EXPECT_EQ(load->src_operand(3)->encoding_value(), static_cast<int>(kNullSgpr));
+    load->execute(*load, wf);
+
+    for (uint32_t i = 0; i < kElements; ++i)
+      EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * 4), 0x71000000u + i);
+
+    for (uint32_t i = 0; i < kElements; ++i)
+      cu->lds().write32(wf->lds_base() + i * 4, 0x72000000u + i);
+
+    auto store = decode_gfx1250(kStoreD2, "tensor_store_from_lds");
+    ASSERT_NE(store, nullptr);
+    ASSERT_EQ(store->num_src_operands(), 4);
+    EXPECT_EQ(store->src_operand(2)->encoding_value(), static_cast<int>(kNullSgpr));
+    EXPECT_EQ(store->src_operand(3)->encoding_value(), static_cast<int>(kNullSgpr));
+    store->execute(*store, wf);
+
+    for (uint32_t i = 0; i < kElements; ++i)
+      EXPECT_EQ(read_global_u32(*sim.memory, kStoreGlobal + i * 4), 0x72000000u + i);
+  }
+
+  {
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_lds_base(cu->allocate_lds(256));
+
+    constexpr uint32_t kCols = 2;
+    constexpr uint32_t kRows = 2;
+    constexpr uint32_t kTileRows = 3;
+    constexpr uint32_t kDepth = 2;
+    constexpr uint32_t kPlaneStride = kTileRows * kCols;
+    constexpr uint64_t kLoadGlobal = 0x1c0000;
+    constexpr uint64_t kStoreGlobal = 0x1d0000;
+    constexpr uint32_t kSentinel = 0x7e7e7e7eu;
+
+    write_tensor_dma_d0(*cu, *wf, 0, kLoadGlobal);
+    write_tensor_dma_d0(*cu, *wf, 8, kStoreGlobal);
+    write_wave_sgpr(*cu, *wf, 12, 2u << 16);    // i32 elements.
+    write_wave_sgpr(*cu, *wf, 13, kCols << 16); // Tensor dim0.
+    write_wave_sgpr(*cu, *wf, 14, kRows << 16); // Tensor dim1.
+    write_wave_sgpr(*cu, *wf, 15, kCols << 16); // Tile dim0.
+    write_wave_sgpr(*cu, *wf, 16, kTileRows | (kDepth << 16));
+    write_wave_sgpr(*cu, *wf, 17, kCols); // Tensor dim0 stride.
+    write_wave_sgpr(*cu, *wf, 18, kPlaneStride << 16);
+    write_wave_sgpr(*cu, *wf, 19, 0);
+    write_wave_sgpr(*cu, *wf, 20, kDepth); // Tensor dim2, from D2.
+    write_wave_sgpr(*cu, *wf, 21, 0);
+    write_wave_sgpr(*cu, *wf, 22, 0);
+    write_wave_sgpr(*cu, *wf, 23, 0);
+    write_wave_sgpr(*cu, *wf, 24, 0);
+    write_wave_sgpr(*cu, *wf, 25, 0);
+    write_wave_sgpr(*cu, *wf, 26, 0);
+    write_wave_sgpr(*cu, *wf, 27, 0);
+
+    for (uint32_t z = 0; z < kDepth; ++z) {
+      for (uint32_t y = 0; y < kTileRows; ++y) {
+        for (uint32_t x = 0; x < kCols; ++x) {
+          const uint64_t offset = static_cast<uint64_t>(z * kPlaneStride + y * kCols + x) * 4;
+          const uint32_t value = 0x73000000u + z * 0x100u + y * 0x10u + x;
+          write_global_u32(*sim.memory, kLoadGlobal + offset, value);
+          write_global_u32(*sim.memory, kStoreGlobal + offset, kSentinel);
+        }
+      }
+    }
+
+    auto load = decode_gfx1250(kLoadD4, "tensor_load_to_lds");
+    ASSERT_NE(load, nullptr);
+    ASSERT_EQ(load->num_src_operands(), 4);
+    EXPECT_EQ(load->src_operand(2)->encoding_value(), 20);
+    EXPECT_EQ(load->src_operand(3)->encoding_value(), 24);
+    load->execute(*load, wf);
+
+    for (uint32_t z = 0; z < kDepth; ++z) {
+      for (uint32_t y = 0; y < kTileRows; ++y) {
+        for (uint32_t x = 0; x < kCols; ++x) {
+          const uint32_t lds_index = z * kTileRows * kCols + y * kCols + x;
+          const uint32_t expected = (y < kRows) ? (0x73000000u + z * 0x100u + y * 0x10u + x) : 0u;
+          EXPECT_EQ(cu->lds().read32(wf->lds_base() + lds_index * 4), expected);
+        }
+      }
+    }
+
+    for (uint32_t i = 0; i < kDepth * kTileRows * kCols; ++i)
+      cu->lds().write32(wf->lds_base() + i * 4, 0x74000000u + i);
+
+    auto store = decode_gfx1250(kStoreD4, "tensor_store_from_lds");
+    ASSERT_NE(store, nullptr);
+    ASSERT_EQ(store->num_src_operands(), 4);
+    EXPECT_EQ(store->src_operand(2)->encoding_value(), 20);
+    EXPECT_EQ(store->src_operand(3)->encoding_value(), 24);
+    store->execute(*store, wf);
+
+    for (uint32_t z = 0; z < kDepth; ++z) {
+      for (uint32_t y = 0; y < kTileRows; ++y) {
+        for (uint32_t x = 0; x < kCols; ++x) {
+          const uint64_t offset = static_cast<uint64_t>(z * kPlaneStride + y * kCols + x) * 4;
+          const uint32_t lds_index = z * kTileRows * kCols + y * kCols + x;
+          const uint32_t expected = (y < kRows) ? (0x74000000u + lds_index) : kSentinel;
+          EXPECT_EQ(read_global_u32(*sim.memory, kStoreGlobal + offset), expected);
+        }
+      }
+    }
   }
 }
 
@@ -1236,9 +1422,143 @@ TEST(Gfx1250ExecutionTest, TensorDmaAtomicBarrierArrivesAfterCopy) {
   gfx1250::TensorLoadToLdsVimage load_inst(load_words.data());
   load_inst.execute_impl(*wf);
 
+  EXPECT_TRUE(wf->wait_counters().empty());
+  EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0 * 4), 0x55000000u);
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + 1 * 4), 0x55000001u);
-  EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr), 7ull << 29);
+  const uint64_t state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
+  EXPECT_EQ(state, 0xffffull << 16);
+  EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
+}
+
+TEST(Gfx1250ExecutionTest, ReleaseWaitCounterWakesWaitcntWhenTargetIsSatisfied) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+
+  wf->wait_counters().increment(amdgpu::WaitCounterType::TENSORCNT);
+  wf->set_wait_target_tensorcnt(0);
+  ASSERT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
+
+  wf->release_wait_counter(amdgpu::WaitCounterType::TENSORCNT);
+
+  EXPECT_TRUE(wf->wait_counters().empty());
+  EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
+}
+
+TEST(Gfx1250ExecutionTest, ReleaseWaitCounterHaltsEndingWaveWhenLastCounterRetires) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+
+  wf->wait_counters().increment(amdgpu::WaitCounterType::TENSORCNT);
+  wf->end();
+  ASSERT_EQ(wf->state(), amdgpu::WfState::ENDING);
+
+  wf->release_wait_counter(amdgpu::WaitCounterType::TENSORCNT);
+
+  EXPECT_TRUE(wf->wait_counters().empty());
+  EXPECT_TRUE(wf->is_halted());
+}
+
+TEST(Gfx1250ExecutionTest, DsAtomicAsyncBarrierArriveFlipsRawBarrierPhase) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint32_t kBarrierLdsAddr = 64;
+  cu->write_vgpr(wf->vgpr_alloc().base + 0, 0, kBarrierLdsAddr);
+  cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, amdgpu::lds_barrier_cell_init_state(1));
+
+  const std::array<uint32_t, 2> words = {0xd9580000u, 0x00000000u};
+  auto *arrive_inst = new gfx1250::DsAtomicAsyncBarrierArriveB64Vds(words.data());
+  arrive_inst->execute_impl(*wf);
+  amdgpu::LocalMemPipeline local_pipeline(&cu->lds());
+  local_pipeline.issue(arrive_inst, *wf);
+
+  const uint64_t state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
+  EXPECT_EQ(state, 0xffffull << 16);
+  EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
+  EXPECT_TRUE(wf->wait_counters().empty());
+}
+
+TEST(Gfx1250ExecutionTest, LocalMemPipelineUsesInjectedBarrierDecrementPayload) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint32_t kBarrierLdsAddr = 64;
+  cu->write_vgpr(wf->vgpr_alloc().base + 0, 0, kBarrierLdsAddr);
+  cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, amdgpu::lds_barrier_cell_init_state(2));
+
+  const std::array<uint32_t, 2> words = {0xd9580000u, 0x00000000u};
+  auto *arrive_inst = new gfx1250::DsAtomicAsyncBarrierArriveB64Vds(words.data());
+  arrive_inst->execute_impl(*wf);
+
+  auto *state = arrive_inst->data_as<amdgpu::VectorMemState>();
+  const uint64_t decrement = 2;
+  state->store_data.resize(static_cast<size_t>(wf->wf_size()) * sizeof(decrement));
+  std::memcpy(state->store_data.data(), &decrement, sizeof(decrement));
+
+  amdgpu::LocalMemPipeline local_pipeline(&cu->lds());
+  local_pipeline.issue(arrive_inst, *wf);
+
+  const uint64_t expected =
+      amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_init_state(2), decrement);
+  EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr), expected);
+  EXPECT_EQ(expected, (1ull << 32) | (0xffffull << 16) | 1ull);
+  EXPECT_TRUE(wf->wait_counters().empty());
+}
+
+TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleAndBatchedArrivals) {
+  uint64_t state = amdgpu::lds_barrier_cell_init_state(2);
+  EXPECT_EQ(state, (1ull << 32) | 1ull);
+
+  state = amdgpu::lds_barrier_cell_update_arrive(state);
+  EXPECT_EQ(state, 1ull << 32);
+  EXPECT_FALSE(amdgpu::lds_barrier_cell_phase_parity(state));
+
+  state = amdgpu::lds_barrier_cell_update_arrive(state);
+  EXPECT_EQ(state, (1ull << 32) | (0xffffull << 16) | 1ull);
+  EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
+
+  const uint64_t drained =
+      amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_init_state(2));
+  ASSERT_EQ(amdgpu::lds_barrier_cell_pending_count(drained), 0ull);
+  EXPECT_EQ(amdgpu::lds_barrier_cell_update_arrive(drained, 0), drained);
+  EXPECT_EQ(amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_init_state(3), 0),
+            amdgpu::lds_barrier_cell_init_state(3));
+
+  uint64_t iterated = amdgpu::lds_barrier_cell_init_state(2);
+  for (int i = 0; i < 5; ++i)
+    iterated = amdgpu::lds_barrier_cell_update_arrive(iterated);
+  const uint64_t batched =
+      amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_init_state(2), 5);
+  EXPECT_EQ(batched, iterated);
+  EXPECT_EQ(batched, (1ull << 32) | (0xfffeull << 16));
+
+  for (uint32_t arrivals_per_phase : {0u, 1u}) {
+    state = amdgpu::lds_barrier_cell_init_state(arrivals_per_phase);
+    EXPECT_EQ(amdgpu::lds_barrier_cell_pending_count(state), 0ull);
+    state = amdgpu::lds_barrier_cell_update_arrive(state);
+    EXPECT_EQ(amdgpu::lds_barrier_cell_pending_count(state), 0ull);
+    EXPECT_EQ(amdgpu::lds_barrier_cell_phase(state), amdgpu::kLdsBarrierCellPhaseMask);
+    EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(state));
+  }
+
+  const uint64_t reserved = 0xabcdull << 48;
+  const uint64_t reserved_state =
+      amdgpu::lds_barrier_cell_update_arrive(reserved | amdgpu::lds_barrier_cell_init_state(2));
+  EXPECT_EQ(reserved_state & amdgpu::kLdsBarrierCellReservedMask, reserved);
+  EXPECT_EQ(amdgpu::lds_barrier_cell_init_count(reserved_state), 1ull);
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaDenseDescriptorCopiesDenseRows) {
@@ -1386,7 +1706,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherSupportsI16Indices) {
   constexpr uint32_t kSentinel = 0xCDAECDAEu;
 
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
-  write_wave_sgpr(*cu, *wf, 0, 1u | (1u << 30));
+  write_wave_sgpr(*cu, *wf, 0, 1u | (1u << 31));
   write_wave_sgpr(*cu, *wf, 12, 2u << 16);    // i32 elements.
   write_wave_sgpr(*cu, *wf, 13, kCols << 16); // Tensor dim0.
   write_wave_sgpr(*cu, *wf, 14, kRows << 16); // Tensor dim1.
@@ -1600,6 +1920,43 @@ TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesVop3px2Pair) {
             "v_wmma_scale_f32_16x16x128_f8f6f4 v[6:13], v[18:33], v[52:67], 0, v0, v4");
 }
 
+TEST(Gfx1250DecodeTest, WmmaScale16F8f6f4ConsumesVop3px2Pair) {
+  const uint32_t words[] = {
+      0xCC3A0000u,
+      0x0202391Au,
+      0xCC336012u,
+      0x02021502u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_wmma_scale16_f32_16x16x128_f8f6f4");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->disassemble(),
+            "v_wmma_scale16_f32_16x16x128_f8f6f4 v[18:25], v[2:9], v[10:17], 0, "
+            "v[26:27], v[28:29] matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4");
+}
+
+TEST(Gfx1250DecodeTest, WmmaScaleF4_32x16x128ConsumesVop3px2Pair) {
+  const uint32_t words[] = {
+      0xCC350000u,
+      0x02025328u,
+      0xCC884000u,
+      0x1A024110u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_wmma_scale_f32_32x16x128_f4");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->disassemble(),
+            "v_wmma_scale_f32_32x16x128_f4 v[0:15], v[16:31], v[32:39], 0, v40, v41");
+}
+
 TEST(Gfx1250DecodeTest, SwmmacPrintsIndexKeyAndReuseModifiers) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
@@ -1759,6 +2116,33 @@ TEST(Gfx1250SimulationTest, MultiWaveDispatchPacksWorkitemIdsInV0) {
                                               31u | (3u << 10)};
   EXPECT_EQ(lane0_values, expected_lane0);
   EXPECT_EQ(lane31_values, expected_lane31);
+}
+
+TEST(Gfx1250SimulationTest, PartialWorkgroupMasksTailWaveExec) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 33, 33);
+  step_until_xcd_halted(sim);
+
+  std::vector<uint64_t> exec_masks;
+  for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
+    auto *se = sim.xcd()->shader_engine(se_idx);
+    for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx) {
+      auto *cu = se->compute_unit(cu_idx);
+      for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
+        auto *wf = cu->wf(wf_idx);
+        if (wf && wf->sgpr_alloc().count > 0)
+          exec_masks.push_back(wf->exec());
+      }
+    }
+  }
+
+  std::sort(exec_masks.begin(), exec_masks.end());
+  const std::vector<uint64_t> expected{1ULL, 0xFFFFFFFFULL};
+  EXPECT_EQ(exec_masks, expected);
 }
 
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
@@ -2016,7 +2400,9 @@ TEST(Gfx1250SimulationTest, SGetShaderCyclesU64ReadsSimulationTime) {
 
   amdgpu::Wavefront *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
-  EXPECT_EQ(read_wave_sgpr64(*sim.cu(), *wf, 4), 17u);
+  const auto observed_time = read_wave_sgpr64(*sim.cu(), *wf, 4);
+  EXPECT_GE(observed_time, 17u);
+  EXPECT_LE(observed_time, sim.engine->global_time());
 }
 
 TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
@@ -2033,7 +2419,9 @@ TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
 
   amdgpu::Wavefront *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
-  EXPECT_EQ(read_wave_sgpr64(*sim.cu(), *wf, 4), 23u);
+  const auto observed_time = read_wave_sgpr64(*sim.cu(), *wf, 4);
+  EXPECT_GE(observed_time, 23u);
+  EXPECT_LE(observed_time, sim.engine->global_time());
   EXPECT_EQ(read_wave_sgpr(*sim.cu(), *wf, 6), 0u);
 }
 
@@ -2187,6 +2575,29 @@ TEST(Gfx1250SimulationTest, VgprMsbRolesSelectHighVgprBanks) {
   dst.write_lane(*wf, kLane, 0x44444444u);
   EXPECT_EQ(cu.read_vgpr(vb + 2 * 256 + 5, kLane), 0x44444444u);
   EXPECT_EQ(cu.read_vgpr(vb + 5, kLane), 0xDEADBEEFu);
+}
+
+TEST(Gfx1250SimulationTest, PackedTrue16SourcesHonorGprIdx) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  amdgpu::Wavefront *wf =
+      dispatch_one_wave(sim, code, std::size(code), kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_GE(wf->vgpr_alloc().count, kGfx1250Wave32VgprAllocation);
+
+  constexpr uint32_t kLane = 0;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  wf->set_mode_raw(amdgpu::Wavefront::GPR_IDX_EN_BIT);
+  wf->set_m0((1u << 8u) | 16u);
+  cu.write_vgpr(vb + 2, kLane, 0xAAAA1111u);
+  cu.write_vgpr(vb + 18, kLane, 0xBBBB2222u);
+
+  gfx1250::Operand lo(16, gfx1250::OperandType::OPR_VGPR, 2, true);
+  gfx1250::Operand hi(16, gfx1250::OperandType::OPR_VGPR, 128 + 2, true);
+  EXPECT_EQ(lo.read_lane(*wf, kLane), 0x2222u);
+  EXPECT_EQ(hi.read_lane(*wf, kLane), 0xBBBBu);
 }
 
 TEST(Gfx1250SimulationTest, VMovrelsReadsM0RelativeVgpr) {

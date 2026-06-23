@@ -135,3 +135,15 @@ event:
   Unit_hipEventIpc_shm_cleanup:
     <<: *level_2
     tags: [ipc]
+  Unit_hipEventCoalescing_CrossStreamWait:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipEventCoalescing_AsyncOpsBreakCoalescing:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipEventCoalescing_InterleavedEvents:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipEventCoalescing_EventQuery:
+    <<: *level_2
+    tags: [synchronization]

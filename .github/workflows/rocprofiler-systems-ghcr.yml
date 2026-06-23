@@ -65,7 +65,7 @@ jobs:
       fail-fast: false
       matrix:
         system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
-        gpu: [ 'gfx94X', 'gfx950' ]
+        gpu: [ 'multiarch' ]
 
     steps:
       - name: Checkout Repository

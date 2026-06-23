@@ -1469,6 +1469,8 @@ class MemObjMap : public AllStatic {
 
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
+  //!< Find any registered mem object whose range overlaps [ptr, ptr + size).
+  static amd::Memory* FindOverlap(const void* ptr, size_t size);
   //!< Batched version: find multiple mem objects in one lock acquisition
   static void FindMemObjBatch(const void* const* ptrs, size_t count,
                               std::vector<amd::Memory*>& memories,
@@ -2218,6 +2220,10 @@ class Device : public RuntimeObject {
   //! before they are destroyed. Pooled signals rest in the armed state, so this
   //! prevents signal destruction from blocking on an armed-but-idle signal.
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const {}
+
+  //! Block until all in-flight HSA async signal handlers (e.g. profiling
+  //! completion callbacks) have finished running.
+  virtual void WaitForHsaAsyncHandlersIdle() {}
 
   struct HwEventPatch {
     static constexpr int kCompletionSignal = -1;
