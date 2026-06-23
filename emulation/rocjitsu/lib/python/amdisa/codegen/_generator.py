@@ -105,14 +105,13 @@ _LITERAL_ENCODING_OPERANDS = {
 
 
 def _exec_mask_flag_stmts(sem) -> list[str]:
-    """Return ``flags_ |= ...;`` statements for EXEC-mask instruction metadata.
+    """Return ``flags_ |= ...;`` statements for EXEC instruction metadata.
 
     The flags are derived from the instruction's semantic AST so generic
     liveness/dataflow analyses do not have to know AMDGPU instruction names:
 
-    * ``EXEC_MASKED``  - VECTOR exec-model: inactive lanes preserve old values.
     * ``IGNORES_EXEC`` - branch-style instructions that run regardless of EXEC.
-    * ``WRITES_EXEC`` / ``READS_EXEC`` - the instruction writes / reads EXEC.
+    * ``WRITES_EXEC``  - the instruction writes EXEC.
 
     Returns an empty list when ``sem`` is None or its semantic class has no
     deriver (``derive_sema_block`` returns None) or derives to an empty stub;
@@ -132,10 +131,8 @@ def _exec_mask_flag_stmts(sem) -> list[str]:
     return [
         f'flags_ |= {name};'
         for prop, name in (
-            (InstructionProperty.EXEC_MASKED, 'EXEC_MASKED'),
             (InstructionProperty.IGNORES_EXEC, 'IGNORES_EXEC'),
             (InstructionProperty.WRITES_EXEC, 'WRITES_EXEC'),
-            (InstructionProperty.READS_EXEC, 'READS_EXEC'),
         )
         if prop in props
     ]

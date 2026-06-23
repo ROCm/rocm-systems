@@ -12,7 +12,7 @@ from amdisa.codegen._generator import (
 from amdisa.semantics import InstructionSemantics
 
 # Flag names emitted for EXEC tracking.
-ALL = {'EXEC_MASKED', 'IGNORES_EXEC', 'WRITES_EXEC', 'READS_EXEC'}
+ALL = {'IGNORES_EXEC', 'WRITES_EXEC'}
 
 
 def _flags(sem):
@@ -38,30 +38,30 @@ _CASES = [
         {'WRITES_EXEC'},
         id='scalar_wrexec',
     ),
-    # Vector ALU: EXEC-masked (per-lane), no EXEC read/write.
+    # Vector ALU: no EXEC interaction flags.
     pytest.param(
         InstructionSemantics(
             'V_ADD_F32', 'vector_binop', operation='add', data_type='f32'
         ),
-        {'EXEC_MASKED'},
+        set(),
         id='vector_binop',
     ),
     pytest.param(
         InstructionSemantics('V_MOV_B32', 'vector_mov', data_type='b32'),
-        {'EXEC_MASKED'},
+        set(),
         id='vector_mov',
     ),
     pytest.param(
         InstructionSemantics('V_CNDMASK_B32', 'vector_cndmask', data_type='b32'),
-        {'EXEC_MASKED'},
+        set(),
         id='vector_cndmask',
     ),
-    # Vector compare-and-set-exec: masked AND reads+writes EXEC.
+    # Vector compare-and-set-exec: writes EXEC.
     pytest.param(
         InstructionSemantics(
             'V_CMPX_LT_F32', 'vector_cmpx', operation='lt', data_type='f32'
         ),
-        {'EXEC_MASKED', 'WRITES_EXEC', 'READS_EXEC'},
+        {'WRITES_EXEC'},
         id='vector_cmpx',
     ),
     # Branches: ignore EXEC, never EXEC-masked.
@@ -100,12 +100,6 @@ class TestExecMaskFlagStmts:
         assert expected <= flags, f'{sem.name}: missing {expected - flags}'
         unexpected = (ALL - expected) & flags
         assert not unexpected, f'{sem.name}: unexpected {unexpected}'
-
-    def test_branch_is_never_exec_masked(self):
-        # IGNORES_EXEC and EXEC_MASKED are mutually exclusive by construction.
-        for sem, _ in [(c.values[0], c.values[1]) for c in _CASES]:
-            flags = _flags(sem)
-            assert not ('IGNORES_EXEC' in flags and 'EXEC_MASKED' in flags)
 
     def test_flag_statement_format(self):
         sem = InstructionSemantics(
