@@ -68,7 +68,7 @@ def compute_desired_labels(file_paths: list) -> set:
             elif parts[0] == "shared":
                 desired_labels.add(f"shared: {parts[1]}")
             elif parts[0] == "profilers":
-                desired_labels.add(f"profilers: {parts[1]}")
+                desired_labels.add(f"project: {parts[1]}")
     logger.debug(f"Desired labels based on changes: {desired_labels}")
     return desired_labels
 
