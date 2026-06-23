@@ -66,7 +66,20 @@ To restore the default behavior after PMC profiling:
 
 Alternatively, use the ``amd-smi`` tool installed with ROCm to query and set the performance level.
 
-Replace ``<N>`` with the card index:
+One advantage of using ``amd-smi`` is that it can be used to query and set the performance level on multiple
+GPUs in a single command. For example, to set the performance level to ``STABLE_STD`` on all GPUs in the
+system, use:
+
+.. code-block:: shell
+
+   $ sudo /opt/rocm/bin/amd-smi set --perf-level STABLE_STD
+   GPU: 0
+       PERFLEVEL: Successfully set performance level STABLE_STD
+   GPU: 1
+       PERFLEVEL: Successfully set performance level STABLE_STD
+
+The following examples show how to query and set the performance level for a specific GPU. Replace ``<N>``
+with the card index:
 
 To check the current performance level:
 
