@@ -55,11 +55,12 @@ Collect this information about the ROCm version, GPU/accelerator, platform, and 
       echo $PATH
       echo $LD_LIBRARY_PATH
 
-*  Collect the HIP configuration.
+*  Collect the HIP and ROCm version information.
 
    .. code:: shell
 
-      /opt/rocm/bin/hipconfig --full
+      cat /opt/rocm/include/hip/hip_version.h
+      cat /opt/rocm/.info/version
 
 *  Verify the network settings and setup. Use the ``ibv_devinfo`` command 
    to display information about the available RDMA devices and determine 

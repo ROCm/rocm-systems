@@ -15,7 +15,6 @@ NCCL_HOME ?= ""
 CUSTOM_RCCL_LIB ?= ""
 
 HIPCC ?= $(ROCM_PATH)/llvm/bin/amdclang++
-HIPCONFIG = $(ROCM_PATH)/bin/hipconfig
 HIPIFY_PL_EXE=$(ROCM_PATH)/bin/hipify-perl
 HIPIFY_PL_FLAGS = -quiet-warnings
 CXX = $(HIPCC)
@@ -36,7 +35,8 @@ NAME_SUFFIX ?=
 # Set to 1 to create and use libverifiable.so to reduce binary size
 DSO ?= 0
 
-HIP_VERSION = $(strip $(shell which $(HIPCONFIG) >/dev/null && $(HIPCONFIG) --version))
+# Derive HIP version from the installed hip_version.h header
+HIP_VERSION = $(strip $(shell awk '/define HIP_VERSION_MAJOR/{maj=$$3} /define HIP_VERSION_MINOR/{min=$$3} /define HIP_VERSION_PATCH/{pat=$$3} END{if(maj!="")print maj"."min"."pat}' $(ROCM_PATH)/include/hip/hip_version.h 2>/dev/null))
 HIP_MAJOR = $(shell echo $(HIP_VERSION) | cut -d "." -f 1)
 HIP_MINOR = $(shell echo $(HIP_VERSION) | cut -d "." -f 2)
 

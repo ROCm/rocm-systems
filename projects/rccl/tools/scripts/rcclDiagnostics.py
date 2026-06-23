@@ -190,7 +190,23 @@ def get_ROCm_version():
 
 # Get HIP Version
 def get_HIP_version():
-	result = run_cli_command("hipconfig --version")
+	# Parse the installed hip_version.h directly instead of calling hipconfig (deprecated).
+	header = "/opt/rocm/include/hip/hip_version.h"
+	try:
+		with open(header) as f:
+			contents = f.read()
+		fields = {
+			key: re.search(rf"#define HIP_VERSION_{key}\s+(\S+)", contents)
+			for key in ("MAJOR", "MINOR", "PATCH", "GITHASH")
+		}
+		major, minor, patch = (fields[k].group(1) for k in ("MAJOR", "MINOR", "PATCH"))
+		version = f"{major}.{minor}.{patch}"
+		if fields["GITHASH"]:
+			version += "-" + fields["GITHASH"].group(1).strip('"')
+		result = CommandResult(stdout=version, stderr="")
+	except (OSError, AttributeError) as e:
+		result = CommandResult(stdout="", stderr=f"Error: {str(e)}, could not read {header}")
+
 	if result.stdout:
 		summary = result.stdout.strip()
 	else:
