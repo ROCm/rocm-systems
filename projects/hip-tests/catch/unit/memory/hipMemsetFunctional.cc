@@ -639,59 +639,208 @@ TEST_CASE("Unit_hipMemset_UnalignedKernelCornerCases", "[fillBuffer][unaligned]"
 
     HIP_CHECK(hipFree(base));
   }
+}
 
-  SECTION("Sub-pattern-misaligned VA returns hipError") {
-    hipError_t err = hipSuccess;
-    void* base = nullptr;
-    HIP_CHECK(hipMalloc(&base, 256));
-    hipStream_t stream{nullptr};
-    HIP_CHECK(hipStreamCreate(&stream));
+// ---------------------------------------------------------------------------
+// Unaligned-base fill tests for D16 / D32 sync and async variants.
+// These exercise the head/body/tile/tail rotation paths of
+// __amd_rocclr_fillBufferUnAligned with sub-element-aligned destination
+// pointers.  The tests are deliberately RED until the source supports
+// unaligned bases.
+// ---------------------------------------------------------------------------
 
-    {
-      // Test hipMemsetD16 with odd-aligned pointer (not 2-byte aligned)
-      void* misaligned16 = static_cast<unsigned char*>(base) + 1;
-      err = hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(misaligned16),
-                                    0xBEEF, /*count=*/16);
-      CAPTURE(err);
-      HIP_ASSERT(err == hipErrorInvalidValue);
-      // Test hipMemsetD16Async with odd-aligned pointer (not 2-byte aligned)
-      err = hipMemsetD16Async(reinterpret_cast<hipDeviceptr_t>(misaligned16),
-                              0xBEEF, /*count=*/16, stream);
-      CAPTURE(err);
-      HIP_ASSERT(err == hipErrorInvalidValue);
+TEST_CASE("Unit_hipMemsetD16_UnalignedPatternFill", "[fillBuffer][unaligned]") {
+  constexpr size_t kAllocBytes = 512;
+  constexpr unsigned char kSentinel = 0x5A;
+  constexpr unsigned short kPattern = 0xBEEF;
+  constexpr size_t kElemSize = sizeof(unsigned short);  // 2
+
+  void* base = nullptr;
+  HIP_CHECK(hipMalloc(&base, kAllocBytes));
+
+  for (size_t offset : {1U}) {
+    for (size_t count : {8U, 12U, 15U, 16U, 31U, 50U, 64U, 100U}) {
+      // Fill whole buffer with sentinel.
+      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes));
+      HIP_CHECK(hipDeviceSynchronize());
+
+      void* dst = static_cast<unsigned char*>(base) + offset;
+      HIP_CHECK(hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(dst),
+                             kPattern, count));
+      HIP_CHECK(hipDeviceSynchronize());
+
+      std::vector<unsigned char> hostCopy(kAllocBytes, 0);
+      HIP_CHECK(hipMemcpy(hostCopy.data(), base, kAllocBytes,
+                          hipMemcpyDeviceToHost));
+
+      // Head sentinel region [0, offset) must be untouched.
+      for (size_t i = 0; i < offset; ++i) {
+        CAPTURE(offset, count, i);
+        HIP_ASSERT(hostCopy[i] == kSentinel);
+      }
+      // Fill region [offset, offset + count*kElemSize) must match pattern.
+      for (size_t j = 0; j < count * kElemSize; ++j) {
+        const unsigned char expected =
+            static_cast<unsigned char>(kPattern >> (8 * (j % kElemSize)));
+        CAPTURE(offset, count, j);
+        HIP_ASSERT(hostCopy[offset + j] == expected);
+      }
+      // Tail sentinel region must be untouched.
+      for (size_t i = offset + count * kElemSize; i < kAllocBytes; ++i) {
+        CAPTURE(offset, count, i);
+        HIP_ASSERT(hostCopy[i] == kSentinel);
+      }
     }
-
-    {
-      // Test hipMemsetD32 with misaligned pointer (not 4-byte aligned)
-      // Test +1 offset (misaligned by 1 byte)
-      void* misaligned32_1 = static_cast<unsigned char*>(base) + 1;
-      err = hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(misaligned32_1),
-                         0xDEADBEEF, /*count=*/16);
-      CAPTURE(err);
-      HIP_ASSERT(err == hipErrorInvalidValue);
-
-      // Test +2 offset (misaligned by 2 bytes)
-      void* misaligned32_2 = static_cast<unsigned char*>(base) + 2;
-      err = hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(misaligned32_2),
-                         0xDEADBEEF, /*count=*/16);
-      CAPTURE(err);
-      HIP_ASSERT(err == hipErrorInvalidValue);
-
-      // Test +3 offset (misaligned by 3 bytes)
-      void* misaligned32_3 = static_cast<unsigned char*>(base) + 3;
-      err = hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(misaligned32_3),
-                         0xDEADBEEF, /*count=*/16);
-      CAPTURE(err);
-      HIP_ASSERT(err == hipErrorInvalidValue);
-
-      // Test hipMemsetD32Async with misaligned pointer (not 4-byte aligned)
-      err = hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(misaligned32_1),
-                              0xDEADBEEF, /*count=*/16, stream);
-      CAPTURE(err);
-      HIP_ASSERT(err == hipErrorInvalidValue);
-    }
-
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK(hipFree(base));
   }
+
+  HIP_CHECK(hipFree(base));
+}
+
+TEST_CASE("Unit_hipMemsetD32_UnalignedPatternFill", "[fillBuffer][unaligned]") {
+  constexpr size_t kAllocBytes = 512;
+  constexpr unsigned char kSentinel = 0x5A;
+  constexpr unsigned int kPattern = 0xDEADBEEFu;
+  constexpr size_t kElemSize = sizeof(unsigned int);  // 4
+
+  void* base = nullptr;
+  HIP_CHECK(hipMalloc(&base, kAllocBytes));
+
+  for (size_t offset : {1U, 2U, 3U}) {
+    for (size_t count : {4U, 6U, 7U, 8U, 15U, 25U, 32U, 50U}) {
+      // Fill whole buffer with sentinel.
+      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes));
+      HIP_CHECK(hipDeviceSynchronize());
+
+      void* dst = static_cast<unsigned char*>(base) + offset;
+      HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(dst),
+                             static_cast<int>(kPattern), count));
+      HIP_CHECK(hipDeviceSynchronize());
+
+      std::vector<unsigned char> hostCopy(kAllocBytes, 0);
+      HIP_CHECK(hipMemcpy(hostCopy.data(), base, kAllocBytes,
+                          hipMemcpyDeviceToHost));
+
+      // Head sentinel region [0, offset) must be untouched.
+      for (size_t i = 0; i < offset; ++i) {
+        CAPTURE(offset, count, i);
+        HIP_ASSERT(hostCopy[i] == kSentinel);
+      }
+      // Fill region [offset, offset + count*kElemSize) must match pattern.
+      for (size_t j = 0; j < count * kElemSize; ++j) {
+        const unsigned char expected =
+            static_cast<unsigned char>(kPattern >> (8 * (j % kElemSize)));
+        CAPTURE(offset, count, j);
+        HIP_ASSERT(hostCopy[offset + j] == expected);
+      }
+      // Tail sentinel region must be untouched.
+      for (size_t i = offset + count * kElemSize; i < kAllocBytes; ++i) {
+        CAPTURE(offset, count, i);
+        HIP_ASSERT(hostCopy[i] == kSentinel);
+      }
+    }
+  }
+
+  HIP_CHECK(hipFree(base));
+}
+
+TEST_CASE("Unit_hipMemsetD16Async_UnalignedPatternFill", "[fillBuffer][unaligned]") {
+  constexpr size_t kAllocBytes = 512;
+  constexpr unsigned char kSentinel = 0x5A;
+  constexpr unsigned short kPattern = 0xBEEF;
+  constexpr size_t kElemSize = sizeof(unsigned short);  // 2
+
+  void* base = nullptr;
+  HIP_CHECK(hipMalloc(&base, kAllocBytes));
+
+  hipStream_t stream{nullptr};
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  for (size_t offset : {1U}) {
+    for (size_t count : {8U, 12U, 15U, 16U, 31U, 50U, 64U, 100U}) {
+      // Fill whole buffer with sentinel.
+      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes));
+      HIP_CHECK(hipDeviceSynchronize());
+
+      void* dst = static_cast<unsigned char*>(base) + offset;
+      HIP_CHECK(hipMemsetD16Async(reinterpret_cast<hipDeviceptr_t>(dst),
+                                  kPattern, count, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+
+      std::vector<unsigned char> hostCopy(kAllocBytes, 0);
+      HIP_CHECK(hipMemcpy(hostCopy.data(), base, kAllocBytes,
+                          hipMemcpyDeviceToHost));
+
+      // Head sentinel region [0, offset) must be untouched.
+      for (size_t i = 0; i < offset; ++i) {
+        CAPTURE(offset, count, i);
+        HIP_ASSERT(hostCopy[i] == kSentinel);
+      }
+      // Fill region [offset, offset + count*kElemSize) must match pattern.
+      for (size_t j = 0; j < count * kElemSize; ++j) {
+        const unsigned char expected =
+            static_cast<unsigned char>(kPattern >> (8 * (j % kElemSize)));
+        CAPTURE(offset, count, j);
+        HIP_ASSERT(hostCopy[offset + j] == expected);
+      }
+      // Tail sentinel region must be untouched.
+      for (size_t i = offset + count * kElemSize; i < kAllocBytes; ++i) {
+        CAPTURE(offset, count, i);
+        HIP_ASSERT(hostCopy[i] == kSentinel);
+      }
+    }
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(base));
+}
+
+TEST_CASE("Unit_hipMemsetD32Async_UnalignedPatternFill", "[fillBuffer][unaligned]") {
+  constexpr size_t kAllocBytes = 512;
+  constexpr unsigned char kSentinel = 0x5A;
+  constexpr unsigned int kPattern = 0xDEADBEEFu;
+  constexpr size_t kElemSize = sizeof(unsigned int);  // 4
+
+  void* base = nullptr;
+  HIP_CHECK(hipMalloc(&base, kAllocBytes));
+
+  hipStream_t stream{nullptr};
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  for (size_t offset : {1U, 2U, 3U}) {
+    for (size_t count : {4U, 6U, 7U, 8U, 15U, 25U, 32U, 50U}) {
+      // Fill whole buffer with sentinel.
+      HIP_CHECK(hipMemset(base, kSentinel, kAllocBytes));
+      HIP_CHECK(hipDeviceSynchronize());
+
+      void* dst = static_cast<unsigned char*>(base) + offset;
+      HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(dst),
+                                  static_cast<int>(kPattern), count, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+
+      std::vector<unsigned char> hostCopy(kAllocBytes, 0);
+      HIP_CHECK(hipMemcpy(hostCopy.data(), base, kAllocBytes,
+                          hipMemcpyDeviceToHost));
+
+      // Head sentinel region [0, offset) must be untouched.
+      for (size_t i = 0; i < offset; ++i) {
+        CAPTURE(offset, count, i);
+        HIP_ASSERT(hostCopy[i] == kSentinel);
+      }
+      // Fill region [offset, offset + count*kElemSize) must match pattern.
+      for (size_t j = 0; j < count * kElemSize; ++j) {
+        const unsigned char expected =
+            static_cast<unsigned char>(kPattern >> (8 * (j % kElemSize)));
+        CAPTURE(offset, count, j);
+        HIP_ASSERT(hostCopy[offset + j] == expected);
+      }
+      // Tail sentinel region must be untouched.
+      for (size_t i = offset + count * kElemSize; i < kAllocBytes; ++i) {
+        CAPTURE(offset, count, i);
+        HIP_ASSERT(hostCopy[i] == kSentinel);
+      }
+    }
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(base));
 }
