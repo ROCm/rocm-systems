@@ -1661,9 +1661,7 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi monitor workload"
         self.common.print(msg)
 
-        # TODO allow monitor_with_workload to be executed
-        # if not self.PrintCmdsOnly:
-        if False:  # jcnii
+        if not self.PrintCmdsOnly:
             if self.common.TODO_SKIP_FAIL:
                 msg = f"{self.tab}Needs Testing, Not Yet Implemented"
                 self.common.print(msg)
@@ -1711,11 +1709,6 @@ class TestAmdSmiCli(unittest.TestCase):
         monitor_workload = json.loads(data_workload)
         data = self._get_monitor_metric_data(monitor_baseline, monitor_workload, None, exclude=True)
         monitor_failures, monitor_successes = self._compare_monitor_metric_data("Workload", data)
-        if False:  # jcnii
-            # Update lists to not have and 'total' checks
-            # Skip comparing 'total' checks since they should not be different
-            monitor_failures = [item for item in monitor_failures if "total" not in item[1]]
-            monitor_successes = [item for item in monitor_successes if "total" not in item[1]]
         # Results are opposite, want differences in values
         # So switch failure and success criterion
         for index, cmd_data in enumerate(monitor_failures):
