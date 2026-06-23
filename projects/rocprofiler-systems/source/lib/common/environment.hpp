@@ -419,7 +419,7 @@ discover_llvm_libdir_for_ompt()
     const auto rocm_dir  = strip(get_env<std::string>("ROCM_PATH", "/opt/rocm"));
     const auto rocmv_dir = strip(get_env<std::string>("ROCmVersion_DIR", ""));
 
-    const constexpr auto number_of_candidates = 6;
+    const constexpr auto number_of_candidates = 8;
 
     std::vector<std::string> candidates;
     candidates.reserve(number_of_candidates);
@@ -439,12 +439,16 @@ discover_llvm_libdir_for_ompt()
     }
     push_unique(rocm_dir + "/llvm/lib");
     push_unique(rocm_dir + "/lib/llvm/lib");
-    push_unique(rocm_dir + "/lib/llvm/lib/" +
-                std::string{ ROCPROFSYS_ROCM_LLVM_HOST_TRIPLE });
+
+    const auto llvm_host_triple = strip(std::string{ ROCPROFSYS_ROCM_LLVM_HOST_TRIPLE });
+    if(!llvm_host_triple.empty())
+    {
+      push_unique(rocm_dir + "/lib/llvm/lib/" + llvm_host_triple);
+      push_unique("/opt/rocm/lib/llvm/lib/" + llvm_host_triple);
+    }
+
     push_unique("/opt/rocm/llvm/lib");
     push_unique("/opt/rocm/lib/llvm/lib");
-    push_unique("/opt/rocm/lib/llvm/lib/" +
-                std::string{ ROCPROFSYS_ROCM_LLVM_HOST_TRIPLE });
 
     auto has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
