@@ -49,6 +49,11 @@ add_executable(
     transcendental_test.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
+    patch/instruction_builder_test.cpp
+    patch/trampoline_builder_test.cpp
+    patch/instrumentor_test.cpp
+    patch/error_report_test.cpp
+    code/code_object_target_id_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     kfd_ioctl_test.cpp
@@ -295,6 +300,7 @@ if(HSA_RUNTIME64)
         set(HAS_CDNA3_GPU FALSE)
         set(HAS_RDNA4_GPU FALSE)
         set(HAS_GFX1201_GPU FALSE)
+        set(HAS_CDNA2_GPU FALSE)
         if(ROCM_AGENT_ENUM)
             execute_process(
                 COMMAND ${ROCM_AGENT_ENUM}
@@ -317,6 +323,9 @@ if(HSA_RUNTIME64)
             endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx1201")
                 set(HAS_GFX1201_GPU TRUE)
+            endif()
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx90a")
+                set(HAS_CDNA2_GPU TRUE)
             endif()
         endif()
 
@@ -416,12 +425,13 @@ if(HSA_RUNTIME64)
             )
         endif()
 
+        set(RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE cdna4_to_cdna3_dispatch_test)
         add_executable(
-            cdna4_to_cdna3_dispatch_test
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             dbt/cdna4_to_cdna3_dispatch_test.cpp
         )
         target_include_directories(
-            cdna4_to_cdna3_dispatch_test
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
@@ -429,7 +439,7 @@ if(HSA_RUNTIME64)
                 ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
-            cdna4_to_cdna3_dispatch_test
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             PRIVATE
                 ${RJ_OBJECT_LIBS}
                 util
@@ -438,85 +448,59 @@ if(HSA_RUNTIME64)
                 GTest::gtest_main
         )
         target_link_options(
-            cdna4_to_cdna3_dispatch_test
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
         )
         target_compile_definitions(
-            cdna4_to_cdna3_dispatch_test
+            ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        add_dependencies(cdna4_to_cdna3_dispatch_test device_kernels)
-        rj_configure_target(cdna4_to_cdna3_dispatch_test TEST)
+        add_dependencies(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} device_kernels)
+        rj_configure_target(${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE} TEST)
 
-        add_test(
-            NAME "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates"
-            COMMAND
-                cdna4_to_cdna3_dispatch_test
-                --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        set(RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS
+            DynamicCopyLoopTranslates
+            TritonDynamicMatmulTranslates
+            TritonBufferAsyncMatmulTranslates
+            TritonFlashAttentionNoAsyncTranslates
+            TritonFlashAttentionBufferAsyncTranslates
         )
-        set_tests_properties(
-            "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulTranslates"
-            PROPERTIES TIMEOUT 120
-        )
-
-        if(HAS_CDNA3_GPU)
+        foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS)
             add_test(
-                NAME "Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun"
+                NAME "Cdna4ToCdna3DispatchTest.${_test_name}"
                 COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            add_test(
-                NAME
-                    "Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun"
-                COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            add_test(
-                NAME
-                    "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun"
-                COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            add_test(
-                NAME
-                    "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun"
-                COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            add_test(
-                NAME
-                    "Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun"
-                COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
-            add_test(
-                NAME
-                    "Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun"
-                COMMAND
-                    cdna4_to_cdna3_dispatch_test
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun
+                    ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
             set_tests_properties(
-                "Cdna4ToCdna3DispatchTest.DynamicCopyLoopDispatchAndRun"
-                "Cdna4ToCdna3DispatchTest.TritonDynamicMatmulDispatchAndRun"
-                "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulDispatchAndRun"
-                "Cdna4ToCdna3DispatchTest.TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun"
-                "Cdna4ToCdna3DispatchTest.TritonFlashAttentionNoAsyncDispatchAndRun"
-                "Cdna4ToCdna3DispatchTest.TritonFlashAttentionBufferAsyncDispatchAndRun"
+                "Cdna4ToCdna3DispatchTest.${_test_name}"
                 PROPERTIES TIMEOUT 120
             )
+        endforeach()
+
+        if(HAS_CDNA3_GPU)
+            set(RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS
+                DynamicCopyLoopDispatchAndRun
+                TritonDynamicMatmulDispatchAndRun
+                TritonBufferAsyncMatmulDispatchAndRun
+                TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
+                TritonFlashAttentionNoAsyncDispatchAndRun
+                TritonFlashAttentionBufferAsyncDispatchAndRun
+            )
+            foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS)
+                add_test(
+                    NAME "Cdna4ToCdna3DispatchTest.${_test_name}"
+                    COMMAND
+                        ${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}
+                        --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                )
+                set_tests_properties(
+                    "Cdna4ToCdna3DispatchTest.${_test_name}"
+                    PROPERTIES TIMEOUT 120
+                )
+            endforeach()
             message(
                 STATUS
                 "CDNA4->CDNA3 dispatch tests enabled (CDNA3 GPU detected)"
@@ -526,6 +510,76 @@ if(HSA_RUNTIME64)
                 STATUS
                 "CDNA4->CDNA3 dispatch tests built but NOT registered with CTest "
                 "(no CDNA3 GPU)"
+            )
+        endif()
+
+        # --- HSA DBI smoke test: gfx90a kernel patched with inlined nop ---
+        # Build always; register with CTest only when a gfx90a GPU is present.
+        add_executable(hsa_dbi_smoke_test dbi/hsa_dbi_smoke_test.cpp)
+        target_include_directories(
+            hsa_dbi_smoke_test
+            PRIVATE
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+                ${CMAKE_SOURCE_DIR}/lib/util/include
+                ${RJ_HSA_INCLUDE_DIR}
+        )
+        target_link_libraries(
+            hsa_dbi_smoke_test
+            PRIVATE
+                ${RJ_OBJECT_LIBS}
+                ${HSA_RUNTIME64}
+                GTest::gtest
+                GTest::gtest_main
+        )
+        target_link_options(
+            hsa_dbi_smoke_test
+            PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+        )
+        target_compile_definitions(
+            hsa_dbi_smoke_test
+            PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
+        )
+        add_dependencies(hsa_dbi_smoke_test device_kernels)
+        rj_configure_target(hsa_dbi_smoke_test TEST)
+
+        # Local helper: register one TEST_F case from hsa_dbi_smoke_test as a
+        # CTest entry. <group> is the part of the fixture name after
+        # "HsaDbiSmoke" (Static or Hardware). Scoped here because it's only
+        # used by the calls immediately below.
+        function(register_hsa_dbi_smoke_case group case)
+            set(oneValueArgs TIMEOUT)
+            cmake_parse_arguments(RJ_DBI "" "${oneValueArgs}" "" ${ARGN})
+            set(name "HsaDbiSmoke${group}.${case}")
+            add_test(
+                NAME "${name}"
+                COMMAND hsa_dbi_smoke_test --gtest_filter=${name}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            if(RJ_DBI_TIMEOUT)
+                set_tests_properties(
+                    "${name}"
+                    PROPERTIES TIMEOUT ${RJ_DBI_TIMEOUT}
+                )
+            endif()
+        endfunction()
+
+        # Static-only test: no GPU needed, runs anywhere the binary is built.
+        register_hsa_dbi_smoke_case(Static PatchedElfActuallyContainsInstrumentation)
+
+        if(HAS_CDNA2_GPU)
+            # Hardware-gated tests. The two that dispatch get an explicit
+            # timeout; the load+validate one runs quickly enough for the
+            # default.
+            register_hsa_dbi_smoke_case(Hardware PatchedElfLoadsAndValidatesInHsaExecutable)
+            register_hsa_dbi_smoke_case(Hardware PatchedKernelDispatchMatchesOriginal TIMEOUT 30)
+            register_hsa_dbi_smoke_case(Hardware TrampolineIsActuallyExecutedByGpu TIMEOUT 30)
+            message(STATUS "HSA DBI smoke test enabled (gfx90a detected)")
+        else()
+            message(
+                STATUS
+                "HSA DBI smoke test built but NOT registered with CTest "
+                "(no gfx90a)"
             )
         endif()
     endif()

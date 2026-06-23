@@ -737,18 +737,8 @@ class Device : public NullDevice {
   };
 
   struct QueueCompare {
-    const Device* device_;
-
-    QueueCompare(const Device* dev = nullptr) : device_(dev) {}
-
     // Customized queue compare operator to make sure the queues are sorted in the creation order
-    bool operator()(hsa_queue_t* lhs, hsa_queue_t* rhs) const {
-      if (device_ != nullptr && device_->settings().dynamic_queues_ > 0) {
-        return (lhs->id < rhs->id) ? true : false;
-      } else {
-        return (lhs < rhs) ? true : false;
-      }
-    }
+    bool operator()(hsa_queue_t* lhs, hsa_queue_t* rhs) const { return lhs->id < rhs->id; }
   };
   //! a vector for keeping Pool of HSA queues with low, normal and high priorities for recycling
   std::vector<std::map<hsa_queue_t*, QueueInfo, QueueCompare>> queuePool_;

@@ -20,8 +20,6 @@ subtrees:
     entries:
       - file: tutorials/copy-a-file
         title: Copying a file
-      - file: tutorials/synchronous-file-copy
-        title: Synchronous file copy
       - file: tutorials/async-multistream-io
         title: Asynchronous multistream I/O
       - file: tutorials/get-version

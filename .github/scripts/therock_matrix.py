@@ -9,6 +9,7 @@ subtree_to_project_map = {
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
     "projects/cuid": "rdc",
+    "projects/hipfile": "storage_libs",
     "projects/hip": "runtimes",
     "projects/hip-tests": "runtimes",
     "projects/hipother": "runtimes",
@@ -52,7 +53,7 @@ project_map = {
             "-DTHEROCK_ENABLE_ALL=OFF",
             "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON",
         ],
-        "projects_to_test": "rocr-debug-agent, rocgdb",
+        "projects_to_test": "rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
     },
     # debug agent changes don't have to exercise ROCgdb.
     "debug_tools-debug-agent": {
@@ -75,23 +76,36 @@ project_map = {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_ROCSHMEM=ON"],
         "projects_to_test": "",  # rocshmem testing to be enabled in a future PR
     },
+    "storage_libs": {
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_STORAGE_LIBS=ON"],
+        "projects_to_test": "",  # hipfile testing to be enabled in a future PR
+    },
     # Also test rocr-debug-agent and rocgdb since those depend on runtimes.
     # Mathlib tests are included because runtime changes (hip, rocr, clr) can affect
     # the full math library stack. This matches nightly test coverage for gfx94x.
     "runtimes": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
+<<<<<<< HEAD
         #TODO - Enable miopen, miopenprovider and rocwmma once they start passing in ci-nightly
         "projects_to_test": "hip-tests, hipblas, hipblaslt, hipcub, hipfft, hiprand, hipsolver, hipsparse, hipsparselt, rocblas, rocfft, rocgdb, rocprim, rocprofiler-sdk, rocr-debug-agent, rocrand, rocroller, rocrtst, rocsolver, rocsparse, rocthrust",
+=======
+        "projects_to_test": "hip-tests, rocrtst, rocprofiler-sdk, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
+>>>>>>> origin/develop
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu",
     },
     # Same test coverage as TheRock submodule-bump PRs (rocm-systems scope).
     # Nightly (schedule) uses this entry explicitly for alignment with runtimes coverage.
     "nightly": {
+<<<<<<< HEAD
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
         "projects_to_test": therock_projects_to_test,
+=======
+        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocprim, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma",
+>>>>>>> origin/develop
     },
 }
 

@@ -2517,8 +2517,10 @@ bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& 
                                   VirtualGPU** gpuDefQueue, uint64_t* vmDefQueue) {
   amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(dev());
   if (nullptr == defQueue) {
-    LogError("Default device queue wasn't allocated");
-    return false;
+    // O0 may conservatively emit hidden device-enqueue ABI arguments even when the
+    // parent kernel does not enqueue children. Without a default device queue there
+    // is no scheduler work to set up, so allow the parent dispatch to proceed.
+    return true;
   } else {
     if (dev().settings().useDeviceQueue_) {
       *gpuDefQueue = static_cast<VirtualGPU*>(defQueue->vDev());
@@ -2834,7 +2836,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   AqlPacketUpdateTs(aql_index, gpuEvent);
 
   // Execute scheduler for device enqueue
-  if (hsaKernel.dynamicParallelism()) {
+  if (hsaKernel.dynamicParallelism() && gpuDefQueue != nullptr) {
     PostDeviceEnqueue(kernel, hsaKernel, gpuDefQueue, vmDefQueue, vmParentWrap, &gpuEvent);
   }
 
