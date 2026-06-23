@@ -529,6 +529,9 @@ class MetricCommands:
                             ]
                         engine_usage["vcn_busy"] = new_xcp_dict
                     else:
+                        # On devices without XCP partitions (e.g. Navi), vcn_busy_percent
+                        # is available via sysfs; there is no equivalent sysfs for gfx_busy_inst
+                        # or jpeg_busy on these devices.
                         try:
                             engine_usage["vcn_busy"] = amdsmi_interface.amdsmi_get_vcn_busy_percent(
                                 args.gpu

@@ -817,11 +817,11 @@ amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* devic
       *vcn_busy_percent = std::stoul(line);
       return AMDSMI_STATUS_SUCCESS;
     } catch (const std::exception&) {
-      return AMDSMI_STATUS_NOT_SUPPORTED;
+      return AMDSMI_STATUS_IO;
     }
   }
 
-  return AMDSMI_STATUS_NOT_SUPPORTED;
+  return AMDSMI_STATUS_IO;
 }
 
 std::string smi_amdgpu_split_string(std::string str, char delim) {
