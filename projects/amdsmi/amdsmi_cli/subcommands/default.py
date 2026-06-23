@@ -153,13 +153,19 @@ class DefaultCommands:
                 gfx_util = gpu_metrics["average_gfx_activity"]
                 if gpu_metrics["current_socket_power"] != "N/A":
                     current_power = gpu_metrics["current_socket_power"]
-                else:
+                elif gpu_metrics["average_socket_power"] != "N/A":
                     current_power = gpu_metrics["average_socket_power"]
+                elif gpu_metrics.get("apu_metrics.average_socket_power", "N/A") != "N/A":
+                    current_power = gpu_metrics["apu_metrics.average_socket_power"]
+                else:
+                    current_power = "N/A"
                 # If the hotspot temperature is not available use the edge temp (applicable to APUs)
                 if gpu_metrics["temperature_hotspot"] != "N/A":
                     temperature = gpu_metrics["temperature_hotspot"]
                 elif gpu_metrics["temperature_edge"] != "N/A":
                     temperature = gpu_metrics["temperature_edge"]
+                elif gpu_metrics.get("apu_metrics.temperature_gfx", "N/A") != "N/A":
+                    temperature = round(gpu_metrics["apu_metrics.temperature_gfx"])
                 else:
                     temperature = "N/A"
             else:

@@ -1774,7 +1774,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         xgmi_err_help = "XGMI error information since last read"
         energy_help = "Amount of energy consumed"
         throttle_help = (
-            "Displays throttle accumulators;\n    Only available for MI300 or newer ASICs"
+            "Displays throttle accumulators;\n    Only available for MI300 or newer ASICs and APUs"
         )
 
         # Help text for Arguments only on Hypervisors
