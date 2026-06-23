@@ -418,7 +418,7 @@ get_library_handle(std::string_view _rocp_reg_lib)
         }
     }
 
-    // try to load with the absoulte path
+    // try to load with the absolute path
     if(!rocprofiler_lib_handle)
     {
         _rocp_reg_lib_path = _rocp_reg_lib_path_abs;
@@ -667,8 +667,9 @@ is_attachment_library_registered()
 {
     for(const auto& itr : registered)
     {
-        if(std::string_view{ itr->common_name } ==
-           supported_library_trait<ROCP_REG_ROCATTACH>::common_name)
+        if(itr.has_value() &&
+           std::string_view{ itr->common_name } ==
+               supported_library_trait<ROCP_REG_ROCATTACH>::common_name)
         {
             return true;
         }

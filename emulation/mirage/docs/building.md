@@ -4,11 +4,11 @@ This guide covers building the `mirage` CLI/daemon, its embedded web
 dashboard, and (optionally) the `rocjitsu` GPU emulator that mirage
 drives.
 
-mirage is a single Cargo workspace
-([`emulation/mirage/`](../)) made of six crates: `core`, `ctl`,
-`daemon`, `dashboard`, `host`, and `rocjitsu` (the `mirage_rocjitsu`
-asset-embedding crate). One `cargo build` produces the unified
-`mirage` binary.
+mirage is a single Cargo workspace ([`emulation/mirage/`](../)). One
+`cargo build` produces the unified `mirage` binary from a set of crates —
+`core`, `ctl`, `host`, `container`, `builtin`, the emulator backends (`noop`,
+`rocjitsu`, `hotswap`), and the optional `daemon` + `dashboard` web UI. See
+[`architecture.md`](architecture.md) for the full crate map.
 
 ## TL;DR
 
@@ -113,18 +113,16 @@ crate then embeds whatever SPA assets were produced by a previous build.
 mirage works without rocjitsu (the `noop` emulator runs commands
 directly). To get real GPU emulation you need the rocjitsu libraries.
 
-### Option A — let mirage build/find them
+### Option A — let mirage find them
 
-`mirage_rocjitsu`'s `build.rs` discovers the rocjitsu assets in this
-order:
+mirage discovers the rocjitsu KMD library (`librocjitsu_kmd.so`, or
+`librocjitsu.so` as a fallback) in this order:
 
-1. explicit paths in `ROCJITSU_KMD_LIB`, `ROCJITSU_LIB`,
-   `ROCJITSU_SCHEMA_FBS`;
-2. the rocjitsu source tree at `$ROCJITSU_ROOT` or the sibling checkout
-   [`../../rocjitsu`](../../rocjitsu) (relative to the `rocjitsu` crate),
-   using prebuilt artifacts under `<root>/build/`;
-3. as a last resort, invoking `cmake` to build the libraries on demand
-   (only when `cmake` is on `PATH` and `MIRAGE_ROCJITSU_BUILD != 0`).
+1. a sibling monorepo build, relative to the `mirage` binary
+   (`../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/linux`);
+2. `$ROCM_HOME/lib`;
+3. `$(rocm-sdk path --root)/lib` (present when a ROCm Python wheel venv
+   is active).
 
 If nothing is found, empty placeholders are staged and mirage still
 compiles; rocjitsu is simply reported as not installed.
@@ -137,40 +135,23 @@ From the rocjitsu source tree
 ```sh
 cd emulation/rocjitsu
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j"$(nproc)"
-```
-
-Then build mirage pointing at that checkout:
-
-```sh
-cd ../mirage
-ROCJITSU_ROOT=$PWD/../rocjitsu cargo build
+cmake --build build
 ```
 
 ### Verifying rocjitsu is wired up
 
 ```sh
-./target/debug/mirage state builtins        # extract agents/topologies/assets
+./target/debug/mirage state builtins        # extract agents/topologies
 ./target/debug/mirage profile create gpu --emulator rocjitsu
 ./target/debug/mirage run --profile gpu -- \
-  sh -c 'echo LD=$LD_PRELOAD RJ_CONFIG=$RJ_CONFIG'
+  sh -c 'echo LD=$LD_PRELOAD ROCJITSU_RUNTIME_DIR=$ROCJITSU_RUNTIME_DIR'
 ```
 
-If the profile is created successfully and `LD_PRELOAD` / `RJ_CONFIG`
-are populated in the run, rocjitsu is integrated. Profile creation
+If the profile is created successfully and `LD_PRELOAD` /
+`ROCJITSU_RUNTIME_DIR` are populated in the run, rocjitsu is integrated.
+Profile creation
 validates against the emulator, so an unusable rocjitsu setup is
 reported at `profile create` time with the reason.
-
-## Useful environment variables
-
-| Variable | Effect |
-|----------|--------|
-| `MIRAGE_DASHBOARD_SKIP_NPM_CI` | Skip the Node check, `npm ci`, and `npm run build`. |
-| `NODE` / `NPM` | Override the `node` / `npm` executables used by the dashboard build. |
-| `ROCJITSU_ROOT` | Path to the rocjitsu source/build tree. |
-| `ROCJITSU_KMD_LIB`, `ROCJITSU_LIB`, `ROCJITSU_SCHEMA_FBS` | Explicit paths to individual rocjitsu assets. |
-| `MIRAGE_ROCJITSU_BUILD=0` | Disable the on-demand `cmake` build fallback. |
-| `MIRAGE_LOG` | Log filter (e.g. `debug`); also `-v` / `-vv` on the CLI. |
 
 ## Testing
 
@@ -195,5 +176,6 @@ signal → stop) through the public CLI and HTTP surfaces.
   mirage to run doesn't exist on `PATH` inside the session; the exec ends
   with exit code 127 and the message is shown on its stdout.
 - **rocjitsu reported as not installed** — build rocjitsu (Option B) and
-  rebuild mirage with `ROCJITSU_ROOT` set, or run
+  ensure `librocjitsu_kmd.so` is reachable (a sibling monorepo build,
+  `$ROCM_HOME/lib`, or `$(rocm-sdk path --root)/lib`), or run
   `mirage state builtins` to extract any embedded assets.

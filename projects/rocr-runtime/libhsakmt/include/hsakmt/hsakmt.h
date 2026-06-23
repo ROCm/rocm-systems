@@ -1405,6 +1405,17 @@ hsaKmtMemHandleFree(
     HsaMemoryObjectHandle Handle
 );
 
+/**
+  Free a memory object handle without clearing its metadata.
+  Used for IPC exporter handles where we need to release the extra kernel
+  reference but preserve metadata for later IPC attach operations.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemHandleFreePreserveMetadata(
+    HsaMemoryObjectHandle Handle
+);
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtMemoryGetCpuAddr(

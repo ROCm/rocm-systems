@@ -342,6 +342,9 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
         num_processes,
         validation_rules_dir,
     ):
+        if "gfx1151" in gpu_info.architectures:
+            pytest.skip("transpose GPU perf counter test skipped on gfx1151")
+
         result = self.run_test(
             "sampling",
             "transpose",
