@@ -226,18 +226,19 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agen
                                    const char *options,
                                    hsa_loaded_code_object_t *loaded_code_object,
                                    const ByteVec &local_bytes) {
-  // Source ISA is derived from the code object inside RetargetCodeObject; the
-  // target ISA is the running GPU.
+  // Source ISA from the code object, target ISA from the running GPU.
+  const std::string source_isa = rocr::hotswap::GetCodeObjectIsaName(
+      local_bytes->data(), local_bytes->size());
   const std::string target_isa = get_agent_isa_name(agent);
-  if (target_isa.empty()) {
+  if (source_isa.empty() || target_isa.empty()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
   void *out_elf = nullptr;
   size_t out_elf_size = 0;
   const int rc = rocr::hotswap::RetargetCodeObject(
-      local_bytes->data(), local_bytes->size(), target_isa.c_str(), &out_elf,
-      &out_elf_size);
+      local_bytes->data(), local_bytes->size(), source_isa.c_str(),
+      target_isa.c_str(), &out_elf, &out_elf_size);
 
   if (rc != 0 || out_elf == local_bytes->data()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;

@@ -8,14 +8,21 @@
 #define ROCR_HOTSWAP_HPP
 
 #include <cstddef>
+#include <string>
 
 namespace rocr::hotswap {
 
-/// Retarget a code object from its own ISA to the running GPU's ISA via COMGR.
+/// Read a code object's own ISA name via COMGR (amd_comgr_get_data_isa_name).
 ///
-/// The source ISA is read from the code object via COMGR
-/// (amd_comgr_get_data_isa_name); the target ISA is the running GPU's ISA,
-/// supplied by the caller (e.g. from the HSA agent). COMGR's
+/// Uses COMGR's LLVM-canonical parser, so it tracks triple normalization
+/// without hand-rolled metadata parsing. Returns an empty string on failure.
+std::string GetCodeObjectIsaName(const void *elf_data, size_t elf_size);
+
+/// Retarget a code object from source_isa to target_isa via COMGR.
+///
+/// Both ISA names are supplied by the caller: source_isa typically comes from
+/// the code object (see GetCodeObjectIsaName) and target_isa from the running
+/// GPU (e.g. the HSA agent), but either may be overridden. COMGR's
 /// amd_comgr_hotswap_rewrite (linked directly) applies whatever transformation
 /// the source/target pair calls for -- same-ISA stepping patches (e.g. gfx1250
 /// B0 to A0) or cross-family transpilation -- and returns the rewritten code
@@ -31,8 +38,8 @@ namespace rocr::hotswap {
 ///
 /// Returns 0 on success, non-zero on failure.
 int RetargetCodeObject(const void *elf_data, size_t elf_size,
-                       const char *target_isa, void **out_data,
-                       size_t *out_size);
+                       const char *source_isa, const char *target_isa,
+                       void **out_data, size_t *out_size);
 
 } // namespace rocr::hotswap
 
