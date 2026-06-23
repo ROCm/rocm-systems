@@ -10,9 +10,18 @@ on:
       - 'projects/rdc/tools/dme_rdc_metric_mapping.json'
       - 'projects/rdc/tools/dme_rdc_metric_sync_check.py'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   sync-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout rocm-systems
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
