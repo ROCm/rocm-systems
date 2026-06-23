@@ -417,15 +417,13 @@ private:
         }
 
         auto temp_it = tracks.find(detail::TEMPERATURE_VALUE);
-        if((effective_metrics.bits.hotspot_temperature ||
-            effective_metrics.bits.edge_temperature) &&
+        if((effective_metrics.bits.edge_temperature ||
+            effective_metrics.bits.hotspot_temperature) &&
            temp_it != tracks.end() && !temp_it->second.track_indexes.empty())
         {
-            // Single GPU temperature track: prefer hotspot sensor, fall back to edge.
-            const double temp =
-                static_cast<double>(effective_metrics.bits.hotspot_temperature
-                                        ? metric_values.hotspot_temperature
-                                        : metric_values.edge_temperature);
+            const double temp = effective_metrics.bits.hotspot_temperature
+                                    ? metric_values.hotspot_temperature
+                                    : metric_values.edge_temperature;
             TRACE_COUNTER(
                 "device_temp",
                 counter_track::at(device_index, temp_it->second.track_indexes[0]), ts,
