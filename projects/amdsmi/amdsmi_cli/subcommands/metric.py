@@ -22,7 +22,6 @@
 import json
 import logging
 import time
-import os
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 from amdsmi.amdsmi_interface import AMDSMI_MAX_RAIL_INDEX
@@ -334,17 +333,6 @@ class MetricCommands:
         # Fetch partition metrics once per GPU; the sections below reuse this result
         gpu_partition_metrics = None
         if args.partition:
-            # Validate feature toggle (should not reach here if flag not added, but defensive check)
-            if not os.environ.get("AMDSMI_ENABLE_PARTITION_METRICS", "").strip().lower() in (
-                "1",
-                "true",
-                "yes",
-                "on",
-            ):
-                logging.warning(
-                    "Partition metrics feature not enabled. Set AMDSMI_ENABLE_PARTITION_METRICS=1"
-                )
-                args.partition = False
             try:
                 gpu_partition_metrics = amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(
                     args.gpu
@@ -777,7 +765,7 @@ class MetricCommands:
                         )
                         if current_socclks_mid != "N/A" and isinstance(current_socclks_mid, list):
                             clocks["socclks_mid"] = {
-                                f"MID_{index}": self.helpers.unit_format(
+                                f"mid_{index}": self.helpers.unit_format(
                                     self.logger, clk, clock_unit
                                 )
                                 for index, clk in enumerate(current_socclks_mid)
@@ -807,7 +795,7 @@ class MetricCommands:
                             soc_limits = None
 
                         for aid_idx in range(num_aids):
-                            aid_key = f"AID_{aid_idx}"
+                            aid_key = f"aid_{aid_idx}"
                             aid_clocks = {}
 
                             # VCLK for this AID
@@ -874,7 +862,7 @@ class MetricCommands:
                             gfx_limits = None
 
                         for xcp_idx in range(num_xcps):
-                            xcp_key = f"XCP_{xcp_idx}"
+                            xcp_key = f"xcp_{xcp_idx}"
                             xcp_clocks = {}
 
                             # GFX clock for this XCP (could be single value or array of engine clocks)
@@ -1032,7 +1020,7 @@ class MetricCommands:
                         current_uclk_aid = gpu_metric.get("current_uclk_aid", "N/A")
                         if current_uclk_aid != "N/A":
                             clocks["uclk_aid"] = {
-                                f"AID_{index}": self.helpers.unit_format(
+                                f"aid_{index}": self.helpers.unit_format(
                                     self.logger, clk, clock_unit
                                 )
                                 if clk != "N/A"
@@ -1046,7 +1034,7 @@ class MetricCommands:
                         current_socclks_mid = gpu_metric.get("current_socclks_mid", "N/A")
                         if current_socclks_mid != "N/A":
                             clocks["socclks_mid"] = {
-                                f"MID_{index}": self.helpers.unit_format(
+                                f"mid_{index}": self.helpers.unit_format(
                                     self.logger, clk, clock_unit
                                 )
                                 if clk != "N/A"
@@ -1315,7 +1303,7 @@ class MetricCommands:
                     xcp_temp_xcd = gpu_partition_metrics.get("xcp_stats.temperature_xcd", "N/A")
                     if xcp_temp_xcd != "N/A" and isinstance(xcp_temp_xcd, list):
                         temperatures["xcd"] = {
-                            f"XCP_{idx}": xcp_temp_xcd[idx] for idx in range(len(xcp_temp_xcd))
+                            f"xcp_{idx}": xcp_temp_xcd[idx] for idx in range(len(xcp_temp_xcd))
                         }
                 else:
                     # Socket-level metrics (existing behavior)
@@ -1341,7 +1329,7 @@ class MetricCommands:
                         if xcp_temp_xcd != "N/A":
                             available_partition = min(num_partition, len(xcp_temp_xcd))
                             temperatures["xcd"] = {
-                                f"XCP_{current_xcp}": xcp_temp_xcd[current_xcp]
+                                f"xcp_{current_xcp}": xcp_temp_xcd[current_xcp]
                                 for current_xcp in range(available_partition)
                             }
 

@@ -105,16 +105,6 @@ def check_brcm_nic_driver():
     return False
 
 
-def is_partition_metrics_enabled():
-    """Returns true if partition metrics feature is enabled via environment variable."""
-    return os.environ.get("AMDSMI_ENABLE_PARTITION_METRICS", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-
-
 def amdsmi_cli_init():
     """Initializes AMDSMI Library for the CLI
 
