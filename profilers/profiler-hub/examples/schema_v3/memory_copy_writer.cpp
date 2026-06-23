@@ -2,15 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 //
-// Memory-copy round-trip launcher for the pytest-driven integration suite.
+// Memory-copy launcher for the pytest-driven integration suite.
 //
-// This binary performs NO comparison. It writes one memory copy to a local rocpd
-// database, reads it back, and prints every reader-recoverable field as
-// "key=value" lines on stdout.
+// This binary performs NO comparison. It writes one memory copy to the
+// Python-provided SQLite DB path, prints that path, and leaves DB validation and
+// deletion to Python.
 //
 
-#include <profiler-hub/reader.hpp>
-#include <profiler-hub/reader_types.hpp>
 #include <profiler-hub/storage.hpp>
 #include <profiler-hub/writer.hpp>
 #include <profiler-hub/writer_types.hpp>
@@ -19,21 +17,13 @@
 #include <exception>
 #include <iostream>
 #include <memory>
-#include <optional>
 #include <string>
-
-#ifndef PHUB_INTEGRATION_TMP_DIR
-#    define PHUB_INTEGRATION_TMP_DIR "."
-#endif
 
 namespace
 {
 namespace wt = profiler_hub::writer_types;
-namespace rt = profiler_hub::reader_types;
 
 const std::string g_uuid = "integration";
-const std::string g_db_path =
-    std::string{ PHUB_INTEGRATION_TMP_DIR } + "/phub_memory_copy_writer_reader.db";
 
 const wt::agent_unique_id_t g_src_agent_uid{ "GPU", 0 };
 const wt::agent_unique_id_t g_dst_agent_uid{ "CPU", 0 };
@@ -171,15 +161,15 @@ const wt::memory_copy_data_t  g_copy = make_memory_copy();
 const wt::trace_environment_t g_env  = make_env();
 
 void
-remove_db()
+remove_db(const std::string& db_path)
 {
-    std::remove(g_db_path.c_str());
+    std::remove(db_path.c_str());
 }
 
 void
-writer()
+writer(const std::string& db_path)
 {
-    auto storage = std::make_unique<profiler_hub::storage_t>(g_db_path, g_uuid);
+    auto storage = std::make_unique<profiler_hub::storage_t>(db_path, g_uuid);
     profiler_hub::writer_t writer(std::move(storage));
 
     writer.register_node_info(g_node);
@@ -200,84 +190,29 @@ print(const char* key, const T& value)
     std::cout << key << "=" << value << "\n";
 }
 
-void
-reader()
-{
-    auto storage = std::make_unique<profiler_hub::storage_t>(g_db_path, g_uuid);
-    profiler_hub::reader_t reader(std::move(storage));
-
-    std::optional<rt::memory_copy_data_t> detail;
-    for(const auto& event : reader.get_events())
-    {
-        if(event.unique_identifier.type != rt::event_type_t::memory_copy) continue;
-        detail = reader.get_memory_copy_details(event);
-        if(detail.has_value()) break;
-    }
-
-    const auto& d = *detail;
-
-    print("start_timestamp", d.start_timestamp);
-    print("end_timestamp", d.end_timestamp);
-    print("dst_address",
-          d.dst_address.has_value() ? std::to_string(d.dst_address.value()) : "null");
-    print("src_address",
-          d.src_address.has_value() ? std::to_string(d.src_address.value()) : "null");
-    print("size", d.size);
-    print("name", d.name);
-    print("region_name", d.region_name);
-    print("extdata", d.extdata);
-
-    print("event.stack_id", d.event->stack_id);
-    print("event.parent_stack_id", d.event->parent_stack_id);
-    print("event.correlation_id", d.event->correlation_id);
-    print("event.event_category", d.event->event_category);
-    print("event.extdata", d.event->extdata);
-
-    print("node_info.node_id", d.node_info->node_id);
-    print("node_info.hash", d.node_info->hash);
-    print("node_info.machine_id", d.node_info->machine_id);
-    print("node_info.system_name", d.node_info->system_name);
-    print("node_info.hostname", d.node_info->hostname);
-    print("node_info.release", d.node_info->release);
-    print("node_info.version", d.node_info->version);
-    print("node_info.hardware_name", d.node_info->hardware_name);
-    print("node_info.domain_name", d.node_info->domain_name);
-
-    print("process_info.pid", d.process_info->pid);
-    print("process_info.ppid",
-          d.process_info->ppid.has_value() ? std::to_string(d.process_info->ppid.value())
-                                           : "null");
-    print("process_info.node_info.node_id", d.process_info->node_info->node_id);
-
-    print("thread_info.thread_id", d.thread_info->thread_id);
-    print("thread_info.name", d.thread_info->name);
-
-    print("src_agent_info.agent_type", d.src_agent_id->agent_type);
-    print("src_agent_info.type_index", d.src_agent_id->type_index);
-    print("src_agent_info.name", d.src_agent_id->name);
-    print("dst_agent_info.agent_type", d.dst_agent_id->agent_type);
-    print("dst_agent_info.type_index", d.dst_agent_id->type_index);
-    print("dst_agent_info.name", d.dst_agent_id->name);
-}
-
 }  // namespace
 
 int
-main()
+main(int argc, char** argv)
 {
-    remove_db();
+    if(argc != 2)
+    {
+        std::cerr << "usage: " << argv[0] << " <db_path>\n";
+        return 2;
+    }
+
+    const std::string db_path = argv[1];
+    remove_db(db_path);
 
     try
     {
-        writer();
-        reader();
+        writer(db_path);
+        print("db_path", db_path);
     } catch(const std::exception& e)
     {
         std::cerr << "[error] exception: " << e.what() << "\n";
-        remove_db();
         return 1;
     }
 
-    remove_db();
     return 0;
 }

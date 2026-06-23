@@ -3,9 +3,8 @@
 
 """Shared fixtures for the pytest-driven integration suite.
 
-The model here is: a  executable example binary (examples/*) writes
-records to a local rocpd database, reads them back, and prints the recovered
-fields as "key=value" lines on stdout.
+The model here is: an executable example binary (examples/*) writes records to
+a Python-provided rocpd database path, then pytest reads that database directly.
 
 Locating an example binary 'profiler-hub_<name>' (first match wins):
   1. $PHUB_EXAMPLE_BIN_DIR/profiler-hub_<name>, if the env var is set.
@@ -137,10 +136,10 @@ def _parse_kv(stdout: str) -> dict[str, str]:
 
 
 @pytest.fixture(scope="session")
-def run_launcher():
-    """Return a callable run(name) -> dict[dotted-key, str] for an example."""
+def run_launcher_db():
+    """Return a callable run(name, db_path) -> Path for SQLite validation."""
 
-    def _run(name: str) -> dict[str, str]:
+    def _run(name: str, db_path: Path) -> Path:
         binary = _find_launcher(name)
         if binary is None:
             pytest.fail(
@@ -148,13 +147,23 @@ def run_launcher():
                 f"{EXAMPLE_BIN_DIR} (or $PHUB_EXAMPLE_BIN_DIR)"
             )
 
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        if db_path.exists():
+            db_path.unlink()
+
         proc = subprocess.run(
-            [str(binary)], capture_output=True, text=True, timeout=120
+            [str(binary), str(db_path)], capture_output=True, text=True, timeout=120
         )
         assert proc.returncode == 0, (
             f"{binary} exited {proc.returncode}\n"
             f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         )
-        return _parse_kv(proc.stdout)
+
+        output = _parse_kv(proc.stdout)
+        assert "db_path" in output, f"missing db_path in launcher output: {proc.stdout}"
+        actual_db_path = Path(output["db_path"])
+        assert actual_db_path == db_path
+        assert actual_db_path.is_file(), f"launcher did not create database: {db_path}"
+        return actual_db_path
 
     return _run
