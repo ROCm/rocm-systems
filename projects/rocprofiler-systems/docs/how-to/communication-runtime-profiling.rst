@@ -171,7 +171,7 @@ ROCm Systems Profiler automatically detects each process's MPI rank by checking 
 - ``OMPI_COMM_WORLD_RANK``
 - ``SLURM_PROCID``
 
-The profiler uses the detected rank number to determine whether that process should produce output files or console logs based on your filter settings. If rank detection fails using these standard variables, both filters are disabled and all ranks produce the output.
+These environment variables are checked in the listed order top-to-bottom, and the first one that is set to a non-negative integer is used as the rank. The profiler uses the detected rank number to determine whether that process should produce output files or console logs based on your filter settings. If rank detection fails using these standard variables, both filters are disabled and all ranks produce the output.
 
 Similarly, if the detected rank itself is out of the range ``[0, world_size - 1]``, the filtering is disabled for that rank and all ranks produce the output.
 
@@ -184,8 +184,6 @@ Similarly, if the detected rank itself is out of the range ``[0, world_size - 1]
        # Show console output only from rank 0
        export ROCPROFSYS_RANK_FILTER_LOGS=0
        mpirun -n 16 rocprof-sys-sample -- <application_path>
-
-For more details on selective rank profiling using ``rocprofv3``, refer to :doc:`Using rocprofv3 with MPI <rocprofiler-sdk:how-to/using-rocprofv3-with-mpi>`.
 
 Custom MPI environment variables
 ----------------------------------
