@@ -82,6 +82,8 @@ using namespace rocr::amd::hsa::common;
 // 9: New trap handler ABI. For gfx11: Save PC in ttmp11[22:7] ttmp6[31:0], and park the wave if stopped.
 // 10: New trap handler ABI. Set status.skip_export when halting the wave.
 //                           For gfx942, set ttmp6[31] = 0 if ttmp11[31] == 0.
+// 11: Remove scratch_backing_memory_byte_size from the aql_queue_t.
+// 12: New trap handler ABI. Halt the wave at the s_trap instruction instead of the next instruction.
 
 HSA_API r_debug _amdgpu_r_debug;
 static __forceinline link_map*& r_debug_tail() {

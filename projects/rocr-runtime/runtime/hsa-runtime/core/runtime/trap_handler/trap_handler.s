@@ -300,21 +300,19 @@ trap_entry:
 .endif
 
 .not_host_trap:
-  // It's an s_trap; advance the PC
-  s_add_u32                             ttmp0, ttmp0, 0x4
-  s_addc_u32                            ttmp1, ttmp1, 0x0
-
   // If llvm.debugtrap and debugger is not attached.
   s_cmp_eq_u32                          ttmp2, TRAP_ID_DEBUGTRAP
-  s_cbranch_scc0                        .no_skip_debugtrap
+  s_cbranch_scc0                        .not_debugtrap
 .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor < 4) || .amdgcn.gfx_generation_number >= 10
   s_bitcmp0_b32                         ttmp11, TTMP_DEBUG_ENABLED_SHIFT
 .else
   s_bitcmp0_b32                         ttmp13, TTMP_DEBUG_ENABLED_SHIFT
 .endif
-  s_cbranch_scc0                        .no_skip_debugtrap
+  s_cbranch_scc0                        .not_debugtrap
 
-  // Ignore llvm.debugtrap.
+  // Ignore llvm.debugtrap. Advance the PC and return to the shader.
+  s_add_u32                             ttmp0, ttmp0, 0x4
+  s_addc_u32                            ttmp1, ttmp1, 0x0
   s_branch                              .exit_trap
 
 .not_s_trap:
@@ -322,7 +320,7 @@ trap_entry:
   //Check for stochastic trap on gfx9.4+
   s_getreg_b32                          ttmp7, hwreg(HW_REG_TRAPSTS)             // On gfx94x, TRAPSTS bit 26 ...
   s_bitcmp1_b32                         ttmp7, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT   // is stochastic_sample_trap
-  s_cbranch_scc0                        .no_skip_debugtrap
+  s_cbranch_scc0                        .not_debugtrap
 
   // Handle stochastic trap
   s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT, 1), 0
@@ -333,7 +331,7 @@ trap_entry:
   s_mov_b64                             ttmp[14:15], ttmp[2:3]
   s_branch                              .profile_trap_handlers_gfx9      // Off to the profile handlers
 .else
-  s_branch                              .no_skip_debugtrap
+  s_branch                              .not_debugtrap
 .endif // PC_SAMPLING_GFX9
 
 .if (.amdgcn.gfx_generation_number == 9) // PC_SAMPLING_GFX9
@@ -430,7 +428,7 @@ trap_entry:
 .endif
   // If neither bit is set, this is unexpected.
   // This branch is not expected to be taken.
-  s_branch                              .no_skip_debugtrap
+  s_branch                              .not_debugtrap
 
   // ttmp7 contains local_entry, ttmp[4:5] contains "&bufferX",
   // ttmp[14:15] holds 'tma->host_trap_buffers' pointer
@@ -644,12 +642,12 @@ trap_entry:
   s_or_b32                              ttmp3, ttmp3, (1 << SQ_WAVE_TRAPSTS_MEM_VIOL_SHIFT | 1 << SQ_WAVE_TRAPSTS_ILLEGAL_INST_SHIFT | 1 << SQ_WAVE_TRAPSTS_XNACK_ERROR_SHIFT)
   s_and_b32                             ttmp2, ttmp2, ttmp3
   // SCC will be 1 if either a maskable instruction was set, or one of MEM_VIOL, ILL_INST, XNACK_ERROR
-  s_cbranch_scc1                        .no_skip_debugtrap              // if any of those are set, handle exceptions
+  s_cbranch_scc1                        .not_debugtrap              // if any of those are set, handle exceptions
 
   // Check for maskable exceptions
   s_getreg_b32                          ttmp3, hwreg(HW_REG_MODE, SQ_WAVE_MODE_EXCP_EN_SHIFT, SQ_WAVE_MODE_EXCP_EN_SIZE)
   s_and_b32                             ttmp3, ttmp2, ttmp3
-  s_cbranch_scc1                        .no_skip_debugtrap
+  s_cbranch_scc1                        .not_debugtrap
 
   // Since we are in PC sampling, it is safe to ignore watch1/2/3 and single step
   // as those should only be enabled by the debugger.
@@ -658,7 +656,7 @@ trap_entry:
   s_branch                              .exit_trap
 
 .endif // PC_SAMPLING_GFX9
-.no_skip_debugtrap:
+.not_debugtrap:
   // Save trap id and halt status in ttmp6.
   s_andn2_b32                           ttmp6, ttmp6, (TTMP6_SAVED_TRAP_ID_MASK | TTMP6_SAVED_STATUS_HALT_MASK)
   s_bfe_u32                             ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE

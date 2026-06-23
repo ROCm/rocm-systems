@@ -250,22 +250,26 @@
   s_bfe_u32         ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE // ttmp2 = TrapID
   s_cbranch_scc0    .check_exceptions			    // If TrapID is 0, it's an exception, so branch.
 
-  // If caused by s_trap then advance PC, then figure out the trap ID:
-  // - if trapID is DEBUGTRAP and debugger is attach, report WAVE_TRAP,
-  // - if trapID is ABORTTRAP, report WAVE_ABORT,
-  // - report WAVE_TRAP for any other trap ID.
-  s_add_u32         ttmp0, ttmp0, 0x4                       // PC_LO += 4
-  s_addc_u32        ttmp1, ttmp1, 0x0                       // PC_HI += carry.
-
   // If llvm.debugtrap and debugger is not attached.
   s_cmp_eq_u32      ttmp2, TRAP_ID_DEBUGTRAP
   s_cbranch_scc0    .not_debug_trap
 
   s_bitcmp1_b32     ttmp11, TTMP11_DEBUG_ENABLED_SHIFT
-  s_cbranch_scc0    .check_exceptions
+  s_cbranch_scc1    .debugtrap_with_debugger
+
+  // Debugtrap with no debugger - advance PC and exit
+  s_add_u32         ttmp0, ttmp0, 0x4                       // PC_LO += 4
+  s_addc_u32        ttmp1, ttmp1, 0x0                       // PC_HI += carry.
+  s_branch          .check_exceptions
+
+.debugtrap_with_debugger:
+  // Debugger is attached - halt at trap instruction, set WAVE_TRAP
   s_or_b32          ttmp3, ttmp3, EC_QUEUE_WAVE_TRAP_M0
 
 .not_debug_trap:
+  // Other trap types - advance PC
+  s_add_u32         ttmp0, ttmp0, 0x4                       // PC_LO += 4
+  s_addc_u32        ttmp1, ttmp1, 0x0                       // PC_HI += carry.
   s_cmp_eq_u32      ttmp2, TRAP_ID_ABORT
   s_cbranch_scc0    .not_abort_trap
   s_or_b32          ttmp3, ttmp3, EC_QUEUE_WAVE_ABORT_M0

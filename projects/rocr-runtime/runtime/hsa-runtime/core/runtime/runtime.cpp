@@ -2481,7 +2481,7 @@ Runtime::Runtime()
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
-  ::_amdgpu_r_debug = {11,
+  ::_amdgpu_r_debug = {12,
                      nullptr,
                      reinterpret_cast<uintptr_t>(
                                 &_loader_debug_state),
