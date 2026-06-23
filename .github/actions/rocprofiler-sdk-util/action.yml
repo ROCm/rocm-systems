@@ -103,8 +103,6 @@ runs:
       shell: bash
       working-directory: projects/rocr-runtime
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Install ROCR-Runtime..."
         cmake -B build \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -112,6 +110,7 @@ runs:
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang++ \
           -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           .
         cmake --build build --target all --parallel ${{ inputs.build-jobs }}
         cmake --build build --target install
@@ -124,8 +123,6 @@ runs:
       run: |
         export HIP_DIR=$PWD/hip
         export CLR_DIR=$PWD/clr
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$PATH
         echo "Install HIP..."
         cd $CLR_DIR
         cmake \
@@ -134,6 +131,7 @@ runs:
           -DHIP_PLATFORM=amd \
           -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DHIP_LLVM_ROOT=${{ inputs.rocm-path }}/llvm \
           -DHIP_CATCH_TEST=0 \
           -DCLR_BUILD_HIP=ON \
@@ -149,13 +147,13 @@ runs:
       shell: bash
       working-directory: projects/rocprofiler-register
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
         export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Install ROCProfiler-Register"
         cmake -B build-rocprofiler-register \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           .
@@ -168,13 +166,12 @@ runs:
       shell: bash
       working-directory: projects/aqlprofile
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Install Aqlprofile..."
         cmake -B build-aqlprofile \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           .
@@ -186,11 +183,10 @@ runs:
       if: ${{ inputs.enable-rocdecode-build == 'true' }}
       shell: bash
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Building & Installing ROCDecode..."
         cmake -B build-rocdecode \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
@@ -204,11 +200,10 @@ runs:
       if: ${{ inputs.enable-rocjpeg-build == 'true' }}
       shell: bash
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Building & Installing ROCJPEG..."
         cmake -B build-rocjpeg \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
@@ -223,8 +218,6 @@ runs:
       shell: bash
       working-directory: projects/rocprof-trace-decoder
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Install rocprof-trace-decoder..."
         rm -f ${{ inputs.rocm-path }}/lib/librocprof-trace-decoder*
         rm -f ${{ inputs.rocm-path }}/lib64/librocprof-trace-decoder*
@@ -232,6 +225,7 @@ runs:
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           .

@@ -750,8 +750,9 @@ def format_table_output(
         for col_idx in range(len(df.columns))
     )
 
-    # Do not print the table if any column is empty
-    if is_empty_columns_exist:
+    # Do not print the table if any column is empty. PC sampling table 21.1 is
+    # exempt: its source column is all N/A when the workload lacks debug info.
+    if is_empty_columns_exist and table_id_str != "21.1":
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content

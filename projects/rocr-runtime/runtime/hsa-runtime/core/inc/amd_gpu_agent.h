@@ -383,7 +383,7 @@ class GpuAgent : public GpuAgentInt {
 
   hsa_status_t Preload(uint64_t flags);
 
-  core::Agent* GetNearestCpuAgent(void) const;
+  core::Agent* GetNearestCpuAgent() const override;
 
   void RegisterGangPeer(core::Agent& gang_peer, unsigned int bandwidth_factor) override;
 
@@ -441,7 +441,7 @@ class GpuAgent : public GpuAgentInt {
   __forceinline uint32_t enumeration_index() const { return enum_index_; }
 
   // @brief returns true if agent uses MES scheduler
-  __forceinline const bool isMES() const { return (isa_->GetMajorVersion() >= 11) ? true : false; };
+  __forceinline const bool isMES() const { return (supported_isas()[0]->GetMajorVersion() >= 11) ? true : false; };
 
   // @brief returns the libdrm device handle
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
@@ -459,6 +459,18 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Is large BAR support enabled for this GPU.
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 
+  /// @brief Total number of SDMA engines (regular + XGMI) addressable via the
+  /// HSA_QUEUE_SDMA_BY_ENG_ID engine-id space.
+  uint32_t NumSdmaEnginesTotal() const;
+
+  /// @brief Whether the kernel driver supports creating a queue on a specific
+  /// SDMA engine (HSA_QUEUE_SDMA_BY_ENG_ID).
+  bool SupportsSdmaQueueByEngineId() const;
+
+  /// @brief Returns the next SDMA engine id for a user-created SDMA queue that
+  /// did not request a specific engine, rotating round-robin across all engines.
+  uint32_t NextSdmaUserQueueEngineId();
+
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
   __forceinline void PcieWcFlush(void *ptr, size_t size) const {
     if (!xgmi_cpu_gpu_) {
@@ -474,8 +486,8 @@ class GpuAgent : public GpuAgentInt {
   const size_t MAX_SCRATCH_APERTURE_PER_XCC_GFX12 = (2ULL << 32); // 8GB
   __forceinline size_t MaxScratchDevice() const {
     return properties_.NumXcc *
-          (isa_->GetMajorVersion() >= 12 ? MAX_SCRATCH_APERTURE_PER_XCC_GFX12 :
-                                            MAX_SCRATCH_APERTURE_PER_XCC);
+          (supported_isas()[0]->GetMajorVersion() >= 12 ? MAX_SCRATCH_APERTURE_PER_XCC_GFX12 :
+                                                           MAX_SCRATCH_APERTURE_PER_XCC);
   }
 
   void ReserveScratch();
@@ -634,8 +646,14 @@ class GpuAgent : public GpuAgentInt {
   // @brief Current short duration scratch memory size.
   size_t scratch_used_large_;
 
+  struct HsaSignalLess {
+    bool operator()(const hsa_signal_t& lhs, const hsa_signal_t& rhs) const {
+      return lhs.handle < rhs.handle;
+    }
+  };
+
   // @brief Notifications for scratch release.
-  std::map<hsa_signal_t, hsa_signal_value_t> scratch_notifiers_;
+  std::map<hsa_signal_t, hsa_signal_value_t, HsaSignalLess> scratch_notifiers_;
 
   // @brief Default scratch size per queue.
   size_t queue_scratch_len_;
@@ -715,8 +733,6 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Array of regions owned by this agent.
   std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
-
-  core::Isa* isa_;
 
   // @brief HSA profile.
   hsa_profile_t profile_;
@@ -882,7 +898,7 @@ class GpuAgent : public GpuAgentInt {
   std::atomic<int> pending_copy_stat_check_ref_;
 
   // Tracks what SDMA blits have been used since initialization.
-  uint32_t sdma_blit_used_mask_;
+  std::atomic<uint32_t> sdma_blit_used_mask_;
 
   // Scratch limit thresholds when async scratch is enabled.
   uint64_t scratch_limit_async_threshold_;
@@ -976,6 +992,10 @@ class GpuAgent : public GpuAgentInt {
 
   // Round-robin index for spreading SDMA work across engines (gfx1250+).
   std::atomic<uint32_t> sdma_rr_index_{0};
+
+  // Round-robin index for assigning engines to user-created SDMA queues
+  // (hsa_amd_queue_create) that request automatic engine selection.
+  std::atomic<uint32_t> sdma_user_queue_rr_index_{0};
 
   // structure for host trap sampling
   pcs_data_t pcs_hosttrap_data_;

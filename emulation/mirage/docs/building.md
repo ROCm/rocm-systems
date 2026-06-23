@@ -4,11 +4,11 @@ This guide covers building the `mirage` CLI/daemon, its embedded web
 dashboard, and (optionally) the `rocjitsu` GPU emulator that mirage
 drives.
 
-mirage is a single Cargo workspace
-([`emulation/mirage/`](../)) made of six crates: `core`, `ctl`,
-`daemon`, `dashboard`, `host`, and `rocjitsu` (the `mirage_rocjitsu`
-asset-embedding crate). One `cargo build` produces the unified
-`mirage` binary.
+mirage is a single Cargo workspace ([`emulation/mirage/`](../)). One
+`cargo build` produces the unified `mirage` binary from a set of crates —
+`core`, `ctl`, `host`, `container`, `builtin`, the emulator backends (`noop`,
+`rocjitsu`, `hotswap`), and the optional `daemon` + `dashboard` web UI. See
+[`architecture.md`](architecture.md) for the full crate map.
 
 ## TL;DR
 
@@ -115,12 +115,14 @@ directly). To get real GPU emulation you need the rocjitsu libraries.
 
 ### Option A — let mirage find them
 
-mirage discovers the rocjitsu assets in this order:
+mirage discovers the rocjitsu KMD library (`librocjitsu_kmd.so`, or
+`librocjitsu.so` as a fallback) in this order:
 
-1. explicit paths in `ROCJITSU_KMD_LIB`
-2. the rocjitsu source tree at `$ROCJITSU_ROOT` or the sibling checkout
-   [`../../rocjitsu`](../../rocjitsu) (relative to the `rocjitsu` crate),
-   using prebuilt artifacts under `<root>/build/`;
+1. a sibling monorepo build, relative to the `mirage` binary
+   (`../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/linux`);
+2. `$ROCM_HOME/lib`;
+3. `$(rocm-sdk path --root)/lib` (present when a ROCm Python wheel venv
+   is active).
 
 If nothing is found, empty placeholders are staged and mirage still
 compiles; rocjitsu is simply reported as not installed.
@@ -139,7 +141,7 @@ cmake --build build
 ### Verifying rocjitsu is wired up
 
 ```sh
-./target/debug/mirage state builtins        # extract agents/topologies/assets
+./target/debug/mirage state builtins        # extract agents/topologies
 ./target/debug/mirage profile create gpu --emulator rocjitsu
 ./target/debug/mirage run --profile gpu -- \
   sh -c 'echo LD=$LD_PRELOAD ROCJITSU_RUNTIME_DIR=$ROCJITSU_RUNTIME_DIR'
@@ -174,5 +176,6 @@ signal → stop) through the public CLI and HTTP surfaces.
   mirage to run doesn't exist on `PATH` inside the session; the exec ends
   with exit code 127 and the message is shown on its stdout.
 - **rocjitsu reported as not installed** — build rocjitsu (Option B) and
-  rebuild mirage with `ROCJITSU_ROOT` set, or run
+  ensure `librocjitsu_kmd.so` is reachable (a sibling monorepo build,
+  `$ROCM_HOME/lib`, or `$(rocm-sdk path --root)/lib`), or run
   `mirage state builtins` to extract any embedded assets.
