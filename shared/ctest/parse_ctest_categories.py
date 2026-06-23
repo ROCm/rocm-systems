@@ -175,6 +175,12 @@ def generate_cmake(categories):
                 f"Category: {category} - exclude",
             )
 
+        for key, value in config.items():
+            if key.endswith("_exclude") and isinstance(value, list) and value:
+                _emit_label_block(
+                    lines, value, key, f"Category: {category} - {key}"
+                )
+
     # Deduplicate labels across all tests, since APPEND_PROPERTY doesn't deduplicate.
     lines.append("# Deduplicate labels across all tests")
     lines.append(
