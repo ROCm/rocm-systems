@@ -22,6 +22,19 @@ on:
     branches: [main, develop]
     paths:
       - 'projects/rccl/**'
+  # Allow manual dispatch for testing the pipeline before the workflow is on develop.
+  # Inputs mirror what a PR run would supply; omit them to use the defaults
+  # (A=A detect: ref == cand == current built lib, expects 0 regressions).
+  workflow_dispatch:
+    inputs:
+      config:
+        description: 'Config JSON path on TW cluster'
+        required: false
+        default: '/it-share/rccl-ci/configs/ci_detect.json'
+      build_rccl:
+        description: 'Build librccl from PR source (1=yes, 0=use fixed lib)'
+        required: false
+        default: '0'
 
 # Serialise: the pinned calibration nodes can host only one A/B job at a time,
 # and thresholds are only valid there. Do NOT cancel in-progress (a running
@@ -50,12 +63,12 @@ jobs:
         # want to post the report below — the final "Gate" step enforces it.
         continue-on-error: true
         env:
-          BUILD_RCCL: "1"
+          BUILD_RCCL: ${{ github.event_name == 'pull_request' && '1' || inputs.build_rccl || '0' }}
           CANDIDATE_SRC: ${{ github.workspace }}
-          BASE_REF: origin/${{ github.base_ref }}
+          BASE_REF: origin/${{ github.base_ref || 'develop' }}
+          _CONFIG: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect.json' }}
         run: |
-          bash "${RCCL_CI_ROOT}/ci/submit_and_poll.sh" \
-            "${RCCL_CI_ROOT}/configs/ci_detect.json"
+          bash "${RCCL_CI_ROOT}/ci/submit_and_poll.sh" "${_CONFIG}"
 
       - name: Render report
         if: always()
