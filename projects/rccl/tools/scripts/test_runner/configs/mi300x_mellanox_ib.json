@@ -21,7 +21,7 @@
   },
   "rccl_tests_build_configuration": {
     "enabled": true,
-    "source_dir": "${RCCL_TESTS_DIR:-$HOME/code/rocm-sparse/projects/rccl-tests}",
+    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
     "install_script": "install.sh",
     "install_flags": [
       "--mpi",

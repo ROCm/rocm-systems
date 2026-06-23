@@ -1,26 +1,25 @@
 {
   "system_configurations": {
-    "name": "RCCL-Validate-MI455X-Perf",
-    "description": "rccl-tests perf sweep for MI455X (AINIC): 11 collectives x 12 datatypes (1B-4G)."
+    "name": "RCCL-Validate-MI300X-Perf",
+    "description": "rccl-tests perf sweep for MI300X: 11 collectives x 12 datatypes (1B-4G)."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
     "rocm_path": "${ROCM_PATH:-/opt/rocm}",
-    "mpi_path": "${MPI_PATH:-$HOME/ompi}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}",
     "test_binary_dir": "${RCCL_TEST_BIN_DIR:-${RCCL_TESTS_DIR:-$HOME/rccl-tests}/build}"
   },
   "env_variables": {
     "NCCL_CUMEM_ENABLE": "1",
-    "NCCL_MNNVL_ENABLE": "1",
-    "RCCL_USE_AMD_SMI_LIB": "0",
     "HSA_NO_SCRATCH_RECLAIM": "1",
     "RCCL_MSCCL_ENABLE": "0",
-    "NCCL_DEBUG": "VERSION"
+    "NCCL_DEBUG": "INFO",
+    "NCCL_SOCKET_IFNAME": "eth0,eth1",
+    "NCCL_IB_HCA": "^mlx5_1,mlx5_6"
   },
   "mpi_args": [
-    "--mca pml ob1",
+    "--mca pml ucx",
     "--mca btl ^openib",
-    "--mca rmaps_base_oversubscribe 1",
     "--bind-to none"
   ],
   "build_configuration": {
@@ -33,7 +32,7 @@
       "--enable-mpi-tests",
       "--no_clean"
     ],
-    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx1250",
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     "parallel_jobs": 64
   },
   "rccl_tests_build_configuration": {
@@ -44,7 +43,7 @@
       "--mpi",
       "--enable-device-api",
       "--gpu_targets",
-      "gfx1250"
+      "gfx942"
     ],
     "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/debug}",
     "env_variables": {}
