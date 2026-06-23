@@ -2270,7 +2270,34 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
     }
     if(!config_match_found)
     {
-        ROCP_ERROR << "Given PC sampling configuration is not supported on any of the agents";
+        // If unsuccessful, get the supported interval range and output it
+        uint64_t supported_min = std::numeric_limits<uint64_t>::max();
+        uint64_t supported_max = 0;
+        for(auto& itr : agent_ptr_vec)
+        {
+            for(const auto& config :
+                CHECK_NOTNULL(tool_metadata)->get_pc_sample_config_info(itr->id))
+            {
+                if(config.method == method && config.unit == unit)
+                {
+                    supported_min = std::min<uint64_t>(supported_min, config.min_interval);
+                    supported_max = std::max<uint64_t>(supported_max, config.max_interval);
+                }
+            }
+        }
+
+        // True if there was at least one matching config, meaning the interval is bad
+        if(supported_max >= supported_min)
+        {
+            ROCP_ERROR << "Bad interval value (" << tool::get_config().pc_sampling_interval
+                       << "): Supported interval range is [" << supported_min << ", "
+                       << supported_max << "]";
+        }
+        // Otherwise, bad config
+        else
+        {
+            ROCP_ERROR << "Given PC sampling configuration is not supported on any of the agents";
+        }
         std::exit(EXIT_FAILURE);
     }
 }

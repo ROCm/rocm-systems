@@ -148,7 +148,7 @@ struct config : output_config
     bool   spm_counter_collection        = get_env("ROCPROF_SPM_COUNTER_COLLECTION", false);
     bool   pc_sampling_host_trap         = false;
     bool   pc_sampling_stochastic        = false;
-    size_t pc_sampling_interval          = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
+    size_t pc_sampling_interval          = get_env<uint64_t>("ROCPROF_PC_SAMPLING_INTERVAL", 1);
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
 
