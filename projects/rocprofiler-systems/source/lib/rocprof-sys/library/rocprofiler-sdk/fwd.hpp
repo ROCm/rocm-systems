@@ -150,8 +150,8 @@ struct client_data
     static constexpr size_t num_buffers  = 11;
     static constexpr size_t num_contexts = 4;
 
-    using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
-    using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
+    using buffer_name_info_t   = typename Wrapper::buffer_name_info_t;
+    using callback_name_info_t = typename Wrapper::callback_name_info_t;
     using kernel_symbol_vec_t  = std::vector<kernel_symbol_callback_record_t<Wrapper>>;
     using code_object_vec_t    = std::vector<code_object_callback_record_t<Wrapper>>;
     using buffer_id_vec_t      = std::array<typename Wrapper::buffer_id, num_buffers>;

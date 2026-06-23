@@ -103,11 +103,79 @@ struct mock_externals
         return storage;
     }
 
-    static bool get_use_perfetto() { return false; }
-    static bool get_use_timemory() { return false; }
-    static bool get_perfetto_annotations() { return false; }
-    static bool get_use_rocpd() { return false; }
-    static bool get_group_by_queue() { return false; }
+    // ─── Mock settings ────────────────────────────────────────────────────────────
+    // Duck-typed stand-in for tim::settings used by tool_init and sdk_core.
+    // Interface needed: settings->at(key)->get_choices().
+    //
+    // Two-class GMock pattern (GMock objects are non-copyable so they cannot be
+    // held by value inside the returning shared_ptr):
+    //   gmock_setting_entry  — EXPECT_CALL / ON_CALL target (global unique_ptr)
+    //   mock_setting_entry   — thin shared_ptr-able wrapper that delegates
+
+    struct gmock_setting_entry
+    {
+        MOCK_METHOD(const std::vector<std::string>&, get_choices, (), (const));
+    };
+
+    struct mock_setting_entry
+    {
+        const std::vector<std::string>& get_choices() const
+        {
+            return g_mock_setting->get_choices();
+        }
+    };
+
+    struct mock_settings
+    {
+        std::shared_ptr<mock_setting_entry> at(const std::string& /*key*/) const
+        {
+            return std::make_shared<mock_setting_entry>();
+        }
+    };
+
+    static auto* get_settings()
+    {
+        static mock_settings stub{};
+        return &stub;
+    }
+
+    static inline std::unique_ptr<::testing::NiceMock<gmock_setting_entry>>
+        g_mock_setting;
+
+    // ─── Mock config methods ───────────────────────────────────────────────────────
+    // Per-test control of string-returning config accessors used by sdk_core to
+    // determine which domains are active.  Tests set ON_CALL expectations on
+    // g_mock_config to drive specific domain combinations through tool_init.
+
+    struct gmock_externals_config
+    {
+        MOCK_METHOD(std::string, get_rocm_domains, ());
+        MOCK_METHOD(std::string, get_rocm_events_setting, ());
+        MOCK_METHOD(std::string, get_gpu_perf_counters, ());
+    };
+
+    static inline std::unique_ptr<::testing::NiceMock<gmock_externals_config>>
+        g_mock_config;
+
+    static bool        get_use_perfetto() { return false; }
+    static bool        get_use_timemory() { return false; }
+    static bool        get_perfetto_annotations() { return false; }
+    static bool        get_use_rocpd() { return false; }
+    static bool        get_group_by_queue() { return false; }
+    static bool        get_use_rcclp() { return false; }
+    static bool        get_use_ompt() { return false; }
+    static bool        get_use_unified_memory_profiling() { return false; }
+    static bool        get_use_process_sampling() { return false; }
+    static std::string get_trace_region() { return {}; }
+    static std::string get_rocm_domains() { return g_mock_config->get_rocm_domains(); }
+    static std::string get_rocm_events_setting()
+    {
+        return g_mock_config->get_rocm_events_setting();
+    }
+    static std::string get_gpu_perf_counters()
+    {
+        return g_mock_config->get_gpu_perf_counters();
+    }
 
     template <typename... Args>
     static void push_timemory(Args&&...)
@@ -195,7 +263,12 @@ protected:
         sut::tool_data = new data_t{};
     }
 
-    void TearDown() override { mock_ns::g_mock_wrapper.reset(); }
+    void TearDown() override
+    {
+        mock_ns::g_mock_wrapper.reset();
+        mock_externals::g_mock_setting.reset();
+        mock_externals::g_mock_config.reset();
+    }
 
     mock_ns::gmock_wrapper& mock() { return *mock_ns::g_mock_wrapper; }
 };
@@ -324,6 +397,326 @@ TEST_F(library_sdk_test,
 
     EXPECT_EQ(ret, 0);
     EXPECT_TRUE(sut::tool_init_done.load());
+}
+
+// ─── tool_init() tests (extended) ────────────────────────────────────────────
+//
+// Fixture subclass that primes the three sdk_core helpers (get_version,
+// get_callback_tracing_names, get_buffer_tracing_names) with AnyNumber()
+// expectations.  Those helpers cache their results in function-local statics;
+// how many times the mock is actually called depends on which test runs first,
+// so we cannot pin the count.
+//
+// With no ROCM_DOMAINS setting configured, get_callback_domains() and
+// get_buffered_domains() both return empty sets.  Therefore tool_init makes
+// exactly three create_context calls (primary, code_object, control) plus
+// one configure_callback_tracing_service call (CODE_OBJECT on code_object_ctx)
+// and one configure_external_correlation_id_request_service call on primary_ctx.
+// No buffers are created, so create_callback_thread / assign_callback_thread
+// are never called.
+
+class tool_init_test : public library_sdk_test
+{
+protected:
+    void SetUp() override
+    {
+        library_sdk_test::SetUp();
+
+        EXPECT_CALL(mock(), get_version(_, _, _))
+            .Times(testing::AnyNumber())
+            .WillRepeatedly(DoAll(SetArgPointee<0>(1U), SetArgPointee<1>(1U),
+                                  SetArgPointee<2>(0U), Return(SUCCESS)));
+        EXPECT_CALL(mock(), get_callback_tracing_names())
+            .Times(testing::AnyNumber())
+            .WillRepeatedly(Return(mock_backend_t::callback_name_info_t{}));
+        EXPECT_CALL(mock(), get_buffer_tracing_names())
+            .Times(testing::AnyNumber())
+            .WillRepeatedly(Return(mock_backend_t::buffer_name_info_t{}));
+
+        // Fresh mock for settings->at(key)->get_choices().
+        // Default: empty choices — no ROCM_DOMAINS configured.
+        mock_externals::g_mock_setting =
+            std::make_unique<::testing::NiceMock<mock_externals::gmock_setting_entry>>();
+        static const std::vector<std::string> empty_choices{};
+        ON_CALL(*mock_externals::g_mock_setting, get_choices())
+            .WillByDefault(::testing::ReturnRef(empty_choices));
+
+        // Fresh mock for string config accessors.
+        // Default: all empty — no domains, no events, no GPU perf counters.
+        mock_externals::g_mock_config = std::make_unique<
+            ::testing::NiceMock<mock_externals::gmock_externals_config>>();
+        ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
+            .WillByDefault(Return(std::string{}));
+        ON_CALL(*mock_externals::g_mock_config, get_rocm_events_setting())
+            .WillByDefault(Return(std::string{}));
+        ON_CALL(*mock_externals::g_mock_config, get_gpu_perf_counters())
+            .WillByDefault(Return(std::string{}));
+    }
+
+    // Expects create_context called 3 times in sequence; assigns distinct handles
+    // 1/2/3 so callers can match on specific contexts.
+    void expect_three_contexts()
+    {
+        EXPECT_CALL(mock(), create_context(_))
+            .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 1 }), Return(SUCCESS)))
+            .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 2 }), Return(SUCCESS)))
+            .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 3 }), Return(SUCCESS)));
+    }
+
+    void expect_code_object_tracing()
+    {
+        EXPECT_CALL(mock(), configure_callback_tracing_service(
+                                handle_t{ 2 },
+                                mock_backend_t::CALLBACK_TRACING_CODE_OBJECT, _, _, _, _))
+            .WillOnce(Return(SUCCESS));
+    }
+
+    void expect_external_correlation()
+    {
+        EXPECT_CALL(mock(), configure_external_correlation_id_request_service(
+                                handle_t{ 1 }, _, _, _, _))
+            .WillOnce(Return(SUCCESS));
+    }
+
+    void expect_primary_ctx_valid(bool valid = true)
+    {
+        EXPECT_CALL(mock(), context_is_valid(handle_t{ 1 }, _))
+            .WillOnce(DoAll(SetArgPointee<1>(valid ? 1 : 0), Return(SUCCESS)));
+    }
+
+    // start() iterates all four contexts; counter_ctx stays handle=0 so only
+    // the three initialized ones (1, 2, 3) trigger context_is_active/start_context.
+    void expect_start_for_initialized_contexts()
+    {
+        for(const auto h : { handle_t{ 1 }, handle_t{ 2 }, handle_t{ 3 } })
+        {
+            EXPECT_CALL(mock(), context_is_active(h, _))
+                .WillOnce(DoAll(SetArgPointee<1>(0), Return(SUCCESS)));
+            EXPECT_CALL(mock(), start_context(h)).WillOnce(Return(SUCCESS));
+        }
+    }
+
+    void expect_full_tool_init_success()
+    {
+        expect_three_contexts();
+        expect_code_object_tracing();
+        expect_external_correlation();
+        expect_primary_ctx_valid();
+        expect_start_for_initialized_contexts();
+    }
+};
+
+// Sets tool_init_done to true so subsequent calls short-circuit.
+TEST_F(tool_init_test, sets_tool_init_done_to_true_after_first_call)
+{
+    expect_full_tool_init_success();
+
+    ASSERT_FALSE(sut::tool_init_done.load());
+    sut::tool_init(nullptr, sut::tool_data);
+    EXPECT_TRUE(sut::tool_init_done.load());
+}
+
+// Three create_context calls happen in a specific order; the resulting handles
+// are stored into primary_ctx, code_object_ctx, and control_ctx respectively.
+// counter_ctx stays 0 because no counter events are configured.
+TEST_F(tool_init_test, assigns_context_handles_to_tool_data_fields)
+{
+    expect_external_correlation();
+    expect_primary_ctx_valid();
+    expect_start_for_initialized_contexts();
+
+    // Actual sequence in tool_init:
+    //   create primary_ctx       (handle 1)
+    //   create code_object_ctx   (handle 2)
+    //   configure CODE_OBJECT tracing on code_object_ctx
+    //   create control_ctx       (handle 3)
+    {
+        testing::InSequence seq;
+        EXPECT_CALL(mock(), create_context(_))
+            .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 1 }), Return(SUCCESS)));
+        EXPECT_CALL(mock(), create_context(_))
+            .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 2 }), Return(SUCCESS)));
+        EXPECT_CALL(mock(), configure_callback_tracing_service(_, _, _, _, _, _))
+            .WillOnce(Return(SUCCESS));
+        EXPECT_CALL(mock(), create_context(_))
+            .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 3 }), Return(SUCCESS)));
+    }
+
+    sut::tool_init(nullptr, sut::tool_data);
+
+    EXPECT_EQ(sut::tool_data->primary_ctx, handle_t{ 1 });
+    EXPECT_EQ(sut::tool_data->code_object_ctx, handle_t{ 2 });
+    EXPECT_EQ(sut::tool_data->control_ctx, handle_t{ 3 });
+    EXPECT_EQ(sut::tool_data->counter_ctx, handle_t{ 0 });
+}
+
+// The code-object callback tracing service must be configured on code_object_ctx
+// (the second context created) with the CODE_OBJECT tracing kind.
+TEST_F(tool_init_test, configures_code_object_tracing_on_code_object_ctx)
+{
+    expect_three_contexts();
+    EXPECT_CALL(mock(), configure_callback_tracing_service(
+                            handle_t{ 2 }, mock_backend_t::CALLBACK_TRACING_CODE_OBJECT,
+                            /*ops=*/nullptr, /*ops_count=*/0, _, _))
+        .WillOnce(Return(SUCCESS));
+    expect_external_correlation();
+    expect_primary_ctx_valid();
+    expect_start_for_initialized_contexts();
+
+    sut::tool_init(nullptr, sut::tool_data);
+}
+
+// External correlation request service must be configured on primary_ctx.
+TEST_F(tool_init_test, configures_external_correlation_service_on_primary_ctx)
+{
+    expect_three_contexts();
+    expect_code_object_tracing();
+    EXPECT_CALL(mock(), configure_external_correlation_id_request_service(handle_t{ 1 },
+                                                                          _, _, _, _))
+        .WillOnce(Return(SUCCESS));
+    expect_primary_ctx_valid();
+    expect_start_for_initialized_contexts();
+
+    sut::tool_init(nullptr, sut::tool_data);
+}
+
+// If context_is_valid reports the primary context as invalid (status = 0),
+// tool_init returns -1 and must not call start_context for any context.
+TEST_F(tool_init_test, returns_minus_one_when_primary_ctx_is_invalid)
+{
+    expect_three_contexts();
+    expect_code_object_tracing();
+    expect_external_correlation();
+    EXPECT_CALL(mock(), context_is_valid(handle_t{ 1 }, _))
+        .WillOnce(DoAll(SetArgPointee<1>(0), Return(SUCCESS)));
+
+    EXPECT_CALL(mock(), context_is_active(_, _)).Times(0);
+    EXPECT_CALL(mock(), start_context(_)).Times(0);
+
+    const int ret = sut::tool_init(nullptr, sut::tool_data);
+    EXPECT_EQ(ret, -1);
+}
+
+// Happy path: valid primary context → returns 0.
+TEST_F(tool_init_test, returns_zero_when_primary_ctx_is_valid)
+{
+    expect_full_tool_init_success();
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+}
+
+// start() iterates {primary, counter, code_object, control}.  counter_ctx
+// stays handle=0 (no counter events configured) so is_initialized returns
+// false for it and no SDK calls are made on its behalf.
+TEST_F(tool_init_test, starts_initialized_contexts_and_skips_uninitialized_counter_ctx)
+{
+    expect_three_contexts();
+    expect_code_object_tracing();
+    expect_external_correlation();
+    expect_primary_ctx_valid();
+
+    for(const auto h : { handle_t{ 1 }, handle_t{ 2 }, handle_t{ 3 } })
+    {
+        EXPECT_CALL(mock(), context_is_active(h, _))
+            .WillOnce(DoAll(SetArgPointee<1>(0), Return(SUCCESS)));
+        EXPECT_CALL(mock(), start_context(h)).WillOnce(Return(SUCCESS));
+    }
+    // counter_ctx has handle 0 — must never be touched by start().
+    EXPECT_CALL(mock(), context_is_active(handle_t{ 0 }, _)).Times(0);
+    EXPECT_CALL(mock(), start_context(handle_t{ 0 })).Times(0);
+
+    sut::tool_init(nullptr, sut::tool_data);
+}
+
+// ─── tool_init() domain tests ─────────────────────────────────────────────────
+//
+// These tests drive specific domain strings through get_rocm_domains() /
+// get_choices() and verify that tool_init calls the expected Wrapper methods.
+// set_operation_options() is used to pre-register operation option entries for
+// callback kinds so that sdk_core::get_operations() does not throw.
+
+// When "memory_copy" is in the domain list, tool_init must create a buffer for
+// memory-copy tracing and configure the buffer tracing service on primary_ctx.
+TEST_F(tool_init_test, creates_memory_copy_buffer_when_memory_copy_domain_active)
+{
+    // Activate the "memory_copy" buffered domain
+    static const std::vector<std::string> choices{ "memory_copy" };
+    ON_CALL(*mock_externals::g_mock_setting, get_choices())
+        .WillByDefault(::testing::ReturnRef(choices));
+    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
+        .WillByDefault(Return(std::string{ "memory_copy" }));
+
+    expect_three_contexts();
+    expect_code_object_tracing();
+    expect_external_correlation();
+
+    // BUFFER_TRACING_MEMORY_COPY triggers the HIP_STREAM callback registration
+    // (compile_time_version >= 700 guard in tool_init).
+    EXPECT_CALL(mock(), configure_callback_tracing_service(
+                            handle_t{ 1 }, mock_backend_t::CALLBACK_TRACING_HIP_STREAM,
+                            nullptr, 0, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    // create_buffer called for MEMORY_COPY — assign a non-zero handle so the
+    // buffer loop triggers create_callback_thread / assign_callback_thread.
+    const handle_t mem_buf{ 99 };
+    EXPECT_CALL(mock(), create_buffer(handle_t{ 1 }, _, _, _, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<6>(mem_buf), Return(SUCCESS)));
+    EXPECT_CALL(mock(), configure_buffer_tracing_service(
+                            handle_t{ 1 }, mock_backend_t::BUFFER_TRACING_MEMORY_COPY,
+                            nullptr, 0, mem_buf))
+        .WillOnce(Return(SUCCESS));
+
+    const handle_t cb_thread{ 7 };
+    EXPECT_CALL(mock(), create_callback_thread(_))
+        .WillOnce(DoAll(SetArgPointee<0>(cb_thread), Return(SUCCESS)));
+    EXPECT_CALL(mock(), assign_callback_thread(mem_buf, cb_thread))
+        .WillOnce(Return(SUCCESS));
+
+    expect_primary_ctx_valid();
+    expect_start_for_initialized_contexts();
+
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+    EXPECT_EQ(sut::tool_data->memory_copy_buffer, mem_buf);
+}
+
+// When "hip_api" is in the domain list, tool_init must register callback tracing
+// for HIP_RUNTIME_API and HIP_COMPILER_API on primary_ctx.
+TEST_F(tool_init_test, configures_hip_api_callback_tracing_when_hip_api_domain_active)
+{
+    using sut_core =
+        ::rocprofsys::rocprofiler_sdk::sdk_core<mock_backend_t, mock_externals>;
+
+    // Pre-register operation options so sdk_core::get_operations() does not throw.
+    sut_core::set_operation_options(mock_backend_t::CALLBACK_TRACING_HIP_RUNTIME_API, "",
+                                    "", "");
+    sut_core::set_operation_options(mock_backend_t::CALLBACK_TRACING_HIP_COMPILER_API, "",
+                                    "", "");
+
+    static const std::vector<std::string> choices{ "hip_api" };
+    ON_CALL(*mock_externals::g_mock_setting, get_choices())
+        .WillByDefault(::testing::ReturnRef(choices));
+    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
+        .WillByDefault(Return(std::string{ "hip_api" }));
+
+    expect_three_contexts();
+    expect_code_object_tracing();
+    expect_external_correlation();
+
+    // Both HIP kinds must be registered on primary_ctx.
+    EXPECT_CALL(mock(), configure_callback_tracing_service(
+                            handle_t{ 1 },
+                            mock_backend_t::CALLBACK_TRACING_HIP_RUNTIME_API, _, _, _, _))
+        .WillOnce(Return(SUCCESS));
+    EXPECT_CALL(
+        mock(),
+        configure_callback_tracing_service(
+            handle_t{ 1 }, mock_backend_t::CALLBACK_TRACING_HIP_COMPILER_API, _, _, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    expect_primary_ctx_valid();
+    expect_start_for_initialized_contexts();
+
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
 }
 
 // ─── reset_sdk_session_guards() tests ─────────────────────────────────────────

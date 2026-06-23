@@ -86,12 +86,39 @@ struct sdk_external_deps
     static auto& get_metadata_registry() { return trace_cache::get_metadata_registry(); }
     static auto& get_buffer_storage() { return trace_cache::get_buffer_storage(); }
 
+    // ─── settings ────────────────────────────────────────────────────────────────
+    static auto* get_settings() { return settings::instance(); }
+
     // ─── config ───────────────────────────────────────────────────────────────────
     static bool get_use_perfetto() { return config::get_use_perfetto(); }
     static bool get_use_timemory() { return config::get_use_timemory(); }
     static bool get_perfetto_annotations() { return config::get_perfetto_annotations(); }
     static bool get_use_rocpd() { return config::get_use_rocpd(); }
     static bool get_group_by_queue() { return config::get_group_by_queue(); }
+    static bool get_use_rcclp() { return config::get_use_rcclp(); }
+    static bool get_use_ompt() { return config::get_use_ompt(); }
+    static bool get_use_unified_memory_profiling()
+    {
+        return config::get_use_unified_memory_profiling();
+    }
+    static bool get_use_process_sampling() { return config::get_use_process_sampling(); }
+    static std::string get_trace_region() { return config::get_trace_region(); }
+    static std::string get_rocm_domains()
+    {
+        return config::get_setting_value<std::string>(
+                   std::string{ env_vars::ROCM_DOMAINS })
+            .value_or(std::string{});
+    }
+    static std::string get_rocm_events_setting()
+    {
+        return config::get_setting_value<std::string>(
+                   std::string{ env_vars::ROCM_EVENTS })
+            .value_or(std::string{});
+    }
+    static std::string get_gpu_perf_counters()
+    {
+        return ::rocprofsys::get_gpu_perf_counters();
+    }
 
     // ─── tracing — timemory ───────────────────────────────────────────────────────
     template <typename CategoryT, typename NameT>
@@ -108,15 +135,17 @@ struct sdk_external_deps
 
     // ─── tracing — perfetto ───────────────────────────────────────────────────────
     template <tracing_category CategoryT, typename... Args>
-    static void push_perfetto_ts(CategoryT cat, Args&&... args)
+    static void push_perfetto_ts(CategoryT cat, const char* name, std::uint64_t ts,
+                                 Args&&... args)
     {
-        tracing::push_perfetto_ts(cat, std::forward<Args>(args)...);
+        tracing::push_perfetto_ts(cat, name, ts, std::forward<Args>(args)...);
     }
 
     template <tracing_category CategoryT, typename... Args>
-    static void pop_perfetto_ts(CategoryT cat, Args&&... args)
+    static void pop_perfetto_ts(CategoryT cat, const char* name, std::uint64_t ts,
+                                Args&&... args)
     {
-        tracing::pop_perfetto_ts(cat, std::forward<Args>(args)...);
+        tracing::pop_perfetto_ts(cat, name, ts, std::forward<Args>(args)...);
     }
 
     template <typename CategoryT, typename... Args>
@@ -253,11 +282,11 @@ public:
 
     // ─── Static data members (formerly anon-namespace globals) ───────────────
 
-    static client_data<Wrapper>*                             tool_data;
-    static std::shared_ptr<roctx_client<Wrapper, Externals>> g_roctx_client;
-    static std::atomic<bool>                                 tool_fini_done;
-    static std::atomic<bool>                                 tool_init_done;
-    static std::atomic<bool>                                 sdk_configured;
+    static client_data<Wrapper>*                                        tool_data;
+    static std::shared_ptr<roctx_client<Wrapper, Externals, Externals>> g_roctx_client;
+    static std::atomic<bool>                                            tool_fini_done;
+    static std::atomic<bool>                                            tool_init_done;
+    static std::atomic<bool>                                            sdk_configured;
 
 private:
     // ─── Nested helper types ──────────────────────────────────────────────────
@@ -334,7 +363,8 @@ private:
 
     // ─── roctx / counter / finalization helpers ───────────────────────────────
 
-    static std::shared_ptr<roctx_client<Wrapper, Externals>> get_roctx_client();
+    static std::shared_ptr<roctx_client<Wrapper, Externals, Externals>>
+                get_roctx_client();
     static void flush_counter_storage_outputs();
     static void flush_counter_tracks_to_zero(typename Wrapper::timestamp_t ts);
     static void finalize_sdk_common();
@@ -612,7 +642,7 @@ client_data<Wrapper>* library_sdk<Wrapper, Externals>::tool_data =
     new client_data<Wrapper>{};
 
 template <typename Wrapper, typename Externals>
-std::shared_ptr<roctx_client<Wrapper, Externals>>
+std::shared_ptr<roctx_client<Wrapper, Externals, Externals>>
     library_sdk<Wrapper, Externals>::g_roctx_client = {};
 
 template <typename Wrapper, typename Externals>
@@ -863,20 +893,17 @@ library_sdk<Wrapper, Externals>::flush()
 // ─── roctx helper ────────────────────────────────────────────────────────────
 
 template <typename Wrapper, typename Externals>
-std::shared_ptr<roctx_client<Wrapper, Externals>>
+std::shared_ptr<roctx_client<Wrapper, Externals, Externals>>
 library_sdk<Wrapper, Externals>::get_roctx_client()
 {
     if(!g_roctx_client)
     {
-        const auto _domains = tim::delimit(
-            config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
-                .value_or(std::string{}),
-            " ,;:\t\n");
+        const auto _domains = tim::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
         const auto has_marker_domain =
             (std::find(_domains.begin(), _domains.end(), "marker_api") !=
                  _domains.end() ||
              std::find(_domains.begin(), _domains.end(), "roctx") != _domains.end());
-        const auto roctx_traced_regions = config::get_trace_region();
+        const auto roctx_traced_regions = Externals::get_trace_region();
         const auto has_trace_regions    = !roctx_traced_regions.empty();
 
         // Case 1: no marker domain and no trace regions — nothing to do
@@ -892,7 +919,8 @@ library_sdk<Wrapper, Externals>::get_roctx_client()
             Externals::get_perfetto_annotations(),
             roctx_traced_regions,
         };
-        g_roctx_client = std::make_shared<roctx_client<Wrapper, Externals>>(roctx_config);
+        g_roctx_client =
+            std::make_shared<roctx_client<Wrapper, Externals, Externals>>(roctx_config);
     }
     return g_roctx_client;
 }
@@ -1731,8 +1759,9 @@ library_sdk<Wrapper, Externals>::tool_tracing_callback(
             }
             case Wrapper::OMPT_ID_thread_begin:
             {
-                ompt_thread_t thread_type = payload_data->args.thread_begin.thread_type;
-                if(thread_type == ompt_thread_initial) return;
+                typename Wrapper::ompt_thread_t thread_type =
+                    payload_data->args.thread_begin.thread_type;
+                if(thread_type == Wrapper::OMPT_THREAD_INITIAL) return;
                 break;
             }
             default: break;
@@ -2964,17 +2993,17 @@ library_sdk<Wrapper, Externals>::tool_init(typename Wrapper::client_finalize_t f
     // Only initialize once per session
     if(tool_init_done.exchange(true)) return 0;
 
-    auto domains = settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS });
+    auto domains = Externals::get_settings()->at(std::string{ env_vars::ROCM_DOMAINS });
 
     std::stringstream _domains_ss;
     for(const auto& itr : domains->get_choices())
         _domains_ss << "- " << itr << "\n";
     LOG_DEBUG("Available ROCm Domains: \n {}", _domains_ss.str());
 
-    auto _callback_domains = sdk_core<Wrapper>::get_callback_domains();
-    auto _buffered_domain  = sdk_core<Wrapper>::get_buffered_domains();
-    auto _counter_events   = sdk_core<Wrapper>::get_rocm_events();
-    auto _version          = sdk_core<Wrapper>::get_version();
+    auto _callback_domains = sdk_core<Wrapper, Externals>::get_callback_domains();
+    auto _buffered_domain  = sdk_core<Wrapper, Externals>::get_buffered_domains();
+    auto _counter_events   = sdk_core<Wrapper, Externals>::get_rocm_events();
+    auto _version          = sdk_core<Wrapper, Externals>::get_version();
     if(_version.formatted == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
@@ -3040,9 +3069,9 @@ library_sdk<Wrapper, Externals>::tool_init(typename Wrapper::client_finalize_t f
     {
         if(_callback_domains.count(itr) > 0)
         {
-            auto _ops = sdk_core<Wrapper>::get_operations(itr);
+            auto _ops = sdk_core<Wrapper, Externals>::get_operations(itr);
             _data->backtrace_operations.emplace(
-                itr, sdk_core<Wrapper>::get_backtrace_operations(itr));
+                itr, sdk_core<Wrapper, Externals>::get_backtrace_operations(itr));
             rocprofiler_call<Wrapper>(Wrapper::configure_callback_tracing_service(
                                           _data->primary_ctx, itr, _ops.data(),
                                           _ops.size(), tool_tracing_callback, _data),
@@ -3266,7 +3295,7 @@ library_sdk<Wrapper, Externals>::tool_init(typename Wrapper::client_finalize_t f
     }
 
 #if ROCPROFILER_VERSION >= 600
-    const auto gpu_perf_counters_setting = get_gpu_perf_counters();
+    const auto gpu_perf_counters_setting = Externals::get_gpu_perf_counters();
     if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
     {
         Externals::register_gpu_perf_counter_source(
@@ -3292,7 +3321,7 @@ library_sdk<Wrapper, Externals>::tool_init(typename Wrapper::client_finalize_t f
 
     gpu::add_device_metadata();
 
-    if(config::get_use_process_sampling())
+    if(Externals::get_use_process_sampling())
     {
         LOG_DEBUG("Setting PMC sampler state to active...");
         Externals::set_pmc_state(State::Active);
@@ -3411,7 +3440,7 @@ library_sdk<Wrapper, Externals>::tool_attach_init(
         Externals::get_buffer_storage().start(getpid());
 
         // Restart process sampler (AMD SMI, CPU freq polling thread)
-        if(config::get_use_process_sampling())
+        if(Externals::get_use_process_sampling())
         {
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
             ::rocprofsys::process_sampler::setup();

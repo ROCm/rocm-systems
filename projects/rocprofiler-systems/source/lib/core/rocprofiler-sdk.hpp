@@ -32,7 +32,44 @@ struct version_info
     std::uint32_t formatted = 0;  // major * 10000 + minor * 100 + patch
 };
 
-template <typename Wrapper>
+// Default Externals for sdk_core: reads settings and config from the global singletons.
+// Replaced by a mock in tests.
+struct default_sdk_externals
+{
+    static auto* get_settings() { return ::rocprofsys::settings::instance(); }
+    static bool  get_use_rcclp() { return ::rocprofsys::config::get_use_rcclp(); }
+    static bool  get_use_ompt() { return ::rocprofsys::config::get_use_ompt(); }
+    static bool  get_use_unified_memory_profiling()
+    {
+        return ::rocprofsys::config::get_use_unified_memory_profiling();
+    }
+    static bool get_use_process_sampling()
+    {
+        return ::rocprofsys::config::get_use_process_sampling();
+    }
+    static std::string get_trace_region()
+    {
+        return ::rocprofsys::config::get_trace_region();
+    }
+    static std::string get_rocm_domains()
+    {
+        return ::rocprofsys::get_setting_value<std::string>(
+                   std::string{ ::rocprofsys::env_vars::ROCM_DOMAINS })
+            .value_or(std::string{});
+    }
+    static std::string get_rocm_events_setting()
+    {
+        return ::rocprofsys::get_setting_value<std::string>(
+                   std::string{ ::rocprofsys::env_vars::ROCM_EVENTS })
+            .value_or(std::string{});
+    }
+    static std::string get_gpu_perf_counters()
+    {
+        return ::rocprofsys::get_gpu_perf_counters();
+    }
+};
+
+template <typename Wrapper, typename Externals = default_sdk_externals>
 class sdk_core
 {
 public:
@@ -116,10 +153,10 @@ namespace rocprofsys::rocprofiler_sdk
 
 // ─── Private helpers ─────────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 template <typename Tp>
 std::string
-sdk_core<Wrapper>::to_lower(const Tp& _val)
+sdk_core<Wrapper, Externals>::to_lower(const Tp& _val)
 {
     auto _v = std::string{ _val };
     for(auto& itr : _v)
@@ -127,9 +164,9 @@ sdk_core<Wrapper>::to_lower(const Tp& _val)
     return _v;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::string
-sdk_core<Wrapper>::get_setting_name(std::string _v)
+sdk_core<Wrapper, Externals>::get_setting_name(std::string _v)
 {
     constexpr auto _prefix = tim::string_view_t{ "rocprofsys_" };
     for(auto& itr : _v)
@@ -141,21 +178,23 @@ sdk_core<Wrapper>::get_setting_name(std::string _v)
 
 // ─── set_operation_options ────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-sdk_core<Wrapper>::set_operation_options(Wrapper::callback_tracing_kind kind,
-                                         std::string include, std::string exclude,
-                                         std::string backtrace)
+sdk_core<Wrapper, Externals>::set_operation_options(Wrapper::callback_tracing_kind kind,
+                                                    std::string include,
+                                                    std::string exclude,
+                                                    std::string backtrace)
 {
     callback_operation_option_names[kind] = { std::move(include), std::move(exclude),
                                               std::move(backtrace) };
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-sdk_core<Wrapper>::set_operation_options(Wrapper::buffer_tracing_kind kind,
-                                         std::string include, std::string exclude,
-                                         std::string backtrace)
+sdk_core<Wrapper, Externals>::set_operation_options(Wrapper::buffer_tracing_kind kind,
+                                                    std::string                  include,
+                                                    std::string                  exclude,
+                                                    std::string backtrace)
 {
     buffered_operation_option_names[kind] = { std::move(include), std::move(exclude),
                                               std::move(backtrace) };
@@ -163,22 +202,22 @@ sdk_core<Wrapper>::set_operation_options(Wrapper::buffer_tracing_kind kind,
 
 // ─── Static data members ─────────────────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::unordered_map<typename Wrapper::callback_tracing_kind,
-                   typename sdk_core<Wrapper>::operation_options>
-    sdk_core<Wrapper>::callback_operation_option_names{};
+                   typename sdk_core<Wrapper, Externals>::operation_options>
+    sdk_core<Wrapper, Externals>::callback_operation_option_names{};
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::unordered_map<typename Wrapper::buffer_tracing_kind,
-                   typename sdk_core<Wrapper>::operation_options>
-    sdk_core<Wrapper>::buffered_operation_option_names{};
+                   typename sdk_core<Wrapper, Externals>::operation_options>
+    sdk_core<Wrapper, Externals>::buffered_operation_option_names{};
 
 // ─── Private method implementations ──────────────────────────────────────────
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper>::get_operations_impl(Wrapper::callback_tracing_kind kindv,
-                                       const std::string&             optname)
+sdk_core<Wrapper, Externals>::get_operations_impl(Wrapper::callback_tracing_kind kindv,
+                                                  const std::string&             optname)
 {
     static const auto callback_tracing_info = Wrapper::get_callback_tracing_names();
 
@@ -220,10 +259,10 @@ sdk_core<Wrapper>::get_operations_impl(Wrapper::callback_tracing_kind kindv,
     return _ret;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper>::get_operations_impl(Wrapper::buffer_tracing_kind kindv,
-                                       const std::string&           optname)
+sdk_core<Wrapper, Externals>::get_operations_impl(Wrapper::buffer_tracing_kind kindv,
+                                                  const std::string&           optname)
 {
     static const auto buffered_tracing_info = Wrapper::get_buffer_tracing_names();
 
@@ -264,11 +303,12 @@ sdk_core<Wrapper>::get_operations_impl(Wrapper::buffer_tracing_kind kindv,
     return _ret;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::vector<std::int32_t>
-sdk_core<Wrapper>::get_operations_impl(const std::unordered_set<std::int32_t>& _complete,
-                                       const std::unordered_set<std::int32_t>& _include,
-                                       const std::unordered_set<std::int32_t>& _exclude)
+sdk_core<Wrapper, Externals>::get_operations_impl(
+    const std::unordered_set<std::int32_t>& _complete,
+    const std::unordered_set<std::int32_t>& _include,
+    const std::unordered_set<std::int32_t>& _exclude)
 {
     auto _convert = [](const auto& _dset) {
         auto _dret = std::vector<std::int32_t>{};
@@ -288,10 +328,10 @@ sdk_core<Wrapper>::get_operations_impl(const std::unordered_set<std::int32_t>& _
     return _convert(_ret);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 template <typename Tp>
 auto
-sdk_core<Wrapper>::insert_config_setting(
+sdk_core<Wrapper, Externals>::insert_config_setting(
     const std::shared_ptr<settings>& config, std::string_view env_name,
     std::string_view description, Tp initial_value,
     std::initializer_list<std::string_view> extra_categories)
@@ -315,9 +355,9 @@ sdk_core<Wrapper>::insert_config_setting(
 
 /// @brief Return the version of the rocprofiler-sdk
 /// @return The version of the rocprofiler-sdk or 0 if not initialized
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 version_info&
-sdk_core<Wrapper>::get_version()
+sdk_core<Wrapper, Externals>::get_version()
 {
     static auto _version = version_info{ 0 };
 
@@ -338,9 +378,9 @@ sdk_core<Wrapper>::get_version()
     return _version;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 void
-sdk_core<Wrapper>::config_settings(const std::shared_ptr<settings>& _config)
+sdk_core<Wrapper, Externals>::config_settings(const std::shared_ptr<settings>& _config)
 {
     // const auto agents                = std::vector<rocprofiler_agent_t>{};
     const auto buffered_tracing_info = Wrapper::get_buffer_tracing_names();
@@ -484,9 +524,9 @@ sdk_core<Wrapper>::config_settings(const std::shared_ptr<settings>& _config)
     }
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::unordered_set<typename Wrapper::callback_tracing_kind>
-sdk_core<Wrapper>::get_callback_domains()
+sdk_core<Wrapper, Externals>::get_callback_domains()
 {
     using kind_t             = typename Wrapper::callback_tracing_kind;
     const auto callback_info = Wrapper::get_callback_tracing_names();
@@ -524,19 +564,16 @@ sdk_core<Wrapper>::get_callback_domains()
     }
 
     auto _data    = std::unordered_set<kind_t>{};
-    auto _domains = tim::delimit(
-        config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
-            .value_or(std::string{}),
-        " ,;:\t\n");
+    auto _domains = tim::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
 
     if constexpr(Wrapper::compile_time_version >= 600)
     {
-        if(config::get_use_rcclp() && _version.formatted >= 600)
+        if(Externals::get_use_rcclp() && _version.formatted >= 600)
         {
             // Translate ROCPROFSYS_USE_RCCLP to entry in ROCPROFSYS_ROCM_DOMAINS
             _data.emplace(Wrapper::CALLBACK_TRACING_RCCL_API);
         }
-        if(config::get_use_ompt() && _version.formatted >= 600)
+        if(Externals::get_use_ompt() && _version.formatted >= 600)
         {
             // Translate some configuration settings to rocprofiler domains
             _data.emplace(Wrapper::CALLBACK_TRACING_OMPT);
@@ -544,8 +581,9 @@ sdk_core<Wrapper>::get_callback_domains()
     }
 
     // Check that the domains are valid
-    const auto valid_choices =
-        settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS })->get_choices();
+    const auto valid_choices = Externals::get_settings()
+                                   ->at(std::string{ env_vars::ROCM_DOMAINS })
+                                   ->get_choices();
     auto invalid_domain = [&valid_choices](const auto& domainv) {
         return !std::ranges::any_of(
             valid_choices, [&domainv](const auto& choice) { return choice == domainv; });
@@ -593,9 +631,9 @@ sdk_core<Wrapper>::get_callback_domains()
     return _data;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::unordered_set<typename Wrapper::buffer_tracing_kind>
-sdk_core<Wrapper>::get_buffered_domains()
+sdk_core<Wrapper, Externals>::get_buffered_domains()
 {
     using kind_t           = typename Wrapper::buffer_tracing_kind;
     const auto buffer_info = Wrapper::get_buffer_tracing_names();
@@ -630,13 +668,11 @@ sdk_core<Wrapper>::get_buffered_domains()
     }
 
     auto _data    = std::unordered_set<kind_t>{};
-    auto _domains = tim::delimit(
-        config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
-            .value_or(std::string{}),
-        " ,;:\t\n");
+    auto _domains = tim::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
     // Check that the domains are valid
-    const auto valid_choices =
-        settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS })->get_choices();
+    const auto valid_choices = Externals::get_settings()
+                                   ->at(std::string{ env_vars::ROCM_DOMAINS })
+                                   ->get_choices();
     auto invalid_domain = [&valid_choices](const auto& domainv) {
         return !std::ranges::any_of(
             valid_choices, [&domainv](const auto& choice) { return choice == domainv; });
@@ -738,7 +774,7 @@ sdk_core<Wrapper>::get_buffered_domains()
     if constexpr(Wrapper::compile_time_version >= 10000)
     {
         // Automatically enable KFD domains when unified memory profiling is enabled
-        if(config::get_use_unified_memory_profiling())
+        if(Externals::get_use_unified_memory_profiling())
         {
             if(kfd_supported_by_runtime)
             {
@@ -761,19 +797,16 @@ sdk_core<Wrapper>::get_buffered_domains()
     return _data;
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::vector<std::string>
-sdk_core<Wrapper>::get_rocm_events()
+sdk_core<Wrapper, Externals>::get_rocm_events()
 {
-    return tim::delimit(
-        get_setting_value<std::string>(std::string{ env_vars::ROCM_EVENTS })
-            .value_or(std::string{}),
-        " ,;\t\n");
+    return tim::delimit(Externals::get_rocm_events_setting(), " ,;\t\n");
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::vector<std::int32_t>
-sdk_core<Wrapper>::get_operations(Wrapper::callback_tracing_kind kindv)
+sdk_core<Wrapper, Externals>::get_operations(Wrapper::callback_tracing_kind kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
@@ -798,9 +831,9 @@ sdk_core<Wrapper>::get_operations(Wrapper::callback_tracing_kind kindv)
     return get_operations_impl(_complete, _include, _exclude);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::vector<std::int32_t>
-sdk_core<Wrapper>::get_operations(Wrapper::buffer_tracing_kind kindv)
+sdk_core<Wrapper, Externals>::get_operations(Wrapper::buffer_tracing_kind kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {
@@ -823,9 +856,10 @@ sdk_core<Wrapper>::get_operations(Wrapper::buffer_tracing_kind kindv)
     return get_operations_impl(_complete, _include, _exclude);
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper>::get_backtrace_operations(Wrapper::callback_tracing_kind kindv)
+sdk_core<Wrapper, Externals>::get_backtrace_operations(
+    Wrapper::callback_tracing_kind kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
     {
@@ -844,9 +878,9 @@ sdk_core<Wrapper>::get_backtrace_operations(Wrapper::callback_tracing_kind kindv
     return { _vec.begin(), _vec.end() };
 }
 
-template <typename Wrapper>
+template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper>::get_backtrace_operations(Wrapper::buffer_tracing_kind kindv)
+sdk_core<Wrapper, Externals>::get_backtrace_operations(Wrapper::buffer_tracing_kind kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
     {

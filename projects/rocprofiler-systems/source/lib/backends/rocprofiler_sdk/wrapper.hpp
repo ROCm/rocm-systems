@@ -172,6 +172,9 @@ struct backend
 #if ROCPROFILER_VERSION >= 600
     using ompt_data_t      = rocprofiler_callback_tracing_ompt_data_t;
     using ompt_operation_t = rocprofiler_ompt_operation_t;
+    using ompt_thread_t    = ::ompt_thread_t;
+
+    static constexpr ompt_thread_t OMPT_THREAD_INITIAL = ompt_thread_initial;
 
     // ─── OMPT operation constants ─────────────────────────────────────────────
     static constexpr ompt_operation_t OMPT_ID_NONE = ROCPROFILER_OMPT_ID_NONE;

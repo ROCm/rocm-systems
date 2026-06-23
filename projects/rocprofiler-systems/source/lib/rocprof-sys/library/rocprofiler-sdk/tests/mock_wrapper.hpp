@@ -13,105 +13,67 @@
 namespace rocprofsys::mock::rocprofiler_sdk
 {
 
-// ─── kind_wrapper ─────────────────────────────────────────────────────────────
+// ─── Concrete integer-backed mock types ───────────────────────────────────────
 //
-// Integer-valued tag type used for callback_tracing_kind and buffer_tracing_kind.
-// Design goals:
-//   1. Constructs from int literals so `= N` constant initializers keep working.
-//   2. operator int() lets it be used in switch/case (C++20 class types in case
-//      labels via "converted constant expression" — one non-explicit integral
-//      conversion is sufficient).
-//   3. template operator T() handles implicit conversion to the real SDK enum
-//      types (rocprofiler_callback_tracing_kind_t etc.) at call sites inside
-//      library_sdk<> — deferred to template instantiation, no SDK headers here.
-//      Excluded for T=int to keep operator int() unambiguous.
-
-namespace detail
-{
-// kind_wrapper is the fallback integer enum mock used when SDK headers are NOT
-// yet available.  When SDK headers are included first (see test_library_sdk.cpp),
-// callback_tracing_kind and buffer_tracing_kind are aliased to the real SDK enum
-// types directly, and kind_wrapper is NOT used for those aliases.
+// Each type is a plain struct holding an int, convertible to int via
+// operator int() only — no template conversion operators, which would
+// create ambiguous implicit conversions in switch statement conditions.
 //
-// kind_wrapper is still used for mock_ompt_thread_t (when _OPENMP is unavailable)
-// and is kept here for completeness.
-template <typename Tag>
-struct kind_wrapper
-{
-    int value = 0;
+// Separate concrete types (not a template) give type-safety without any
+// template magic. operator int() is the sole integral conversion, making
+// switch(record.kind) unambiguous.
 
-    constexpr kind_wrapper() noexcept = default;
-    constexpr kind_wrapper(int val) noexcept
-    : value(val)
-    {}
-
-    constexpr operator int() const noexcept { return value; }
-
-    // Deferred conversion to real enum types (e.g. ompt_thread_t) at template
-    // instantiation time — no enum headers needed in this file.
-    // Safe because callback_tracing_kind and buffer_tracing_kind use the real
-    // SDK enum types directly (via #ifdef ROCPROFILER_VERSION), so kind_wrapper
-    // is only used for mock_ompt_thread_t which never appears in switch/ostream.
-    template <typename T, typename = std::enable_if_t<!std::is_same_v<T, int>>>
-    constexpr operator T() const noexcept
-    {
-        return static_cast<T>(value);
+// Shared macro to avoid repetition — each type has the same body.
+// The std::uint32_t friends avoid -Wsign-compare against record_header_t::kind.
+#define ROCPROFSYS_MOCK_INT_TYPE(Name)                                                   \
+    struct Name                                                                          \
+    {                                                                                    \
+        int value                 = 0;                                                   \
+        constexpr Name() noexcept = default;                                             \
+        constexpr Name(int val) noexcept /* NOLINT */                                    \
+        : value(val)                                                                     \
+        {}                                                                               \
+        constexpr      operator int() const noexcept { return value; }                   \
+        constexpr bool operator==(const Name&) const noexcept = default;                 \
+        constexpr bool operator!=(const Name& rhs) const noexcept                        \
+        {                                                                                \
+            return value != rhs.value;                                                   \
+        }                                                                                \
+        constexpr bool operator<(const Name& rhs) const noexcept                         \
+        {                                                                                \
+            return value < rhs.value;                                                    \
+        }                                                                                \
+        friend std::ostream& operator<<(std::ostream& os, const Name& k)                 \
+        {                                                                                \
+            return os << k.value;                                                        \
+        }                                                                                \
+        friend constexpr bool operator==(std::uint32_t lhs, const Name& rhs) noexcept    \
+        {                                                                                \
+            return lhs == static_cast<std::uint32_t>(rhs.value);                         \
+        }                                                                                \
+        friend constexpr bool operator==(const Name& lhs, std::uint32_t rhs) noexcept    \
+        {                                                                                \
+            return static_cast<std::uint32_t>(lhs.value) == rhs;                         \
+        }                                                                                \
+        friend constexpr bool operator!=(std::uint32_t lhs, const Name& rhs) noexcept    \
+        {                                                                                \
+            return !(lhs == rhs);                                                        \
+        }                                                                                \
+        friend constexpr bool operator!=(const Name& lhs, std::uint32_t rhs) noexcept    \
+        {                                                                                \
+            return !(lhs == rhs);                                                        \
+        }                                                                                \
     }
 
-    constexpr bool operator==(const kind_wrapper&) const noexcept = default;
-    constexpr bool operator!=(const kind_wrapper& rhs) const noexcept
-    {
-        return value != rhs.value;
-    }
-    constexpr bool operator<(const kind_wrapper& rhs) const noexcept
-    {
-        return value < rhs.value;
-    }
+ROCPROFSYS_MOCK_INT_TYPE(callback_tracing_kind);
+ROCPROFSYS_MOCK_INT_TYPE(buffer_tracing_kind);
 
-    // Direct ostream support — avoids the ambiguity that would arise if the compiler
-    // has to choose among the many operator<<(integral) overloads via operator int().
-    friend std::ostream& operator<<(std::ostream& os, const kind_wrapper& k)
-    {
-        return os << k.value;
-    }
+ROCPROFSYS_MOCK_INT_TYPE(mock_ompt_thread_t);
 
-    // Explicit std::uint32_t comparisons avoid -Wsign-compare when comparing against
-    // record_header_t::kind (std::uint32_t) without going through operator int().
-    friend constexpr bool operator==(std::uint32_t lhs, const kind_wrapper& rhs) noexcept
-    {
-        return lhs == static_cast<std::uint32_t>(rhs.value);
-    }
-    friend constexpr bool operator==(const kind_wrapper& lhs, std::uint32_t rhs) noexcept
-    {
-        return static_cast<std::uint32_t>(lhs.value) == rhs;
-    }
-    friend constexpr bool operator!=(std::uint32_t lhs, const kind_wrapper& rhs) noexcept
-    {
-        return !(lhs == rhs);
-    }
-    friend constexpr bool operator!=(const kind_wrapper& lhs, std::uint32_t rhs) noexcept
-    {
-        return !(lhs == rhs);
-    }
-};
-
-struct callback_tracing_kind_tag
-{};
-struct buffer_tracing_kind_tag
-{};
-struct ompt_thread_tag
-{};
-}  // namespace detail
+#undef ROCPROFSYS_MOCK_INT_TYPE
 
 // ─── Self-contained stub types ────────────────────────────────────────────────
 //
-// When SDK headers are included before this file (via ROCPROFILER_VERSION being
-// defined), the real SDK enum types are used directly for callback_tracing_kind
-// and buffer_tracing_kind.  This eliminates all switch/ostream ambiguity issues
-// that arise from custom wrapper types while keeping .at() call-site compatibility
-// with the real rocprofiler::sdk::callback_name_info_t.
-//
-// When SDK headers are not present, kind_wrapper fallbacks are used.
 
 struct handle_t
 {
@@ -130,20 +92,8 @@ using runtime_library_t = int;
 using callback_phase_t  = int;
 using tracing_operation = std::int32_t;
 
-#ifdef ROCPROFILER_VERSION
-// SDK headers available — use real enum types for exact type compatibility
-// at call sites like callback_name_info_t::at(rocprofiler_callback_tracing_kind_t, ...).
-using callback_tracing_kind = rocprofiler_callback_tracing_kind_t;
-using buffer_tracing_kind   = rocprofiler_buffer_tracing_kind_t;
-#else
-using callback_tracing_kind = detail::kind_wrapper<detail::callback_tracing_kind_tag>;
-using buffer_tracing_kind   = detail::kind_wrapper<detail::buffer_tracing_kind_tag>;
-#endif
-
-// ompt_thread_t: use real OpenMP type when OpenMP headers are available,
-// otherwise fall back to kind_wrapper which converts to the real type at
-// template instantiation time via static_cast.
-using mock_ompt_thread_t = detail::kind_wrapper<detail::ompt_thread_tag>;
+// callback_tracing_kind, buffer_tracing_kind, and mock_ompt_thread_t are
+// defined as concrete structs above via ROCPROFSYS_MOCK_INT_TYPE.
 static constexpr mock_ompt_thread_t mock_ompt_thread_initial{ 1 };
 static constexpr mock_ompt_thread_t mock_ompt_thread_worker{ 2 };
 static constexpr mock_ompt_thread_t mock_ompt_thread_other{ 3 };
@@ -654,42 +604,71 @@ using available_dimensions_cb_t    = std::uint64_t (*)(handle_t, const dim_info_
 using device_counting_agent_cb_t   = void*;
 using device_counting_service_cb_t = void*;
 
-// Name-info stub (return type for get_callback/buffer_tracing_names).
-//
-// sdk_core<Wrapper> iterates the result of get_callback_tracing_names() with:
-//   - .size()                 → size_t  (outer loop guard — we return 0)
-//   - [size_t idx]            → name_info_value_t  (.name field + .items())
-//   - [callback_tracing_kind] → name_info_value_t  (.items() range-for)
-//   - [buffer_tracing_kind]   → name_info_value_t  (unsigned int key)
-//
-// Since size() == 0 the outer loops never execute, but the compiler must still
-// instantiate operator[] and items() bodies.
-struct name_info_value_t
-{
-    std::string_view name{};
+// Minimal name_info stub for mock testing.
+// name_info_impl and name_info mirror rocprofiler::sdk::utility::name_info so that
+// Wrapper::callback_name_info_t / buffer_name_info_t are interchangeable in library_sdk
+// templates.  All methods are no-op stubs; impl is always empty so iteration never fires.
 
-    // items() returns pairs (operation_id, name_ptr) — empty so inner loops skip.
-    std::vector<std::pair<std::int32_t, const std::string_view*>> items() const
+template <typename EnumT, typename ValueT = std::string_view>
+struct name_info_impl
+{
+    // support_type converts const char* → ValueT; matches the SDK's callable convention.
+    struct support_type
     {
-        return {};
-    }
+        ValueT operator()(const char* s) const { return s ? ValueT{ s } : ValueT{}; }
+        static ValueT default_value() { return {}; }
+    };
+
+    using return_type  = ValueT;
+    using item_array_t = std::vector<std::pair<std::int32_t, const ValueT*>>;
+
+    ValueT              name{};
+    EnumT               value{};
+    std::vector<ValueT> operations{};
+
+    item_array_t items() const { return {}; }
 };
 
-struct name_info_t
+template <typename EnumT, typename ValueT = std::string_view>
+struct name_info
 {
-    std::size_t size() const { return 0; }
+    using value_type   = name_info_impl<EnumT, ValueT>;
+    using enum_type    = EnumT;
+    using support_type = typename value_type::support_type;
+    using return_type  = typename value_type::return_type;
+    using item_type    = const value_type*;
+    using item_array_t = std::vector<item_type>;
 
-    name_info_value_t operator[](std::size_t) const { return {}; }
-    name_info_value_t operator[](callback_tracing_kind) const { return {}; }
-    name_info_value_t operator[](buffer_tracing_kind) const { return {}; }
+    void emplace(EnumT, const char*) {}
+    void emplace(EnumT, int, const char*) {}
 
-    // Universal conversion: allows name_info_t to be assigned to the real SDK
-    // name_info types (which are default-constructible) without SDK includes here.
-    template <typename T>
-    operator T() const  // NOLINT(google-explicit-constructor)
+    return_type at(EnumT) const { return {}; }
+    return_type at(EnumT, int) const { return {}; }
+
+    item_array_t items() const { return {}; }
+
+    decltype(auto) size() const { return impl.size(); }
+    decltype(auto) begin() { return impl.begin(); }
+    decltype(auto) begin() const { return impl.begin(); }
+    decltype(auto) end() { return impl.end(); }
+    decltype(auto) end() const { return impl.end(); }
+
+    // Auto-resize on out-of-bounds write (real SDK tables are dense by kind value).
+    // Const access returns a default-constructed entry for unknown indices so
+    // get_operations_impl can iterate an empty .items() without throwing.
+    value_type& operator[](std::size_t idx)
     {
-        return T{};
+        if(idx >= impl.size()) impl.resize(idx + 1);
+        return impl[idx];
     }
+    const value_type& operator[](std::size_t idx) const
+    {
+        static const value_type default_entry{};
+        return idx < impl.size() ? impl[idx] : default_entry;
+    }
+
+private:
+    std::vector<value_type> impl{};
 };
 
 // ─── gmock_wrapper ────────────────────────────────────────────────────────────
@@ -758,8 +737,8 @@ public:
                 (callback_tracing_record_t, callback_tracing_operation_args_cb_t,
                  std::int32_t, void*) );
 
-    MOCK_METHOD(name_info_t, get_callback_tracing_names, ());
-    MOCK_METHOD(name_info_t, get_buffer_tracing_names, ());
+    MOCK_METHOD((name_info<callback_tracing_kind>), get_callback_tracing_names, ());
+    MOCK_METHOD((name_info<buffer_tracing_kind>), get_buffer_tracing_names, ());
 };
 
 inline std::unique_ptr<gmock_wrapper> g_mock_wrapper;
@@ -878,6 +857,12 @@ struct backend
 
     using ompt_data_t      = ::rocprofsys::mock::rocprofiler_sdk::ompt_data_t;
     using ompt_operation_t = ::rocprofsys::mock::rocprofiler_sdk::ompt_operation_t;
+    using ompt_thread_t    = ::rocprofsys::mock::rocprofiler_sdk::mock_ompt_thread_t;
+
+    using callback_name_info_t = name_info<callback_tracing_kind>;
+    using buffer_name_info_t   = name_info<buffer_tracing_kind>;
+
+    static constexpr ompt_thread_t OMPT_THREAD_INITIAL = mock_ompt_thread_initial;
 
     // ─── OMPT operation constants ─────────────────────────────────────────────
     static constexpr ompt_operation_t OMPT_ID_NONE               = -1;
@@ -1377,12 +1362,12 @@ struct backend
                                                               output_records, rec_count);
     }
 
-    static name_info_t get_callback_tracing_names()
+    static callback_name_info_t get_callback_tracing_names()
     {
         return g_mock_wrapper->get_callback_tracing_names();
     }
 
-    static name_info_t get_buffer_tracing_names()
+    static buffer_name_info_t get_buffer_tracing_names()
     {
         return g_mock_wrapper->get_buffer_tracing_names();
     }
@@ -1409,12 +1394,32 @@ struct hash<::rocprofsys::mock::rocprofiler_sdk::handle_t>
     }
 };
 
-template <typename Tag>
-struct hash<::rocprofsys::mock::rocprofiler_sdk::detail::kind_wrapper<Tag>>
+template <>
+struct hash<::rocprofsys::mock::rocprofiler_sdk::callback_tracing_kind>
 {
     std::size_t operator()(
-        const ::rocprofsys::mock::rocprofiler_sdk::detail::kind_wrapper<Tag>& k)
+        const ::rocprofsys::mock::rocprofiler_sdk::callback_tracing_kind& k)
         const noexcept
+    {
+        return std::hash<int>{}(k.value);
+    }
+};
+
+template <>
+struct hash<::rocprofsys::mock::rocprofiler_sdk::buffer_tracing_kind>
+{
+    std::size_t operator()(
+        const ::rocprofsys::mock::rocprofiler_sdk::buffer_tracing_kind& k) const noexcept
+    {
+        return std::hash<int>{}(k.value);
+    }
+};
+
+template <>
+struct hash<::rocprofsys::mock::rocprofiler_sdk::mock_ompt_thread_t>
+{
+    std::size_t operator()(
+        const ::rocprofsys::mock::rocprofiler_sdk::mock_ompt_thread_t& k) const noexcept
     {
         return std::hash<int>{}(k.value);
     }
