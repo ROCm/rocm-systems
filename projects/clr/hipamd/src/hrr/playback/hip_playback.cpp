@@ -508,28 +508,57 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                         live ? "" : " (MISSING!)");
         } else if (value_kind == 3) {  // scalar/struct with embedded gpu pointer(s)
             storage.assign(data, data + arg_size);
-            for (uint16_t off : ptr_offsets) {
-                if (static_cast<size_t>(off) + 8 > arg_size) continue;
-                uint64_t rec_ptr; memcpy(&rec_ptr, storage.data() + off, 8);
+
+            // Translate the 8-byte word at `off` (read from the *original*
+            // recorded bytes) and write the live pointer into storage, but only
+            // when the recorded value actually resolves to a known allocation.
+            //
+            // The capture-side detector is a value-based heuristic: any 8-byte
+            // word that happened to fall inside a live device VA was flagged. If
+            // the recorded value does not resolve to a known allocation here, it
+            // may be a genuine scalar (a large count, a double, a packed value)
+            // that was mis-flagged — overwriting it with null would silently
+            // corrupt it. Only rewrite the word when it actually resolves.
+            auto try_translate_word = [&](size_t off) -> bool {
+                if (off + 8 > arg_size) return false;
+                uint64_t rec_ptr; memcpy(&rec_ptr, data + off, 8);
+                if (rec_ptr < 0x10000ULL) return false;  // null/small — never a VA
                 void* live = ctx.translate_ptr(rec_ptr);
-                // The capture-side detector is a value-based heuristic: any
-                // 8-byte word that happened to fall inside a live device VA was
-                // flagged. If the recorded value does not resolve to a known
-                // allocation here, it may be a genuine scalar (a large count, a
-                // double, a packed value) that was mis-flagged — overwriting it
-                // with null would silently corrupt it. Only rewrite the word
-                // when it actually resolves; otherwise leave the original bytes.
-                if (!live) {
-                    if (ctx.verbose)
-                        fprintf(stderr, "[HRR]   arg[%u]: embedded ptr @+%u 0x%llx unresolved — left as-is (possible scalar)\n",
-                                i, off, (unsigned long long)rec_ptr);
-                    continue;
-                }
+                if (!live) return false;
                 memcpy(storage.data() + off, &live, sizeof(void*));
                 if (dbg_dump_ptrs) dbg_ptrs.emplace_back(i, rec_ptr, live);
                 if (ctx.verbose)
-                    fprintf(stderr, "[HRR]   arg[%u]: embedded ptr @+%u 0x%llx -> %p\n",
+                    fprintf(stderr, "[HRR]   arg[%u]: embedded ptr @+%zu 0x%llx -> %p\n",
                             i, off, (unsigned long long)rec_ptr, live);
+                return true;
+            };
+
+            // First honor the capture-recorded offsets (these may be unaligned).
+            std::vector<char> handled(arg_size, 0);
+            for (uint16_t off : ptr_offsets) {
+                if (try_translate_word(off))
+                    for (int b = 0; b < 8 && static_cast<size_t>(off) + b < arg_size; b++)
+                        handled[off + b] = 1;
+                else if (ctx.verbose)
+                    fprintf(stderr, "[HRR]   arg[%u]: embedded ptr @+%u unresolved — left as-is (possible scalar)\n",
+                            i, off);
+            }
+
+            // Defensive rescan: the capture-side value-based detector can MISS an
+            // embedded pointer. Its per-offset verdict is cached, so a struct slot
+            // that held a non-resolving value on an early launch is frozen as a
+            // scalar; when a later launch reuses that slot for a real device
+            // pointer (e.g. the reused addresses[] slots in ATen's
+            // multi_tensor_apply TensorListMetadata across launch waves), the
+            // offset is never flagged and the stale recorded pointer reaches the
+            // GPU — a guaranteed VM fault. Here we have the full recorded
+            // allocation map, so we re-scan every word and translate any that
+            // resolves. Genuine scalars (small counts/shapes) never fall inside a
+            // recorded device VA, so this does not corrupt them.
+            for (size_t off = 0; off + 8 <= arg_size; ) {
+                if (handled[off]) { off += 1; continue; }
+                if (try_translate_word(off)) off += 8;
+                else off += 1;
             }
         } else {
             storage.assign(data, data + arg_size);

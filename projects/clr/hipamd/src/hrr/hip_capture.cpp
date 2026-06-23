@@ -201,6 +201,16 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 //   intentionally out of scope.
 enum class PtrVerdict : uint8_t { Pointer, Scalar };
 
+// A cached per-word verdict. For a Scalar verdict we also remember the exact
+// 8-byte value that was probed: a struct slot can legitimately hold a harmless
+// scalar/garbage value on one launch and a real device pointer on a later one
+// (e.g. the reused addresses[] slots in ATen's multi_tensor_apply metadata
+// across launch waves). Freezing such an offset as "scalar" forever would leave
+// the later real pointer unflagged and therefore untranslated at replay — a
+// guaranteed GPU VM fault. So a Scalar verdict is trusted only while the word
+// value is unchanged; any change forces a re-probe.
+struct PtrVerdictEntry { PtrVerdict verdict; uint64_t probed_value; };
+
 static void scan_embedded_ptr_offsets(const void* func_key, uint32_t arg_idx,
                                       const uint8_t* data, uint16_t size,
                                       std::vector<uint16_t>& offsets) {
@@ -208,27 +218,35 @@ static void scan_embedded_ptr_offsets(const void* func_key, uint32_t arg_idx,
   // Per-word verdict cache. thread_local keeps the hot launch path lock-free;
   // verdicts are identical across threads so per-thread duplication is harmless.
   thread_local std::map<std::tuple<const void*, uint32_t, uint16_t, uint16_t>,
-                        PtrVerdict> verdicts;
+                        PtrVerdictEntry> verdicts;
   const bool cacheable = (func_key != nullptr);
   const hipError_t saved_cmd = hip::tls.last_command_error_;
   const hipError_t saved_err = hip::tls.last_error_;
   size_t j = 0;
   while (j + sizeof(void*) <= size) {
     const uint16_t off = static_cast<uint16_t>(j);
+    uint64_t cand;
+    std::memcpy(&cand, data + j, sizeof(cand));
     if (cacheable) {
       auto it = verdicts.find(std::make_tuple(func_key, arg_idx, size, off));
       if (it != verdicts.end()) {
-        if (it->second == PtrVerdict::Pointer) {
+        if (it->second.verdict == PtrVerdict::Pointer) {
+          // Pointer verdicts are sticky: flagging an offset is harmless even if
+          // it later holds a scalar, since replay only rewrites a flagged word
+          // when its recorded value actually resolves to a live allocation.
           offsets.push_back(off);
           j += sizeof(void*);
-        } else {
-          j += 1;
+          continue;
         }
-        continue;
+        // Scalar verdict: trust it only while the value is unchanged. A changed
+        // value may have transitioned from scalar/garbage to a real pointer.
+        if (it->second.probed_value == cand) {
+          j += 1;
+          continue;
+        }
+        // else: value changed — fall through and re-probe.
       }
     }
-    uint64_t cand;
-    std::memcpy(&cand, data + j, sizeof(cand));
     // Null/small word: never a device VA. Skip without caching a verdict — a
     // pointer field that is merely null on this launch must stay re-checkable.
     if (cand < 0x10000ULL) { j += 1; continue; }
@@ -239,7 +257,7 @@ static void scan_embedded_ptr_offsets(const void* func_key, uint32_t arg_idx,
         (attr.type == hipMemoryTypeDevice || attr.type == hipMemoryTypeUnified);
     if (cacheable)
       verdicts[std::make_tuple(func_key, arg_idx, size, off)] =
-          is_ptr ? PtrVerdict::Pointer : PtrVerdict::Scalar;
+          PtrVerdictEntry{ is_ptr ? PtrVerdict::Pointer : PtrVerdict::Scalar, cand };
     if (is_ptr) {
       offsets.push_back(off);
       j += sizeof(void*);
