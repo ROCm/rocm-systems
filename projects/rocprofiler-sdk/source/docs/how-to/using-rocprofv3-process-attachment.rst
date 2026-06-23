@@ -25,6 +25,10 @@ Here are the options used in the preceding example:
 
 - ``--output-format``: The desired output format such as rocpd, csv, or json.
 
+.. note::
+
+   In process-attachment mode, ``rocprofv3`` may generate output files asynchronously during detachment. As a result, output files might not be fully written immediately when ``rocprofv3`` returns. If your workflow needs output files to be complete before continuing, for example, if a script processes or removes the output directory right after detach, use ``--attach-sync-output``. This makes detach wait for output generation to finish, which can increase detach time.
+
 **Basic attachment syntax:**
 
 .. code-block:: bash
@@ -117,8 +121,6 @@ There are some restrictions on what the options are allowed to change when reatt
 
 By default, the output file generation runs asynchronously after detachment, allowing for faster tool detachment. This implies that the output files might not be immediately available when ``rocprofv3`` exits. If the output file generation from the previous attachment is still in progress, ``rocprofv3`` blocks reattachment until the ongoing output generation completes.
 
-For use cases requiring output files to be fully written before detachment completes, such as scripts that process or delete output directories immediately after detachment, you can enable synchronous output generation using the ``--attach-sync-output`` flag. This causes ``tool_detach`` to wait for all output files to be written before returning, ensuring output files are complete when the ``rocprofv3`` process exits.
-
 .. class:: details
 
    Full list of options that mustn't change:
@@ -133,6 +135,40 @@ For use cases requiring output files to be fully written before detachment compl
    - ``kernel_include_regex``
    - ``kernel_exclude_regex``
    - ``kernel_iteration_range``
+
+Synchronous output generation for scripts
+------------------------------------------
+
+For use cases requiring output files to be fully written before detachment completes, such as scripts that process or delete output directories immediately after detachment, you can enable synchronous output generation using the ``--attach-sync-output`` flag. This causes ``tool_detach`` to wait for all output files to be written before returning, ensuring output files are complete when the ``rocprofv3`` process exits.
+
+For example, consider a script that attaches for a fixed duration and then terminates the workload as soon as ``rocprofv3`` returns:
+
+.. code-block:: bash
+
+   # Start the workload in the background
+   ./myapp &
+   WL_PID=$!
+
+   # Attach for 5 seconds, then detach
+   rocprofv3 --pid "$WL_PID" --attach-duration-msec 5000 \
+       --output-format csv -o profile -d "$PWD"
+
+   # Workload is killed immediately after rocprofv3 returns
+   kill "$WL_PID"
+
+With the default asynchronous output generation, the output thread runs inside the target process. Killing the workload right after ``rocprofv3`` returns can terminate that thread before it finishes writing, producing truncated or incomplete output files. Add ``--attach-sync-output`` so that detachment waits for output generation to finish before returning:
+
+.. code-block:: bash
+
+   ./myapp &
+   WL_PID=$!
+
+   rocprofv3 --pid "$WL_PID" --attach-duration-msec 5000 \
+       --attach-sync-output \
+       --output-format csv -o profile -d "$PWD"
+
+   # Safe: output files are fully written before rocprofv3 returns
+   kill "$WL_PID"
 
 Attaching to a process tree
 ----------------------------
