@@ -55,20 +55,24 @@ public:
     synchronized(const synchronized&) = delete;
 
     template <typename FuncT, typename... Args>
+        requires std::is_invocable_v<FuncT, const LockedType&, Args...>
     decltype(auto) rlock(FuncT&& lambda, Args&&... args) const;
 
     template <typename FuncT, typename... Args>
+        requires std::is_invocable_v<FuncT, LockedType&, Args...>
     decltype(auto) wlock(FuncT&& lambda, Args&&... args);
 
     // This overload to wlock allows a synchronized map whose keys map to synchronized
     // data to use a read lock on the key data and then a write lock on the mapped data.
-    template <typename FuncT, typename... Args, bool EnableForMappedType = IsMappedTypeV,
-              std::enable_if_t<EnableForMappedType, int> = 0>
+    template <typename FuncT, typename... Args>
+        requires(IsMappedTypeV)
     decltype(auto) wlock(FuncT&& lambda, Args&&... args) const;
 
     // Upgradable lock. If read returns false, write will be called with a unique_lock.
     // Essentially a helper function that does .rlock() followed by .wlock().
     template <typename ReadFuncT, typename WriteFuncT, typename... Args>
+        requires(std::is_invocable_v<ReadFuncT, const LockedType&, Args...> &&
+                 std::is_invocable_v<WriteFuncT, LockedType&, Args...>)
     bool ulock(ReadFuncT&& read, WriteFuncT&& write, Args&&... args);
 
 private:
@@ -81,24 +85,20 @@ private:
 //
 template <typename LockedType, bool IsMappedTypeV>
 template <typename FuncT, typename... Args>
+    requires std::is_invocable_v<FuncT, const LockedType&, Args...>
 decltype(auto)
 synchronized<LockedType, IsMappedTypeV>::rlock(FuncT&& lambda, Args&&... args) const
 {
-    static_assert(std::is_invocable<FuncT, const value_type&, Args...>::value,
-                  "function must accept const reference to locked type");
-
     auto lock = std::shared_lock{ m_mutex };
     return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
 }
 
 template <typename LockedType, bool IsMappedTypeV>
 template <typename FuncT, typename... Args>
+    requires std::is_invocable_v<FuncT, LockedType&, Args...>
 decltype(auto)
 synchronized<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args)
 {
-    static_assert(std::is_invocable<FuncT, value_type&, Args...>::value,
-                  "function must accept reference to locked type");
-
     auto lock = std::unique_lock{ m_mutex };
     return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
 }
@@ -106,8 +106,8 @@ synchronized<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args)
 // This overload to wlock allows a synchronized map whose keys map to synchronized data to
 // use a read lock on the key data and then a write lock on the mapped data.
 template <typename LockedType, bool IsMappedTypeV>
-template <typename FuncT, typename... Args, bool EnableForMappedType,
-          std::enable_if_t<EnableForMappedType, int>>
+template <typename FuncT, typename... Args>
+    requires(IsMappedTypeV)
 decltype(auto)
 synchronized<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args) const
 {
@@ -119,15 +119,12 @@ synchronized<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args) c
 // Essentially a helper function that does .rlock() followed by .wlock().
 template <typename LockedType, bool IsMappedTypeV>
 template <typename ReadFuncT, typename WriteFuncT, typename... Args>
+    requires(std::is_invocable_v<ReadFuncT, const LockedType&, Args...> &&
+             std::is_invocable_v<WriteFuncT, LockedType&, Args...>)
 bool
 synchronized<LockedType, IsMappedTypeV>::ulock(ReadFuncT&& read, WriteFuncT&& write,
                                                Args&&... args)
 {
-    static_assert(std::is_invocable<ReadFuncT, const value_type&, Args...>::value,
-                  "read function must accept const reference to locked type");
-    static_assert(std::is_invocable<WriteFuncT, value_type&, Args...>::value,
-                  "write function must accept reference to locked type");
-
     using read_return_type  = std::invoke_result_t<ReadFuncT, const value_type&, Args...>;
     using write_return_type = std::invoke_result_t<WriteFuncT, value_type&, Args...>;
 

@@ -577,17 +577,19 @@ __device__ void GDAContext::internal_put_broadcast(T *dst, const T *src,
   if (constmem.my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
-      if (i != constmem.my_pe) {
+      if (constmem.my_pe != i)
         internal_putmem_nbi_wg(dst, src, nelems * sizeof(T), i, i, wf_info);
-      }
     }
+    memcpy_wg<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
   }
 }
 
 template <typename T>
 __device__ void GDAContext::internal_get_broadcast(T *dst, const T *src,
     int nelems, int pe_root, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
-  if (constmem.my_pe != pe_root) {
+  if (constmem.my_pe == pe_root) {
+    memcpy_wg<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
+  } else {
     internal_getmem_wg(dst, src, nelems * sizeof(T), pe_root, pe_root, wf_info);
   }
 }

@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
 """Query hipFile driver properties and version information."""
 
 from __future__ import annotations

@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
+from amdisa.isa_profile import Rdna4Profile
+from amdisa.semantics import InstructionSemantics
 
 
 def _enc(name: str) -> InstEncoding:
@@ -31,6 +33,27 @@ def _literal_operand(size: int, operand_type: str) -> Operand:
         is_implicit=False,
         is_binary_ucode_required=True,
         order=2,
+    )
+
+
+def _operand(
+    name: str,
+    operand_type: str,
+    *,
+    size: int = 32,
+    is_input: bool = True,
+    is_output: bool = False,
+    order: int = 0,
+) -> Operand:
+    return Operand(
+        name,
+        size,
+        operand_type,
+        is_input=is_input,
+        is_output=is_output,
+        is_implicit=False,
+        is_binary_ucode_required=False,
+        order=order,
     )
 
 
@@ -115,6 +138,103 @@ def test_scalar_literal_fma_synthesizes_third_source_operand():
     assert fixed.operands[-1].name == 'src2'
     assert fixed.operands[-1].operand_type == 'OPR_SIMM32'
     assert fixed.operands[-1].is_input
+
+
+def test_scalar_fmamk_semantic_sources_use_synthesized_literal_as_multiplier():
+    operands = [
+        _operand('sdst', 'OPR_SDST', is_input=False, is_output=True, order=0),
+        _operand('ssrc0', 'OPR_SSRC', order=1),
+        _operand('ssrc1', 'OPR_SSRC', order=2),
+        _operand('src2', 'OPR_SIMM32', order=3),
+    ]
+    inst = Instruction('S_FMAMK_F32', 'ENC_SOP2', opcode=70, operands=operands)
+
+    ordered = CodeGenerator._semantic_source_operands(inst, operands[1:])
+
+    assert [op.name for op in ordered] == ['ssrc0', 'src2', 'ssrc1']
+
+
+def test_scalar_fmamk_semantic_sources_keep_explicit_literal_as_multiplier():
+    operands = [
+        _operand('ssrc0', 'OPR_SSRC', order=0),
+        _operand('literal', 'OPR_SIMM32', order=1),
+        _operand('ssrc1', 'OPR_SSRC', order=2),
+        _operand('src2', 'OPR_SIMM32', order=3),
+    ]
+    inst = Instruction('S_FMAMK_F32', 'ENC_SOP2', opcode=70, operands=operands)
+
+    ordered = CodeGenerator._semantic_source_operands(inst, operands)
+
+    assert [op.name for op in ordered] == ['ssrc0', 'literal', 'ssrc1', 'src2']
+
+
+def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [
+        _operand('sdst', 'OPR_SDST', is_input=False, is_output=True, order=0),
+        _operand('ssrc0', 'OPR_SSRC', order=1),
+        _operand('ssrc1', 'OPR_SSRC', order=2),
+        _operand('src2', 'OPR_SIMM32', order=3),
+    ]
+    inst = Instruction('S_FMAMK_F32', 'ENC_SOP2', opcode=70, operands=operands)
+    sem = InstructionSemantics(
+        'S_FMAMK_F32',
+        'scalar_binop',
+        operation='fma',
+        data_type='f32',
+        sets_scc='none',
+    )
+
+    body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
+
+    assert 'std::bit_cast<float>(ssrc0.read_scalar(wf))' in body
+    assert 'std::bit_cast<float>(src2.read_scalar(wf))' in body
+    assert 'std::bit_cast<float>(ssrc1.read_scalar(wf))' in body
+    assert body.index('src2.read_scalar(wf)') < body.index('ssrc1.read_scalar(wf)')
+
+
+def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [
+        _operand(
+            'sdst',
+            'OPR_SDST',
+            size=64,
+            is_input=False,
+            is_output=True,
+            order=0,
+        ),
+        _operand('ssrc0', 'OPR_SSRC', size=64, order=1),
+        _operand('ssrc1', 'OPR_SSRC', size=64, order=2),
+    ]
+    inst = Instruction('S_MUL_U64', 'ENC_SOP2', opcode=68, operands=operands)
+    sem = InstructionSemantics(
+        'S_MUL_U64',
+        'scalar_binop',
+        operation='mul',
+        data_type='u64',
+        sets_scc='none',
+    )
+
+    body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
+
+    assert 'ssrc0.read_scalar64(wf)' in body
+    assert 'ssrc1.read_scalar64(wf)' in body
+    assert 'sdst.write_scalar64(wf, result);' in body
+    assert 'ssrc0.read_scalar(wf)' not in body
+    assert 'ssrc1.read_scalar(wf)' not in body
 
 
 def test_literal_fma_mnemonics_are_not_shared_across_isa_layouts():
