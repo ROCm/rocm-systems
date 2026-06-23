@@ -56,6 +56,18 @@ add_executable(hotswap_test tests/hotswap_test.cpp hotswap.cpp)
 target_include_directories(hotswap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hotswap_test PRIVATE amd_comgr)
 
+# Embed the gfx1250 fixture code object as a byte array so the test exercises the
+# real parse + rewrite path with no GPU and no runtime file dependency (works in
+# any CI). Regenerate the .hsaco per tests/fixtures/README.md.
+set(_hotswap_co "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/gfx1250_min.hsaco")
+set(_hotswap_co_hdr "${CMAKE_CURRENT_BINARY_DIR}/gfx1250_min_hsaco.h")
+file(READ "${_hotswap_co}" _hotswap_co_hex HEX)
+string(REGEX REPLACE "(..)" "0x\\1," _hotswap_co_arr "${_hotswap_co_hex}")
+file(WRITE "${_hotswap_co_hdr}"
+  "// Generated from tests/fixtures/gfx1250_min.hsaco. Do not edit.\n"
+  "static const unsigned char kGfx1250MinCo[] = {${_hotswap_co_arr}};\n")
+target_include_directories(hotswap_test PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+
 # Unit tests for the gfx-target / ASIC-revision query logic. The test compiles
 # the portable hotswap_gfx_query.cpp unit alongside the test translation unit 
 # and supplies its own stubs for the HSA entry points, so this target needs 
