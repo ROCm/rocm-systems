@@ -1,55 +1,42 @@
-## hip_add_executable ###
-This tutorial shows how to use the FindHIP cmake module and create an executable using ```hip_add_executable``` macro.
+## Building a HIP executable with CMake ###
+This tutorial shows how to build a HIP executable with CMake using the native HIP language support (`project(... LANGUAGES HIP)`), which compiles HIP sources directly with the ROCm compiler. This replaces the deprecated `hip_add_executable` macro from the FindHIP module.
 
-## Including FindHIP cmake module in the project
-Since FindHIP cmake module is not yet a part of the default cmake distribution, ```CMAKE_MODULE_PATH``` needs to be updated to contain the path to FindHIP.cmake.
-
-The simplest approach is to use
+## Enabling the HIP language
+HIP is a first-class CMake language as of CMake 3.21. Declare it in `project()` and CMake will locate the HIP compiler from your ROCm installation (via `CMAKE_PREFIX_PATH`):
 ```
-set(CMAKE_MODULE_PATH "/opt/rocm/lib/cmake/hip/" ${CMAKE_MODULE_PATH})
-find_package(HIP)
-```
-
-A more generic solution that allows for a user specified location for the HIP installation would look something like
-```
-if(NOT DEFINED HIP_PATH)
-    if(NOT DEFINED ENV{HIP_PATH})
-        set(HIP_PATH "/opt/rocm/hip" CACHE PATH "Path to which HIP has been installed")
-    else()
-        set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to which HIP has been installed")
-    endif()
-endif()
-set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
-find_package(HIP)
+cmake_minimum_required(VERSION 3.21.3)
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+project(12_cmake LANGUAGES HIP CXX)
 ```
 
-If your project already modifies ```CMAKE_MODULE_PATH```, you will need to append the path to FindHIP.cmake instead of replacing it.
-
-## Using the hip_add_executable macro
-FindHIP provides the ```hip_add_executable``` macro that is similar to the ```cuda_add_executable``` macro that is provided by FindCUDA.
-The syntax is also similar. The ```hip_add_executable``` macro uses the hipcc wrapper as the compiler.
-The macro supports specifying CLANG-specific, NVCC-specific compiler options using the ```CLANG_OPTIONS``` and ```NVCC_OPTIONS``` keywords.
-Common options targeting both compilers can be specificed after the ```HIPCC_OPTIONS``` keyword.
+## Compiling a .cpp source as HIP
+Sources with a `.hip` extension are treated as HIP automatically. For a HIP source that uses a `.cpp` extension, tag it explicitly so the HIP toolchain compiles it:
+```
+set_source_files_properties(MatrixTranspose.cpp PROPERTIES LANGUAGE HIP)
+add_executable(MatrixTranspose1 MatrixTranspose.cpp)
+target_include_directories(MatrixTranspose1 PRIVATE ../../common)
+```
+The HIP language toolchain links the HIP runtime (`libamdhip64`) automatically, so no explicit `find_package(hip)` or `hip::device` link is required.
 
 ## How to build and run:
 - Build sample using cmake
 ```
 $ mkdir build; cd build
- # For shared lib of hip rt,
 $ cmake ..
- # Or for static lib of hip rt,
-$ cmake -DCMAKE_PREFIX_PATH="/opt/rocm/llvm/lib/cmake" ..
+ # Optionally select GPU architecture(s), for example:
+$ cmake .. -DCMAKE_HIP_ARCHITECTURES=gfx1102
 $ make
 ```
 
 - Execute the sample
 ```
-$ ./MatrixTranspose
+$ ./MatrixTranspose1
 Device name
 PASSED!
 ```
+
 ## On TheRock build :
-Pass GPU arch to cmake i.e. -DHIP_HIPCC_FLAGS="--offload-arch=gfx1102" for windows.
+Pass the GPU arch to cmake, e.g. -DCMAKE_HIP_ARCHITECTURES=gfx1102 (for example, on Windows).
 
 ## More Info:
 

@@ -39,7 +39,7 @@ add_executable(hipDispatchLatency ${EXCLUDE_OPTION} hipDispatchLatency.cpp)
 add_executable(hipDispatchEnqueueRateMT ${EXCLUDE_OPTION} hipDispatchEnqueueRateMT.cpp)
 
 # Generate code object using CMake's HIP language support
-# Note: Build for all detected architectures to support multiple GPUs (like hipcc does)
+# Note: Build for all detected architectures to support multiple GPUs
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/test_kernel.code
   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -x hip --cuda-device-only ${OFFLOAD_ARCH_FLAGS} ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/test_kernel.code
