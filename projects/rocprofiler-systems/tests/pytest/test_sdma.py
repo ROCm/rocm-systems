@@ -41,6 +41,7 @@ def sdma_rules(validation_rules_dir: Path) -> list[Path]:
 
 
 @pytest.mark.amdsmi_min_version("26.3")
+@pytest.mark.amdgpu_min_version("6.19.14")
 class TestSDMA(RocprofsysTest):
     """Tests for SDMA usage metrics (Perfetto and ROCPD)."""
 
