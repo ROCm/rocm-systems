@@ -174,9 +174,10 @@ ErrorCode GpuMemory::UnmapGpuVirtualAddress(const gpusize addr, const gpusize si
 
     code = d3dthunk::MapGpuVirtualAddress(&args);
 
-    if (code == ErrorCode::NotReady)
+    if (code == ErrorCode::NotReady) {
       device_->UpdatePageFence(args.PagingFenceValue);
-    else if (code != ErrorCode::Success)
+      code = ErrorCode::Success;
+    } else if (code != ErrorCode::Success)
       break;
 
     map_addr += block_size;

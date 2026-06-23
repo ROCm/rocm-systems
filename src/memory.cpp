@@ -644,6 +644,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
         return HSAKMT_STATUS_ERROR;
     }
 
+    wsl::thunk::GpuMemory *gpu_mem =
+        reinterpret_cast<wsl::thunk::GpuMemory *>(drmhandle);
+    if (!gpu_mem->GetDevice()->WaitOnPagingFenceFromCpu()) {
+        return HSAKMT_STATUS_ERROR;
+    }
+
     return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -659,6 +665,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
     int ret = amdgpu_bo_va_op_impl(drmhandle, offset, size, addr, 0,
                               AMDGPU_VA_OP_UNMAP);
     if (ret) {
+        return HSAKMT_STATUS_ERROR;
+    }
+
+    wsl::thunk::GpuMemory *gpu_mem =
+        reinterpret_cast<wsl::thunk::GpuMemory *>(drmhandle);
+    if (!gpu_mem->GetDevice()->WaitOnPagingFenceFromCpu()) {
         return HSAKMT_STATUS_ERROR;
     }
 
@@ -1052,6 +1064,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
       if (code != ErrorCode::Success)
         return HSAKMT_STATUS_ERROR;
       gpu_mem->Evict();
+      if (!gpu_mem->GetDevice()->WaitOnPagingFenceFromCpu())
+        return HSAKMT_STATUS_ERROR;
 
       return HSAKMT_STATUS_SUCCESS;
     }
