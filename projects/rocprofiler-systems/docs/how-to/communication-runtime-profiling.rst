@@ -188,7 +188,7 @@ Similarly, if the detected rank itself is out of the range ``[0, world_size - 1]
 Custom MPI environment variables
 ----------------------------------
 
-For mixed environments or non-standard MPI configurations, you can specify custom environment variables for rank detection.
+For mixed environments or non-standard MPI configurations, you can specify custom environment variables for rank detection using ``--rank-filter-id`` CLI option or corresponding configuration setting ``ROCPROFSYS_RANK_FILTER_LOGS``.
 When using custom environment variables, ``--rank-filter-id`` must be specified together with at least one of the filter:  ``--rank-filter-output`` or ``--rank-filter-logs``.
 The ``--rank-filter-id`` will take precedence over automatic detection for both filters.
 Below is an example using the ``MY_CUSTOM_RANK`` environment variable with ``rocprof-sys-sample`` to profile ranks 0-3 and 8:
