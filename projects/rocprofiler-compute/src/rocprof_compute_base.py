@@ -552,6 +552,28 @@ class RocProfCompute:
             self.__soc[self.__mspec.gpu_arch],
         )
 
+    @staticmethod
+    def prepare_workload_directory(output_dir: Path, overwrite: bool) -> None:
+        """Error if the output directory is non-empty unless overwrite is set,
+        in which case its contents are removed before profiling.
+        """
+        if output_dir.is_dir() and any(output_dir.iterdir()):
+            if not overwrite:
+                console_error(
+                    f"Existing workload directory {output_dir} is not empty, "
+                    "please use --overwrite"
+                )
+            console_warning(
+                f"Clearing existing directory {output_dir} due to --overwrite"
+            )
+            for child in output_dir.iterdir():
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
     @demarcate
     def run_profiler(self) -> None:
         self.print_graphic()
@@ -571,13 +593,10 @@ class RocProfCompute:
         except WorkloadCommandError as e:
             console_error(str(e))
 
-        # Create workload directory if it does not exist
-        p = Path(self.__args.output_directory)
-        if not p.exists():
-            try:
-                p.mkdir(parents=True, exist_ok=False)
-            except FileExistsError:
-                console_error("Directory already exists.")
+        # Validate and prepare the workload directory before profiling.
+        self.prepare_workload_directory(
+            Path(self.__args.output_directory), self.__args.overwrite
+        )
 
         # enable file-based logging
         setup_file_handler(self.__args.loglevel, self.__args.output_directory)
@@ -696,6 +715,11 @@ class RocProfCompute:
 
         roofline_csv = output_dir / "roofline.csv"
         existing_roofline = roofline_csv.is_file()
+        if existing_roofline and not getattr(self.__args, "overwrite", False):
+            console_error(
+                f"{roofline_csv} already exists, please use --overwrite to "
+                "regenerate it"
+            )
         console_log(
             "roofline",
             f"Running roofline microbenchmark on device {self.__args.device}",
