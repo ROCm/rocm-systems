@@ -1,0 +1,19 @@
+# Keep the build context small + fast. These are all regenerated inside
+# the image (cargo target, cmake build tree, fetched third_party) or are
+# host-only artifacts that must never leak into the build.
+**/target/
+**/build/
+**/.venv/
+**/.venv-*/
+**/third_party/
+**/node_modules/
+**/.git/
+**/.gitignore
+**/Testing/
+**/triage_results/
+**/__pycache__/
+**/.pytest_cache/
+**/*.pyc
+**/.DS_Store
+Dockerfile
+.dockerignore

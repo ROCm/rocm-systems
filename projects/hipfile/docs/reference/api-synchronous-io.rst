@@ -10,14 +10,11 @@ Synchronous read and write API reference
 
 Before calling these functions, register the file handle with ``hipFileHandleRegister`` and the GPU buffer with ``hipFileBufRegister``. See :doc:`/reference/api-file-and-buffer` for registration details and :doc:`/tutorials/copy-a-file` for a usage walkthrough.
 
-Offset type
-***********
+Offset type and functions
+************************
 
-.. doxygentypedef:: hoff_t
+The offset type used by the synchronous read and write functions, and the
+functions themselves.
 
-Functions
-*********
-
-.. doxygenfunction:: hipFileRead
-
-.. doxygenfunction:: hipFileWrite
+.. doxygengroup:: sync
+   :content-only:

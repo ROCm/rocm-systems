@@ -367,12 +367,15 @@ class ThunkLoader {
                                       HSAuint64 offset, \
                                       HSAuint64 size, \
                                       HSAuint64 addr, \
-                                      HsaMemoryMapFlags flags);
+                                      HsaMemoryMapFlags flags, \
+                                      HSAuint32 NodeId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaUnmap))(HsaMemoryObjectHandle Handle, \
                                       HSAuint64 offset, \
                                       HSAuint64 size, \
-                                      HSAuint64 addr);
+                                      HSAuint64 addr, \
+                                      HSAuint32 NodeId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemHandleFree))(HsaMemoryObjectHandle Handle);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata))(HsaMemoryObjectHandle Handle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr))(HsaAMDGPUDeviceHandle DeviceHandle, \
                                       HsaMemoryObjectHandle MemoryHandle, \
                                       HSAuint64* cpu_addr);
@@ -542,6 +545,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtMemoryVaMap)* HSAKMT_PFN(hsaKmtMemoryVaMap);
     HSAKMT_DEF(hsaKmtMemoryVaUnmap)* HSAKMT_PFN(hsaKmtMemoryVaUnmap);
     HSAKMT_DEF(hsaKmtMemHandleFree)* HSAKMT_PFN(hsaKmtMemHandleFree);
+    HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata)* HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata);
     HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)* HSAKMT_PFN(hsaKmtMemoryGetCpuAddr);
     HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)* HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd);
     HSAKMT_DEF(hsaKmtMemoryCpuMap)* HSAKMT_PFN(hsaKmtMemoryCpuMap);

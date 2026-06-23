@@ -22,7 +22,13 @@ foreach(example ${BASICS_EXAMPLES})
     add_executable(${example} "${example}.cpp")
     target_compile_features(${example} PRIVATE cxx_std_17)
     set_target_properties(${example} PROPERTIES CXX_EXTENSIONS OFF)
-    target_compile_options(${example} PRIVATE -Wall -Wextra -fno-sanitize=all)
+    target_compile_options(${example} PRIVATE -Wall -Wextra)
+    # hipfile is instrumented when the sanitizers are on; an uninstrumented
+    # executable linked against it dies at load with undefined __asan_*/__tsan_*
+    # symbols. Instrument the example too so it pulls in the sanitizer runtime.
+    if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
+        ais_add_sanitizers(${example})
+    endif()
 
     if(CMAKE_HIP_PLATFORM STREQUAL "amd")
         target_compile_definitions(${example} PRIVATE __HIP_PLATFORM_AMD__)

@@ -78,21 +78,10 @@ const std::array<Case, 17> kCases = {{
     {"v_mad_legacy_u16_vop3", 491, true},
 }};
 
-const std::array<uint32_t, 14> kVals = {{
-    0x00000000u,
-    0x00000001u,
-    0x00000005u,
-    0x0000001Fu,
-    0x00000010u,
-    0x80000000u,
-    0x7FFFFFFFu,
-    0xFFFFFFFFu,
-    0x12345678u,
-    0xDEADBEEFu,
-    0xCAFEBABEu,
-    0xA5A5A5A5u,
-    0x5A5A5A5Au,
-    0xF0F0F0F0u,
+const std::array<uint32_t, 20> kVals = {{
+    0x00000000u, 0x00000001u, 0x00000005u, 0x0000001Fu, 0x00000010u, 0x00000020u, 0x0000003Fu,
+    0x00000040u, 0x007FFFFFu, 0x00800000u, 0x00FFFFFFu, 0x80000000u, 0x7FFFFFFFu, 0xFFFFFFFFu,
+    0x12345678u, 0xDEADBEEFu, 0xCAFEBABEu, 0xA5A5A5A5u, 0x5A5A5A5Au, 0xF0F0F0F0u,
 }};
 
 struct Fixture {

@@ -2187,13 +2187,15 @@ class CodeGenerator:
         return textwrap.dedent('''\
             namespace {
 
+            bool isVop3pOp(const MachineInst opcode, uint32_t op) {
+              return (opcode >> 24) == 0xcc && ((opcode >> 16) & 0xff) == op;
+            }
+
             bool isWmmaScaleF32Vop3px2(const MachineInst *opcode) {
-              const auto *low = reinterpret_cast<const Vop3pMachineInst *>(opcode);
-              if (low->encoding != 0xcc || (low->op != 0x35 && low->op != 0x3a))
+              if (!isVop3pOp(opcode[0], 0x35) && !isVop3pOp(opcode[0], 0x3a))
                 return false;
 
-              const auto *high = reinterpret_cast<const Vop3pMachineInst *>(opcode + 2);
-              return high->encoding == 0xcc && (high->op == 0x33 || high->op == 0x88);
+              return isVop3pOp(opcode[2], 0x33) || isVop3pOp(opcode[2], 0x88);
             }
 
             } // namespace
@@ -2606,15 +2608,11 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_mulk':
+            L.append(f'  uint32_t s0 = {dst_ops[0]}.read_scalar(wf);')
             L.append(
-                f'  int32_t s0 = static_cast<int32_t>({dst_ops[0]}.read_scalar(wf));'
+                f'  uint32_t imm = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_)));'
             )
-            L.append(
-                f'  int32_t imm = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
-            )
-            L.append(
-                f'  {dst_ops[0]}.write_scalar(wf, static_cast<uint32_t>(s0 * imm));'
-            )
+            L.append(f'  {dst_ops[0]}.write_scalar(wf, s0 * imm);')
             return '\n'.join(L)
 
         if cls == 'scalar_wrexec':

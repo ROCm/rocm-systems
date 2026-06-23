@@ -773,14 +773,14 @@ def gen_dot2(
         L.append(
             '    int16_t b1 = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);'
         )
-        L.append(f'    int32_t acc = static_cast<int32_t>({s2}.read_lane(wf, lane));')
-        L.append(
-            '    int32_t result = static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1 + acc;'
-        )
-        L.append(
-            '    if (inst_.clamp) result = std::clamp(result, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());'
-        )
-        L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(result));')
+        L.append(f'    uint32_t result = {s2}.read_lane(wf, lane);')
+        L.append('    result += static_cast<uint32_t>(static_cast<int32_t>(a0) * b0);')
+        L.append('    result += static_cast<uint32_t>(static_cast<int32_t>(a1) * b1);')
+        L.append('    if (inst_.clamp) {')
+        L.append('      int32_t signed_result = static_cast<int32_t>(result);')
+        L.append('      if (signed_result < 0) result = 0u;')
+        L.append('    }')
+        L.append(f'    {d}.write_lane(wf, lane, result);')
     else:  # dot2_u32_u16
         L.append(
             '    uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);'
@@ -815,8 +815,7 @@ def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
     L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
 
     if cls in ('dot4_i32_i8', 'dot4_i32_iu8'):
-        L.append(f'    int32_t acc = static_cast<int32_t>({s2}.read_lane(wf, lane));')
-        L.append('    int32_t sum = acc;')
+        L.append(f'    uint32_t sum = {s2}.read_lane(wf, lane);')
         if cls == 'dot4_i32_iu8':
             L.append('    const bool src0_signed = (inst_.neg & 0x1u) != 0;')
             L.append('    const bool src1_signed = (inst_.neg & 0x2u) != 0;')
@@ -836,14 +835,15 @@ def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
             L.append('      int8_t a = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);')
             L.append('      int8_t b = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);')
         if cls == 'dot4_i32_iu8':
-            L.append('      sum += a * b;')
+            L.append('      sum += static_cast<uint32_t>(a * b);')
         else:
-            L.append('      sum += static_cast<int32_t>(a) * b;')
+            L.append('      sum += static_cast<uint32_t>(static_cast<int32_t>(a) * b);')
         L.append('    }')
-        L.append(
-            '    if (inst_.clamp) sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());'
-        )
-        L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(sum));')
+        L.append('    if (inst_.clamp) {')
+        L.append('      int32_t signed_sum = static_cast<int32_t>(sum);')
+        L.append('      if (signed_sum < 0) sum = 0u;')
+        L.append('    }')
+        L.append(f'    {d}.write_lane(wf, lane, sum);')
     elif cls == 'dot4_f32_fp8':
         # FP8 dot product: D.f32 += sum(A.fp8[i] * B.fp8[i]) for i in 0..3
         L.append(f'    float acc = std::bit_cast<float>({s2}.read_lane(wf, lane));')
@@ -882,8 +882,7 @@ def gen_dot8(dst: list[str], src: list[str], cls: str) -> str:
     L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
 
     if cls in ('dot8_i32_i4', 'dot8_i32_iu4'):
-        L.append(f'    int32_t acc = static_cast<int32_t>({s2}.read_lane(wf, lane));')
-        L.append('    int32_t sum = acc;')
+        L.append(f'    uint32_t sum = {s2}.read_lane(wf, lane);')
         if cls == 'dot8_i32_iu4':
             L.append('    const bool src0_signed = (inst_.neg & 0x1u) != 0;')
             L.append('    const bool src1_signed = (inst_.neg & 0x2u) != 0;')
@@ -904,12 +903,13 @@ def gen_dot8(dst: list[str], src: list[str], cls: str) -> str:
             L.append('      if (a & 0x8) a |= ~0xF;')
             L.append('      int32_t b = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);')
             L.append('      if (b & 0x8) b |= ~0xF;')
-        L.append('      sum += a * b;')
+        L.append('      sum += static_cast<uint32_t>(a * b);')
         L.append('    }')
-        L.append(
-            '    if (inst_.clamp) sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());'
-        )
-        L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(sum));')
+        L.append('    if (inst_.clamp) {')
+        L.append('      int32_t signed_sum = static_cast<int32_t>(sum);')
+        L.append('      if (signed_sum < 0) sum = 0u;')
+        L.append('    }')
+        L.append(f'    {d}.write_lane(wf, lane, sum);')
     else:  # dot8_u32_u4
         L.append(f'    uint32_t acc = {s2}.read_lane(wf, lane);')
         L.append('    uint32_t sum = acc;')
