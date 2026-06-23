@@ -4,6 +4,8 @@
 set(PROFILER_HUB_SCHEMA_V3_EXAMPLES
     memory_alloc_writer_reader
     kernel_dispatch_writer_reader
+    memory_copy_writer_reader
+    region_writer_reader
 )
 set(PROFILER_HUB_SCHEMA_V3_EXAMPLE_TARGETS)
 
