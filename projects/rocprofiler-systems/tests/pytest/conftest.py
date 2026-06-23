@@ -1321,6 +1321,11 @@ def _generate_rocprofsys_config_header() -> list[str]:
     else:
         oshrun_version_str = "Not found"
 
+    if cap.amdsmi_version is not None:
+        amdsmi_version_str = f"{cap.amdsmi_version[0]}.{cap.amdsmi_version[1]}"
+    else:
+        amdsmi_version_str = "Not found"
+
     # Rocprofiler SDK version
     rocprofiler_sdk_version_str = (
         f"{cap.rocprofiler_sdk_version[0]}.{cap.rocprofiler_sdk_version[1]}.{cap.rocprofiler_sdk_version[2]}"
@@ -1343,6 +1348,7 @@ def _generate_rocprofsys_config_header() -> list[str]:
         "=" * 70,
         _row("ROCm version:", rocm_version),
         _row("ROCprof-SDK version:", rocprofiler_sdk_version_str),
+        _row("AMD-SMI version:", amdsmi_version_str),
         _row("ROCm path:", rocprof_config.rocm_path),
         _row("Is installed:", rocprof_config.is_installed),
         _row("Output dir:", rocprof_config.test_output_dir),
