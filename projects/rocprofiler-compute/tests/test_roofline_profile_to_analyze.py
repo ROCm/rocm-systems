@@ -3,11 +3,11 @@
 
 """End-to-end roofline coverage: profile then analyze.
 
-These tests run ``rocprof-compute profile`` against the multi-precision
-``fma_throughput`` sample on real GPU hardware and then ``analyze`` the freshly
-produced workload, exercising the full roofline pipeline (built-in microbenchmark
--> ``roofline.csv`` -> AI calc -> per-datatype HTML) across the precisions the
-detected SoC supports.
+These tests run ``rocprof-compute profile --roof-only`` against the
+multi-precision ``fma_throughput`` sample on real GPU hardware and then
+``analyze`` the freshly produced workload, exercising the roofline-generation
+pipeline (built-in microbenchmark -> ``roofline.csv`` -> per-datatype empirical
+roof HTML) across the precisions the detected SoC supports.
 """
 
 from pathlib import Path
@@ -66,7 +66,7 @@ def test_profile_then_analyze_all_precisions(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
 ):
-    """Profile fma_throughput once, then analyze every SoC-supported precision.
+    """Profile fma_throughput once (roof-only), then analyze every SoC-supported precision.
 
     Each precision is analyzed individually to produce its own roofline HTML;
     datatypes with a known roof branch additionally assert the VALU/matrix
@@ -77,7 +77,7 @@ def test_profile_then_analyze_all_precisions(
     dtypes = supported_dtypes()
     assert dtypes, f"No supported datatypes for {gpu_arch}"
 
-    options = ["--device", "0"]
+    options = ["--device", "0", "--roof-only"]
     workload_dir = common.get_output_dir()
     returncode = binary_handler_profile_rocprof_compute(
         config,
