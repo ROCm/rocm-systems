@@ -69,7 +69,9 @@ project_map = {
     # },
     "profiler": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",
+        # Diagnostic branch override: run only rocprofiler-systems tests when
+        # manually dispatching with projects/rocprofiler-systems.
+        "projects_to_test": "rocprofiler-systems",
     },
     "rocshmem": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_ROCSHMEM=ON"],
