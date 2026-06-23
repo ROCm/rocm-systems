@@ -96,39 +96,8 @@ endif()
 
 if(NOT DEFINED HIP_PLATFORM)
   if(NOT DEFINED ENV{HIP_PLATFORM})
-    # Try using hip_HIPCONFIG_EXECUTABLE first, if it is available.
-    if(DEFINED hip_HIPCONFIG_EXECUTABLE AND NOT hip_HIPCONFIG_EXECUTABLE STREQUAL "")
-      execute_process(
-        COMMAND ${hip_HIPCONFIG_EXECUTABLE} --platform
-        OUTPUT_VARIABLE HIP_PLATFORM
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _hipconfig_result
-        ERROR_VARIABLE _hipconfig_error
-      )
-      if(_hipconfig_result EQUAL 0 AND NOT HIP_PLATFORM STREQUAL "")
-        message(STATUS "HIP_PLATFORM using hip_HIPCONFIG_EXECUTABLE: ${HIP_PLATFORM}")
-      else()
-        message(WARNING "Failed to detect HIP_PLATFORM using hip_HIPCONFIG_EXECUTABLE (${hip_HIPCONFIG_EXECUTABLE}): ${_hipconfig_error}")
-        unset(HIP_PLATFORM)
-      endif()
-    endif()
-
-    # Fallback to finding a hipconfig executable on PATH if needed.
-    if(NOT DEFINED HIP_PLATFORM OR HIP_PLATFORM STREQUAL "")
-      find_program(HIPCONFIG_EXEC hipconfig)
-      execute_process(
-        COMMAND ${HIPCONFIG_EXEC} --platform
-        OUTPUT_VARIABLE HIP_PLATFORM
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _hipconfig_fallback_result
-        ERROR_VARIABLE _hipconfig_fallback_error
-      )
-      if(_hipconfig_fallback_result EQUAL 0 AND NOT HIP_PLATFORM STREQUAL "")
-        message(STATUS "HIP_PLATFORM using HIPCONFIG_EXEC: ${HIP_PLATFORM}")
-      else()
-        message(FATAL_ERROR "Failed to detect HIP_PLATFORM using HIPCONFIG_EXEC (${HIPCONFIG_EXEC}): ${_hipconfig_fallback_error}")
-      endif()
-    endif()
+    set(HIP_PLATFORM "amd")
+    message(STATUS "HIP_PLATFORM: ${HIP_PLATFORM}")
   else()
     set(HIP_PLATFORM $ENV{HIP_PLATFORM} CACHE STRING "HIP Platform")
   endif()
