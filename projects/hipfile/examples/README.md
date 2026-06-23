@@ -1,9 +1,8 @@
 # hipFile examples
 
-This directory contains working examples of the hipFile API, grouped by what they demonstrate. The
-programs verify their results with an FNV-1a hash and print `OK …` on success.
-This top-level README consolidates the full program lists, build, and run
-instructions for every example directory.
+This directory contains working examples of the hipFile API, grouped by what
+they demonstrate. The programs verify their results with an FNV-1a hash and
+print `OK …` on success.
 
 Most examples move data through the GPU on hipFile's fast path, which opens
 files with `O_DIRECT`; running them as written therefore requires an AMD GPU
@@ -26,36 +25,45 @@ query the library and need neither a GPU nor an `O_DIRECT` filesystem.
 
 ## Building
 
-Most examples are built in-tree by the parent hipFile project when
-`AIS_INSTALL_EXAMPLES=ON` (the default):
+Each example directory contains a ready-to-use `CMakeLists.txt` that finds the
+installed hipFile via `find_package`. To build a directory, configure and build
+it in place:
 
 ```bash
-cd rocm-systems/projects/hipfile
-cmake -DCMAKE_CXX_COMPILER=amdclang++ -DCMAKE_HIP_PLATFORM=amd \
-      -DAIS_INSTALL_EXAMPLES=ON -B build
+cd basics
+cmake -B build -DCMAKE_PREFIX_PATH="/opt/rocm;/path/to/hipfile"
 cmake --build build --parallel
 ```
 
-The binaries land under `build/examples/<directory>/`. The `api` and `aiscp`
-directories can also be built standalone against an installed hipFile — see
-those sections below.
+Drop the `-DCMAKE_PREFIX_PATH` argument if ROCm and hipFile are installed in
+standard locations. If the install tree is read-only, copy the directory (and,
+for `basics`/`async`, the sibling [`common`](common) directory) somewhere
+writable first.
 
-### Building a single example
+`basics` and `async` link the shared helpers in [`common`](common) and pull it
+in via `add_subdirectory(../common …)`, so keep the `common` directory alongside
+them when you build.
 
-Each example program is its own CMake target, named exactly after the program
-(the `basics`/`async` directories create one target per program in a `foreach`
-loop; `api`/`aiscp` do the same via `ais_add_executable(NAME …)`). After
-configuring, build just one with `--target`:
+### Finding the library at runtime
+
+When you build an example, CMake records the location of `libhipfile.so` (taken
+from the same `find_package` result used above) in the example binary, so it
+runs in place even when hipFile is installed outside the default library search
+path — no `LD_LIBRARY_PATH` needed.
+
+That recorded path is fixed at build time. If you later move the hipFile
+installation, the binaries can no longer find the library and fail to start with
+`error while loading shared libraries: libhipfile.so.0`. Point the loader at the
+new location to recover (or rebuild the examples):
 
 ```bash
-cmake --build build --target bufregister-write
-cmake --build build --target roundtrip-async-multi-stream
+LD_LIBRARY_PATH=/new/path/to/hipfile/lib ./bufregister-write out.bin
 ```
 
 Per-example payload and chunk sizes are compile-time `#define`s (e.g.
-`-DBRW_SIZE=…`, `-DIR_CHUNK_SIZE=…`, documented at the top of each `.cpp`); to
-build an example with different sizes, re-run the configure step with the
-corresponding `-D` flag.
+`-DBRW_SIZE=…`, `-DIR_CHUNK_SIZE=…`, documented at the top of each `.cpp`). To
+build an example with different sizes, pass the corresponding `-D` flag at
+configure time.
 
 ---
 
@@ -69,24 +77,6 @@ require an `O_DIRECT`-capable filesystem or even file arguments.
 | Program | What it shows | Args |
 | --- | --- | --- |
 | `get-version` | Read the hipFile version both ways: the `HIPFILE_VERSION_*` header macros (compile-time) and `hipFileGetVersion()` (runtime). | none |
-
-### Building
-
-In-tree, the `api` examples are built by the parent hipFile project when
-`AIS_INSTALL_EXAMPLES=ON` (the default). Unlike `basics/` and `async/`, these
-use the `ais_add_executable` macro and link the `hipfile` target directly.
-
-To build standalone against an installed hipFile, copy `CMakeLists.install.in`
-to `CMakeLists.txt` in a scratch copy of the directory — it uses
-`find_package(hipfile)` instead of the in-tree macro:
-
-```bash
-mkdir -p /tmp/api-example
-cp CMakeLists.install.in /tmp/api-example/CMakeLists.txt
-cp get-version.cpp /tmp/api-example/
-cmake -DCMAKE_PREFIX_PATH="/opt/rocm;/path/to/hipfile" -S /tmp/api-example -B /tmp/api-example/build
-cmake --build /tmp/api-example/build
-```
 
 ### Running
 
@@ -125,12 +115,6 @@ prints `OK …` on success.
 `#define`s (e.g. `-DBRW_SIZE=…`, `-DIR_CHUNK_SIZE=…`) documented at the top of
 each `.cpp`.
 
-### Building
-
-Built in-tree by the parent hipFile project when `AIS_INSTALL_EXAMPLES=ON`
-(the default; see the top-level [Building](#building) section). The binaries
-land under `build/examples/basics/`.
-
 ### Running
 
 Reads need an existing input file; create one with `dd`:
@@ -141,7 +125,7 @@ dd if=/dev/urandom of=input.bin bs=1M count=1
 
 The input and output paths must live on an `O_DIRECT`-capable local
 filesystem (ext4 mounted `data=ordered`, or xfs); verify with
-`/opt/rocm/bin/ais-check`. Then, from `build/examples/basics/`:
+`/opt/rocm/bin/ais-check`:
 
 ```bash
 ./bufregister-write            out_bufregister.bin
@@ -153,21 +137,6 @@ filesystem (ext4 mounted `data=ordered`, or xfs); verify with
 ./various-mem-rw               input.bin out_vmrw.bin 1     # 1=device 2=managed 3=pinned
 ./roundtrip-verify             rtv_created.bin rtv_copied.bin
 ```
-
-### Via ctest
-
-When configured with `-DBUILD_TESTING=ON`, each example is wrapped as a system
-test (labels `basics;hipfile;system`). The wrappers seed a scratch input and
-run under `AIS_CAPABLE_DIR` (defaults to `/tmp` — point it at an
-`O_DIRECT`-capable path):
-
-```bash
-ctest --test-dir build -L basics --output-on-failure
-```
-
-Note: `various-mem-rw`'s `managed` and `pinned` modes are marked `DISABLED` in
-the ctest setup, so only the `device` mode runs under ctest. Run the other two
-modes by hand.
 
 ---
 
@@ -202,34 +171,16 @@ PROGRAM READ_FILE WRITE_FILE [GPUID]
 payload. `GPUID` is optional (default `0`). Sizes and stream counts are
 compile-time `#define`s documented at the top of each `.cpp`.
 
-### Building
-
-Built in-tree by the parent hipFile project when `AIS_INSTALL_EXAMPLES=ON`
-(the default; see the top-level [Building](#building) section). The binaries
-land under `build/examples/async/`.
-
 ### Running
 
 Both paths must live on an `O_DIRECT`-capable local filesystem (ext4 mounted
-`data=ordered`, or xfs); verify with `/opt/rocm/bin/ais-check`. From
-`build/examples/async/`:
+`data=ordered`, or xfs); verify with `/opt/rocm/bin/ais-check`:
 
 ```bash
 ./roundtrip-async                        in.bin out.bin
 ./roundtrip-async-nonblocking-stream     in.bin out.bin
 ./roundtrip-async-multi-stream           in.bin out.bin
 ./roundtrip-async-multi-stream-registered in.bin out.bin
-```
-
-### Via ctest
-
-When configured with `-DBUILD_TESTING=ON`, each example is wrapped as a system
-test (labels `async;hipfile;system`), with each test getting its own seeded
-input path under `AIS_CAPABLE_DIR` (defaults to `/tmp` — point it at an
-`O_DIRECT`-capable path):
-
-```bash
-ctest --test-dir build -L async --output-on-failure
 ```
 
 ---
@@ -243,24 +194,6 @@ like the Linux `cp` command:
 aiscp SOURCE DEST
 ```
 
-### Building
-
-In-tree, `aiscp` is built by the parent hipFile project when
-`AIS_INSTALL_EXAMPLES=ON` (the default; see the top-level
-[Building](#building) section). Its default `CMakeLists.txt` uses the in-tree
-`ais_add_executable` macro, so it builds alongside the other examples and the
-binary lands under `build/examples/aiscp/`.
-
-To build it standalone against an installed hipFile, use the
-`find_package`-based `CMakeLists.install.cmake` (copy it to `CMakeLists.txt` in
-a scratch copy of the directory). You may need to add the path(s) to ROCm
-and/or hipFile if they are installed in non-standard locations:
-
-```bash
-cmake -DCMAKE_PREFIX_PATH="/path/to/rocm;/path/to/hipfile" /path/to/aiscp/dir
-cmake --build .
-```
-
 ---
 
 ## `common`
@@ -270,8 +203,10 @@ by the [`basics`](basics) and [`async`](async) examples. It was pulled out to
 remove verbatim duplication; each example still drives the hipFile API directly
 in its own `main()` so the example flow stays readable top-to-bottom.
 
-There is nothing to run here. The library is built automatically as a
-dependency whenever the examples are built (`AIS_INSTALL_EXAMPLES=ON`).
+There is nothing to run or build here on its own. The `basics`/`async`
+directories pull it in via `add_subdirectory(../common …)`, so the helper code
+is compiled once and shared rather than duplicated into each example. Keep this
+directory alongside `basics`/`async` when building them.
 
 ### What's in it
 
