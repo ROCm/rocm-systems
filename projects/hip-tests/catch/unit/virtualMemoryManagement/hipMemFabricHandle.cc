@@ -597,7 +597,7 @@ static int test_runner(const TestConfig& config) {
  *    - MPI runtime available
  *    - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipExportToFabricHandle_Basic) {
+HIP_TEST_CASE(Unit_hipExportToFabricHandle_Basic) {
   REQUIRE(mpi_init_env() == 0);
   checkVMMSupported(0);
   if (gWorldSize > 1) {
@@ -625,7 +625,7 @@ TEST_CASE(Unit_hipExportToFabricHandle_Basic) {
  *    - MPI runtime available
  *    - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipExportToFabricHandle_Stress) {
+HIP_TEST_CASE(Unit_hipExportToFabricHandle_Stress) {
   REQUIRE(mpi_init_env() == 0);
   checkVMMSupported(0);
   if (gWorldSize > 1) {
