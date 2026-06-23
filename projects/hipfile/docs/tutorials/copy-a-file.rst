@@ -2,9 +2,9 @@
    :description: Tutorial walking through the aiscp example program, which copies a file via GPU memory using hipFile synchronous read and write operations.
    :keywords: hipFile, ROCm, GPU I/O, direct-to-GPU, file copy, synchronous I/O, hipFileRead, hipFileWrite, aiscp, tutorial, example
 
-****************************************
+*****************************************
 Copy a file via GPU memory using hipFile
-****************************************
+*****************************************
 
 `aiscp.cpp <https://github.com/ROCm/rocm-systems/blob/develop/projects/hipfile/examples/aiscp/aiscp.cpp>`_ copies a source file to a destination by routing every byte through GPU memory. In a hipFile checkout, the same sources are in ``examples/aiscp/aiscp.cpp``. The program opens files with ``O_DIRECT``, registers them with hipFile, allocates a GPU buffer with ``hipMalloc()``, and copies data in a chunk loop using ``hipFileRead()`` and ``hipFileWrite()``.
 
@@ -17,7 +17,7 @@ The walkthrough covers every required step of a synchronous hipFile workflow:
 5. Cleaning up handles, buffers, and file descriptors
 
 When to use this pattern
-************************
+===========================
 
 Use synchronous GPU-mediated copy when you need to:
 
@@ -26,7 +26,7 @@ Use synchronous GPU-mediated copy when you need to:
 - Match a minimal reference path before layering async or Python bindings on top.
 
 Prerequisites
-*************
+===============
 
 Verify you have:
 
@@ -36,7 +36,7 @@ Verify you have:
 - The HIP runtime development headers from ``hip/hip_runtime_api.h``.
 
 Build the example
-*****************
+==================
 
 Create a build directory and point CMake at ``examples/aiscp`` in your hipFile checkout. If ROCm or hipFile are in non-standard locations, pass them through ``CMAKE_PREFIX_PATH``:
 
@@ -54,7 +54,7 @@ Run the resulting binary the same way as the Linux ``cp`` command:
 Both paths should sit on a file system that supports ``O_DIRECT``. If the source is empty, the program exits successfully without entering the read loop.
 
 Step-by-step walkthrough
-************************
+===========================
 
 Define the chunk size limit
 ---------------------------

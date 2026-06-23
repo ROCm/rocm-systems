@@ -2,9 +2,9 @@
    :description: cuFile compatibility
    :keywords: hipFile, ROCm, NVIDIA, cuFile, compatibility, hipify
 
-******************************
+*****************************
 hipFile cuFile compatibility
-******************************
+*****************************
 
 hipFile supports NVIDIA platforms by delegating I/O operations to the cuFile library. There are some differences between hipFile and cuFile that should be taken into account prior to using hipFile on NVIDIA platforms.
 
