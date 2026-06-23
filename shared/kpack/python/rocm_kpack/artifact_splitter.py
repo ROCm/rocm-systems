@@ -35,6 +35,19 @@ def strip_target_features(target: str) -> str:
     return target[:colon_pos] if colon_pos >= 0 else target
 
 
+def base_arch(arch: str) -> str:
+    """Reduce an architecture id to its bare base, dropping feature suffixes.
+
+    Handles both the ELF bundle/colon form ('gfx942:xnack+') and the
+    Tensile-style hyphen form found in kernel-database filenames
+    ('gfx90a-xnack-'). The bare base arch is the unit of artifact sharding
+    and of --gpu-targets matching, so xnack+/- variants of an in-scope base
+    arch must collapse onto it rather than be treated as distinct targets.
+    """
+    # Normalize the hyphen feature form to the colon form, then strip features.
+    return strip_target_features(arch.replace("-xnack", ":xnack"))
+
+
 @dataclass
 class ExtractedKernel:
     """Represents a kernel extracted from a fat binary."""
@@ -103,6 +116,15 @@ class FileClassificationVisitor:
         for handler in self.database_handlers:
             arch = handler.detect(file_path, prefix_path)
             if arch:
+                # Collapse feature variants onto the bare base arch. detect()
+                # returns the Tensile hyphen form for kernel objects (e.g.
+                # 'gfx90a-xnack-'), while gpu_targets and the per-arch shard key
+                # are bare ('gfx90a'). Without this, an xnack-suffixed kernel
+                # whose base arch IS in gpu_targets fails the membership check
+                # below and is dropped from both the generic and per-arch
+                # artifacts, even though no separate 'gfx90a-xnack-' build job
+                # exists to emit it (see ROCM-25535).
+                arch = base_arch(arch)
                 if self.gpu_targets is not None and arch not in self.gpu_targets:
                     if self.verbose:
                         print(
@@ -235,7 +257,7 @@ class ArtifactSplitter:
         self.database_handlers = database_handlers or []
         self.verbose = verbose
         self.gpu_targets: Optional[Set[str]] = (
-            {strip_target_features(t) for t in gpu_targets} if gpu_targets else None
+            {base_arch(t) for t in gpu_targets} if gpu_targets else None
         )
 
     def compute_kpack_search_pattern(self, binary_path: Path, prefix_root: Path) -> str:
