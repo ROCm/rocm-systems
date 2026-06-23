@@ -1251,7 +1251,8 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
 def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     """
     Test roofline multi-attempt profiling with `--kernel`
-    Expect to be able to re-profile from same workload if kernels are valid.
+    Expect to be able to re-profile into the same workload directory (with
+    --overwrite) if kernels are valid.
 
     Roofline now takes in a dataframe that should already have filtering applied.
     Any invald kernels should be handled prior to roof activity.
@@ -1266,13 +1267,15 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
         "--device",
         "0",
         "--roof-only",
+        "--overwrite",
     ]
     workload_dir = common.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=True, roof=True
     )
-    # Don't clean output dir, use same workload
+    # Wipe the directory where applicable with --overwrite, then
+    # Re-profile into the same workload directory
     # Test only non-existent kernel: result should be passing
     # Dataframe given to roofline should just be all available kernels with no filtering
     options_bad = options.copy()
@@ -1289,7 +1292,7 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     )
     assert returncode == 0
 
-    # Test one good kernel using existing profiling data
+    # Test one good kernel, re-profiling the same directory with --overwrite
     # Result should be passing as usual
     options_good = options.copy()
     options_good.extend(["--kernel", config["kernel_name_1"]])
@@ -1298,7 +1301,7 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     )
     assert returncode == 0
 
-    # Test one good and one nonexistent kernel using existing profiling data
+    # Test one good and one nonexistent kernel, re-profiling
     # Result should be passing as usual
     options_both = options.copy()
     options_both.extend([
