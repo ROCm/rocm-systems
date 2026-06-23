@@ -119,7 +119,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util
@@ -148,7 +148,7 @@ jobs:
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ${{ steps.submods.outputs.paths }}
@@ -160,7 +160,7 @@ jobs:
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
       - name: Clone ROCDecode
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: 'ROCm/rocDecode'
           ref: 'release/rocm-rel-7.0'
@@ -168,7 +168,7 @@ jobs:
           path: 'rocDecode'
 
       - name: Clone ROCJPEG
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: 'ROCm/rocJPEG'
           ref: 'release/rocm-rel-7.0'
@@ -344,7 +344,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util
@@ -373,7 +373,7 @@ jobs:
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ${{ steps.submods.outputs.paths }}
@@ -486,7 +486,7 @@ jobs:
 
     steps:
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
@@ -515,7 +515,7 @@ jobs:
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ${{ steps.submods.outputs.paths }}

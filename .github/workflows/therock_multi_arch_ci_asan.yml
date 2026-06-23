@@ -40,7 +40,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@685f8c3b89006309b34a7c16de17e841400f0d76 # 2026-05-29 commit
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@8484067b044134dc2a4b1f3fe45c415b2a631a17 # 2026-05-29 commit
     with:
       build_variant: "host-asan"
       # targets gfx94X and gfx950 are selected to replicate the ASAN coverage in TheRock
@@ -61,7 +61,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@685f8c3b89006309b34a7c16de17e841400f0d76 # 2026-05-29 commit
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@8484067b044134dc2a4b1f3fe45c415b2a631a17 # 2026-05-29 commit
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: "ROCm/TheRock"
           ref: "685f8c3b89006309b34a7c16de17e841400f0d76" # 2026-05-29 commit

@@ -102,7 +102,7 @@ jobs:
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         git config --global --add safe.directory '*'
 
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
@@ -121,7 +121,7 @@ jobs:
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
+      uses: github/codeql-action/init@v4
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
@@ -153,6 +153,6 @@ jobs:
         rm -rf ${EXCLUDED_PATHS}
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
