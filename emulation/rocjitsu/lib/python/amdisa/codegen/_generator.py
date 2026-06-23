@@ -4981,13 +4981,14 @@ class CodeGenerator:
     def _operand_encoding_value_expr(
         opnd_name: str, is_smem: bool, packed_16bit: bool
     ) -> str:
-        """C++ expression for an operand's raw encoding value.
+        """C++ expression for the decoded value passed to an Operand constructor.
 
-        SMEM SBASE is encoded in units of 2 SGPRs (raw N names s[2N:2N+1]), so it
-        is scaled here to a real SGPR index. This keeps the operand's
-        register-ref (disassembly, def/use, liveness) consistent with execution,
-        which scales the raw field independently (addr_calc_scalar.h:
-        ``sbase = base + inst.sbase * 2``).
+        For most operands this is just the value. SMEM SBASE is an
+        exception, as it is encoded in units of 2 SGPRs (where N gets
+        s[2N:2N+1]), so this helper scales it to the real SGPR index.
+        This keeps the operand's register-ref (disassembly, def/use, liveness)
+        consistent with execution, which scales the raw field independently
+        (addr_calc_scalar.h: ``sbase = base + inst.sbase * 2``).
         """
         expr = f'reinterpret_cast<const OpEncoding*>(inst)->{opnd_name}'
         if is_smem and opnd_name == 'sbase':
