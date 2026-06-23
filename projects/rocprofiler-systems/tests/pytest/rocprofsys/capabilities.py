@@ -37,7 +37,8 @@ def get_amdsmi_version(rocm_path: Optional[Path] = None) -> Optional[tuple[int, 
             timeout=5,
         )
         raw = (result.stdout or "") + " " + (result.stderr or "")
-        m = re.search(r"Version:\s*(\d+)\.(\d+)", raw)
+        # e.g. "AMDSMI Tool: 26.4.0+... | AMDSMI Library version: 26.4.0 | ROCm version: 7.13.0 ..."
+        m = re.search(r"AMDSMI\s+(?:Tool|Library version):\s*(\d+)\.(\d+)", raw)
         if m:
             return (int(m.group(1)), int(m.group(2)))
     except (subprocess.SubprocessError, OSError, ValueError):
