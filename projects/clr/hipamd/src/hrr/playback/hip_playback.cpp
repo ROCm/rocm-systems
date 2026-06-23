@@ -344,7 +344,29 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 //                         3=scalar/struct with embedded gpu pointer(s);
 //             kind 3 appends u16 n_ptrs then n_ptrs * u16 byte offsets.
 
-static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) {
+// ext_global_worksize: the captured grid[] holds *global work-item counts*
+// (HSA/OpenCL semantics, as passed to hipExtModuleLaunchKernel), NOT workgroup
+// counts. When false the grid[] holds workgroup counts (hipModuleLaunchKernel /
+// hipLaunchKernel semantics). This MUST match the API the launch was captured
+// from: replaying an Ext launch (global work items) through
+// hipModuleLaunchKernel (which treats the dims as workgroup counts) over-launches
+// the grid by a factor of the block size in each dimension. For persistent,
+// co-resident kernels (e.g. hipBLASLt StreamK producer/consumer flag handshakes)
+// that blow-up deadlocks the kernel: only the first wave of workgroups is
+// resident and the spinning consumers wait forever on producers that live in
+// later, never-scheduled waves.
+// hipExtModuleLaunchKernel lives in hip/hip_ext.h, which conflicts with the
+// already-included runtime headers under -Werror=attributes. Forward-declare the
+// exported symbol (from libamdhip64) directly, matching the capture-side shim.
+extern "C" hipError_t hipExtModuleLaunchKernel(
+    hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY,
+    uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY,
+    uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream,
+    void** kernelParams, void** extra, hipEvent_t startEvent,
+    hipEvent_t stopEvent, uint32_t flags);
+
+static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
+                                       bool ext_global_worksize = false) {
     // Skip the 32-byte header; kernel launch has a variable-length binary format.
     const auto* hdr = reinterpret_cast<const hrr_event_header*>(pl);
     const uint8_t* p   = pl + sizeof(hrr_event_header);
@@ -358,6 +380,17 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
     if (p + name_len > end) return hipErrorInvalidValue;
     std::string kernel_name(reinterpret_cast<const char*>(p), name_len);
     p += name_len;
+
+    // Workaround for recordings made before the capture side tagged Ext launches:
+    // hipBLASLt/Tensile ("Cijk_*") StreamK kernels are launched via
+    // hipExtModuleLaunchKernel, whose grid[] is *global work-item counts*. If such
+    // a launch was collapsed into the generic (workgroup-count) launch event, the
+    // grid is over-launched by blockDim and the persistent producer/consumer
+    // handshake deadlocks. Setting HIP_HRR_REPLAY_FORCE_EXT_CIJK=1 reinterprets
+    // these grids as global work items (replay through the Ext API).
+    if (!ext_global_worksize && kernel_name.compare(0, 5, "Cijk_") == 0 &&
+        std::getenv("HIP_HRR_REPLAY_FORCE_EXT_CIJK"))
+        ext_global_worksize = true;
 
     uint64_t co_hash_lo = 0, co_hash_hi = 0;
     if (p + 16 <= end) {
@@ -559,10 +592,11 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
 
     if (ctx.trace_kernels) {
         fprintf(stderr,
-                "[HRR launch] seq=%llu kernel=%zu grid=[%u,%u,%u] "
+                "[HRR launch] seq=%llu kernel=%zu launch=%s grid=[%u,%u,%u] "
                 "block=[%u,%u,%u] shared=%u args=%u snapshots=%u name=\"%s\"\n",
                 (unsigned long long)hrr_dispatch_seq,
                 kernel_ordinal,
+                ext_global_worksize ? "EXT" : "MOD",
                 grid[0], grid[1], grid[2],
                 block[0], block[1], block[2],
                 shared_mem,
@@ -615,21 +649,44 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
                 HIP_LAUNCH_PARAM_BUFFER_SIZE,    &extra_sz,
                 HIP_LAUNCH_PARAM_END
             };
-            r = hipModuleLaunchKernel(
-                func,
-                grid[0], grid[1], grid[2],
-                block[0], block[1], block[2],
-                shared_mem, stream,
-                nullptr, extra);
+            if (ext_global_worksize) {
+                // grid[] = global work-item counts: replay through the Ext API.
+                r = hipExtModuleLaunchKernel(
+                    func,
+                    grid[0], grid[1], grid[2],
+                    block[0], block[1], block[2],
+                    shared_mem, stream,
+                    nullptr, extra,
+                    nullptr, nullptr, 0);
+            } else {
+                r = hipModuleLaunchKernel(
+                    func,
+                    grid[0], grid[1], grid[2],
+                    block[0], block[1], block[2],
+                    shared_mem, stream,
+                    nullptr, extra);
+            }
         } else {
             // HIP C++ kernels: kernelParams[] path — runtime handles hidden args.
-            r = hipModuleLaunchKernel(
-                func,
-                grid[0], grid[1], grid[2],
-                block[0], block[1], block[2],
-                shared_mem, stream,
-                arg_ptrs.empty() ? nullptr : arg_ptrs.data(),
-                nullptr);
+            if (ext_global_worksize) {
+                // grid[] = global work-item counts: replay through the Ext API.
+                r = hipExtModuleLaunchKernel(
+                    func,
+                    grid[0], grid[1], grid[2],
+                    block[0], block[1], block[2],
+                    shared_mem, stream,
+                    arg_ptrs.empty() ? nullptr : arg_ptrs.data(),
+                    nullptr,
+                    nullptr, nullptr, 0);
+            } else {
+                r = hipModuleLaunchKernel(
+                    func,
+                    grid[0], grid[1], grid[2],
+                    block[0], block[1], block[2],
+                    shared_mem, stream,
+                    arg_ptrs.empty() ? nullptr : arg_ptrs.data(),
+                    nullptr);
+            }
         }
     }
 
@@ -708,7 +765,10 @@ hipError_t playback_hipModuleLaunchKernel(PlaybackContext& ctx,
 
 hipError_t playback_hipExtModuleLaunchKernel(PlaybackContext& ctx,
                                              const uint8_t* payload) {
-    return replay_kernel_launch(ctx, payload);
+    // hipExtModuleLaunchKernel is captured with HSA/OpenCL semantics: the grid[]
+    // dims are *global work-item counts*, not workgroup counts. Replay through
+    // the matching API so the grid is not over-launched by a factor of blockDim.
+    return replay_kernel_launch(ctx, payload, /*ext_global_worksize=*/true);
 }
 
 hipError_t playback_hipLaunchKernel(PlaybackContext& ctx,

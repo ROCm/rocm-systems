@@ -732,8 +732,20 @@ hipError_t capture_hipExtModuleLaunchKernel(
          localWorkSizeX,  localWorkSizeY,  localWorkSizeZ,
       sharedMemBytes, stream, kernelParams, extra, startEvent, stopEvent, flags);
   if (r == hipSuccess) {
+    // hipExtModuleLaunchKernel takes *global work-item counts* (HSA/OpenCL
+    // semantics), whereas the unified launch event — and the
+    // hipModuleLaunchKernel replay path — expects *workgroup counts*. Convert
+    // here so the recording is unambiguous and replays correctly. Recording the
+    // raw global sizes would over-launch the grid by blockDim on replay and
+    // deadlock persistent, co-resident kernels (e.g. hipBLASLt StreamK
+    // producer/consumer flag handshakes).
+    auto ceil_div = [](uint32_t a, uint32_t b) -> unsigned {
+      return b ? static_cast<unsigned>((a + b - 1) / b) : static_cast<unsigned>(a);
+    };
     record_launch(f,
-                  globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
+                  ceil_div(globalWorkSizeX, localWorkSizeX),
+                  ceil_div(globalWorkSizeY, localWorkSizeY),
+                  ceil_div(globalWorkSizeZ, localWorkSizeZ),
                   localWorkSizeX,  localWorkSizeY,  localWorkSizeZ,
                   static_cast<unsigned>(sharedMemBytes), stream, kernelParams, extra);
   }
