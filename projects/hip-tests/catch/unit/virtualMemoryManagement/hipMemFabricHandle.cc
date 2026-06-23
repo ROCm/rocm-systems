@@ -1,5 +1,4 @@
 /**
-/*
  * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
  * SPDX-License-Identifier: MIT
@@ -127,6 +126,9 @@ static void log_printf(const char* file, int line, const char* format, ...) {
     if (error != hipSuccess) {                                                                     \
       LogPrint(LOG_ERROR, "HIP error: '%s'(%d) from '%s'\n", hipGetErrorString(error), error,      \
                #cmd);                                                                              \
+      if (gWorldSize > 1) {                                                                        \
+        MPI_Abort(MPI_COMM_WORLD, static_cast<int>(error));                                        \
+      }                                                                                            \
       return -1;                                                                                   \
     }                                                                                              \
   } while (0)
@@ -258,7 +260,10 @@ static int VmmReserveAndMapImported(VmmAllocation* alloc, int deviceId,
       hipMemGetAllocationGranularity(&alloc->granularity, &alloc->prop,
                                      hipMemAllocationGranularityMinimum));
 
-  alloc->size = AlignUp(requestedSize, alloc->granularity);
+  // requestedSize is the exporter-aligned allocation size. Map exactly that
+  // region so we never map beyond what the exported handle backs. The importer
+  // granularity is used only as the VA-reservation alignment, not to re-size.
+  alloc->size = requestedSize;
   alloc->memHandle = importedHandle;
 
   alloc->dptr = nullptr;
@@ -430,6 +435,12 @@ static int runExporter(int deviceId, const TestConfig& config) {
   MPI_Send(&fabricHandle, sizeof(fabricHandle), MPI_UNSIGNED_CHAR, gPartnerRank, 0,
            MPI_COMM_WORLD);
 
+  // Send the exporter-aligned allocation size so the importer maps exactly the
+  // backed region. The importer's own granularity may differ; re-aligning
+  // locally could exceed the exported allocation and make hipMemMap fail.
+  uint64_t exported_size = alloc.size;
+  MPI_Send(&exported_size, 1, MPI_UINT64_T, gPartnerRank, 0, MPI_COMM_WORLD);
+
   LogPrint(LOG_DEBUG, "Waiting for importer result\n");
   int remote_status = -1;
   MPI_Recv(&remote_status, 1, MPI_INT, gPartnerRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -471,12 +482,21 @@ static int runImporter(int deviceId, const TestConfig& config) {
 
   LogPrint(LOG_DEBUG, "Received fabric handle [%s]\n", fabric_handle_str(fabricHandle));
 
+  // Receive the exporter-aligned allocation size and map exactly that region,
+  // rather than re-aligning total_size with the importer's own granularity.
+  uint64_t exported_size = 0;
+  MPI_Recv(&exported_size, 1, MPI_UINT64_T, gPartnerRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+  LogPrint(LOG_DEBUG, "Received exported allocation size: %zu\n",
+           static_cast<size_t>(exported_size));
+
   hipMemGenericAllocationHandle_t memHandle;
   HIP_CHECK_MPI(
       hipMemImportFromShareableHandle(&memHandle, &fabricHandle, hipMemHandleTypeFabric));
 
   VmmAllocation alloc = {};
-  if (VmmReserveAndMapImported(&alloc, deviceId, memHandle, layout.total_size)) return -1;
+  if (VmmReserveAndMapImported(&alloc, deviceId, memHandle,
+                               static_cast<size_t>(exported_size)))
+    return -1;
 
   int test_result = RunKernelAndVerify(deviceId, alloc.dptr, layout, config);
   LogPrint(LOG_INFO, "Importer verification: %s\n", test_result ? "FAILED" : "PASS");
@@ -506,8 +526,6 @@ static bool detect_multihost(int world_rank, int world_size) {
 /* ========================================================================
  * MPI Environment Init
  *
- * Mirrors mpi_init_env() from the original MPI fabric test.  The two
- * differences from the original:
  *   1. Catch2 owns main(), so we pass nullptr instead of argc/argv
  *      (valid per MPI-2).
  *   2. MPI_Finalize is registered via std::atexit since there is no
@@ -595,15 +613,17 @@ static int test_runner(const TestConfig& config) {
  *    - Host specific (LINUX)
  *    - Device supports VMM and fabric handles (multi-rank)
  *    - MPI runtime available
- *    - HIP_VERSION >= 6.3
+ *    - HIP_VERSION >= 7.13
  */
 HIP_TEST_CASE(Unit_hipExportToFabricHandle_Basic) {
   REQUIRE(mpi_init_env() == 0);
+  if (gWorldSize > 1 && (gWorldSize % 2) != 0) {
+    HIP_SKIP_TEST("This test requires an even MPI world size (rank pairs).");
+  }
   checkVMMSupported(0);
   if (gWorldSize > 1) {
     checkFabricHandleSupported(0);
   }
-
   REQUIRE(test_runner({1024, MEMCPY_BEFORE_KERNEL, MEMCPY_SYNC}) == 0);
 }
 
@@ -623,10 +643,14 @@ HIP_TEST_CASE(Unit_hipExportToFabricHandle_Basic) {
  *    - Host specific (LINUX)
  *    - Device supports VMM and fabric handles (multi-rank)
  *    - MPI runtime available
- *    - HIP_VERSION >= 6.3
+ *    - HIP_VERSION >= 7.13
  */
 HIP_TEST_CASE(Unit_hipExportToFabricHandle_Stress) {
   REQUIRE(mpi_init_env() == 0);
+
+  if (gWorldSize > 1 && (gWorldSize % 2) != 0) {
+    HIP_SKIP_TEST("This test requires an even MPI world size (rank pairs).");
+  }
   checkVMMSupported(0);
   if (gWorldSize > 1) {
     checkFabricHandleSupported(0);

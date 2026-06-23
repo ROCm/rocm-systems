@@ -265,7 +265,9 @@ virtualMemoryManagement:
   Unit_hipMemSetAccess_SegmentsAccess: *level_2
   Unit_hipExportToFabricHandle_Basic:
     <<: *level_2
+    # Requires an MPI-enabled runner (mpirun) to execute.
     disabled: [amd_windows, amd_wsl]
   Unit_hipExportToFabricHandle_Stress:
     <<: *level_2
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    # Requires an MPI-enabled runner (mpirun) to execute.
+    disabled: [amd_windows, amd_wsl]
