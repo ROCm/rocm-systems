@@ -1524,6 +1524,7 @@ def _generate_rocprofsys_config_header() -> list[str]:
         _row("Perf event paranoid:", cap.perf_event_paranoid),
         _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),
         _row("CAP_PERFMON:", cap.cap_perfmon),
+        _row("Perf events usable:", cap.perf_events_usable),
         _row("Ptrace scope:", cap.ptrace_scope),
         _row("Is inside docker:", rocprof_config.capabilities.is_inside_docker),
         _row("PAPI available:", cap.papi_availability),
