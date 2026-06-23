@@ -475,4 +475,6 @@ if(BUILD_TESTS)
     RENAME "CTestTestfile.cmake"
   )
 
+  add_subdirectory(microtest)
+
 endif()
