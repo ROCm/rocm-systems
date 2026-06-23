@@ -24,6 +24,7 @@
             "binaryDir": "${sourceDir}/build/ci",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_COLOR_DIAGNOSTICS": "ON",
                 "ROCPROFSYS_BUILD_CI": "ON",
                 "ROCPROFSYS_BUILD_GTEST": "ON",
                 "ROCPROFSYS_BUILD_TESTING": "ON",

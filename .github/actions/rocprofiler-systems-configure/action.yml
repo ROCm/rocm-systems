@@ -1,8 +1,9 @@
 name: rocprofiler-systems CMake configure
 description: >
-  Configure a rocprofiler-systems build. Uses the ci preset by default so
-  BUILD_CI, BUILD_TESTING, MAX_THREADS, and BUILD_TYPE are already set.
-  Callers supply only the flags that differ per distro or job.
+  Configure a rocprofiler-systems build, then open a CDash TAG for this run.
+  Uses the ci preset by default so BUILD_CI, BUILD_TESTING, MAX_THREADS, and
+  BUILD_TYPE are already set. Callers supply only the flags that differ per
+  distro or job.
 
 inputs:
   build-dir:
@@ -38,4 +39,13 @@ runs:
         echo "Compiler:  $(${CXX:-g++} --version | head -n 1)"
         cmake -B ${{ inputs.build-dir }} --preset ${{ inputs.preset }} \
           ${{ inputs.cmake-flags }} \
-          -DROCPROFSYS_BUILD_NUMBER=${{ inputs.build-number }}
+          -DROCPROFSYS_BUILD_NUMBER=${{ inputs.build-number }} || \
+          { cat "${{ inputs.build-dir }}/Testing/Temporary/LastConfigure"*.log \
+              2>/dev/null; exit 1; }
+        # Open the CDash TAG and capture configure output into Configure.xml.
+        # cmake already ran above so DartConfiguration.tcl exists; -T Configure
+        # re-runs cmake via that config (cache hit, near-instant) and writes
+        # Configure.xml so CDash shows configure warnings/errors.
+        ctest --test-dir ${{ inputs.build-dir }} -T Start -T Configure || \
+          { cat "${{ inputs.build-dir }}/Testing/Temporary/LastConfigure"*.log \
+              2>/dev/null; exit 1; }

@@ -116,6 +116,7 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-systems
+            .github/actions/
             .gitmodules
           submodules: recursive
 
@@ -156,40 +157,32 @@ jobs:
         run: |
           python3 -m pip install --break-system-packages -r requirements.txt
 
+      - name: Extend PATH for ROCm
+        run: |
+          echo "${{ env.ROCM_PATH }}/bin" >> $GITHUB_PATH
+          echo "${{ env.ROCM_PATH }}/llvm/bin" >> $GITHUB_PATH
+          echo "LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
       - name: Configure
         timeout-minutes: 10
-        working-directory: projects/rocprofiler-systems/
-        env:
-          GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-          CMAKE_C_COMPILER_LAUNCHER: ccache
-          CMAKE_CXX_COMPILER_LAUNCHER: ccache
-        run: |
-          # PATH/LD_LIBRARY_PATH must be exported inside the run script;
-          # GitHub Actions env: blocks do not shell-expand $VAR references.
-          export PATH="${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:${PATH}"
-          export LD_LIBRARY_PATH="${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:${LD_LIBRARY_PATH}"
-          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
-          git config --global --add safe.directory "${PWD}"
-          echo "CMake: $(cmake --version | head -n 1)"
-          cmake -B build --preset ci \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
-            -DROCPROFSYS_BUILD_DYNINST=ON \
-            -DROCPROFSYS_BUILD_TBB=ON \
-            -DROCPROFSYS_BUILD_ELFUTILS=ON \
-            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
-            -DROCPROFSYS_USE_PYTHON=ON \
-            -DROCPROFSYS_MAX_THREADS=64 \
-            -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+        uses: ./.github/actions/rocprofiler-systems-configure
+        with:
+          cmake-flags: >-
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+            -DROCPROFSYS_BUILD_DYNINST=ON
+            -DROCPROFSYS_BUILD_TBB=ON
+            -DROCPROFSYS_BUILD_ELFUTILS=ON
+            -DROCPROFSYS_BUILD_LIBIBERTY=ON
+            -DROCPROFSYS_USE_PYTHON=ON
+            -DROCPROFSYS_MAX_THREADS=64
 
       - name: Build
         timeout-minutes: 20
-        working-directory: projects/rocprofiler-systems/
         env:
-          CMAKE_C_COMPILER_LAUNCHER: ccache
-          CMAKE_CXX_COMPILER_LAUNCHER: ccache
-        run: cmake --build build --parallel 16
+          CMAKE_BUILD_PARALLEL_LEVEL: "16"
+        uses: ./.github/actions/rocprofiler-systems-build
 
       - name: Test
         timeout-minutes: 30
@@ -202,6 +195,7 @@ jobs:
             ${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}
 
       - name: Check for leftover buffered files
+        timeout-minutes: 5
         uses: ./.github/actions/rocprofiler-systems-check-leftover
 
       - name: Output logs on failure

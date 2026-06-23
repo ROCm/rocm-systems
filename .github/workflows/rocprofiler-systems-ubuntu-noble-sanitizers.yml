@@ -201,7 +201,7 @@ jobs:
             -DCMAKE_PREFIX_PATH=/opt/rocm
 
       - name: Build
-        timeout-minutes: 40
+        timeout-minutes: 90
         uses: ./.github/actions/rocprofiler-systems-build
 
       - name: Test
@@ -259,6 +259,7 @@ jobs:
           echo "No sanitizer findings detected (only suppression summaries)."
 
       - name: Check for leftover buffered files
+        timeout-minutes: 5
         uses: ./.github/actions/rocprofiler-systems-check-leftover
 
       - name: Test clean up

@@ -8,7 +8,6 @@ runs:
   steps:
     - name: Check for leftover buffered files
       shell: bash
-      timeout-minutes: 5
       run: |
         if find /tmp -maxdepth 1 -name 'buffered*' -print -quit | grep -q .; then
           echo "Error: Found leftover buffered storage files in /tmp:"

@@ -129,6 +129,7 @@ jobs:
         run: ccache -s -v || true
 
       - name: Check for leftover buffered files
+        timeout-minutes: 5
         uses: ./.github/actions/rocprofiler-systems-check-leftover
 
       - name: Post-build

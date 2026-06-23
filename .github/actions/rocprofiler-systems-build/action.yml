@@ -1,13 +1,13 @@
 name: rocprofiler-systems CMake build
-description: Build the configured rocprofiler-systems tree.
+description: >
+  Build the configured rocprofiler-systems tree via ctest -T Build so that
+  build warnings and errors are captured in Build.xml for CDash. On failure
+  the full build log (with terminal colours) is printed before exiting.
 
 inputs:
   build-dir:
     description: CMake binary directory, relative to projects/rocprofiler-systems/
     default: build
-  build-jobs:
-    description: Parallel job count passed to cmake --build
-    default: "$(nproc)"
 
 runs:
   using: composite
@@ -18,4 +18,10 @@ runs:
       env:
         CMAKE_C_COMPILER_LAUNCHER: ccache
         CMAKE_CXX_COMPILER_LAUNCHER: ccache
-      run: cmake --build ${{ inputs.build-dir }} --parallel ${{ inputs.build-jobs }}
+      run: |
+        # Honour a pre-set CMAKE_BUILD_PARALLEL_LEVEL (e.g. GPU CI pins to 16);
+        # fall back to all available cores on every other runner.
+        export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)}"
+        ctest --test-dir ${{ inputs.build-dir }} -T Build || \
+          { cat "${{ inputs.build-dir }}/Testing/Temporary/LastBuild"*.log \
+              2>/dev/null; exit 1; }

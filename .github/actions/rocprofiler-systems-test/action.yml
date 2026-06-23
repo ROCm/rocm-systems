@@ -49,8 +49,11 @@ runs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
+        # -T Test appends to the TAG opened by configure's ctest -T Start so
+        # that Build.xml and Test.xml share the same CDash build entry.
         ctest_args=(
           "--test-dir" "${{ inputs.build-dir }}"
+          "-T" "Test"
           "--output-on-failure"
           "--repeat" "until-pass:${{ inputs.repeat-until-pass }}"
         )
@@ -73,11 +76,12 @@ runs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        cmake \
-          -DBUILD_DIR="${{ inputs.build-dir }}" \
-          -DBUILD_NAME="${{ inputs.cdash-build-name }}" \
-          -DSITE="${HOSTNAME:-GitHub}" \
-          -P cmake/CDashSubmit.cmake || true
+        # ctest -S is required: ctest_start/ctest_submit are CTest dashboard
+        # functions unavailable in cmake -P script mode.
+        export BUILD_DIR="${{ inputs.build-dir }}"
+        export BUILD_NAME="${{ inputs.cdash-build-name }}"
+        export SITE="${HOSTNAME:-GitHub}"
+        ctest -S cmake/CDashSubmit.cmake || true
 
     - name: CDash link
       if: always()
@@ -85,4 +89,7 @@ runs:
       run: |
         NAME="${{ inputs.cdash-build-name }}"
         URL="https://my.cdash.org/index.php?project=rocprofiler-systems&filtercount=1&showfilters=1&field1=buildname&compare1=65&value1=${NAME}"
+        # Step summary: clickable markdown link visible in the job summary page.
         printf '### CDash Results\n[View build on CDash](%s)\n' "${URL}" >> "${GITHUB_STEP_SUMMARY}"
+        # Notice annotation: surfaces the URL at the top of the CI run checks list.
+        echo "::notice title=CDash Results::${URL}"

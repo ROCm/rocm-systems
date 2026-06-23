@@ -7,8 +7,8 @@ description: >
 inputs:
   name-prefix:
     description: >
-      Prefix for the artifact name. Sanitizer jobs pass
-      "ctest-${{ matrix.sanitizer-type }}" to distinguish the three variants.
+      Prefix for the artifact name. Sanitizer jobs pass a sanitizer-type
+      suffix (e.g. "ctest-address") to distinguish the three variants.
     default: ctest
   build-dir:
     description: CMake binary directory, relative to projects/rocprofiler-systems/
