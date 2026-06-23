@@ -69,6 +69,7 @@ struct HwQueue {
 enum class SdmaPacketDialect {
   Legacy,
   Gfx11Plus,
+  Gfx1250,
 };
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
@@ -213,7 +214,12 @@ private:
   }
 
   bool uses_gfx11_plus_sdma_packets() const {
-    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx11Plus;
+    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx11Plus ||
+           sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
+  }
+
+  bool uses_gfx1250_sdma_packets() const {
+    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
   }
 
   GpuMemory *memory_ = nullptr;
@@ -230,7 +236,7 @@ private:
   uint32_t workgroup_id_offset_ = 0;
   uint32_t vgpr_granularity_ = 8;
   bool packed_tid_ = false;
-  // GFX11+ SDMA GCR keeps the same opcode but changes packet size/layout, so
+  // gfx1250 SDMA GCR keeps the same opcode but changes packet size/layout, so
   // the decoder cannot infer this dialect from the packet header alone.
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   uint32_t next_dispatch_id_ = 1;

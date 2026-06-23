@@ -10,6 +10,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
@@ -1060,17 +1061,39 @@ int fcntl(int fd, int cmd, ...) {
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
   assert(InterposerContext::real.ready());
-  if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
-    return remote->mmap(addr, length, prot, flags, offset);
+  // Daemon-backed and local simulated GPU fds own their mmap semantics. Forward
+  // those calls first, then invalidate host VMA snapshots used by GPU page-table
+  // translations when a mapping actually changes.
+  if (auto *remote = InterposerContext::ctx.remote_lookup(fd)) {
+    void *ret = remote->mmap(addr, length, prot, flags, offset);
+    if (ret != MAP_FAILED)
+      rocjitsu::KfdProcess::notify_host_mappings_changed();
+    return ret;
+  }
 
-  if (auto *drv = InterposerContext::ctx.lookup(fd))
-    return drv->mmap(addr, length, prot, flags, offset);
+  if (auto *drv = InterposerContext::ctx.lookup(fd)) {
+    void *ret = drv->mmap(addr, length, prot, flags, offset);
+    if (ret != MAP_FAILED)
+      rocjitsu::KfdProcess::notify_host_mappings_changed();
+    return ret;
+  }
 
   if (InterposerContext::ctx.is_drm(fd)) {
-    if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
-      return remote->mmap(addr, length, prot, flags, offset);
-    if (auto *drv = InterposerContext::ctx.driver())
-      return drv->mmap(addr, length, prot, flags, offset);
+    // Synthetic DRM fds in daemon mode do not have local mmap state; route them
+    // through the remote KFD driver so dma-buf imports get a real host mapping.
+    if (auto *remote =
+            InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
+      void *ret = remote->mmap(addr, length, prot, flags, offset);
+      if (ret != MAP_FAILED)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
+      return ret;
+    }
+    if (auto *drv = InterposerContext::ctx.driver()) {
+      void *ret = drv->mmap(addr, length, prot, flags, offset);
+      if (ret != MAP_FAILED)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
+      return ret;
+    }
   }
 
   if (fd < 0 && (flags & MAP_FIXED) && prot != PROT_NONE && addr) {
@@ -1087,11 +1110,15 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
 #ifdef MADV_POPULATE_WRITE
         InterposerContext::real.madvise(raw, length, MADV_POPULATE_WRITE);
 #endif
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
         return raw;
       }
     }
   }
-  return InterposerContext::real.mmap(addr, length, prot, flags, fd, offset);
+  void *ret = InterposerContext::real.mmap(addr, length, prot, flags, fd, offset);
+  if (ret != MAP_FAILED)
+    rocjitsu::KfdProcess::notify_host_mappings_changed();
+  return ret;
 }
 
 int mprotect(void *addr, size_t length, int prot) {
@@ -1101,7 +1128,10 @@ int mprotect(void *addr, size_t length, int prot) {
     errno = EPERM;
     return -1;
   }
-  return InterposerContext::real.mprotect(addr, length, prot);
+  int ret = InterposerContext::real.mprotect(addr, length, prot);
+  if (ret == 0)
+    rocjitsu::KfdProcess::notify_host_mappings_changed();
+  return ret;
 }
 
 int madvise(void *addr, size_t length, int advice) {
@@ -1116,16 +1146,25 @@ int munmap(void *addr, size_t length) {
   assert(InterposerContext::real.ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
     int ret = remote->munmap(addr, length);
-    if (ret != -ENOENT)
+    if (ret != -ENOENT) {
+      if (ret == 0)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
       return ret;
+    }
   }
   auto *drv = InterposerContext::ctx.driver();
   if (drv) {
     int ret = drv->munmap(addr, length);
-    if (ret != -ENOENT)
+    if (ret != -ENOENT) {
+      if (ret == 0)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
       return ret;
+    }
   }
-  return InterposerContext::real.munmap(addr, length);
+  int ret = InterposerContext::real.munmap(addr, length);
+  if (ret == 0)
+    rocjitsu::KfdProcess::notify_host_mappings_changed();
+  return ret;
 }
 
 // -- libdrm interposition --

@@ -320,12 +320,17 @@ inline float fp8_e4m3_to_f32(uint8_t v) {
 inline uint8_t f32_to_fp8_e4m3(float val) {
   uint32_t f = std::bit_cast<uint32_t>(val);
   uint32_t sign = (f >> 24) & 0x80;
-  int32_t exp = static_cast<int32_t>((f >> 23) & 0xFF) - 127 + 7;
+  if (std::isnan(val))
+    return static_cast<uint8_t>(sign | 0x7F);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  if (f_exp == 0xFF)
+    return static_cast<uint8_t>(sign | 0x7F);
+  int32_t exp = f_exp - 127 + 7;
   uint32_t mant = (f >> 20) & 0x7;
   if (exp <= 0)
     return static_cast<uint8_t>(sign);
-  if (exp >= 15)
-    return static_cast<uint8_t>(sign | 0x7E); // max normal
+  if (exp > 15 || (exp == 15 && mant >= 7))
+    return static_cast<uint8_t>(sign | 0x7F);
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
 }
 
@@ -337,7 +342,7 @@ inline uint8_t f32_to_fp8_e4m3_rne(float val) {
   int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
   uint32_t f_mant = f & 0x7FFFFF;
   if (f_exp == 0xFF)
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   int32_t exp = f_exp - 127 + 7;
   if (exp <= 0) {
     if (exp < -3)
@@ -356,7 +361,7 @@ inline uint8_t f32_to_fp8_e4m3_rne(float val) {
     return static_cast<uint8_t>(sign | (result & 0x7));
   }
   if (exp > 15)
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   uint32_t round_bit = (f_mant >> 19) & 1;
   uint32_t sticky = (f_mant & 0x7FFFF) ? 1 : 0;
   uint32_t mant = (f_mant >> 20) & 0x7;
@@ -366,7 +371,7 @@ inline uint8_t f32_to_fp8_e4m3_rne(float val) {
     exp += 1;
   }
   if (exp > 15 || (exp == 15 && mant >= 7))
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
 }
 
@@ -378,7 +383,7 @@ inline uint8_t f32_to_fp8_e4m3_sr(float val, uint32_t seed) {
   int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
   uint32_t f_mant = f & 0x7FFFFF;
   if (f_exp == 0xFF)
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   int32_t exp = f_exp - 127 + 7;
   if (exp <= 0) {
     uint32_t full_mant = f_mant | 0x800000;
@@ -396,7 +401,7 @@ inline uint8_t f32_to_fp8_e4m3_sr(float val, uint32_t seed) {
     return static_cast<uint8_t>(sign | (result & 0x7));
   }
   if (exp > 15)
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   uint32_t trunc_bits = f_mant & 0xFFFFF;
   uint32_t random_add = seed >> 12;
   uint32_t mant = (f_mant >> 20) & 0x7;
@@ -408,7 +413,7 @@ inline uint8_t f32_to_fp8_e4m3_sr(float val, uint32_t seed) {
     }
   }
   if (exp > 15 || (exp == 15 && mant >= 7))
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
 }
 

@@ -57,13 +57,11 @@ public:
   }
 
   void read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid = 0) {
-    for (uint32_t i = 0; i < size; ++i)
-      dst[i] = memory_->read8(addr + i, vmid);
+    memory_->read_bytes(addr, dst, size, vmid);
   }
 
   void write(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid = 0) {
-    for (uint32_t i = 0; i < size; ++i)
-      memory_->write8(addr + i, src[i], vmid);
+    memory_->write_bytes(addr, src, size, vmid);
   }
 
   /// @brief Read a 32-bit dword (little-endian).

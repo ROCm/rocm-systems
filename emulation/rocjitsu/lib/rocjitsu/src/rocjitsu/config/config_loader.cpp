@@ -460,13 +460,17 @@ std::unordered_map<std::string, FactoryFn> &factories() {
         gran = 8;
       cp->set_vgpr_granularity(gran);
       bool packed = (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-                     arch == ROCJITSU_CODE_ARCH_GFX1250);
+                     arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                     arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250);
       cp->set_packed_tid(packed);
       const bool gfx11_plus_sdma =
           arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
           arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
-      cp->set_sdma_packet_dialect(gfx11_plus_sdma ? amdgpu::SdmaPacketDialect::Gfx11Plus
-                                                  : amdgpu::SdmaPacketDialect::Legacy);
+      if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+        cp->set_sdma_packet_dialect(amdgpu::SdmaPacketDialect::Gfx1250);
+      else
+        cp->set_sdma_packet_dialect(gfx11_plus_sdma ? amdgpu::SdmaPacketDialect::Gfx11Plus
+                                                    : amdgpu::SdmaPacketDialect::Legacy);
       return cp;
     };
 
