@@ -5689,12 +5689,6 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 142
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-          block: SQ
-          event: 256
     - name: SQ_LDS_IDX_ACTIVE
       description: Number of cycles LDS (local data store) is used for indexed 
         (non-direct,non-interpolation) operations. This value is returned on a per-SE (aggregate of 
@@ -5719,12 +5713,6 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 147
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-          block: SQ
-          event: 261
     - name: SQ_LDS_MEM_VIOLATIONS
       description: Number of threads that have a memory violation in the LDS (local data store). 
         This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
@@ -12439,46 +12427,6 @@ rocprofiler-sdk:
             - gfx1151
             - gfx1152
           expression: reduce(CPC_MEC_INSTR_CACHE_MISS,sum)
-    - name: CPC_STAT_BUSY
-      description: CPC Busy.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-          block: CPC
-          event: 25
-    - name: CPC_STAT_IDLE
-      description: CPC Idle.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-          block: CPC
-          event: 26
-    - name: CPC_STAT_STALL
-      description: CPC Stalled.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-          block: CPC
-          event: 27
-    - name: CPC_TCIU_BUSY
-      description: CPC TCIU interface Busy.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-          block: CPC
-          event: 28
     - name: CPC_TCIU_READ_REQUEST_SENT
       description: ''
       properties: []
@@ -12517,16 +12465,6 @@ rocprofiler-sdk:
             - gfx1151
             - gfx1152
           expression: reduce(CPC_TCIU_WRITE_REQUEST_SENT,sum)
-    - name: CPC_UTCL2IU_BUSY
-      description: CPC UTCL2 interface Busy.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-          block: CPC
-          event: 30
     - name: GCEA_ALWAYS_COUNT
       description: ''
       properties: []
