@@ -91,9 +91,9 @@ utf8_to_wide(const std::string& src)
 }
 }  // namespace
 
-// Concrete dispatch table. The PFND3DKMT_* typedefs come from the vendored WDK
-// header and carry the APIENTRY (__stdcall) calling convention - using a plain
-// (*)() here would be an ABI bug on x86 and a type-safety hole on x64.
+// Concrete dispatch table. Function pointers use the PFND3DKMT_* typedefs from
+// the vendored WDK header so the APIENTRY (__stdcall) calling convention is
+// preserved correctly - a raw void(*)() would drop the convention annotation.
 struct d3dkmt_loader::impl_t
 {
     ::HMODULE                    hmodule       = nullptr;
