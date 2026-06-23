@@ -40,10 +40,11 @@ jobs:
           "clang++",
           "g++"
         ]
+      # C++20 is the production standard. C++23 is a forward-compat smoke test
+      # run once via MATRIX_INCLUDE (ubuntu + amdclang++ + 7.2.2), not fanned out.
       CXX_STANDARD: >-
         [
-          20,
-          23
+          20
         ]
       # Note: If adding distros or ROCm versions, ensure they have been properly excluded.
       SUPPORTED_PLATFORMS: >-
@@ -63,14 +64,15 @@ jobs:
       # through to GHA's strategy.matrix include/exclude keys so non-rectangular
       # combinations can be expressed without abandoning the base cross-product.
       MATRIX_INCLUDE: >-
-        []
+        [
+          {"supported_platforms": "ubuntu", "rocm_versions": "7.2.2", "cxx_compiler": "amdclang++", "cxx_standard": 23}
+        ]
       # 7.13.0 and nightly are ubuntu-only targets. They live in the base
       # ROCM_VERSIONS axis and are removed from every other distro via
       # MATRIX_EXCLUDE below. This is cleaner than specifying the full
       # combination of CI parameters in include as the matrix axes grow.
       MATRIX_EXCLUDE: >-
         [
-          {"supported_platforms": "rocky8", "cxx_standard": 23},
           {"supported_platforms": "rocky", "rocm_versions": "7.13.0"},
           {"supported_platforms": "rocky", "rocm_versions": "nightly"},
           {"supported_platforms": "rocky8", "rocm_versions": "7.13.0"},
