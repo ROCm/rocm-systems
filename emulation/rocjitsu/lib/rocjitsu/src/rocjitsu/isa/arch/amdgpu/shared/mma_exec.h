@@ -711,7 +711,9 @@ void wmma_simd_matmul(uint32_t M, uint32_t N, uint32_t K, uint32_t W, uint32_t s
 /// to physical registers. On wave32, each logical VGPR spans two physical
 /// VGPRs. Without stride adjustment, read_vgpr(base+V, lane>=32) aliases
 /// with read_vgpr(base+V+1, lane%32), corrupting data from the next logical
-/// VGPR. The fix strides the logical VGPR offset by 2 on wave32.
+/// VGPR. The fix strides the logical VGPR offset by 64/wf_size on wave32.
+///
+/// Returns @p loc unchanged when wf_size >= 64.
 inline InputLoc physicalize_loc(const InputLoc &loc, uint32_t wf_size) {
   if (wf_size >= 64)
     return loc;
@@ -721,6 +723,7 @@ inline InputLoc physicalize_loc(const InputLoc &loc, uint32_t wf_size) {
 }
 
 /// Adjust a GFX9 OutputLoc for wave32 physical VGPR addressing.
+/// No-op when wf_size >= 64.
 inline OutputLoc physicalize_out(const OutputLoc &loc, uint32_t wf_size) {
   if (wf_size >= 64)
     return loc;
@@ -729,6 +732,7 @@ inline OutputLoc physicalize_out(const OutputLoc &loc, uint32_t wf_size) {
 }
 
 /// Adjust a GFX9 PackedOutputLoc for wave32 physical VGPR addressing.
+/// No-op when wf_size >= 64.
 inline PackedOutputLoc physicalize_packed_out(const PackedOutputLoc &loc, uint32_t wf_size) {
   if (wf_size >= 64)
     return loc;
@@ -2300,12 +2304,12 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
                      ExtractA ea, ExtractB eb, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
                      uint32_t blgp, uint32_t scale_a_base, uint32_t scale_b_base) {
   constexpr uint32_t BLOCK_K = 32;
+  const uint32_t wf = cu.wf_size();
   struct Result {
     uint32_t reg;
     uint32_t lane;
     uint32_t val;
   };
-  const uint32_t wf = cu.wf_size();
   std::vector<Result> results;
   results.reserve(M * N * B);
   uint32_t num_blocks = (K + BLOCK_K - 1) / BLOCK_K;

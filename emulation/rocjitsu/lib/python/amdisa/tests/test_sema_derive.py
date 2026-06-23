@@ -177,6 +177,14 @@ class TestDeriveScalarBinop:
         cpp = lower_sema_block(block)
         assert 'write_scc' in cpp
 
+    def test_signed_mul_uses_unsigned_result_slot(self):
+        sem = _FakeSem('S_MUL_I32', 'scalar_binop', 'mul', 'i32')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+
+        assert 'uint32_t result' in cpp
+        assert re.search(r'\bint32_t\s+result\b', cpp) is None
+
     def test_signed_co_uses_unsigned_carry(self):
         sem = derive_semantics('S_ADD_CO_I32', 'ENC_SOP2')
         assert sem.sets_scc == 'carry'
@@ -994,6 +1002,14 @@ class TestDeriveVectorBinop:
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.SHL in all_kinds
 
+    def test_i24_mul_lowers_through_unsigned_helper(self):
+        sem = _FakeSem('V_MUL_I32_I24', 'vector_binop', 'mul_i24', 'i24')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+
+        assert '::rocjitsu::amdgpu::mul_i24_u32' in cpp
+        assert 'a * b' not in cpp
+
     def test_min_max_use_call(self):
         for op in ['min', 'max']:
             sem = _FakeSem(f'V_{op.upper()}_F32', 'vector_binop', op, 'f32')
@@ -1098,6 +1114,32 @@ class TestDeriveVectorTernary:
             assert '| (pack(' in cpp
             assert ' << 8);' in cpp
             assert f'{op}(' not in cpp
+
+    def test_lshl_add_lowers_through_masked_helper(self):
+        sem = _FakeSem('V_LSHL_ADD_U32', 'vector_ternary', 'lshl_add', 'u32')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+
+        assert '::rocjitsu::amdgpu::lshl_masked' in cpp
+        assert (
+            'inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)' not in cpp
+        )
+
+    def test_i24_mad_lowers_through_unsigned_helper(self):
+        sem = _FakeSem('V_MAD_I32_I24', 'vector_ternary', 'mad_i24', 'i24')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+
+        assert '::rocjitsu::amdgpu::mad_i24_u32' in cpp
+        assert 'a * b' not in cpp
+
+    def test_signed_bfe_keeps_braced_one_literal(self):
+        sem = _FakeSem('V_BFE_I32', 'vector_ternary', 'bfe_i', 'i32')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+
+        assert 'uint32_t{1}' in cpp
+        assert 'uint32_tstatic_cast' not in cpp
 
 
 class TestDeriveVectorCmp:

@@ -32,12 +32,12 @@ function(ais_add_sanitizers target)
         target_compile_options(${target} PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:-fsanitize=${SANITIZER_LIST}>
             $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize=unsigned-integer-overflow>
-            $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize-recover=integer>
+            $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize-recover=${SANITIZER_LIST}>
         )
         target_link_options(${target} PRIVATE
             -Xarch_host -fsanitize=${SANITIZER_LIST}
             -Xarch_host -fno-sanitize=unsigned-integer-overflow
-            -Xarch_host -fno-sanitize-recover=integer
+            -Xarch_host -fno-sanitize-recover=${SANITIZER_LIST}
         )
     endif()
 

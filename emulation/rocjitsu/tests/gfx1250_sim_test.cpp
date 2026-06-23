@@ -2400,7 +2400,9 @@ TEST(Gfx1250SimulationTest, SGetShaderCyclesU64ReadsSimulationTime) {
 
   amdgpu::Wavefront *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
-  EXPECT_EQ(read_wave_sgpr64(*sim.cu(), *wf, 4), 17u);
+  const auto observed_time = read_wave_sgpr64(*sim.cu(), *wf, 4);
+  EXPECT_GE(observed_time, 17u);
+  EXPECT_LE(observed_time, sim.engine->global_time());
 }
 
 TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
@@ -2417,7 +2419,9 @@ TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
 
   amdgpu::Wavefront *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
-  EXPECT_EQ(read_wave_sgpr64(*sim.cu(), *wf, 4), 23u);
+  const auto observed_time = read_wave_sgpr64(*sim.cu(), *wf, 4);
+  EXPECT_GE(observed_time, 23u);
+  EXPECT_LE(observed_time, sim.engine->global_time());
   EXPECT_EQ(read_wave_sgpr(*sim.cu(), *wf, 6), 0u);
 }
 

@@ -989,11 +989,24 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
     if (pEnable != 0 && p == NCCL_PROTO_LL128) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #if defined(ENABLE_LL128)
+      // protoEnable[LL128] starts at 2 (tentative default-on); explicit
+      // NCCL_PROTO=LL128 from the user sets it to 1. Preserve that signal so
+      // the path/arch/ll128Enabled gate below doesn't silently downgrade a
+      // user-requested LL128 (e.g. multi-node MNNVL where typeInter > PXB).
+      const bool userOptedInLL128 = (pEnable == 1);
+      const char* gcn = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
+      const bool archOk = IsArchMatch(gcn, "gfx90a") ||
+                          IsArchMatch(gcn, "gfx942") ||
+                          IsArchMatch(gcn, "gfx950") ||
+                          IsArchMatch(gcn, "gfx1250");
       // Enable LL128 by default only on gfx90a with available tuning table
       pEnable = (graphs[a]->typeInter <= PATH_PXB) && graphs[a]->typeIntra <= PATH_NVL &&
-        ((IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx90a") ||
-          IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
-          IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) && comm->topo->ll128Enabled) ? 1 : 0;
+        (archOk && comm->topo->ll128Enabled) ? 1 : 0;
+      // Restore an explicit NCCL_PROTO=LL128 only when the arch supports LL128
+      // (the path-check is what we want to override, not the arch gate); on
+      // unsupported archs let dispatch fall back rather than failing later in
+      // rcclIsArchSupportedForFunc.
+      if (pEnable == 0 && userOptedInLL128 && archOk) pEnable = 1;
 #else
       pEnable = 0;
 #endif

@@ -395,6 +395,29 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
   return result.memory;
 }
 
+amd::Memory* MemObjMap::FindOverlap(const void* ptr, size_t size) {
+  if (size == 0) {
+    return nullptr;
+  }
+  std::shared_lock lock(AllocatedLock_);
+
+  uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
+  uintptr_t end = start + size;  // exclusive
+
+  auto it = MemObjMap_.upper_bound(end - 1);
+  if (it != MemObjMap_.begin()) {
+    --it;
+    amd::Memory* mem = it->second;
+    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                          ? sizeof(mem->getUserData().hsa_handle)
+                          : mem->getSize();
+    if ((it->first + mem_size) > start) {
+      return mem;
+    }
+  }
+  return nullptr;
+}
+
 amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
   std::unique_lock lock(AllocatedLock_);
   uintptr_t key = reinterpret_cast<uintptr_t>(k);
