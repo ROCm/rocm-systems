@@ -26,6 +26,7 @@
 #include <vector>
 #include <algorithm>
 #include <mutex>
+#include <unistd.h>   // _exit (async-signal-safe abort from watchdog)
 
 // Thread-local sequence ID — set by dispatch_event before calling any handler.
 // Kernel-launch handlers use this to wait for their submission turn and then
