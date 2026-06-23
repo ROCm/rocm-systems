@@ -443,6 +443,29 @@ def test_gfx1250_wmma_i32_iu4_emits_executor():
     assert 'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 4, dst, src0_base,' in body
 
 
+def test_cdna3_fp8_mfma_uses_fnuz_helper_variant():
+    inst = Instruction('V_MFMA_F32_16X16X32_FP8_FP8', 'ENC_VOP3P_MFMA', 0, [])
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna3')
+
+    assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' in body
+
+
+def test_cdna3_fp8_smfmac_uses_fnuz_readers():
+    inst = Instruction('V_SMFMAC_F32_16X16X64_FP8_BF8', 'ENC_VOP3P_MFMA', 0, [])
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna3')
+
+    assert 'amdgpu::smfmac_read_fp8_fnuz' in body
+    assert 'amdgpu::smfmac_read_bf8_fnuz' in body
+
+
+def test_cdna4_fp8_mfma_keeps_ocp_helper_variant():
+    inst = Instruction('V_MFMA_F32_16X16X32_FP8_FP8', 'ENC_VOP3P_MFMA', 0, [])
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna4')
+
+    assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true>(' in body
+    assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' not in body
+
+
 def test_div_scale_uses_signed_tiny_exponent_threshold():
     body = gen_vector_div_scale(
         ['vdst', 'sdst'], ['src0', 'src1', 'src2'], 'f32', is_vop3=True

@@ -37,6 +37,18 @@ def _f8_bools(input_type: str) -> tuple[str, str]:
     )
 
 
+def _cdna3_fnuz_name(arch_name: str, name: str) -> str:
+    """Select CDNA3's FNUZ f8 helpers while preserving OCP helper names elsewhere."""
+    if arch_name == 'cdna3' and name in (
+        'amdgpu::extract_fp8',
+        'amdgpu::extract_bf8',
+        'amdgpu::smfmac_read_fp8',
+        'amdgpu::smfmac_read_bf8',
+    ):
+        return f'{name}_fnuz'
+    return name
+
+
 def _gfx1250_wmma_spec(
     result_type: str, input_type: str, M: int, N: int, K: int
 ) -> str | None:
@@ -145,8 +157,11 @@ def gen_mfma(
             'BF16': 'amdgpu::smfmac_read_bf16',
         }
         _SMFMAC_FP8_READ = {
-            'FP8': 'amdgpu::smfmac_read_fp8',
-            'BF8': 'amdgpu::smfmac_read_bf8',
+            key: _cdna3_fnuz_name(arch_name, value)
+            for key, value in {
+                'FP8': 'amdgpu::smfmac_read_fp8',
+                'BF8': 'amdgpu::smfmac_read_bf8',
+            }.items()
         }
         L = []
         L.append(f'  auto &cu = wf.cu();')
@@ -515,8 +530,8 @@ def gen_mfma(
             L.append(f'    throw util::UnimplementedInst(mnemonic());')
             return '\n'.join(L)
 
-        ea = _EXTRACT_A.get(input_type, 'amdgpu::extract_f32')
-        eb = _EXTRACT_B.get(input_type, 'amdgpu::extract_f32')
+        ea = _cdna3_fnuz_name(arch, _EXTRACT_A.get(input_type, 'amdgpu::extract_f32'))
+        eb = _cdna3_fnuz_name(arch, _EXTRACT_B.get(input_type, 'amdgpu::extract_f32'))
         # CDNA1-4 VOP3P_MFMA encoding has cbsz/abid/blgp fields for
         # A-matrix broadcast and B-matrix lane permutation. RDNA does
         # not have MFMA (only WMMA), so these fields don't exist.
@@ -687,8 +702,9 @@ def gen_mfma(
             s1b = f'amdgpu::src_base(vb, {s1}.encoding_value_)'
             if N % 16 == 0 and input_type in _F8_FIXED and has_blgp:
                 a_fp8, b_fp8 = _f8_bools(input_type)
+                fnuz = ', true' if arch == 'cdna3' else ''
                 L.append(
-                    f'  amdgpu::exec_f32_mfma_f8_spec<{M}, {N}, {K}, {a_fp8}, {b_fp8}>('
+                    f'  amdgpu::exec_f32_mfma_f8_spec<{M}, {N}, {K}, {a_fp8}, {b_fp8}{fnuz}>('
                     f'cu, dst, {s0b}, {s1b}, s2, const_acc, {cbsz}, {abid}, {blgp});'
                 )
             elif N % 16 == 0 and input_type in _MFMA_F32_SPEC and has_blgp:
