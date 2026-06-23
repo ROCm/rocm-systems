@@ -716,12 +716,15 @@ class MetricCommands:
                                             self.logger, clk, clock_unit
                                         )
 
-                        # GFX clock lock status from partition metrics
-                        gfxclk_lock_status = gpu_partition_metrics.get("gfxclk_lock_status", 0)
-                        if gfxclk_lock_status != "N/A" and gfxclk_lock_status != 0:
+                        # GFX clock lock status from partition metrics; annotate only
+                        # slots that carry a clock value so an empty skeleton entry never
+                        # gets a lock state. A missing key is unknown ("N/A"); 0 is a valid
+                        # "all unlocked" reading.
+                        gfxclk_lock_status = gpu_partition_metrics.get("gfxclk_lock_status", "N/A")
+                        if gfxclk_lock_status != "N/A":
                             for idx in range(amdsmi_interface.AMDSMI_MAX_NUM_GFX_CLKS):
                                 gfx_index = f"gfx_{idx}"
-                                if gfx_index in clocks:
+                                if gfx_index in clocks and clocks[gfx_index]["clk"] != "N/A":
                                     if (gfxclk_lock_status >> idx) & 1:
                                         clocks[gfx_index]["clk_locked"] = "ENABLED"
                                     else:
@@ -773,10 +776,11 @@ class MetricCommands:
                             }
 
                         # Add AID-level clock data (VCLK, DCLK, SOCCLK per AID)
-                        # Determine number of AIDs based on VCLK array length
+                        # Iterate every VCLK position; per-field "N/A" guards skip holes,
+                        # so counting only non-"N/A" entries would drop trailing valid AIDs
                         num_aids = 0
                         if isinstance(current_vclk_clocks, list) and current_vclk_clocks != "N/A":
-                            num_aids = len([x for x in current_vclk_clocks if x != "N/A"])
+                            num_aids = len(current_vclk_clocks)
 
                         # Get clock limits for AID clocks
                         try:
@@ -883,23 +887,27 @@ class MetricCommands:
                                             self.logger, gfx_clk_data, clock_unit
                                         )
 
-                            # GFX min/max limits (same for all XCPs)
-                            if gfx_limits:
-                                xcp_clocks["gfx_min_clk"] = self.helpers.unit_format(
-                                    self.logger, gfx_limits["min_clk"], clock_unit
-                                )
-                                xcp_clocks["gfx_max_clk"] = self.helpers.unit_format(
-                                    self.logger, gfx_limits["max_clk"], clock_unit
-                                )
+                            # Only annotate limits/lock for an XCP that reports a real gfx
+                            # clock; otherwise the entry would carry limits with no value
+                            if "gfx_clk" in xcp_clocks:
+                                # GFX min/max limits (same for all XCPs)
+                                if gfx_limits:
+                                    xcp_clocks["gfx_min_clk"] = self.helpers.unit_format(
+                                        self.logger, gfx_limits["min_clk"], clock_unit
+                                    )
+                                    xcp_clocks["gfx_max_clk"] = self.helpers.unit_format(
+                                        self.logger, gfx_limits["max_clk"], clock_unit
+                                    )
 
-                            # GFX clock lock status for this XCP's gfx domain
-                            if gfxclk_lock_status != "N/A" and gfxclk_lock_status != 0:
-                                is_locked = (gfxclk_lock_status >> xcp_idx) & 1
-                                xcp_clocks["gfx_clk_locked"] = (
-                                    "ENABLED" if is_locked else "DISABLED"
-                                )
-                            else:
-                                xcp_clocks["gfx_clk_locked"] = "DISABLED"
+                                # GFX clock lock status for this XCP's gfx domain; missing
+                                # status is unknown ("N/A"), 0 is a valid "unlocked" reading
+                                if gfxclk_lock_status != "N/A":
+                                    is_locked = (gfxclk_lock_status >> xcp_idx) & 1
+                                    xcp_clocks["gfx_clk_locked"] = (
+                                        "ENABLED" if is_locked else "DISABLED"
+                                    )
+                                else:
+                                    xcp_clocks["gfx_clk_locked"] = "N/A"
 
                             if xcp_clocks:
                                 clocks[xcp_key] = xcp_clocks

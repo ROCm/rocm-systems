@@ -59,6 +59,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.
+  - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
+  - Human-readable output is unchanged, since it uppercases all keys.
+
 - **Fixed `amd-smi static --clock` csv and human_readable formatting to output frequency 
 levels as strings instead of dictionary objects**.  
 
