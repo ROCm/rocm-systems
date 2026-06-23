@@ -35,7 +35,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  # Only allow one run at a time for 'pull_request' events.
+  # Allow multiple runs for 'push' and 'workflow_dispatch'.
+  #
+  # `github.workflow`: each workflow gets its own concurrency group
+  # `github.head_ref`: the branch name (only defined for pull_request events)
+  # `github.run_id`  : fallback, unique for each run
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
