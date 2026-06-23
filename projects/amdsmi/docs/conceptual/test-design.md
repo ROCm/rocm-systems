@@ -400,7 +400,9 @@ tests/python/
 │
 ├── integration_test.py               # Runner: discovers and runs functional/ tests
 ├── cli_unit_test.py                  # Runner: discovers and runs cli/ tests
-└── unit_tests.py                     # Runner: discovers and runs unit/ tests
+├── unit_tests.py                     # Runner: discovers and runs unit/ tests
+├── CMakeLists.txt                    # Installs this tree into the python_unittest/ path
+└── README.md                         # Prerequisites + pointer to this design doc
 ```
 
 ### Naming conventions
@@ -486,18 +488,22 @@ one way — **CLI tests are Python-only**, and the **read-only/read-write split 
 
 ### CMake integration
 
-`tests/python_unittest/CMakeLists.txt` installs the `tests/python/` source tree into the
-`python_unittest/` install path, so the install location stays consistent with the original:
+`tests/python/CMakeLists.txt` installs its own `tests/python/` tree into the legacy
+`python_unittest/` install path. The source directory was consolidated into `tests/python/`,
+but the install location is unchanged, so existing invocations keep working:
 
 ```cmake
 install(
-    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../python/
+    DIRECTORY ./
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests/python_unittest/
     COMPONENT ${TESTS_COMPONENT}
     USE_SOURCE_PERMISSIONS
-    FILES_MATCHING PATTERN "*.py"
+    FILES_MATCHING
+    PATTERN "*.py"
 )
 ```
+
+The top-level `CMakeLists.txt` wires this in with `add_subdirectory("tests/python")`.
 
 ## Migration reference
 
