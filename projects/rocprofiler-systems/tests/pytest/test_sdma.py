@@ -50,11 +50,13 @@ class TestSDMA(RocprofsysTest):
     )
     def test_usage(self, mode, sdma_env, sdma_rules):
         """Run sdma-test with sdma_usage and validate Perfetto + ROCPD for SDMA tracks/values."""
+        # sdma-test is a host-side hipMemcpy benchmark with no device kernels,
+        # so the binary embeds no gfx offload bundle; skip the target-arch check
+        # (it would always report no supported architectures).
         result = self.run_test(
             mode,
             "sdma-test",
             env=sdma_env,
-            check_target_arch=True,
             run_args=["-n", "2", "-s", "64"],
         )
         self.assert_regex(result)
