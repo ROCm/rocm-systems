@@ -195,8 +195,32 @@ class HIPAllocator : public MemoryAllocator {
     }
 
     /*
-     * Allocated via HIP VMM: hipMemRetainAllocationHandle only succeeds for
-     * memory created with hipMemCreate/hipMemMap.
+     * Confirm the pointer is HIP VMM memory before doing anything else.
+     * hipMemRetainAllocationHandle can fault on non-VMM pointers (e.g.
+     * hipMalloc or host memory), whereas hipMemGetAccess fails gracefully with
+     * an error, so use it as a safe gate.
+     */
+    hipMemLocation location = {};
+    location.type = hipMemLocationTypeDevice;
+    location.id = device_id;
+    unsigned long long access_flags = 0;
+    if (hipMemGetAccess(&access_flags, &location, const_cast<void *>(ptr)) !=
+        hipSuccess) {
+      return false;
+    }
+
+    /*
+     * This PE's device must have read/write access to the buffer; RMA
+     * (puts/gets) would otherwise fault. VMM memory can be mapped without
+     * hipMemSetAccess having been called for this device, in which case the
+     * call above still succeeds but reports no access.
+     */
+    if (access_flags != hipMemAccessFlagsProtReadWrite) {
+      return false;
+    }
+
+    /*
+     * Now safe to retain the backing VMM handle to inspect its properties.
      */
     hipMemGenericAllocationHandle_t handle;
     if (hipMemRetainAllocationHandle(&handle, const_cast<void *>(ptr)) !=
@@ -208,11 +232,6 @@ class HIPAllocator : public MemoryAllocator {
     hipError_t err = hipMemGetAllocationPropertiesFromHandle(&prop, handle);
     (void)hipMemRelease(handle);
     if (err != hipSuccess) {
-      return false;
-    }
-
-    /* Right memory type: must be device (VMM) memory. */
-    if (prop.location.type != hipMemLocationTypeDevice) {
       return false;
     }
 
