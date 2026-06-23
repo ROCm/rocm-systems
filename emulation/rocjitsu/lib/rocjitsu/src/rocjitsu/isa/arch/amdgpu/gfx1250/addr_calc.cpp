@@ -4,6 +4,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -104,7 +105,13 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
       vaddr =
           (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
     }
-    d.per_lane_addr[lane] = saddr_val + vaddr + offset;
+    uint64_t addr = saddr_val + vaddr + offset;
+    uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
+    if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi) {
+      uint64_t lane_base = wf.scratch_base() + static_cast<uint64_t>(lane) * wf.scratch_lane_size();
+      addr = lane_base + (addr & 0xFFFFFFFFULL);
+    }
+    d.per_lane_addr[lane] = addr;
   }
 }
 
@@ -199,24 +206,24 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
     } else if (inst.offen) {
       voffset = cu.read_vgpr(vbase, lane);
     }
-    int64_t total_offset = static_cast<int64_t>(static_cast<uint64_t>(index) * stride) +
-                           static_cast<int64_t>(voffset) + ioff + soffset_val;
-    const int64_t offset_part = static_cast<int64_t>(voffset) + ioff;
-    bool oob = total_offset < 0 || offset_part < 0;
+    uint32_t offset_part = amdgpu::addr_calc::buffer_offset_part(voffset, ioff);
+    uint64_t total_offset =
+        amdgpu::addr_calc::buffer_total_offset(index, stride, offset_part, soffset_val);
+    bool oob = false;
     if (!oob && num_records != 0) {
       if (oob_raw) {
-        oob = static_cast<uint64_t>(offset_part) >= num_records;
+        oob = offset_part >= num_records;
       } else if (stride > 0) {
         oob = index >= num_records;
       } else {
-        oob = static_cast<uint64_t>(offset_part) >= num_records;
+        oob = offset_part >= num_records;
       }
     }
     if (oob) {
       d.lane_mask &= ~(1ULL << lane);
       d.per_lane_addr[lane] = 0;
     } else {
-      d.per_lane_addr[lane] = (base_addr + static_cast<uint64_t>(total_offset)) & 0xFFFFFFFFFFFFULL;
+      d.per_lane_addr[lane] = (base_addr + total_offset) & 0xFFFFFFFFFFFFULL;
     }
   }
 }
