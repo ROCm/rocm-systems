@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
 """Tests for main(): the argument parsing, output, and exit-code contract."""
 
 # The stub_checks fixture is requested by name (pytest dependency injection),

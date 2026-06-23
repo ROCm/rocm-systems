@@ -111,6 +111,7 @@ def _register_handlers() -> None:
         gen_mad_mix_lo_hi,
         gen_mad_mix_bf16,
         gen_dot2,
+        gen_dot2_true16,
         gen_dot4,
         gen_dot8,
     )
@@ -309,6 +310,8 @@ def _register_handlers() -> None:
     DISPATCH['dot2'] = lambda c: gen_dot2(
         c.dst_ops, c.src_ops, c.cls, opsel_exprs=c.opsel_exprs
     )
+    DISPATCH['dot2_f16_f16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
+    DISPATCH['dot2_bf16_bf16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
     DISPATCH['dot4'] = lambda c: gen_dot4(c.dst_ops, c.src_ops, c.cls)
     DISPATCH['dot8'] = lambda c: gen_dot8(c.dst_ops, c.src_ops, c.cls)
 

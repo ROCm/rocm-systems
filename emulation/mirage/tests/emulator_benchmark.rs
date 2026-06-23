@@ -130,8 +130,7 @@ fn report_path() -> PathBuf {
     std::env::var("MIRAGE_BENCH_REPORT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("target/emulator-benchmark/report.md")
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/emulator-benchmark/report.md")
         })
 }
 
@@ -259,9 +258,7 @@ fn benchmark_emulators_and_write_report() {
         let skip = match row {
             None => Some("not present in the registry".to_string()),
             Some(r) if !r.installed => Some("not installed".to_string()),
-            Some(r) if !r.support.supported => {
-                Some(format!("unsupported: {}", r.support.reason))
-            }
+            Some(r) if !r.support.supported => Some(format!("unsupported: {}", r.support.reason)),
             Some(_) => None,
         };
         if let Some(reason) = skip {
@@ -336,7 +333,8 @@ fn benchmark_emulators_and_write_report() {
     );
     for r in ran {
         assert_eq!(
-            r.correct, r.runs,
+            r.correct,
+            r.runs,
             "emulator `{}` produced an incorrect result in {}/{} runs \
              (accuracy regression)",
             r.name,
@@ -468,7 +466,11 @@ fn render_report(results: &[EmulatorResult], n: usize) -> String {
         "| Emulator | Min | Mean | Median | Max | Stddev | Overhead (median) | Workload Δ (median) |"
     )
     .unwrap();
-    writeln!(s, "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |").unwrap();
+    writeln!(
+        s,
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+    )
+    .unwrap();
     for r in results {
         match (&r.workload, &r.overhead) {
             (Some(w), Some(o)) => {

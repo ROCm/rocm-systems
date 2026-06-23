@@ -15,6 +15,10 @@ on:
       - 'projects/hipfile/**/ais-check'
       - '.github/workflows/hipfile-pylint.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

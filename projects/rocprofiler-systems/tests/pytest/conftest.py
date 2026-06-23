@@ -295,6 +295,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "no_docker",
         "shmem",
         "nic",
+        "ainic",
     ]
 
     # Informational markers, only used for test labeling
@@ -575,6 +576,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = nic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
+        if "ainic" in item.keywords:
+            _msg = ainic_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
         if "kfd" in item.keywords or "unified_memory" in item.keywords:
             _msg = kfd_unavailable_reason(rocprof_config)
             if _msg is not None:
@@ -803,6 +808,16 @@ def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     if caps.papi_nic_events is not None and caps.perf_event_paranoid <= 2:
         return None
     return "Requires PAPI network events and perf_event_paranoid <= 2 to be available"
+
+
+def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    """Check if AI NIC tracking is available.
+
+    Requires ``amd-smi static`` to report at least one NETDEV entry.
+    """
+    if not rocprof_config.capabilities.ai_nic_devices:
+        return "No AI NIC devices found (amd-smi static reports no NETDEV entries)"
+    return None
 
 
 def kfd_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
@@ -1513,13 +1528,13 @@ def _generate_rocprofsys_config_header() -> list[str]:
         _row("Ptrace scope:", cap.ptrace_scope),
         _row("Is inside docker:", rocprof_config.capabilities.is_inside_docker),
         _row("PAPI available:", cap.papi_availability),
+        _row("AI NIC devices:", cap.ai_nic_devices),
         _row("Default NIC:", cap.default_nic),
         *(
             lambda evts: (
-                [_subrow("PAPI NIC events:", evts[0])]
-                + [_subrow("", e) for e in evts[1:]]
+                [_row("PAPI NIC events:", evts[0])] + [_row("", e) for e in evts[1:]]
                 if evts
-                else [_subrow("PAPI NIC events:", "None")]
+                else [_row("PAPI NIC events:", "None")]
             )
         )(cap.papi_nic_events.split() if cap.papi_nic_events else []),
         "-" * 70,

@@ -1,10 +1,10 @@
 .. meta::
-  :description: How to build and install the hipFile Cython-based Python bindings, including prerequisites, virtual environment setup, and CMake override variables.
-  :keywords: hipFile, Python bindings, Cython, install, ROCm, scikit-build-core, wheel, editable install
+   :description: How to build and install the hipFile Cython-based Python bindings, including prerequisites, virtual environment setup, and CMake override variables.
+   :keywords: hipFile, Python bindings, Cython, install, ROCm, scikit-build-core, wheel, editable install
 
-***********************************
+************************************
 Install the hipFile Python bindings
-***********************************
+************************************
 
 This page covers building and installing the Cython-based Python bindings for
 the hipFile C library. Before following these steps, you must have the hipFile C
@@ -12,7 +12,7 @@ library already built or installed. See :doc:`/install/build-from-source` for
 instructions on building the C library.
 
 Prerequisites
-*************
+===============
 
 The Python bindings require the following software:
 
@@ -30,7 +30,7 @@ The Python bindings require the following software:
    The Python bindings currently support only the AMD platform.
 
 Set up a virtual environment
-****************************
+==============================
 
 Create and activate a Python virtual environment before installing dependencies
 or building the bindings:
@@ -47,7 +47,7 @@ Install the required Python build tools inside the virtual environment:
    pip install cython scikit-build-core build
 
 Build the hipFile C library
-***************************
+============================
 
 The Python bindings link against ``libhipfile.so`` and include ``hipfile.h``. You
 must build or install the C library before building the Python package.
@@ -58,7 +58,7 @@ and the ``include/`` directory: you may need them for the override variables
 described below.
 
 Build the Python wheel
-**********************
+========================
 
 Navigate to the ``python/`` directory inside the hipFile source tree and build
 the wheel:
@@ -81,7 +81,7 @@ If these default paths do not match your environment, use the override variables
 described in :ref:`python-cmake-overrides`.
 
 Install an editable package
-***************************
+=============================
 
 For development, you can install the Python package in editable mode. An
 editable install lets you modify the Python source code and see changes
@@ -96,7 +96,7 @@ Cython source code (``_hipfile.pyx``) still require a rebuild.
 .. _python-cmake-overrides:
 
 CMake override variables
-************************
+==========================
 
 If the hipFile library, hipFile headers, or HIP headers are installed in
 non-default locations, pass override variables to CMake through the build
@@ -142,7 +142,7 @@ Or with ``pip install``:
    indicating which path to set.
 
 Confirm the installation
-***********************
+=============================
 
 After building and installing the wheel, or using an editable install, confirm
 that the bindings are importable:
