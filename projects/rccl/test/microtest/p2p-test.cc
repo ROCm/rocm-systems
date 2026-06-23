@@ -174,6 +174,17 @@ public:
         return *this;
     }
 
+    // gproxyConn is a bare pointer in ncclComm; the real ncclCommInit
+    // allocates it sized to comm->nRanks. Tests that drive the
+    // fresh-registration arm hand-roll a backing array sized to nRanks
+    // (must be > max peerRank the test will exercise).
+    CommBuilder& WithProxyConnArray(int nRanks) {
+        gproxyConnStorage_.assign(nRanks, ncclProxyConnector{});
+        comm_.gproxyConn = gproxyConnStorage_.data();
+        comm_.nRanks     = nRanks;
+        return *this;
+    }
+
     ncclComm& comm() { return comm_; }
     operator ncclComm&() { return comm_; }
 
@@ -186,6 +197,7 @@ private:
     bool rankToLocalRankInstalled_ = false;
     std::array<int, NCCL_MAX_LOCAL_RANKS> rankToLocalRankStorage_{};
     ncclSharedResources sharedResStorage_{};
+    std::vector<ncclProxyConnector> gproxyConnStorage_;
 };
 
 // ReusableIpcInfo -- owns the per-peer ncclIpcRegInfo + host-side
@@ -258,105 +270,164 @@ ncclResult_t CallIpcRegisterBuffer(ncclComm& comm,
 // Tests
 // ===========================================================================
 
-// DISABLED_ until the upstream NCCL PR #1861 fix is merged into RCCL.
-// The test deliberately fails against the current buggy code (calloc'd dev
-// table is never populated from the host table); re-enable by deleting the
-// DISABLED_ prefix once the fix lands.
-//
 // Regression test for NVIDIA/nccl#1859 ("user-buffer p2p + coll rmtAddr
-// nullptr error"). The same buggy code is present in RCCL's p2p.cc.
+// nullptr error"), fixed by NCCL PR #1861 (commit ebd1e92), ported to
+// RCCL in this branch.
 //
-// Repro at the application level:
-//   1. Call any P2P op (SENDRECV) with a registered user buffer. The
-//      fresh-registration arm populates hostPeerRmtAddrs[peer] and sets
-//      the local `needUpdate=true`, but devPeerRmtAddrs stays NULL
-//      because the strong-stream block is COLLECTIVE-only.
-//   2. Call any collective (e.g. AllReduce) on the SAME buffer.
-//      Re-enters ipcRegisterBuffer via the reuse arm, so needUpdate
-//      stays false. The post-loop strong-stream block fires because
-//      devPeerRmtAddrs is still NULL. The buggy logic is then:
-//          if (devPeerRmtAddrs == NULL)
-//              ncclCudaCallocAsync(&devPeerRmtAddrs, ...);  // zero-filled
-//          if (needUpdate)
-//              ncclCudaMemcpyAsync(devPeerRmtAddrs, host..., ...);
-//      With needUpdate==false the memcpy is skipped, so devPeerRmtAddrs
-//      is allocated but full of zeros. The kernel then reads remote
-//      addresses as NULL and crashes.
+// The bug lived in ipcRegisterBuffer's post-loop strong-stream block:
 //
-// The PR fix (nccl#1861) restructures the inner conditionals so that
-// allocating a fresh devPeerRmtAddrs always implies copying the host
-// table into it. That's the contract this test pins down: after a
-// successful COLLECTIVE call from the post-SENDRECV state,
-// devPeerRmtAddrs[peerLocalRank] must equal hostPeerRmtAddrs[peerLocalRank].
+//   Pre-fix code (inside the COLLECTIVE branch only):
+//     if (devPeerRmtAddrs == NULL || needUpdate)
+//         ncclCudaCallocAsync(&devPeerRmtAddrs, ...);   // zero-filled
+//     if (needUpdate)
+//         ncclCudaMemcpyAsync(devPeerRmtAddrs, host...);// skipped when !needUpdate
 //
-// The fake ncclCudaCallocAsync/MemcpyAsync hooks (defaults) are honest
-// emulators -- calloc real heap memory, real memcpy -- so the test sees
-// either zeros (buggy code: calloc but no memcpy) or kRmtRegAddr (fixed
-// code: calloc followed by memcpy).
-TEST_F(P2pMicrotest, DISABLED_IpcRegisterBuffer_RegressionNcclIssue1859_P2pThenCollectivePopulatesDevTable)
+// The fix (ebd1e92) replaced this with:
+//   1. An unconditional `if (needUpdate)` block (alloc + memcpy) that fires
+//      for ALL types -- so a SENDRECV fresh-registration always populates
+//      devPeerRmtAddrs.
+//   2. Deletion of the old COLLECTIVE-specific inner block -- on the reuse
+//      path, devPeerRmtAddrs is already correct from step 1.
+//
+// This test drives the actual two-call sequence:
+//   Call 1: ipcRegisterBuffer with NCCL_IPC_SENDRECV on a fresh regRecord
+//           (ipcInfos[peer] == NULL). The fresh-registration arm fires,
+//           sets needUpdate=true, and the `if (needUpdate)` block allocates
+//           and populates devPeerRmtAddrs.
+//   Call 2: ipcRegisterBuffer with NCCL_IPC_COLLECTIVE on the same regRecord
+//           (ipcInfos[peer] now set -- reuse arm). needUpdate stays false.
+//           devPeerRmtAddrs was already set in call 1; the function should
+//           return it unchanged.
+//
+// With the pre-fix code call 1 never touches devPeerRmtAddrs (it was
+// COLLECTIVE-only), so call 2 enters the buggy block with devPeerRmtAddrs==NULL
+// and needUpdate==false: calloc fires but memcpy is skipped, leaving zeros.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_RegressionNcclIssue1859_P2pThenCollectivePopulatesDevTable)
 {
     constexpr int       kPeerRank      = 2;
     constexpr int       kPeerLocalRank = 1;
+    constexpr int       kNRanks        = kPeerRank + 1;
     constexpr uintptr_t kBegAddr       = 0x10000;
+    constexpr uintptr_t kBaseAddr      = kBegAddr;  // hipMemGetAddressRange returns this
+    constexpr size_t    kBaseSize      = 0x2000;    // covers kBegAddr + buffSize
     constexpr uintptr_t kBuffOffset    = 0x40;
-    // A plausible "peer's remote registered address" that step 1 would
-    // have written into hostPeerRmtAddrs[peerLocalRank], and that step 2
-    // is then supposed to copy into devPeerRmtAddrs[peerLocalRank].
-    constexpr uintptr_t kRmtRegAddr    = 0xA000;
+    constexpr uintptr_t kRmtRegAddr    = 0xA000;    // canned remote addr from proxy
 
     CommBuilder cb;
     cb.WithLocalRank(kPeerRank, kPeerLocalRank)
       .WithMaxLocalRanks()
-      .WithSharedRes();
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
 
-    // Simulate the state left by a prior SENDRECV registration:
-    //   - ipcInfos[peerLocalRank] populated (drives reuse arm in step 2)
-    //   - hostPeerRmtAddrs[peerLocalRank] = kRmtRegAddr
-    //   - devPeerRmtAddrs still NULL (SENDRECV doesn't allocate it)
-    ReusableIpcInfo prior(kPeerRank, kPeerLocalRank, kRmtRegAddr,
-                          /*legacyIpcCap=*/ false);
     ncclReg regRecord{};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
-    prior.InstallInto(regRecord);
-    ASSERT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs, nullptr);  // sanity
+    // ipcInfos starts NULL -- fresh-registration arm will fire on call 1.
 
-    // Leave g_strongStreamAcquire / g_fakeCudaCallocAsync /
-    // g_fakeCudaMemcpyAsync at their defaults: the strong-stream block
-    // runs to completion against real heap memory + real memcpy. The
-    // test will then read the contents of the dev table back.
+    // Hooks for the fresh-registration path (legacy IPC arm).
+    // g_loadParam: force ncclParamLegacyCudaRegister() == 1 so the
+    //   HIP_VERSION < 71260540 branch sets legacyIpcCap = 1.
+    // g_hipMemGetAddressRange: return a base/size that covers our buffer.
+    // g_hipIpcGetMemHandle: succeed with a canned handle.
+    // g_proxyConnect: succeed and mark the connector initialised.
+    // g_proxyCallBlocking: succeed and write kRmtRegAddr into respBuff
+    //   (the void* that ipcRegisterBuffer reads back as rmtRegAddr).
+    ScopedHook loadParam(g_loadParam,
+        [](const char* env, int64_t deftVal) -> int64_t {
+            return std::strcmp(env, "LEGACY_CUDA_REGISTER") == 0 ? 1 : deftVal;
+        });
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t* h, void*) -> hipError_t {
+            if (h) std::memset(h, 0x5A, sizeof(*h));
+            return hipSuccess;
+        });
+    ScopedHook proxyConn(g_proxyConnect,
+        [](ncclComm*, int, int, int, ncclProxyConnector* conn) -> ncclResult_t {
+            if (conn) conn->initialized = true;
+            return ncclSuccess;
+        });
+    ScopedHook proxyCall(g_proxyCallBlocking,
+        [](ncclComm*, ncclProxyConnector*, int,
+           void*, int, void* resp, int) -> ncclResult_t {
+            // Write kRmtRegAddr as the rmtRegAddr the proxy hands back.
+            if (resp) *reinterpret_cast<void**>(resp) =
+                          reinterpret_cast<void*>(kRmtRegAddr);
+            return ncclSuccess;
+        });
 
+    // -----------------------------------------------------------------------
+    // Call 1: SENDRECV fresh-registration.
+    // Fresh-reg arm: allocates ipcInfos[peerLocalRank], sets
+    // hostPeerRmtAddrs[peerLocalRank]=kRmtRegAddr, needUpdate=true.
+    // if (needUpdate) block: calloc + memcpy -> devPeerRmtAddrs[peerLocalRank]
+    // should equal kRmtRegAddr after this call.
+    // -----------------------------------------------------------------------
     int peerRanks[] = {kPeerRank};
-    IpcRegOutputs out;
-    bool isLegacyIpc = false;
+    IpcRegOutputs out1;
+    bool isLegacyIpc = true;
 
-    auto r = CallIpcRegisterBuffer(cb,
-                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
-                                   /*buffSize=*/ 512,
-                                   peerRanks, 1,
-                                   NCCL_IPC_COLLECTIVE,
-                                   &regRecord, out, &isLegacyIpc);
+    auto r1 = CallIpcRegisterBuffer(cb,
+                                    reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+                                    512,
+                                    peerRanks, 1,
+                                    NCCL_IPC_SENDRECV,
+                                    &regRecord, out1, &isLegacyIpc);
 
-    ASSERT_EQ(r, ncclSuccess);
-    ASSERT_EQ(out.regBufFlag, 1);
+    ASSERT_EQ(r1, ncclSuccess);
+    ASSERT_EQ(out1.regBufFlag, 1);
+    // devPeerRmtAddrs must have been allocated and populated by the
+    // if (needUpdate) block -- this is the invariant the fix establishes.
+    ASSERT_NE(regRecord.regIpcAddrs.devPeerRmtAddrs, nullptr)
+        << "devPeerRmtAddrs not allocated after SENDRECV fresh-registration. "
+           "The if (needUpdate) block must calloc it for all IPC types.";
+    EXPECT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs[kPeerLocalRank], kRmtRegAddr)
+        << "devPeerRmtAddrs not populated after SENDRECV fresh-registration.";
 
-    // The function must have allocated a fresh dev table -- this is the
-    // entry condition for the bug.
-    ASSERT_NE(regRecord.regIpcAddrs.devPeerRmtAddrs, nullptr);
+    // -----------------------------------------------------------------------
+    // Call 2: COLLECTIVE reuse.
+    // ipcInfos[peerLocalRank] is now set -> reuse arm -> needUpdate stays false.
+    // devPeerRmtAddrs is non-NULL and correct from call 1; the function must
+    // return it as-is without zeroing it (the pre-fix bug would re-calloc
+    // here and skip the memcpy because needUpdate==false).
+    // -----------------------------------------------------------------------
+    IpcRegOutputs out2;
+    bool isLegacyIpc2 = false;
 
-    // The contract under test: the per-peer slot in the dev table must
-    // hold the same remote address as the host table. With the bug it's
-    // 0 (calloc'd but never written); with the fix it's kRmtRegAddr.
-    EXPECT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs[kPeerLocalRank],
-              kRmtRegAddr)
-        << "devPeerRmtAddrs[" << kPeerLocalRank << "] was not populated "
-           "from hostPeerRmtAddrs after a P2P-then-COLLECTIVE sequence. "
-           "This is the failure mode tracked by NVIDIA/nccl#1859: a fresh "
-           "devPeerRmtAddrs is allocated but the memcpy from the host "
-           "table is gated on `needUpdate`, which is false on the reuse "
-           "arm. See nccl PR #1861 for the fix.";
+    auto r2 = CallIpcRegisterBuffer(cb,
+                                    reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+                                    512,
+                                    peerRanks, 1,
+                                    NCCL_IPC_COLLECTIVE,
+                                    &regRecord, out2, &isLegacyIpc2);
 
-    // The function returned the dev table itself as peerRmtAddrs.
-    EXPECT_EQ(out.peerRmtAddrs, regRecord.regIpcAddrs.devPeerRmtAddrs);
-    EXPECT_EQ(out.offsetOut,    kBuffOffset);
+    ASSERT_EQ(r2, ncclSuccess);
+    ASSERT_EQ(out2.regBufFlag, 1);
+    EXPECT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs[kPeerLocalRank], kRmtRegAddr)
+        << "devPeerRmtAddrs[" << kPeerLocalRank << "] was corrupted by the "
+           "COLLECTIVE reuse call. Pre-fix code would re-calloc (zeroing) "
+           "and skip the memcpy because needUpdate==false. "
+           "See NCCL issue #1859 and PR #1861.";
+    EXPECT_EQ(out2.peerRmtAddrs, regRecord.regIpcAddrs.devPeerRmtAddrs);
+    EXPECT_EQ(out2.offsetOut, kBuffOffset);
+
+    // Cleanup: ipcInfos array and each per-peer entry were allocated by
+    // ncclCalloc/ncclRealloc (standard heap). devPeerRmtAddrs and
+    // hostPeerRmtAddrs are tracked by g_fakeAllocations / ncclCalloc
+    // respectively and freed by ResetP2pFakes() in TearDown.
+    if (regRecord.ipcInfos) {
+        for (int i = 0; i < regRecord.ipcInfosSize; ++i)
+            std::free(regRecord.ipcInfos[i]);
+        std::free(regRecord.ipcInfos);
+        regRecord.ipcInfos = nullptr;
+    }
+    if (regRecord.regIpcAddrs.hostPeerRmtAddrs) {
+        std::free(regRecord.regIpcAddrs.hostPeerRmtAddrs);
+        regRecord.regIpcAddrs.hostPeerRmtAddrs = nullptr;
+    }
 }

@@ -1198,19 +1198,12 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
         NCCLCHECKGOTO(ncclStrongStreamRelease(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->deviceStream, /*concurrent=*/false), ret, fail);
       }
       if (type == NCCL_IPC_COLLECTIVE) {
-        // for collective, store registered remote buffers into dev memory for future reference
-        if (regRecord->regIpcAddrs.devPeerRmtAddrs == NULL || needUpdate) {
-          cudaStream_t hostStream, deviceStream;
-          NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->hostStream, /*concurrent=*/false, &hostStream), ret, fail);
-          NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream), ret, fail);
-          if (regRecord->regIpcAddrs.devPeerRmtAddrs == NULL)
-            NCCLCHECKGOTO(ncclCudaCallocAsync(&regRecord->regIpcAddrs.devPeerRmtAddrs, comm->localRanks, hostStream, comm->memManager), ret, fail);
-          if (needUpdate)
-            NCCLCHECKGOTO(ncclCudaMemcpyAsync(regRecord->regIpcAddrs.devPeerRmtAddrs, regRecord->regIpcAddrs.hostPeerRmtAddrs, comm->localRanks, hostStream), ret, fail);
-          NCCLCHECKGOTO(ncclStreamWaitStream(deviceStream, hostStream, comm->sharedRes->scratchEvent), ret, fail);
-          NCCLCHECKGOTO(ncclStrongStreamRelease(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->hostStream, /*concurrent=*/false), ret, fail);
-          NCCLCHECKGOTO(ncclStrongStreamRelease(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->deviceStream, /*concurrent=*/false), ret, fail);
-        }
+        // devPeerRmtAddrs was allocated and populated by the if (needUpdate) block
+        // above on fresh registration. On the reuse path it is already set.
+        // The inner alloc/memcpy block present here before the v2.29.2 sync was
+        // removed by upstream NCCL PR #1861 (commit ebd1e92): it was the source
+        // of the crash reported in NCCL issue #1859, where a fresh calloc on the
+        // reuse path (needUpdate==false) left devPeerRmtAddrs zero-filled.
         peerRmtAddrs = regRecord->regIpcAddrs.devPeerRmtAddrs;
       } else {
         assert(nPeers == 1);
