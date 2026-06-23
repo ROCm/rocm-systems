@@ -74,9 +74,10 @@ headers, the hipFile shared library, and the HIP runtime headers. By default, it
 searches:
 
 - The sibling ``../include`` directory (relative to the ``python/`` directory)
-  for ``hipfile.h``. ``/opt/rocm/include`` as a fallback location.
-- The sibling ``../build/src/amd_detail`` directory for ``libhipfile.so``.
-  ``/opt/rocm/lib`` as a fallback location.
+  is searched for ``hipfile.h``, with ``/opt/rocm/include`` as a fallback
+  location.
+- The sibling ``../build/src/amd_detail`` directory is searched for
+  ``libhipfile.so``, with ``/opt/rocm/lib`` as a fallback location.
 
 If these default paths do not match your environment, use the override variables
 described in :ref:`python-cmake-overrides`.
