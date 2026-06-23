@@ -131,6 +131,10 @@ MAYBE_UNUSED static inline __hip_bfloat16 __float2bfloat16(const float in) {
 MAYBE_UNUSED static inline float __bfloat162float(__hip_bfloat16 a) {
   return __hip_bfloat_to_float(a);
 }
+
+MAYBE_UNUSED static inline __hip_bfloat16 __ushort_as_bfloat16(const unsigned short int a) {
+  return __hip_bfloat16(__hip_bfloat16_raw{a});
+}
 #endif  // __cplusplus
 
 #undef ALIGN_IT
