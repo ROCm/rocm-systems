@@ -357,6 +357,19 @@ namespace hip {
     /// Fetch the stream Id
     uint64_t GetStreamId() const { return stream_id_; }
 
+    void SetAsyncError(hipError_t err) {
+      hipError_t expected = hipSuccess;
+      async_error_.compare_exchange_strong(expected, err,
+          std::memory_order_relaxed, std::memory_order_relaxed);
+    }
+    hipError_t GetAndClearAsyncError() {
+      // Fast path: no error, skip the locked RMW.
+      if (async_error_.load(std::memory_order_relaxed) == hipSuccess) {
+        return hipSuccess;
+      }
+      return async_error_.exchange(hipSuccess, std::memory_order_relaxed);
+    }
+
     static void Destroy(hip::Stream* stream, bool forceDestroy = false);
     virtual bool terminate();
 
@@ -461,6 +474,9 @@ namespace hip {
     bool null_;                              //!< True for the null (default legacy) stream
     const std::vector<uint32_t> cuMask_;     //!< CU mask restricting which CUs may be used
     uint64_t stream_id_;                     //!< Process-unique monotonic stream identifier
+
+    // Per-stream async error from fire-and-forget commands; cleared on read.
+    std::atomic<hipError_t> async_error_{hipSuccess};
 
     // ----- Stream capture state -----
     hipStreamCaptureStatus captureStatus_{hipStreamCaptureStatusNone}; //!< Current capture status

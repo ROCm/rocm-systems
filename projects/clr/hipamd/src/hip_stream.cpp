@@ -393,7 +393,7 @@ hipError_t hipStreamSynchronize_common(hipStream_t stream) {
   auto hip_stream = hip::getStream(stream, wait);
   hip_stream->finish();
   hip_stream->GetDevice()->ReleaseFreedMemory();
-  return hipSuccess;
+  return hip_stream->GetAndClearAsyncError();
 }
 
 // ================================================================================================
