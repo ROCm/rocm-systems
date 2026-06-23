@@ -1380,8 +1380,7 @@ hsaKmtMemoryVaMap(
     HSAuint64 offset,
     HSAuint64 size,
     HSAuint64 addr,
-    HsaMemoryMapFlags flags,
-    HSAuint32 NodeId
+    HsaMemoryMapFlags flags
 );
 
 HSAKMT_STATUS
@@ -1390,8 +1389,7 @@ hsaKmtMemoryVaUnmap(
     HsaMemoryObjectHandle Handle,
     HSAuint64 offset,
     HSAuint64 size,
-    HSAuint64 addr,
-    HSAuint32 NodeId
+    HSAuint64 addr
 );
 
 HSAKMT_STATUS
@@ -1404,17 +1402,6 @@ hsaKmtMemoryCpuMap(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtMemHandleFree(
-    HsaMemoryObjectHandle Handle
-);
-
-/**
-  Free a memory object handle without clearing its metadata.
-  Used for IPC exporter handles where we need to release the extra kernel
-  reference but preserve metadata for later IPC attach operations.
-*/
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtMemHandleFreePreserveMetadata(
     HsaMemoryObjectHandle Handle
 );
 

@@ -6,11 +6,9 @@
  */
 
 #include "proxy_trace/proxy_trace.h"
-#ifdef RCCL_PROXYTRACE_PLUGIN_BUILD
-#include "proxytrace_plugin_log.h"
-#else
 #include "debug.h"
-#endif
+#include "device.h"
+#include "proxy.h"
 #include <map>
 
 constexpr int32_t kFinishedProxyOpItems = 32;

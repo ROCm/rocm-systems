@@ -48,7 +48,7 @@ HIP_TEST_CASE(Unit_hipMalloc_Positive_Alignment) {
   HIP_CHECK(hipFree(ptr2));
 }
 
-HIP_TEST_CASE(Unit_hipMalloc_Negative_Parameters) {
+TEST_CASE("Unit_hipMalloc_Negative_Parameters") {
   SECTION("ptr == nullptr") {
     HIP_CHECK_ERROR(hipMalloc(nullptr, 4096), hipErrorInvalidValue);
   }

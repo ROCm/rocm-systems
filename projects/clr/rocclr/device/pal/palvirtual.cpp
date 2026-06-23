@@ -2351,13 +2351,10 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   size_t vaddr_offset = 0;
   size_t phys_offset = 0;
   if (phys_mem_obj != nullptr) {
-    vaddr_sub_obj =
-        dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
-    if (vaddr_sub_obj == nullptr) {
-      LogError("PAL Command: MapMemObjBookkeeping failed!");
-      profilingEnd(vcmd);
-      return;
-    }
+    constexpr bool kParent = false;
+    vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
+        phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
+        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
 
     pal::Memory* phys_pal_mem = dev().getGpuMemory(phys_mem_obj);
     phymem_igpu_mem = phys_pal_mem->iMem();
@@ -2391,19 +2388,22 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   setGpuEvent(event);
   if (result == Pal::Result::Success) {
     if (phys_mem_obj != nullptr) {
-      constexpr bool kImportVmmForInterprocess = false;
-      dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
-                                         kImportVmmForInterprocess);
+      // assert the vaddr_mem_obj wasn't mapped already
+      assert(amd::MemObjMap::FindMemObj(vcmd.ptr()) == nullptr);
+      amd::MemObjMap::AddMemObj(vcmd.ptr(), vaddr_sub_obj);
+      vaddr_sub_obj->getUserData().phys_mem_obj = phys_mem_obj;
+      phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
     } else {
       // assert the vaddr_mem_obj is mapped and needs to be removed
       vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
       assert(vaddr_sub_obj != nullptr);
       assert(vcmd.ptr() == vaddr_sub_obj->getSvmPtr());
 
-      constexpr bool kDestroyVirtualBuffer = false;
-      constexpr bool kReleaseSubObj = false;
-      dev().UnmapMemObjBookkeeping(vaddr_sub_obj, const_cast<void*>(vcmd.ptr()),
-                                   kDestroyVirtualBuffer, kReleaseSubObj);
+      amd::MemObjMap::RemoveMemObj(vcmd.ptr());
+      if (vaddr_sub_obj->getUserData().phys_mem_obj != nullptr) {
+        vaddr_sub_obj->getUserData().phys_mem_obj->getUserData().vaddr_mem_obj = nullptr;
+        vaddr_sub_obj->getUserData().phys_mem_obj = nullptr;
+      }
     }
   }
   profilingEnd(vcmd);
@@ -2517,10 +2517,8 @@ bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& 
                                   VirtualGPU** gpuDefQueue, uint64_t* vmDefQueue) {
   amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(dev());
   if (nullptr == defQueue) {
-    // O0 may conservatively emit hidden device-enqueue ABI arguments even when the
-    // parent kernel does not enqueue children. Without a default device queue there
-    // is no scheduler work to set up, so allow the parent dispatch to proceed.
-    return true;
+    LogError("Default device queue wasn't allocated");
+    return false;
   } else {
     if (dev().settings().useDeviceQueue_) {
       *gpuDefQueue = static_cast<VirtualGPU*>(defQueue->vDev());
@@ -2836,7 +2834,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   AqlPacketUpdateTs(aql_index, gpuEvent);
 
   // Execute scheduler for device enqueue
-  if (hsaKernel.dynamicParallelism() && gpuDefQueue != nullptr) {
+  if (hsaKernel.dynamicParallelism()) {
     PostDeviceEnqueue(kernel, hsaKernel, gpuDefQueue, vmDefQueue, vmParentWrap, &gpuEvent);
   }
 

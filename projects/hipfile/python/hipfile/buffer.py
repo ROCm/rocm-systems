@@ -1,7 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-#
-# SPDX-License-Identifier: MIT
-
 """GPU memory buffer registration for hipFile I/O."""
 
 from __future__ import annotations

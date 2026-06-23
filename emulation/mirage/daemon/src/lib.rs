@@ -42,7 +42,6 @@ use clap::{Args, Subcommand};
 mod api;
 mod server;
 mod service;
-#[cfg(feature = "webui")]
 mod spa;
 mod state;
 

@@ -132,6 +132,7 @@ static uint32_t kernelMask_user() {
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
 NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
+NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
 NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)
 RCCL_PARAM(SymModel, "SYM_MODEL", 0)
 
@@ -206,6 +207,21 @@ static int rcclSymkTuningModelIndex() {
   return s_cache;
 }
 
+static constexpr size_t ncclSymkRsGinDefaultChunkBytes = 128 << 10;
+static constexpr size_t ncclSymkRsGinMinChunkBytes = 128;
+static constexpr size_t ncclSymkRsGinMaxChunkBytes = size_t(1) << 30;
+
+static size_t ncclSymkRsGinChunkBytes() {
+  int64_t param = ncclParamSymRsGinChunkSize();
+  size_t chunkBytes = param > 0 ? (size_t)param : ncclSymkRsGinDefaultChunkBytes;
+  chunkBytes = std::max(ncclSymkRsGinMinChunkBytes, std::min(chunkBytes, ncclSymkRsGinMaxChunkBytes));
+  return pow2Down(chunkBytes);
+}
+
+static uint32_t ncclSymkRsGinAccumBytesPerBlock() {
+  return (uint32_t)alignUp(2 * ncclSymkRsGinChunkBytes(), 128);
+}
+
 static double softmin(double x, double ceiling, double softness) {
   // looks like a smooth version of: min(x, ceiling)
   return ceiling - softness * std::log1p((std::exp(ceiling / softness) - 1) * std::exp(-x / softness));
@@ -264,14 +280,18 @@ static double getGinBw(struct ncclComm* comm) {
   return (/*byte/sec*/ 1.e9) * comm->minNetBw;
 }
 
-static void getBusMul_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc, double* out_smMul, double* out_lsaMul,
-                                            double* out_ginMul) {
+// Bus multipliers count number of times data is sent through that widget.
+static void getBusMul_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc,
+    // Bus multipliers per bottleneck
+                                            double* out_smMul, double* out_lsaMul, double* out_ginMul) {
   int lsaRanks = ncclTeamLsa(comm).nRanks;
   int railRanks = ncclTeamRail(comm).nRanks;
   *out_lsaMul = std::max(
     /*inbound*/ (ldmc ? lsaRanks : lsaRanks - 1) * railRanks,
     /*outbound*/ (lsaRanks - 1) * railRanks);
-  *out_ginMul = railRanks - 1;
+  // GIN
+  *out_ginMul = railRanks - 1; // inbound == outbound
+  // SM. Inbound (reads) only because it dominates outbound (writes).
   *out_smMul =
     /*stage 0*/ (lsaRanks == 1 ? 0 : (ldmc ? 1 : lsaRanks) * (railRanks - 1)) +
     /*stage 1*/ (ldmc ? 1 : lsaRanks) + (railRanks - 1);
@@ -279,9 +299,9 @@ static void getBusMul_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc, do
 
 static double getSmBw_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc) {
   if (100 <= comm->minCompCap) {
-    return ldmc ? 2.25e9 : 5.0e9;
+    return ldmc ? 8.44e9 : 26.6e9;
   } else {
-    return ldmc ? 9.85e9 : 14.5e9;
+    return ldmc ? 4.22e9 : 13.7e9;
   }
 }
 
@@ -295,6 +315,10 @@ static int calcSatBlocks_ReduceScatter_RailA2A(struct ncclComm* comm, bool ldmc)
   double smBw = getSmBw_ReduceScatter_RailA2A(comm, ldmc);
   double smMul, lsaMul, ginMul;
   getBusMul_ReduceScatter_RailA2A(comm, ldmc, &smMul, &lsaMul, &ginMul);
+  // Effective Bandwidth: EffBw = Bw/Mul
+  // Let smsEffBw = smEffBw*nBlocks
+  // Set smsEffBw = min(lsaEffBw, ginEffBw)
+  // Solve for nBlocks:
   double minLsaGinEffBw = std::min(lsaBw / lsaMul, ginBw / ginMul);
   return std::ceil(std::min(double(1 << 30), minLsaGinEffBw / (smBw / smMul)));
 }
@@ -309,6 +333,7 @@ static void getRequirements_gin(struct ncclComm* comm, int* out_nBlocks, size_t*
     double smLat = getSmLat_ReduceScatter_RailA2A(comm, ldmc);
     double smMul, lsaMul, ginMul;
     getBusMul_ReduceScatter_RailA2A(comm, ldmc, &smMul, &lsaMul, &ginMul);
+    // GIN could be throttled by LSA work
     double ginBwRenorm = std::min(lsaBw / lsaMul, ginBw / ginMul) * ginMul;
     size_t bufSize = ginBwRenorm * (ginLat + smLat);
     int nBlocks = calcSatBlocks_ReduceScatter_RailA2A(comm, ldmc);
@@ -324,6 +349,8 @@ static void getRequirements_gin(struct ncclComm* comm, int* out_nBlocks, size_t*
 
 static void queryModel_gin(struct ncclComm* comm, ncclSymkKernelId k, size_t nBytes, float* timeUs, int* nBlocks) {
   struct ncclSymkState* symk = &comm->symkState;
+  // ncclTeam world = ncclTeamWorld(comm);
+  // ncclTeam lsa = ncclTeamLsa(comm);
   ncclTeam rail = ncclTeamRail(comm);
   double lsaBw = getLsaBw(comm);
   double ginLat = getGinLat(comm);
@@ -363,17 +390,20 @@ static void queryModel_gin(struct ncclComm* comm, ncclSymkKernelId k, size_t nBy
       bool ldmc = k == ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC;
       nMaxBlocks = std::min(nMaxBlocks, symk->maxGinInboxBlocks);
       nMaxBlocks = std::min(nMaxBlocks, calcSatBlocks_ReduceScatter_RailA2A(comm, ldmc));
-      constexpr int chunkSize = 64 << 10;
+      size_t chunkSize = ncclSymkRsGinChunkBytes();
       double smBw = getSmBw_ReduceScatter_RailA2A(comm, ldmc);
       double smMul, lsaMul, ginMul;
       getBusMul_ReduceScatter_RailA2A(comm, ldmc, &smMul, &lsaMul, &ginMul);
-      *nBlocks = divUp(nBytes, chunkSize);
+      *nBlocks = (int)divUp(nBytes, chunkSize);
+      // max against nMinBlocks last since we may have nMaxBlocks < nMinBlocks
       *nBlocks = std::max(nMinBlocks, std::min(nMaxBlocks, *nBlocks));
       double effBw = (*nBlocks) * (smBw / smMul);
       effBw = std::min(effBw, lsaBw / lsaMul);
       effBw = std::min(effBw, ginBw / ginMul);
       double time = nBytes / effBw;
-      time += std::min<size_t>(nBytes, chunkSize * (*nBlocks)) * (lsaMul / lsaBw + ginMul / ginBw);
+      // Delayed by LSA processing of first chunk.
+      time += std::min(nBytes, chunkSize * (size_t)(*nBlocks)) * (lsaMul / lsaBw + ginMul / ginBw);
+      // Delay by GIN latency of first chunk.
       time += ginLat;
       *timeUs = (/*usec/sec=*/1.e6) * time;
     }
@@ -515,6 +545,7 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
 
     struct ncclDevResourceRequirements ginInboxRailReq = {};
     struct ncclDevResourceRequirements ginOutboxReq = {};
+    struct ncclDevResourceRequirements rsGinAccumReq = {};
     struct ncclDevResourceRequirements railSignalReq = {};
     if (ncclParamSymGinKernelsEnable() && ncclTeamLsa(comm).nRanks < comm->nRanks) {
       int maxBlocks;
@@ -526,6 +557,13 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
       if (ncclParamSymCTAs() >= 1) maxBlocks = ncclParamSymCTAs();
       maxBlocks = std::min(maxBlocks, ncclSymkMaxBlocks);
       symk->maxGinInboxBlocks = maxBlocks;
+      symk->kcomm.rsGinAccumBytesPerBlock = ncclSymkRsGinAccumBytesPerBlock();
+
+      rsGinAccumReq.bufferSize = (size_t)maxBlocks * symk->kcomm.rsGinAccumBytesPerBlock;
+      rsGinAccumReq.bufferAlign = 128;
+      rsGinAccumReq.outBufferHandle = &symk->kcomm.rsGinAccumBuf;
+      rsGinAccumReq.next = reqs.resourceRequirementsList;
+      reqs.resourceRequirementsList = &rsGinAccumReq;
 
       ncclGinInboxA2ACreateRequirement(ncclTeamRail(comm), maxBlocks, log2Up(bufSize), &symk->kcomm.ginInboxRail,
                                        &ginInboxRailReq);
@@ -543,8 +581,6 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
       railSignalReq.outBufferHandle = nullptr;
       railSignalReq.ginSignalCount = railSignalCount;
       railSignalReq.outGinSignalStart = &symk->kcomm.ginSyncHandle.railSignals;
-      railSignalReq.ginCounterCount = ncclSymkMaxBlocks;
-      railSignalReq.outGinCounterStart = &symk->kcomm.ginCounterPerBlock;
       railSignalReq.next = reqs.resourceRequirementsList;
       reqs.resourceRequirementsList = &railSignalReq;
       reqs.barrierCount = ncclSymkMaxBlocks;

@@ -18,7 +18,6 @@
 #include <cstdio>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -136,7 +135,7 @@ TEST_F(HipFileBatch, CreateOperationBadFileOffsetIsNegative)
 
 TEST_F(HipFileBatch, CreateOperationBadOpcode)
 {
-    io_params->opcode = invalidEnum<hipFileOpcode_t>(maxEnum<hipFileOpcode_t>());
+    io_params->opcode = invalidEnum<hipFileOpcode_t>(-1);
 
     EXPECT_THROW(BatchOperation(std::move(io_params), default_mock_buffer, default_mock_file),
                  std::invalid_argument);
@@ -144,7 +143,7 @@ TEST_F(HipFileBatch, CreateOperationBadOpcode)
 
 TEST_F(HipFileBatch, CreateOperationBadMode)
 {
-    io_params->mode = invalidEnum<hipFileBatchMode_t>(maxEnum<hipFileBatchMode_t>());
+    io_params->mode = invalidEnum<hipFileBatchMode_t>(-1);
 
     EXPECT_THROW(BatchOperation(std::move(io_params), default_mock_buffer, default_mock_file),
                  std::invalid_argument);
@@ -337,14 +336,14 @@ TEST_F(HipFileBatchContext, SubmitSingleBadParamFileOffsetNegative)
 TEST_F(HipFileBatchContext, SubmitSingleBadParamOpcodeInvalid)
 {
     hipFileIOParams_t bad_io_params = io_params;
-    bad_io_params.opcode            = invalidEnum<hipFileOpcode_t>(maxEnum<hipFileOpcode_t>());
+    bad_io_params.opcode            = invalidEnum<hipFileOpcode_t>(-1);
     ASSERT_THROW(_context->submit_operations(&bad_io_params, 1), std::invalid_argument);
 }
 
 TEST_F(HipFileBatchContext, SubmitSingleBadParamModeInvalid)
 {
     hipFileIOParams_t bad_io_params = io_params;
-    bad_io_params.mode              = invalidEnum<hipFileBatchMode_t>(maxEnum<hipFileBatchMode_t>());
+    bad_io_params.mode              = invalidEnum<hipFileBatchMode_t>(-1);
     ASSERT_THROW(_context->submit_operations(&bad_io_params, 1), std::invalid_argument);
 }
 

@@ -2,7 +2,6 @@
 set(NET_IB_CAST_SOURCES
     src/transport/net_ib_limits.h
     src/transport/net_ib_cast/net_ib_cast_inspect.h
-    src/transport/net_ib_cast/net_ib_ops_fault.h
     src/transport/net_ib_cast/common_cast.h
     src/transport/net_ib_cast/connect_cast.h
     src/transport/net_ib_cast/gin_cast.h
@@ -16,7 +15,6 @@ set(NET_IB_CAST_SOURCES
     src/transport/net_ib_cast/gdr.cc
     src/transport/net_ib_cast/init.cc
     src/transport/net_ib_cast/p2p.cc
-    src/transport/net_ib_cast/net_ib_ops_fault.cc
     src/transport/net_ib_cast/p2p_resiliency.cc
     src/transport/net_ib_cast/p2p_resiliency_recovery.cc
     src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc

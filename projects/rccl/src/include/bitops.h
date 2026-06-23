@@ -56,7 +56,7 @@ constexpr static __host__ __device__ Int maxval(Int a, Int b, More... more) {
 
 #define ALIGN_POWER(x, y) ((x) > (y) ? ROUNDUP(x, y) : ((y) / ((y) / (x))))
 
-#define ALIGN_SIZE(size, align) size = ((size + (align) - 1) / (align)) * (align);
+#define ALIGN_SIZE(size, align) size = ((size + (align) - 1) / (align)) * (align)
 
 template <typename X, typename Y, typename Z = decltype(X() + Y())>
 static __host__ __device__ constexpr Z divUp(X x, Y y) {
@@ -366,7 +366,11 @@ static __host__ __device__ Int pow2Down(Int x) {
 }
 
 template <typename UInt, int nSubBits>
+#if defined(__HIP_PLATFORM_AMD__)
 static __host__ __device__ UInt reverseSubBits(UInt x) {
+#else
+static __host__ UInt reverseSubBits(UInt x) {
+#endif
   if (nSubBits >= 16 && 8 * sizeof(UInt) == nSubBits) {
     switch (8 * sizeof(UInt)) {
     case 16:

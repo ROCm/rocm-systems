@@ -23,11 +23,44 @@
 // after that point and we'd compile references to types that were never
 // declared in this TU.
 #ifndef NCCL_CHECK_CUDACC
-#define NCCL_CHECK_CUDACC __CUDACC__
+    #if defined(__clang__)
+        #ifdef __CUDACC__
+            #define NCCL_CHECK_CUDACC 1
+        #else
+            #define NCCL_CHECK_CUDACC 0
+        #endif
+    #else
+        #if __CUDACC__
+            #define NCCL_CHECK_CUDACC 1
+        #else
+            #define NCCL_CHECK_CUDACC 0
+        #endif
+    #endif
 #endif
 
 // NCCL_DEVICE_INLINE / NCCL_HOST_DEVICE_INLINE are provided by hip_compat.h
-// (included above) for the AMD path; do not redefine them here.
+// (included above) for the AMD path; only define them here when not already set.
+#ifndef NCCL_DEVICE_INLINE
+#if NCCL_CHECK_CUDACC
+  #if defined(NCCL_HOSTLIB_ONLY) || defined(__clang_llvm_bitcode_lib__)
+    #define NCCL_DEVICE_INLINE __device__ __attribute__((always_inline))
+    #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __attribute__((always_inline))
+  #else
+    #define NCCL_DEVICE_INLINE __device__ __forceinline__
+    #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __forceinline__
+  #endif
+#else
+  #ifndef __host__
+    #define __host__
+  #endif
+  #define NCCL_DEVICE_INLINE
+  #if defined(NCCL_OS_WINDOWS)
+    #define NCCL_HOST_DEVICE_INLINE __forceinline
+  #else
+    #define NCCL_HOST_DEVICE_INLINE inline __attribute__((always_inline))
+  #endif
+#endif
+#endif // NCCL_DEVICE_INLINE
 
 // Macro for conditional constexpr support
 #if defined(__cpp_if_constexpr) && __cpp_if_constexpr >= 201606
@@ -39,6 +72,19 @@
 #define NCCL_IF_CONSTEXPR
 #endif
 #endif
+
+// NVCC pragmas for controling loop unrolling for subsequent loop
+// trip_count must be integer constant expression (integer literal or constexpr) may optionally
+// follow.
+// 1. If trip_count is absent, the compiler try auto determine a trip count and unroll the loop.
+// 2. If trip_count evaluates to 0 or 1, the loop will not be unrolled.
+// 3. If trip_count is a non-positive integer or greater than INT_MAX, the pragma will be ignored,
+//    and a warning will be issued.
+// https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html#pragma-unroll
+#define DO_PRAGMA(x) _Pragma(#x)
+#define NVCC_PRAGMA_UNROLL(trip_count) DO_PRAGMA(unroll trip_count)
+#define NVCC_PRAGMA_UNROLL_AUTO DO_PRAGMA(unroll)
+#define NVCC_PRAGMA_UNROLL_DISABLED NVCC_PRAGMA_UNROLL(1)
 
 #if __cplusplus
 #define NCCL_EXTERN_C extern "C"
@@ -95,9 +141,9 @@ static NCCL_DEVICE_INLINE bool testAbort(uint32_t* abortFlag, uint32_t& steps) {
 }
 #endif
 
-template <typename T>
+template<typename T>
 NCCL_HOST_DEVICE_INLINE T&& declval() noexcept {
-  static_assert(sizeof(T) != sizeof(T), "You can't evaluate declval.");
+  static_assert(sizeof(T)!=sizeof(T), "You can't evaluate declval.");
 }
 
 template <typename>
@@ -282,6 +328,7 @@ NCCL_HOST_DEVICE_INLINE uint64_t imodFast64(uint64_t x, uint64_t y, uint64_t yrc
 // Precomputed integer reciprocoals for denominator values 1..64 inclusive.
 // Pass these to idivFast64() for fast division on the GPU.
 NCCL_DEVICE_INLINE uint64_t idivRcp64_upto64(int x) {
+  // clang-format off
   static constexpr uint64_t table[65] = {
     idivRcp64(0x01), idivRcp64(0x01), idivRcp64(0x02), idivRcp64(0x03), idivRcp64(0x04), idivRcp64(0x05),
     idivRcp64(0x06), idivRcp64(0x07), idivRcp64(0x08), idivRcp64(0x09), idivRcp64(0x0a), idivRcp64(0x0b),
@@ -295,6 +342,7 @@ NCCL_DEVICE_INLINE uint64_t idivRcp64_upto64(int x) {
     idivRcp64(0x36), idivRcp64(0x37), idivRcp64(0x38), idivRcp64(0x39), idivRcp64(0x3a), idivRcp64(0x3b),
     idivRcp64(0x3c), idivRcp64(0x3d), idivRcp64(0x3e), idivRcp64(0x3f), idivRcp64(0x40)
   };
+  // clang-format on
   return table[x];
 }
 #endif
@@ -451,39 +499,24 @@ NCCL_DEVICE_INLINE unsigned int lanemask_lt() {
 template <typename T>
 NCCL_DEVICE_INLINE T loadConst(T const* p) {
   if (alignof(T) == 1) {
-    union {
-      uint8_t part[sizeof(T)];
-      T ret;
-    };
-    for (int i = 0; i < (int)sizeof(T); i++) part[i] = nccl_ldg((uint8_t const*)p + i);
+    union { uint8_t part[sizeof(T)]; T ret; };
+    for (int i=0; i < (int)sizeof(T); i++) part[i] = __ldg((uint8_t const*)p + i);
     return ret;
   } else if (alignof(T) == 2) {
-    union {
-      uint16_t part[sizeof(T) / 2];
-      T ret;
-    };
-    for (int i = 0; i < (int)sizeof(T) / 2; i++) part[i] = nccl_ldg((uint16_t const*)p + i);
+    union { uint16_t part[sizeof(T)/2]; T ret; };
+    for (int i=0; i < (int)sizeof(T)/2; i++) part[i] = __ldg((uint16_t const*)p + i);
     return ret;
   } else if (alignof(T) == 4) {
-    union {
-      uint32_t part[sizeof(T) / 4];
-      T ret;
-    };
-    for (int i = 0; i < (int)sizeof(T) / 4; i++) part[i] = nccl_ldg((uint32_t const*)p + i);
+    union { uint32_t part[sizeof(T)/4]; T ret; };
+    for (int i=0; i < (int)sizeof(T)/4; i++) part[i] = __ldg((uint32_t const*)p + i);
     return ret;
   } else if (alignof(T) == 8) {
-    union {
-      uint64_t part[sizeof(T) / 8];
-      T ret;
-    };
-    for (int i = 0; i < (int)sizeof(T) / 8; i++) part[i] = nccl_ldg((uint64_t const*)p + i);
+    union { uint64_t part[sizeof(T)/8]; T ret; };
+    for (int i=0; i < (int)sizeof(T)/8; i++) part[i] = __ldg((uint64_t const*)p + i);
     return ret;
   } else { // alignof(T) >= 16
-    union {
-      ulonglong2 part[sizeof(T) / 16];
-      T ret;
-    };
-    for (int i = 0; i < (int)sizeof(T) / 16; i++) part[i] = nccl_ldg((ulonglong2 const*)p + i);
+    union { ulonglong2 part[sizeof(T)/16]; T ret; };
+    for (int i=0; i < (int)sizeof(T)/16; i++) part[i] = __ldg((ulonglong2 const*)p + i);
     return ret;
   }
 }

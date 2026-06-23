@@ -145,8 +145,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
 
-  if ((gfxipMajor == 9 && gfxipMinor >= 4) ||
-      (gfxipMajor == 12 && gfxipMinor >= 5)) {
+  if (gfxipMajor == 9 && gfxipMinor >= 4) {
     sdma_swap_supported_ = true;
   }
 
@@ -193,6 +192,16 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   if (gfxipMajor == 12 && gfxipMinor == 5) {
     sdma_indirect_supported_ = true;
   }
+
+#if defined(_WIN32)
+  if (gfxipMajor >= 11) {
+    // Due to driver limitation,
+    // D3D10/11 sharing extensions are only supported on GFX11 or later,
+    // and D3D9 sharing extension is not supported on any hardware as it is deprecated.
+    enableExtension(ClKhrD3d10Sharing);
+    enableExtension(ClKhrD3d11Sharing);
+  }
+#endif
 
   // Override current device settings
   override();

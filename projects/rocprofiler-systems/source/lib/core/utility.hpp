@@ -142,8 +142,9 @@ struct generate
 
 private:
     template <typename Up>
-        requires std::invocable<Up>
-    static auto invoke(Up&& _v, int) -> decltype(std::forward<Up>(_v)())
+    static auto invoke(Up&& _v, int,
+                       std::enable_if_t<std::is_invocable<Up>::value, int> = 0)
+        -> decltype(std::forward<Up>(_v)())
     {
         return std::forward<Up>(_v)();
     }
@@ -188,10 +189,12 @@ combine(LhsT& _lhs, RhsT&& _rhs)
 
 template <template <typename, typename...> class ContainerT, typename Tp,
           typename... TailT>
-    requires tim::concepts::is_string_type<Tp>::value
 std::string
 get_regex_or(const ContainerT<Tp, TailT...>& _container, const std::string& _fallback)
 {
+    static_assert(tim::concepts::is_string_type<Tp>::value,
+                  "get_regex_or requires a container of string types");
+
     if(_container.empty()) return _fallback;
 
     auto _ss  = std::stringstream{};
@@ -205,11 +208,13 @@ get_regex_or(const ContainerT<Tp, TailT...>& _container, const std::string& _fal
 
 template <template <typename, typename...> class ContainerT, typename Tp,
           typename... TailT, typename PredicateT>
-    requires tim::concepts::is_string_type<Tp>::value
 std::string
 get_regex_or(const ContainerT<Tp, TailT...>& _container, PredicateT&& _predicate,
              const std::string& _fallback)
 {
+    static_assert(tim::concepts::is_string_type<Tp>::value,
+                  "get_regex_or requires a container of string types");
+
     if(_container.empty()) return _fallback;
 
     auto _dest = std::vector<std::string>{};

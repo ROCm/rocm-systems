@@ -48,24 +48,22 @@ static inline int getCurrentDevice() {
 /**
  * Helper function to perform Memory copy and kernel operations
  */
-static void performOperations(bool threadSafe = false) {
+static void performOperations() {
   int hostMem[N];
   for (int i = 0; i < N; i++) {
     hostMem[i] = 5;
   }
   int* devMem = nullptr;
-  HIP_CHECK_OPT_THREAD(threadSafe, hipMalloc(&devMem, N * sizeof(int)));
-  HIP_CHECK_OPT_THREAD(threadSafe,
-                       hipMemcpy(devMem, hostMem, N * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&devMem, N * sizeof(int)));
+  HIP_CHECK(hipMemcpy(devMem, hostMem, N * sizeof(int), hipMemcpyHostToDevice));
 
   doubleKernel<<<1, N>>>(devMem, N);
 
-  HIP_CHECK_OPT_THREAD(threadSafe,
-                       hipMemcpy(hostMem, devMem, N * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostMem, devMem, N * sizeof(int), hipMemcpyDeviceToHost));
   for (int i = 0; i < N; i++) {
-    REQUIRE_OPT_THREAD(threadSafe, hostMem[i] == 10);
+    REQUIRE(hostMem[i] == 10);
   }
-  HIP_CHECK_OPT_THREAD(threadSafe, hipFree(devMem));
+  HIP_CHECK(hipFree(devMem));
 }
 
 /**
@@ -341,17 +339,14 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiProcess) {
  * Helper function used in multi threaded scenario to set Valid devices
  */
 void launchFunction(int deviceId) {
-  int device = -1;
-  HIP_CHECK_THREAD(hipGetDevice(&device));
-  REQUIRE_THREAD(device == 0);
+  REQUIRE(getCurrentDevice() == 0);
 
   int length = 1;
   int deviceArr[1] = {deviceId};
-  HIP_CHECK_THREAD(hipSetValidDevices(deviceArr, length));
+  HIP_CHECK(hipSetValidDevices(deviceArr, length));
 
-  HIP_CHECK_THREAD(hipGetDevice(&device));
-  REQUIRE_THREAD(device == deviceId);
-  performOperations(true);
+  REQUIRE(getCurrentDevice() == deviceId);
+  performOperations();
 }
 
 /**
@@ -381,7 +376,6 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiThread) {
       std::thread thread(launchFunction, deviceId);
       thread.join();
     }
-    HIP_CHECK_THREAD_FINALIZE();
   }
 
   SECTION("Parallel") {
@@ -392,7 +386,6 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiThread) {
     for (int t = 0; (t < deviceCount) && (t < threads.size()); t++) {
       threads[t].join();
     }
-    HIP_CHECK_THREAD_FINALIZE();
   }
 }
 

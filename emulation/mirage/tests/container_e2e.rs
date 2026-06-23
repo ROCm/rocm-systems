@@ -4,16 +4,15 @@
 //!
 //! These assert the full containerised lifecycle:
 //!
-//! * `mirage profile create --image ... --container-provider <mock>` records the
+//! * `mirage profile create --image ... --provider <mock>` records the
 //!   containerisation on the profile;
 //! * starting a containerised session brings up the per-node container
 //!   and network (the host pulls the image, creates the network, and
 //!   runs the node container) and persists `container.json` plus a
 //!   per-node `node/<rank>/cid` file;
 //! * `mirage run` against a containerised profile actually executes the
-//!   workload via the per-node host that is the container's foreground
-//!   process (`mirage host --session <id> --rank <n>`), and the MIRAGE_*
-//!   environment is injected on the node container;
+//!   workload *inside* the container (via the mock provider's `exec`,
+//!   which runs the command) and the MIRAGE_* environment is injected;
 //! * destroying the session removes every node container and the network
 //!   via the provider and deletes the whole session directory, so a
 //!   containerised session cleans up after itself.
@@ -83,7 +82,7 @@ impl Env {
                 name,
                 "--image",
                 "img:latest",
-                "--container-provider",
+                "--provider",
                 &self.provider.to_string_lossy(),
             ])
             .assert()
@@ -92,76 +91,43 @@ impl Env {
 }
 
 /// A mock `docker`/`podman` that logs every invocation and behaves just
-/// enough for the host's bring-up path:
-///   * `pull` / `network create|rm` succeed silently,
+/// enough for the host's bring-up and exec paths:
+///   * `pull` / `network create|rm` / `rm` succeed silently,
 ///   * `network inspect` fails so `ensure_network` takes the create path,
-///   * `run -d ... <image> mirage host --session <id> --rank <n>` launches
-///     the per-node host directly on the host (there is no real container
-///     here) so the workload actually executes, records its pid, and
-///     prints a fake container id,
-///   * `rm -f <name>` stops that per-node host (mirroring how removing a
-///     real container kills its in-container host).
-///
-/// The per-node host is the container's foreground process in the real
-/// architecture; running it on the host lets it resolve the session under
-/// the test's XDG dirs and run the exec, so an attached `mirage run`
-/// observes the workload's output and exit instead of blocking forever.
+///   * `run -d ...` prints a fake container id,
+///   * `exec [-i] [-w DIR] [-e K=V ...] <container> CMD ARGS...` strips
+///     the flags and the container name and runs CMD locally, so the
+///     workload actually executes.
 fn write_mock_provider(path: &Path, log: &Path) {
     use std::os::unix::fs::PermissionsExt;
-    let piddir = log.parent().unwrap();
     let script = r#"#!/bin/sh
 echo "$@" >> __LOG__
 case "$1" in
   pull) exit 0 ;;
-  image)
-    case "$2" in
-      inspect) exit 1 ;;
-      *) exit 0 ;;
-    esac ;;
   network)
     case "$2" in
       inspect) exit 1 ;;
       *) exit 0 ;;
     esac ;;
-  run)
-    # Mirror the real container entrypoint (`mirage host --session <id>
-    # --rank <n>`) by launching that per-node host directly on the host.
-    # Detach its stdio so the cid we print on stdout — which the engine
-    # captures as the container id — stays clean, and record its pid so
-    # `rm` can stop it on teardown.
+  run) echo cid-12345 ; exit 0 ;;
+  rm) exit 0 ;;
+  inspect) echo true ; exit 0 ;;
+  exec)
     shift
-    name=""; sid=""; rank=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --name) name="$2"; shift 2 ;;
-        --session) sid="$2"; shift 2 ;;
-        --rank) rank="$2"; shift 2 ;;
-        *) shift ;;
+        -i) shift ;;
+        -w) shift 2 ;;
+        -e) shift 2 ;;
+        *) break ;;
       esac
     done
-    if [ -n "$sid" ] && [ -n "$rank" ]; then
-      "$MIRAGE_BIN" host --session "$sid" --rank "$rank" </dev/null >/dev/null 2>&1 &
-      [ -n "$name" ] && echo $! > "__PIDDIR__/$name.pid"
-    fi
-    echo cid-12345
-    exit 0 ;;
-  rm)
-    for a in "$@"; do
-      case "$a" in
-        mirage-*)
-          if [ -f "__PIDDIR__/$a.pid" ]; then
-            kill "$(cat "__PIDDIR__/$a.pid")" 2>/dev/null
-            rm -f "__PIDDIR__/$a.pid"
-          fi ;;
-      esac
-    done
-    exit 0 ;;
-  inspect) echo true ; exit 0 ;;
+    shift
+    exec "$@" ;;
   *) exit 0 ;;
 esac
 "#
-    .replace("__LOG__", &log.display().to_string())
-    .replace("__PIDDIR__", &piddir.display().to_string());
+    .replace("__LOG__", &log.display().to_string());
     std::fs::write(path, script).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
@@ -219,17 +185,14 @@ fn containerized_run_executes_in_container_and_cleans_up() {
         log.contains("run -d --name mirage-"),
         "missing container run; log:\n{log}"
     );
-    // Each node container's foreground process is the per-node host
-    // (`mirage host --session <id> --rank <n>`); that is what actually
-    // runs the workload inside the container.
-    assert!(
-        log.contains("host --session"),
-        "node container entrypoint is not the per-node host; log:\n{log}"
-    );
-    // The always-present rank env is injected on the node container.
+    // Workload executed via exec, with the always-present rank env.
     assert!(
         log.contains("-e MIRAGE_RANK=0"),
         "missing MIRAGE_RANK injection; log:\n{log}"
+    );
+    assert!(
+        log.contains("/bin/echo hello-mirage"),
+        "command not exec'd in container; log:\n{log}"
     );
     // Cleanup on session destroy.
     assert!(

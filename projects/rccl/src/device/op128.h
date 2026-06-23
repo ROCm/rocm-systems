@@ -245,31 +245,47 @@ __device__ __forceinline__ T fromPack(typename BytePackOf<T>::Pack pack) {
 
 template <int Size>
 __device__ BytePack<Size> ld_global(uintptr_t addr);
-// template<int Size> __device__ BytePack<Size> ld_shared(uint32_t addr);
+// template <int Size>
+// __device__ BytePack<Size> ld_shared(uint32_t addr);
 template <int Size>
 __device__ BytePack<Size> ld_volatile_global(uintptr_t addr);
-// template<int Size> __device__ BytePack<Size> ld_volatile_shared(uint32_t addr);
-// template<int Size> __device__ BytePack<Size> ld_relaxed_gpu_global(uintptr_t addr);
+// template <int Size>
+// __device__ BytePack<Size> ld_volatile_shared(uint32_t addr);
+// template <int Size>
+// __device__ BytePack<Size> ld_relaxed_gpu_global(uintptr_t addr);
 template <int Size>
 __device__ void st_global(uintptr_t addr, BytePack<Size> value);
-// template<int Size> __device__ void st_shared(uint32_t addr, BytePack<Size> value);
-// template<int Size> __device__ void st_relaxed_gpu_global(uintptr_t addr, BytePack<Size> value);
+// template <int Size>
+// __device__ void st_shared(uint32_t addr, BytePack<Size> value);
+// template <int Size>
+// __device__ void st_relaxed_gpu_global(uintptr_t addr, BytePack<Size> value);
 
 template <>
 __device__ __forceinline__ BytePack<0> ld_global<0>(uintptr_t addr) {
   return {};
 }
-// template<> __device__ __forceinline__ BytePack<0> ld_shared<0>(uint32_t addr) { return {}; }
+// template <>
+// __device__ __forceinline__ BytePack<0> ld_shared<0>(uint32_t addr) {
+//   return {};
+// }
 template <>
 __device__ __forceinline__ BytePack<0> ld_volatile_global<0>(uintptr_t addr) {
   return {};
 }
-// template<> __device__ __forceinline__ BytePack<0> ld_volatile_shared<0>(uint32_t addr) { return {}; }
-// template<> __device__ __forceinline__ BytePack<0> ld_relaxed_gpu_global<0>(uintptr_t addr) { return {}; }
+// template <>
+// __device__ __forceinline__ BytePack<0> ld_volatile_shared<0>(uint32_t addr) {
+//   return {};
+// }
+// template <>
+// __device__ __forceinline__ BytePack<0> ld_relaxed_gpu_global<0>(uintptr_t addr) {
+//   return {};
+// }
 template <>
 __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack<0> value) {}
-// template<> __device__ __forceinline__ void st_shared<0>(uint32_t addr, BytePack<0> value) {}
-// template<> __device__ __forceinline__ void st_relaxed_gpu_global<0>(uintptr_t addr, BytePack<0> value) {}
+// template <>
+// __device__ __forceinline__ void st_shared<0>(uint32_t addr, BytePack<0> value) {}
+// template <>
+// __device__ __forceinline__ void st_relaxed_gpu_global<0>(uintptr_t addr, BytePack<0> value) {}
 
 // Used to define implementations for above prototypes.
 #define DEFINE_ld_st__size_space_hip_atomic(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, \

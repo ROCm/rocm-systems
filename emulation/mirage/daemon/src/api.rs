@@ -132,6 +132,7 @@ struct PathsResponse {
     config: String,
     runtime: String,
     state: String,
+    cache: String,
     profiles: String,
     sessions: String,
 }
@@ -145,6 +146,7 @@ async fn get_paths() -> Json<PathsResponse> {
             .display()
             .to_string(),
         state: mirage_core::paths::mirage_state_dir().display().to_string(),
+        cache: mirage_core::paths::mirage_cache_dir().display().to_string(),
         profiles: mirage_core::paths::profile_root().display().to_string(),
         sessions: mirage_core::paths::session_root().display().to_string(),
     })
@@ -175,6 +177,7 @@ struct EmulatorEntry {
     supported: bool,
     /// Human-readable explanation of the support decision.
     support_reason: String,
+    path: Option<std::path::PathBuf>,
     available_plugins: Vec<&'static str>,
 }
 
@@ -191,6 +194,7 @@ async fn list_emulators() -> Json<Vec<EmulatorEntry>> {
                 is_default,
                 supported: spec.support.supported,
                 support_reason: spec.support.reason,
+                path: spec.path,
                 // Plugin discovery requires constructing a live backend
                 // instance; the registry doesn't expose a static plugin
                 // list yet, so we return an empty set here. Future work:
@@ -362,10 +366,6 @@ struct CreateSessionBody {
     id: Option<SessionId>,
     #[serde(default)]
     workdir: Option<String>,
-    /// Run the emulator in out-of-process daemon mode instead of the
-    /// default in-process (local) emulation.
-    #[serde(default)]
-    daemon: bool,
     /// Override/enable containerisation: run every node inside a
     /// container built from this image.
     #[serde(default)]
@@ -444,10 +444,8 @@ async fn create_session(
                     provider: body.provider,
                     image,
                     mounts,
-                    ports: Vec::new(),
                     devices: Vec::new(),
                     groups: Vec::new(),
-                    hacks: Vec::new(),
                 });
             }
         }
@@ -463,7 +461,6 @@ async fn create_session(
                 .map(|p| p.display().to_string())
                 .unwrap_or("/".to_string())
         }),
-        daemon: body.daemon,
     })?;
     if body.spawn_host {
         mirage_ctl::spawn_host_for(&def.id)?;
@@ -552,7 +549,6 @@ async fn create_exec(
             workdir: body.workdir,
         },
         worker_exec: None,
-        nproc_per_node: 1,
         keep: body.keep,
     };
     let r = s.ctl.session_exec(&def)?;

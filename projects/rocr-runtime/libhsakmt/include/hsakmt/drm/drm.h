@@ -35,17 +35,7 @@
 #ifndef _DRM_H_
 #define _DRM_H_
 
-#ifndef __user
-#define __user
-#endif
-
-#if defined(__KERNEL__)
-
-#include <linux/types.h>
-#include <asm/ioctl.h>
-typedef unsigned int drm_handle_t;
-
-#elif defined(__linux__)
+#if   defined(__linux__)
 
 #include <linux/types.h>
 #include <asm/ioctl.h>
@@ -145,11 +135,11 @@ struct drm_version {
 	int version_minor;	  /**< Minor version */
 	int version_patchlevel;	  /**< Patch level */
 	__kernel_size_t name_len;	  /**< Length of name buffer */
-	char __user *name;	  /**< Name of driver */
+	char *name;	  /**< Name of driver */
 	__kernel_size_t date_len;	  /**< Length of date buffer */
-	char __user *date;	  /**< User-space buffer to hold date */
+	char *date;	  /**< User-space buffer to hold date */
 	__kernel_size_t desc_len;	  /**< Length of desc buffer */
-	char __user *desc;	  /**< User-space buffer to hold desc */
+	char *desc;	  /**< User-space buffer to hold desc */
 };
 
 /*
@@ -159,12 +149,12 @@ struct drm_version {
  */
 struct drm_unique {
 	__kernel_size_t unique_len;	  /**< Length of unique */
-	char __user *unique;	  /**< Unique name for driver instantiation */
+	char *unique;	  /**< Unique name for driver instantiation */
 };
 
 struct drm_list {
 	int count;		  /**< Length of user-space structures */
-	struct drm_version __user *version;
+	struct drm_version *version;
 };
 
 struct drm_block {
@@ -359,7 +349,7 @@ struct drm_buf_desc {
  */
 struct drm_buf_info {
 	int count;		/**< Entries in list */
-	struct drm_buf_desc __user *list;
+	struct drm_buf_desc *list;
 };
 
 /*
@@ -367,7 +357,7 @@ struct drm_buf_info {
  */
 struct drm_buf_free {
 	int count;
-	int __user *list;
+	int *list;
 };
 
 /*
@@ -379,7 +369,7 @@ struct drm_buf_pub {
 	int idx;		       /**< Index into the master buffer list */
 	int total;		       /**< Buffer size */
 	int used;		       /**< Amount of buffer in use (for DMA) */
-	void __user *address;	       /**< Address of buffer */
+	void *address;	       /**< Address of buffer */
 };
 
 /*
@@ -388,11 +378,11 @@ struct drm_buf_pub {
 struct drm_buf_map {
 	int count;		/**< Length of the buffer list */
 #ifdef __cplusplus
-	void __user *virt;
+	void *virt;
 #else
-	void __user *virtual;		/**< Mmap'd area in user-virtual */
+	void *virtual;		/**< Mmap'd area in user-virtual */
 #endif
-	struct drm_buf_pub __user *list;	/**< Buffer information */
+	struct drm_buf_pub *list;	/**< Buffer information */
 };
 
 /*
@@ -405,13 +395,13 @@ struct drm_buf_map {
 struct drm_dma {
 	int context;			  /**< Context handle */
 	int send_count;			  /**< Number of buffers to send */
-	int __user *send_indices;	  /**< List of handles to buffers */
-	int __user *send_sizes;		  /**< Lengths of data to send */
+	int *send_indices;	  /**< List of handles to buffers */
+	int *send_sizes;		  /**< Lengths of data to send */
 	enum drm_dma_flags flags;	  /**< Flags */
 	int request_count;		  /**< Number of buffers requested */
 	int request_size;		  /**< Desired size for buffers */
-	int __user *request_indices;	  /**< Buffer information */
-	int __user *request_sizes;
+	int *request_indices;	  /**< Buffer information */
+	int *request_sizes;
 	int granted_count;		  /**< Number of buffers granted */
 };
 
@@ -435,7 +425,7 @@ struct drm_ctx {
  */
 struct drm_ctx_res {
 	int count;
-	struct drm_ctx __user *contexts;
+	struct drm_ctx *contexts;
 };
 
 /*
@@ -601,63 +591,32 @@ struct drm_set_version {
 	int drm_dd_minor;
 };
 
-/**
- * struct drm_gem_close - Argument for &DRM_IOCTL_GEM_CLOSE ioctl.
- * @handle: Handle of the object to be closed.
- * @pad: Padding.
- *
- * Releases the handle to an mm object.
- */
+/* DRM_IOCTL_GEM_CLOSE ioctl argument type */
 struct drm_gem_close {
+	/** Handle of the object to be closed. */
 	__u32 handle;
 	__u32 pad;
 };
 
-/**
- * struct drm_gem_flink - Argument for &DRM_IOCTL_GEM_FLINK ioctl.
- * @handle: Handle for the object being named.
- * @name: Returned global name.
- *
- * Create a global name for an object, returning the name.
- *
- * Note that the name does not hold a reference; when the object
- * is freed, the name goes away.
- */
+/* DRM_IOCTL_GEM_FLINK ioctl argument type */
 struct drm_gem_flink {
+	/** Handle for the object being named */
 	__u32 handle;
+
+	/** Returned global name */
 	__u32 name;
 };
 
-/**
- * struct drm_gem_open - Argument for &DRM_IOCTL_GEM_OPEN ioctl.
- * @name: Name of object being opened.
- * @handle: Returned handle for the object.
- * @size: Returned size of the object
- *
- * Open an object using the global name, returning a handle and the size.
- *
- * This handle (of course) holds a reference to the object, so the object
- * will not go away until the handle is deleted.
- */
+/* DRM_IOCTL_GEM_OPEN ioctl argument type */
 struct drm_gem_open {
+	/** Name of object being opened */
 	__u32 name;
-	__u32 handle;
-	__u64 size;
-};
 
-/**
- * struct drm_gem_change_handle - Argument for &DRM_IOCTL_GEM_CHANGE_HANDLE ioctl.
- * @handle: The handle of a gem object.
- * @new_handle: An available gem handle.
- *
- * This ioctl changes the handle of a GEM object to the specified one.
- * The new handle must be unused. On success the old handle is closed
- * and all further IOCTL should refer to the new handle only.
- * Calls to DRM_IOCTL_PRIME_FD_TO_HANDLE will return the new handle.
- */
-struct drm_gem_change_handle {
+	/** Returned handle for the object */
 	__u32 handle;
-	__u32 new_handle;
+
+	/** Returned size of the object */
+	__u64 size;
 };
 
 /**
@@ -910,21 +869,6 @@ struct drm_get_cap {
  */
 #define DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT	6
 
-/**
- * DRM_CLIENT_CAP_PLANE_COLOR_PIPELINE
- *
- * If set to 1 the DRM core will allow setting the COLOR_PIPELINE
- * property on a &drm_plane, as well as drm_colorop properties.
- *
- * Setting of these plane properties will be rejected when this client
- * cap is set:
- * - COLOR_ENCODING
- * - COLOR_RANGE
- *
- * The client must enable &DRM_CLIENT_CAP_ATOMIC first.
- */
-#define DRM_CLIENT_CAP_PLANE_COLOR_PIPELINE	7
-
 /* DRM_IOCTL_SET_CLIENT_CAP ioctl argument type */
 struct drm_set_client_cap {
 	__u64 capability;
@@ -955,17 +899,13 @@ struct drm_syncobj_destroy {
 };
 
 #define DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE (1 << 0)
-#define DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_TIMELINE         (1 << 1)
 #define DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE (1 << 0)
-#define DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_TIMELINE         (1 << 1)
 struct drm_syncobj_handle {
 	__u32 handle;
 	__u32 flags;
 
 	__s32 fd;
 	__u32 pad;
-
-	__u64 point;
 };
 
 struct drm_syncobj_transfer {
@@ -1077,13 +1017,6 @@ struct drm_crtc_queue_sequence {
 	__u64 sequence;		/* on input, target sequence. on output, actual sequence */
 	__u64 user_data;	/* user data passed to event */
 };
-
-#define DRM_CLIENT_NAME_MAX_LEN		64
-struct drm_set_client_name {
-	__u64 name_len;
-	__u64 name;
-};
-
 
 #if defined(__cplusplus)
 }
@@ -1349,24 +1282,6 @@ extern "C" {
  */
 #define DRM_IOCTL_MODE_CLOSEFB		DRM_IOWR(0xD0, struct drm_mode_closefb)
 
-/**
- * DRM_IOCTL_SET_CLIENT_NAME - Attach a name to a drm_file
- *
- * Having a name allows for easier tracking and debugging.
- * The length of the name (without null ending char) must be
- * <= DRM_CLIENT_NAME_MAX_LEN.
- * The call will fail if the name contains whitespaces or non-printable chars.
- */
-#define DRM_IOCTL_SET_CLIENT_NAME	DRM_IOWR(0xD1, struct drm_set_client_name)
-
-/**
- * DRM_IOCTL_GEM_CHANGE_HANDLE - Move an object to a different handle
- *
- * Some applications (notably CRIU) need objects to have specific gem handles.
- * This ioctl changes the object at one gem handle to use a new gem handle.
- */
-#define DRM_IOCTL_GEM_CHANGE_HANDLE    DRM_IOWR(0xD2, struct drm_gem_change_handle)
-
 /*
  * Device specific ioctls should only be in their respective headers
  * The device specific ioctl range is from 0x40 to 0x9f.
@@ -1444,7 +1359,6 @@ struct drm_event_crtc_sequence {
 };
 
 /* typedef area */
-#ifndef __KERNEL__
 typedef struct drm_clip_rect drm_clip_rect_t;
 typedef struct drm_drawable_info drm_drawable_info_t;
 typedef struct drm_tex_region drm_tex_region_t;
@@ -1486,7 +1400,6 @@ typedef struct drm_agp_binding drm_agp_binding_t;
 typedef struct drm_agp_info drm_agp_info_t;
 typedef struct drm_scatter_gather drm_scatter_gather_t;
 typedef struct drm_set_version drm_set_version_t;
-#endif
 
 #if defined(__cplusplus)
 }

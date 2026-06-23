@@ -57,7 +57,7 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
 
     auto modRanks = [&] __device__(int r) -> int { return r - (r >= nranks ? nranks : 0); };
 
-      // step 0: push data to next GPU
+    // step 0: push data to next GPU
     chunk = modRanks(ringIx + nranks - 1);
     chunkOffset = chunk * chunkCount;
     offset = gridOffset + elemOffset + chunkOffset;
@@ -187,9 +187,10 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
   if (Proto::Id == NCCL_PROTO_SIMPLE) {
     nthreadsSplit = nthreads / 2;
     if (nthreadsSplit >= 256) nthreadsSplit += 64;
-  } else { // LL & LL128
-      // Receiving from up to 3 sources is more compute intensive than sending
-      // to 3 dests. Use 70% for reduce and 30% for bcast.
+  } else {
+    // LL & LL128
+    // Receiving from up to 3 sources is more compute intensive than sending
+    // to 3 dests. Use 70% for reduce and 30% for bcast.
     nthreadsSplit = (nthreads * 7 / (10 * WARP_SIZE)) * WARP_SIZE;
   }
 
@@ -203,9 +204,8 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
       nelem = min(chunkCount, channelCount - elemOffset);
       prims.directRecvReduceCopyDirectSend(offset, offset, nelem, /*doPost=*/true);
     }
-
   } else if (tid < nthreadsSplit) {
-      /* Reduce up. Max number of recv is 3, max number of send is 1 (binary tree + local).
+    /* Reduce up. Max number of recv is 3, max number of send is 1 (binary tree + local).
      * Why Direct=1????
      * Answer: Because despite not performing any direct operations, the ctor
      * must assume Direct so that it can exchange direct pointers with remote ctors
@@ -263,8 +263,7 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
 #if defined(__gfx942__) // Use a single slice per simple primitive for a single node on some gfx942 devices.
 #define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work) \
   if (work->rcclUseOneSlice) { \
-    using Proto = \
-      ProtoSimple<ALLREDUCE_CHUNKSTEPS / ALLREDUCE_SLICESTEPS_SINGLE_NODE, ALLREDUCE_SLICESTEPS_SINGLE_NODE>; \
+    using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS / ALLREDUCE_SLICESTEPS_SINGLE_NODE, ALLREDUCE_SLICESTEPS_SINGLE_NODE>; \
     runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
   } else { \
     using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS / ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>; \
@@ -314,7 +313,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_SIMPL
 template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int /*nthreads*/, struct ncclDevWorkColl* work) {
-    static constexpr int COLLNET_COPY_THREADS = 64;
+    static constexpr int COLLNET_COPY_THREADS = 96;
     const int bid = ncclShmem.channelId - work->channelLo;
     const int nChannels = work->channelHi - work->channelLo + 1;
     struct ncclDirect* direct = &ncclShmem.channel.collnetDirect;
@@ -325,12 +324,12 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
     const int hasUp = (direct->up[0] >= 0) ? 1 : 0;
     const int hasDn = (direct->down[0] >= 0) ? 1 : 0;
     const int nThreadsScatter = WARP_SIZE + ((hasUp && hasDn) ? COLLNET_COPY_THREADS :
-                                             hasUp            ? 2 * COLLNET_COPY_THREADS :
+                                             hasUp            ? 3 * COLLNET_COPY_THREADS :
                                                                 0);
-    const int nThreadsGather = ((hasUp && hasDn) ? COLLNET_COPY_THREADS : hasUp ? 1 * COLLNET_COPY_THREADS : 0);
+    const int nThreadsGather = ((hasUp && hasDn) ? COLLNET_COPY_THREADS : hasUp ? 2 * COLLNET_COPY_THREADS : 0);
     const int nThreadsBcast = WARP_SIZE + ((hasUp && hasDn) ? COLLNET_COPY_THREADS :
                                            hasUp            ? 0 :
-                                                              1 * COLLNET_COPY_THREADS);
+                                                              2 * COLLNET_COPY_THREADS);
     const int nThreadsReduce = work->nWarps * WARP_SIZE - nThreadsScatter - nThreadsGather - nThreadsBcast;
     const int tidStartBcast = nThreadsGather;
     const int tidStartScatter = tidStartBcast + nThreadsBcast;

@@ -13,7 +13,6 @@ on:
       - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk/**'
       - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
       - '.github/workflows/rocprofiler-sdk-docs.yml'
-      - '.github/actions/rocprofiler-sdk-util/action.yml'
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/*.md'
@@ -23,7 +22,6 @@ on:
       - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk/**'
       - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
       - '.github/workflows/rocprofiler-sdk-docs.yml'
-      - '.github/actions/rocprofiler-sdk-util/action.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

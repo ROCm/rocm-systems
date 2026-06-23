@@ -26,7 +26,7 @@ inline void hipHostRegisterSupported() {
 }
 
 
-HIP_TEST_CASE(Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister) {
+TEST_CASE("Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister") {
   hipHostRegisterSupported();
 
   // try all combinations of flags

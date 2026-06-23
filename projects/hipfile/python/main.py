@@ -1,7 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-#
-# SPDX-License-Identifier: MIT
-
 """
 A quick & rough script for testing the Cython bindings to the
 hipFile C library. Reads a given file and copies it to an

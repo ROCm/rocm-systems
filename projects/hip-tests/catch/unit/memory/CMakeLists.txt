@@ -41,7 +41,6 @@ set(TEST_SRC
     hipMemcpyHtoA_old.cc
     hipMemcpyAllApiNegative.cc
     hipMemcpy_MultiThread.cc
-    hipMemcpyDynamicQueueChurn.cc
     hipHostRegister.cc
     hipHostUnregister.cc
     hipHostGetFlags.cc
@@ -71,7 +70,6 @@ set(TEST_SRC
     hipMemcpy2DArrayToArray.cc
     hipMemcpy3DBatchAsync.cc
     hipMemcpyBatchAsync.cc
-    hipMemDiscardBatchAsync.cc
     hipMemsetD2D8.cc
     hipMemsetD2D8Async.cc
     hipMemsetD2D16.cc

@@ -57,9 +57,6 @@ pub struct CreateSessionRequest {
     pub profile: crate::common::MaybeRef<ProfileDef>,
     /// Working directory used as the default cwd for execs.
     pub workdir: String,
-    /// Run the emulator in out-of-process daemon mode for this session
-    /// instead of the default in-process emulation.
-    pub daemon: bool,
 }
 
 /// The control-plane API the CLI talks to.
@@ -209,11 +206,8 @@ impl MirageCtl for FileCtl {
     }
 
     fn profile_put(&self, profile: &ProfileDef) -> Result<()> {
-        // Profile names are case-insensitive and always stored lowercase.
-        let mut profile = profile.clone();
-        profile.name = profile.name.to_lowercase();
         let p = crate::paths::profile_path(&profile.name);
-        crate::state::write_json(&p, &profile)
+        crate::state::write_json(&p, profile)
     }
 
     fn profile_delete(&self, name: &str) -> Result<()> {
@@ -288,17 +282,9 @@ impl MirageCtl for FileCtl {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().to_string();
-            let Ok(id) = SessionId::new(name) else {
-                continue;
-            };
-            // A real session always has a `def.json`. Skip directories
-            // missing it: these are ghosts left by a heartbeat write that
-            // raced a `session destroy`, and a destroyed session must not
-            // reappear in listings.
-            if !crate::paths::SessionLayout::for_id(&id).def().exists() {
-                continue;
+            if let Ok(id) = SessionId::new(name) {
+                out.push(id);
             }
-            out.push(id);
         }
         out.sort();
         Ok(out)
@@ -357,7 +343,6 @@ impl MirageCtl for FileCtl {
             id: id.clone(),
             profile: req.profile,
             workdir: req.workdir,
-            daemon: req.daemon,
             created_at: Utc::now(),
         };
         crate::state::write_json(&layout.def(), &def)?;
@@ -365,20 +350,11 @@ impl MirageCtl for FileCtl {
     }
 
     fn session_wait_ready(&self, id: &SessionId, timeout: Duration) -> Result<SessionHealth> {
-        let mut deadline = std::time::Instant::now() + timeout;
+        let deadline = std::time::Instant::now() + timeout;
         loop {
             let h = self.session_health(id)?;
             if h.healthy || h.terminal {
                 return Ok(h);
-            }
-            // Pulling a base image and building a derived image (for
-            // profile hacks) are externally-bounded operations that can
-            // legitimately run far longer than the ready timeout. The
-            // timeout exists to catch a *hung* host, not a slow pull or
-            // build, so don't count time spent in those states against
-            // the deadline — keep pushing it out while they're in flight.
-            if matches!(h.state.as_deref(), Some("pulling" | "building")) {
-                deadline = std::time::Instant::now() + timeout;
             }
             if std::time::Instant::now() >= deadline {
                 return Err(MirageError::HostStartTimeout(timeout));
@@ -727,7 +703,7 @@ mod tests {
             name: name.to_string(),
             description: None,
             emulator: crate::emulator::EmulatorDef {
-                emulator: "noop".to_string(),
+                emulator: crate::emulator::EmulatorKind::Noop,
                 plugins: Default::default(),
                 exec_mode: Default::default(),
                 options: Default::default(),
@@ -768,7 +744,6 @@ mod tests {
                 id: Some(SessionId::new("s1").unwrap()),
                 profile: MaybeRef::Ref("p".to_string()),
                 workdir: "/tmp".to_string(),
-                daemon: false,
             })
             .unwrap();
         assert_eq!(def.id.as_str(), "s1");
@@ -788,7 +763,6 @@ mod tests {
             id: Some(SessionId::new("dup").unwrap()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            daemon: false,
         };
         ctl.session_create(req()).unwrap();
         assert!(matches!(
@@ -805,7 +779,6 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            daemon: false,
         })
         .unwrap();
         let def = ExecDef {
@@ -818,7 +791,6 @@ mod tests {
                 workdir: None,
             },
             worker_exec: None,
-            nproc_per_node: 1,
             keep: true,
         };
         let r0 = ctl.session_exec(&def).unwrap();
@@ -840,7 +812,6 @@ mod tests {
                 workdir: None,
             },
             worker_exec: None,
-            nproc_per_node: 1,
             keep: true,
         };
         ctl.session_exec(&def).unwrap()
@@ -854,7 +825,6 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            daemon: false,
         })
         .unwrap();
         let r = make_exec_dir(&ctl, &s);
@@ -874,7 +844,6 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            daemon: false,
         })
         .unwrap();
         let r = make_exec_dir(&ctl, &s);
@@ -893,7 +862,6 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            daemon: false,
         })
         .unwrap();
         let r = ExecRef {
@@ -928,7 +896,6 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            daemon: false,
         })
         .unwrap();
         // Simulate the host having recorded the container state.
@@ -988,7 +955,6 @@ mod tests {
             id: Some(s.clone()),
             profile: MaybeRef::Ref("p".to_string()),
             workdir: "/tmp".to_string(),
-            daemon: false,
         })
         .unwrap();
         // No container state was ever written → provider must not be

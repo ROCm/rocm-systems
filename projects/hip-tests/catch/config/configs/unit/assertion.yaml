@@ -12,5 +12,4 @@ assertion:
   Unit_Assert_Positive_Basic_KernelFail:
     <<: *level_2
     # === Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210 ===
-    # Disabled for asan since this test intentionally enter a failed state which prevents freeing resources
-    disabled: [amd_windows, amd_wsl, asan]
+    disabled: [amd_windows, amd_wsl]

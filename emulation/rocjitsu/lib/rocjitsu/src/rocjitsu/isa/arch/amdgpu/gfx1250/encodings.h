@@ -97,7 +97,6 @@ public:
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
-  uint32_t dpp8_lane_sel_ = 0;
   std::unique_ptr<DppOperand> dpp_src0_;
   std::unique_ptr<DppOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
@@ -127,7 +126,6 @@ public:
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
-  uint32_t dpp8_lane_sel_ = 0;
   std::unique_ptr<DppOperand> dpp_src0_;
   std::unique_ptr<DppOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
@@ -158,7 +156,6 @@ public:
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
-  uint32_t dpp8_lane_sel_ = 0;
   std::unique_ptr<DppOperand> dpp_src0_;
   std::unique_ptr<DppOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;

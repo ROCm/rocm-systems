@@ -85,7 +85,6 @@ struct backtrace_metrics : comp::empty_base
     bool operator()(Tp) const;
 
     template <typename Tp>
-        requires(!concepts::is_type_listing<Tp>::value)
     bool operator()(type_list<Tp>) const;
 
     auto        get_valid() const { return m_valid; }
@@ -124,10 +123,12 @@ backtrace_metrics::get_valid(type_list<Tp>, valid_array_t _valid)
 }
 
 template <typename Tp>
-    requires(!concepts::is_type_listing<Tp>::value)
 bool
 backtrace_metrics::operator()(type_list<Tp>) const
 {
+    static_assert(!concepts::is_type_listing<Tp>::value,
+                  "Error! invalid call with tuple");
+
     constexpr auto idx = tim::index_of<Tp, categories_t>::value;
     return m_valid.test(idx);
 }

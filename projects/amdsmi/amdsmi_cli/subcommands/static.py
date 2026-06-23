@@ -857,8 +857,8 @@ class StaticCommands:
             static_dict["partition"] = {
                 "accelerator_partition": compute_partition,
                 "memory_partition": memory_partition,
-                "partition_id": partition_id,
                 "compute_partition_mem_alloc_mode": mem_alloc_mode,
+                "partition_id": partition_id,
             }
         if "soc_pstate" in current_platform_args:
             if args.soc_pstate:
@@ -1270,14 +1270,9 @@ class StaticCommands:
                                             AMDSMIHelpers.SI_Unit.MICRO,
                                         )
                                     )
-                                    if self.logger.is_json_format():
-                                        freq_dict["frequency_levels"].update(
-                                            {f"Level {level}": {"value": freq, "unit": "MHz"}}
-                                        )
-                                    else:
-                                        freq_dict["frequency_levels"].update(
-                                            {f"Level {level}": f"{freq} MHz"}
-                                        )
+                                    freq_dict["frequency_levels"].update(
+                                        {f"Level {level}": {"value": freq, "unit": "MHz"}}
+                                    )
                                 else:
                                     freq_dict["frequency_levels"].update({f"Level {level}": "N/A"})
                         else:

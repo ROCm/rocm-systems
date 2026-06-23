@@ -568,6 +568,8 @@ struct ncclPeerInfo {
   bool crossNicSupport;
   bool rmaPluginAvailable;
   bool cuMemGdrSupport;
+  int mloPart; // MLOPart partition index, or NCCL_TOPO_UNDEF if not an MLOPart GPU
+  cudaUUID_t gpuUuid;
 };
 
 typedef enum ncclGroupTaskType {
@@ -605,14 +607,16 @@ struct ncclComm {
   struct ncclProxyConnector* gproxyConn;
   struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next> legacyRegCleanupQueue;
   bool peerInfoValid;
-  float minNetBw;
+  int minNetCount; // Minimum number of network devices local to a rank
+  float minNetBw; // Minimum bw of any network device local to a rank
 
   ncclNet_t* ncclNet;
   void* netContext;
   void* ginContext;
-  void* rmaGinContext;
+  void* rmaContext;
   int netPluginIndex;
   int ginPluginIndex;
+  int rmaPluginIndex;
   int ncclNetVer;
   ncclNetDeviceType netDeviceType;
   ncclCollNet_t* ncclCollNet;
@@ -637,8 +641,8 @@ struct ncclComm {
   bool directMode; // if any process manages more than one local rank
   int cuMemSupport;
 
-  uint64_t
-    magic; // Magic number for all network communication. Not a security key -- only goal is to detect mismatches.
+  uint64_t magic; // Magic number for all network communication. Not a security key -- only goal is to detect
+                  // mismatches.
 
   uint64_t commHash;
   int rank;    // my rank in the communicator
@@ -682,7 +686,6 @@ struct ncclComm {
 
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
-  bool isMultiRankGpu; // true when multiple ranks use the same GPU device on the same host
   struct cliqueInfo clique; // Our MNNVL clique information
   int cliqueRank; // Our rank within the MNNVL clique
 
@@ -787,6 +790,7 @@ struct ncclComm {
   uint8_t collNetSupportMatrix[4 /*sum,prod,max,min*/][ncclNumTypes];
   int* collNetHeads;
   int collNetHeadsNum;
+  int collNetChainSupport;
   int* collNetDenseToUserRank;
   int* collNetUserToDenseRank;
   /* sharable collNet proxy progress resource. */
@@ -894,6 +898,8 @@ struct ncclComm {
   int symmetricSupport;
   bool useNetPXN;
   bool useGdr;
+  bool hasMloPart; // if mlopart is used
+  bool hasMultiRankNvml; // if multiple ranks are using the NVML device
   ncclGinConnectionType_t globalGinSupport;
   bool globalRmaProxySupport;
   bool hostRmaSupport;

@@ -3,7 +3,6 @@
 
 #include "library/coverage.hpp"
 #include "api.hpp"
-#include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "library/coverage/impl.hpp"
 #include "library/thread_data.hpp"
@@ -205,8 +204,8 @@ post_process()
         return _b.value_or(true);
     };
 
-    auto _text_output = _get_setting(std::string{ env_vars::TEXT_OUTPUT });
-    auto _json_output = _get_setting(std::string{ env_vars::JSON_OUTPUT });
+    auto _text_output = _get_setting("ROCPROFSYS_TEXT_OUTPUT");
+    auto _json_output = _get_setting("ROCPROFSYS_JSON_OUTPUT");
 
     if(_text_output)
     {

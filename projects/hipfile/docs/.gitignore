@@ -1,8 +1,7 @@
-/_build/
-/_doxygen/
-/doxygen/html
-/doxygen/xml
-/doxygen/latex
-/doxygen/*.tag
-/sphinx/_toc.yml
-Doxyfile.bak
+_build/
+_doxygen/
+doxygen/Doxyfile
+doxygen/html/
+doxygen/latex/
+doxygen/xml/
+sphinx/_toc.yml

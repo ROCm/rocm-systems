@@ -337,23 +337,12 @@ TEST_F(LsaBarrierTimeoutMPITest, AbsentPeerProducesTimeout)
     SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
     int rank = -1, nRanks = -1;
     ncclCommUserRank(comm, &rank); ncclCommCount(comm, &nRanks);
-    // The single-absent-peer timeout only starves reliably with a 2-rank LSA team;
-    // at N>2 the all-to-all inbox + rolling-epoch wait can complete, so skip instead.
-    // Decide collectively (max LSA size across the job) so every rank skips or runs
-    // together — a per-rank skip would deadlock the MPI_Barrier below.
-    ncclTeam_t lsaTeam = ncclTeamLsa(comm);
-    int maxLsaNRanks = lsaTeam.nRanks;
-    MPI_Allreduce(MPI_IN_PLACE, &maxLsaNRanks, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-    if (maxLsaNRanks != 2) {
-        GTEST_SKIP() << "LSA absent-peer timeout requires a 2-rank LSA team; got "
-                     << maxLsaNRanks << ". Run with 2 ranks sharing one LSA domain.";
-    }
-    const bool isAbsent = (lsaTeam.rank == lsaTeam.nRanks - 1);
+    const bool isAbsent = (rank == nRanks - 1);
     int hResult = static_cast<int>(ncclSuccess);
     if (!isAbsent) {
         hResult = runLsaBarrier(devComm, stream, kShortTimeoutCycles);
         EXPECT_EQ(static_cast<int>(ncclTimeout), hResult)
-            << "LSA rank " << lsaTeam.rank << " expected ncclTimeout, got "
+            << "Rank " << rank << " expected ncclTimeout, got "
             << ncclGetErrorString(static_cast<ncclResult_t>(hResult));
     }
     MPI_Barrier(MPI_COMM_WORLD);
@@ -367,19 +356,12 @@ TEST_F(LsaBarrierTimeoutMPITest, ZeroBudgetAbsentPeerTimesOut)
     SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
     int rank = -1, nRanks = -1;
     ncclCommUserRank(comm, &rank); ncclCommCount(comm, &nRanks);
-    ncclTeam_t lsaTeam = ncclTeamLsa(comm);
-    // The single-absent-peer timeout only starves reliably with a 2-rank LSA team;
-    // at N>2 the all-to-all inbox + rolling-epoch wait can complete, so skip instead.
-    if (lsaTeam.nRanks != 2) {
-        GTEST_SKIP() << "LSA absent-peer timeout requires a 2-rank LSA team; got "
-                     << lsaTeam.nRanks << ". Run with 2 ranks sharing one LSA domain.";
-    }
-    const bool isAbsent = (lsaTeam.rank == lsaTeam.nRanks - 1);
+    const bool isAbsent = (rank == nRanks - 1);
     int hResult = static_cast<int>(ncclSuccess);
     if (!isAbsent) {
         hResult = runLsaBarrier(devComm, stream, /*timeoutCycles=*/0ULL);
         EXPECT_EQ(static_cast<int>(ncclTimeout), hResult)
-            << "LSA rank " << lsaTeam.rank << " expected immediate ncclTimeout, got "
+            << "Rank " << rank << " expected immediate ncclTimeout, got "
             << ncclGetErrorString(static_cast<ncclResult_t>(hResult));
     }
     MPI_Barrier(MPI_COMM_WORLD);
@@ -412,14 +394,7 @@ TEST_F(LsaBarrierTimeoutMPITest, RecoversAfterTimeout)
     SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
     int rank = -1, nRanks = -1;
     ncclCommUserRank(comm, &rank); ncclCommCount(comm, &nRanks);
-    ncclTeam_t lsaTeam = ncclTeamLsa(comm);
-    // The single-absent-peer timeout only starves reliably with a 2-rank LSA team;
-    // at N>2 the all-to-all inbox + rolling-epoch wait can complete, so skip instead.
-    if (lsaTeam.nRanks != 2) {
-        GTEST_SKIP() << "LSA absent-peer timeout requires a 2-rank LSA team; got "
-                     << lsaTeam.nRanks << ". Run with 2 ranks sharing one LSA domain.";
-    }
-    const bool isAbsent = (lsaTeam.rank == lsaTeam.nRanks - 1);
+    const bool isAbsent = (rank == nRanks - 1);
     if (!isAbsent) {
         EXPECT_EQ(static_cast<int>(ncclTimeout),
                   runLsaBarrier(devComm, stream, kShortTimeoutCycles));
@@ -440,14 +415,7 @@ TEST_F(LsaBarrierTimeoutMPITest, BackToBackTimeouts)
     SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
     int rank = -1, nRanks = -1;
     ncclCommUserRank(comm, &rank); ncclCommCount(comm, &nRanks);
-    ncclTeam_t lsaTeam = ncclTeamLsa(comm);
-    // The single-absent-peer timeout only starves reliably with a 2-rank LSA team;
-    // at N>2 the all-to-all inbox + rolling-epoch wait can complete, so skip instead.
-    if (lsaTeam.nRanks != 2) {
-        GTEST_SKIP() << "LSA absent-peer timeout requires a 2-rank LSA team; got "
-                     << lsaTeam.nRanks << ". Run with 2 ranks sharing one LSA domain.";
-    }
-    const bool isAbsent = (lsaTeam.rank == lsaTeam.nRanks - 1);
+    const bool isAbsent = (rank == nRanks - 1);
     constexpr int kRounds = 4;
     int timeouts = 0;
     for (int i = 0; i < kRounds; ++i) {

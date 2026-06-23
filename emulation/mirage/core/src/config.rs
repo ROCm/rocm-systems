@@ -7,5 +7,5 @@ pub struct OptionDef {
     pub name: String,
     pub dtype: SimpleType,
     pub description: String,
-    pub default: Option<SimpleValue>,
+    pub default_value: SimpleValue,
 }

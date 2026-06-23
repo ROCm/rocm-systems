@@ -1,7 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-#
-# SPDX-License-Identifier: MIT
-
 """GPU-accelerated file I/O through hipFile."""
 
 from __future__ import annotations

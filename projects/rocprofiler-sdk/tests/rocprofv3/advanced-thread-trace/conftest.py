@@ -27,6 +27,7 @@ import json
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 
 import re
 import os
@@ -54,11 +55,6 @@ def pytest_addoption(parser):
         action="store",
         default=None,
         help="Target CU for perfcounter validation.",
-    )
-    parser.addoption(
-        "--att-occupancy-event-trace-out-dir",
-        action="store",
-        help="Path to ATT occupancy event trace output directory.",
     )
     parser.addoption(
         "--att-other-simd-out-dir",
@@ -92,14 +88,6 @@ def json_data(request):
 @pytest.fixture
 def output_path(request):
     return request.config.getoption("--output-path")
-
-
-@pytest.fixture
-def att_occupancy_event_trace_out_dir_path(request):
-    output_dir_path = request.config.getoption("--att-occupancy-event-trace-out-dir")
-    if not output_dir_path:
-        pytest.skip("--att-occupancy-event-trace-out-dir not provided")
-    return output_dir_path
 
 
 @pytest.fixture

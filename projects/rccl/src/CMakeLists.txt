@@ -28,6 +28,7 @@ set(SRC_FILES
   mem_manager.cc
   debug.cc
   dev_runtime.cc
+  dev_runtime_internal.h
   dda_all_reduce_ipc.cu
   dda_reduce_scatter_ipc.cu
   dda_all_gather_ipc.cu
@@ -78,8 +79,8 @@ set(SRC_FILES
   device/symmetric/kernel.cuh
   device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh
-  device/symmetric/reduce_scatter_gin.cuh
   device/symmetric/tma_ptx.cuh
+  device/symmetric/reduce_scatter_gin.cuh
   graph/connect.cc
   graph/paths.cc
   graph/rings.cc
@@ -141,6 +142,8 @@ set(SRC_FILES
   include/gin.h
   include/gin/gin_host.h
   include/gin/gin_host_proxy.h
+  gin/proxy_gpucontext/gpucontext.h
+  gin/proxy_gpucontext/gpucontext_v1.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -267,12 +270,13 @@ set(SRC_FILES
   include/nvtx3/nvtxDetail/nvtxInitDefs.h
   include/nvtx3/nvtxDetail/nvtxLinkOnce.h
   include/nvtx3/nvtxDetail/nvtxTypes.h
-  include/proxy_diag_counters.h
+  include/proxy_trace/proxy_trace.h
   include/plugin/nccl_net.h
   include/plugin/nccl_profiler.h
   include/plugin/nccl_tuner.h
   include/plugin/nccl_env.h
   include/plugin/env/env_v1.h
+  include/plugin/env/env_v2.h
   include/plugin/plugin.h
   include/plugin/net/net_v6.h
   include/plugin/net/net_v7.h
@@ -297,9 +301,11 @@ set(SRC_FILES
   include/plugin/tuner/tuner_v5.h
   include/plugin/tuner/tuner_v6.h
   include/plugin/nccl_gin.h
-  include/plugin/gin/gin_v11.h
-  include/plugin/gin/gin_v12.h
+  include/plugin/nccl_rma.h
+  include/plugin/rma/rma_v13.h
+  include/plugin/rma/rma_v14.h
   include/plugin/gin/gin_v13.h
+  include/plugin/gin/gin_v14.h
   misc/alt_rsmi.cc
   misc/archinfo.cc
   misc/argcheck.cc
@@ -325,13 +331,16 @@ set(SRC_FILES
   misc/socket.cc
   misc/strongstream.cc
   misc/utils.cc
+  misc/proxy_trace/proxy_trace.cc
   nccl_device/core.cc
   nccl_device/gin_barrier.cc
   nccl_device/gin_scratch.cc
   nccl_device/ll_a2a.cc
   nccl_device/lsa_barrier.cc
   os/linux.cc
+  os/linux_socket_pair.cc
   include/os.h
+  include/os_socket_pair.h
   include/os/linux.h
   include/os/windows.h
   param/c_api.cc
@@ -352,6 +361,7 @@ set(SRC_FILES
   rma/rma_proxy.cc
   rma/rma_proxy_launch.cc
   rma/rma_proxy_progress.cc
+  include/rma.h
   include/rma/rma.h
   include/rma/rma_ce.h
   include/rma/rma_proxy.h
@@ -382,9 +392,8 @@ set(SRC_FILES
   plugin/tuner/tuner_v6.cc
   plugin/tuner/csv_tuner.cc
   plugin/gin.cc
-  plugin/gin/gin_v11.cc
-  plugin/gin/gin_v12.cc
   plugin/gin/gin_v13.cc
+  plugin/gin/gin_v14.cc
   ras/client.cc
   ras/client_support.cc
   ras/collectives.cc
@@ -530,19 +539,6 @@ add_custom_command(
 list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
 list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
 
-# proxy_trace headers are not produced by hipify-perl; copy from src so the
-# hipify include tree matches (unit tests search hipify paths before src/include).
-set(PROXY_TRACE_HDR_SRC "${RCCL_SOURCE_DIR}/src/include/proxy_trace/proxy_trace.h")
-set(PROXY_TRACE_HDR_DST "${HIPIFY_DIR}/src/include/proxy_trace/proxy_trace.h")
-add_custom_command(
-  OUTPUT ${PROXY_TRACE_HDR_DST}
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPIFY_DIR}/src/include/proxy_trace"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROXY_TRACE_HDR_SRC} ${PROXY_TRACE_HDR_DST}
-  MAIN_DEPENDENCY ${PROXY_TRACE_HDR_SRC}
-  COMMENT "Copying proxy_trace/proxy_trace.h (no hipification)"
-)
-list(APPEND HIP_SOURCES ${PROXY_TRACE_HDR_DST})
-
 # copy_directory_if_different was added in CMake 3.26.  On older toolchains
 # fall back to the unconditional copy_directory (same behaviour, just causes
 # unnecessary recompilation on no-op rebuilds).
@@ -592,6 +588,47 @@ foreach(_hdr common gin p2p)
   list(APPEND NET_IB_HEADER_SYMLINKS "${NET_IB_HIPIFY_DIR}/${_hdr}.h")
 endforeach()
 add_custom_target(net_ib_header_symlinks DEPENDS ${NET_IB_HEADER_SYMLINKS})
+
+# Several other header directories also collide on basename and are hipified with _tmp
+# suffixes. Create canonical-name symlinks so that #include "<name>.h" resolves correctly.
+# Affected groups:
+#   include/rma/rma.h  -> rma_tmp.h   (collision with include/rma.h)
+#   include/nccl_device/{core,comm,gin}.h -> *_tmp.h  (collision within the dir)
+#   include/param/{param,common,utils}.h  -> *_tmp.h  (collision within the dir)
+set(EXTRA_HEADER_SYMLINKS "")
+# rma/rma.h
+set(_rma_dir "${HIPIFY_DIR}/src/include/rma")
+add_custom_command(
+  OUTPUT  "${_rma_dir}/rma.h"
+  DEPENDS "${_rma_dir}/rma_tmp.h"
+  COMMAND ${CMAKE_COMMAND} -E create_symlink "rma_tmp.h" "${_rma_dir}/rma.h"
+  COMMENT "Symlinking include/rma/rma_tmp.h -> rma.h"
+)
+list(APPEND EXTRA_HEADER_SYMLINKS "${_rma_dir}/rma.h")
+# nccl_device/{core,comm,gin}.h
+set(_nd_dir "${HIPIFY_DIR}/src/include/nccl_device")
+foreach(_hdr core comm gin)
+  add_custom_command(
+    OUTPUT  "${_nd_dir}/${_hdr}.h"
+    DEPENDS "${_nd_dir}/${_hdr}_tmp.h"
+    COMMAND ${CMAKE_COMMAND} -E create_symlink "${_hdr}_tmp.h" "${_nd_dir}/${_hdr}.h"
+    COMMENT "Symlinking nccl_device/${_hdr}_tmp.h -> ${_hdr}.h"
+  )
+  list(APPEND EXTRA_HEADER_SYMLINKS "${_nd_dir}/${_hdr}.h")
+endforeach()
+# include/param/{param,common,utils}.h
+set(_param_dir "${HIPIFY_DIR}/src/include/param")
+foreach(_hdr param common utils)
+  add_custom_command(
+    OUTPUT  "${_param_dir}/${_hdr}.h"
+    DEPENDS "${_param_dir}/${_hdr}_tmp.h"
+    COMMAND ${CMAKE_COMMAND} -E create_symlink "${_hdr}_tmp.h" "${_param_dir}/${_hdr}.h"
+    COMMENT "Symlinking param/${_hdr}_tmp.h -> ${_hdr}.h"
+  )
+  list(APPEND EXTRA_HEADER_SYMLINKS "${_param_dir}/${_hdr}.h")
+endforeach()
+add_custom_target(extra_header_symlinks DEPENDS ${EXTRA_HEADER_SYMLINKS})
+add_dependencies(hipify_all extra_header_symlinks)
 
 
 # Generate device/host tables and all the collective functions that are going to be in librccl.so
@@ -691,7 +728,7 @@ add_library(rccl ${HIP_SOURCES})
 
 ## Set RCCL dependencies
 ## Ensure git version is updated before building rccl
-add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_symlinks)
+add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_symlinks extra_header_symlinks)
 
 ## Set RCCL include directories
 target_include_directories(rccl PRIVATE ${PROJECT_BINARY_DIR}/include)        # for generated rccl.h header

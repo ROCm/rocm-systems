@@ -593,23 +593,21 @@ hsa_status_t KfdDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* ha
 }
 
 hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
-                            hsa_access_permission_t perms, uint32_t node_id) {
+                            hsa_access_permission_t perms) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle,
-                                     static_cast<HSAuint64>(offset),
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, static_cast<HSAuint64>(offset),
                                      static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
-                                     mem_perm(perms), node_id));
+                                     mem_perm(perms)));
   if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
-                              size_t offset, size_t size, uint32_t node_id) {
+                              size_t offset, size_t size) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle,
-                                     static_cast<HSAuint64>(offset),
-                                     static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem), node_id));
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle, static_cast<HSAuint64>(offset),
+                                     static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem)));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }

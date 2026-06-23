@@ -16,7 +16,6 @@ set(TESTS
     OCLDeviceQueries
     OCLDynamic
     OCLDynamicBLines
-    OCLEmptyDeviceEnqueue
     OCLGenericAddressSpace
     OCLGetQueueThreadID
     OCLGlobalOffset

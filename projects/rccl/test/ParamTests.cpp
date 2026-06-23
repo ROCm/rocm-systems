@@ -5,7 +5,6 @@
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 #include "common/ProcessIsolatedTestRunner.hpp"
-#include "graph/topo.h"
 
 namespace RcclUnitTesting {
 TEST(ParamTests, initEnv_ParseValidConfFile) {
@@ -53,19 +52,6 @@ TEST(ParamTests, ncclLoadParam_InvalidParam) {
           unsetenv("TEST_INVALID_PARAM");
 
           ASSERT_EQ(cache, defaultVal); // Cache should be set to default value
-      }
-  );
-}
-
-TEST(ParamTests, ncclPxnC2cParam_DefaultOff) {
-  RUN_ISOLATED_TEST(
-      "ncclPxnC2cParam_DefaultOff",
-      []()
-      {
-          initEnv();
-          // No-op on xGMI; default must stay off.
-          unsetenv("NCCL_PXN_C2C");
-          ASSERT_EQ(ncclParamPxnC2c(), 0);
       }
   );
 }

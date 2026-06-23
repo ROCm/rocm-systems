@@ -39,14 +39,14 @@ static ncclResult_t ncclIbResiliencyCheckErrorNotFatal(struct ncclIbResiliency* 
     fatalCompletionStatus = false;
     break;
   default:
-    WARN("NET/IB: %s: Unsupported completion status %s (%d)", __func__, ibvWcStatusStr(wc->status), wc->status);
+    WARN("NET/IB: Unsupported completion status %s (%d)", ibvWcStatusStr(wc->status), wc->status);
     break;
   }
 
   if (nFailedDevices > 1) {
-    WARN("NET/IB: %s: Fatal error. Detected %d failed devices out of %d devices on the %s communicator (comm=%p). No "
+    WARN("NET/IB: Fatal error. Detected %d failed devices out of %d devices on the %s communicator (comm=%p). No "
          "support for more than a single failed device.",
-         __func__, nFailedDevices, resCtx->ndevs, resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm);
+         nFailedDevices, resCtx->ndevs, resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm);
     return ncclRemoteError;
   }
 
@@ -61,7 +61,7 @@ static ncclResult_t ncclIbResiliencyCheckErrorNotFatal(struct ncclIbResiliency* 
     failureReason = "Fatal error status in work completion";
   }
 
-  WARN("NET/IB: %s: The error is fatal (%s). Cannot continue.", __func__, failureReason);
+  WARN("NET/IB: The error is fatal (%s). Cannot continue.", failureReason);
   return ncclRemoteError;
 }
 
@@ -95,9 +95,9 @@ static ncclResult_t ncclIbResiliencyReplaceQps(struct ncclIbResiliency* resCtx, 
       newDevState = resCtx->devs[newDevIndex].state.load(std::memory_order_acquire);
       if (newDevState != ncclIbResiliencyDevStateOk) {
         offset++;
-        WARN("NET/IB: %s: Cannot replace QP with qpIndex=%d because the new QP (qpIndex=%d, devIndex=%d) is not on a "
+        WARN("NET/IB: Cannot replace QP with qpIndex=%d because the new QP (qpIndex=%d, devIndex=%d) is not on a "
              "functional device (state=%d)",
-             __func__, failedQpIndex, newQpIndex, newDevIndex, newDevState);
+             failedQpIndex, newQpIndex, newDevIndex, newDevState);
         continue;
       }
 
@@ -113,8 +113,8 @@ static ncclResult_t ncclIbResiliencyReplaceQps(struct ncclIbResiliency* resCtx, 
     } while (replaced == false && newQpIndex != failedQpIndex);
 
     if (!replaced) {
-      WARN("NET/IB: %s: Could not find a replacement QP for the failed QP with qpIndex=%d (devIndex=%d)", __func__,
-           failedQpIndex, failedQp->devIndex);
+      WARN("NET/IB: Could not find a replacement QP for the failed QP with qpIndex=%d (devIndex=%d)", failedQpIndex,
+           failedQp->devIndex);
       return ncclInternalError;
     }
   }
@@ -149,16 +149,16 @@ static ncclResult_t ncclIbResiliencySendRequestInit(struct ncclIbResiliencySend*
   }
 
   if (request->id + 1 <= failedSendRequest->id) {
-    WARN("NET/IB: %s: Attempting to initiate a replay using an old request (req=%p, comm=%p, id=%ld, slot=%d, "
+    WARN("NET/IB: Attempting to initiate a replay using an old request (req=%p, comm=%p, id=%ld, slot=%d, "
          "failedSendRequest.id=%ld).",
-         __func__, request, request->base, request->id, slot, failedSendRequest->id);
+         request, request->base, request->id, slot, failedSendRequest->id);
     return ncclInternalError;
   }
 
   if (request->type != NCCL_NET_IB_REQ_SEND) {
-    WARN("NET/IB: %s: Attempting to initiate a failed request using a '%s' request while expecting a 'send' request "
+    WARN("NET/IB: Attempting to initiate a failed request using a '%s' request while expecting a 'send' request "
          "(req=%p, comm=%p, id=%ld, slot=%d, failedSendRequest.id=%ld).",
-         __func__, ncclIbReqTypeStr[request->type], request, request->base, request->id, slot, failedSendRequest->id);
+         ncclIbReqTypeStr[request->type], request, request->base, request->id, slot, failedSendRequest->id);
     return ncclInternalError;
   }
 
@@ -183,7 +183,7 @@ static ncclResult_t ncclIbResiliencySendRequestFree(struct ncclIbResiliencySend*
   assert(failedSendRequest != NULL);
   if (failedSendRequest->request == NULL) {
     int slot = failedSendRequest - sendResCtx->failedRequests;
-    WARN("NET/IB: %s: Attempting to free a non-existent failed request (slot=%d).", __func__, slot);
+    WARN("NET/IB: Attempting to free a non-existent failed request (slot=%d).", slot);
     return ncclInternalError;
   }
   INFO(NCCL_NET, "NET/IB: %s: Done handling failed send request (req=%p, comm=%p, id=%ld, slot=%ld).", __func__,
@@ -205,7 +205,7 @@ static ncclResult_t ncclIbResiliencySendRequestFree(struct ncclIbResiliencySend*
 // Function to repost a given request.
 static ncclResult_t ncclIbResiliencyRepostRequest(struct ncclIbRequest* request) {
   if (request->type == NCCL_NET_IB_REQ_UNUSED) {
-    WARN("NET/IB: %s: Attempting to repost an unused request (id=%ld).", __func__, request->id);
+    WARN("NET/IB: Attempting to repost an unused request (id=%ld).", request->id);
     return ncclInternalError;
   }
   int slot = request->id % NET_IB_MAX_REQUESTS;
@@ -214,26 +214,26 @@ static ncclResult_t ncclIbResiliencyRepostRequest(struct ncclIbRequest* request)
     struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)request->base;
     struct ncclIbRequest** sendReqs = sendComm->sendReqs[slot];
     for (int r = 0; r < request->nreqs; r++) {
-        // Clear all event counters and later on increment only the required
-        // ones based on the probing results on which QP a retransmission is
-        // required.
+      // Clear all event counters and later on increment only the required
+      // ones based on the probing results on which QP a retransmission is
+      // required.
       memset(sendReqs[r]->events, 0, sizeof(sendReqs[r]->events));
 
-        // Populate events
+      // Populate events
       int nqps = ncclIbCommBaseGetNqpsPerRequest(sendReqs[r]->base);
       int qpIndex = -1;
       ncclIbQp* qp = NULL;
       for (int i = 0; i < nqps; i++) {
-          // TODO: This code does not handle the case where a send request fails twice!
-          // If that device that is used for retransmission fails during retransmission,
-          // the logic here will retrieve the QP that was used for the first send attempt
-          // and not the QP that was used for the second send attempt! Causing
-          // probably data corruption or a hang.
+        // TODO: This code does not handle the case where a send request fails twice!
+        // If that device that is used for retransmission fails during retransmission,
+        // the logic here will retrieve the QP that was used for the first send attempt
+        // and not the QP that was used for the second send attempt! Causing
+        // probably data corruption or a hang.
         NCCLCHECK(ncclIbCommBaseGetQpForRequest(sendReqs[r]->base, sendReqs[r]->id, i, &qp, &qpIndex));
 
-          // Selective Retransmission:
-          // If the probing result shows that the data was delivered successfully on this QP,
-          // we don't need to retransmit it.
+        // Selective Retransmission:
+        // If the probing result shows that the data was delivered successfully on this QP,
+        // we don't need to retransmit it.
         if (sendResCtx->probingResults[slot][qpIndex] == true) {
           INFO(NCCL_NET,
                "NET/IB: %s: Skipping retransmission on QP index %d (req=%p, comm=%p, id=%ld, slot=%d) as it was "
@@ -246,7 +246,7 @@ static ncclResult_t ncclIbResiliencyRepostRequest(struct ncclIbRequest* request)
              "NET/IB: %s: Retransmitting reqIndex=%d on qp_num=%u (req=%p, comm=%p, id=%ld, slot=%d) as it was not "
              "delivered.",
              __func__, r, qp->qp->qp_num, sendReqs[r], sendReqs[r]->base, sendReqs[r]->id, slot);
-          // Reset the sentData for this QP since we are going to retransmit it.
+        // Reset the sentData for this QP since we are going to retransmit it.
         sendReqs[r]->send.sentData[qpIndex] = false;
         ncclIbAddEvent(sendReqs[r], qp->devIndex);
       }
@@ -259,7 +259,7 @@ static ncclResult_t ncclIbResiliencyRepostRequest(struct ncclIbRequest* request)
          request->base, request->id, request->id % NET_IB_MAX_REQUESTS);
     NCCLCHECK(ncclIbPostFifo((struct ncclIbRecvComm*)request->base, request, slot));
   } else {
-    WARN("NET/IB: %s: Unsupported type of request reposting (type=%d, id=%ld).", __func__, request->type, request->id);
+    WARN("NET/IB: Unsupported type of request reposting (type=%d, id=%ld).", request->type, request->id);
     return ncclInternalError;
   }
   return ncclSuccess;
@@ -268,12 +268,12 @@ static ncclResult_t ncclIbResiliencyRepostRequest(struct ncclIbRequest* request)
 static ncclResult_t ncclIbResiliencyHandleCompletionErrorReceiver(struct ncclIbResiliency* resCtx, struct ibv_wc* wc,
                                                                   int devIndex) {
   INFO(NCCL_NET, "NET/IB: %s: Handling an error on the receiver side (comm %p)", __func__, resCtx->baseComm);
-  bool inRecvRange = (wc->wr_id >= 0 && wc->wr_id <= NET_IB_MAX_REQUESTS);
+  bool inRecvRange = (wc->wr_id >= 0 && wc->wr_id < NET_IB_MAX_REQUESTS);
   bool inFlushRange =
     (wc->wr_id >= NCCL_IB_FLUSH_REQ_WR_ID_OFFSET && wc->wr_id < (NCCL_IB_FLUSH_REQ_WR_ID_OFFSET + NET_IB_MAX_REQUESTS));
   if (!inRecvRange && !inFlushRange && (wc->wr_id != NCCL_IB_RECV_WR_ID_DUMMY)) {
-    WARN("NET/IB: %s: Invalid wr_id (%ld). Unable to retrieve a request on the receiver side (comm=%p)", __func__,
-         wc->wr_id, resCtx->baseComm);
+    WARN("NET/IB: Invalid wr_id (%ld). Unable to retrieve a request on the receiver side (comm=%p)", wc->wr_id,
+         resCtx->baseComm);
     return ncclInternalError;
   }
   if (wc->wr_id == NCCL_IB_RECV_WR_ID_DUMMY) {
@@ -302,37 +302,36 @@ static ncclResult_t ncclIbResiliencyHandleCompletionErrorReceiver(struct ncclIbR
 
   switch (request->type) {
   case NCCL_NET_IB_REQ_FLUSH:
-      // When a flush request encounters an error, it's ignored and the event
-      // counter on that device is set to zero, so the flush request could be
-      // completed on other devices if needed.
+    // When a flush request encounters an error, it's ignored and the event
+    // counter on that device is set to zero, so the flush request could be
+    // completed on other devices if needed.
     request->events[devIndex] = 0;
     INFO(NCCL_NET, "NET/IB: %s: Ignoring error on flush request (req=%p, comm=%p, id=%ld) on device index %d", __func__,
          request, request->base, request->id, devIndex);
     break;
   case NCCL_NET_IB_REQ_RECV:
-      // Assert it's a CTS message that got an error.
-      // When error occurs the CQE's opcode is not valid and cannot be read!
-      // The only valid fields are: wr_id, status, qp_num, and vendor_err.
-      // From: https://www.rdmamojo.com/2013/02/15/ibv_poll_cq/
-      // Assert the CQE belongs to a CTS and not a data transfer.
+    // Assert it's a CTS message that got an error.
+    // When error occurs the CQE's opcode is not valid and cannot be read!
+    // The only valid fields are: wr_id, status, qp_num, and vendor_err.
+    // From: https://www.rdmamojo.com/2013/02/15/ibv_poll_cq/
+    // Assert the CQE belongs to a CTS and not a data transfer.
     assert(wc->wr_id != NCCL_IB_RECV_WR_ID_DUMMY);
-      // CTS is reposted immediately
+    // CTS is reposted immediately
     NCCLCHECK(ncclIbResiliencyRepostRequest(request));
     break;
   case (NCCL_NET_IB_REQ_UNUSED):
-      // This might happen for a CTS message. Consider a case where a HW ack
-      // failed for a CTS message but before the receiver got a CQE with error
-      // because of a HW timeout, the sender already completed the data transfer
-      // and receiver completed the receive request. Note that receiver does not
-      // verify if the CTS was completed for every receive request before
-      // completing a receive request.
-      // When error occurs the CQE's opcode is not valid and cannot be read!
-    WARN("NET/IB: %s: Unrecognized request. It might be a CTS message for which the request was already completed. "
-         "Continue.",
-         __func__);
+    // This might happen for a CTS message. Consider a case where a HW ack
+    // failed for a CTS message but before the receiver got a CQE with error
+    // because of a HW timeout, the sender already completed the data transfer
+    // and receiver completed the receive request. Note that receiver does not
+    // verify if the CTS was completed for every receive request before
+    // completing a receive request.
+    // When error occurs the CQE's opcode is not valid and cannot be read!
+    WARN(
+      "NET/IB: Unrecognized request. It might be a CTS message for which the request was already completed. Continue.");
     break;
   default:
-    WARN("NET/IB: %s: Unrecognized request type. request->type=%d", __func__, request->type);
+    WARN("NET/IB: Unrecognized request type. request->type=%d", request->type);
     return ncclInternalError;
   }
   return ncclSuccess;
@@ -348,20 +347,20 @@ static ncclResult_t ncclIbResiliencyHandleCompletionErrorSender(struct ncclIbRes
   request = sendComm->sendReqs[slot][0];
 
   if (request == NULL) {
-    WARN("NET/IB: %s: Encountered a stale CQE with error for slot=%ld. Slot was already handled (comm=%p, "
-         "wc.wr_id=%ld, wc.status=%s(%d), wc.opcode=%s(%d)).",
-         __func__, slot, resCtx->baseComm, wc->wr_id, ibvWcStatusStr(wc->status), wc->status,
-         ibvWcOpcodeStr(wc->opcode), wc->opcode);
+    WARN("NET/IB: Encountered a stale CQE with error for slot=%ld. Slot was already handled (comm=%p, wc.wr_id=%ld, "
+         "wc.status=%s(%d), wc.opcode=%s(%d)).",
+         slot, resCtx->baseComm, wc->wr_id, ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode),
+         wc->opcode);
     return ncclSuccess;
   }
 
   struct ncclIbResiliencySend* sendResCtx = (struct ncclIbResiliencySend*)resCtx;
   res = ncclIbResiliencySendRequestInit(sendResCtx, request, devIndex);
   if (res != ncclSuccess) {
-    WARN("NET/IB: %s: Failed to initialize a resiliency send request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=%ld, "
+    WARN("NET/IB: Failed to initialize a resiliency send request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=%ld, "
          "wc.status=%s(%d), wc.opcode=%s(%d), slot=%ld).",
-         __func__, request, request->base, request->id, ncclIbReqTypeStr[request->type], wc->wr_id,
-         ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, slot);
+         request, request->base, request->id, ncclIbReqTypeStr[request->type], wc->wr_id, ibvWcStatusStr(wc->status),
+         wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, slot);
     return res;
   }
 
@@ -374,9 +373,9 @@ static ncclResult_t ncclIbResiliencyHandleDeviceFailure(struct ncclIbResiliency*
   ncclResult_t res = ncclSuccess;
   enum ncclIbResiliencyDevState devState = resCtx->devs[devIndex].state.load(std::memory_order_acquire);
   if (devState == ncclIbResiliencyDevStateOk) {
-    WARN("NET/IB: %s: Device %d marked as failed. Initiating recovery? %s (%s comm=%p, outstandingRecovery=%d)",
-         __func__, devIndex, resCtx->recoveryEnabled ? "Yes" : "No", resCtx->baseComm->isSend ? "send" : "recv",
-         resCtx->baseComm, resCtx->outstandingRecovery);
+    WARN("NET/IB: Device %d marked as failed. Initiating recovery? %s (%s comm=%p, outstandingRecovery=%d)", devIndex,
+         resCtx->recoveryEnabled ? "Yes" : "No", resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm,
+         resCtx->outstandingRecovery);
     resCtx->devs[devIndex].state.store(ncclIbResiliencyDevStateError, std::memory_order_release);
     NCCLCHECK(ncclIbResiliencyReplaceQps(resCtx, devIndex));
     if (resCtx->recoveryEnabled) {
@@ -458,10 +457,8 @@ static ncclResult_t ncclIbResiliencyProbePost(struct ncclIbResiliencySend* sendR
   assert(failedSendRequest->state == ncclIbResiliencyRequestStatePending);
 
   if (failedSendRequest->failedAttempts > ncclParamIbResiliencyPortFailoverMaxAttempts()) {
-    WARN("NET/IB: %s: Maximum number of probing attempts (%ld) reached for request %p (id=%ld). Cannot post another "
-         "probe.",
-         __func__, ncclParamIbResiliencyPortFailoverMaxAttempts(), failedSendRequest->request,
-         failedSendRequest->request->id);
+    WARN("NET/IB: Maximum number of probing attempts (%ld) reached for request %p (id=%ld). Cannot post another probe.",
+         ncclParamIbResiliencyPortFailoverMaxAttempts(), failedSendRequest->request, failedSendRequest->request->id);
     return ncclRemoteError;
   }
 
@@ -488,7 +485,7 @@ static ncclResult_t ncclIbResiliencyProbePost(struct ncclIbResiliencySend* sendR
   }
 
   if (devIndex == sendResCtx->base.ndevs) {
-    WARN("NET/IB: %s: Could not find a functional device to post the probe for request %p (id=%ld)", __func__,
+    WARN("NET/IB: Could not find a functional device to post the probe for request %p (id=%ld)",
          failedSendRequest->request, failedSendRequest->request->id);
     return ncclInternalError;
   }
@@ -778,9 +775,9 @@ ncclResult_t ncclIbResiliencyDeviceNumSet(struct ncclIbResiliency* resCtx, int n
   // of devices supported.
   assert(resCtx->nProbingQps <= NCCL_IB_MAX_DEVS_PER_NIC);
   if (resCtx->nProbingQps <= 1) {
-    WARN("NET/IB: %s: Resiliency is enabled on a %s communicator (comm=%p) with a single device. This does not make "
-         "sense since there is no other device to fail over to.",
-         __func__, resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm);
+    WARN("NET/IB: Resiliency is enabled on a %s communicator (comm=%p) with a single device. This does not make sense "
+         "since there is no other device to fail over to.",
+         resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm);
   }
   INFO(NCCL_NET, "NET/IB: %s: Resiliency context (comm=%p) is configured with %d probing QPs", __func__,
        resCtx->baseComm, resCtx->nProbingQps);
@@ -864,6 +861,7 @@ ncclResult_t ncclIbResiliencySenderQpsToRts(struct ncclIbResiliency* resCtx, str
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
     rtrAttr->localIbPort = remDevInfo->ib_port;
+    rtrAttr->localPortFlags = ibDev->portAttr.flags;
     rtrAttr->localGid = sendCommDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = sendCommDev->base.gidInfo.localGidIndex;
     NCCLCHECK(ncclIbQpRtr(localQp));
@@ -931,6 +929,7 @@ ncclResult_t ncclIbResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
     rtrAttr->localIbPort = remDevInfo->ib_port;
+    rtrAttr->localPortFlags = ibDev->portAttr.flags;
     rtrAttr->localGid = recvCommDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = recvCommDev->base.gidInfo.localGidIndex;
     NCCLCHECK(ncclIbQpRtr(localQp));
@@ -954,7 +953,7 @@ ncclResult_t ncclIbResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
 
 ncclResult_t ncclIbResiliencyClose(struct ncclIbResiliency* resCtx) {
   if (resCtx == NULL) {
-    WARN("NET/IB: %s: Resiliency context is NULL. Nothing to destroy.", __func__);
+    WARN("NET/IB: Resiliency context is NULL. Nothing to destroy.");
     return ncclSuccess;
   }
   INFO(NCCL_NET, "NET/IB: %s: Resiliency context close for %s communicator (comm=%p)", __func__,
@@ -973,9 +972,9 @@ ncclResult_t ncclIbResiliencyClose(struct ncclIbResiliency* resCtx) {
   }
   if (resCtx->recoveryEnabled) {
     if (resCtx->outstandingRecovery > 0) {
-      WARN("NET/IB: %s: There are still %d outstanding recovery operations on the resiliency context (comm=%p) being "
+      WARN("NET/IB: There are still %d outstanding recovery operations on the resiliency context (comm=%p) being "
            "destroyed.",
-           __func__, resCtx->outstandingRecovery, resCtx->baseComm);
+           resCtx->outstandingRecovery, resCtx->baseComm);
     }
     NCCLCHECK(ncclIbPortRecoveryClose(resCtx));
     NCCLCHECK(ncclIbPortRecoveryQpsDestroy(resCtx, resCtx->nPortRecoveryQps));

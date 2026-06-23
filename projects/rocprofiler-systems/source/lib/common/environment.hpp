@@ -4,7 +4,6 @@
 #pragma once
 
 #include "common/defines.h"
-#include "common/env_vars.hpp"
 #include "common/join.hpp"
 #include "logger/debug.hpp"
 
@@ -247,6 +246,16 @@ public:
         }
     }
 
+    /// @brief std::string_view / std::string overload of @ref get_env: materialises
+    ///        a null-terminated copy of @p env_id once, then dispatches to the
+    ///        const char* overload.
+    template <typename Tp>
+    static auto get_env(std::string_view env_id, Tp&& value_default)
+    {
+        const std::string name{ env_id };
+        return get_env(name.c_str(), std::forward<Tp>(value_default));
+    }
+
     /// @brief Read environment variable @p env_id as @p Tp, using a
     ///        value-initialised @c Tp{} as the fallback.
     /// @tparam Tp Target type (defaults to std::string).
@@ -254,6 +263,14 @@ public:
     /// @return The parsed value, or @c Tp{} when the variable is unset.
     template <typename Tp = std::string>
     static auto get_env(const char* env_id)
+    {
+        return get_env(env_id, Tp{});
+    }
+
+    /// @brief std::string_view / std::string overload of the single-argument
+    ///        @ref get_env.
+    template <typename Tp = std::string>
+    static auto get_env(std::string_view env_id)
     {
         return get_env(env_id, Tp{});
     }
@@ -271,6 +288,14 @@ public:
         std::stringstream ss_val;
         ss_val << value;
         EnvType::setenv(env_var, ss_val.str().c_str(), override);
+    }
+
+    /// @brief std::string_view / std::string overload of @ref set_env.
+    template <typename Tp>
+    static void set_env(std::string_view env_var, const Tp& value, int override)
+    {
+        const std::string name{ env_var };
+        set_env(name.c_str(), value, override);
     }
 
     /// @brief Read environment variable @p env_id constrained to a set of allowed
@@ -296,6 +321,15 @@ public:
             return value_default;
         }
         return value;
+    }
+
+    /// @brief std::string_view / std::string overload of @ref get_env_choice.
+    template <typename Tp>
+    static auto get_env_choice(std::string_view env_id, Tp value_default,
+                               std::set<Tp> choices)
+    {
+        const std::string name{ env_id };
+        return get_env_choice(name.c_str(), std::move(value_default), std::move(choices));
     }
 };
 
@@ -335,6 +369,14 @@ get_env(const char* env_id, Tp&& value_default)
     return environment<>::get_env(env_id, std::forward<Tp>(value_default));
 }
 
+/// @brief std::string_view / std::string overload of @ref get_env.
+template <typename Tp>
+inline auto
+get_env(std::string_view env_id, Tp&& value_default)
+{
+    return environment<>::get_env(env_id, std::forward<Tp>(value_default));
+}
+
 /// @brief Read environment variable @p env_id as @p Tp, falling back to @c Tp{}.
 /// @tparam Tp Target type (defaults to std::string).
 /// @param env_id Null-terminated variable name.
@@ -342,6 +384,15 @@ get_env(const char* env_id, Tp&& value_default)
 template <typename Tp = std::string>
 inline auto
 get_env(const char* env_id)
+{
+    return environment<>::get_env<Tp>(env_id);
+}
+
+/// @brief std::string_view / std::string overload of the single-argument
+///        @ref get_env.
+template <typename Tp = std::string>
+inline auto
+get_env(std::string_view env_id)
 {
     return environment<>::get_env<Tp>(env_id);
 }
@@ -358,6 +409,14 @@ set_env(const char* env_var, const Tp& value, int override)
     environment<>::set_env(env_var, value, override);
 }
 
+/// @brief std::string_view / std::string overload of @ref set_env.
+template <typename Tp>
+inline void
+set_env(std::string_view env_var, const Tp& value, int override)
+{
+    environment<>::set_env(env_var, value, override);
+}
+
 /// @brief Read environment variable @p env_id constrained to @p value_choices,
 ///        returning @p value_default when unset or not allowed. Allocation-free
 ///        overload for null-terminated names.
@@ -368,6 +427,15 @@ set_env(const char* env_var, const Tp& value, int override)
 template <typename Tp>
 inline auto
 get_env_choice(const char* env_id, Tp value_default, std::set<Tp> value_choices)
+{
+    return environment<>::get_env_choice(env_id, std::move(value_default),
+                                         std::move(value_choices));
+}
+
+/// @brief std::string_view / std::string overload of @ref get_env_choice.
+template <typename Tp>
+inline auto
+get_env_choice(std::string_view env_id, Tp value_default, std::set<Tp> value_choices)
 {
     return environment<>::get_env_choice(env_id, std::move(value_default),
                                          std::move(value_choices));
@@ -586,14 +654,13 @@ enum class update_mode : std::uint8_t
 ///        strings pass through.
 /// @return The string representation of @p val.
 template <typename Tp>
-    requires(std::is_same_v<std::decay_t<Tp>, std::string> ||
-             std::is_same_v<std::decay_t<Tp>, const char*> ||
-             std::is_same_v<std::decay_t<Tp>, bool> ||
-             std::is_arithmetic_v<std::decay_t<Tp>>)
 inline std::string
 to_env_string(Tp&& val)
 {
     using T = std::decay_t<Tp>;
+    static_assert(std::is_same_v<T, std::string> || std::is_same_v<T, const char*> ||
+                      std::is_same_v<T, bool> || std::is_arithmetic_v<T>,
+                  "to_env_string: unsupported type. Use string, bool, or numeric types.");
 
     if constexpr(std::is_same_v<T, std::string> || std::is_same_v<T, const char*>)
         return std::string{ val };
@@ -733,8 +800,8 @@ consolidate_env_entries(std::vector<std::string>& envp)
     /// - ROCPROFSYS_SAMPLING_OVERFLOW_EVENT: uses perf::EVENT_NAME syntax
     /// - ROCPROFSYS_ROCM_EVENTS: uses EVENT_NAME:device=N syntax
     auto get_delimiter = [](std::string_view key) -> char {
-        if(key == env_vars::PAPI_EVENTS || key == env_vars::SAMPLING_OVERFLOW_EVENT ||
-           key == env_vars::ROCM_EVENTS)
+        if(key == "ROCPROFSYS_PAPI_EVENTS" ||
+           key == "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT" || key == "ROCPROFSYS_ROCM_EVENTS")
             return ',';
         return ':';
     };

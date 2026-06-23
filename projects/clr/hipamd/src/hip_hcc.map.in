@@ -660,10 +660,6 @@ global:
     hipKernelSetAttribute;
     hipKernelGetFunction;
     hipMemPrefetchBatchAsync;
-    hipMemDiscardBatchAsync;
-    hipDrvMemDiscardBatchAsync;
-    hipMemDiscardAndPrefetchBatchAsync;
-    hipDrvMemDiscardAndPrefetchBatchAsync;
 local:
     *;
 } hip_7.1;

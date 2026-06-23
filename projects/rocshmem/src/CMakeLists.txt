@@ -28,7 +28,6 @@
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
-    api_trace.cc
     backend_bc.cpp
     backend_bc_device.cpp
     build_info.cpp

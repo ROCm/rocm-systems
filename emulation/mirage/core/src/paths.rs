@@ -13,6 +13,7 @@
 //! |-----------------------|-------------------------|-------------------------------|
 //! | Profiles              | `$XDG_CONFIG_HOME`      | `mirage/profile/<name>.json`  |
 //! | Sessions (runtime)    | `$XDG_RUNTIME_DIR`      | `mirage/session/<id>/...`     |
+//! | Cache                 | `$XDG_CACHE_HOME`       | `mirage/`                     |
 //! | Persistent state      | `$XDG_STATE_HOME`       | `mirage/`                     |
 //!
 //! Two environment variables provide direct overrides for the
@@ -22,6 +23,8 @@
 //!   be `$XDG_CONFIG_HOME/mirage`).
 //! * `$MIRAGE_STATE` — overrides the mirage state dir (would otherwise
 //!   be `$XDG_STATE_HOME/mirage`).
+//! * `$MIRAGE_CACHE` — overrides the mirage cache dir (would otherwise
+//!   be `$XDG_CACHE_HOME/mirage`).
 //! * `$MIRAGE_RUNTIME` — overrides the mirage runtime dir (would
 //!   otherwise be `$XDG_RUNTIME_DIR/mirage`); session files live under
 //!   `<mirage_runtime_dir>/session/<id>/...`.
@@ -68,7 +71,10 @@ static TEST_ROOT: RwLock<Option<PathBuf>> = RwLock::new(None);
 
 /// Current test override root, if any.
 fn test_root() -> Option<PathBuf> {
-    TEST_ROOT.read().unwrap_or_else(|e| e.into_inner()).clone()
+    TEST_ROOT
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
 }
 
 /// Returns `$XDG_CONFIG_HOME` (or `$HOME/.config` if unset).
@@ -114,6 +120,19 @@ pub fn xdg_state_home() -> PathBuf {
     home_dir().join(".local").join("state")
 }
 
+/// Returns `$XDG_CACHE_HOME` (or `$HOME/.cache` if unset).
+pub fn xdg_cache_home() -> PathBuf {
+    if let Some(root) = test_root() {
+        return root.join("cache");
+    }
+    if let Ok(p) = std::env::var("XDG_CACHE_HOME")
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
+    }
+    home_dir().join(".cache")
+}
+
 fn home_dir() -> PathBuf {
     std::env::var("HOME")
         .map(PathBuf::from)
@@ -148,6 +167,20 @@ pub fn mirage_state_dir() -> PathBuf {
     xdg_state_home().join(APP_NAMESPACE)
 }
 
+/// Returns the mirage cache directory.
+///
+/// Honors `$MIRAGE_CACHE` as a direct override; otherwise returns
+/// `$XDG_CACHE_HOME/mirage`.
+pub fn mirage_cache_dir() -> PathBuf {
+    if test_root().is_none()
+        && let Ok(p) = std::env::var("MIRAGE_CACHE")
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
+    }
+    xdg_cache_home().join(APP_NAMESPACE)
+}
+
 /// Returns the mirage runtime directory.
 ///
 /// Honors `$MIRAGE_RUNTIME` as a direct override; otherwise returns
@@ -168,11 +201,8 @@ pub fn profile_root() -> PathBuf {
 }
 
 /// Path to a specific profile file: `<profile_root>/<name>.json`.
-///
-/// Profile names are case-insensitive and always stored lowercase, so the
-/// name is lowercased before building the path.
 pub fn profile_path(name: &str) -> PathBuf {
-    profile_root().join(format!("{}.json", name.to_lowercase()))
+    profile_root().join(format!("{name}.json"))
 }
 
 /// Root directory for mirage topologies: `<mirage_config_dir>/topology`.
@@ -191,11 +221,8 @@ pub fn agent_root() -> PathBuf {
 }
 
 /// Path to a specific agent file: `<agent_root>/<name>.json`.
-///
-/// Agent names are case-insensitive and always stored lowercase, so the
-/// name is lowercased before building the path.
 pub fn agent_path(name: &str) -> PathBuf {
-    agent_root().join(format!("{}.json", name.to_lowercase()))
+    agent_root().join(format!("{name}.json"))
 }
 
 /// Root directory for all sessions: `<mirage_runtime_dir>/session`.
@@ -349,6 +376,7 @@ impl NodeLayout {
 /// <override>/config/
 /// <override>/runtime/
 /// <override>/state/
+/// <override>/cache/
 /// ```
 ///
 /// This mutates a process-wide override rather than environment

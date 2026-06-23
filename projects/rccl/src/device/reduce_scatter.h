@@ -142,8 +142,7 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
 #if defined(__gfx942__)  // Use a single slice per simple primitive for a single node on some GFX9 devices.
 #define rcclReduceScatterRunRingSimpleProtoImpl(tid, nthreads, work) \
   if (work->rcclUseOneSlice) { \
-    using Proto = ProtoSimple<REDUCESCATTER_CHUNKSTEPS / REDUCESCATTER_SLICESTEPS_SINGLE_NODE, \
-                              REDUCESCATTER_SLICESTEPS_SINGLE_NODE>; \
+    using Proto = ProtoSimple<REDUCESCATTER_CHUNKSTEPS / REDUCESCATTER_SLICESTEPS_SINGLE_NODE, REDUCESCATTER_SLICESTEPS_SINGLE_NODE>; \
     runRing<T, RedOp, Proto>(tid, nthreads, work); \
   } else { \
     using Proto = ProtoSimple<REDUCESCATTER_CHUNKSTEPS / REDUCESCATTER_SLICESTEPS, REDUCESCATTER_SLICESTEPS>; \
@@ -204,7 +203,8 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
     if (tid == nworkers) shmem->parallelFactor = 0;
     __syncthreads();
 
-    if (tid == nworkers) { // Algo computation thread
+    if (tid == nworkers) {
+      // Algo computation thread
       PatRSAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, NCCL_PAT_NWORKERS / WARP_SIZE, channelOffset,
                                 channelOffset + channelCount, count, chunkCount, rank, nranks);
       int parallelFactor = shmem->parallelFactor = patAlgo.getParallelFactor();
@@ -221,7 +221,8 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
         step++;
         if (last == 2) break;
       }
-    } else if (tid < nworkers) { // Worker threads
+    } else if (tid < nworkers) {
+      // Worker threads
       T* inputBuf = (T*)work->sendbuff;
       T* outputBuf = (T*)work->recvbuff;
       int parallelFactor = 0;

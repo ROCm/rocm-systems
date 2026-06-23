@@ -186,15 +186,16 @@ FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
       args.wg_size,
       0));
   // Get the number of compute units
-  const int num_cus = deviceProps.multiProcessorCount;
+  hipDeviceProp_t device_prop;
+  CHECK_HIP(hipGetDeviceProperties(&device_prop, 0));
+  const int num_cus = device_prop.multiProcessorCount;
   const int max_sustainable_wgs = max_co_resident_wgs_per_cu * num_cus;
 
   // Print warning if num_wgs exceeds max co-resident work-groups
   if (static_cast<unsigned int>(args.num_wgs) > static_cast<unsigned int>(max_sustainable_wgs)) {
-    std::cerr << "Error: Requested work-groups (" << args.num_wgs
-              << ") exceeds max co-resident work-groups (" << max_sustainable_wgs
-              << "). Reduce -w to avoid grid_barrier deadlock." << std::endl;
-    exit(-1);
+    std::cout << "Warning: Number of work-groups (" << args.num_wgs
+              << ") exceeds max sustainable work-groups ("
+              << max_sustainable_wgs << ")." << std::endl;
   }
 }
 
@@ -206,7 +207,6 @@ FloodAmoTester::~FloodAmoTester() {
 void FloodAmoTester::resetBuffers([[maybe_unused]] size_t size) {
   CHECK_HIP(hipMemsetAsync(d_buf, 0, sizeof(uint64_t) * args.num_wgs, stream));
   CHECK_HIP(hipMemsetAsync(grid_psync, 0, 4 * sizeof(int), stream));
-  CHECK_HIP(hipStreamSynchronize(stream));
 }
 
 void FloodAmoTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,

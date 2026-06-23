@@ -152,7 +152,7 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
     return;
   }
 
-  err = hsa_amd_memory_async_copy(ptr_src, src_agent, host_ptr_src, cpu_agent_,
+  err = hsa_amd_memory_async_copy(ptr_src, *cpy_ag, host_ptr_src, *cpy_ag,
                                                             size, 0, NULL, s);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 

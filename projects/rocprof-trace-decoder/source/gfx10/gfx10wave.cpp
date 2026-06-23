@@ -232,10 +232,9 @@ wave_t::wave_t(
     bool exbarw,
     uint8_t me,
     uint8_t pipe,
-    uint8_t wg,
-    uint8_t cluster
+    uint8_t wg
 ) :
-WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw, me, pipe, wg, cluster)
+WaveDataInternal(target_wgp, tg_simd, slot, token.time, addr, exbarw, me, pipe, wg)
 {
     this->last_state_cycle = token.time;
     this->cur_state = WaveslotState::WS_IDLE;

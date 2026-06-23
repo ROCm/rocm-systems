@@ -105,7 +105,8 @@ class TestRocBLASHandler:
     def test_detect_arch_subdir_co(self, handler, prefix_root):
         """Per-arch subdirectory layout: .co file under library/<arch>/."""
         file_path = (
-            prefix_root / "lib/rocblas/library/gfx942/TensileLibrary_Type_HH_gfx942.co"
+            prefix_root
+            / "lib/rocblas/library/gfx942/TensileLibrary_Type_HH_gfx942.co"
         )
         file_path.parent.mkdir(parents=True)
         file_path.touch()
@@ -127,7 +128,9 @@ class TestRocBLASHandler:
 
     def test_detect_arch_subdir_manifest(self, handler, prefix_root):
         """Per-arch subdirectory layout: TensileManifest.txt under library/<arch>/."""
-        file_path = prefix_root / "lib/rocblas/library/gfx90a/TensileManifest.txt"
+        file_path = (
+            prefix_root / "lib/rocblas/library/gfx90a/TensileManifest.txt"
+        )
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
@@ -136,7 +139,10 @@ class TestRocBLASHandler:
 
     def test_detect_arch_subdir_xnack(self, handler, prefix_root):
         """Per-arch subdirectory layout with xnack variant."""
-        file_path = prefix_root / "lib/rocblas/library/gfx942-xnack+/TensileLibrary.co"
+        file_path = (
+            prefix_root
+            / "lib/rocblas/library/gfx942-xnack+/TensileLibrary.co"
+        )
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
@@ -278,7 +284,9 @@ class TestHipBLASLtHandler:
 
     def test_detect_arch_subdir_manifest(self, handler, prefix_root):
         """Per-arch subdirectory layout: manifest .txt under library/<arch>/."""
-        file_path = prefix_root / "lib/hipblaslt/library/gfx1100/TensileManifest.txt"
+        file_path = (
+            prefix_root / "lib/hipblaslt/library/gfx1100/TensileManifest.txt"
+        )
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
@@ -436,7 +444,6 @@ class TestAotritonHandler:
 
         Family/sub-family patterns are mapped to bundle keys:
             gfx11xx → gfx11, gfx120x → gfx12_0.
-            gfx110x and gfx115x are already valid sub-family bundle keys.
         Target names pass through unchanged.
         """
         test_cases = [
@@ -444,8 +451,6 @@ class TestAotritonHandler:
             ("amd-gfx942", "gfx942"),
             ("amd-gfx950", "gfx950"),
             ("amd-gfx11xx", "gfx11"),
-            ("amd-gfx110x", "gfx110x"),
-            ("amd-gfx115x", "gfx115x"),
             ("amd-gfx120x", "gfx12_0"),
         ]
 

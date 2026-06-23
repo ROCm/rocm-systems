@@ -49,10 +49,6 @@ bool testMallocFromChild() {
     else
       testResult = false;
 
-    if (A_d != nullptr) {
-      hipFree(A_d);
-    }
-
     // send the value on the write-descriptor:
     write(fd[1], &testResult, sizeof(testResult));
 

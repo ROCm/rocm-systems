@@ -906,9 +906,9 @@ public:
   Operand src2;
 };
 
-class VWmmaScaleF32Vop3px2 : public Vop3p {
+class VWmmaScaleF3216x16x128F8f6f4Vop3px2 : public Vop3p {
 public:
-  VWmmaScaleF32Vop3px2(const MachineInst *inst);
+  VWmmaScaleF3216x16x128F8f6f4Vop3px2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void build_modifiers(std::string &out) const override;
 

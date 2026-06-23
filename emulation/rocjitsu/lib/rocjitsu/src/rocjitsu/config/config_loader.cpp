@@ -462,11 +462,9 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       bool packed = (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
                      arch == ROCJITSU_CODE_ARCH_GFX1250);
       cp->set_packed_tid(packed);
-      const bool gfx11_plus_sdma =
-          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-          arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
-      cp->set_sdma_packet_dialect(gfx11_plus_sdma ? amdgpu::SdmaPacketDialect::Gfx11Plus
-                                                  : amdgpu::SdmaPacketDialect::Legacy);
+      cp->set_sdma_packet_dialect(arch == ROCJITSU_CODE_ARCH_GFX1250
+                                      ? amdgpu::SdmaPacketDialect::Gfx1250
+                                      : amdgpu::SdmaPacketDialect::Legacy);
       return cp;
     };
 
@@ -713,8 +711,6 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
     if (d->marketing_name())
       dev.marketing_name = d->marketing_name()->str();
     dev.drm_render_minor = d->drm_render_minor();
-    dev.revision_id = d->revision_id();
-    dev.pci_revision_id = d->pci_revision_id();
     dev.simd_count = d->simd_count();
     dev.max_waves_per_simd = d->max_waves_per_simd();
     dev.num_shader_engines = d->num_shader_engines();
@@ -724,7 +720,6 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
     dev.wave_front_size = d->wave_front_size();
     dev.max_slots_scratch_cu = d->max_slots_scratch_cu();
     dev.local_mem_size = d->local_mem_size();
-    dev.vram_type = d->vram_type();
     dev.lds_size_kb = d->lds_size_kb();
     dev.mem_width = d->mem_width();
     dev.mem_clk_max = d->mem_clk_max();

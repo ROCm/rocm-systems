@@ -639,10 +639,11 @@ typedef struct _HsaMemMapFlags
 
 typedef struct _HsaGraphicsResourceInfo {
     void       *MemoryAddress;      // For use in hsaKmtMapMemoryToGPU(Nodes)
-    HSAuint64  SizeInBytes;         // Buffer size
+    HSAuint64  SizeInBytes;         // Buffer size (OUT)
     const void *Metadata;           // Pointer to metadata owned by Thunk
     HSAuint32  MetadataSizeInBytes; // Size of metadata
     HSAuint32  NodeId;              // GPU exported the buffer
+    HSAuint64  SizeHintInBytes;     // Caller-provided size hint for foreign (non-ROCr) resources (IN, 0 if unknown)
 } HsaGraphicsResourceInfo;
 
 typedef enum _HSA_CACHING_TYPE

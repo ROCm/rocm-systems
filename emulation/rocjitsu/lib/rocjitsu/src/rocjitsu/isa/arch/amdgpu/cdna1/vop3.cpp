@@ -4292,10 +4292,7 @@ void VCmpxFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4331,10 +4328,7 @@ void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4370,10 +4364,7 @@ void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4409,10 +4400,7 @@ void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4448,10 +4436,7 @@ void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4487,10 +4472,7 @@ void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1 || s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4526,10 +4508,7 @@ void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4565,10 +4544,7 @@ void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!std::isnan(s0) && !std::isnan(s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4604,10 +4580,7 @@ void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4643,10 +4616,7 @@ void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 >= s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4682,10 +4652,7 @@ void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1 || s0 > s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4721,10 +4688,7 @@ void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 > s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4760,10 +4724,7 @@ void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 <= s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4799,10 +4760,7 @@ void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4838,10 +4796,7 @@ void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -4866,10 +4821,7 @@ void VCmpxTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5163,10 +5115,7 @@ void VCmpxFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5202,10 +5151,7 @@ void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5241,10 +5187,7 @@ void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5280,10 +5223,7 @@ void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5319,10 +5259,7 @@ void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5358,10 +5295,7 @@ void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1 || s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5397,10 +5331,7 @@ void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5436,10 +5367,7 @@ void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!std::isnan(s0) && !std::isnan(s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5475,10 +5403,7 @@ void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5514,10 +5439,7 @@ void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 >= s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5553,10 +5475,7 @@ void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1 || s0 > s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5592,10 +5511,7 @@ void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 > s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5631,10 +5547,7 @@ void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 <= s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5670,10 +5583,7 @@ void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5709,10 +5619,7 @@ void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5737,10 +5644,7 @@ void VCmpxTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6034,10 +5938,7 @@ void VCmpxFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6073,10 +5974,7 @@ void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6112,10 +6010,7 @@ void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6151,10 +6046,7 @@ void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6190,10 +6082,7 @@ void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6229,10 +6118,7 @@ void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1 || s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6268,10 +6154,7 @@ void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6307,10 +6190,7 @@ void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!std::isnan(s0) && !std::isnan(s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6346,10 +6226,7 @@ void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6385,10 +6262,7 @@ void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 >= s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6424,10 +6298,7 @@ void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1 || s0 > s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6463,10 +6334,7 @@ void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 > s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6502,10 +6370,7 @@ void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 <= s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6541,10 +6406,7 @@ void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6580,10 +6442,7 @@ void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1))
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6608,10 +6467,7 @@ void VCmpxTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6904,10 +6760,7 @@ void VCmpxFI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6927,25 +6780,15 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
 void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
+    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
+    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6965,25 +6808,15 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
 void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
+    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
+    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7003,25 +6836,15 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
 void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
+    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
+    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7041,25 +6864,15 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
 void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
+    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
+    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7079,25 +6892,15 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
 void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
+    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
+    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7117,25 +6920,15 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
 void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
+    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
+    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7160,10 +6953,7 @@ void VCmpxTI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7188,10 +6978,7 @@ void VCmpxFU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7211,25 +6998,15 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
 void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
+    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
+    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7249,25 +7026,15 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
 void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
+    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
+    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7287,25 +7054,15 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
 void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
+    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
+    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7325,25 +7082,15 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
 void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
+    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
+    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7363,25 +7110,15 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
 void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
+    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
+    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7401,25 +7138,15 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
 void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_raw = src0.read_lane(wf, lane);
-    uint32_t s1_raw = src1.read_lane(wf, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
+    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
+    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7444,10 +7171,7 @@ void VCmpxTU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7740,10 +7464,7 @@ void VCmpxFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7771,10 +7492,7 @@ void VCmpxLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7802,10 +7520,7 @@ void VCmpxEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7833,10 +7548,7 @@ void VCmpxLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7864,10 +7576,7 @@ void VCmpxGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7895,10 +7604,7 @@ void VCmpxNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7926,10 +7632,7 @@ void VCmpxGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7954,10 +7657,7 @@ void VCmpxTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7982,10 +7682,7 @@ void VCmpxFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8013,10 +7710,7 @@ void VCmpxLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8044,10 +7738,7 @@ void VCmpxEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8075,10 +7766,7 @@ void VCmpxLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8106,10 +7794,7 @@ void VCmpxGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8137,10 +7822,7 @@ void VCmpxNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8168,10 +7850,7 @@ void VCmpxGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8196,10 +7875,7 @@ void VCmpxTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8492,10 +8168,7 @@ void VCmpxFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8523,10 +8196,7 @@ void VCmpxLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8554,10 +8224,7 @@ void VCmpxEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8585,10 +8252,7 @@ void VCmpxLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8616,10 +8280,7 @@ void VCmpxGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8647,10 +8308,7 @@ void VCmpxNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8678,10 +8336,7 @@ void VCmpxGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8706,10 +8361,7 @@ void VCmpxTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8734,10 +8386,7 @@ void VCmpxFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8765,10 +8414,7 @@ void VCmpxLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8796,10 +8442,7 @@ void VCmpxEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8827,10 +8470,7 @@ void VCmpxLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8858,10 +8498,7 @@ void VCmpxGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8889,10 +8526,7 @@ void VCmpxNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8920,10 +8554,7 @@ void VCmpxGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8948,10 +8579,7 @@ void VCmpxTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  if (wf.wf_size() <= 32)
-    vdst.write_scalar(wf, static_cast<uint32_t>(result));
-  else
-    vdst.write_scalar64(wf, result);
+  vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 

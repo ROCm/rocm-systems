@@ -24,6 +24,5 @@ rj_add_object_library(rocjitsu_isa_rdna3
     vop2.cpp
     vop3.cpp
     vop3p.cpp
-    vopd.cpp
     vopc.cpp
 )

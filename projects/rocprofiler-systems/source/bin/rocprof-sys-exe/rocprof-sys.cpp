@@ -1,8 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "common/env_vars.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -99,7 +97,7 @@ main(int argc, char** argv)
         _completed.set_value();
     };
 
-    for(const auto* itr : { "CI", rocprofsys::env_vars::CI })
+    for(const auto* itr : { "CI", "ROCPROFSYS_CI" })
     {
         if(_get_env(itr)) _env_failure(itr);
     }

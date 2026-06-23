@@ -321,7 +321,7 @@ hsa_status_t hsa_system_major_extension_supported(uint16_t extension, uint16_t v
 
   if ((extension == HSA_EXTENSION_AMD_AQLPROFILE) && (version_major == 1)) {
     *version_minor = 0;
-    *result = core::Runtime::runtime_singleton_->AqlProfileAvailable();
+    *result = true;
     return HSA_STATUS_SUCCESS;
   }
 

@@ -2,7 +2,7 @@
  * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
  * Adapted from NVIDIA NCCL ir/nccl_device_wrapper__impl.h (v2.29.2-1).
  *
- * See LICENSE.txt for license information
+ * See LICENSE.txt for more license information
  ************************************************************************/
 #ifndef _NCCL_DEVICE_WRAPPER__IMPL_H_
 #define _NCCL_DEVICE_WRAPPER__IMPL_H_
@@ -32,6 +32,7 @@
  *                      ncclGin* / composite ncclBarrierSession.
  */
 
+#include "nccl_device.h"
 #include "nccl_device_wrapper.h"
 #include <new>          /* placement new */
 
@@ -163,6 +164,16 @@ NCCL_IR_EXPORT void ncclGinBarrierSessionInit(
     uint32_t index) {
   ::new (&(session->bar)) ncclGinBarrierSession<ncclCoopAny>(
       coop, reinterpret_cast<ncclGin const&>(net), team, handle, index);
+}
+
+NCCL_IR_EXPORT void ncclGinBarrierSessionInitAllContexts(
+    ncclGinBarrierSession_C* session,
+    ncclCoopAny coop,
+    ncclDevComm const& comm,
+    ncclTeam team,
+    ncclGinBarrierHandle handle,
+    uint32_t index) {
+  ::new (&(session->bar)) ncclGinBarrierSession<ncclCoopAny>(coop, ncclGinAllContexts(comm), team, handle, index);
 }
 
 NCCL_IR_EXPORT void ncclGinBarrierSessionSync(

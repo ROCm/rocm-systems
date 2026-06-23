@@ -70,7 +70,11 @@ public:
     wf.wait_counters().increment(issue_counter);
     initiate_access(*inst, wf);
     complete_access(*inst, wf);
-    wf.release_wait_counter(issue_counter);
+    wf.wait_counters().decrement(issue_counter);
+    if (wf.state() == WfState::WAITCNT && wf.wait_satisfied())
+      wf.set_state(WfState::RUNNING);
+    if (wf.state() == WfState::ENDING && wf.wait_counters().empty())
+      wf.halt();
     delete inst;
   }
 

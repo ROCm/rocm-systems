@@ -151,10 +151,11 @@ PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
   const int max_sustainable_wgs =
       max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
   if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
-    std::cerr << "Error: Requested work-groups (" << args.num_wgs
+    std::cout << "Warning: Requested work-groups (" << args.num_wgs
               << ") exceeds max co-resident work-groups (" << max_sustainable_wgs
-              << "). Reduce -w to avoid grid_barrier deadlock." << std::endl;
-    exit(-1);
+              << "). Capping to " << max_sustainable_wgs
+              << " to avoid grid_barrier deadlock." << std::endl;
+    args.num_wgs = max_sustainable_wgs;
   }
 
   switch (_type) {
@@ -173,8 +174,7 @@ PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
       break;
   }
 
-  CHECK_HIP(hipMemsetAsync(source, 'a', buff_size, stream));
-  CHECK_HIP(hipStreamSynchronize(stream));
+  CHECK_HIP(hipMemset(source, 'a', buff_size));
 }
 
 PrimitiveTester::~PrimitiveTester() {
@@ -206,7 +206,6 @@ void PrimitiveTester::resetBuffers(size_t size) {
   size_t buff_size = size * batch_size * args.wg_size * args.num_wgs;
   CHECK_HIP(hipMemsetAsync(dest, '1', buff_size, stream));
   CHECK_HIP(hipMemsetAsync(grid_psync, 0, sizeof(int), stream));
-  CHECK_HIP(hipStreamSynchronize(stream));
 }
 
 void PrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,

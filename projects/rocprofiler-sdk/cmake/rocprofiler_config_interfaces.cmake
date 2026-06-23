@@ -365,11 +365,11 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(rocdecode)
+find_package(rocDecode)
 
-if(rocdecode_FOUND
-   AND rocdecode_INCLUDE_DIR
-   AND EXISTS "${rocdecode_INCLUDE_DIR}/rocdecode/amd_detail/rocdecode_api_trace.h")
+if(rocDecode_FOUND
+   AND rocDecode_INCLUDE_DIR
+   AND EXISTS "${rocDecode_INCLUDE_DIR}/rocdecode/amd_detail/rocdecode_api_trace.h")
     rocprofiler_config_nolink_target(
         rocprofiler-sdk-rocdecode-nolink rocdecode::rocdecode INTERFACE
         ROCPROFILER_SDK_USE_SYSTEM_ROCDECODE=1)
@@ -385,11 +385,11 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(rocjpeg)
+find_package(rocJPEG)
 
-if(rocjpeg_FOUND
-   AND rocjpeg_INCLUDE_DIR
-   AND EXISTS "${rocjpeg_INCLUDE_DIR}/rocjpeg/amd_detail/rocjpeg_api_trace.h")
+if(rocJPEG_FOUND
+   AND rocJPEG_INCLUDE_DIR
+   AND EXISTS "${rocJPEG_INCLUDE_DIR}/rocjpeg/amd_detail/rocjpeg_api_trace.h")
     rocprofiler_config_nolink_target(rocprofiler-sdk-rocjpeg-nolink rocjpeg::rocjpeg
                                      INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=1)
 else()

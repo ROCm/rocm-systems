@@ -63,7 +63,7 @@ extern CUmemAllocationHandleType ncclCuMemHandleType;
     if (err != CUDA_SUCCESS) { \
       const char* errStr; \
       (void)pfn_cuGetErrorString(err, &errStr); \
-      INFO(NCCL_ALL, "%s:%d Cuda failure %d '%s'", __FILE__, __LINE__, err, errStr); \
+      INFO_LOC(NCCL_ALL, "Cuda failure %d '%s'", err, errStr); \
     } \
   } while (false)
 
@@ -71,7 +71,7 @@ extern CUmemAllocationHandleType ncclCuMemHandleType;
   do { \
     CUresult err = pfn_##cmd; \
     if (err != CUDA_SUCCESS) { \
-      INFO(NCCL_INIT, "%s:%d -> %d [Async thread]", __FILE__, __LINE__, err); \
+      INFO_LOC(NCCL_INIT, "-> %d [Async thread]", (int)(err)); \
       args->ret = ncclUnhandledCudaError; \
       return args; \
     } \
@@ -83,6 +83,7 @@ extern CUmemAllocationHandleType ncclCuMemHandleType;
 /* CUDA Driver functions loaded with cuGetProcAddress for versioning */
 DECLARE_CUDA_PFN_EXTERN(cuDeviceGet, 2000);
 DECLARE_CUDA_PFN_EXTERN(cuDeviceGetAttribute, 2000);
+DECLARE_CUDA_PFN_EXTERN(cuDeviceGetUuid, 9020);
 DECLARE_CUDA_PFN_EXTERN(cuGetErrorString, 6000);
 DECLARE_CUDA_PFN_EXTERN(cuGetErrorName, 6000);
 DECLARE_CUDA_PFN_EXTERN(cuMemGetAddressRange, 3020);

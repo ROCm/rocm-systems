@@ -61,7 +61,7 @@ void TestComputePartitionMemAllocModeReadWrite::Close() {
   TestBase::Close();
 }
 
-static std::string memAllocModeString(amdsmi_compute_partition_mem_alloc_mode_t mode) {
+static const std::string memAllocModeString(amdsmi_compute_partition_mem_alloc_mode_t mode) {
   switch (mode) {
     case AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING:
       return "CAPPING";
@@ -81,8 +81,7 @@ void TestComputePartitionMemAllocModeReadWrite::Run(void) {
     return;
   }
 
-  // Invalid argument tests (run only when at least one device exists;
-  // the handle is validated by SetUp).
+  // Invalid input tests (device-independent)
   ret = amdsmi_get_gpu_compute_partition_mem_alloc_mode(processor_handles_[0], nullptr);
   EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
 
@@ -183,10 +182,5 @@ void TestComputePartitionMemAllocModeReadWrite::Run(void) {
         amdsmi_set_gpu_compute_partition_mem_alloc_mode(processor_handles_[dv_ind], original_mode);
     DISPLAY_AMDSMI_STATUS(isVerbose, __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS);
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-      std::cerr << "\t**WARNING: failed to restore device " << dv_ind
-                << " to original compute_partition_mem_alloc_mode = "
-                << memAllocModeString(original_mode) << "; device left in modified state.\n";
-    }
   }
 }

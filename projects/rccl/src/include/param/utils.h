@@ -32,10 +32,8 @@
 
 // Compiler detection macros
 #if defined(__GNUC__) || defined(__clang__)
-#define NCCL_PARAM_COMPILER_EXPORT_SYMBOL __attribute__((visibility("default")))
 #define NCCL_PARAM_COMPILER_EXPECT(x, v) __builtin_expect((x), (v))
 #elif defined(_MSC_VER)
-#define NCCL_PARAM_COMPILER_EXPORT_SYMBOL
 #define NCCL_PARAM_COMPILER_EXPECT(x, v) (x)
 #else
 #error "Unsupported compiler"
@@ -56,8 +54,8 @@ constexpr ncclParamTypeId_t ncclParamTypeIdOf() noexcept {
   else return NCCL_PARAM_TYPE_RAW;
 }
 
-extern "C" NCCL_PARAM_COMPILER_EXPORT_SYMBOL const char* ncclParamEnvPluginGet(const char* key);
-extern "C" NCCL_PARAM_COMPILER_EXPORT_SYMBOL bool ncclParamIsCacheDisabled(const char* key);
+extern "C" const char* ncclParamEnvPluginGet(const char* key, bool env_init);
+extern "C" bool ncclParamIsCacheDisabled(const char* key);
 
 namespace nccl {
 namespace param {
@@ -71,6 +69,7 @@ inline std::string flagsStr(uint64_t flags) {
     {NCCL_PARAM_FLAG_DEPRECATED, "Deprecated"},
     {NCCL_PARAM_FLAG_CACHED, "Cached"},
     {NCCL_PARAM_FLAG_UNUSED, "Unused"},
+    {NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT, "NoEnvPluginInit"},
   };
   std::string result = (flags & NCCL_PARAM_FLAG_PUBLISHED) ? "" : "Private";
   for (const auto& e : entries) {

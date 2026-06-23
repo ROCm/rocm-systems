@@ -80,7 +80,7 @@ void* ncclAsyncJobMain(void* arg) {
   struct ncclAsyncJob* job = (struct ncclAsyncJob*)arg;
   job->result = job->func(job);
   if (job->result != ncclSuccess) {
-    INFO(NCCL_INIT, "%s:%d -> %d [Async thread]", __FILE__, __LINE__, job->result);
+    INFO_LOC(NCCL_INIT, "-> %d [Async thread]", job->result);
   }
   COMPILER_ATOMIC_STORE(&job->state, static_cast<ncclGroupJobState_t>(ncclGroupJobDone), std::memory_order_release);
   return arg;
@@ -386,10 +386,12 @@ static ncclResult_t doLaunches(struct ncclComm* head) {
       goto failure;
     }
 
-    while (true) { // Iterate rounds of launches for clique.
+    while (true) {
+      // Iterate rounds of launches for clique.
       bool moreRounds = false;
       comm = cliqueHead;
-      do { // Iterate clique members.
+      do {
+        // Iterate clique members.
         struct ncclComm* next = comm->groupNext[ncclGroupTaskTypeCollective];
         if (useBarrier) {
           // Barrier reduction result tells us if this was the final round.
@@ -417,7 +419,8 @@ static ncclResult_t doLaunches(struct ncclComm* head) {
           if (plan != nullptr) {
             NCCLCHECKGOTO(ncclLaunchKernelAfter_NoCuda(comm, plan), result, failure);
           }
-        } else { // Final round.
+        } else {
+          // Final round.
           CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), result, failure);
           NCCLCHECKGOTO(ncclLaunchFinish(comm), result, failure);
         }
@@ -514,10 +517,11 @@ static void groupCleanup(struct ncclComm** groupCommHeadPtr,
           memset(&comm->planner, 0, sizeof(comm->planner));
 
           comm->planner.peers = tmp;
-          if (comm->planner.peers != NULL)
+          if (comm->planner.peers != NULL) {
             memset(comm->planner.peers, 0, comm->nRanks * sizeof(comm->planner.peers[0]));
-       //   comm->planner.bcast_info.minBcastPeer = INT_MAX;
-       //   comm->planner.bcast_info.maxBcastPeer = INT_MIN;
+          }
+          comm->planner.bcast_info.minBcastPeer = INT_MAX;
+          comm->planner.bcast_info.maxBcastPeer = INT_MIN;
 
           comm->planner.rmaTaskQueues = tmpRmaQueues;
           if (comm->planner.rmaTaskQueues != NULL) {
@@ -527,6 +531,7 @@ static void groupCleanup(struct ncclComm** groupCommHeadPtr,
           }
         }
       }
+
       if (!comm->config.blocking) (void)ncclCommSetAsyncError(comm, error);
       comm = next;
     }
@@ -803,8 +808,9 @@ static ncclResult_t groupLaunch(struct ncclAsyncJob* job_, ncclSimInfo_t* simInf
   while (!ncclIntruQueueEmpty(asyncJobsMain)) {
     struct ncclAsyncJob* job = ncclIntruQueueDequeue(asyncJobsMain);
     if (!job->destroyFlag && job->comm && !job->comm->config.blocking &&
-        groupCommHeadMain[ncclGroupTaskTypeCollective] == nullptr)
+        groupCommHeadMain[ncclGroupTaskTypeCollective] == nullptr) {
       (void)ncclCommSetAsyncError(job->comm, ret);
+    }
     if (job->destructor) job->destructor((void*)job);
   }
 

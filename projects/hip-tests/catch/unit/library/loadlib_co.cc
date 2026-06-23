@@ -224,5 +224,4 @@ HIP_TEST_CASE(Unit_hipKernelGetParamInfo_Negative) {
     HIP_CHECK_ERROR(hipKernelGetParamInfo(function, 0, nullptr, &paramsize), hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipLibraryUnload(library));
 }

@@ -77,6 +77,9 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
     cl_queue_properties name;
     union {
       cl_queue_properties raw;
+      // FIXME_lmoriche: Check with Khronos. cl_queue_properties is an intptr,
+      // but cl_command_queue_properties is a bitfield (truncate?).
+      // cl_command_queue_properties properties;
       cl_uint size;
     } value;
   }* p = reinterpret_cast<const QueueProperty*>(queue_properties);
@@ -90,12 +93,15 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
     while (p->name != 0) {
       switch (p->name) {
         case CL_QUEUE_PROPERTIES:
+          // FIXME_lmoriche: See comment above.
+          // properties = p->value.properties;
           properties = static_cast<cl_command_queue_properties>(p->value.raw);
           if ((int32_t) properties < 0) {
             *not_null(errcode_ret) = CL_INVALID_VALUE;
             return (cl_command_queue)0;
           }
-          else if (properties & ~queueProperty) {
+          else if ((properties == CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) &&
+            !(properties & queueProperty)) { 
             *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
             return (cl_command_queue)0;
           }
@@ -115,7 +121,7 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
           }
           break;
         case CL_QUEUE_ON_DEVICE:
-          if((properties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) &&
+          if((properties == CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) &&
             !(properties & queueonDeviceProperty)) {
             *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
             return (cl_command_queue)0;

@@ -16,15 +16,9 @@ struct ncclGinIbCollComm {
   void* ctx;
   int rank;
   int nranks;
-  int connectionId;
-  int nConnections;
-  int queueDepth;
   void* recvComm;
   void* sendComm;
-  void** fullRecvComm;
-  void** fullSendComm;
   int dev;
-  void* ginCtx;
   struct {
     struct ibv_context* context;
     struct ibv_pd* pd;

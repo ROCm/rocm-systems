@@ -319,13 +319,6 @@ void TesterArguments::get_arguments() {
     case HostTeamSyncBarrierTestType:
     case HostAmoAllPesTestType:
     case HostAmoSelfTestType:
-    // Tile collective tests - support any number of PEs
-    case TileBroadcastTestType:
-    case TileBroadcastWaveTestType:
-    case TileBroadcastWGTestType:
-    case TileAllgatherTestType:
-    case TileAllgatherWaveTestType:
-    case TileAllgatherWGTestType:
       requires_two_pes = false;
       break;
     default:

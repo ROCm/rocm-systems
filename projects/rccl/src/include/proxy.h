@@ -29,15 +29,6 @@
 #include <mutex>
 #include <condition_variable>
 
-/* Optional fields for ncclProfileProxyDiag (proxy-trace profiler plugin) */
-struct ncclProxyProfilerExtras {
-  int32_t funcIdx;
-  int32_t protocol;
-  int32_t pattern;
-  uint32_t totalBytes;
-  uint32_t chunkSize;
-};
-
 typedef enum : uint8_t {
   ncclPatternRing,
   ncclPatternRingTwice,
@@ -62,10 +53,7 @@ enum ncclProxyOpState {
   ncclProxyOpReady,
   ncclProxyOpProgress
 };
-enum {
-  proxyRecv = 0,
-  proxySend = 1
-};
+
 
 struct ncclProxyArgs;
 typedef ncclResult_t (*proxyProgressFunc_t)(struct ncclProxyState*, struct ncclProxyArgs*);
@@ -128,10 +116,13 @@ struct ncclProxyOp {
     struct ncclTaskP2p* p2p;
   } task;
 
-  // Profiler work counter increment flag. Set to 'true' if the profiler work counter for this channel needs increment.
-  // Always 'true' for collective operations. Grouped p2p operations are fused into one <send, recv> pair in the GPU kernel,
+  // Profiler work counter increment flag. Set to 'true' if the profiler work counter for this channel needs
+  // increment.
+  // Always 'true' for collective operations. Grouped p2p operations are fused into one <send, recv> pair in the GPU
+  // kernel,
   // meaning the GPU profiler code increments the work counter for the pair rather than the individual p2p. For this
-  // reason, the incWorkCounter flag is used to avoid incrementing the work counter twice in the host code. This is done
+  // reason, the incWorkCounter flag is used to avoid incrementing the work counter twice in the host code. This is
+  // done
   // by setting incWorkCounter to 'true' only for one of the p2ps in the pair during enqueue.
   bool incWorkCounter;
   int eActivationMask;
@@ -146,8 +137,9 @@ struct ncclProxyOp {
 
   // Used to track total real bytes of this op
   uint32_t totalBytes;
-  uint64_t commHash;
-  struct ncclProxyProfilerExtras profExtras;
+  // Used to fetch/update the proxyOp in ProxyTrace map
+  facebook_rccl::ProxyTraceRecordKey traceKey;
+  facebook_rccl::ProxyTraceExtraInfo traceInfo;
 };
 
 struct ncclProxySubArgs;
@@ -201,8 +193,9 @@ struct ncclProxySubArgs {
   void* recvRequestsCache[NCCL_STEPS];
   int recvRequestsSubCount;
 
-  uint64_t commHash;
-  struct ncclProxyProfilerExtras profExtras;
+  // Used to fetch/update the proxyOp in ProxyTrace map
+  facebook_rccl::ProxyTraceRecordKey traceKey;
+  facebook_rccl::ProxyTraceExtraInfo traceInfo;
 };
 
 struct ncclProxyArgs {
@@ -385,8 +378,6 @@ struct ncclProxyState {
   struct ncclSocket* listenSock;
   struct ncclIpcSocket ipcSock;
   int stop;
-  CUcontext cudaCtx;
-  std::once_flag cudaCtxOnceFlag;
   ncclResult_t asyncResult;
 
   // Used by main thread
@@ -418,6 +409,9 @@ struct ncclProxyState {
 
   // Queue of expected responses from the proxy
   struct ncclExpectedProxyResponse* expectedResponses;
+
+  // A handle to the proxy traces
+  facebook_rccl::ProxyTrace* proxyTrace;
 
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   int ll128LineElems;
@@ -503,7 +497,8 @@ enum ncclProxyMsgType {
 ncclResult_t ncclProxyCallAsync(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, int type, void* reqBuff,
                                 int reqSize, int respSize, void* opId);
 
-// This function will internally call ncclProxyCallAsync() and spin until ncclPollProxyResponse() confirms the result is received
+// This function will internally call ncclProxyCallAsync() and spin until ncclPollProxyResponse() confirms the result
+// is received
 ncclResult_t ncclProxyCallBlocking(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, int type, void* reqBuff,
                                    int reqSize, void* respBuff, int respSize);
 ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, void* respBuff,

@@ -44,8 +44,9 @@ struct unblocking_gotcha : comp::base<unblocking_gotcha, void>
     static void shutdown();
 
     template <size_t Idx, typename Ret, typename... Args>
-        requires(Idx < kill_idx)
-    Ret operator()(gotcha_index<Idx>, Ret (*)(Args...), Args...) const noexcept;
+    std::enable_if_t<(Idx < kill_idx), Ret> operator()(gotcha_index<Idx>,
+                                                       Ret (*)(Args...),
+                                                       Args...) const noexcept;
 
     int operator()(gotcha_index<kill_idx>, int (*)(pid_t, int), pid_t,
                    int) const noexcept;

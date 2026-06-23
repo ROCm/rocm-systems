@@ -16,15 +16,16 @@
 # from that wrapper gives /usr, which mixes headers and device libraries from
 # different installs.
 find_program(
-    AMDCXX
+    AMDCLANG
     amdclang++
-    PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib/llvm/bin bin
+    HINTS
+    ENV ROCM_PATH
+    /opt/rocm
+    PATH_SUFFIXES bin
     DOC "Path to the ROCm amdclang++ compiler"
-    NO_DEFAULT_PATH
 )
 
-if(NOT AMDCXX)
+if(NOT AMDCLANG)
     message(
         STATUS
         "amdclang++ not found - device kernel tests will be disabled"
@@ -40,10 +41,14 @@ if(DEFINED SKIP_DEVICE_KERNELS AND SKIP_DEVICE_KERNELS)
     return()
 endif()
 
-message(STATUS "Using device compiler: ${AMDCXX}")
+message(STATUS "Found amdclang++: ${AMDCLANG}")
 
 set(KERNEL_OUTPUT_DIR ${CMAKE_BINARY_DIR}/kernels)
 file(MAKE_DIRECTORY ${KERNEL_OUTPUT_DIR})
+
+# Locate the ROCm installation root for --rocm-path.
+get_filename_component(ROCM_PATH "${AMDCLANG}" DIRECTORY)
+get_filename_component(ROCM_PATH "${ROCM_PATH}" DIRECTORY)
 
 include(rj_add_device_kernel)
 
@@ -63,7 +68,7 @@ function(rj_add_triton_asm_fixture name target)
     add_custom_command(
         OUTPUT ${asm_obj}
         COMMAND
-            ${AMDCXX} -x assembler -target amdgcn-amd-amdhsa -mcpu=${target}
+            ${AMDCLANG} -x assembler -target amdgcn-amd-amdhsa -mcpu=${target}
             --rocm-path=${ROCM_PATH} -c -o ${asm_obj}
             ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s
@@ -72,7 +77,7 @@ function(rj_add_triton_asm_fixture name target)
     add_custom_command(
         OUTPUT ${hsaco}
         COMMAND
-            ${AMDCXX} -target amdgcn-amd-amdhsa -mcpu=${target}
+            ${AMDCLANG} -target amdgcn-amd-amdhsa -mcpu=${target}
             --rocm-path=${ROCM_PATH} -nostdlib -shared -o ${hsaco} ${asm_obj}
         DEPENDS ${asm_obj}
         COMMENT "Linking Triton fixture: ${name} (${target})"
@@ -89,13 +94,6 @@ rj_add_triton_asm_fixture(triton_cdna3_matmul_buffer_async_1024 gfx942)
 rj_add_triton_asm_fixture(triton_cdna3_flash_attention_no_async_1024 gfx942)
 rj_add_triton_asm_fixture(triton_cdna3_flash_attention_buffer_async_1024 gfx942)
 
-# Second build of vector_add for gfx90a, used by the DBI hardware-gated
-# smoke test (tests/dbi/hsa_dbi_smoke_test.cpp). Outputs vector_add_gfx90a.o
-# so it coexists with the gfx950 build above. (A single multi-target fat
-# binary would be cleaner but the Executable loader has a pre-existing
-# single-bundle assumption — see executable.cpp::load_hip_fatbin.)
-rj_add_device_kernel(vector_add gfx90a OUTPUT_NAME vector_add_gfx90a)
-
 # Umbrella target for all device kernels.
 add_custom_target(
     device_kernels
@@ -105,7 +103,6 @@ add_custom_target(
         kernel_matmul_mfma_16x16
         kernel_matmul_tiled
         kernel_vector_add
-        kernel_vector_add_gfx90a
         kernel_dynamic_copy_loop
         kernel_triton_cdna4_matmul_dynamic_32x32x64
         kernel_triton_cdna4_matmul_buffer_async_1024

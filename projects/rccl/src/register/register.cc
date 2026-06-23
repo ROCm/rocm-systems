@@ -52,8 +52,8 @@ ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool i
     if (memType == CU_MEMORYTYPE_HOST) {
       hasSysmemSegment = true;
     } else {
-      // Check for a Sysmem segment is only valid with cuMem based allocators, so a IS_LEGACY_CUDA_IPC check is required to ensure
-      // that we're calling ncclCuMemGetAddressRange only when necessary.
+      // Check for a Sysmem segment is only valid with cuMem based allocators, so a IS_LEGACY_CUDA_IPC check is
+      // required to ensure that we're calling ncclCuMemGetAddressRange only when necessary.
       CUCHECK(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
                                     (CUdeviceptr)base));
       if (!legacyIpcCap) {
@@ -72,7 +72,8 @@ ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool i
 
   for (int slot = 0; /*true*/; slot++) {
     if ((slot == cache->population) || (begAddr < cache->slots[slot]->begAddr)) {
-      if (cache->population == cache->capacity) { // must grow cache
+      if (cache->population == cache->capacity) {
+        // must grow cache
         cache->capacity = cache->capacity < 32 ? 32 : 2 * cache->capacity;
         NCCLCHECK(ncclRealloc(&cache->slots, cache->population, cache->capacity));
       }
@@ -162,9 +163,11 @@ NCCL_API(ncclResult_t, ncclCommRegister, const ncclComm_t comm, void* buff, size
 ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t size, void** handle) {
   ncclResult_t ret = ncclSuccess;
 
-  if (!ncclParamLocalRegister()) *handle = NULL;
-  else {
-    INFO(NCCL_INIT, "RCCL: ncclCommRegister");
+  if (!ncclParamLocalRegister() || ncclP2pUsesMemcpy()) {
+    *handle = NULL;
+    INFO(NCCL_REG, "Skipping registration for buffer %p size %zi (LocalRegister=%ld, P2pUsesMemcpy=%d)", buff, size,
+         ncclParamLocalRegister(), ncclP2pUsesMemcpy());
+  } else {
     NCCLCHECKGOTO(ncclRegister(comm, buff, size, false, handle), ret, end);
   }
 end:
@@ -212,6 +215,7 @@ exit:
 NCCL_API(ncclResult_t, ncclCommDeregister, const ncclComm_t comm, void* handle);
 ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void* handle) {
   NCCLCHECK(Recorder::instance().record(rrCommDeregister, comm, handle));
+
 
   NCCLCHECK(commDeregister(comm, false, (struct ncclReg*)handle));
   return ncclSuccess;
