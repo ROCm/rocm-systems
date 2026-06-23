@@ -104,6 +104,257 @@ _LITERAL_ENCODING_OPERANDS = {
 }
 
 
+# Body of shared/scalar_operand_resolve.h: the wavefront-only scalar
+# source/destination resolve helpers, shared verbatim by every AMDGPU arch
+# (emitted by CodeGenerator._write_shared_scalar_resolve). Per-arch variation
+# is confined to the M0 encoding value passed as `m0_ev` (124 normally; 125 on
+# RDNA4 / GFX1250, where 124 is the NULL slot).
+_SHARED_SCALAR_RESOLVE_FUNCS = r"""// Wavefront-free subset of resolve_src_scalar: the value of an inline constant
+// (small integers 0..64 / -1..-16 and the inline float constants), or nullopt
+// for any other encoding value. Negative inline integers are sign-extended to
+// 64 bits so 64-bit consumers see all-ones.
+inline std::optional<uint64_t> resolve_src_scalar_statically(int ev) {
+  if (ev >= 128 && ev <= 192)
+    return static_cast<uint64_t>(ev - 128);
+  if (ev >= 193 && ev <= 208)
+    return static_cast<uint64_t>(static_cast<int64_t>(-(ev - 192)));
+  if (ev == 240)
+    return static_cast<uint64_t>(0x3F000000u); // 0.5f
+  if (ev == 241)
+    return static_cast<uint64_t>(0xBF000000u); // -0.5f
+  if (ev == 242)
+    return static_cast<uint64_t>(0x3F800000u); // 1.0f
+  if (ev == 243)
+    return static_cast<uint64_t>(0xBF800000u); // -1.0f
+  if (ev == 244)
+    return static_cast<uint64_t>(0x40000000u); // 2.0f
+  if (ev == 245)
+    return static_cast<uint64_t>(0xC0000000u); // -2.0f
+  if (ev == 246)
+    return static_cast<uint64_t>(0x40800000u); // 4.0f
+  if (ev == 247)
+    return static_cast<uint64_t>(0xC0800000u); // -4.0f
+  if (ev == 248)
+    return static_cast<uint64_t>(0x3E22F983u); // 1/(2*pi)
+  return std::nullopt;
+}
+
+// The value of a scalar source operand resolvable from wavefront state alone
+// (SGPR/VCC/EXEC/M0 reads plus inline constants). `m0_ev` is the M0 encoding
+// value for this arch (124 on most arches; 125 on RDNA4 / GFX1250, where 124
+// is the NULL slot).
+inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
+  if (ev == 102)
+    return static_cast<uint32_t>(wf.scratch_base());
+  if (ev == 103)
+    return static_cast<uint32_t>(wf.scratch_base() >> 32);
+  if (ev <= 105)
+    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+  if (ev == 106)
+    return static_cast<uint32_t>(wf.vcc());
+  if (ev == 107)
+    return static_cast<uint32_t>(wf.vcc() >> 32);
+  if (ev >= 108 && ev <= 123)
+    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+  if (m0_ev == 125 && ev == 124)
+    return 0u; // NULL
+  if (ev == m0_ev)
+    return wf.m0();
+  if (ev == 126)
+    return static_cast<uint32_t>(wf.exec());
+  if (ev == 127)
+    return static_cast<uint32_t>(wf.exec() >> 32);
+  if (ev >= 128 && ev <= 192)
+    return static_cast<uint32_t>(ev - 128);
+  if (ev >= 193 && ev <= 208)
+    return static_cast<uint32_t>(static_cast<int32_t>(-(ev - 192)));
+  if (ev == 230)
+    return static_cast<uint32_t>(wf.scratch_base()); // SRC_FLAT_SCRATCH_BASE_LO
+  if (ev == 231)
+    return static_cast<uint32_t>(wf.scratch_base() >> 32); // SRC_FLAT_SCRATCH_BASE_HI
+  if (ev == 240)
+    return 0x3F000000u; // 0.5f
+  if (ev == 241)
+    return 0xBF000000u; // -0.5f
+  if (ev == 242)
+    return 0x3F800000u; // 1.0f
+  if (ev == 243)
+    return 0xBF800000u; // -1.0f
+  if (ev == 244)
+    return 0x40000000u; // 2.0f
+  if (ev == 245)
+    return 0xC0000000u; // -2.0f
+  if (ev == 246)
+    return 0x40800000u; // 4.0f
+  if (ev == 247)
+    return 0xC0800000u; // -4.0f
+  if (ev == 248)
+    return 0x3E22F983u; // 1/(2*pi)
+  if (ev == 235)
+    return static_cast<uint32_t>(wf.shared_aperture_base() >> 32); // SRC_SHARED_BASE
+  if (ev == 236)
+    return static_cast<uint32_t>(wf.shared_aperture_limit() >> 32); // SRC_SHARED_LIMIT
+  if (ev == 237)
+    return static_cast<uint32_t>(wf.private_aperture_base() >> 32); // SRC_PRIVATE_BASE
+  if (ev == 238)
+    return static_cast<uint32_t>(wf.private_aperture_limit() >> 32); // SRC_PRIVATE_LIMIT
+  if (ev == 249)
+    return 0u; // SRC_POPS_EXITING_WAVE_ID (not used in compute)
+  if (ev == 250)
+    return 0u; // NULL
+  if (ev == 251)
+    return wf.vcc() == 0 ? 1u : 0u; // VCCZ
+  if (ev == 252)
+    return wf.exec() == 0 ? 1u : 0u; // EXECZ
+  if (ev == 253)
+    return wf.read_scc() ? 1u : 0u; // SCC
+  throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));
+}
+
+// Must stay in sync with resolve_src_scalar above -- returns true for exactly
+// the encoding values that resolve_src_scalar handles without throwing. Used by
+// Isa::simd_capable_value() to keep the SIMD fast path off operands whose
+// scalar broadcast would throw at runtime.
+inline bool can_resolve_src_scalar(int ev, int m0_ev) {
+  bool ok = (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) ||
+            ev == 124 || ev == 126 || ev == 127 ||
+            (ev >= 128 && ev <= 208) || (ev >= 235 && ev <= 238) ||
+            (ev >= 240 && ev <= 253);
+  if (m0_ev == 125)
+    ok = ok || ev == 125 || ev == 230 || ev == 231;
+  return ok;
+}
+
+inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
+  if (ev == 102)
+    return wf.scratch_base();
+  if (ev <= 105) {
+    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
+    return static_cast<uint64_t>(hi) << 32 | lo;
+  }
+  if (ev == 106)
+    return wf.vcc();
+  if (ev >= 108 && ev <= 122) {
+    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
+    return static_cast<uint64_t>(hi) << 32 | lo;
+  }
+  if (m0_ev == 125 && ev == 124)
+    return 0u; // NULL
+  if (ev == m0_ev)
+    return wf.m0();
+  if (ev == 126)
+    return wf.exec();
+  if (ev >= 128 && ev <= 192)
+    return static_cast<uint64_t>(ev - 128);
+  if (ev >= 193 && ev <= 208)
+    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(-(ev - 192))));
+  if (ev == 230)
+    return wf.scratch_base(); // SRC_FLAT_SCRATCH_BASE
+  if (ev == 240)
+    return 0x3FE0000000000000ULL; // 0.5
+  if (ev == 241)
+    return 0xBFE0000000000000ULL; // -0.5
+  if (ev == 242)
+    return 0x3FF0000000000000ULL; // 1.0
+  if (ev == 243)
+    return 0xBFF0000000000000ULL; // -1.0
+  if (ev == 244)
+    return 0x4000000000000000ULL; // 2.0
+  if (ev == 245)
+    return 0xC000000000000000ULL; // -2.0
+  if (ev == 246)
+    return 0x4010000000000000ULL; // 4.0
+  if (ev == 247)
+    return 0xC010000000000000ULL; // -4.0
+  if (ev == 248)
+    return 0x3FC45F306DC9C883ULL; // 1/(2*pi)
+  if (ev == 235)
+    return wf.shared_aperture_base(); // SRC_SHARED_BASE
+  if (ev == 236)
+    return wf.shared_aperture_limit(); // SRC_SHARED_LIMIT
+  if (ev == 237)
+    return wf.private_aperture_base(); // SRC_PRIVATE_BASE
+  if (ev == 238)
+    return wf.private_aperture_limit(); // SRC_PRIVATE_LIMIT
+  throw std::logic_error("Unsupported encoding value for scalar64 read: " + std::to_string(ev));
+}
+
+inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
+  if (ev == 102) {
+    uint64_t sb = wf.scratch_base();
+    wf.set_scratch_base((sb & 0xFFFFFFFF00000000ULL) | val);
+    return;
+  }
+  if (ev == 103) {
+    uint64_t sb = wf.scratch_base();
+    wf.set_scratch_base((sb & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
+    return;
+  }
+  if (ev <= 105) {
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    return;
+  }
+  if (ev == 106) {
+    wf.set_vcc((wf.vcc() & 0xFFFFFFFF00000000ULL) | val);
+    return;
+  }
+  if (ev == 107) {
+    wf.set_vcc((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
+    return;
+  }
+  if (ev >= 108 && ev <= 123) {
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    return;
+  }
+  if (m0_ev == 125 && ev == 124)
+    return; // NULL
+  if (ev == m0_ev) {
+    wf.set_m0(val);
+    return;
+  }
+  if (ev == 126) {
+    wf.set_exec((wf.exec() & 0xFFFFFFFF00000000ULL) | val);
+    return;
+  }
+  if (ev == 127) {
+    wf.set_exec((wf.exec() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
+    return;
+  }
+  throw std::logic_error("Unsupported encoding value for scalar write: " + std::to_string(ev));
+}
+
+inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
+  if (ev == 102) {
+    wf.set_scratch_base(val);
+    return;
+  }
+  if (ev <= 105) {
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));
+    return;
+  }
+  if (ev == 106) {
+    wf.set_vcc(val);
+    return;
+  }
+  if (ev >= 108 && ev <= 122) {
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));
+    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));
+    return;
+  }
+  if (ev == 124)
+    return;
+  if (ev == 126) {
+    wf.set_exec(val);
+    return;
+  }
+  throw std::logic_error("Unsupported encoding value for scalar64 write: " + std::to_string(ev));
+}
+"""
+
+
 def _exec_mask_flag_stmts(sem) -> list[str]:
     """Return ``flags_ |= ...;`` statements for EXEC instruction metadata.
 
@@ -6531,6 +6782,51 @@ class CodeGenerator:
             file=sys.stderr,
         )
 
+    def _write_shared_scalar_resolve(self) -> None:
+        """Write shared/scalar_operand_resolve.h.
+
+        The scalar source/destination resolve helpers depend only on
+        ``amdgpu::Wavefront`` and an encoding value -- not on any per-arch
+        ``Operand`` or ``Isa`` type -- so they are emitted once here in
+        ``rocjitsu::amdgpu`` instead of being duplicated into every arch's
+        ``operand.cpp``. The only per-arch variation is the M0 encoding value
+        (124 on most arches; 125 on RDNA4 / GFX1250, where 124 is the NULL
+        slot), which callers pass via ``m0_ev`` / ``kM0EncodingValue``.
+
+        The file is arch-independent, so every arch regenerates the same
+        content (idempotent); this keeps it in lockstep with operand.cpp.
+        """
+        import os
+        import sys
+
+        guard = 'ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_'
+        content = CppFile._prologue_comment() + (
+            f'#ifndef {guard}\n'
+            f'#define {guard}\n'
+            '\n'
+            '#include "rocjitsu/vm/amdgpu/compute_unit.h"\n'
+            '#include "rocjitsu/vm/amdgpu/wavefront.h"\n'
+            '#include <cstdint>\n'
+            '#include <optional>\n'
+            '#include <stdexcept>\n'
+            '#include <string>\n'
+            '\n'
+            'namespace rocjitsu {\n'
+            'namespace amdgpu {\n'
+            '\n'
+            + _SHARED_SCALAR_RESOLVE_FUNCS
+            + '\n'
+            '} // namespace amdgpu\n'
+            '} // namespace rocjitsu\n'
+            '\n'
+            f'#endif  // {guard}\n'
+        )
+        shared_dir = os.path.join(self.out_path, 'shared')
+        os.makedirs(shared_dir, exist_ok=True)
+        with open(os.path.join(shared_dir, 'scalar_operand_resolve.h'), 'w') as f:
+            f.write(content)
+        print('Generated shared/scalar_operand_resolve.h', file=sys.stderr)
+
     @staticmethod
     def _gen_narrow_cvt_header_REMOVED_PLACEHOLDER(out_path: str) -> None:
         return
@@ -7449,7 +7745,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  }',
                 '  if (is_immediate_type(opr_type_))',
                 '    return static_cast<uint32_t>(ev);',
-                '  return resolve_src_scalar_statically(wf, ev);',
+                '  return amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);',
                 '}',
             ]
         )
@@ -7470,7 +7766,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));\n'
-            '  return resolve_src_scalar64(wf, ev);\n'
+            '  return amdgpu::resolve_src_scalar64(wf, ev, kM0EncodingValue);\n'
             '}'
         )
 
@@ -7536,264 +7832,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         resolve_code = cgen.Line(
             'namespace {\n'
             '\n'
-            '// Wavefront-free subset of resolve_src_scalar_statically: the value of an inline\n'
-            '// constant (small integers 0..64 / -1..-16 and the inline float\n'
-            '// constants), or nullopt for any other encoding value. Negative inline\n'
-            '// integers are sign-extended to 64 bits so 64-bit consumers see all-ones.\n'
-            'std::optional<uint64_t> resolve_inline_const(int ev) {\n'
-            '  if (ev >= 128 && ev <= 192)\n'
-            '    return static_cast<uint64_t>(ev - 128);\n'
-            '  if (ev >= 193 && ev <= 208)\n'
-            '    return static_cast<uint64_t>(static_cast<int64_t>(-(ev - 192)));\n'
-            '  if (ev == 240)\n'
-            '    return static_cast<uint64_t>(0x3F000000u); // 0.5f\n'
-            '  if (ev == 241)\n'
-            '    return static_cast<uint64_t>(0xBF000000u); // -0.5f\n'
-            '  if (ev == 242)\n'
-            '    return static_cast<uint64_t>(0x3F800000u); // 1.0f\n'
-            '  if (ev == 243)\n'
-            '    return static_cast<uint64_t>(0xBF800000u); // -1.0f\n'
-            '  if (ev == 244)\n'
-            '    return static_cast<uint64_t>(0x40000000u); // 2.0f\n'
-            '  if (ev == 245)\n'
-            '    return static_cast<uint64_t>(0xC0000000u); // -2.0f\n'
-            '  if (ev == 246)\n'
-            '    return static_cast<uint64_t>(0x40800000u); // 4.0f\n'
-            '  if (ev == 247)\n'
-            '    return static_cast<uint64_t>(0xC0800000u); // -4.0f\n'
-            '  if (ev == 248)\n'
-            '    return static_cast<uint64_t>(0x3E22F983u); // 1/(2*pi)\n'
-            '  return std::nullopt;\n'
-            '}\n'
-            '\n'
-            'uint32_t resolve_src_scalar_statically(const amdgpu::Wavefront &wf, int ev) {\n'
-            '  if (ev == 102)\n'
-            '    return static_cast<uint32_t>(wf.scratch_base());\n'
-            '  if (ev == 103)\n'
-            '    return static_cast<uint32_t>(wf.scratch_base() >> 32);\n'
-            '  if (ev <= 105)\n'
-            '    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            '  if (ev == 106)\n'
-            '    return static_cast<uint32_t>(wf.vcc());\n'
-            '  if (ev == 107)\n'
-            '    return static_cast<uint32_t>(wf.vcc() >> 32);\n'
-            '  if (ev >= 108 && ev <= 123)\n'
-            '    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            + (
-                '  if (ev == 124)\n'
-                '    return 0u; // NULL\n'
-                '  if (ev == 125)\n'
-                '    return wf.m0();\n'
-                if arch in ('rdna4', 'gfx1250')
-                else '  if (ev == 124)\n' '    return wf.m0();\n'
-            )
-            + '  if (ev == 126)\n'
-            '    return static_cast<uint32_t>(wf.exec());\n'
-            '  if (ev == 127)\n'
-            '    return static_cast<uint32_t>(wf.exec() >> 32);\n'
-            '  if (ev >= 128 && ev <= 192)\n'
-            '    return static_cast<uint32_t>(ev - 128);\n'
-            '  if (ev >= 193 && ev <= 208)\n'
-            '    return static_cast<uint32_t>(static_cast<int32_t>(-(ev - 192)));\n'
-            '  if (ev == 230)\n'
-            '    return static_cast<uint32_t>(wf.scratch_base()); // SRC_FLAT_SCRATCH_BASE_LO\n'
-            '  if (ev == 231)\n'
-            '    return static_cast<uint32_t>(wf.scratch_base() >> 32); // SRC_FLAT_SCRATCH_BASE_HI\n'
-            '  if (ev == 240)\n'
-            '    return 0x3F000000u; // 0.5f\n'
-            '  if (ev == 241)\n'
-            '    return 0xBF000000u; // -0.5f\n'
-            '  if (ev == 242)\n'
-            '    return 0x3F800000u; // 1.0f\n'
-            '  if (ev == 243)\n'
-            '    return 0xBF800000u; // -1.0f\n'
-            '  if (ev == 244)\n'
-            '    return 0x40000000u; // 2.0f\n'
-            '  if (ev == 245)\n'
-            '    return 0xC0000000u; // -2.0f\n'
-            '  if (ev == 246)\n'
-            '    return 0x40800000u; // 4.0f\n'
-            '  if (ev == 247)\n'
-            '    return 0xC0800000u; // -4.0f\n'
-            '  if (ev == 248)\n'
-            '    return 0x3E22F983u; // 1/(2*pi)\n'
-            '  if (ev == 235)\n'
-            '    return static_cast<uint32_t>(wf.shared_aperture_base() >> 32); // SRC_SHARED_BASE\n'
-            '  if (ev == 236)\n'
-            '    return static_cast<uint32_t>(wf.shared_aperture_limit() >> 32); // SRC_SHARED_LIMIT\n'
-            '  if (ev == 237)\n'
-            '    return static_cast<uint32_t>(wf.private_aperture_base() >> 32); // SRC_PRIVATE_BASE\n'
-            '  if (ev == 238)\n'
-            '    return static_cast<uint32_t>(wf.private_aperture_limit() >> 32); // SRC_PRIVATE_LIMIT\n'
-            '  if (ev == 249)\n'
-            '    return 0u; // SRC_POPS_EXITING_WAVE_ID (not used in compute)\n'
-            '  if (ev == 250)\n'
-            '    return 0u; // NULL\n'
-            '  if (ev == 251)\n'
-            '    return wf.vcc() == 0 ? 1u : 0u; // VCCZ\n'
-            '  if (ev == 252)\n'
-            '    return wf.exec() == 0 ? 1u : 0u; // EXECZ\n'
-            '  if (ev == 253)\n'
-            '    return wf.read_scc() ? 1u : 0u; // SCC\n'
-            '  throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));\n'
-            '}\n'
-            '\n'
-            '// Must stay in sync with resolve_src_scalar_statically above — returns true for\n'
-            '// exactly the encoding values that resolve_src_scalar_statically handles without\n'
-            '// throwing. Used by Isa::simd_capable_value() to keep the SIMD fast\n'
-            '// path off operands whose scalar broadcast would throw at runtime.\n'
-            'bool can_resolve_src_scalar(int ev) {\n'
-            + (
-                '  return (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) ||\n'
-                '         ev == 124 || ev == 125 || ev == 126 || ev == 127 ||\n'
-                '         (ev >= 128 && ev <= 208) || ev == 230 || ev == 231 ||\n'
-                '         (ev >= 235 && ev <= 238) || (ev >= 240 && ev <= 253);\n'
-                if arch in ('rdna4', 'gfx1250')
-                else '  return (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) ||\n'
-                '         ev == 124 || ev == 126 || ev == 127 ||\n'
-                '         (ev >= 128 && ev <= 208) || (ev >= 235 && ev <= 238) ||\n'
-                '         (ev >= 240 && ev <= 253);\n'
-            )
-            + '}\n'
-            '\n'
-            'uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {\n'
-            '  if (ev == 102)\n'
-            '    return wf.scratch_base();\n'
-            '  if (ev <= 105) {\n'
-            '    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            '    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
-            '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
-            '  }\n'
-            '  if (ev == 106)\n'
-            '    return wf.vcc();\n'
-            '  if (ev >= 108 && ev <= 122) {\n'
-            '    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            '    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
-            '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
-            '  }\n'
-            + (
-                '  if (ev == 124)\n'
-                '    return 0u; // NULL\n'
-                '  if (ev == 125)\n'
-                '    return wf.m0();\n'
-                if arch in ('rdna4', 'gfx1250')
-                else '  if (ev == 124)\n' '    return wf.m0();\n'
-            )
-            + '  if (ev == 126)\n'
-            '    return wf.exec();\n'
-            '  if (ev >= 128 && ev <= 192)\n'
-            '    return static_cast<uint64_t>(ev - 128);\n'
-            '  if (ev >= 193 && ev <= 208)\n'
-            '    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(-(ev - 192))));\n'
-            '  if (ev == 230)\n'
-            '    return wf.scratch_base(); // SRC_FLAT_SCRATCH_BASE\n'
-            '  if (ev == 240)\n'
-            '    return 0x3FE0000000000000ULL; // 0.5\n'
-            '  if (ev == 241)\n'
-            '    return 0xBFE0000000000000ULL; // -0.5\n'
-            '  if (ev == 242)\n'
-            '    return 0x3FF0000000000000ULL; // 1.0\n'
-            '  if (ev == 243)\n'
-            '    return 0xBFF0000000000000ULL; // -1.0\n'
-            '  if (ev == 244)\n'
-            '    return 0x4000000000000000ULL; // 2.0\n'
-            '  if (ev == 245)\n'
-            '    return 0xC000000000000000ULL; // -2.0\n'
-            '  if (ev == 246)\n'
-            '    return 0x4010000000000000ULL; // 4.0\n'
-            '  if (ev == 247)\n'
-            '    return 0xC010000000000000ULL; // -4.0\n'
-            '  if (ev == 248)\n'
-            '    return 0x3FC45F306DC9C883ULL; // 1/(2*pi)\n'
-            '  if (ev == 235)\n'
-            '    return wf.shared_aperture_base(); // SRC_SHARED_BASE\n'
-            '  if (ev == 236)\n'
-            '    return wf.shared_aperture_limit(); // SRC_SHARED_LIMIT\n'
-            '  if (ev == 237)\n'
-            '    return wf.private_aperture_base(); // SRC_PRIVATE_BASE\n'
-            '  if (ev == 238)\n'
-            '    return wf.private_aperture_limit(); // SRC_PRIVATE_LIMIT\n'
-            '  throw std::logic_error("Unsupported encoding value for scalar64 read: " + std::to_string(ev));\n'
-            '}\n'
-            '\n'
-            'void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {\n'
-            '  if (ev == 102) {\n'
-            '    uint64_t sb = wf.scratch_base();\n'
-            '    wf.set_scratch_base((sb & 0xFFFFFFFF00000000ULL) | val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 103) {\n'
-            '    uint64_t sb = wf.scratch_base();\n'
-            '    wf.set_scratch_base((sb & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev <= 105) {\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 106) {\n'
-            '    wf.set_vcc((wf.vcc() & 0xFFFFFFFF00000000ULL) | val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 107) {\n'
-            '    wf.set_vcc((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev >= 108 && ev <= 123) {\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
-            '    return;\n'
-            '  }\n'
-            + (
-                '  if (ev == 124)\n'
-                '    return;\n'
-                '  if (ev == 125) {\n'
-                '    wf.set_m0(val);\n'
-                '    return;\n'
-                '  }\n'
-                if arch in ('rdna4', 'gfx1250')
-                else '  if (ev == 124) {\n'
-                '    wf.set_m0(val);\n'
-                '    return;\n'
-                '  }\n'
-            )
-            + '  if (ev == 126) {\n'
-            '    wf.set_exec((wf.exec() & 0xFFFFFFFF00000000ULL) | val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 127) {\n'
-            '    wf.set_exec((wf.exec() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
-            '    return;\n'
-            '  }\n'
-            '  throw std::logic_error("Unsupported encoding value for scalar write: " + std::to_string(ev));\n'
-            '}\n'
-            '\n'
-            'void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {\n'
-            '  if (ev == 102) {\n'
-            '    wf.set_scratch_base(val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev <= 105) {\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 106) {\n'
-            '    wf.set_vcc(val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev >= 108 && ev <= 122) {\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
-            '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 124)\n'
-            '    return;\n'
-            '  if (ev == 126) {\n'
-            '    wf.set_exec(val);\n'
-            '    return;\n'
-            '  }\n'
-            '  throw std::logic_error("Unsupported encoding value for scalar64 write: " + std::to_string(ev));\n'
-            '}\n'
+            f'constexpr int kM0EncodingValue = {125 if arch in ("rdna4", "gfx1250") else 124};\n'
             '\n'
             + _is_vgpr_only_body
             + '\n\n'
@@ -7811,13 +7850,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + '\n\n'
             'bool Isa::simd_capable_value(OperandType opr_type, int ev) {\n'
             '  return resolved_vgpr_offset(opr_type, ev).has_value() ||\n'
-            '         is_immediate_type(opr_type) || can_resolve_src_scalar(ev);\n'
+            '         is_immediate_type(opr_type) || amdgpu::can_resolve_src_scalar(ev, kM0EncodingValue);\n'
             '}\n'
             '\n'
             'uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type,\n'
             '                                   int ev) {\n'
             '  return is_immediate_type(opr_type) ? static_cast<uint32_t>(ev)\n'
-            '                                     : resolve_src_scalar_statically(wf, ev);\n'
+            '                                     : amdgpu::resolve_src_scalar(wf, ev, kM0EncodingValue);\n'
             '}\n'
             '\n'
             + simd_methods
@@ -7827,7 +7866,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return static_cast<uint32_t>(literal64_value_);\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint32_t>(encoding_value_);\n'
-            '  return resolve_src_scalar_statically(wf, encoding_value_);\n'
+            '  return amdgpu::resolve_src_scalar(wf, encoding_value_, kM0EncodingValue);\n'
             '}\n'
             '\n'
             # Wavefront-free constant value: the register-state-free subset of
@@ -7841,11 +7880,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return static_cast<uint64_t>(static_cast<uint32_t>(encoding_value_));\n'
             '  if (to_register_ref())\n'
             '    return std::nullopt;\n'
-            '  return resolve_inline_const(encoding_value_);\n'
+            '  return amdgpu::resolve_src_scalar_statically(encoding_value_);\n'
             '}\n'
             '\n' + _read_lane_body + '\n\n'
             'void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {\n'
-            '  resolve_dst_write(wf, encoding_value_, val);\n'
+            '  amdgpu::resolve_dst_write(wf, encoding_value_, val, kM0EncodingValue);\n'
             '}\n'
             '\n'
             'void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {\n'
@@ -7874,11 +7913,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    return literal64_value_;\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(encoding_value_)));\n'
-            '  return resolve_src_scalar64(wf, encoding_value_);\n'
+            '  return amdgpu::resolve_src_scalar64(wf, encoding_value_, kM0EncodingValue);\n'
             '}\n'
             '\n'
             'void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {\n'
-            '  resolve_dst_write64(wf, encoding_value_, val);\n'
+            '  amdgpu::resolve_dst_write64(wf, encoding_value_, val);\n'
             '}'
         )
         class_impl.append(resolve_code)
@@ -7906,6 +7945,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 ('rocjitsu/isa/isa_operand_simd_inl.h', False),
                 ('rocjitsu/vm/amdgpu/compute_unit.h', False),
                 ('rocjitsu/vm/amdgpu/wavefront.h', False),
+                ('rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h', False),
                 ('format', True),
                 ('optional', True),
                 ('stdexcept', True),
@@ -7917,6 +7957,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         )
         header_file.gen_code()
         source_file.gen_code()
+        self._write_shared_scalar_resolve()
 
     def gen_decoder(self) -> None:
         """Generate decoder lookup tables and decode functions."""
