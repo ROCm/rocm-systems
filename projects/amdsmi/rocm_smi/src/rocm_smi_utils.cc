@@ -943,13 +943,9 @@ void logHexDump(const char* desc, const void* addr, const size_t len, size_t byt
   std::ostringstream ss;
   // Silently ignore per-line values.
   if (bytesPerLine < 4 || bytesPerLine > 64) bytesPerLine = 16;
+  unsigned char buff[65];  // Using largest possible value as bounded by [4,64]
 
   size_t i;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wvla-cxx-extension"
-  // Using known compiler extension variable length arrays
-  unsigned char buff[bytesPerLine + 1];
-#pragma clang diagnostic pop
   const unsigned char* pc  // ptr to data (char, 1 byte sized data)
       = (const unsigned char*)addr;
 
