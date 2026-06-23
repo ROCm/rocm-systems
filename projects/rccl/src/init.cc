@@ -183,8 +183,8 @@ RCCL_PARAM(RocshmemEnabled, "ROCSHMEM_ENABLE", 1);
 std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 #endif
 
-// Turn off cheap fence for gfx942/gfx950
-RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 0);
+// RCCL_GFX9_CHEAP_FENCE_OFF: 0 = arch-tuned, non-zero = force cheap fence off (__threadfence_system)
+RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 1);
 
 /**
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes. 
@@ -830,6 +830,7 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.abortFlag = comm->abortFlagDev;
   tmpCommAndChans.comm.isAllNvlink = comm->isAllNvlink;
   tmpCommAndChans.comm.p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
+  tmpCommAndChans.comm.gfx9CheapFenceOff = comm->gfx9CheapFenceOff;
   for (int p=0; p < NCCL_NUM_PROTOCOLS; p++) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
   }
@@ -1693,18 +1694,18 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     allGather3Data[rank].nc = std::max(allGather3Data[rank].nc, 4/ringGraph->nChannels);
   if (ringGraph->nChannels > MAXCHANNELS/2)
     allGather3Data[rank].nc = 1;
-  comm -> gfx9CheapFenceOff = 1;
+  comm->gfx9CheapFenceOff = 1;
   #ifdef HIP_UNCACHED_MEMORY
+  // cheap fence is only safe with cache bypassing load/store availability in kernel
+  // only enabled on gfx942, gfx950 and gfx1250
   if(!rcclParamGfx9CheapFenceOff()){
-    if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942")){
-      comm -> gfx9CheapFenceOff = 0;
-    }
-    else if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")){
-      comm -> gfx9CheapFenceOff = ROCM_VERSION < 70002 && nNodes > 1; // Enable for single node only prior to ROCm 7.0.2
-    }
+    if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
+      IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950") ||
+      IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250"))
+      comm->gfx9CheapFenceOff = 0;
   }
-  INFO(NCCL_INIT, "GFX9 cheap fence is %s", comm -> gfx9CheapFenceOff ? "OFF" : "ON");
   #endif
+  INFO(NCCL_INIT, "GFX9 cheap fence is %s", comm->gfx9CheapFenceOff ? "OFF" : "ON");
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")){
     comm->rcclUseOneSlice = nNodes == 1;
@@ -1748,7 +1749,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
 
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
-  comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable();
+  // Default-enable LL128 on gfx1250 so NCCL_PROTO=LL128 is honored without
+  // also requiring RCCL_LL128_FORCE_ENABLE=1.
+  comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable()
+    || IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
 
   if (comm->ncclNet && comm->ncclNet->devices) {
@@ -3849,7 +3853,7 @@ exit:
 }
 
 NCCL_API(ncclResult_t, ncclCommGetUniqueId, ncclComm_t comm, ncclUniqueId* uniqueId);
-ncclResult_t ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId) {
+ncclResult_t ncclCommGetUniqueId_impl(ncclComm_t comm, ncclUniqueId* uniqueId) {
   NCCLCHECK(CommCheck(comm, __func__, "comm"));
   NCCLCHECK(ncclCommEnsureReady(comm));
   NCCLCHECK(PtrCheck(uniqueId, "CommGetUniqueId", "uniqueId"));
@@ -3866,7 +3870,7 @@ ncclResult_t ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId) {
 }
 
 NCCL_API(ncclResult_t, ncclCommGrow, ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config);
-ncclResult_t ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config) {
+ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config) {
   NVTX3_RANGE(NcclNvtxParamsCommGrow)
 
   if (newcomm == NULL) return ncclInvalidArgument;
