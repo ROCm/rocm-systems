@@ -719,6 +719,308 @@ TEST_F(tool_init_test, configures_hip_api_callback_tracing_when_hip_api_domain_a
     EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
 }
 
+// ─── tool_init() — additional coverage ───────────────────────────────────────
+
+// When a non-null fini_func is supplied, tool_init must store it in client_fini.
+TEST_F(tool_init_test, stores_client_fini_when_fini_func_is_non_null)
+{
+    expect_full_tool_init_success();
+
+    auto fini_stub = [](mock_backend_t::client_id_t*, void*) {};
+
+    sut::tool_init(fini_stub, sut::tool_data);
+
+    EXPECT_EQ(sut::tool_data->client_fini, fini_stub);
+}
+
+// When "scratch_memory" is active, tool_init creates a buffer and configures
+// BUFFER_TRACING_SCRATCH_MEMORY on primary_ctx.
+// No HIP_STREAM registration: that guard only fires for KERNEL_DISPATCH or MEMORY_COPY.
+//
+// "scratch_memory" is not a special-cased domain in get_buffered_domains() — it falls
+// through to the name-lookup path.  Override get_buffer_tracing_names() to populate
+// the entry at the SCRATCH_MEMORY kind value so the lookup succeeds.
+TEST_F(tool_init_test, creates_scratch_memory_buffer_when_scratch_memory_domain_active)
+{
+    static const std::vector<std::string> choices{ "scratch_memory" };
+    ON_CALL(*mock_externals::g_mock_setting, get_choices())
+        .WillByDefault(::testing::ReturnRef(choices));
+    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
+        .WillByDefault(Return(std::string{ "scratch_memory" }));
+
+    // Provide name entry so get_buffered_domains() fallback finds SCRATCH_MEMORY.
+    mock_backend_t::buffer_name_info_t buf_names;
+    buf_names[mock_backend_t::BUFFER_TRACING_SCRATCH_MEMORY.value].name =
+        "scratch_memory";
+    EXPECT_CALL(mock(), get_buffer_tracing_names())
+        .Times(testing::AnyNumber())
+        .WillRepeatedly(Return(buf_names));
+
+    expect_three_contexts();
+    expect_code_object_tracing();
+    expect_external_correlation();
+
+    const handle_t scratch_buf{ 55 };
+    EXPECT_CALL(mock(), create_buffer(handle_t{ 1 }, _, _, _, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<6>(scratch_buf), Return(SUCCESS)));
+    EXPECT_CALL(mock(), configure_buffer_tracing_service(
+                            handle_t{ 1 }, mock_backend_t::BUFFER_TRACING_SCRATCH_MEMORY,
+                            nullptr, 0, scratch_buf))
+        .WillOnce(Return(SUCCESS));
+
+    const handle_t cb_thread{ 8 };
+    EXPECT_CALL(mock(), create_callback_thread(_))
+        .WillOnce(DoAll(SetArgPointee<0>(cb_thread), Return(SUCCESS)));
+    EXPECT_CALL(mock(), assign_callback_thread(scratch_buf, cb_thread))
+        .WillOnce(Return(SUCCESS));
+
+    expect_primary_ctx_valid();
+    expect_start_for_initialized_contexts();
+
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+    EXPECT_EQ(sut::tool_data->scratch_memory_buffer, scratch_buf);
+}
+
+// When "kernel_dispatch" is in the buffered domain, tool_init creates a buffer for
+// kernel dispatch tracing. Because compile_time_version >= 700, tool_init also
+// registers CALLBACK_TRACING_HIP_STREAM on primary_ctx.
+//
+// "kernel_dispatch" falls through to the name-lookup path in get_buffered_domains(),
+// so get_buffer_tracing_names() must expose the KERNEL_DISPATCH name entry.
+TEST_F(tool_init_test, creates_kernel_dispatch_buffer_when_kernel_dispatch_domain_active)
+{
+    static const std::vector<std::string> choices{ "kernel_dispatch" };
+    ON_CALL(*mock_externals::g_mock_setting, get_choices())
+        .WillByDefault(::testing::ReturnRef(choices));
+    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
+        .WillByDefault(Return(std::string{ "kernel_dispatch" }));
+
+    mock_backend_t::buffer_name_info_t buf_names;
+    buf_names[mock_backend_t::BUFFER_TRACING_KERNEL_DISPATCH.value].name =
+        "kernel_dispatch";
+    EXPECT_CALL(mock(), get_buffer_tracing_names())
+        .Times(testing::AnyNumber())
+        .WillRepeatedly(Return(buf_names));
+
+    expect_three_contexts();
+    expect_code_object_tracing();
+    expect_external_correlation();
+
+    // BUFFER_TRACING_KERNEL_DISPATCH triggers HIP_STREAM callback registration.
+    EXPECT_CALL(mock(), configure_callback_tracing_service(
+                            handle_t{ 1 }, mock_backend_t::CALLBACK_TRACING_HIP_STREAM,
+                            nullptr, 0, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    const handle_t kd_buf{ 66 };
+    EXPECT_CALL(mock(), create_buffer(handle_t{ 1 }, _, _, _, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<6>(kd_buf), Return(SUCCESS)));
+    EXPECT_CALL(mock(), configure_buffer_tracing_service(
+                            handle_t{ 1 }, mock_backend_t::BUFFER_TRACING_KERNEL_DISPATCH,
+                            nullptr, 0, kd_buf))
+        .WillOnce(Return(SUCCESS));
+
+    const handle_t cb_thread{ 9 };
+    EXPECT_CALL(mock(), create_callback_thread(_))
+        .WillOnce(DoAll(SetArgPointee<0>(cb_thread), Return(SUCCESS)));
+    EXPECT_CALL(mock(), assign_callback_thread(kd_buf, cb_thread))
+        .WillOnce(Return(SUCCESS));
+
+    expect_primary_ctx_valid();
+    expect_start_for_initialized_contexts();
+
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+    EXPECT_EQ(sut::tool_data->kernel_dispatch_buffer, kd_buf);
+}
+
+// When "memory_allocation" is in the buffered domain, tool_init creates a buffer
+// and configures BUFFER_TRACING_MEMORY_ALLOCATION (SDK >= 600, always true for
+// mock's compile_time_version 10301). The buffer handle must be non-zero: tool_init
+// aborts if create_buffer returns handle=0 for this domain.
+TEST_F(tool_init_test,
+       creates_memory_allocation_buffer_when_memory_allocation_domain_active)
+{
+    static const std::vector<std::string> choices{ "memory_allocation" };
+    ON_CALL(*mock_externals::g_mock_setting, get_choices())
+        .WillByDefault(::testing::ReturnRef(choices));
+    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
+        .WillByDefault(Return(std::string{ "memory_allocation" }));
+
+    expect_three_contexts();
+    expect_code_object_tracing();
+    expect_external_correlation();
+
+    const handle_t alloc_buf{ 77 };
+    EXPECT_CALL(mock(), create_buffer(handle_t{ 1 }, _, _, _, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<6>(alloc_buf), Return(SUCCESS)));
+    EXPECT_CALL(mock(),
+                configure_buffer_tracing_service(
+                    handle_t{ 1 }, mock_backend_t::BUFFER_TRACING_MEMORY_ALLOCATION,
+                    nullptr, 0, alloc_buf))
+        .WillOnce(Return(SUCCESS));
+
+    const handle_t cb_thread{ 10 };
+    EXPECT_CALL(mock(), create_callback_thread(_))
+        .WillOnce(DoAll(SetArgPointee<0>(cb_thread), Return(SUCCESS)));
+    EXPECT_CALL(mock(), assign_callback_thread(alloc_buf, cb_thread))
+        .WillOnce(Return(SUCCESS));
+
+    expect_primary_ctx_valid();
+    expect_start_for_initialized_contexts();
+
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+    EXPECT_EQ(sut::tool_data->memory_alloc_buffer, alloc_buf);
+}
+
+// When "hsa_api" is in the domain list, tool_init must configure callback tracing
+// for all four HSA kinds (CORE, AMD_EXT, IMAGE_EXT, FINALIZE_EXT) on primary_ctx.
+TEST_F(tool_init_test, configures_hsa_api_callback_tracing_for_all_four_hsa_kinds)
+{
+    using sut_core =
+        ::rocprofsys::rocprofiler_sdk::sdk_core<mock_backend_t, mock_externals>;
+
+    for(auto kind : { mock_backend_t::CALLBACK_TRACING_HSA_CORE_API,
+                      mock_backend_t::CALLBACK_TRACING_HSA_AMD_EXT_API,
+                      mock_backend_t::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+                      mock_backend_t::CALLBACK_TRACING_HSA_FINALIZE_EXT_API })
+        sut_core::set_operation_options(kind, "", "", "");
+
+    static const std::vector<std::string> choices{ "hsa_api" };
+    ON_CALL(*mock_externals::g_mock_setting, get_choices())
+        .WillByDefault(::testing::ReturnRef(choices));
+    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
+        .WillByDefault(Return(std::string{ "hsa_api" }));
+
+    expect_three_contexts();
+    expect_code_object_tracing();
+    expect_external_correlation();
+
+    for(auto kind : { mock_backend_t::CALLBACK_TRACING_HSA_CORE_API,
+                      mock_backend_t::CALLBACK_TRACING_HSA_AMD_EXT_API,
+                      mock_backend_t::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+                      mock_backend_t::CALLBACK_TRACING_HSA_FINALIZE_EXT_API })
+    {
+        EXPECT_CALL(mock(),
+                    configure_callback_tracing_service(handle_t{ 1 }, kind, _, _, _, _))
+            .WillOnce(Return(SUCCESS));
+    }
+
+    expect_primary_ctx_valid();
+    expect_start_for_initialized_contexts();
+
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+}
+
+// When two buffers are active (memory_copy + scratch_memory), tool_init must call
+// create_callback_thread / assign_callback_thread once per non-zero buffer handle.
+// memory_copy is special-cased in get_buffered_domains(); scratch_memory requires a
+// name entry in get_buffer_tracing_names() so the fallback lookup succeeds.
+TEST_F(tool_init_test, creates_two_callback_thread_pairs_for_two_active_buffers)
+{
+    static const std::vector<std::string> choices{ "memory_copy", "scratch_memory" };
+    ON_CALL(*mock_externals::g_mock_setting, get_choices())
+        .WillByDefault(::testing::ReturnRef(choices));
+    ON_CALL(*mock_externals::g_mock_config, get_rocm_domains())
+        .WillByDefault(Return(std::string{ "memory_copy scratch_memory" }));
+
+    mock_backend_t::buffer_name_info_t buf_names;
+    buf_names[mock_backend_t::BUFFER_TRACING_SCRATCH_MEMORY.value].name =
+        "scratch_memory";
+    EXPECT_CALL(mock(), get_buffer_tracing_names())
+        .Times(testing::AnyNumber())
+        .WillRepeatedly(Return(buf_names));
+
+    expect_three_contexts();
+    expect_code_object_tracing();
+    expect_external_correlation();
+
+    // memory_copy activates HIP_STREAM (compile_time_version >= 700).
+    EXPECT_CALL(mock(), configure_callback_tracing_service(
+                            handle_t{ 1 }, mock_backend_t::CALLBACK_TRACING_HIP_STREAM,
+                            nullptr, 0, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    // tool_init order: memory_copy buffer first, scratch_memory buffer second.
+    const handle_t mem_buf{ 20 };
+    const handle_t scratch_buf{ 21 };
+    EXPECT_CALL(mock(), create_buffer(handle_t{ 1 }, _, _, _, _, _, _))
+        .WillOnce(DoAll(SetArgPointee<6>(mem_buf), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<6>(scratch_buf), Return(SUCCESS)));
+    EXPECT_CALL(mock(), configure_buffer_tracing_service(
+                            handle_t{ 1 }, mock_backend_t::BUFFER_TRACING_MEMORY_COPY,
+                            nullptr, 0, mem_buf))
+        .WillOnce(Return(SUCCESS));
+    EXPECT_CALL(mock(), configure_buffer_tracing_service(
+                            handle_t{ 1 }, mock_backend_t::BUFFER_TRACING_SCRATCH_MEMORY,
+                            nullptr, 0, scratch_buf))
+        .WillOnce(Return(SUCCESS));
+
+    // Two non-zero buffer handles → two thread creation/assignment pairs.
+    // get_buffers() returns {scratch_memory, memory_copy, ...} so scratch_memory is
+    // processed first; use wildcards to avoid coupling to that internal ordering.
+    EXPECT_CALL(mock(), create_callback_thread(_))
+        .Times(2)
+        .WillRepeatedly(DoAll(SetArgPointee<0>(handle_t{ 30 }), Return(SUCCESS)));
+    EXPECT_CALL(mock(), assign_callback_thread(_, _))
+        .Times(2)
+        .WillRepeatedly(Return(SUCCESS));
+
+    expect_primary_ctx_valid();
+    expect_start_for_initialized_contexts();
+
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+}
+
+// When get_rocm_events_setting() returns a non-empty event list, tool_init creates
+// a counter_ctx (4th context), configures KERNEL_DISPATCH callback tracing on it,
+// and registers the dispatch counting service. start() then also activates counter_ctx.
+//
+// initialize_event_info() queries real GPU agents present on the test host via
+// iterate_agent_supported_counters — allow those calls with AnyNumber().
+TEST_F(tool_init_test, creates_counter_ctx_when_rocm_events_configured)
+{
+    ON_CALL(*mock_externals::g_mock_config, get_rocm_events_setting())
+        .WillByDefault(Return(std::string{ "SQ_CYCLES" }));
+
+    // Four create_context calls in order: primary(1), code_object(2), control(3),
+    // counter(4). Chained WillOnce on a single EXPECT_CALL delivers handles in order.
+    EXPECT_CALL(mock(), create_context(_))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 1 }), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 2 }), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 3 }), Return(SUCCESS)))
+        .WillOnce(DoAll(SetArgPointee<0>(handle_t{ 4 }), Return(SUCCESS)));
+
+    expect_code_object_tracing();
+    expect_external_correlation();
+
+    // KERNEL_DISPATCH callback tracing and dispatch counting service on counter_ctx.
+    EXPECT_CALL(mock(), configure_callback_tracing_service(
+                            handle_t{ 4 },
+                            mock_backend_t::CALLBACK_TRACING_KERNEL_DISPATCH, _, _, _, _))
+        .WillOnce(Return(SUCCESS));
+    EXPECT_CALL(mock(),
+                configure_callback_dispatch_counting_service(handle_t{ 4 }, _, _, _, _))
+        .WillOnce(Return(SUCCESS));
+
+    // initialize_event_info() iterates real GPU agents on this host.
+    EXPECT_CALL(mock(), iterate_agent_supported_counters(_, _, _))
+        .Times(testing::AnyNumber())
+        .WillRepeatedly(Return(SUCCESS));
+
+    expect_primary_ctx_valid();
+
+    // All four initialized contexts are started (counter_ctx=4 is now non-zero).
+    for(const auto h : { handle_t{ 1 }, handle_t{ 2 }, handle_t{ 3 }, handle_t{ 4 } })
+    {
+        EXPECT_CALL(mock(), context_is_active(h, _))
+            .WillOnce(DoAll(SetArgPointee<1>(0), Return(SUCCESS)));
+        EXPECT_CALL(mock(), start_context(h)).WillOnce(Return(SUCCESS));
+    }
+
+    EXPECT_EQ(sut::tool_init(nullptr, sut::tool_data), 0);
+    EXPECT_EQ(sut::tool_data->counter_ctx, handle_t{ 4 });
+}
+
 // ─── reset_sdk_session_guards() tests ─────────────────────────────────────────
 
 TEST_F(library_sdk_test, reset_sdk_session_guards_clears_both_done_flags)
