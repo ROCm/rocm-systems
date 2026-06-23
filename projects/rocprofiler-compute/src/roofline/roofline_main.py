@@ -32,7 +32,16 @@ from utils.utils_analysis import get_matrix_ops_type
 
 # ROOFLINE_SUPPORTED lists the supported gfx architectures, check against this list
 # before doing any roofline-related work
-ROOFLINE_SUPPORTED = ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950", "gfx1151"]
+ROOFLINE_SUPPORTED = [
+    "gfx90a",
+    "gfx940",
+    "gfx941",
+    "gfx942",
+    "gfx950",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+]
 
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 
@@ -1099,30 +1108,37 @@ class Roofline:
 
         for cache_level in sanitized_cache_hierarchy:
             cache_key = cache_level.lower()
-            if self.__ceiling_data[cache_key][0] is None:
+
+            # cache_data layout:
+            #   [0] list[float] — x-axis coords for AI: [start_AI, ridge_point_AI]
+            #   [1] list[float] — y-axis coords for performance: [start_perf, peak_perf]
+            #   [2] float       — scalar peak bandwidth (GB/s)
+            cache_data = self.__ceiling_data.get(cache_key)
+
+            if not cache_data or cache_data[0] is None:
                 continue
             plt.plot(
-                self.__ceiling_data[cache_key][0],
-                self.__ceiling_data[cache_key][1],
+                cache_data[0],
+                cache_data[1],
                 label=f"{cache_level}-{dtype}",
                 marker="braille",
                 color=get_color(cache_level, backend="cli"),
             )
             plt.text(
-                f"{round(self.__ceiling_data[cache_key][2])} GB/s",
-                x=self.__ceiling_data[cache_key][0][0],
-                y=self.__ceiling_data[cache_key][1][0],
+                f"{round(cache_data[2])} GB/s",
+                x=cache_data[0][0],
+                y=cache_data[1][0],
                 background="black",
                 color="white",
                 alignment="left",
             )
             console_debug(
                 "roofline",
-                f"{cache_level}: [{self.__ceiling_data[cache_key][0][0]},"
-                f"{self.__ceiling_data[cache_key][0][1]}], "
-                f"[{self.__ceiling_data[cache_key][1][0]},"
-                f"{self.__ceiling_data[cache_key][1][1]}], "
-                f"{self.__ceiling_data[cache_key][2]}",
+                f"{cache_level}: [{cache_data[0][0]},"
+                f"{cache_data[0][1]}], "
+                f"[{cache_data[1][0]},"
+                f"{cache_data[1][1]}], "
+                f"{cache_data[2]}",
             )
 
         # Plot VALU and Matrix Ops Peak
