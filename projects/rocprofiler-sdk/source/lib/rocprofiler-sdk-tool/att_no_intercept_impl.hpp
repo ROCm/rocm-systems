@@ -31,6 +31,7 @@ typedef uint64_t rocprof_trace_decoder_handle_t;
 #endif
 
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -38,6 +39,7 @@ typedef uint64_t rocprof_trace_decoder_handle_t;
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -94,6 +96,18 @@ struct kernel_symbol_range
     uint64_t                end            = 0;
 };
 
+struct trace_range_t
+{
+    bool                    active               = false;
+    rocprofiler_kernel_id_t kernel_id            = 0;
+    uint64_t                offset_begin         = 0;
+    uint64_t                offset_end           = 0;
+    uint64_t                remaining_dispatches = 0;
+    uint8_t                 me_id                = 0;
+    uint8_t                 pipe_id              = 0;
+    uint64_t                flush_count          = 0;
+};
+
 struct agent_state_t
 {
     rocprofiler_agent_id_t                            id                  = {};
@@ -114,6 +128,16 @@ struct agent_state_t
     std::unordered_map<uint64_t, std::vector<kernel_symbol_range>> kernel_ranges_by_code_object =
         {};
     std::unordered_map<uint64_t, code_object_record> code_objects = {};
+
+    std::atomic<bool>     chunk_failed{false};
+    std::atomic<uint64_t> chunk_completed{0};
+    std::atomic<uint64_t> pending_requests{0};
+
+    std::mutex request_mutex{};
+    std::unordered_set<uint64_t> chunk_requested{};
+    std::mutex data_mutex{};
+    std::unordered_map<uint64_t, std::vector<uint8_t>> chunk_data{0};
+    std::condition_variable data_cv{};
 };
 
 bool
