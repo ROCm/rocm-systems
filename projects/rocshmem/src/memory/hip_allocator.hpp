@@ -412,6 +412,11 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
   static hipError_t VMMAlloc(void** ptr, size_t size);
   static hipError_t VMMFree(void* ptr);
 
+  // Export a generic VMM handle to a POSIX shareable fd and fill the IPC handle
+  // struct. The exported fd is returned via out_fd.
+  hipError_t ExportToPosixHandle(hipMemGenericAllocationHandle_t generic_handle,
+                                 size_t size, void *handle, int *out_fd);
+
  public:
   HIPAllocatorVMMPosixFd();
 
@@ -486,6 +491,11 @@ class HIPAllocatorVMMFabric : public HIPAllocator {
 
   static hipError_t VMMAlloc(void** ptr, size_t size);
   static hipError_t VMMFree(void* ptr);
+
+  // Export a generic VMM handle to a fabric handle and fill the IPC handle
+  // struct.
+  hipError_t ExportToFabricHandle(hipMemGenericAllocationHandle_t generic_handle,
+                                  size_t size, void *handle);
 
  public:
   HIPAllocatorVMMFabric();

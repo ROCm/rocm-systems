@@ -122,6 +122,24 @@ HIPAllocatorVMMFabric::HIPAllocatorVMMFabric()
   mem_granularity_ = (granularity != 0) ? granularity : 1;
 }
 
+hipError_t HIPAllocatorVMMFabric::ExportToFabricHandle(
+    hipMemGenericAllocationHandle_t generic_handle, size_t size, void *handle)
+{
+  hipMemFabricHandle_t fabricHandle;
+  hipError_t err = hipMemExportToShareableHandle(&fabricHandle, generic_handle,
+                                                 hipMemHandleTypeFabric, 0);
+  if (err != hipSuccess) {
+    return err;
+  }
+
+  HIPIpcMemHandleFabric_t* ipc_handle = reinterpret_cast<HIPIpcMemHandleFabric_t*>(handle);
+  ipc_handle->fabric_handle = fabricHandle;
+  ipc_handle->size = size;
+  ipc_handle->offset = 0;
+
+  return hipSuccess;
+}
+
 hipError_t HIPAllocatorVMMFabric::GetIpcHandle(void *dev_ptr, void *handle)
 {
   if (dev_ptr == nullptr || handle == nullptr) {
@@ -134,26 +152,7 @@ hipError_t HIPAllocatorVMMFabric::GetIpcHandle(void *dev_ptr, void *handle)
     return hipErrorInvalidValue;
   }
 
-  VMMFabricAllocationInfo& info = it->second;
-  HIPIpcMemHandleFabric_t* ipc_handle = reinterpret_cast<HIPIpcMemHandleFabric_t*>(handle);
-
-  // Export the VMM handle to a fabric handle
-  hipMemFabricHandle_t fabricHandle;
-  hipError_t err = hipMemExportToShareableHandle(&fabricHandle, info.handle,
-                                                 hipMemHandleTypeFabric, 0);
-  if (err != hipSuccess) {
-    return err;
-  }
-
-  // Store the fabric handle in the IPC handle structure
-  ipc_handle->fabric_handle = fabricHandle;
-  ipc_handle->size = info.size;
-  ipc_handle->offset = 0;
-
-  // Cache the fabric_id in our allocation info for later use
-  info.fabric_id = fabricHandle;
-
-  return hipSuccess;
+  return ExportToFabricHandle(it->second.handle, it->second.size, handle);
 }
 
 hipError_t HIPAllocatorVMMFabric::OpenIpcHandle(void **dev_ptr, void *handle)
@@ -277,9 +276,8 @@ hipError_t HIPAllocatorVMMFabric::GetIpcHandleFromPtr(void *dev_ptr, size_t leng
     return err;
   }
 
-  hipMemFabricHandle_t fabricHandle;
-  err = hipMemExportToShareableHandle(&fabricHandle, generic_handle,
-                                      hipMemHandleTypeFabric, 0);
+  // length is already granularity-aligned (validated at registration).
+  err = ExportToFabricHandle(generic_handle, length, handle);
 
   /*
    * Drop our retained reference regardless of the export outcome. On success
@@ -292,18 +290,7 @@ hipError_t HIPAllocatorVMMFabric::GetIpcHandleFromPtr(void *dev_ptr, size_t leng
              hipGetErrorString(rel_err));
   }
 
-  // Report any export failure once cleanup is done.
-  if (err != hipSuccess) {
-    return err;
-  }
-
-  HIPIpcMemHandleFabric_t* ipc_handle = reinterpret_cast<HIPIpcMemHandleFabric_t*>(handle);
-  ipc_handle->fabric_handle = fabricHandle;
-  /* length is already granularity-aligned (validated at registration). */
-  ipc_handle->size = length;
-  ipc_handle->offset = 0;
-
-  return hipSuccess;
+  return err;
 }
 
 size_t HIPAllocatorVMMFabric::GetIpcHandleSize()

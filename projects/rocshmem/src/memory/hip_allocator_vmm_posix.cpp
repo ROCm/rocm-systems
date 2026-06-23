@@ -145,6 +145,26 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
   mem_granularity_ = (granularity != 0) ? granularity : 1;
 }
 
+hipError_t HIPAllocatorVMMPosixFd::ExportToPosixHandle(
+    hipMemGenericAllocationHandle_t generic_handle, size_t size, void *handle,
+    int *out_fd)
+{
+  int fd;
+  hipError_t err = hipMemExportToShareableHandle(
+      &fd, generic_handle, hipMemHandleTypePosixFileDescriptor, 0);
+  if (err != hipSuccess) {
+    return err;
+  }
+
+  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
+  posix_handle->fd = static_cast<uint64_t>(fd);
+  posix_handle->pid = static_cast<uint32_t>(getpid());
+  posix_handle->size = size;
+  *out_fd = fd;
+
+  return hipSuccess;
+}
+
 hipError_t HIPAllocatorVMMPosixFd::GetIpcHandle(void *dev_ptr, void *handle)
 {
   if (dev_ptr == nullptr || handle == nullptr) {
@@ -157,29 +177,25 @@ hipError_t HIPAllocatorVMMPosixFd::GetIpcHandle(void *dev_ptr, void *handle)
     return hipErrorInvalidValue;
   }
 
-  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
-  hipError_t err;
-
-  // Check if we already exported this allocation
-  int fd;
+  // Reuse a previously exported fd if available; the underlying handle does
+  // not change for the lifetime of this allocation.
   if (it->second.exported_fd != -1) {
-    // Reuse existing fd
-    fd = it->second.exported_fd;
-  } else {
-    // Export the VMM handle to a shareable file descriptor
-    err = hipMemExportToShareableHandle(&fd, it->second.handle,
-                                        hipMemHandleTypePosixFileDescriptor, 0);
-    if (err != hipSuccess) {
-      return err;
-    }
-    // Store the fd so we can close it later
-    it->second.exported_fd = fd;
+    HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
+    posix_handle->fd = static_cast<uint64_t>(it->second.exported_fd);
+    posix_handle->pid = static_cast<uint32_t>(getpid());
+    posix_handle->size = it->second.size;
+    return hipSuccess;
   }
 
-  // Get current process ID and fill handle
-  posix_handle->fd = static_cast<uint64_t>(fd);
-  posix_handle->pid = static_cast<uint32_t>(getpid());
-  posix_handle->size = it->second.size;
+  // First export for this allocation: export and cache the fd so we can close
+  // it later in Deallocate().
+  int fd;
+  hipError_t err = ExportToPosixHandle(it->second.handle, it->second.size,
+                                       handle, &fd);
+  if (err != hipSuccess) {
+    return err;
+  }
+  it->second.exported_fd = fd;
 
   return hipSuccess;
 }
@@ -350,9 +366,9 @@ hipError_t HIPAllocatorVMMPosixFd::GetIpcHandleFromPtr(void *dev_ptr, size_t len
     return err;
   }
 
+  // length is already granularity-aligned (validated at registration).
   int fd;
-  err = hipMemExportToShareableHandle(&fd, generic_handle,
-                                      hipMemHandleTypePosixFileDescriptor, 0);
+  err = ExportToPosixHandle(generic_handle, length, handle, &fd);
 
   // Drop our retained reference regardless of the export outcome. On success
   // the exported fd keeps the underlying memory alive for importers; a release
@@ -363,18 +379,7 @@ hipError_t HIPAllocatorVMMPosixFd::GetIpcHandleFromPtr(void *dev_ptr, size_t len
              hipGetErrorString(rel_err));
   }
 
-  // Report any export failure once cleanup is done.
-  if (err != hipSuccess) {
-    return err;
-  }
-
-  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
-  posix_handle->fd = static_cast<uint64_t>(fd);
-  posix_handle->pid = static_cast<uint32_t>(getpid());
-  /* length is already granularity-aligned (validated at registration). */
-  posix_handle->size = length;
-
-  return hipSuccess;
+  return err;
 }
 
 hipError_t HIPAllocatorVMMPosixFd::CloseExportedHandle(void *handle)
