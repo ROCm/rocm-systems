@@ -135,6 +135,13 @@ jobs:
           fi
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
+      - name: Install dependencies
+        shell: bash
+        run: |
+          apt-get update
+          apt install -y pkg-config
+          echo "✅ ROCm Dependencies Installed!"
+
       - name: Install Latest Nightly ROCm
         run: |
           set -e
