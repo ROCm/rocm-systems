@@ -120,8 +120,9 @@ namespace RcclUnitTesting
 
   ErrCode CollectiveArgs::ValidateResults()
   {
-    // Ignore non-root outputs for collectives with a root
-    if (CollectiveArgs::UsesRoot(this->funcType) && this->options.root != this->globalRank) return TEST_SUCCESS;
+    // Ignore non-root outputs for collectives with a root, except Broadcast where
+    // every rank receives the result and must be validated.
+    if (CollectiveArgs::UsesRoot(this->funcType) && this->funcType != ncclCollBroadcast && this->options.root != this->globalRank) return TEST_SUCCESS;
     if (this->funcType == ncclCollSend) return TEST_SUCCESS; // on the send receive pair only recv needs to be checked
     size_t const numOutputBytes = (this->numOutputElements * DataTypeToBytes(this->dataType));
 
