@@ -51,20 +51,31 @@ message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("")
 
-# Other source directories
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/functional functionalSources)
+# Collect all sources under unit/ and functional/ recursively. CONFIGURE_DEPENDS
+# re-globs at build time, so a newly added test .cc is picked up without manually
+# re-running cmake.
+file(GLOB_RECURSE unitSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
+file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
 
 set(TEST "amdsmitst")
 
 # Source files
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} tstSources)
-# Header file include path
-include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
 
 # Build rules
-add_executable(${TEST} ${tstSources} ${functionalSources})
-# Absolute path to the committed mock CPER fixtures (functional/mock_values).
-target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/functional/mock_values")
+add_executable(${TEST} ${tstSources} ${unitSources} ${functSources})
+
+# Header include paths, scoped to the test target (consistent with the
+# target_* calls below). ${CMAKE_CURRENT_SOURCE_DIR} (= tests/amd_smi_test/) lets
+# test_base.h, test_common.h, and test_utils.h be included as "test_base.h" from
+# any subdirectory depth.
+target_include_directories(
+    ${TEST}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..
+)
+
+# Absolute path to the committed mock CPER fixtures (unit/gpu/mock_cper).
+target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/gpu/mock_cper")
 target_link_libraries(
     ${TEST}
     ${AMD_SMI_TARGET}
@@ -90,7 +101,7 @@ install(
 # Exclude __pycache__ so a locally-run sanitize_cper.py never leaks a stray .pyc
 # into the package.
 install(
-    DIRECTORY functional/mock_values
+    DIRECTORY unit/gpu/mock_cper
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
     COMPONENT ${TESTS_COMPONENT}
     PATTERN "__pycache__" EXCLUDE
