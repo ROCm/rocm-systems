@@ -2964,9 +2964,9 @@ class GraphMemAllocNode final : public GraphNode {
         // (intended for GPU page faults), while CL_OUT_OF_RESOURCES surfaces as
         // the more appropriate hipErrorLaunchOutOfResources.
         setStatus(CL_OUT_OF_RESOURCES);
-        // Graph commands are fire-and-forget; latch the device error (as the HSA
-        // async-error handler does) so hipGraphLaunch/sync surface it.
-        queue()->device().gpu_error_ = CL_OUT_OF_RESOURCES;
+        // Graph commands are fire-and-forget; latch the global GPU error (as the HSA
+        // async-error handler does) so hipGraphLaunch/hipStreamSynchronize surface it.
+        amd::Device::gpu_error_ = CL_OUT_OF_RESOURCES;
         if (!AMD_DIRECT_DISPATCH) {
           WorkerThreadLock_.unlock();
         }
