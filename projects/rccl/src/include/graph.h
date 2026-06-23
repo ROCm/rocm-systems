@@ -19,6 +19,12 @@
 
 ncclResult_t ncclTopoCudaPath(int cudaDev, char** path);
 
+// Reduce a per-rank channel count to the global minimum across comm. Used on the
+// grow path, which keeps a fresh sharedRes (owner==comm) and so skips the
+// tpNChannels/tpP2pNChannels clamp; the arch-specific caps can otherwise leave
+// ranks with different counts and break the ncclConnect exchange.
+ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value);
+
 struct ncclTopoSystem;
 // Build the topology
 ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** system, const char* dumpXmlFile=NULL);

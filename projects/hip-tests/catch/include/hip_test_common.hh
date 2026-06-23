@@ -145,6 +145,26 @@ inline bool isQuickLevel() {
 #define HIP_CHECK_THREAD_FINALIZE()                                                                \
   { TestContext::get().finalizeResults(); }
 
+// Selects between the thread-safe and the regular check based on a runtime flag.
+#define HIP_CHECK_OPT_THREAD(threadSafe, error)                                                    \
+  {                                                                                                \
+    if (threadSafe) {                                                                              \
+      HIP_CHECK_THREAD(error);                                                                     \
+    } else {                                                                                       \
+      HIP_CHECK(error);                                                                            \
+    }                                                                                              \
+  }
+
+// Selects between the thread-safe and the regular check based on a runtime flag.
+#define REQUIRE_OPT_THREAD(threadSafe, condition)                                                  \
+  {                                                                                                \
+    if (threadSafe) {                                                                              \
+      REQUIRE_THREAD(condition);                                                                   \
+    } else {                                                                                       \
+      REQUIRE(condition);                                                                          \
+    }                                                                                              \
+  }
+
 
 // Check that an expression, errorExpr, evaluates to the expected error_t, expectedError.
 #define HIP_CHECK_ERROR(errorExpr, expectedError)                                                  \
@@ -578,6 +598,8 @@ inline constexpr char const kNotEnoughFreeGpuMemory[] =
 inline constexpr char const kNotEnoughFreeHostMemory[] =
     "not enough free host memory";
 inline constexpr char const kRequiresLinux[] = "this test requires Linux.";
+inline constexpr char const kSdmaSwapUnsupported[] =
+    "SDMA swap is not supported on this device.";
 }  // namespace SkipReason
 
 /**

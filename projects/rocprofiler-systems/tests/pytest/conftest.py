@@ -17,6 +17,11 @@ import os
 import sys
 import shutil
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover
+    yaml = None  # type: ignore[assignment]
+
 # Add the pytest directory to Python path for rocprofsys package
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -290,6 +295,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "no_docker",
         "shmem",
         "nic",
+        "ainic",
     ]
 
     # Informational markers, only used for test labeling
@@ -344,6 +350,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "unit_tests",
         "hip_stream",
         "presets",
+        "cli_help",
         "hpc",
         "hip",
         "scratch_memory",
@@ -569,6 +576,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = nic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
+        if "ainic" in item.keywords:
+            _msg = ainic_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
         if "kfd" in item.keywords or "unified_memory" in item.keywords:
             _msg = kfd_unavailable_reason(rocprof_config)
             if _msg is not None:
@@ -761,10 +772,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
-    caps = rocprof_config.capabilities
-    if caps.perf_event_paranoid <= 3 or caps.cap_sys_admin or caps.cap_perfmon:
+    if rocprof_config.capabilities.perf_events_usable:
         return None
-    return "Requires either perf_event_paranoid <= 3, CAP_SYS_ADMIN, or CAP_PERFMON to be available"
+    return "Requires either perf_event_paranoid <= 2 or CAP_SYS_ADMIN to be available"
 
 
 def gpu_unavailable_reason() -> Optional[str]:
@@ -794,9 +804,19 @@ def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]
 
 def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     caps = rocprof_config.capabilities
-    if caps.papi_nic_events is not None and caps.perf_event_paranoid <= 2:
+    if caps.papi_nic_events is not None and caps.perf_events_usable:
         return None
-    return "Requires PAPI network events and perf_event_paranoid <= 2 to be available"
+    return "Requires PAPI network events and perf_event_paranoid <= 2 (or CAP_SYS_ADMIN) to be available"
+
+
+def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    """Check if AI NIC tracking is available.
+
+    Requires ``amd-smi static`` to report at least one NETDEV entry.
+    """
+    if not rocprof_config.capabilities.ai_nic_devices:
+        return "No AI NIC devices found (amd-smi static reports no NETDEV entries)"
+    return None
 
 
 def kfd_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
@@ -861,6 +881,153 @@ def shmem_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     if rocprof_config.capabilities.oshrun_exec:
         return None
     return "SHMEM not available"
+
+
+# ----------------------------------------------------------------------------
+# Test-category (tier) label injection from test_categories.yaml
+# ----------------------------------------------------------------------------
+# Single source of truth for tier policy is tests/test_categories.yaml.
+# At CTest-generate time we read the YAML and append tier labels to each
+# test's emitted LABELS set, so `ctest -L <tier>` Just Works from the
+# installed share/rocprofiler-systems/tests directory.
+
+TIER_ORDER = ["quick", "standard", "comprehensive", "full"]
+
+
+@lru_cache(maxsize=1)
+def _load_test_categories() -> Optional[dict]:
+    """Load and compile test_categories.yaml from rocprofsys_tests_dir.
+
+    Reads the YAML that CMake installs/configures into
+    ``<build|install>/share/rocprofiler-systems/tests`` (resolved via
+    ``get_rocprof_config().rocprofsys_tests_dir``) rather than the
+    source-tree copy, so build-tree edits and the installed layout both
+    pick up the right file.
+
+    Returns ``None`` (with a single STDERR warning) when the YAML is missing or
+    PyYAML isn't importable - the conftest stays usable in sparse / standalone
+    checkouts that don't carry the test-filter standardisation files.
+
+    Pattern semantics intentionally mirror CTest ``--tests-regex`` (substring
+    regex via ``re.search``), so legacy patterns from
+    test_rocprofiler_systems.py port over unchanged.
+    """
+    if yaml is None:
+        print(
+            "[test_categories] PyYAML not available - skipping tier label injection.",
+            file=sys.stderr,
+        )
+        return None
+    try:
+        yaml_path = get_rocprof_config().rocprofsys_tests_dir / "test_categories.yaml"
+    except Exception as exc:
+        print(
+            f"[test_categories] Could not resolve tests dir - skipping tier label injection: {exc}",
+            file=sys.stderr,
+        )
+        return None
+    if not yaml_path.exists():
+        print(
+            f"[test_categories] {yaml_path} not found - skipping tier label injection.",
+            file=sys.stderr,
+        )
+        return None
+    try:
+        data = yaml.safe_load(yaml_path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        print(
+            f"[test_categories] Failed to load {yaml_path}: {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+    def _compile_list(patterns):
+        compiled = []
+        for p in patterns or []:
+            # A YAML alias of a sequence (e.g. `- *common_excludes`) substitutes
+            # the anchored list as a single element, producing a list-of-lists
+            # here. Flatten one level so callers can mix shared anchors with
+            # per-tier additions, mirroring the idiom at
+            # shared/ctest/parse_test_categories.py (`exclude_gpu.test_patterns`,
+            # see comment "test_patterns may be either a flat list or list-of-lists").
+            for pattern in p if isinstance(p, list) else [p]:
+                try:
+                    compiled.append(re.compile(pattern))
+                except re.error as exc:
+                    print(
+                        f"[test_categories] Skipping invalid regex {pattern!r}: {exc}",
+                        file=sys.stderr,
+                    )
+        return compiled
+
+    def _flatten_labels(values):
+        # Mirror _compile_list's one-level flattening for plain label lists
+        # (excluded_labels / labels). A YAML alias of a sequence (e.g.
+        # `- *heavy_labels`) substitutes the anchored list as a single element,
+        # so callers can mix a shared anchor with per-tier additions, e.g.
+        #   excluded_labels:
+        #     - *heavy_labels
+        #     - "openmp"
+        # Without flattening, set([[...], "openmp"]) raises TypeError on the
+        # unhashable inner list.
+        flat = []
+        for v in values or []:
+            flat.extend(v if isinstance(v, list) else [v])
+        return flat
+
+    tier_cfg: dict = {}
+    for tier in TIER_ORDER:
+        cfg = (data.get("test_categories", {}) or {}).get(tier) or {}
+        tier_cfg[tier] = {
+            "include": _compile_list(cfg.get("test_patterns")),
+            "exclude": _compile_list(cfg.get("exclude")),
+            "excluded_labels": set(_flatten_labels(cfg.get("excluded_labels"))),
+            # Supplementary CTest labels declared by the tier (e.g. quick's
+            # `pre-commit` / `smoke`, comprehensive's `nightly`). Emitted in
+            # addition to the tier name by _resolve_tier_labels().
+            "labels": _flatten_labels(cfg.get("labels")),
+        }
+
+    return {"tiers": tier_cfg}
+
+
+def _resolve_tier_labels(test_name: str, existing_labels: set[str]) -> set[str]:
+    """Return tier labels (subset of TIER_ORDER) for *test_name*.
+
+    Each tier is evaluated independently. A test is granted tier T iff:
+      * its name matches any of T's ``test_patterns``,
+      * its name does NOT match any of T's ``exclude`` patterns, AND
+      * none of its ``existing_labels`` (pytest-marker-derived) appear in
+        T's ``excluded_labels``.
+
+    The rocJenkins-style cascade ("matching quick also yields standard /
+    comprehensive / full") is achieved by having those higher tiers use
+    broad include patterns (typically ``test_patterns: [".*"]``). Per-tier
+    ``exclude`` punches a hole through the cascade for individual tests:
+    listing ``testA`` under ``standard.exclude`` drops ``standard`` from
+    its label set even if ``quick`` / ``comprehensive`` / ``full`` match.
+
+    In addition to the tier name, each matched tier contributes its
+    supplementary ``labels:`` (e.g. ``pre-commit`` / ``smoke`` for quick,
+    ``nightly`` for comprehensive), so ``ctest -L <alias>`` works for the
+    aliases declared in test_categories.yaml.
+    """
+    categories = _load_test_categories()
+    if not categories:
+        return set()
+    matched_indices: list[int] = []
+    extra_labels: set[str] = set()
+    for i, tier in enumerate(TIER_ORDER):
+        cfg = categories["tiers"].get(tier) or {}
+        if not any(p.search(test_name) for p in cfg.get("include", [])):
+            continue
+        if any(p.search(test_name) for p in cfg.get("exclude", [])):
+            continue
+        if existing_labels & cfg.get("excluded_labels", set()):
+            continue
+        matched_indices.append(i)
+        extra_labels.update(cfg.get("labels", []))
+    return {TIER_ORDER[i] for i in matched_indices} | extra_labels
 
 
 # ----------------------------------------------------------------------------
@@ -1122,6 +1289,10 @@ def _ctest_generate_tests(
                 args_str = ", ".join(str(a) for a in marker.args)
                 labels.add(f"{marker.name}[{args_str}]")
 
+        # Inject tier (quick/standard/comprehensive/full) labels from
+        # test_categories.yaml
+        labels |= _resolve_tier_labels(test_name, labels)
+
         escaped_name = _cmake_escape(test_name)
 
         if escaped_name in seen_names:
@@ -1353,16 +1524,17 @@ def _generate_rocprofsys_config_header() -> list[str]:
         _row("Perf event paranoid:", cap.perf_event_paranoid),
         _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),
         _row("CAP_PERFMON:", cap.cap_perfmon),
+        _row("Perf events usable:", cap.perf_events_usable),
         _row("Ptrace scope:", cap.ptrace_scope),
         _row("Is inside docker:", rocprof_config.capabilities.is_inside_docker),
         _row("PAPI available:", cap.papi_availability),
+        _row("AI NIC devices:", cap.ai_nic_devices),
         _row("Default NIC:", cap.default_nic),
         *(
             lambda evts: (
-                [_subrow("PAPI NIC events:", evts[0])]
-                + [_subrow("", e) for e in evts[1:]]
+                [_row("PAPI NIC events:", evts[0])] + [_row("", e) for e in evts[1:]]
                 if evts
-                else [_subrow("PAPI NIC events:", "None")]
+                else [_row("PAPI NIC events:", "None")]
             )
         )(cap.papi_nic_events.split() if cap.papi_nic_events else []),
         "-" * 70,
