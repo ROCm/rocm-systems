@@ -308,7 +308,7 @@ class TestAmdSmiCli(unittest.TestCase):
             passed = False
         return (msg, passed)
 
-    def _get_monitor_metric_data(self, monitor1, monitor2, metric):
+    def _get_monitor_metric_data(self, monitor1, monitor2, metric, exclude=False):
         data = []
         for i in range(len(monitor1)):
             data.append(
@@ -320,10 +320,11 @@ class TestAmdSmiCli(unittest.TestCase):
                     "gfx": None,
                     "mem": None,
                     "vram_used": None,
-                    "vram_free": None,
-                    "vram_total": None,
                 }
             )
+            if not exclude:
+                data["vram_free"] = None
+                data["vram_total"] = None
             # Find the larger of the two amounts
             if metric is not None:
                 total_gtt = int(metric["gpu_data"][i]["mem_usage"]["total_gtt"]["value"])
@@ -1662,10 +1663,11 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # TODO allow monitor_with_workload to be executed
         # if not self.PrintCmdsOnly:
-        if self.common.TODO_SKIP_FAIL:
-            msg = f"{self.tab}Needs Testing, Not Yet Implemented"
-            self.common.print(msg)
-            self.skipTest(msg)
+        if False:  # jcnii
+            if self.common.TODO_SKIP_FAIL:
+                msg = f"{self.tab}Needs Testing, Not Yet Implemented"
+                self.common.print(msg)
+                self.skipTest(msg)
 
         # Setup queue between processes
         q = multiprocessing.Queue()
@@ -1707,12 +1709,13 @@ class TestAmdSmiCli(unittest.TestCase):
 
         monitor_baseline = json.loads(data_baseline)
         monitor_workload = json.loads(data_workload)
-        data = self._get_monitor_metric_data(monitor_baseline, monitor_workload, None)
+        data = self._get_monitor_metric_data(monitor_baseline, monitor_workload, None, exclude=True)
         monitor_failures, monitor_successes = self._compare_monitor_metric_data("Workload", data)
-        # Update lists to not have and 'total' checks
-        # Skip comparing 'total' checks since they should not be different
-        monitor_failures = [item for item in monitor_failures if "total" not in item[1]]
-        monitor_successes = [item for item in monitor_successes if "total" not in item[1]]
+        if False:  # jcnii
+            # Update lists to not have and 'total' checks
+            # Skip comparing 'total' checks since they should not be different
+            monitor_failures = [item for item in monitor_failures if "total" not in item[1]]
+            monitor_successes = [item for item in monitor_successes if "total" not in item[1]]
         # Results are opposite, want differences in values
         # So switch failure and success criterion
         for index, cmd_data in enumerate(monitor_failures):
