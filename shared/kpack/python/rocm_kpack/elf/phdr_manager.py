@@ -11,6 +11,7 @@ segment to map it into memory.
 
 Key invariants:
 - (p_offset % PAGE_SIZE) == (p_vaddr % PAGE_SIZE) for all PT_LOAD segments
+- The relocated PHDR PT_LOAD uses p_vaddr == p_offset for old-kernel compat
 - PT_PHDR (if present) must point to the program header table location
 - The program header table must be covered by a PT_LOAD segment
 """
@@ -26,7 +27,6 @@ from .types import (
     PT_PHDR,
     PF_R,
     round_up_to_page,
-    page_align_offset,
 )
 from .surgery import ElfSurgery
 
@@ -202,12 +202,12 @@ class ProgramHeaderManager:
 
     def _relocate_to_end(self) -> PhdrResizeResult:
         """Relocate program header table to end of file."""
-        # Calculate new virtual address for PHDR table
-        phdr_vaddr = self.allocate_vaddr()
-
-        # Calculate file offset with proper alignment
+        # Place the table at end of file with p_vaddr == p_offset. Old kernels
+        # (e.g. EL8 4.18) compute AT_PHDR = load_bias + e_phoff without mapping
+        # it through the covering segment, so vaddr must equal offset.
         current_end = len(self._surgery.data)
-        new_phoff = page_align_offset(current_end, phdr_vaddr)
+        phdr_vaddr = max(round_up_to_page(current_end), self.allocate_vaddr())
+        new_phoff = phdr_vaddr
 
         # Add padding to reach aligned offset
         padding = new_phoff - current_end
