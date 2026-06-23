@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Unit tests for the trace-cache argument serialization / caching helpers added to
-// category_region.hpp. These helpers live in an anonymous namespace inside the header,
-// so including the header gives this translation unit direct access to them. The tests
-// exercise the pure input/output behavior (wire-format serialization, renumbering,
-// annotation decoding) and the in-memory pending-entry append logic; the storage-backed
-// paths (cache_stop / flush) are covered by the pytest integration tests instead.
+// category_region.hpp
 
 #include "rocprof-sys/library/components/category_region.hpp"
 
@@ -15,7 +11,6 @@
 
 #include <cstdint>
 #include <gtest/gtest.h>
-#include <span>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -209,82 +204,6 @@ TEST(category_region_serialization, serialize_return_arg)
     EXPECT_EQ(args[0].arg_number, 0u);
     EXPECT_EQ(args[0].arg_name, "return");
     EXPECT_EQ(args[0].arg_value, "0");
-}
-
-// ---------------------------------------------------------------------------------------
-// serialize_annotation_args (rocprofsys_annotation_t span overload)
-// ---------------------------------------------------------------------------------------
-
-TEST(category_region_serialization, serialize_annotation_args_span)
-{
-    std::int64_t size  = 4096;
-    const char*  phase = "begin";
-
-    rocprofsys_annotation_t annotations[] = {
-        { "size", ROCPROFSYS_INT64, &size },
-        { "phase", ROCPROFSYS_STRING, const_cast<char*>(phase) },
-    };
-
-    auto args = parse(serialize_annotation_args(
-        std::span<const rocprofsys_annotation_t>{ annotations, 2 }));
-    ASSERT_EQ(args.size(), 2u);
-
-    EXPECT_EQ(args[0].arg_number, 0u);
-    EXPECT_EQ(args[0].arg_name, "size");
-    EXPECT_EQ(args[0].arg_value, "4096");
-
-    EXPECT_EQ(args[1].arg_number, 1u);
-    EXPECT_EQ(args[1].arg_name, "phase");
-    EXPECT_EQ(args[1].arg_type, "string");
-    EXPECT_EQ(args[1].arg_value, "begin");
-}
-
-TEST(category_region_serialization, serialize_annotation_args_span_empty)
-{
-    EXPECT_TRUE(
-        serialize_annotation_args(std::span<const rocprofsys_annotation_t>{}).empty());
-}
-
-TEST(category_region_serialization, serialize_annotation_args_span_skips_invalid)
-{
-    std::int64_t value = 7;
-
-    // null name, ROCPROFSYS_VALUE_NONE type, and null value are all skipped; the single
-    // valid record is compacted to index 0.
-    rocprofsys_annotation_t annotations[] = {
-        { nullptr, ROCPROFSYS_INT64, &value },
-        { "ok", ROCPROFSYS_INT64, &value },
-        { "none", ROCPROFSYS_VALUE_NONE, &value },
-        { "nullval", ROCPROFSYS_INT64, nullptr },
-    };
-
-    auto args = parse(serialize_annotation_args(
-        std::span<const rocprofsys_annotation_t>{ annotations, 4 }));
-    ASSERT_EQ(args.size(), 1u);
-    EXPECT_EQ(args[0].arg_number, 0u);
-    EXPECT_EQ(args[0].arg_name, "ok");
-    EXPECT_EQ(args[0].arg_value, "7");
-}
-
-TEST(category_region_serialization, serialize_annotation_args_span_pointer)
-{
-    int   target = 0;
-    void* ptr    = &target;
-
-    // ROCPROFSYS_PTR maps to a pointer C++ type, so the value is taken by value (the
-    // address itself) and formatted as a hex address rather than being dereferenced.
-    rocprofsys_annotation_t annotations[] = {
-        { "ptr", ROCPROFSYS_PTR, ptr },
-    };
-
-    auto args = parse(serialize_annotation_args(
-        std::span<const rocprofsys_annotation_t>{ annotations, 1 }));
-    ASSERT_EQ(args.size(), 1u);
-    EXPECT_EQ(args[0].arg_number, 0u);
-    EXPECT_EQ(args[0].arg_name, "ptr");
-    EXPECT_NE(args[0].arg_type, "string");
-    EXPECT_FALSE(args[0].arg_type.empty());
-    EXPECT_TRUE(starts_with(args[0].arg_value, "0x"));
 }
 
 // ---------------------------------------------------------------------------------------

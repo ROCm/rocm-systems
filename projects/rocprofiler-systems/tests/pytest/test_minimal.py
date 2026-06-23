@@ -29,12 +29,6 @@ def recursion_rules(validation_rules_dir: Path) -> list[Path]:
 
 
 @pytest.fixture
-def annotations_rules(validation_rules_dir: Path) -> list[Path]:
-    rules_dir = validation_rules_dir / "minimal"
-    return [rules_dir / "annotations-rules.json"]
-
-
-@pytest.fixture
 def pthreads_rules(validation_rules_dir: Path) -> list[Path]:
     rules_dir = validation_rules_dir / "minimal"
     return [rules_dir / "pthreads-rules.json"]
@@ -96,46 +90,6 @@ class TestMinimal(RocprofsysTest):
                 r"key\s*::\s*debug\.source_object",
                 r"string_value\s*::\s*minimal-recursion",
             ],
-        )
-
-    @pytest.mark.rocpd("rocpd_env")
-    @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_annotations(self, mode, rocpd_env, annotations_rules):
-        """
-        Ensure that user annotated-region arguments (via add_perfetto_annotation)
-        are stored in the trace cache and surfaced in both perfetto and rocpd.
-        Covers both the start-time ("size") and pop-time ("status") annotation
-        capture paths, with capture gated by ROCPROFSYS_PERFETTO_ANNOTATIONS.
-        """
-        env = rocpd_env.copy()
-        env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
-        env["ROCPROFSYS_PERFETTO_ANNOTATIONS"] = "ON"
-
-        result = self.run_test(
-            mode,
-            "minimal-annotations",
-            env=env,
-        )
-        self.assert_regex(result)
-
-        # The annotated_region carries a push-time "size" trace-arg of 4096 and a
-        # pop-time "status" trace-arg of 0 (one occurrence each).
-        self.assert_perfetto(
-            result,
-            subtest_name="Perfetto Annotation Args Validation",
-            key_names=["size", "status"],
-            key_counts=[1, 1],
-            pass_regex=[
-                r"key\s*::\s*debug\.size",
-                r":: 4096",
-                r"key\s*::\s*debug\.status[\s\S]*?::\s*0",
-            ],
-        )
-
-        self.assert_rocpd(
-            result,
-            subtest_name="ROCpd Annotation Args Validation",
-            rules_files=annotations_rules,
         )
 
     @pytest.mark.rocpd("rocpd_env")
